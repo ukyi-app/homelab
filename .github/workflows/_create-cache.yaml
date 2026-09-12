@@ -76,6 +76,7 @@ jobs:
             jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
           } > /tmp/pr-body.md
       - name: PR-first 커밋 + auto-merge
+        id: aiops_check
         uses: ./.github/actions/pr-first-commit
         with:
           branch: create-cache/${{ steps.spec.outputs.name }}-${{ github.run_id }}
@@ -85,6 +86,16 @@ jobs:
           pr-body-file: /tmp/pr-body.md
           auto-merge: 'true'
           gh-token: ${{ steps.writer.outputs.token }}
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: _create-cache.yaml/create
+          target: ${{ steps.spec.outputs.name || 'unresolved-cache' }}
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
       - name: telegram notify (핸들 이름만 — URL/자격 금지)
         if: always()
         uses: ./.github/actions/telegram-notify

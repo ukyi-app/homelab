@@ -58,6 +58,7 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
       - name: behind한 auto-merge-pending 봇 PR을 update-branch
+        id: aiops_check
         env:
           GH_TOKEN: ${{ steps.writer.outputs.token }}
           REPO: ${{ github.repository }}
@@ -118,6 +119,16 @@ jobs:
             fi
           done < /tmp/behind.txt
           if [ -n "$failed" ]; then echo "::error::update-branch 실패 PR:$failed"; exit 1; fi
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: pr-sweeper.yaml/sweep
+          target: sweep
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
       - name: telegram notify (실패 시)
         if: failure()
         uses: ./.github/actions/telegram-notify

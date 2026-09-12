@@ -135,6 +135,7 @@ jobs:
             jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
           } > /tmp/pr-body.md
       - name: PR-first 커밋 (수동 머지 — create-app 패턴)
+        id: aiops_check
         uses: ./.github/actions/pr-first-commit
         with:
           branch: create-app/${{ steps.img.outputs.app }}-${{ github.run_id }}
@@ -152,6 +153,16 @@ jobs:
           pr-body-file: /tmp/pr-body.md
           auto-merge: 'false'
           gh-token: ${{ steps.writer.outputs.token }}
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: _create-app.yaml/create
+          target: ${{ inputs.app }}
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
       - name: telegram notify
         if: always()
         uses: ./.github/actions/telegram-notify

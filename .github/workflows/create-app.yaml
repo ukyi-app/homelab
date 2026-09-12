@@ -76,12 +76,25 @@ jobs:
 
   notify:
     needs: [validate, create-app]
-    if: failure() || cancelled()
+    if: always()
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5 # 보조 잡 — 위 validate와 같은 이유(실패 알림도 그룹을 쥔다)
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        id: aiops_check
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: create-app.yaml/notify
+          target: notify
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          needs: ${{ toJSON(needs) }}
+          primary-step: aiops_check
       - uses: ./.github/actions/mutation-notify
+        if: failure() || cancelled()
         with:
           results: ${{ toJSON(needs) }}
           title: create-app 실행

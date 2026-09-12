@@ -123,6 +123,16 @@ jobs:
         env:
           WORKFLOW_NEEDS: ${{ toJSON(needs) }}
         run: bun tools/check-workflow-readiness.ts --workflow renovate.yaml
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: renovate.yaml/accounting
+          target: accounting
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: acct
       - name: telegram notify (required 미실행 · 원장 불일치 시에만 — 선언된 갭은 제외)
         if: always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')
         uses: ./.github/actions/telegram-notify

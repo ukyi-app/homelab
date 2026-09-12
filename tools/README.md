@@ -816,6 +816,16 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 ## 정적 감사 (읽기 전용)
 
+### AIOps 파일럿
+
+- **`aiops.ts`** — 전용 사건 CLI. `bun tools/aiops.ts --help`: 로컬 재생·수집·진단·검증·게시·호스트 준비·평가. 운영 변이 MCP에 등록하지 않는다.
+- **`aiops-stage.ts`** — systemd가 전용 Unix 역할로 실행하는 고정 작업 진입점. 직접 호출은 거부한다.
+- **`aiops-install-config.ts`** — `aiops-install.sh`의 설정 검증·역할별 설정 파일 생성. 비활성 설정만 설치한다.
+- **`aiops-observation.ts`** — GHA `aiops-observation` composite가 검사 결과를 선별된 artifact로 기록한다. 정상·경고·관측 불가와 대상별 부분 결과를 구별한다.
+
+`lib/aiops/`는 사건 저장·단계 감독·고정 검증·생산자 변환·역할별 게시 커널이다. 공개 계약과 설치 순서는 [`docs/aiops.md`](../docs/aiops.md).
+
+
 - **`audit-orphans.ts`** — registry(`apps.json`)↔매니페스트↔바인딩↔원장 교차 드리프트 리포트.
   `just audit`(전체)·`just ci`/`ci.yaml`(`--ci`, 배포 깨는 유형만 차단)·`audit.yaml`(스케줄
   reconciler)이 호출. `--ci`(orphan-dns/activation-exposure-drift만 비-0)·`--strict`(전부 비-0)·기본(리포트만).

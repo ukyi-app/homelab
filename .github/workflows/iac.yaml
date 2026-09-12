@@ -220,7 +220,18 @@ jobs:
           allow: '^cloudflare_dns_record\.app\['
           allow_max: '1'
       - name: terraform apply (plan 산출물만 적용)
+        id: aiops_check
         run: terraform -chdir=infra/cloudflare apply -input=false tf.plan
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: iac.yaml/apply
+          target: apply
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
       - name: telegram notify
         if: always()
         uses: ./.github/actions/telegram-notify

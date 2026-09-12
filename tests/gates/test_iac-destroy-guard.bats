@@ -47,9 +47,10 @@ guard_with() { # $1: 잡 이름, $2: with 키 — 그 잡의 tf-destroy-guard �
   m="$(guard_with apply mode)"
   [ -n "$m" ]
   [ "$m" = "block" ]
-  run grep -qE 'continue-on-error:[[:space:]]*true' "$WF"
-  # rc 2(대상 부재)를 통과로 읽지 않는다. 위 mode=block 단언(rc 0)이 $WF의 양성 대조다.
-  [ "$status" -eq 1 ]   # iac.yaml apply 경로엔 continue-on-error 없음
+  # 선택적 관측 기록 외 모든 apply 스텝은 실패를 삼키지 않아야 한다.
+  run yq '[.jobs.apply.steps[] | select(.uses != "./.github/actions/aiops-observation") | select(.continue-on-error == true)] | length' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
 }
 
 @test "iac guards pass allow=app-DNS + allow_max cap (both apply+preview)" {

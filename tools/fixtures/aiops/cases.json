@@ -1,0 +1,335 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "oom",
+      "observation": {
+        "source": "alertmanager",
+        "eventId": "evaluation-oom",
+        "target": "observability/vmalert",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "PodOOMKilled",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "oom-state",
+            "kind": "state",
+            "target": "observability/vmalert",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "reason": "OOMKilled",
+              "exitCode": 137,
+              "message": "Container reached its memory limit"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "image-pull",
+      "observation": {
+        "source": "alertmanager",
+        "eventId": "evaluation-image-pull",
+        "target": "apps/web",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "PodCrashLooping",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "image-pull-state",
+            "kind": "state",
+            "target": "apps/web",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "reason": "ImagePullBackOff",
+              "message": "manifest unknown for pinned image digest"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "disk-full",
+      "observation": {
+        "source": "alertmanager",
+        "eventId": "evaluation-disk-full",
+        "target": "node",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "StandardSSDFilling",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "disk-full-state",
+            "kind": "state",
+            "target": "node",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "reason": "DiskPressure",
+              "value": 98,
+              "unit": "percent"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "pending",
+      "observation": {
+        "source": "alertmanager",
+        "eventId": "evaluation-pending",
+        "target": "apps/web",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "TargetDown",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "pending-state",
+            "kind": "state",
+            "target": "apps/web",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "reason": "FailedScheduling",
+              "message": "Insufficient memory; no eligible node"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "external-app",
+      "observation": {
+        "source": "alertmanager",
+        "eventId": "evaluation-external-app",
+        "target": "apps/web",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "PodCrashLooping",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "external-app-state",
+            "kind": "state",
+            "target": "apps/web",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "reason": "CrashLoopBackOff",
+              "message": "Application source stack trace in external ukyi-app/web; deployment unchanged"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-evidence",
+      "observation": {
+        "source": "alertmanager",
+        "eventId": "evaluation-missing-evidence",
+        "target": "apps/unknown",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "TargetDown",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": []
+      }
+    },
+    {
+      "id": "sync-hook",
+      "observation": {
+        "source": "argocd",
+        "eventId": "evaluation-sync-hook",
+        "target": "argocd/cnpg-data",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "ArgoSyncFailed",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "sync-hook-state",
+            "kind": "state",
+            "target": "argocd/cnpg-data",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "phase": "Failed",
+              "status": "Healthy",
+              "message": "PostSync ensure-role-password failed while sync remains Synced"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "out-of-sync",
+      "observation": {
+        "source": "argocd",
+        "eventId": "evaluation-out-of-sync",
+        "target": "argocd/web-prod",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "ArgoHealthDegraded",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "out-of-sync-state",
+            "kind": "state",
+            "target": "argocd/web-prod",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "phase": "Degraded",
+              "reason": "InvalidSpecError",
+              "message": "Helm values field rejected by schema"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "restore-drill",
+      "observation": {
+        "source": "cnpg",
+        "eventId": "evaluation-restore-drill",
+        "target": "database/pg-restore-drill",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "restore-drill",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "restore-drill-state",
+            "kind": "state",
+            "target": "database/pg-restore-drill",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "reason": "RestoreFailed",
+              "message": "Restore cannot find archive serverName; source and archive names differ"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "role-password",
+      "observation": {
+        "source": "cnpg",
+        "eventId": "evaluation-role-password",
+        "target": "database/pg",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "ensure-role-password",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "role-password-state",
+            "kind": "state",
+            "target": "database/pg",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "reason": "PostSyncFailed",
+              "message": "passwordStatus has old resourceVersion, role absent from byStatus.reconciled"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "dns-partial",
+      "observation": {
+        "source": "gha",
+        "eventId": "evaluation-dns-partial",
+        "target": "public-dns",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "dns-drift.yaml:check",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "dns-partial-state",
+            "kind": "state",
+            "target": "public-dns",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "reason": "DNSDrift",
+              "count": 1,
+              "message": "One target differs; another target lookup transient; run completed partially"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "backup-stale",
+      "observation": {
+        "source": "healthchecks",
+        "eventId": "evaluation-backup-stale",
+        "target": "backup-nuc",
+        "observedAt": "2026-09-12T00:00:00Z",
+        "revision": null,
+        "severity": "warning",
+        "reason": "HealthcheckDown",
+        "status": "firing"
+      },
+      "evidence": {
+        "collectedAt": "2026-09-12T00:10:00Z",
+        "items": [
+          {
+            "id": "backup-stale-state",
+            "kind": "state",
+            "target": "backup-nuc",
+            "observedAt": "2026-09-12T00:01:00Z",
+            "data": {
+              "reason": "down",
+              "message": "Backup heartbeat missed; NUC is alive; no backup job logs available"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

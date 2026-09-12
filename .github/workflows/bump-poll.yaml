@@ -96,6 +96,7 @@ jobs:
           token: ${{ steps.writer.outputs.token }}
       - uses: ./.github/actions/setup-bun
       - name: reconcile (낡은 auto-merge 인가 회수 — 대상은 bump-poll/* 네임스페이스, 플래너 무관)
+        id: aiops_check
         env:
           GH_TOKEN: ${{ steps.writer.outputs.token }} # writer: PR 조회 + auto-merge 해제
         run: |
@@ -104,6 +105,16 @@ jobs:
           # 직접 열거하고, 레인은 autoDeploy SSOT(.bindings.json / .image-pin.json)에서 직접 읽는다.
           # 항목별 격리·실패 수집·비-0 종료는 전부 실행기 안에 있다(한 앱의 실패가 나머지를 굶기지 않는다).
           bun tools/ensure-bump-pr.ts --reconcile-only
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: bump-poll.yaml/reconcile
+          target: reconcile
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
       - name: telegram notify (실패 시)
         if: failure()
         uses: ./.github/actions/telegram-notify
@@ -166,6 +177,7 @@ jobs:
       # tests/gates/test_bump-poll-callsite.bats가, **항목 처리**(순서·레인 verbatim·격리·소유권·집계)는
       # tools/tests/test_run-bump-plan.bats가 — 후자는 진짜 git worktree 위에서 실행으로 증명한다.
       - name: bump → PR (항목 러너 경유 — 레인은 플래너의 .action 그대로)
+        id: aiops_check
         env:
           GH_TOKEN: ${{ steps.writer.outputs.token }} # writer: PR 조회·생성·무장 + 브랜치 push
         run: |
@@ -180,6 +192,16 @@ jobs:
           #    끝나 run을 빨갛게 만든다(R-27). 두 경로는 서로를 굶기지 않는다: 회수가 죽어도 bump는 돌고,
           #    bump가 죽어도 회수는 이미 돌았다.
           bun tools/run-bump-plan.ts --plan /tmp/plan.json
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: bump-poll.yaml/poll
+          target: poll
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
       - name: telegram notify (실패 시)
         if: failure()
         uses: ./.github/actions/telegram-notify
@@ -211,6 +233,16 @@ jobs:
         env:
           WORKFLOW_NEEDS: ${{ toJSON(needs) }}
         run: bun tools/check-workflow-readiness.ts --workflow bump-poll.yaml
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: bump-poll.yaml/accounting
+          target: accounting
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: acct
       - name: telegram notify (required 미실행 · 원장 불일치 시에만 — 선언된 갭은 제외)
         if: always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')
         uses: ./.github/actions/telegram-notify

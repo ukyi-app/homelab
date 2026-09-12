@@ -54,10 +54,23 @@ jobs:
           # ⚠️ drift 알림은 .drift(NXDOMAIN)만 센다 — transient(SERVFAIL/timeout)는 거짓 알림 방지.
           n=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.drift.length))')
           t=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.transient.length))')
-          echo "count=$n" >> "$GITHUB_OUTPUT"
-          echo "transient=$t" >> "$GITHUB_OUTPUT"
+          {
+            echo "count=$n"
+            echo "transient=$t"
+            bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));console.log("observations="+JSON.stringify(o.observations))'
+          } >> "$GITHUB_OUTPUT"
           [ "$t" -gt 0 ] && echo "::warning::DNS resolve 일시 실패 ${t}건(transient — drift 아님, 재확인)"
           cat /tmp/drift.json
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: dns-drift.yaml/check
+          target: public-dns
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: check
       - name: telegram notify (드리프트/실패 시에만)
         if: failure() || steps.check.outputs.count != '0'
         uses: ./.github/actions/telegram-notify

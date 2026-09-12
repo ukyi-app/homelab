@@ -70,7 +70,10 @@ notify_fail() {
     --data-urlencode "text=${text}" \
     --data-urlencode "parse_mode=HTML" >/dev/null 2>&1 || true
 }
-fail() { notify_fail "$1"; exit 1; }
+fail() {
+  bash "${BASH_SOURCE[0]%/*}/aiops-observation.sh" ensure-role-password "${NS}/${CLUSTER}" warning || true
+  notify_fail "$1"; exit 1
+}
 
 # cluster passwordStatus[<role>].resourceVersion — bracket notation(하이픈/언더스코어 롤명 안전), 없으면 빈 문자열
 pwstatus_rv() {
@@ -230,3 +233,4 @@ main() {
 }
 
 main "$@"
+bash "${BASH_SOURCE[0]%/*}/aiops-observation.sh" ensure-role-password "${NS}/${CLUSTER}" healthy || true

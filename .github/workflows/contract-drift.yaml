@@ -77,6 +77,16 @@ jobs:
           [ "$a" -gt 0 ] && echo "::warning::계약 사본 부재·접근 불가(absent-or-private) ${a}건 — 레포 삭제·private 전환·경로 리네임 중 하나(비인증 fetch로는 구별 불가)"
           [ "$t" -gt 0 ] && echo "::warning::계약 사본 fetch 실패(transient) ${t}건 — 재확인"
           cat /tmp/drift.json
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: contract-drift.yaml/check
+          target: check
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: check
       - name: telegram notify (드리프트·fetch 실패·하드 실패 시)
         # fetch 실패도 알림: errors만 있고 무소음이면 체커가 blind pass — 감시의 감시 공백.
         # ⚠️ status는 notify.sh enum만 — 체커가 성공(outcome==success)일 때만 드리프트/fetch 실패를 ⚠️경고(drift)로,

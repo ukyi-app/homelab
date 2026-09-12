@@ -1,0 +1,80 @@
+{
+  "credential-expiry.yaml/check": {
+    "workflow": "credential-expiry.yaml"
+  },
+  "_teardown-app.yaml/teardown": {
+    "workflow": "teardown-app.yaml"
+  },
+  "teardown-app.yaml/notify": {
+    "workflow": "teardown-app.yaml"
+  },
+  "create-cache.yaml/notify": {
+    "workflow": "create-cache.yaml"
+  },
+  "_create-app.yaml/create": {
+    "workflow": "create-app.yaml"
+  },
+  "dns-drift.yaml/check": {
+    "workflow": "dns-drift.yaml"
+  },
+  "update-secrets.yaml/notify": {
+    "workflow": "update-secrets.yaml"
+  },
+  "_create-cache.yaml/create": {
+    "workflow": "create-cache.yaml"
+  },
+  "renovate.yaml/accounting": {
+    "workflow": "renovate.yaml"
+  },
+  "contract-drift.yaml/check": {
+    "workflow": "contract-drift.yaml"
+  },
+  "create-database.yaml/notify": {
+    "workflow": "create-database.yaml"
+  },
+  "bump-poll.yaml/reconcile": {
+    "workflow": "bump-poll.yaml"
+  },
+  "bump-poll.yaml/poll": {
+    "workflow": "bump-poll.yaml"
+  },
+  "bump-poll.yaml/accounting": {
+    "workflow": "bump-poll.yaml"
+  },
+  "_create-database.yaml/provision": {
+    "workflow": "create-database.yaml"
+  },
+  "create-app.yaml/notify": {
+    "workflow": "create-app.yaml"
+  },
+  "tf-reconcile.yaml/reconcile": {
+    "workflow": "tf-reconcile.yaml"
+  },
+  "tf-reconcile.yaml/drift-github": {
+    "workflow": "tf-reconcile.yaml"
+  },
+  "tf-reconcile.yaml/drift-tailscale": {
+    "workflow": "tf-reconcile.yaml"
+  },
+  "tf-reconcile.yaml/accounting": {
+    "workflow": "tf-reconcile.yaml"
+  },
+  "build.yaml/build": {
+    "workflow": "build.yaml"
+  },
+  "audit.yaml/audit": {
+    "workflow": "audit.yaml"
+  },
+  "bump.yaml/writeback": {
+    "workflow": "bump.yaml"
+  },
+  "_update-secrets.yaml/rotate": {
+    "workflow": "update-secrets.yaml"
+  },
+  "pr-sweeper.yaml/sweep": {
+    "workflow": "pr-sweeper.yaml"
+  },
+  "iac.yaml/apply": {
+    "workflow": "iac.yaml"
+  }
+}

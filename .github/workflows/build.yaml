@@ -145,6 +145,7 @@ jobs:
           APP: ${{ matrix.app }}
         run: mkdir -p built && printf '%s' "${APP}" > "built/${APP}"
       - name: upload built-app marker
+        id: aiops_check
         if: steps.changed.outputs.build == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -152,6 +153,16 @@ jobs:
           path: built/${{ matrix.app }}
           retention-days: 1
       # 빌드 결과를 owner에게 가시화 — push 실패가 Actions UI에만 묻히지 않게(if: always()).
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: build.yaml/build
+          target: ${{ matrix.app }}
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
       - name: telegram notify
         if: always()
         uses: ./.github/actions/telegram-notify
