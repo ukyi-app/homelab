@@ -23,7 +23,7 @@ probe() {
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "private App omission is healthy only when REST confirms both exact actors" {
+@test "private App omission is healthy after REST actor validation" {
   probe <<'TS'
 assert.deepEqual(classifyGithubPlan(plan,rest),{drift:false,privateAppReadMismatch:true});
 plan.resource_changes[0].change.after.restrict_pushes[0].push_allowances.reverse();
@@ -66,7 +66,7 @@ for(const r of [{},null,{restrictions:null},{restrictions:{...rest.restrictions,
 TS
 }
 
-@test "fixed REST GET uses the readonly token and cannot follow a redirect" {
+@test "fixed REST GET uses the CI token and cannot follow a redirect" {
   probe <<'TS'
 let calls=0;const api=async(url,init)=>{calls++;assert.equal(url,"https://api.github.com/repos/ukyi-app/homelab/branches/main/protection");assert.equal(init.method,"GET");assert.equal(init.redirect,"error");assert.equal(init.headers.Authorization,"Bearer fixture-token");return Response.json(rest)};
 assert.equal((await checkGithubPlan(plan,"fixture-token",api)).drift,false);assert.equal(calls,1);
@@ -98,13 +98,13 @@ TS
   bun -e 'const {plan}=await import(process.argv[1]);console.log(JSON.stringify(plan))' "$BATS_TEST_TMPDIR/fixture.ts" > "$BATS_TEST_TMPDIR/plan.json"
   run bash -c 'TF_VAR_github_token=secret-fixture bun --preload "$1/preload.ts" "$DRIFT_MODULE" < "$1/plan.json"' _ "$BATS_TEST_TMPDIR"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"drift":false'* && "$output" != *secret-fixture* ]]
+  [ "$output" = '{"drift":false,"privateAppReadMismatch":true}' ]
   run bash -c 'REST_DRIFT=1 TF_VAR_github_token=secret-fixture bun --preload "$1/preload.ts" "$DRIFT_MODULE" < "$1/plan.json"' _ "$BATS_TEST_TMPDIR"
   [ "$status" -eq 2 ]
-  [[ "$output" == *'"drift":true'* ]]
+  [ "$output" = '{"drift":true,"privateAppReadMismatch":false}' ]
   run bash -c 'REST_FAIL=1 TF_VAR_github_token=secret-fixture bun --preload "$1/preload.ts" "$DRIFT_MODULE" < "$1/plan.json"' _ "$BATS_TEST_TMPDIR"
   [ "$status" -eq 1 ]
-  [[ "$output" != *secret-fixture* && "$output" != *'"drift":false'* ]]
+  [ "$output" = '{"error":"rest-read-failed-403"}' ]
 }
 
 workflow_fixture() {
@@ -148,9 +148,9 @@ SH
 @test "actual workflow preserves terraform plan and partial show failures" {
   workflow_fixture
   for pair in TF_PLAN_RC=1 TF_SHOW_RC=1; do
-    run env PATH="$BATS_TEST_TMPDIR/bin:$PATH" "$pair" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/failed" TF_VAR_github_token=fixture bash -e -o pipefail "$BATS_TEST_TMPDIR/workflow.sh"
+    run env PATH="$BATS_TEST_TMPDIR/bin:$PATH" "$pair" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/$pair" TF_VAR_github_token=fixture bash -e -o pipefail "$BATS_TEST_TMPDIR/workflow.sh"
     [ "$status" -eq 1 ] || { echo "$output"; return 1; }
-    ! grep -Fx 'drift=false' "$BATS_TEST_TMPDIR/failed"
+    [ "$(cat "$BATS_TEST_TMPDIR/$pair")" = 'executed=true' ]
   done
 }
 
@@ -158,5 +158,5 @@ SH
   workflow_fixture
   run env PATH="$BATS_TEST_TMPDIR/bin:$PATH" TF_SHOW_RC=1 REST_DRIFT=1 GITHUB_OUTPUT="$BATS_TEST_TMPDIR/failed" TF_VAR_github_token=fixture bash -e -o pipefail "$BATS_TEST_TMPDIR/workflow.sh"
   [ "$status" -eq 1 ] || { echo "$output"; return 1; }
-  ! grep -E '^drift=(true|false)$' "$BATS_TEST_TMPDIR/failed"
+  [ "$(cat "$BATS_TEST_TMPDIR/failed")" = 'executed=true' ]
 }
