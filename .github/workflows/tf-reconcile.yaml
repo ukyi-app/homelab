@@ -308,6 +308,9 @@ jobs:
           # renovate: datasource=github-releases depName=hashicorp/terraform
           terraform_version: "1.16.2"
           terraform_wrapper: false
+      - uses: ./.github/actions/setup-bun
+        if: steps.pf.outputs.configured == 'true'
+        with: { install: 'false' }
       - name: terraform init (R2 backend, github)
         if: steps.pf.outputs.configured == 'true'
         uses: ./.github/actions/tf-r2-init
@@ -320,6 +323,7 @@ jobs:
       - name: plan (드리프트 감지 — apply 안 함)
         id: drift
         if: steps.pf.outputs.configured == 'true'
+        shell: bash
         env:
           TF_VAR_github_owner: ${{ secrets.TF_GITHUB_OWNER }}
           TF_VAR_github_token: ${{ secrets.TF_GITHUB_TOKEN }}
@@ -342,7 +346,7 @@ jobs:
           # ⚠️ 이 목록은 `infra/github/*.tf`의 비-repository 리소스 **전건**이어야 한다. 리소스를 더하고
           #    여기 안 더하면 새 리소스가 조용히 무감시가 된다 — infra/github/test_ci_targets.bats가 막는다.
           set +e
-          terraform -chdir=infra/github plan -input=false -lock-timeout=120s -detailed-exitcode -no-color \
+          terraform -chdir=infra/github plan -input=false -lock-timeout=120s -detailed-exitcode -no-color -out=github-ci.tfplan \
             -target=github_branch_protection.main \
             -target=github_repository_ruleset.bump_poll_writer_only \
             -target=github_repository_ruleset.mutation_writer_only \
@@ -352,6 +356,17 @@ jobs:
             -target=github_actions_environment_secret.telegram_chat_id
           rc=$?
           set -e
+          [ "$rc" = "0" ] || [ "$rc" = "2" ] || exit "$rc"
+          # 읽기 전용 GraphQL에서 private writer App이 누락될 수 있다. 같은 PAT의 REST 전체
+          # 허용 주체와 plan의 정확한 단일 App 누락 차이를 대조한다. 다른 변경·조회 실패는 유지한다.
+          # JSON/plan에는 민감값이 있으므로 파일/로그 아티팩트로 게시하지 않는다.
+          set +e
+          terraform -chdir=infra/github show -json github-ci.tfplan | bun tools/lib/github-plan-drift.ts
+          results=("${PIPESTATUS[@]}")
+          set -e
+          # pipefail의 우측 코드만 보면 show 실패가 분류기의 drift(2)에 가려진다.
+          [ "${results[0]}" = "0" ] || { echo "::error::terraform show 실패"; exit 1; }
+          rc="${results[1]}"
           case "$rc" in
             0) echo "drift=false" >> "$GITHUB_OUTPUT"; echo "github 드리프트 없음" ;;
             2) echo "drift=true" >> "$GITHUB_OUTPUT"; echo "::warning::github 루트 드리프트 감지 — owner 로컬 apply 필요(CI 무인 apply 금지)" ;;
