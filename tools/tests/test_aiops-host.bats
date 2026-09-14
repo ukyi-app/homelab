@@ -48,7 +48,13 @@ SH
   # 첫 설치 쓰기를 임시 의존성 설치로 대체하고 종료한다. 호스트 경로에는 쓰지 않는다.
   cat > "$BATS_TEST_TMPDIR/installer-env" <<'SH'
 id() { printf '0\n'; }
-git() { if [[ " $* " == *" diff "* ]]; then return 0; fi; command git "$@"; }
+git() {
+  case "$3" in
+    diff) return 0 ;;
+    rev-parse) printf '%040d\n' 1 ;;
+    *) command git "$@" ;;
+  esac
+}
 install() {
   (
     cd "$BATS_TEST_TMPDIR/dependencies" || exit 1
@@ -57,10 +63,65 @@ install() {
   )
   exit 77
 }
+
 SH
   run env BASH_ENV="$BATS_TEST_TMPDIR/installer-env" bash -c 'umask 0077; exec bash infra/k3s-bootstrap/aiops-install.sh --install "$@"' _ "$BATS_TEST_TMPDIR/install/config.example.json" "$(command -v bun)" "$BATS_TEST_TMPDIR/codex" /usr/bin/true
   [ "$status" -eq 77 ]
   printf '%s\n' "$output" | grep -q '^dependency-mode=755$'
   [ "$(stat -c %a "$BATS_TEST_TMPDIR/dependencies/node_modules")" = 755 ]
   [ "$(stat -c %a "$BATS_TEST_TMPDIR/dependencies/node_modules/yaml")" = 755 ]
+}
+
+@test "installer creates missing system configuration directories before writing accounts" {
+  export AIOPS_TEST_REPO="$PWD" AIOPS_TEST_BUN
+  AIOPS_TEST_BUN="$(command -v bun)"
+  mkdir -p "$BATS_TEST_TMPDIR/root/infra/k3s-bootstrap"
+  # 호스트 루트 경로만 임시 루트로 옮긴다. 설치 순서와 install/mkdir/mv는 실제 셸을 거친다.
+  python3 - "$BATS_TEST_TMPDIR" <<'PY'
+from pathlib import Path
+import sys
+root=Path(sys.argv[1])/'root'
+text=Path('infra/k3s-bootstrap/aiops-install.sh').read_text()
+for prefix in ['/opt/homelab-aiops','/etc/sysusers.d','/etc/tmpfiles.d','/etc/systemd/system']:
+    text=text.replace(prefix,str(root)+prefix)
+(root/'infra/k3s-bootstrap/aiops-install.sh').write_text(text)
+PY
+  cat > "$BATS_TEST_TMPDIR/bun" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == install ]] && exit 0
+[[ "$2" == check ]] && exit 0
+shift
+exec "$AIOPS_TEST_BUN" "$AIOPS_TEST_REPO/tools/aiops.ts" "$@"
+SH
+  cat > "$BATS_TEST_TMPDIR/codex" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' 'codex-cli 0.154.0'
+SH
+  chmod +x "$BATS_TEST_TMPDIR/bun" "$BATS_TEST_TMPDIR/codex"
+  printf '{}\n' > "$BATS_TEST_TMPDIR/config.json"
+  cat > "$BATS_TEST_TMPDIR/installer-env" <<'SH'
+id() { printf '0\n'; }
+git() {
+  case "$3" in
+    diff|cat-file) return 0 ;;
+    rev-parse) printf '%040d\n' 1 ;;
+    archive) tar -cf - --files-from /dev/null ;;
+    *) return 90 ;;
+  esac
+}
+systemd-sysusers() {
+  test -s "$1" || exit 91
+  printf 'account-config-mode=%s\n' "$(stat -c %a "$1")"
+  # 실제 계정·파일시스템 생성 경계 직전에 종료한다.
+  exit 77
+}
+SH
+  run env BASH_ENV="$BATS_TEST_TMPDIR/installer-env" bash "$BATS_TEST_TMPDIR/root/infra/k3s-bootstrap/aiops-install.sh" --install "$BATS_TEST_TMPDIR/config.json" "$BATS_TEST_TMPDIR/bun" "$BATS_TEST_TMPDIR/codex" /usr/bin/true
+  [ "$status" -eq 77 ]
+  printf '%s\n' "$output" | grep -q '^account-config-mode=644$'
+  [ ! -L "$BATS_TEST_TMPDIR/root/opt/homelab-aiops/current" ]
+  for directory in sysusers.d tmpfiles.d systemd/system; do
+    [ "$(stat -c %a "$BATS_TEST_TMPDIR/root/etc/$directory")" = 755 ]
+  done
 }

@@ -40,6 +40,7 @@ Helm 템플릿·암호화 자료·live/Terraform·나머지 저장소 게이트�
 
 설치기의 `--install <config.json> <bun 절대경로> <codex 절대경로> <conftest 절대경로>`는 sudo가 필요하다.
 커밋한 실행 코드를 `/opt/homelab-aiops/<revision>`에 고정하고 바이너리 해시를 설정에 기록한다.
+`/etc/sysusers.d` 등 시스템 설정 디렉터리가 없으면 먼저 생성한다. `current` 링크는 계정·저장소·설정·유닛 설치가 모두 끝난 뒤 갱신한다.
 설정의 `revision`은 조사·검증할 homelab 기준 commit이다. 저장소에 해당 commit이 있어야 한다.
 기준 main이 전진하면 저장소 사본과 설정을 갱신하고 수용 증거를 다시 확인한다. 오래된 기준으로 새 PR은 만들지 않는다.
 기본 kubectl 경로는 k3s의 `/usr/local/bin/kubectl`이며 설치 전 실행 가능 여부를 검사한다.

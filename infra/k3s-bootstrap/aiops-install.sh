@@ -35,11 +35,11 @@ install -m 0755 "$conftest_binary" "$release/bin/conftest"
 # 잠금 파일로 설치하고 패키지 lifecycle script는 실행하지 않는다.
 (cd "$release" && "$release/bin/bun" install --frozen-lockfile --ignore-scripts)
 install -d -m 0755 /opt/homelab-aiops
-ln -s "$release" /opt/homelab-aiops/current.new
-mv -T /opt/homelab-aiops/current.new /opt/homelab-aiops/current
 plan="$(mktemp -d /tmp/aiops-install.XXXXXX)"
 trap 'rm -rf "$plan"' EXIT
 "$release/bin/bun" "$release/tools/aiops.ts" host-plan --state-dir "$plan/state" --output "$plan/plan" >/dev/null
+# 기본 배포판에 /etc/sysusers.d가 없을 수 있으므로 계정·유닛 파일보다 부모를 먼저 만든다.
+install -d -m 0755 /etc/sysusers.d /etc/tmpfiles.d /etc/systemd/system
 install -m 0644 "$plan/plan/sysusers.conf" /etc/sysusers.d/homelab-aiops.conf
 systemd-sysusers /etc/sysusers.d/homelab-aiops.conf
 # 전용 512 MiB 파일시스템이 SQLite/WAL·원문·작업 파일의 합계 상한이다. 기존 파일은 포맷하지 않는다.
@@ -78,4 +78,7 @@ for unit in aiops-worker.service aiops-worker.timer aiops-ingress.service; do
   install -m 0644 "$plan/plan/$unit" "/etc/systemd/system/$unit"
 done
 systemctl daemon-reload
+# 준비 중 실패한 release를 완료된 설치로 가리키지 않는다.
+ln -s "$release" /opt/homelab-aiops/current.new
+mv -T /opt/homelab-aiops/current.new /opt/homelab-aiops/current
 printf '%s\n' 'installed; worker and ingress remain disabled. Complete role credentials and acceptance before activation.'
