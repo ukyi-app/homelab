@@ -49,12 +49,15 @@ head ref의 정확한 이전 SHA를 lease로 지정해 push한다. 조회 뒤 PR
 
 ### owner-local 전환 순서
 
-1. 이름/가시성만 조사해 repository 17개와 조직 공급의 실제 목록을 확정한다. 현재 조직 목록
-   조회는 `admin:org` 부족 HTTP 403이므로 **미검증**이다. 없다고 가정하지 않는다.
+1. 이름/가시성만 조사해 repository 17개와 조직 공급의 실제 목록을 확정한다. 조직 목록
+   조회가 `admin:org` 부족 HTTP 403이면 **미검증**이다. 없다고 가정하지 않는다.
 2. Environment·branch 정책·main/ref 제한을 검토한 owner-local plan으로 먼저 준비한다.
    기존 허용 주체의 양성 동작과 운영 비밀 없는 canary를 검사한다. 새 환경 이름을 선언하는
    후보 workflow가 기존 환경 자격을 상속하지 못하는 경우도 포함한다.
-3. `.env.secrets`의 로컬 공급에서 17개를 환경으로 복제하고 workflow 배선을 반영한다.
+3. 로컬 운영 공급과 CI 전용 자격의 원본 백업에서 17개를 환경으로 복제하고 workflow 배선을 반영한다.
+   reader/writer App 키와 CI 읽기 전용 GitHub·Tailscale 자격은 `.env.secrets`에 보관하지 않는다.
+   이 5개는 패스워드 매니저 등 기존 원본에서 환경으로 직접 입력하며 owner/bootstrap 자격으로
+   대체하지 않는다. 환경 secret의 이름 존재만으로 값의 일치나 실제 CI 동작을 증명하지 않는다.
    Telegram은 새 environment resource가 소유한다. `removed { destroy = false }`는 이전
    repository resource의 state 관리만 해제하므로 이 단계에서 원본은 삭제하지 않는다.
 4. main schedule/dispatch/reusable·알림·autoDeploy 양성 확인 후 원본 repository/organization
@@ -68,6 +71,10 @@ head ref의 정확한 이전 SHA를 lease로 지정해 push한다. 조회 뒤 PR
 원본 공급 회수 전에는 그 공급으로 기존 main 운영을 복구할 수 있다. 회수 후에는 운영
 시크릿을 PR에 다시 노출하는 원복 대신 보호 환경의 로컬 공급을 복원한다.
 GitHub plan-only 자격은 새 Environment/배포 정책/환경 secret을 읽을 수 있어야 한다.
+fine-grained PAT의 Repository permissions는 기존 Administration / Secrets Read-only에
+Actions / Environments Read-only가 필요하다. Environment·배포 브랜치 정책 조회는
+[Actions read](https://docs.github.com/en/rest/deployments/environments#get-an-environment),
+환경 secret 목록은 [Environments read](https://docs.github.com/en/rest/actions/secrets#list-environment-secrets)를 요구한다.
 부족하면 HTTP 404나 허위 drift가 생길 수 있으므로 API 읽기와 실제 `No changes`를 함께
 확인한다. Administration write를 CI에 추가하는 방식으로 해결하지 않는다.
 
