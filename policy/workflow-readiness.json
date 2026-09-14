@@ -67,17 +67,6 @@
         }
       }
     },
-    "iac.yaml": {
-      "accounting_job": "accounting",
-      "expect_executed": 1,
-      "jobs": {
-        "iac-plan": {
-          "state": "required",
-          "severity": "error",
-          "why": "PR 머지 전 cloudflare plan 미리보기. 시크릿이 없으면 스텝이 전부 skip되고 job summary가 비는데, 리뷰어는 빈 summary를 '변경 없음'으로 오독한다(정보 부재가 정보로 읽힌다). required check는 아니지만 PR에 red로 보이는 것이 정확한 신호다. ⚠️ fork PR은 구조적으로 시크릿을 못 받으므로 accounting job 자신이 fork를 제외한다(원장 면제가 아니라 트리거 경계)."
-        }
-      }
-    },
     "reusable-app-build.yaml": {
       "jobs": {
         "deploy-trigger": {

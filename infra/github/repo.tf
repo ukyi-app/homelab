@@ -38,6 +38,15 @@ resource "github_branch_protection" "main" {
   repository_id = data.github_repository.homelab.node_id
   pattern       = "main"
 
+  # GITHUB_TOKEN 기본 read는 상한이 아니다. write 요청도 이 서버 allowlist를 넘지 못한다.
+  # 2026-09-14 read-only API 실측: owner ukkiee=52371529, writer App=4043080.
+  # App node ID는 GraphQL node 조회로 확인했다(slug data source의 fine-grained PAT 404 회피).
+  # 조직 관리자 역할 전체를 신규 허용하지 않는다. 기존 owner/admin 잔여 우회는 아래와 같다.
+  restrict_pushes {
+    blocks_creations = true
+    push_allowances  = ["MDQ6VXNlcjUyMzcxNTI5", "A_kwHOEWo9us4APbFI"]
+  }
+
   required_status_checks {
     strict   = true
     contexts = ["gate"] # pull_request에서는 `gate`만 실행된다(ci.yaml); `build`는 push-to-main(머지 후)에서 돌므로 필수 PR 체크로 넣으면 안 된다 — 넣으면 모든 PR이 영원히 pending에 걸린다

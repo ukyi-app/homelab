@@ -1,7 +1,7 @@
 # stale auto-merge-pending PR 스위퍼 (races-3/obs-5).
 # strict=true 분기보호 + 비동기 auto-merge면 동시 2번째 봇 PR이 main 뒤로 처져(BEHIND) auto-merge가
 # 영원히 무장만 한 채 멈춘다("PR 생성됨(머지 대기)"는 "배포됨"이 아니다 — obs-5). 주기적으로 열린
-# 봇 PR 중 auto-merge 무장 + BEHIND인 것만 update-branch해 수렴을 깨운다. 다른 PR은 손대지 않는다.
+# 봇 PR 중 auto-merge 무장 + BEHIND인 것만 고정 main과 병합해 수렴을 깨운다. 다른 PR은 손대지 않는다.
 name: "🔁 pr-sweeper"
 run-name: "🔁 pr-sweeper — ${{ github.event_name == 'schedule' && '스케줄' || format('수동({0})', github.actor) }}"
 on:
@@ -9,7 +9,7 @@ on:
     - cron: "*/30 * * * *"
   workflow_dispatch: {}
 
-# 직렬화 불필요(읽고 update-branch만; 머지는 GitHub auto-merge가) — 단 동시 중복은 무의미하니 single.
+# 직렬화 불필요(검증한 head에 lease push만; 머지는 GitHub auto-merge가) — 단 동시 중복은 무의미하니 single.
 concurrency:
   group: pr-sweeper
   cancel-in-progress: true
@@ -19,12 +19,41 @@ permissions:
 
 jobs:
   sweep:
+    environment: homelab-main
     runs-on: ubuntu-24.04-arm
     # timeout-minutes — 그룹 밖 천장의 근거 전문은 ci.yaml gate 잡 주석.
     # 값 근거 — 2026-09-03 라이브 실측(최근 100 run, run 구간): p50 13s / max 24s.
-    # gh API 조회 + update-branch뿐이고 */30 크론이라 거짓 타임아웃도 다음 주기가 수렴시킨다.
+    # gh API 조회 + object 병합·lease push뿐이고 */30 크론이라 거짓 타임아웃도 다음 주기가 수렴시킨다.
     timeout-minutes: 10
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
         env:
           EVENT: ${{ github.event_name }}
@@ -33,6 +62,10 @@ jobs:
           TRIGGERING: ${{ github.triggering_actor }}
           OWNER: ${{ vars.HOMELAB_OWNER }}
         run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
           # 디스패치 자격(actions:write)은 워크플로 단위 스코프가 불가 — 허용목록(bump-poll) 외 전 진입점 가드(P2-1).
           [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
           # 재실행 축 — **이벤트를 보지 않는다.** github.run_attempt은 재실행이 보존할 수 없는 유일한
@@ -49,6 +82,11 @@ jobs:
       # ⚠️ 로컬 composite(아래 telegram-notify)는 체크아웃된 레포에서 resolve된다 —
       # checkout이 없으면 failure 알림 스텝이 액션 로드 실패로 죽어 알림 자체가 안 간다. 첫 스텝으로 checkout.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+        with: { install: 'false' }
       # writer App: 봇 PR 브랜치 update + auto-merge 무장 확인(Contents+PR write).
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: writer
@@ -57,13 +95,14 @@ jobs:
           private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      - name: behind한 auto-merge-pending 봇 PR을 update-branch
+      - name: 고정 main을 behind 봇 head에 병합 (head lease)
+        id: aiops_check
         env:
           GH_TOKEN: ${{ steps.writer.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
           # 열린 PR 중 봇 head prefix만 — autoMergeRequest!=null(무장됨) && mergeStateStatus=BEHIND.
-          # update-branch는 main을 머지해 BEHIND를 풀고, gate 재실행 → green이면 auto-merge가 머지한다.
+          # 고정 main을 병합해 BEHIND를 풀고, gate 재실행 → green이면 기존 auto-merge가 머지한다.
           #
           # ★★ `bump-poll/`은 이 목록에 **없다** — 그 네임스페이스의 원격 상태는 tools/ensure-bump-pr.ts가
           #    유일하게 소유한다. 이유 둘:
@@ -99,27 +138,32 @@ jobs:
           #    (bump·create-*·update-secrets)에는 여전히 DIRTY 소유자가 없다.
           # ⚠️ 고칠 때 `update-branch`로 밀면 안 된다 — DIRTY는 충돌이라 update-branch가 실패한다. 올바른
           #    형태는 **탐지+경고(telegram)** 이거나 소유 도구의 rebuild이지 자동 전진이 아니다.
-          gh pr list --repo "$REPO" --state open \
-            --json number,headRefName,mergeStateStatus,autoMergeRequest \
-            --jq '.[] | select(.autoMergeRequest != null)
+          # PR base는 조회 후 바뀔 수 있다. 후보 ref/SHA만 넘기고 helper가 main object를 고정한다.
+          SWEEP_CANDIDATES="$(mktemp)"
+          export SWEEP_CANDIDATES
+          trap 'rm -f "$SWEEP_CANDIDATES"' EXIT
+          gh pr list --repo "$REPO" --state open --limit 1000 \
+            --json number,headRefName,headRefOid,baseRefName,isDraft,isCrossRepository,author,mergeStateStatus,autoMergeRequest \
+            --jq '[.[] | select(.isDraft == false and .isCrossRepository == false and .baseRefName == "main")
+                       | select(.author.is_bot == true and .author.login == "app/ukyi-homelab-writer")
+                       | select(.autoMergeRequest != null)
                        | select(.mergeStateStatus == "BEHIND")
                        | select(.headRefName | test("^(bump|create-database|create-cache|create-app|update-secrets)/"))
-                       | .number' > /tmp/behind.txt
-          if [ ! -s /tmp/behind.txt ]; then echo "behind한 봇 PR 없음 — no-op"; exit 0; fi
-          # ⚠️ 실패를 ::warning::로 삼키고 green으로 끝내면 멈춘 PR(이 스위퍼가 잡으려던 모드)이
-          # 무알림으로 묻힌다 → 실패 PR을 모아 잡을 nonzero 종료(아래 failure() telegram이 발화해 owner에게 알림).
-          failed=""
-          while read -r n; do
-            [ -n "$n" ] || continue
-            echo "update-branch PR #$n"
-            if ! gh pr update-branch "$n" --repo "$REPO"; then
-              echo "::warning::PR #$n update-branch 실패(충돌/권한/API) — 수동 확인 필요"
-              failed="$failed #$n"
-            fi
-          done < /tmp/behind.txt
-          if [ -n "$failed" ]; then echo "::error::update-branch 실패 PR:$failed"; exit 1; fi
+                       | {number, headRefOid, headRefName}]' > "$SWEEP_CANDIDATES"
+          # 실패를 삼키지 않는다. 충돌/lease/연결 실패는 비-0 종료 → failure() Telegram으로 전달된다.
+          bun tools/lib/ci-writeback.ts sweep
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: pr-sweeper.yaml/sweep
+          target: sweep
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
       - name: telegram notify (실패 시)
-        if: failure()
+        if: ${{ (failure()) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           status: failure

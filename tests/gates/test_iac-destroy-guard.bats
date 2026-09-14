@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # iac.yaml의 primary merge→apply 경로(apply job)는 plan과 apply 사이에 tf-destroy-guard
-# (mode=block)를 거쳐야 한다. iac-plan preview는 동일 composite를 mode=warn으로 쓴다.
+# (mode=block)를 거쳐야 한다. reviewed-plan preview는 동일 composite를 mode=warn으로 쓴다.
 # ⚠️ bash 3.2: 중간 단언은 [ ]만. 순수 grep — terraform/cluster 비접촉(required gate-safe).
 
 WF="$BATS_TEST_DIRNAME/../../.github/workflows/iac.yaml"
@@ -11,7 +11,9 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/iac.yaml"
 #    destroy 차단선이 사라진 상태였다). 같은 디렉토리 test_pr-sweeper.bats의 yq 관용구를 쓴다.
 #    mode 판정으로 landed한 관용구를 $2 키 일반으로 넓혀 allow/allow_max도 같은 함수로 잰다.
 guard_with() { # $1: 잡 이름, $2: with 키 — 그 잡의 tf-destroy-guard 콜사이트 값
-  yq -r ".jobs.\"$1\".steps[] | select(.uses == \"./.github/actions/tf-destroy-guard\") | .with.$2" "$WF"
+  local source="$WF" job="$1"
+  if [ "$job" = "iac-plan" ]; then source="$BATS_TEST_DIRNAME/../../.github/workflows/reviewed-plan.yaml"; job=plan; fi
+  yq -r ".jobs.\"$job\".steps[] | select(.uses == \"./.github/actions/tf-destroy-guard\") | .with.$2" "$source"
 }
 
 @test "apply job uses tf-destroy-guard with mode=block" {
@@ -27,10 +29,10 @@ guard_with() { # $1: 잡 이름, $2: with 키 — 그 잡의 tf-destroy-guard �
   # apply 스텝과 guard 사용이 같은 워크플로에 공존 — guard 미사용 회귀를 차단.
   run grep -c 'uses: ./.github/actions/tf-destroy-guard' "$WF"
   [ "$status" -eq 0 ]
-  [ "$output" -ge 2 ]   # apply(block) + iac-plan preview(warn) 두 콜사이트
+  [ "$output" -eq 1 ]   # apply(block)만 남고 수동 preview는 reviewed-plan.yaml에 있다
 }
 
-@test "iac-plan preview uses tf-destroy-guard mode=warn (not an inline jq block)" {
+@test "reviewed-plan preview uses tf-destroy-guard mode=warn (not an inline jq block)" {
   m="$(guard_with iac-plan mode)"
   [ -n "$m" ]
   [ "$m" = "warn" ]
@@ -47,9 +49,10 @@ guard_with() { # $1: 잡 이름, $2: with 키 — 그 잡의 tf-destroy-guard �
   m="$(guard_with apply mode)"
   [ -n "$m" ]
   [ "$m" = "block" ]
-  run grep -qE 'continue-on-error:[[:space:]]*true' "$WF"
-  # rc 2(대상 부재)를 통과로 읽지 않는다. 위 mode=block 단언(rc 0)이 $WF의 양성 대조다.
-  [ "$status" -eq 1 ]   # iac.yaml apply 경로엔 continue-on-error 없음
+  # 선택적 관측 기록 외 모든 apply 스텝은 실패를 삼키지 않아야 한다.
+  run yq '[.jobs.apply.steps[] | select(.uses != "./.github/actions/aiops-observation") | select(.continue-on-error == true)] | length' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
 }
 
 @test "iac guards pass allow=app-DNS + allow_max cap (both apply+preview)" {
@@ -65,18 +68,8 @@ guard_with() { # $1: 잡 이름, $2: with 키 — 그 잡의 tf-destroy-guard �
   done
 }
 
-@test "iac.yaml accounting job's fork boundary stays head.repo.full_name == github.repository" {
-  # wf-iac-actions-1: G-09 준비상태 회계(accounting job)는 fork PR을 원장 면제가 아니라 트리거
-  # 경계로 제외한다(140-147행 주석) — 그런데 check-workflow-readiness.ts의 checkStatic은
-  # !cancelled() 존재만 정규식으로 보고 이 fork 절은 파싱하지 않는다(무증인). `==`가 `!=`로 반전되면
-  # same-repo PR에서 accounting이 꺼져(G-09가 막으려던 침묵 재발) fork PR마다는 spurious red가 뜬다.
-  cond="$(yq -r '.jobs.accounting.if' "$WF")"
-  [ -n "$cond" ]   # 비공허 바닥값 — 잡 리네임으로 추출이 0줄이면 아래 비교가 공허해진다
-  case "$cond" in
-    *'head.repo.full_name == github.repository'*) : ;;
-    *)
-      echo "unwitnessed fork boundary: accounting job의 if에 'head.repo.full_name == github.repository'가 없다('$cond')"
-      false
-      ;;
-  esac
+@test "PR iac has no credentialed plan or secret readiness accounting" {
+  run yq '[.jobs | keys | .[] | select(. == "iac-plan" or . == "accounting")] | length' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
 }

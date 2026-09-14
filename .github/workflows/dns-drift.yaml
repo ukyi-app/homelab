@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check:
+    environment: homelab-main
     runs-on: ubuntu-24.04-arm
     # timeout-minutes — 그룹 밖 천장의 근거 전문은 ci.yaml gate 잡 주석.
     # 값 근거 — 2026-09-03 라이브 실측(최근 100 run, run 구간): p50 12s / max 15s.
@@ -20,6 +21,34 @@ jobs:
     # 10분 red로 드러내고, 6시간 크론이라 거짓 타임아웃도 다음 주기가 수렴시킨다.
     timeout-minutes: 10
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
         env:
           EVENT: ${{ github.event_name }}
@@ -28,6 +57,10 @@ jobs:
           TRIGGERING: ${{ github.triggering_actor }}
           OWNER: ${{ vars.HOMELAB_OWNER }}
         run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
           # 디스패치 자격(actions:write)은 워크플로 단위 스코프가 불가 — 허용목록(bump-poll) 외 전 진입점 가드(P2-1).
           [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
           # 재실행 축 — **이벤트를 보지 않는다.** github.run_attempt은 재실행이 보존할 수 없는 유일한
@@ -54,12 +87,25 @@ jobs:
           # ⚠️ drift 알림은 .drift(NXDOMAIN)만 센다 — transient(SERVFAIL/timeout)는 거짓 알림 방지.
           n=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.drift.length))')
           t=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.transient.length))')
-          echo "count=$n" >> "$GITHUB_OUTPUT"
-          echo "transient=$t" >> "$GITHUB_OUTPUT"
+          {
+            echo "count=$n"
+            echo "transient=$t"
+            bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));console.log("observations="+JSON.stringify(o.observations))'
+          } >> "$GITHUB_OUTPUT"
           [ "$t" -gt 0 ] && echo "::warning::DNS resolve 일시 실패 ${t}건(transient — drift 아님, 재확인)"
           cat /tmp/drift.json
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: dns-drift.yaml/check
+          target: public-dns
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: check
       - name: telegram notify (드리프트/실패 시에만)
-        if: failure() || steps.check.outputs.count != '0'
+        if: ${{ (failure() || steps.check.outputs.count != '0') && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           # check 스텝 크래시·**상류 스텝 실패로 skip** 시 count가 미설정('')이라 count!='0'이 참→'drift'로

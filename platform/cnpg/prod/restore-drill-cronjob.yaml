@@ -69,6 +69,8 @@ spec:
                 requests: { cpu: 50m, memory: 64Mi }
               command: ["/bin/bash", "/scripts/drill.sh"]
               env:
+                - name: AIOPS_ENDPOINT
+                  valueFrom: { configMapKeyRef: { name: aiops-endpoint, key: cnpg, optional: true } }
                 - name: TELEGRAM_BOT_TOKEN
                   valueFrom: { secretKeyRef: { name: restore-drill-alerting, key: TELEGRAM_BOT_TOKEN } }
                 - name: TELEGRAM_CHAT_ID
@@ -78,7 +80,10 @@ spec:
                 - name: METRICS_PUSH_URL
                   value: "http://vmsingle.observability.svc:8428" # vmsingle import API (M5) — 성공 메트릭이 반드시 적재되어야 함
               volumeMounts:
+                - { name: aiops-auth, mountPath: /run/aiops, readOnly: true }
                 - { name: script, mountPath: /scripts }
           volumes:
+            - name: aiops-auth
+              secret: { secretName: aiops-observation-auth, optional: true, defaultMode: 0444 }
             - name: script
               configMap: { name: restore-drill-script, defaultMode: 0755 }

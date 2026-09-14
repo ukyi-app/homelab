@@ -159,7 +159,7 @@ EOF
   # ⚠️ 절대값은 **콜사이트가 소유한다**(scripts/lib/scan-floor.sh: 바닥값 수치는 소비자 소유).
   #    콜사이트를 늘/줄이면 아래 표를 같은 커밋에서 고친다.
   EXPECTED="$(cat <<'EOF'
-iac.yaml 2
+iac.yaml 1
 tf-reconcile.yaml 3
 EOF
 )"
@@ -173,7 +173,7 @@ EOF
   done <<EOF
 $EXPECTED
 EOF
-  [ "$total" -eq 5 ]
+  [ "$total" -eq 4 ]
 
   yqn=0; viol=0; roots=""
   for f in "$WF"/*.yaml "$WF"/*.yml; do

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# build.yaml은 telegram-notify로 빌드 결과를 알린다(source=배포, if: always()).
+# build.yaml은 권한 검사를 통과한 실행에서 성공·실패 모두 telegram-notify로 알린다.
 # ⚠️ 중간 단언은 [ ]만.
 
 setup() {
@@ -17,10 +17,10 @@ setup() {
 #    0건이다(telegram-callsites·workflow-readiness는 전부 skip된 job 축). build.yaml은 pg-tools·
 #    skopeo의 GHCR push 경로라, 알림이 성공에서만 나가면 push 실패가 Actions UI에만 묻힌다.
 #    선례: tests/gates/test_ci-build.bats:16-24(줄번호 grep → .jobs.build.steps[] 구조 비교).
-@test "build.yaml notify step runs on always() so failures are visible" {
+@test "build.yaml notify includes failures only after the authority guard succeeds" {
   run yq -e '.jobs.build.steps[] | select((.uses // "") | test("telegram-notify")) | .if' "$BUILD"
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qx 'always()'
+  printf '%s' "$output" | grep -Fxq "\${{ (always()) && steps.authority.outcome == 'success' }}"
 }
 
 @test "build.yaml notify uses the deploy source label and job.status" {

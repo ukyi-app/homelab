@@ -137,8 +137,9 @@ guard_step() { yq -r ".jobs.reconcile.steps[] | select(.uses == \"./.github/acti
   # 스텝 **실재**는 tests/gates/test_telegram-callsites.bats의 콜사이트 수 SSOT(tf-reconcile.yaml 4)가
   # 증언한다(스텝 통째 삭제 = 그 gate red 실측). 여기서는 그 gate가 원리적으로 못 보는 **발화 조건**만 본다.
   # `if:` 리터럴은 이 파일에서 유일하다(:250·:374는 `steps.pf.outputs.configured == 'true' && (…)` 접두).
-  run grep -qF "if: failure() || steps.drift.outputs.drift == 'true'" "$WF"
+  run yq -r '.jobs.reconcile.steps[] | select(.uses == "./.github/actions/telegram-notify") | .if' "$WF"
   [ "$status" -eq 0 ]
+  [ "$output" = "\${{ (failure() || steps.drift.outputs.drift == 'true') && steps.authority.outcome == 'success' }}" ]
   run grep -qF "steps.guard.outputs.result == 'blocked-delete' && 'drift'" "$WF"
   [ "$status" -eq 0 ]
 }

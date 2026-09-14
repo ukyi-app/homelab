@@ -387,8 +387,9 @@ EOF
 
 @test "each dispatcher notify fires on cancelled as well as failure" {
   for d in $DISPATCHERS; do
-    run grep -nE "if:\s*failure\(\)\s*\|\|\s*cancelled\(\)" "$WF/$d.yaml"
+    run yq -r '.jobs.notify.steps[] | select(.uses == "./.github/actions/mutation-notify") | .if' "$WF/$d.yaml"
     [ "$status" -eq 0 ]
+    [ "$output" = "\${{ (failure() || cancelled()) && steps.authority.outcome == 'success' }}" ]
   done
 }
 
@@ -538,6 +539,11 @@ EOF
       const on = doc?.on ?? doc?.[true];   // 일부 YAML 파서의 on→true 키 함정 방어
       const hasDispatch = !!on && typeof on === "object" && Object.prototype.hasOwnProperty.call(on, "workflow_dispatch");
       if (!hasDispatch || ALLOW.has(f)) continue;
+      // reviewed-plan은 main SHA의 독립 검증기를 실행한다. 판정 동작은 test_reviewed-plan.bats가 검증한다.
+      if (f === "reviewed-plan.yaml") {
+        if (!doc.jobs?.authorize?.steps?.some(s => s.run === "bun tools/lib/reviewed-plan.ts authorize")) bad.push(f + ": reviewed authorization missing");
+        continue;
+      }
       // 재료 3개의 **존재**만 보면 술어가 틀려도 초록이다(실측: `=`→`!=`가 통과했다) — 위 개수
       // 등식과 아래 실행 증인이 그 축을 닫는다. 여기서는 거부 문구를 **닫힌 열거**로 못박는다:
       // 오늘 두 변종이 있고(수동 진입 / 변이), 세 번째는 규약 결정이지 조용히 늘 것이 아니다.
@@ -551,9 +557,12 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "bump-poll stays allowlisted WITHOUT the actor guard (intended dispatch target)" {
-  # 이 @test에는 형제 단언이 없다 — `-ne 0`이면 bump-poll.yaml 리네임에도 홀로 초록으로 남는다.
-  run grep -q 'HOMELAB_OWNER' "$WF/bump-poll.yaml"; [ "$status" -eq 1 ]
+@test "bump-poll keeps the dispatch App allowance with owner-only replay guards" {
+  # 최초 dispatch App 실행은 유지한다. 부분 job 재실행은 owner 전용이다.
+  run grep -F 'ukyi-homelab-dispatch[bot]' "$WF/bump-poll.yaml"
+  [ "$status" -eq 0 ]
+  run grep -F 'environment: homelab-main' "$WF/bump-poll.yaml"
+  [ "$status" -eq 0 ]
 }
 
 @test "reusable branch: lines match the lane rows' neutral patterns (TS-YAML parity)" {
@@ -772,40 +781,49 @@ EOF
   # (2026-08 실측). 이 등식이 그 우회의 절반을 닫는다: 사본이 사라지거나 비교가 뒤집히면 수가 어긋난다.
   # 나머지 절반은 아래 **실행 증인**이 닫는다 — 개수만으로는 "뒤집고 하나 더 추가"를 못 잡는다.
   # 수치는 콜사이트가 소유한다(CONTEXT.md 「열거 바닥값」) — 도메인이 줄지 않는 한 손대지 않는다.
-  pred="$(grep -rhoF '[ "$ACTOR" = "$OWNER" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  # 기존 actor/replay 가드 집합만 추출한다. 새 job 경계의 실행 증인은 test_reviewed-plan.bats가 소유한다.
+  export LEGACY_GUARDS="$BATS_TEST_TMPDIR/legacy-guards"
+  bun -e '
+    const fs=require("fs"), y=require("yaml");let out="";
+    for(const f of fs.readdirSync(process.argv[1]).filter(x=>x.endsWith(".yaml"))){
+      const w=y.parse(fs.readFileSync(process.argv[1]+"/"+f,"utf8"));
+      for(const j of Object.values(w.jobs))for(const s of j.steps??[])if(/actor 가드|replay 가드/.test(s.name??""))out+=s.name+"\n"+Object.entries(s.env??{}).map(([k,v])=>k+": "+v).join("\n")+"\n"+s.run+"\n";
+    }fs.writeFileSync(process.env.LEGACY_GUARDS,out);
+  ' "$WF"
+  pred="$(grep -rhoF '[ "$ACTOR" = "$OWNER" ] ||' "$LEGACY_GUARDS" | wc -l | tr -d ' ')"
   [ "$pred" -ge 15 ]
   # 빈 owner fail-closed(vacuous 방지)는 술어와 **같은 수**로 존재해야 한다 — 한쪽만 남으면
   # 변수 미설정이 곧 통과가 된다.
   # 빈 owner fail-closed는 **모든** 가드 스텝에 있어야 한다(dispatch 가드 + replay 전용 가드).
-  empty="$(grep -rhoF '[ -n "$OWNER" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  empty="$(grep -rhoF '[ -n "$OWNER" ] ||' "$LEGACY_GUARDS" | wc -l | tr -d ' ')"
   [ "$empty" -ge 15 ]
   # 정본 본문은 축이 셋이고 **셋 다 같은 수**여야 한다. 하나만 빠져도 그 축이 조용히 다시 열린다.
   #   ① 재실행 축   — 이벤트를 보지 않는다(github.run_attempt).
   #   ② 트리거 축   — 종전 `if:` 한정을 본문으로 옮긴 것. `if:`로 두면 재실행에서 스텝이 skip된다.
   #   ③ dispatch 축 — actor와 개시자 둘 다 owner여야 한다(actor는 재실행에서 보존된다).
-  replay="$(grep -rhoF '[ "$ATTEMPT" = "1" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
-  gate="$(grep -rhoF '[ "$EVENT" = "workflow_dispatch" ] || exit 0' "$WF"/*.yaml | wc -l | tr -d ' ')"
-  init="$(grep -rhoF '재실행 개시자=$TRIGGERING 거부' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  replay="$(grep -rhoF '[ "$ATTEMPT" = "1" ] ||' "$LEGACY_GUARDS" | wc -l | tr -d ' ')"
+  gate="$(grep -rhoF '[ "$EVENT" = "workflow_dispatch" ] || exit 0' "$LEGACY_GUARDS" | wc -l | tr -d ' ')"
+  init="$(grep -rhoF '재실행 개시자=$TRIGGERING 거부' "$LEGACY_GUARDS" | wc -l | tr -d ' ')"
   [ "$replay" -ge 15 ]
   # 재실행 절은 dispatch 가드 15 + 이벤트 구동 잡의 replay 전용 가드에 붙는다. 등식으로 못을 박아야
   # 한쪽에서 사라진 것이 다른 쪽 증가로 가려지지 않는다.
-  evt="$(grep -rhoF 'replay 가드 (이벤트 구동 잡' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  evt="$(grep -rhoF 'replay 가드 (이벤트 구동 잡' "$LEGACY_GUARDS" | wc -l | tr -d ' ')"
   [ "$evt" -ge 2 ]
   [ "$replay" -eq "$((pred + evt))" ]
   [ "$empty" -eq "$replay" ]
   [ "$pred" -eq "$gate" ]
   [ "$pred" -eq "$init" ]
   # 가드 스텝에 `if:`가 남아 있으면 안 된다 — 그것이 재실행 축을 무력화하는 정확한 형태다.
-  [ "$(grep -rhcF "if: github.event_name == 'workflow_dispatch'" "$WF"/*.yaml | paste -sd+ - | bc)" -eq 0 ]
+  [ "$(grep -rhcF "if: github.event_name == 'workflow_dispatch'" "$LEGACY_GUARDS" | paste -sd+ - | bc)" -eq 0 ]
   # env 바인딩도 같은 수 — 술어만 있고 바인딩이 없으면 빈 문자열 비교로 **전 디스패치가 잠긴다**.
   # ATTEMPT/TRIGGERING은 **모든** 가드 스텝이 바인딩한다 — replay 총계와 등식이어야 한다.
   # (`-ge pred`로 두면 replay 전용 가드 2건이 여유가 되어 dispatch 가드 하나의 누락을 가린다.)
   for k in 'ATTEMPT: ${{ github.run_attempt }}' 'TRIGGERING: ${{ github.triggering_actor }}'; do
-    b="$(grep -rhoF "$k" "$WF"/*.yaml | wc -l | tr -d ' ')"
+    b="$(grep -rhoF "$k" "$LEGACY_GUARDS" | wc -l | tr -d ' ')"
     [ "$b" -eq "$replay" ]
   done
   # EVENT는 트리거 축을 가진 dispatch 가드만 바인딩한다.
-  [ "$(grep -rhoF 'EVENT: ${{ github.event_name }}' "$WF"/*.yaml | wc -l | tr -d ' ')" -ge "$pred" ]
+  [ "$(grep -rhoF 'EVENT: ${{ github.event_name }}' "$LEGACY_GUARDS" | wc -l | tr -d ' ')" -ge "$pred" ]
 }
 
 @test "every actor guard predicate actually executes and decides correctly (the predicate gets a witness)" {
@@ -817,11 +835,11 @@ EOF
     set -euo pipefail
     root="$1"; n=0; bad=""
     for f in "$root"/.github/workflows/*.yaml; do
-      cnt="$(yq -r "[.jobs[]?.steps[]? | select((.run // \"\") | contains(\"ATTEMPT\"))] | length" "$f" 2>/dev/null || echo 0)"
+      cnt="$(yq -r "[.jobs[]?.steps[]? | select((.name // \"\") | test(\"actor 가드|replay 가드\"))] | length" "$f" 2>/dev/null || echo 0)"
       [ "${cnt:-0}" -gt 0 ] || continue
       i=0
       while [ "$i" -lt "$cnt" ]; do
-        body="$(yq -r "[.jobs[]?.steps[]? | select((.run // \"\") | contains(\"ATTEMPT\"))][$i].run" "$f")"
+        body="$(yq -r "[.jobs[]?.steps[]? | select((.name // \"\") | test(\"actor 가드|replay 가드\"))][$i].run" "$f")"
         n=$((n+1)); w="$(basename "$f")#$i"
         # ── 재실행 축 (17사본 **공통**) — 이벤트를 보지 않는다 ──
         # `if:`로 dispatch에 한정한 가드는 push/schedule run의 재실행에서 **스텝 자체가 skip**되므로
@@ -845,6 +863,8 @@ EOF
             bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:rerun-passed"
           EVENT="workflow_dispatch" ATTEMPT="1" OWNER="alice" ACTOR="alice" TRIGGERING="alice" \
             bash -e -c "$body" >/dev/null 2>&1 || bad="$bad $w:match-rejected"
+          EVENT="workflow_dispatch" ATTEMPT="1" OWNER="Alice" ACTOR="ALICE" TRIGGERING="aLiCe" \
+            bash -e -c "$body" >/dev/null 2>&1 || bad="$bad $w:case-match-rejected"
         esac
         i=$((i+1))
       done

@@ -30,9 +30,11 @@ configMapGenerator:
   - name: restore-drill-script
     files:
       - drill.sh=restore-drill-script.sh
+      - aiops-observation.sh
   - name: ensure-role-password-script # PostSync hook Job이 /scripts로 마운트
     files:
       - ensure-role-password.sh
+      - aiops-observation.sh
 
 generatorOptions:
   disableNameSuffixHash: true # 고정 이름: restore-drill-script, ensure-role-password-script

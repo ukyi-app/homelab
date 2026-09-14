@@ -19,6 +19,7 @@ defaults:
 
 jobs:
   create:
+    environment: homelab-main
     runs-on: ubuntu-24.04-arm
     # timeout-minutes — 디스패처의 route 잡(`uses:`)에는 걸 수 없어(actionlint 거부) 변이 본체의 상한이
     # 여기 있다. homelab-mutation 그룹 천장의 근거 전문은 bump-poll.yaml preflight 잡 주석 —
@@ -28,6 +29,34 @@ jobs:
       contents: read
       packages: read # digest 해석(docker imagetools)
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: reader
         with:
@@ -135,6 +164,7 @@ jobs:
             jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
           } > /tmp/pr-body.md
       - name: PR-first 커밋 (수동 머지 — create-app 패턴)
+        id: aiops_check
         uses: ./.github/actions/pr-first-commit
         with:
           branch: create-app/${{ steps.img.outputs.app }}-${{ github.run_id }}
@@ -152,8 +182,18 @@ jobs:
           pr-body-file: /tmp/pr-body.md
           auto-merge: 'false'
           gh-token: ${{ steps.writer.outputs.token }}
-      - name: telegram notify
+      - name: AIOps 검사 결과 기록
         if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: _create-app.yaml/create
+          target: ${{ inputs.app }}
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
+      - name: telegram notify
+        if: ${{ (always()) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           status: ${{ job.status }}

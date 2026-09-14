@@ -20,6 +20,7 @@ jobs:
   # Phase 0(TF/R2 secrets 등록) 전에 머지되면 스케줄이 매 30분 실패+Telegram 스팸 →
   # 시크릿 부재 시 reconcile을 skip해 run을 깨끗한 성공으로 만든다.
   preflight:
+    environment: homelab-main
     runs-on: ubuntu-24.04-arm
     # timeout-minutes — homelab-mutation 그룹의 천장(근거 전문은 bump-poll.yaml preflight 잡 주석).
     # 값 근거 — 2026-09-02 라이브 실측(최근 100 run 실행구간): tf-reconcile p50 38s / max 145s.
@@ -28,6 +29,34 @@ jobs:
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
         env:
           EVENT: ${{ github.event_name }}
@@ -36,6 +65,10 @@ jobs:
           TRIGGERING: ${{ github.triggering_actor }}
           OWNER: ${{ vars.HOMELAB_OWNER }}
         run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
           # 디스패치 자격(actions:write)은 워크플로 단위 스코프가 불가 — 허용목록(bump-poll) 외 전 진입점 가드(P2-1).
           [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
           # 재실행 축 — **이벤트를 보지 않는다.** github.run_attempt은 재실행이 보존할 수 없는 유일한
@@ -62,6 +95,7 @@ jobs:
           fi
 
   reconcile:
+    environment: homelab-main
     needs: preflight
     if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-24.04-arm
@@ -71,6 +105,34 @@ jobs:
       TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
       TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with: { ref: main } # 항상 main 최신 — 머지된 선언 상태가 권위
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
@@ -123,10 +185,21 @@ jobs:
           echo "::error::tf-destroy-guard 내부 오류(result=error) — 가드 신뢰 불가, reconcile 잡 실패시켜 가시화"
           exit 1
       - name: apply (드리프트 + 가드 result=ok일 때만)
+        id: aiops_check
         if: steps.drift.outputs.drift == 'true' && steps.guard.outputs.result == 'ok'
         run: terraform -chdir=infra/cloudflare apply -input=false tf.plan
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: tf-reconcile.yaml/reconcile
+          target: cloudflare
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: aiops_check
       - name: telegram notify (수렴/실패/delete-차단 시에만)
-        if: failure() || steps.drift.outputs.drift == 'true'
+        if: ${{ (failure() || steps.drift.outputs.drift == 'true') && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           status: ${{ steps.guard.outputs.result == 'blocked-delete' && 'drift' || (job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status) }}
@@ -144,6 +217,7 @@ jobs:
   # 우회 불가)을 위반한다. 그래서 cloudflare(좁은 DNS/tunnel 스코프)만 apply하고, 이 둘은 plan만 돌려
   # 드리프트를 알리며 수렴은 owner 로컬 apply로 한다. read 토큰이 시크릿에 없으면 preflight가 skip(Phase-0 토글).
   drift-github:
+    environment: homelab-main
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10 # plan 전용(apply 없음) — 근거는 preflight 잡 주석
     # 스텝-레벨 게이트라 시크릿이 없으면 **스텝만** 전부 skip되고 job은 그대로 success로 끝난다 —
@@ -153,6 +227,34 @@ jobs:
     outputs:
       executed: ${{ steps.drift.outputs.executed }}
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       # `needs: preflight` + `if: needs.preflight.outputs.configured`(위 reconcile 잡의 관용구)를 이 잡에
       # 걸지 않는다 — preflight의 configured는 CF/R2 자격이고, 이 잡의 게이트는 자기 자격(TF_GITHUB_TOKEN /
       # TF_TAILSCALE_OAUTH_ID)을 보는 스텝-레벨 `pf`라 서로 독립이다. `needs:`만으로는 묶이지 않지만
@@ -169,6 +271,10 @@ jobs:
           TRIGGERING: ${{ github.triggering_actor }}
           OWNER: ${{ vars.HOMELAB_OWNER }}
         run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
           # 디스패치 자격(actions:write)은 워크플로 단위 스코프가 불가 — 허용목록(bump-poll) 외 전 진입점 가드(P2-1).
           [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
           # 재실행 축 — **이벤트를 보지 않는다.** github.run_attempt은 재실행이 보존할 수 없는 유일한
@@ -239,8 +345,11 @@ jobs:
           terraform -chdir=infra/github plan -input=false -lock-timeout=120s -detailed-exitcode -no-color \
             -target=github_branch_protection.main \
             -target=github_repository_ruleset.bump_poll_writer_only \
-            -target=github_actions_secret.telegram_bot_token \
-            -target=github_actions_secret.telegram_chat_id
+            -target=github_repository_ruleset.mutation_writer_only \
+            -target=github_repository_environment.main \
+            -target=github_repository_environment_deployment_policy.main \
+            -target=github_actions_environment_secret.telegram_bot_token \
+            -target=github_actions_environment_secret.telegram_chat_id
           rc=$?
           set -e
           case "$rc" in
@@ -248,8 +357,18 @@ jobs:
             2) echo "drift=true" >> "$GITHUB_OUTPUT"; echo "::warning::github 루트 드리프트 감지 — owner 로컬 apply 필요(CI 무인 apply 금지)" ;;
             *) exit "$rc" ;;
           esac
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: tf-reconcile.yaml/drift-github
+          target: github
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: drift
       - name: telegram notify (드리프트/실패 시에만)
-        if: steps.pf.outputs.configured == 'true' && (failure() || steps.drift.outputs.drift == 'true')
+        if: ${{ (steps.pf.outputs.configured == 'true' && (failure() || steps.drift.outputs.drift == 'true')) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           status: ${{ job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status }}
@@ -261,12 +380,41 @@ jobs:
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
 
   drift-tailscale:
+    environment: homelab-main
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10 # plan 전용(apply 없음) — 근거는 preflight 잡 주석
     # drift-github와 같은 이유의 승격(위 주석) — 이 job도 스텝-레벨 게이트다.
     outputs:
       executed: ${{ steps.drift.outputs.executed }}
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       # `needs: preflight` + `if: needs.preflight.outputs.configured`(위 reconcile 잡의 관용구)를 이 잡에
       # 걸지 않는다 — preflight의 configured는 CF/R2 자격이고, 이 잡의 게이트는 자기 자격(TF_GITHUB_TOKEN /
       # TF_TAILSCALE_OAUTH_ID)을 보는 스텝-레벨 `pf`라 서로 독립이다. `needs:`만으로는 묶이지 않지만
@@ -283,6 +431,10 @@ jobs:
           TRIGGERING: ${{ github.triggering_actor }}
           OWNER: ${{ vars.HOMELAB_OWNER }}
         run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
           # 디스패치 자격(actions:write)은 워크플로 단위 스코프가 불가 — 허용목록(bump-poll) 외 전 진입점 가드(P2-1).
           [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
           # 재실행 축 — **이벤트를 보지 않는다.** github.run_attempt은 재실행이 보존할 수 없는 유일한
@@ -357,8 +509,18 @@ jobs:
             2) echo "drift=true" >> "$GITHUB_OUTPUT"; echo "::warning::tailscale 루트 드리프트 감지 — owner 로컬 apply 필요(CI 무인 apply 금지)" ;;
             *) exit "$rc" ;;
           esac
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: tf-reconcile.yaml/drift-tailscale
+          target: tailscale
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: drift
       - name: telegram notify (드리프트/실패 시에만)
-        if: steps.pf.outputs.configured == 'true' && (failure() || steps.drift.outputs.drift == 'true')
+        if: ${{ (steps.pf.outputs.configured == 'true' && (failure() || steps.drift.outputs.drift == 'true')) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           status: ${{ job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status }}
@@ -375,11 +537,40 @@ jobs:
   # ⚠️ `if: !cancelled()` 필수 — 기본 success()가 걸리면 감시자가 감시 대상과 같은 운명에 묶인다.
   # 판정 기준은 policy/workflow-readiness.json(원장) — 원장↔워크플로 정합은 ci.yaml gate가 강제한다.
   accounting:
+    environment: homelab-main
     needs: [preflight, reconcile, drift-github, drift-tailscale]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5 # 보조 잡 — 원장 대조만. 근거는 preflight 잡 주석
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with: { ref: main } # 원장의 권위는 머지된 상태다(브랜치 로컬 수정이 회계를 무르게 하지 못한다)
       - uses: ./.github/actions/setup-bun
@@ -389,8 +580,18 @@ jobs:
         run: bun tools/check-workflow-readiness.ts --workflow tf-reconcile.yaml
       # 선언된 갭(gaps)은 telegram에 넣지 않는다 — 매 30분 재발해 진짜 신호를 덮는다. 갭의 venue는
       # 로그 + job summary + 원장이고, 알림은 **선언되지 않은** 미실행(failures/warnings)에만 쓴다.
+      - name: AIOps 검사 결과 기록
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: tf-reconcile.yaml/accounting
+          target: accounting
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: acct
       - name: telegram notify (required 미실행 · 원장 불일치 시에만 — 선언된 갭은 제외)
-        if: always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')
+        if: ${{ (always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           # 긍정 가드 — acct 앞 checkout/setup-bun이 죽으면 outcome=skipped라 `== 'failure'`가 거짓이고

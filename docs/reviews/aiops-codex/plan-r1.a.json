@@ -1,0 +1,287 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "ack": "herdr-human-triage",
+  "triageMode": "human",
+  "verdict": "needs-attention",
+  "summary": "구현 착수 전 계약 보완이 필요합니다. 검증 대상 분리, 검증 단계 상한, GHA 해소 증거, 진단 합격 기준에 공백이 있습니다. 정적 검토 3/3 완료. 운영·모델 동작은 검증하지 않았습니다.",
+  "planFile": "docs/reviews/aiops-codex/input/implementation.md",
+  "planInDiff": true,
+  "reviewedFileCount": 17,
+  "target": "working tree frozen at 5c29ced83b4e (HEAD 16a44e6c86fe)",
+  "scope": "working-tree",
+  "requestedScope": "working-tree",
+  "base": null,
+  "reviewer": "codex",
+  "effort": "xhigh",
+  "inputMode": "inline-diff",
+  "reviewedSha": "16a44e6c86fe1710a9f68ca6062b5f0250659cb7",
+  "reviewedTree": "83be66c64042190b78e6540ea489c8198ef55410",
+  "reviewedPlanSha256": "249a464456b0764722b66a307d7677d6b20be692d348f4b186a6f4a27b0bf91a",
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": false,
+  "frozen": {
+    "commit": "a2a00c7277dac014fdc9fb5a71e4f87e83d51b15",
+    "tree": "5c29ced83b4e56bf13dd61e954cb468d260344c6",
+    "parent": "16a44e6c86fe1710a9f68ca6062b5f0250659cb7",
+    "diffRange": "16a44e6c86fe1710a9f68ca6062b5f0250659cb7..5c29ced83b4e56bf13dd61e954cb468d260344c6",
+    "gitEnvironment": {
+      "selectors": [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+        "GIT_CEILING_DIRECTORIES"
+      ],
+      "strippedFromLauncher": [],
+      "paneInheritsLauncherEnvironment": false
+    },
+    "ref": "refs/herdr-review/aiopscod/plan/r1/a-92c37c5a",
+    "refPinned": true
+  },
+  "herdr": {
+    "workspaceId": "w16",
+    "callerPaneId": "w16:p2",
+    "reviewerPaneId": "w16:p4",
+    "agentName": "hrg-aiopscod-p-r1-a-92c37c5a",
+    "agentKind": "codex",
+    "agentSessionId": "01a09374-a4a4-79f2-ae5b-ca6bcca30cb6"
+  },
+  "isolation": {
+    "executedArgv": [
+      "codex",
+      "-C",
+      "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r1-a-92c37c5a--7aUsiv",
+      "-s",
+      "read-only",
+      "-c",
+      "approval_policy=never",
+      "-c",
+      "projects./tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r1-a-92c37c5a--7aUsiv.trust_level=\"trusted\"",
+      "-c",
+      "memories.use_memories=false",
+      "-c",
+      "memories.generate_memories=false",
+      "-c",
+      "model_reasoning_effort=xhigh"
+    ],
+    "requestedArgv": [
+      "-C",
+      "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r1-a-92c37c5a--7aUsiv",
+      "-s",
+      "read-only",
+      "-c",
+      "approval_policy=never",
+      "-c",
+      "projects./tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r1-a-92c37c5a--7aUsiv.trust_level=\"trusted\"",
+      "-c",
+      "memories.use_memories=false",
+      "-c",
+      "memories.generate_memories=false",
+      "-c",
+      "model_reasoning_effort=xhigh"
+    ],
+    "sandbox": {
+      "requested": "read-only",
+      "observedInExecutedArgv": "read-only",
+      "matchesRequest": true
+    },
+    "approval": {
+      "requested": "never",
+      "observedInExecutedArgv": "never",
+      "matchesRequest": true
+    },
+    "memoriesRead": {
+      "requested": "false",
+      "observedInExecutedArgv": "false",
+      "matchesRequest": true
+    },
+    "memoriesWrite": {
+      "requested": "false",
+      "observedInExecutedArgv": "false",
+      "matchesRequest": true
+    },
+    "trust": {
+      "requested": "\"trusted\"",
+      "observedInExecutedArgv": "\"trusted\"",
+      "matchesRequest": true
+    },
+    "mcpDisables": {
+      "requested": "",
+      "observedInExecutedArgv": "",
+      "matchesRequest": true
+    },
+    "workingRoot": {
+      "requested": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r1-a-92c37c5a--7aUsiv",
+      "observedInExecutedArgv": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r1-a-92c37c5a--7aUsiv",
+      "matchesRequest": true
+    },
+    "confinementAxes": [
+      "sandbox",
+      "approval",
+      "memoriesRead",
+      "memoriesWrite",
+      "trust",
+      "mcpDisables",
+      "workingRoot"
+    ],
+    "confinementConfirmed": true,
+    "workRoot": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r1-a-92c37c5a--7aUsiv",
+    "owner": {
+      "workspace": "w16",
+      "session": "w16:p2",
+      "slug": "aiopscod",
+      "kind": "plan",
+      "round": 1,
+      "slot": "a",
+      "nonce": "92c37c5a"
+    },
+    "mcp": {
+      "overrides": [],
+      "servers": [],
+      "enumerated": true,
+      "verified": true,
+      "note": "No MCP server is configured for this reviewer under /home/ukyi/.codex — the configuration root this launcher enumerated and the reviewer's tab is opened with."
+    },
+    "canary": {
+      "path": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-canary-aiopscod-p-r1-a-92c37c5a",
+      "asked": true,
+      "wrote": false,
+      "conclusion": "none",
+      "note": "No canary appeared, and that proves NOTHING: the sandbox may have blocked the write, or the reviewer may have declined it, misread it, or run no tool at all. Absence of an effect is not evidence of prevention."
+    },
+    "platformSandboxCheck": {
+      "axis": "permission-profile (-P), the axis `codex sandbox` drives",
+      "reviewerAxis": "sandbox-mode (-s), the axis the reviewer agent is started on",
+      "result": "enforcing",
+      "denied": {
+        "code": 2,
+        "stderr": "sh: 1: cannot create /tmp/hrgaiops-1gi3ltuq/hrg-probe-canary-4441774a: Read-only file system",
+        "wrote": false
+      },
+      "allowed": {
+        "code": 0,
+        "stderr": "",
+        "wrote": true
+      },
+      "note": "PLATFORM CHECK: on this machine `codex sandbox -P :read-only` refused a write outside its frame and `-P :workspace` performed the same write, so the sandbox mechanism is alive and discriminating. Whether those two axes converge on the same policy is UNDETERMINED, so this result is a fact about this MACHINE and does not show that this reviewer was confined."
+    },
+    "sandboxEnforcement": "not-independently-verified",
+    "sandboxEnforcementNote": "The sandbox argument (`-s read-only`) is present in the argv herdr reported executing; see executedArgv. The approval-policy argument (`approval_policy=never`) is present in the argv herdr reported executing; see executedArgv. The memory-read override (`memories.use_memories=false`) is present in the argv herdr reported executing; see executedArgv. The memory-write override (`memories.generate_memories=false`) is present in the argv herdr reported executing; see executedArgv. The trust declaration for the frozen root (`trust_level=\"trusted\"`) is present in the argv herdr reported executing; see executedArgv. No MCP server is configured on this machine, so no disable override was needed, and the argv herdr reported executing carries none. The working-root argument (`-C /tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r1-a-92c37c5a--7aUsiv`) is present in the argv herdr reported executing and names the frozen copy; see executedArgv. This gate does NOT independently confirm the CLI enforced it. Extraction removes the reviewer's path to this repository's git metadata and makes the target immune to the CALLER's edits; it does not remove the repository from the filesystem."
+  },
+  "gateBinding": null,
+  "deadlines": {
+    "paneReadyMs": 5000,
+    "agentStartMs": 120000,
+    "canaryMs": 60000,
+    "promptAckMs": 5000,
+    "stallCandidateMs": 180000,
+    "stallConfirmMs": 300000,
+    "panePollMs": 10000,
+    "settleMs": 30000,
+    "roundMs": 1800000
+  },
+  "deadlineOwners": {
+    "paneReadyMs": "launcher",
+    "agentStartMs": "launcher",
+    "canaryMs": "launcher",
+    "promptAckMs": "herdr",
+    "stallCandidateMs": "launcher",
+    "stallConfirmMs": "launcher",
+    "panePollMs": "launcher",
+    "settleMs": "launcher",
+    "roundMs": "launcher"
+  },
+  "readback": {
+    "sessionAnchor": "01a09374-a4a4-79f2-ae5b-ca6bcca30cb6",
+    "declaredCount": 4,
+    "recoveredCount": 4,
+    "failure": null,
+    "settle": {
+      "polls": 0,
+      "waitedMs": 7,
+      "deadlineMs": 30000,
+      "pollMs": 500,
+      "boundaryOffset": 190192,
+      "grew": 0
+    },
+    "threadCount": 1,
+    "sessionLogCopy": {
+      "requested": false
+    }
+  },
+  "liveness": {
+    "polls": 36,
+    "paneMoves": 1,
+    "rolloutMoves": 20,
+    "descendantMoves": 0,
+    "lateAnchors": 0,
+    "holds": 0,
+    "candidateWarnings": 0
+  },
+  "findingCount": 4,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "고정 검사 코드와 후보 입력의 루트를 분리하세요",
+      "body": "사실: 현행 scripts/lib/guard.sh:41은 검사 코드 위치에서 ROOT를 산출하고, scripts/verify-ledger.sh:17–18은 그 ROOT에서 입력 원장·변환기·정책을 모두 읽습니다. scripts/run-bats.sh:22–23도 자기 체크아웃으로 이동합니다. 따라서 신뢰된 기준 사본의 진입점을 후보 디렉터리에서 호출해도 기준 사본을 검사합니다. 반대로 진입점만 후보에 복사하면 후보가 바꾼 하위 라이브러리·정책을 실행하게 됩니다. 추론: 후보가 원장을 깨뜨려도 기준 원장의 통과 결과를 후보 검증으로 기록할 수 있습니다. 후보 CI와 고정 검사를 구별한다는 수용 조건은 있지만, 현행 게이트에서 검사 코드와 검사 대상을 분리하는 작업이 빠져 있습니다.",
+      "file": "docs/reviews/aiops-codex/input/issues/04-validation-publication.md",
+      "line_start": 14,
+      "line_end": 15,
+      "code": "1. 후보가 수정할 수 없는 신뢰된 기준 revision의 검사 진입점을 사용한다. 변경 종류에 맞는\n   기존 gate를 운영 자격 없는 환경에서 실행하고 미실행·SKIP·실패를 구분한다.",
+      "confidence": 0.98,
+      "recommendation": "04번에 신뢰된 검사 코드·의존성과 후보 데이터의 루트를 분리하는 어댑터 작업을 추가하세요. 기준 사본은 정상이고 후보만 위반하는 사례, 후보가 검사 라이브러리를 약화하는 사례에서 고정 검사가 후보 위반을 검출하도록 요구하세요.",
+      "isPlanFinding": false,
+      "quotation": "matches"
+    },
+    {
+      "severity": "high",
+      "title": "Codex 종료 뒤의 검증에도 강제 종료 상한을 두세요",
+      "body": "사실: 명시된 10분·2 GiB 상한은 Codex 단계에 한정되고, design.md:178–179는 별도 검증기에서 후보 테스트도 실행하도록 합니다. 현행 scripts/run-bats.sh:37–45에는 테스트별 timeout을 두지 않는 이유가 명시돼 있으며, GitHub에서는 .github/workflows/ci.yaml:48의 job timeout이 바깥 상한입니다. 이 상한은 NUC에서 게이트 스크립트를 호출한다고 따라오지 않습니다. 추론: 후보 테스트가 무한 대기하면 Codex는 정상 종료했어도 단일 worker가 validating에 계속 머뭅니다. worker가 살아 있으므로 사망 후 lease 복구도 작동하지 않아 후속 critical 사건 처리가 막힙니다. Codex timeout·child cleanup 시험만으로는 이 경로를 검증할 수 없습니다.",
+      "file": "docs/reviews/aiops-codex/input/implementation.md",
+      "line_start": 34,
+      "line_end": 37,
+      "code": "| 실행 | 동시 1건·KST 하루 20회. 재시도도 계상. 사건의 Codex 단계 총 10분 |\n| 실패 | 근거 부족은 보류. 실행/사용량 결과 불명은 자동 재시도 금지. 인증·구독 한도 회복까지 대기 |\n| 증거 | 사건 전 15분부터 수집 시점까지. 컨테이너당 선별 로그 200줄·증거 합계 256 KiB부터 시작 |\n| 보존·자원 | 사건/진단 30일·선별 증거/실행 로그 7일. Codex 초기 2 GiB·CPU 2코어 상당, NUC 실측으로 검증 |",
+      "confidence": 0.96,
+      "recommendation": "수집·검증 단계에도 wall-clock·메모리·출력 상한과 자식 프로세스 강제 종료 계약을 추가하세요. 종료하지 않는 검증기를 주입해 제한 시간 뒤 실패 기록, lease 해제, 다음 사건 처리가 이루어지는 수용 시험을 명시하세요.",
+      "isPlanFinding": true,
+      "quotation": "matches"
+    },
+    {
+      "severity": "medium",
+      "title": "GHA의 정상 관측을 Telegram 호출과 독립적으로 남기세요",
+      "body": "사실: .github/workflows/tf-reconcile.yaml:246–253은 drift=false인 정상 실행에서 telegram-notify를 호출하지 않습니다. dns-drift.yaml:61–63도 정상일 때 호출하지 않습니다. 따라서 공통 통지 action에만 artifact 생성을 붙이면 해당 실행의 해소 증거는 생기지 않습니다. 경고가 있는 실행도 success이므로 성공 run 조회만으로는 해소를 판정할 수 없습니다. 추론: quota 때문에 대기 중인 GitHub Terraform 드리프트가 owner 로컬 apply로 해소돼도 SHA는 그대로이고 큐에는 해소 관측이 도착하지 않습니다. 계획의 대기 취소·게시 전 상태 재확인은 필요하다고 선언됐지만, 이 생산자에서 사용할 권위 있는 정상 결과의 공급 경로가 없습니다. 알림 부재를 정상으로 추정하면 artifact 유실까지 해소로 오인합니다.",
+      "file": "docs/reviews/aiops-codex/input/issues/02-notification-sources.md",
+      "line_start": 20,
+      "line_end": 22,
+      "code": "4. 공통 `.github/actions/telegram-notify/`와 위임 통지에서 비민감 사건 artifact를 만든다.\n   NUC pull은 workflow 신원·event·실행 revision·원본 run을 검증한다. 성공 run도 조회하며,\n   fork PR이 만든 임의 artifact를 신뢰된 main 생산자 사건으로 받아들이지 않는다.",
+      "confidence": 0.97,
+      "recommendation": "GHA 검사 결과를 Telegram 조건과 독립된 구조화 artifact로 남기거나 생산자별 권위 재조회 경로를 정의하세요. 대상·검사 완료·정상/경고/관측 불가를 구별하고, 같은 SHA에서 경고→정상으로 바뀌면 대기 사건이 취소되며 artifact 누락은 해소가 되지 않는 사례를 추가하세요.",
+      "isPlanFinding": false,
+      "quotation": "matches"
+    },
+    {
+      "severity": "medium",
+      "title": "진단 품질의 합격선을 파일럿 시작 조건에 연결하세요",
+      "body": "사실: 이 티켓은 12개 사례를 평가하고 지표를 기록하도록 하지만, 다음 단계의 시작 조건은 생산자와 권한 수용입니다. design.md:210의 근거 참조·올바른 보류 요구에도 원인·수정 품질의 합격 판정표가 없고, 14일 평가의 충분한 사건 수 역시 정의되지 않았습니다. 추론: 근거 ID는 유효하지만 원인 추론과 수정안이 틀린 결과가 반복돼도, 평가를 수행했다는 사실과 통신·권한 시험 통과만으로 파일럿을 시작할 수 있습니다. 이후 검토 비용이 늘어난 결과를 어떤 기준으로 실패 또는 보류할지도 정해져 있지 않습니다. 평가 항목의 부재가 아니라, 평가 결과가 활성화와 완료 판정을 제어하지 않는 계약 공백입니다.",
+      "file": "docs/reviews/aiops-codex/input/issues/05-nuc-pilot-acceptance.md",
+      "line_start": 20,
+      "line_end": 23,
+      "code": "4. 최소 12개 고정 사례로 원인 근거·반증·보류·수정 필요성과 모든 생산자 도달을 평가한다.\n   정답 문서는 모델 입력에서 분리하고, 정제/권한 시험과 진단 품질 평가를 따로 기록한다.\n5. 모든 생산자와 권한 수용 후 실제 알림 파일럿을 시작한다. 14일 동안 운영자의 확인 시간·\n   오진·보류·검토 비용·확인된 사용량을 기록한다. 사건 수가 부족하면 효과 입증은 미완료다.",
+      "confidence": 0.94,
+      "recommendation": "사례별 허용 결론·필수 보류·수정 성공 조건과 시작 전 합격선을 정의하세요. 14일 평가에도 최소 사건 수, 기존 수동 대응과의 비교 기준, 성공·실패·평가 부족 판정을 정하고 진단 합격을 파일럿 시작 조건에 포함하세요.",
+      "isPlanFinding": false,
+      "quotation": "matches"
+    }
+  ],
+  "next_steps": [
+    "2분: 04번 티켓에 ‘신뢰된 검사 코드와 후보 입력 루트 분리’를 선행 작업으로 추가하세요."
+  ],
+  "member": "a",
+  "composite": "plan-r1.json"
+}

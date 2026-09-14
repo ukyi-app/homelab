@@ -814,7 +814,17 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `facts.bytes`/`facts.checksum`이 한 값이라 "해시한 것 ≠ 디스크에 쓴 것"이 구조적으로 불가능(#299).
   소비자: `create-app`(그린필드)·`update-secrets`(제자리 병합).
 
+- **`lib/ci-writeback.ts`** — 검증한 build run·attempt·workflow·main ancestry와 불변 artifact ID만 승격한다. PR 스위퍼는 후보 checkout 없이 고정 main 객체를 head lease로 병합한다. `tests/test_ci-writeback.bats`가 base 교체·head 경합·외부 merge driver·잘못된 build 출처를 검증한다.
+- **`lib/reviewed-plan.ts`** — owner가 명시한 정확한 PR head SHA와 main 실행 신원을 검증하는 수동 인증 plan 계약. `tests/test_reviewed-plan.bats`가 변경된 head·재실행·잘못된 요청의 거부를 검증한다.
+
 ## 정적 감사 (읽기 전용)
+
+### AIOps 파일럿
+
+- **`aiops-observation.ts`** — GHA `aiops-observation` composite가 검사 결과를 선별된 artifact로 기록한다. 정상·경고·관측 불가와 대상별 부분 결과를 구별하며 `aiops-producers-v1.json`의 버전·바이트 해시를 기록한다.
+
+실행기·검증기·게시기는 별도 `ukyi-app/aiops` 레포에 둔다. 이 레포는 `aiops-producers-v1.json`의 생산자 계약과 `infra/k3s-bootstrap/aiops-runtime.json`의 release 핀을 소유한다. 연결·설치 순서는 [`docs/aiops.md`](../docs/aiops.md).
+
 
 - **`audit-orphans.ts`** — registry(`apps.json`)↔매니페스트↔바인딩↔원장 교차 드리프트 리포트.
   `just audit`(전체)·`just ci`/`ci.yaml`(`--ci`, 배포 깨는 유형만 차단)·`audit.yaml`(스케줄

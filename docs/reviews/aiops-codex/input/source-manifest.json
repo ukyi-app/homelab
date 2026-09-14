@@ -1,0 +1,65 @@
+{
+  "scope": "pre-implementation plan review",
+  "transformations": [
+    "Rebase absolute homelab Markdown links to the frozen repository",
+    "Point Polyrelay research links at an explicit deferred-scope note; body text otherwise preserved"
+  ],
+  "files": [
+    {
+      "source": ".scratch/aiops-codex/spec.md",
+      "source_sha256": "b37d3b7143ba1d5be1a92f3833bc2d7cb73dbbeeee4d52c18a3f015240efdc4f",
+      "review_path": "docs/reviews/aiops-codex/input/spec.md",
+      "review_sha256": "0238803b9bae1803b5aa24142f2a6770fd771029866c5458686cde5d71740d09"
+    },
+    {
+      "source": ".scratch/aiops-codex/design.md",
+      "source_sha256": "d293e29c3112a5a2394957783d4f9c7d66e2851a7a492a4f623e254b85cb5671",
+      "review_path": "docs/reviews/aiops-codex/input/design.md",
+      "review_sha256": "532b3c80689d9884b96ceb8264061caf6648beab9c96346c778346f87ef4715d"
+    },
+    {
+      "source": ".scratch/aiops-codex/implementation.md",
+      "source_sha256": "1fd66c934a7775fdf6574795116ddd2aaa3da5d5650bc479c5a14f91907f43ed",
+      "review_path": "docs/reviews/aiops-codex/input/implementation.md",
+      "review_sha256": "19d74faa15d0cb65281cff5ef59434fea036761e0a93c31bc23f1c06c9875310"
+    },
+    {
+      "source": ".scratch/aiops-codex/research.md",
+      "source_sha256": "c99a140022f227482d3cdfe8feed402ee9753ded9cf0e791ee98a242e1650bfc",
+      "review_path": "docs/reviews/aiops-codex/input/research.md",
+      "review_sha256": "6309f384b47bd8103c4fa03a4af437a31d59dfc24ba30ae938ee34fffedc359c"
+    },
+    {
+      "source": ".scratch/aiops-codex/issues/01-incident-queue.md",
+      "source_sha256": "a21fdea189c0d6d4a0a573dcd1177cc4f4d52fa9f80dad54df500fd1b5ac9739",
+      "review_path": "docs/reviews/aiops-codex/input/issues/01-incident-queue.md",
+      "review_sha256": "a21fdea189c0d6d4a0a573dcd1177cc4f4d52fa9f80dad54df500fd1b5ac9739"
+    },
+    {
+      "source": ".scratch/aiops-codex/issues/02-notification-sources.md",
+      "source_sha256": "751f7dd0447b25f4f13f49b656043eeb35ce359f2999cca49759ee1d9ed62fb5",
+      "review_path": "docs/reviews/aiops-codex/input/issues/02-notification-sources.md",
+      "review_sha256": "751f7dd0447b25f4f13f49b656043eeb35ce359f2999cca49759ee1d9ed62fb5"
+    },
+    {
+      "source": ".scratch/aiops-codex/issues/03-evidence-codex-runner.md",
+      "source_sha256": "31497618e5c5074dc5157f202b61718301f9db16c99775ee53ce98504c847f13",
+      "review_path": "docs/reviews/aiops-codex/input/issues/03-evidence-codex-runner.md",
+      "review_sha256": "31497618e5c5074dc5157f202b61718301f9db16c99775ee53ce98504c847f13"
+    },
+    {
+      "source": ".scratch/aiops-codex/issues/04-validation-publication.md",
+      "source_sha256": "c6b736a7c53cee59a4a71f982d823cc8b9d046a6788af64c9611634f1352837c",
+      "review_path": "docs/reviews/aiops-codex/input/issues/04-validation-publication.md",
+      "review_sha256": "c6b736a7c53cee59a4a71f982d823cc8b9d046a6788af64c9611634f1352837c"
+    },
+    {
+      "source": ".scratch/aiops-codex/issues/05-nuc-pilot-acceptance.md",
+      "source_sha256": "f24186711a7e88e24a86619071cea9590104c0329c8af65bd9a89fa076829714",
+      "review_path": "docs/reviews/aiops-codex/input/issues/05-nuc-pilot-acceptance.md",
+      "review_sha256": "f24186711a7e88e24a86619071cea9590104c0329c8af65bd9a89fa076829714"
+    }
+  ],
+  "round": 3,
+  "prior_snapshot_commit": "c52ae4d"
+}

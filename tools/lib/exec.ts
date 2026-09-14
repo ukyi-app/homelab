@@ -23,7 +23,8 @@
 // 넣지 않는다(kubectl은 키 부재 시 Secret을 base64째 stderr에 덤프한다 — conn-url의 라이브 실측).
 // 원장은 관측 편의라 기록 실패가 실행을 막지 않는다(prod 경로 무영향).
 import { appendFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import type { SpawnSyncOptions, SpawnSyncOptionsWithStringEncoding, SpawnSyncOptionsWithBufferEncoding, SpawnSyncReturns } from "node:child_process";
 
 export type ErrKind = "not-found" | "timeout" | "overflow" | "spawn";
 // status — 자식의 exit code(실행 실패·시그널 사망이면 null). rc **의미론**은 콜사이트 소유지만
@@ -43,6 +44,20 @@ function ledger(cmd: string, args: string[]): void {
   const f = process.env.HOMELAB_EXEC_LEDGER;
   if (!f) return;
   try { appendFileSync(f, JSON.stringify({ cmd, args }) + "\n"); } catch { /* 관측은 실행을 막지 않는다 */ }
+}
+
+// AIOps 감독 경로: 환경을 호출자가 명시하고 stdin·상속 FD를 닫는다. 문자열/바이너리 Git 결과를 구별한다.
+export function isolatedSpawnSync(cmd: string, args: string[], opts: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string>;
+export function isolatedSpawnSync(cmd: string, args: string[], opts: SpawnSyncOptionsWithBufferEncoding): SpawnSyncReturns<Buffer>;
+export function isolatedSpawnSync(cmd: string, args: string[], opts: SpawnSyncOptions): SpawnSyncReturns<Buffer | string>;
+export function isolatedSpawnSync(cmd: string, args: string[], opts: SpawnSyncOptions): SpawnSyncReturns<Buffer | string> {
+  if (!opts.env || !opts.timeout || opts.timeout <= 0 || !opts.maxBuffer || opts.maxBuffer <= 0) throw new Error("isolated-process-options-required");
+  ledger(cmd, args);
+  return spawnSync(cmd, args, { ...opts, stdio: ["ignore", "pipe", "pipe"] });
+}
+export function isolatedSpawn(cmd: string, args: string[], opts: { cwd?: string; env: NodeJS.ProcessEnv }) {
+  ledger(cmd, args);
+  return spawn(cmd, args, { ...opts, detached: true, stdio: ["ignore", "pipe", "pipe"] });
 }
 
 // git 실행의 env 위생 — **cmd === "git"인 모든 호출**에 건다. 명명 adapter(git())만

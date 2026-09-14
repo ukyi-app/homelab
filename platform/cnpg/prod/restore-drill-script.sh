@@ -73,6 +73,7 @@ notify() {
 # <<< notify-block (test-extracted)
 
 fail() {
+  bash "${BASH_SOURCE[0]%/*}/aiops-observation.sh" restore-drill "${NS}/${DRILL_CLUSTER}" warning || true
   notify FAIL "$1"
   exit 1
 }
@@ -471,3 +472,4 @@ esac
 # ⚠️ 검증 범위를 정확히 쓴다. 이 스크립트는 PV를 한 번도 열거하지 않는다(그럴 수도 없다 —
 #    restore-drill-rbac.yaml:20-24가 PV 권한을 설계상 두지 않는다). 잔여 PV는 감사 도구 몫이다.
 echo "[drill] cleanup done (Cluster + PVC 잔여 0 확인 — PV는 drill-ssd reclaimPolicy=Delete에 위임, 잔여 PV 감사는 scripts/audit-orphan-pv.sh)"
+bash "${BASH_SOURCE[0]%/*}/aiops-observation.sh" restore-drill "${NS}/${DRILL_CLUSTER}" healthy || true

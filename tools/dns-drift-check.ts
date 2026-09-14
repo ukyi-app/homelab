@@ -83,17 +83,20 @@ if (reservedHosts.length < minReserved) {
 
 const drift = [];       // NXDOMAIN — active:true인데 DNS 레코드 미존재(apply 누락). 이것만 drift로 센다.
 const transient = [];   // ⚠️ SERVFAIL/timeout/저하된 resolver — drift로 단정 불가(별도 버킷)
+const observations: { target: string; status: string; completed: boolean }[] = [];
 for (const r of appHosts) {                                // dns.tf는 public&&active만 노출
   const recs = await resolve(r.host);
+  observations.push({ target: r.host, status: recs === null ? "warning" : recs === undefined ? "unobservable" : "healthy", completed: recs !== undefined });
   if (recs === null) drift.push({ host: r.host, name: r.name, reason: "NXDOMAIN — active:true인데 DNS 레코드 미존재(apply 누락 의심)" });
   else if (recs === undefined) transient.push({ host: r.host, name: r.name, reason: "resolve 일시 실패(SERVFAIL/timeout) — drift 아님, 재확인 필요" });
 }
 for (const host of reservedHosts) {
   const recs = await resolve(host);
+  observations.push({ target: host, status: recs === null ? "warning" : recs === undefined ? "unobservable" : "healthy", completed: recs !== undefined });
   if (recs === null) drift.push({ host, name: "platform", reason: "NXDOMAIN — 예약 platform host인데 DNS 레코드 미존재(apply 누락 의심)" });
   else if (recs === undefined) transient.push({ host, name: "platform", reason: "resolve 일시 실패(SERVFAIL/timeout) — drift 아님, 재확인 필요" });
 }
 // drift와 transient 분리 출력 — 워크플로는 .drift.length만 drift 알림으로(transient는 별도 경고).
 // `scanned`는 스캔 신호다: stdout이 기계 판독 JSON이라 `SCAN:` 마커를 낼 수 없으므로(마커가 출력을
 // 오염시킨다 — CONTRIBUTING '가드 스캔 신호') 같은 정보를 페이로드 안에 싣는다.
-console.log(JSON.stringify({ scanned: appHosts.length + reservedHosts.length, drift, transient }, null, 2));
+console.log(JSON.stringify({ scanned: appHosts.length + reservedHosts.length, drift, transient, observations }, null, 2));

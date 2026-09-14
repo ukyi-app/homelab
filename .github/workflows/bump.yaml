@@ -23,6 +23,7 @@ permissions:
 
 jobs:
   writeback:
+    environment: homelab-main
     # 이 레포의 `main`에서 돈 성공한 build에만 반응한다 (fork/PR build는 절대 아님) —
     # 아니면 공격자가 통제한 아티팩트 내용이 write-back PR 내용을 조종할 수 있다.
     if: >-
@@ -37,10 +38,38 @@ jobs:
     # matrix 없음: 직렬화된 단일 job이 실제로 빌드된 앱만 bump하고
     # (build.yaml의 `built-*` 아티팩트에서 도출), 각 digest 실존을 검증한 뒤 한 번만 커밋한다.
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       # writer App 토큰(설치는 org 전체 — `owner`/`repositories` 생략이 현재 레포로 한정한다):
       # App 토큰은 branch protection을 우회하지 못하므로
       # main 직접 push가 아니라 PR + auto-merge로 쓴다(required check `gate`가 리뷰 게이트).
-      # checkout 자체에 토큰이 필요해 이 첫 step에서 create-github-app-token을 인라인 발급한다
+      # 읽기 토큰으로 provenance를 증명한 뒤에만 writer를 발급한다.
       # (핀 SSOT: tests/gates/test_app-token-sha-ssot.bats가 전 콜사이트 동일 SHA 강제).
       - name: replay 가드 (이벤트 구동 잡 — 재실행 개시자만 검사한다)
         env:
@@ -48,12 +77,42 @@ jobs:
           TRIGGERING: ${{ github.triggering_actor }}
           OWNER: ${{ vars.HOMELAB_OWNER }}
         run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          TRIGGERING="${TRIGGERING,,}"
           # 이 잡은 owner 디스패치 대상이 아니라 **이벤트 구동**이다 — 출처는 잡 `if:`와 branch
           # protection이 진다. 그래서 actor 축은 모양이 맞지 않고, 남는 축은 재실행뿐이다:
           # 재실행은 원래 이벤트를 **그대로 재생**하므로 출처 술어가 그대로 통과한다.
           # (actions:write는 재실행 동사를 포함하고, 그 자격은 앱 레포에 실재한다.)
           [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — replay 가드 fail-closed"; exit 1; }
           [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행(attempt=$ATTEMPT)은 owner($OWNER)만 개시 가능 — 개시자=$TRIGGERING 거부"; exit 1; }
+      # 실행 코드는 downstream 생성 당시 trusted main SHA에 고정한다. 후보는 checkout하지 않는다.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - name: 실제 build run·attempt·workflow·main ancestry 검증
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOMELAB_OWNER: ${{ vars.HOMELAB_OWNER }}
+        run: bun tools/lib/ci-writeback.ts verify-build
+      - name: 검증한 불변 built artifact ID만 다운로드
+        if: steps.provenance.outputs.artifact_ids != ''
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          artifact-ids: ${{ steps.provenance.outputs.artifact_ids }}
+          path: ${{ runner.temp }}/built
+          merge-multiple: true
+          run-id: ${{ steps.provenance.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: writer 발급 직전 run·attempt·artifact ID 재검증
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOMELAB_OWNER: ${{ vars.HOMELAB_OWNER }}
+          EXPECTED_ARTIFACT_IDS: ${{ steps.provenance.outputs.artifact_ids }}
+        run: bun tools/lib/ci-writeback.ts verify-build
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: token
         with:
@@ -61,28 +120,13 @@ jobs:
           private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          ref: main
-          token: ${{ steps.token.outputs.token }}
-      - uses: ./.github/actions/setup-bun
       - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: download built-app markers from the build run
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
-        with:
-          pattern: built-*
-          # ⚠️ 워크스페이스(=레포 체크아웃) **밖**에 푼다. 레포 트리 안이면 이 다운로드가 untracked
-          #    잔여물이 되어 아래 스테이징 완전성 판정의 노이즈가 되고, 더 나쁘게는 `git add -A --
-          #    apps platform` 천장이 넓어지는 날 산출물이 커밋에 실릴 수 있다.
-          path: ${{ runner.temp }}/built
-          merge-multiple: true
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: derive the set of apps that were actually built
+        if: steps.provenance.outputs.artifact_ids != ''
         id: set
         run: |
           built_apps="$(find "$RUNNER_TEMP/built" -mindepth 1 -maxdepth 1 -type f -printf '%f ' 2>/dev/null | sed 's/ *$//')"
@@ -96,7 +140,7 @@ jobs:
         if: steps.set.outputs.apps != ''
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          SHA: "sha-${{ github.event.workflow_run.head_sha }}"
+          SHA: "sha-${{ steps.provenance.outputs.head_sha }}"
           OWNER: "${{ github.repository_owner }}"
           APPS: ${{ steps.set.outputs.apps }}
           RUN_ID: ${{ github.run_id }}
@@ -160,7 +204,10 @@ jobs:
           #    cf. docs/traps.md 「이미지 핀의 존재 ≠ 일치 ≠ 소유자」
           git add -A -- apps platform
           git commit -m "chore: 빌드 산출물 이미지 핀 갱신 (${APPS})"
-          git push -u origin "$branch"
+          # checkout에는 자격을 남기지 않는다. push 한 명령의 환경에만 writer 토큰을 공급한다.
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            git -c credential.helper= push -u origin "$branch"
           # PR-first 쓰기 모델: gate 통과 시 자동 머지(squash). 머지 후 브랜치는 자동 삭제(repo 설정).
           gh pr create --base main --head "$branch" \
             --title "chore: 이미지 태그 갱신 (${APPS})" \
@@ -168,8 +215,18 @@ jobs:
           # PR 생성 확정 후 신호 — 이후 auto-merge 실패해도 PR은 존재(알림이 PR 생성을 정확히 반영)
           echo "result=pr" >> "$GITHUB_OUTPUT"
           bash scripts/auto-merge-or-fail.sh "$branch"
-      - name: telegram notify
+      - name: AIOps 검사 결과 기록
         if: always()
+        continue-on-error: true
+        uses: ./.github/actions/aiops-observation
+        with:
+          producer: bump.yaml/writeback
+          target: writeback
+          job-result: ${{ job.status }}
+          steps: ${{ toJSON(steps) }}
+          primary-step: bump
+      - name: telegram notify
+        if: ${{ (always()) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           status: ${{ job.status }}
