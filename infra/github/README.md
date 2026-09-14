@@ -78,6 +78,18 @@ Actions / Environments Read-only가 필요하다. Environment·배포 브랜치 
 부족하면 HTTP 404나 허위 drift가 생길 수 있으므로 API 읽기와 실제 `No changes`를 함께
 확인한다. Administration write를 CI에 추가하는 방식으로 해결하지 않는다.
 
+provider 6.12.1은 `github_branch_protection`의 push 허용 주체를 GraphQL로 읽는다.
+2026-09-14 실제 CI에서는 private writer App만 조회 결과에서 빠져 `1 to change`가 나왔지만,
+owner plan은 변경 0건이고 REST의 main 보호 목록에는 owner/writer가 모두 있었다.
+`tf-reconcile`의 `tools/lib/github-plan-drift.ts`는 같은 CI 읽기 전용 PAT로 고정 main 보호
+REST API를 조회한다. 사용자 1명(owner)·App 1개(writer)·팀 0개를 숫자 ID와 node ID로
+정확히 확인하고, plan의 유일한 변경이 그 writer 추가이며 나머지 before/after가 같을 때만
+조회 차이로 판정한다. no-op plan에도 REST를 대조해 숨겨진 추가 App을 놓치지 않는다.
+다른 자원·속성 변경과 unknown은 드리프트이며, 잘못된 plan/REST 응답·조회 실패는 job 실패다.
+CI 자격에 쓰기 권한을 추가하거나 Terraform 설정/state에서 허용 주체를 무시하지 않는다.
+저장 plan과 JSON에는 민감값이 있으므로 runner에서만 처리하고 artifact나 로그로 내보내지 않는다.
+테스트와 owner 대조만으로 CI PAT의 REST 가시성을 증명하지 않으며, 실제 main 실행 결과로 확인한다.
+
 ### 로컬 검증과 남은 서버 증거
 
 `tests/ci-authority.tftest.hcl`은 mock provider로 HCL의 실제 resolved plan을 검사한다.

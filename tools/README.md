@@ -816,6 +816,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 - **`lib/ci-writeback.ts`** — 검증한 build run·attempt·workflow·main ancestry와 불변 artifact ID만 승격한다. PR 스위퍼는 후보 checkout 없이 고정 main 객체를 head lease로 병합한다. `tests/test_ci-writeback.bats`가 base 교체·head 경합·외부 merge driver·잘못된 build 출처를 검증한다.
 - **`lib/reviewed-plan.ts`** — owner가 명시한 정확한 PR head SHA와 main 실행 신원을 검증하는 수동 인증 plan 계약. `tests/test_reviewed-plan.bats`가 변경된 head·재실행·잘못된 요청의 거부를 검증한다.
+- **`lib/github-plan-drift.ts`** — GitHub plan의 main push 허용 주체를 고정 REST GET으로 교차 확인한다. private writer App 조회 누락만 실제 owner/writer 목록과 대조하고, 나머지 변경·불명확한 값·조회 실패는 정상으로 처리하지 않는다. `tests/test_github-plan-drift.bats`는 실제 CLI와 workflow 셸의 드리프트·실패 전달을 검사한다.
 
 ## 정적 감사 (읽기 전용)
 
