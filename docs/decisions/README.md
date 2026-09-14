@@ -23,3 +23,4 @@
 | [0007](0007-seed-vs-live-ssot.md) | ArgoCD가 수렴시키지 않는 tracked 값은 자산별 SSOT 선언 · 시드 드리프트는 경고로만 |
 | [0008](0008-aiops-diagnostic-drafts.md) | AIOps 첫 권한 경계는 장애 진단과 운영 수정 초안까지 · 운영 적용은 별도 승인 |
 | [0009](0009-aiops-fork-pr-boundary.md) | AIOps 수정 초안은 전용 fork에서 Draft PR로 제출 · upstream 운영 시크릿과 실행 분리 |
+| [0010](0010-aiops-two-repositories.md) | ADR-0009 대체: 두 조직 레포·고정 실행기·homelab 내부 Draft PR, 운영 자격과 main 권한의 서버 경계 선행 |

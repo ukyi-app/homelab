@@ -1,7 +1,11 @@
 # AIOps 파일럿 — 설치와 수용
 
-`bash infra/k3s-bootstrap/aiops-install.sh --prepare`가 `.scratch/aiops-install/plan/`에 검토할 설정과 유닛을 만든다.
-현재 구현은 로컬 재생과 설치 준비 단계다. 실제 NUC cgroup·전용 구독 로그인·알림 전달·fork PR의 수용 증거는 별도로 기록한다.
+운영 선언은 `ukyi-app/homelab`, 실행기 소스는 `ukyi-app/aiops`가 소유한다([ADR-0010](decisions/0010-aiops-two-repositories.md)).
+`infra/k3s-bootstrap/aiops-runtime.json`은 승인한 실행기 커밋과 Git archive의 SHA-256을 고정한다.
+`bash infra/k3s-bootstrap/aiops-install.sh --prepare <runtime.tar>`가 고정 바이트를 검증한 뒤
+`.scratch/aiops-install/plan/`에 설정과 유닛을 만든다. 핀이 비어 있거나 바이트가 다르면 실행하지 않는다.
+이 문서의 `bun tools/aiops.ts` 명령은 **aiops checkout**에서 실행한다. homelab 생산자·정책은 복사하지 않는다.
+기존 NUC 설치·구독 로그인은 보존하며, 새 CI/권한·실제 진단·게시 수용 완료 전까지 비활성 상태를 유지한다.
 NUC가 꺼진 장애, 자동 복구·머지, 다른 앱 레포 수정, Polyrelay 연결은 이 파일럿의 실행 범위 밖이다.
 
 ## 1. 사건을 재생한다
@@ -38,25 +42,30 @@ Helm 템플릿·암호화 자료·live/Terraform·나머지 저장소 게이트�
 
 ## 2. NUC에 설치한다
 
-설치기의 `--install <config.json> <bun 절대경로> <codex 절대경로> <conftest 절대경로>`는 sudo가 필요하다.
+homelab 설치기의 `--install <runtime.tar> <config.json> <bun 절대경로> <codex 절대경로> <conftest 절대경로>`는 sudo가 필요하다.
 커밋한 실행 코드를 `/opt/homelab-aiops/<revision>`에 고정하고 바이너리 해시를 설정에 기록한다.
 `/etc/sysusers.d` 등 시스템 설정 디렉터리가 없으면 먼저 생성한다. `current` 링크는 계정·저장소·설정·유닛 설치가 모두 끝난 뒤 갱신한다.
-설정의 `revision`은 조사·검증할 homelab 기준 commit이다. 저장소에 해당 commit이 있어야 한다.
+설정의 `installationRevision`은 aiops 실행기 커밋, `revision`은 조사·검증할 homelab 기준 커밋이다. 두 값은 별개다.
+`target.url`은 별도 homelab Git 원본이며 저장소에 해당 기준 커밋이 있어야 한다.
+기존 사본의 origin이 다르면 설치를 거부한다. 확인한 옛 URL을 `--migrate-target-origin <옛-URL>`로
+명시한 전환만 허용하며, `--retry-transaction <ID>`는 보존된 실패 기록을 지정하는 재시도다.
+비활성 복구 진입점은 `bash infra/k3s-bootstrap/aiops-install.sh --rollback <runtime.tar> <transaction-ID>`다.
+설치 입력·유닛·Git origin·current의 변경 전 기록을 복구하며 인증·사건 저장소는 보존한다.
 기준 main이 전진하면 저장소 사본과 설정을 갱신하고 수용 증거를 다시 확인한다. 오래된 기준으로 새 PR은 만들지 않는다.
 기본 kubectl 경로는 k3s의 `/usr/local/bin/kubectl`이며 설치 전 실행 가능 여부를 검사한다.
 SQLite DB/WAL은 `0660`, 운영 state 디렉토리는 root:`aiops-state`의 `2770`으로 유지한다.
 호출자의 umask가 `0077`이어도 설치 의존성 디렉터리는 다른 역할이 읽고 통과할 수 있게 생성한다.
-호스트 검사 코드는 `0444`, 작업 경로는 `0711`을 생성 후 명시하며 역할 입력 `0400`·출력 디렉터리 `0700`은 유지한다.
+호스트 검사 코드는 `0444`, 작업 경로는 `0711`을 생성 후 명시하며 역할 입력은 root:역할 `0440`, 출력 디렉터리는 역할 소유 `0700`으로 유지한다.
 
 | 역할 | 접근 자료 | 허용 작업 |
 |---|---|---|
 | `aiops-collector` | 읽기 전용 kubeconfig·GitHub·healthchecks, 생산자 토큰, 사건 저장소 | 정해진 관측 조회·수신 |
 | `aiops-engine` | 전용 구독 인증, 선별 증거·Git 사본 | 네트워크 없는 Codex 도구 sandbox 안에서 조사 |
 | `aiops-validator` | 기준·후보 사본 | 무자격 검사 |
-| `aiops-fork` / `aiops-pr` | 각 역할 전용 GitHub 토큰 | fork Git Data 쓰기 / upstream Draft PR 생성·조회 |
+| `aiops-writer` / `aiops-pr` | 각 역할로 축소 발급한 GitHub App 토큰 | homelab 사건 브랜치 Git Data 쓰기 / Draft PR 생성·조회 |
 | `aiops-telegram` | 전용 Telegram 토큰·chat ID | 요약 발송 |
 
-조정기는 root로 systemd 작업을 시작하고 사건 상태만 조정한다. 모델을 root 프로세스 안에서 실행하지 않는다.
+조정기는 root로 역할 토큰을 발급하고 systemd 작업과 사건 상태를 조정한다. 모델을 root 프로세스 안에서 실행하지 않는다.
 역할 작업에는 표준 입출력 외 FD와 상속 인증 환경을 전달하지 않는다. engine 인증은 도구 workspace 밖에 놓으며
 직접 파일·symlink·부모 `/proc`·환경·FD·소켓·네트워크 접근을 실제 Codex sandbox로 검증한다.
 설치된 Codex는 `0.154.0`이며 모델 기본값은 `gpt-6-astra`다. API 키 fallback은 허용하지 않는다.
@@ -69,15 +78,27 @@ SQLite DB/WAL은 `0660`, 운영 state 디렉토리는 root:`aiops-state`의 `277
 
 ## 3. 인증과 생산자를 연결한다
 
-토큰 값을 채팅·명령 인자에 넣지 않는다. 설정 템플릿의 역할별 파일에 소유자 전용 권한으로 저장한다.
-전용 fork는 원본 homelab의 fork여야 하고 Actions를 비활성화한다. fork 토큰은 그 fork의 Contents+Workflows 쓰기,
-PR 토큰은 homelab의 Pull requests 쓰기와 Contents 읽기로 제한한다. engine/validator에는 두 토큰을 전달하지 않는다.
+토큰 값을 채팅·명령 인자에 넣지 않는다. `.env.secrets.example`의 `AIOPS_GITHUB_APP_ID`,
+`AIOPS_GITHUB_APP_INSTALLATION_ID`, `AIOPS_GITHUB_APP_PRIVATE_KEY_B64`가 로컬 공급 항목이다.
+App 개인 키는 `/etc/homelab-aiops/app/private-key.pem`에 root `0600`으로 공급한다.
+GitHub 역할 토큰은 root 발급기가 `/run/homelab-aiops/credentials/<역할>/github`에 root:역할 `0440`으로 기록한다.
+부모 역할 디렉터리는 `0710`이며, 토큰의 남은 수명이 25분 미만이면 작업 전에 갱신한다.
+전용 GitHub App은 homelab 한 레포에 선택 설치한다. root가 보호하는 개인 키로 수집기에는 Actions/Contents 읽기,
+writer에는 Contents/Workflows 쓰기, PR 역할에는 Contents 읽기/Pull requests 쓰기 토큰을 각각 발급한다.
+발급 시 repository ID와 권한을 명시하고 실제 응답의 권한·레포·만료 시각을 검증한다. engine/validator에는 쓰기 자격을 전달하지 않는다.
+기존 `aiops-fork` 계정과 개인 fork는 자동 삭제하지 않으며 새 경로의 운영 자격으로 재사용하지 않는다.
+
+같은 레포 게시 전에 repository/organization 범위의 운영 시크릿 공급을 회수하고 `homelab-main` Environment로 옮긴다.
+환경의 서버 배포 정책은 branch 유형 main만 허용한다. main 쓰기도 서버에서 owner/기존 writer로 제한한다.
+AIOps App·PR의 `GITHUB_TOKEN` 거부와 기존 운영 흐름의 성공을 실제로 확인해야 한다. Draft·workflow 조건·기본 read 권한은 이 증거를 대체하지 않는다.
+인증 Terraform plan은 owner가 main의 `reviewed-plan.yaml`에 정확한 검토 PR head SHA를 지정해 실행한다.
+재실행이나 head 변경은 새 검토 요청이 필요하다. 일반 PR은 운영 자격 없이 검사한다.
 ChatGPT 로그인은 `aiops-engine` 계정의 `/var/lib/homelab-aiops/auth`에서 진행한다. 설치 이전 개인 인증을 복사하지 않는다.
 healthchecks에는 **읽기 전용 API 키**를 사용한다. UUID·ping URL 대신 읽기 전용 `unique_key`로 체크와 flips를 조회한다.
 
 ```bash
 bun tools/aiops.ts producer-plan --state-dir .scratch/aiops-install/state \
-  --repo "$PWD" --output .scratch/aiops-install/producers --address <NUC-사설-IP>
+  --repo /path/to/homelab --output .scratch/aiops-install/producers --address <NUC-사설-IP>
 ```
 
 생성된 Alertmanager 설정은 기존 Telegram/Watchdog 경로 앞에 병렬 수신자를 추가한다. 배포 패치의 토큰 Secret을 먼저 준비한다.
@@ -96,7 +117,9 @@ Alertmanager의 observability Secret은 raw `token` 키를 사용한다. 서로 
 생성물 `host-ingress.nft`는 실제 Pod CIDR·NUC 주소와 대조한 뒤 기존 방화벽에 추가한다.
 `argocd-aiops-egress.yaml`은 이미 격리된 notifications의 NUC 접근만 허용한다. AM/CNPG의 기존 통신을 닫는 새 Egress 정책을 만들지 않는다.
 수신기는 전 인터페이스 주소·공개 주소를 거부하며 bearer 인증 후 영속 저장을 완료해야 응답한다.
-GHA는 Telegram 조건과 독립된 artifact를 기록한다. workflow/run/attempt/repository/revision을 검증하며
+GHA는 Telegram 조건과 독립된 artifact를 기록한다. `tools/aiops-producers-v1.json`의 버전·바이트 해시를
+`contractVersion`/`contractSha256`으로 싣는다. 실행기는 `github.producerContract`가 핀한 homelab 기준 Git blob과 대조한다.
+계약 불일치·누락은 미관측이며 이전 계약의 관측 cache로 정상 판정하지 않는다. workflow/run/attempt/repository/revision을 검증하며
 누락·skip·부분 실행은 정상으로 접지 않는다. DNS는 대상별 정상/경고/미관측을 구별한다.
 최신 100건과 최근 30일의 고정 기간 페이지를 함께 조회하고 순회 cursor를 저장한다. 큰 검색 구간은 분할하며
 관측 0건·과거 순회 미완료·artifact 누락은 수집 성공으로 기록하지 않는다. 오래된 run의 새 attempt도 다시 대조한다.
@@ -117,16 +140,19 @@ bun tools/aiops.ts readiness --state-dir .scratch/aiops-install/state --config <
 `probe-host`는 모의 자격만 사용하는 임시 systemd 작업으로 허용 대조군·다른 UID 자격 거부·timeout·setsid 자식·OOM·출력 한도를 확인한다.
 실패 시 `stages`의 단계별 상태·종료 코드·정리 여부를 확인한다. `ReadOnlyPaths`는 Unix 파일 읽기 권한을 부여하지 않는다.
 실행할 수 없으면 sudo 인증을 완료한 owner가 이 명령을 실행한다. 로컬 프로세스 그룹 테스트 통과를 cgroup 증거로 기록하지 않는다.
-실제 재부팅 후 복구, 단계별 역할 접근, 구독 로그인, 모든 생산자 도달, fork Actions 비활성화, 실제 Draft PR/Telegram 발송은 별도 수용이다.
+실제 재부팅 후 복구, 단계별 역할 접근, 구독 로그인, 모든 생산자 도달, CI 자격·main 서버 권한, 실제 Draft PR/Telegram 발송은 별도 수용이다.
 발송 여부·권한은 실제 API 결과로 확인한다. 읽기 설정만 보고 쓰기 권한이 맞다고 판정하지 않는다.
 
-`acceptance.json`은 root 소유·그룹/타인 쓰기 금지 파일이다. `isolation,roles,cgroup,producerDelivery,subscription,forkActionsDisabled,publication,diagnosticCases`
-각 키에 `passed,revision,engineHash,checkedAt` 증거를 기록한다. 미수행 항목을 true로 채우지 않는다.
-이 증거는 최대 30일간 유효하며 기준 revision 또는 engine 해시가 바뀌면 다시 수용한다.
+`acceptance.json`은 root 소유·그룹/타인 쓰기 금지 파일이다. `isolation,roles,cgroup,producerDelivery,subscription,ciAuthority,publication,diagnosticCases`
+각 키에 `passed,revision,installationRevision,engineHash,checkedAt` 증거를 기록한다. 미수행 항목을 true로 채우지 않는다.
+`ciAuthority`에는 추가로 `venue: live-github`, App의 `appId,installationId,repositoryId,repository` 신원과
+`selectedInstallation,environmentSecrets,repositorySecretsRemoved,organizationSecretsRemoved,mainRestriction,aiopsMainDenied,nativeTokenDenied,ownerAllowed,writerAllowed`
+검사를 기록한다. 각 검사는 `passed`와 실제 증거 파일의 `evidenceSha256`을 요구한다. 조직 시크릿 목록의 권한 부족은 회수 완료 증거가 아니다.
+이 증거는 최대 30일간 유효하며 기준 revision·실행기 installationRevision·engine 해시가 바뀌면 다시 수용한다.
 `readiness` 결과의 pending 항목이 남아 있으면 worker는 모델을 호출하지 않는다.
 
 실제 진단·게시의 수용 증거는 `commission`으로 만든다. `enabled:false`에서 사건을 명시하는 1회 실행이다.
-바이너리·구독 인증 파일·저장소·격리·역할·cgroup·fork Actions 비활성화는 먼저 통과해야 한다.
+바이너리·구독 인증 파일·저장소·격리·역할·cgroup·CI 자격·main 서버 권한는 먼저 통과해야 한다.
 생산자 도달·실제 구독 실행·게시·12개 진단 평가·관찰 기준은 이 시험 경로로 확인하고 기록한다.
 시험도 같은 역할·자원 제한·동시 1건·하루 20회 원장을 사용하며 실제 Telegram/Draft PR을 만들 수 있다.
 

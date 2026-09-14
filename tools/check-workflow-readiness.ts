@@ -651,7 +651,8 @@ if (import.meta.main) {
         },
         {
           scan: "check-workflow-readiness:declarations",
-          min: 8,
+          // 인증 PR 자동 plan을 수동 reviewed-plan으로 옮겨 skip 회계 대상이 1개 줄었다.
+          min: 7,
           floorHint: "원장 붕괴 — 대조 대상이 사라졌다",
           // 종전 카운트와 동일 의미론: 워크플로가 실재하는 원장 항목의 선언 job 수 합.
           // 원장 로딩은 **이 도메인**의 열거다 — workflows enumerate에 두면 원장 실패가

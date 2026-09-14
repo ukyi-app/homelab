@@ -128,7 +128,7 @@ PY
 # 배선까지 따라간다(그 배선이 끊기면 라이브에서도 출력이 빈다).
 preflight_values() { # $1=READER $2=WRITER → "이름=값" 줄들
   local body="$BATS_TEST_TMPDIR/preflight.sh"
-  yq -r '[.jobs.preflight.steps[] | select(.run)] | .[0].run // ""' "$F" > "$body"
+  yq -r '[.jobs.preflight.steps[] | select(.id == "check")] | .[0].run // ""' "$F" > "$body"
   [ -s "$body" ] || { echo "preflight 스텝(.run)을 추출하지 못했다" >&2; return 9; }
   local out="$BATS_TEST_TMPDIR/preflight.out"
   : > "$out"
@@ -916,7 +916,7 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   MUT="$BATS_TEST_TMPDIR/bump-poll.mut.yaml"
   yq '
     .jobs.preflight.outputs = {"configured": "${{ steps.check.outputs.configured }}"} |
-    .jobs.preflight.steps[0].run = "if [ -n \"$READER\" ] && [ -n \"$WRITER\" ]; then\n  echo \"configured=true\" >> \"$GITHUB_OUTPUT\"\nelse\n  echo \"configured=false\" >> \"$GITHUB_OUTPUT\"\nfi\n" |
+    (.jobs.preflight.steps[] | select(.id == "check")).run = "if [ -n \"$READER\" ] && [ -n \"$WRITER\" ]; then\n  echo \"configured=true\" >> \"$GITHUB_OUTPUT\"\nelse\n  echo \"configured=false\" >> \"$GITHUB_OUTPUT\"\nfi\n" |
     .jobs.reconcile.if = "needs.preflight.outputs.configured == '"'"'true'"'"'" |
     .jobs.poll.if = "${{ !cancelled() && needs.preflight.outputs.configured == '"'"'true'"'"' }}"
   ' "$F" > "$MUT"

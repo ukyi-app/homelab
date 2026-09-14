@@ -29,6 +29,7 @@ jobs:
   #   인가를 유지**한다. 회수는 가용성이 아니라 **보안 속성**이라 멈추면 안 된다.
   #   (tests/gates/test_bump-poll-callsite.bats가 두 job의 `if`를 **실제로 평가**해 독립성을 증명한다.)
   preflight:
+    environment: homelab-main
     runs-on: ubuntu-24.04-arm
     # ── timeout-minutes: homelab-mutation 직렬화 그룹의 천장 ────────────────────────────
     # 이 그룹(bump-poll·bump·tf-reconcile·iac apply·변이 디스패처 5종)은 `queue: max` +
@@ -43,6 +44,34 @@ jobs:
       writer: ${{ steps.check.outputs.writer }} # 회수(reconcile) 게이트 — reader와 무관하다
       reader: ${{ steps.check.outputs.reader }} # 폴링(poll)의 추가 게이트 — 회수를 막지 않는다
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || [ "$ACTOR" = "ukyi-homelab-dispatch[bot]" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       - id: check
         env:
           READER: ${{ secrets.HOMELAB_READER_APP_ID }}
@@ -77,11 +106,40 @@ jobs:
   # ⚠️ 게이트는 **writer 하나뿐**이다(R-31) — reader 준비상태를 여기 걸면, reader가 비었거나 회전 중인
   #    주기에 GitHub이 이 job을 skip하고 낡은 무장이 살아남는다. 이 job은 reader를 **쓰지도 않는다**.
   reconcile:
+    environment: homelab-main
     needs: preflight
     if: needs.preflight.outputs.writer == 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15 # 실측 max 352s(≈6분)의 2.5배 여유 — 근거 전문은 preflight 잡 주석
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || [ "$ACTOR" = "ukyi-homelab-dispatch[bot]" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       # writer App: PR 조회 + auto-merge 해제 (이 job이 쓰는 **유일한** 자격 — reader는 여기 없다)
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: writer
@@ -116,7 +174,7 @@ jobs:
           steps: ${{ toJSON(steps) }}
           primary-step: aiops_check
       - name: telegram notify (실패 시)
-        if: failure()
+        if: ${{ (failure()) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           status: failure
@@ -127,6 +185,7 @@ jobs:
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
 
   poll:
+    environment: homelab-main
     # ⚠️ `!cancelled()` — reconcile이 **실패해도** bump 루프는 돈다(회수 실패가 배포를 정지시키면
     #    억제가 곧 공격 표면이 된다). needs는 **순서**를 위한 것이지 성공 조건이 아니다.
     # ⚠️ 게이트는 **writer + reader 둘 다**다(R-31): 이 job만이 플래너(앱 레포 조회 = reader)를 돌린다.
@@ -136,6 +195,34 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15 # GHCR 폴링 + PR 생성. 근거 전문은 preflight 잡 주석
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || [ "$ACTOR" = "ukyi-homelab-dispatch[bot]" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       # reader App: 앱 레포 main 커밋/compare 조회 (Contents:read).
       # ⚠️ 설치 범위는 org 전체다 — 아래 `owner:`가 그 범위를 실효 스코프로 만든다(설치가 좁은 게 아니다).
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -203,7 +290,7 @@ jobs:
           steps: ${{ toJSON(steps) }}
           primary-step: aiops_check
       - name: telegram notify (실패 시)
-        if: failure()
+        if: ${{ (failure()) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           status: failure
@@ -221,11 +308,40 @@ jobs:
   # 심각도는 원장(policy/workflow-readiness.json)이 가른다 — reconcile=error(run red, 면제 불가) ·
   # poll=warning(가용성이라 telegram만). ⚠️ `if: !cancelled()` 필수(위 tf-reconcile 주석과 동일 이유).
   accounting:
+    environment: homelab-main
     needs: [preflight, reconcile, poll]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5 # 보조 잡 — 원장 대조만. 근거 전문은 preflight 잡 주석
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || [ "$ACTOR" = "ukyi-homelab-dispatch[bot]" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with: { ref: main } # 원장의 권위는 머지된 상태다
       - uses: ./.github/actions/setup-bun
@@ -244,7 +360,7 @@ jobs:
           steps: ${{ toJSON(steps) }}
           primary-step: acct
       - name: telegram notify (required 미실행 · 원장 불일치 시에만 — 선언된 갭은 제외)
-        if: always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')
+        if: ${{ (always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           # 긍정 가드 — acct 앞 checkout/setup-bun이 죽으면 outcome=skipped라 `== 'failure'`가 거짓이고

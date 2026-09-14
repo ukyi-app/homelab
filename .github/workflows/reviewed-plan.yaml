@@ -1,0 +1,148 @@
+name: "🔎 reviewed-plan"
+run-name: "🔎 reviewed-plan — PR #${{ inputs.reviewed_pr }} @ ${{ inputs.reviewed_head_sha }}"
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_pr:
+        description: "내용을 검토한 homelab PR 번호"
+        required: true
+        type: string
+      reviewed_head_sha:
+        description: "검토한 정확한 PR head SHA (소문자 40자리; 재실행 대신 새 요청)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REVIEWED_PR: ${{ inputs.reviewed_pr }}
+  REVIEWED_HEAD_SHA: ${{ inputs.reviewed_head_sha }}
+  HOMELAB_OWNER: ${{ vars.HOMELAB_OWNER }}
+
+jobs:
+  authorize:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    outputs:
+      head_sha: ${{ steps.review.outputs.head_sha }}
+    steps:
+      # ref: main의 이동을 따라가지 않는다. dispatch 당시 main workflow SHA에 실행 코드를 고정한다.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+        with: { install: 'false' }
+      - name: owner 요청·main 코드·정확 head 검증
+        id: review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun tools/lib/reviewed-plan.ts authorize
+
+  plan:
+    needs: authorize
+    environment: homelab-main
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    # 인증 plan도 state 잠금·운영 변이 큐를 공유한다. apply는 이 워크플로에 없다.
+    concurrency:
+      group: homelab-mutation
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+        with: { install: 'false' }
+      # 후보는 별도 디렉토리에 정확 SHA로만 놓는다. 후보 action/script/package install은 호출하지 않는다.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ukyi-app/homelab
+          ref: ${{ needs.authorize.outputs.head_sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          # renovate: datasource=github-releases depName=hashicorp/terraform
+          terraform_version: "1.16.2"
+          terraform_wrapper: false
+      - name: 자격 사용 직전 head 재검증
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bun tools/lib/reviewed-plan.ts pre-plan
+          [ "$(git -C candidate rev-parse HEAD)" = "$REVIEWED_HEAD_SHA" ]
+      - name: 검토한 Cloudflare 후보 plan
+        working-directory: candidate/infra/cloudflare
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
+          TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
+          TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
+        run: |
+          # plan도 provider/data source를 실행하므로 owner의 정확 SHA 검토가 자격 사용 승인이다.
+          # 누락은 skip/빈 summary로 숨기지 않고 실패한다. 값은 출력하지 않는다.
+          for key in R2_ACCOUNT_ID AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_VAR_cloudflare_api_token TF_VAR_cloudflare_account_id TF_VAR_zone_name; do
+            [ -n "${!key}" ] || { echo "::error::필수 환경 자격 미설정: $key"; exit 1; }
+          done
+          # backend 자격을 후보 트리에 파일로 쓰지 않는다. main 고정 명령이 CF state key를 지정한다.
+          terraform init -input=false -lockfile=readonly \
+            -backend-config="endpoints={s3=\"https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com\"}" \
+            -backend-config="key=cloudflare/prod/terraform.tfstate"
+          set +e
+          terraform plan -input=false -lock-timeout=120s -no-color -detailed-exitcode -out=tf.plan > plan.txt 2>&1
+          rc=$?
+          set -e
+          {
+            echo "### Cloudflare plan — 검토 head $REVIEWED_HEAD_SHA"
+            echo "Terraform exit: $rc (0=변경 없음, 2=변경 있음). 최종 귀속은 result job을 확인하세요."
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$rc" = "0" ] || [ "$rc" = "2" ] || exit "$rc"
+      - name: destroy 사전 경고 (warn)
+        uses: ./.github/actions/tf-destroy-guard
+        with:
+          mode: warn
+          root: candidate/infra/cloudflare
+          plan: tf.plan
+          allow: '^cloudflare_dns_record\.app\['
+          allow_max: '1'
+
+  result:
+    needs: [authorize, plan]
+    if: ${{ !cancelled() && needs.authorize.result == 'success' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    steps:
+      # 후보가 실행된 runner의 파일·출력을 신뢰 근거로 재사용하지 않는다.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+        with: { install: 'false' }
+      - name: 새 runner에서 head 재조회·검토 SHA 결과 귀속
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+        run: bun tools/lib/reviewed-plan.ts result
+      - name: 검토 SHA 수령증 보존 (plan·state·시크릿 없음)
+        if: ${{ !cancelled() && hashFiles('reviewed-plan-receipt.json') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reviewed-plan-${{ inputs.reviewed_head_sha }}
+          path: reviewed-plan-receipt.json
+          if-no-files-found: error
+          retention-days: 30

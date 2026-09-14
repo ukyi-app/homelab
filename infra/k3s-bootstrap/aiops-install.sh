@@ -1,84 +1,77 @@
 #!/usr/bin/env bash
-# AIOps 전용 설치. 일반 host-config와 분리하며 timer·인입·Codex 실행을 활성화하지 않는다.
+# homelab은 실행기 release만 핀한다. 실제 설치 구현은 검증된 aiops archive에 있다.
 set -euo pipefail
-# 고정 실행 코드·의존성은 역할 UID도 읽는다. 인증·설정은 아래의 명시적 0600/0700으로 제한한다.
 umask 0022
-repo="$(cd "$(dirname "$0")/../.." && pwd)"
+homelab_root="$(cd "$(dirname "$0")/../.." && pwd)"
 action="${1:-}"
 case "$action" in
-  --prepare)
-    exec bun "$repo/tools/aiops.ts" host-plan --state-dir "$repo/.scratch/aiops-install/state" --output "${2:-$repo/.scratch/aiops-install/plan}"
+  --prepare) [ "$#" -ge 2 ] && [ "$#" -le 3 ] || exit 2 ;;
+  --install)
+    [ "$#" -ge 6 ] || exit 2
+    options=("${@:7}")
+    for ((index=0; index<${#options[@]}; index+=2)); do
+      case "${options[index]}" in --migrate-target-origin|--retry-transaction) ;; *) exit 2 ;; esac
+      [ -n "${options[index+1]:-}" ] || exit 2
+    done
     ;;
-  --install) ;;
-  *) printf '%s\n' 'usage: aiops-install.sh --prepare [output] | --install <config.json> <bun> <codex> <conftest>' >&2; exit 2 ;;
+  --rollback) [ "$#" -eq 3 ] || exit 2 ;;
+  *) printf '%s\n' 'usage: aiops-install.sh --prepare <runtime.tar> [output] | --install <runtime.tar> <config.json> <bun> <codex> <conftest> [--migrate-target-origin <expected-old-url>] [--retry-transaction <id>] | --rollback <runtime.tar> <id>' >&2; exit 2 ;;
 esac
-[ "$(id -u)" -eq 0 ] || { printf '%s\n' 'root required' >&2; exit 1; }
-[ "$#" -eq 5 ] || exit 2
-config="$(realpath "$2")"; bun_binary="$(realpath "$3")"; codex_binary="$(realpath "$4")"; conftest_binary="$(realpath "$5")"
-for binary in "$bun_binary" "$codex_binary" "$conftest_binary"; do [ -x "$binary" ] || exit 1; done
-[ "$("$codex_binary" --version)" = 'codex-cli 0.154.0' ] || { printf '%s\n' 'Codex pin mismatch' >&2; exit 1; }
-git -C "$repo" diff --quiet
-git -C "$repo" diff --cached --quiet
-# 설치 실행 코드가 커밋에 없으면 archive가 조용히 누락하므로 파일 존재도 검사한다.
-git -C "$repo" cat-file -e HEAD:tools/aiops-stage.ts
-revision="$(git -C "$repo" rev-parse HEAD)"
-release="/opt/homelab-aiops/$revision"
-"$bun_binary" "$repo/tools/aiops-install-config.ts" check "$config" >/dev/null
-if [ -e "$release" ]; then
-  printf '%s\n' 'release already exists; verify the existing installation before replacing it' >&2; exit 1
+temporary="$(mktemp -d /tmp/homelab-aiops-runtime.XXXXXX)"
+trap 'rm -rf "$temporary"' EXIT
+# 검증 후 원본 파일이 바뀌어도 실행 바이트는 바뀌지 않는다. root 설치 시 사본도 root 소유다.
+python3 - "$2" "$temporary/runtime.tar" <<'PYTHON'
+import os,pathlib,stat,sys
+fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+with os.fdopen(fd,'rb') as source:
+ if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+  raise SystemExit('runtime archive must be a regular file')
+ data=source.read(32*1024*1024+1)
+ if len(data)>32*1024*1024:
+  raise SystemExit('runtime archive exceeds 32MiB')
+ pathlib.Path(sys.argv[2]).write_bytes(data)
+os.chmod(sys.argv[2],0o444)
+PYTHON
+archive="$temporary/runtime.tar"
+pin="$homelab_root/infra/k3s-bootstrap/aiops-runtime.json"
+# archive를 실행하거나 풀기 전에 homelab이 승인한 바이트와 일치하는지 검사한다.
+release_identity="$(python3 - "$pin" "$archive" <<'PYTHON'
+import hashlib,json,pathlib,re,sys,tarfile
+pin=json.loads(pathlib.Path(sys.argv[1]).read_text())
+if set(pin)!={'version','repository','revision','archiveSha256'} or pin['version']!=1 or pin['repository']!='ukyi-app/aiops':
+ raise SystemExit('invalid AIOps runtime pin')
+if not re.fullmatch('[0-9a-f]{40}',str(pin['revision'])) or not re.fullmatch('[0-9a-f]{64}',str(pin['archiveSha256'])):
+ raise SystemExit('AIOps runtime release is not pinned; keep installation disabled')
+archive=pathlib.Path(sys.argv[2])
+if archive.is_symlink() or not archive.is_file() or archive.stat().st_size>32*1024*1024:
+ raise SystemExit('invalid AIOps runtime archive')
+with archive.open('rb') as file:
+ if hashlib.file_digest(file,'sha256').hexdigest()!=pin['archiveSha256']:
+  raise SystemExit('AIOps runtime archive digest mismatch')
+with tarfile.open(archive,'r:') as bundle:
+ if bundle.pax_headers.get('comment')!=pin['revision']:
+  raise SystemExit('AIOps runtime archive revision mismatch')
+print(pin['revision']+' '+pin['archiveSha256'])
+PYTHON
+)"
+runtime_revision="${release_identity%% *}"
+archive_sha256="${release_identity##* }"
+mkdir "$temporary/source"
+python3 - "$archive" "$temporary/source" <<'PYTHON'
+import pathlib,sys,tarfile
+with tarfile.open(sys.argv[1],'r:') as bundle:
+ for entry in bundle.getmembers():
+  path=pathlib.PurePosixPath(entry.name)
+  if path.is_absolute() or '..' in path.parts or not (entry.isfile() or entry.isdir()):
+   raise SystemExit('unsafe AIOps runtime archive entry')
+ bundle.extractall(sys.argv[2],filter='data')
+PYTHON
+installer="$temporary/source/scripts/aiops-install.sh"
+[ -f "$installer" ] || { printf '%s\n' 'AIOps release installer missing' >&2; exit 1; }
+if [ "$action" = --prepare ]; then
+  bash "$installer" --prepare "${3:-$homelab_root/.scratch/aiops-install/plan}"
+elif [ "$action" = --rollback ]; then
+  bash "$installer" --rollback "$3"
+else
+  bash "$installer" --install "$3" "$archive" "$runtime_revision" "$archive_sha256" "$4" "$5" "$6" "${options[@]}"
 fi
-install -d -m 0755 "$release" "$release/bin"
-git -C "$repo" archive HEAD | tar -x -C "$release"
-install -m 0755 "$bun_binary" "$release/bin/bun"
-install -m 0755 "$codex_binary" "$release/bin/codex"
-install -m 0755 "$conftest_binary" "$release/bin/conftest"
-# 잠금 파일로 설치하고 패키지 lifecycle script는 실행하지 않는다.
-(cd "$release" && "$release/bin/bun" install --frozen-lockfile --ignore-scripts)
-install -d -m 0755 /opt/homelab-aiops
-plan="$(mktemp -d /tmp/aiops-install.XXXXXX)"
-trap 'rm -rf "$plan"' EXIT
-"$release/bin/bun" "$release/tools/aiops.ts" host-plan --state-dir "$plan/state" --output "$plan/plan" >/dev/null
-# 기본 배포판에 /etc/sysusers.d가 없을 수 있으므로 계정·유닛 파일보다 부모를 먼저 만든다.
-install -d -m 0755 /etc/sysusers.d /etc/tmpfiles.d /etc/systemd/system
-install -m 0644 "$plan/plan/sysusers.conf" /etc/sysusers.d/homelab-aiops.conf
-systemd-sysusers /etc/sysusers.d/homelab-aiops.conf
-# 전용 512 MiB 파일시스템이 SQLite/WAL·원문·작업 파일의 합계 상한이다. 기존 파일은 포맷하지 않는다.
-image=/var/lib/homelab-aiops.img
-if [ ! -e "$image" ]; then
-  (umask 0077; truncate -s 512M "$image")
-  mkfs.ext4 -q -F "$image"
-fi
-install -d -m 0711 /var/lib/homelab-aiops
-mount_unit="$(systemd-escape --path --suffix=mount /var/lib/homelab-aiops)"
-cat > "/etc/systemd/system/$mount_unit" <<'UNIT'
-[Unit]
-Description=Homelab AIOps bounded persistent storage
-Before=aiops-worker.service aiops-ingress.service
-
-[Mount]
-What=/var/lib/homelab-aiops.img
-Where=/var/lib/homelab-aiops
-Type=ext4
-Options=loop,nosuid,nodev
-
-[Install]
-WantedBy=local-fs.target
-UNIT
-systemctl daemon-reload
-systemctl enable --now "$mount_unit"
-install -m 0644 "$plan/plan/tmpfiles.conf" /etc/tmpfiles.d/homelab-aiops.conf
-systemd-tmpfiles --create /etc/tmpfiles.d/homelab-aiops.conf
-if [ ! -e /var/lib/homelab-aiops/repository ]; then
-  git -C "$repo" clone --bare --no-hardlinks "$repo" /var/lib/homelab-aiops/repository
-  chmod -R a+rX /var/lib/homelab-aiops/repository
-fi
-install -m 0600 "$config" /etc/homelab-aiops/config.json
-"$release/bin/bun" "$release/tools/aiops-install-config.ts" write /etc/homelab-aiops/config.json "$revision" "$release" >/dev/null
-for unit in aiops-worker.service aiops-worker.timer aiops-ingress.service; do
-  install -m 0644 "$plan/plan/$unit" "/etc/systemd/system/$unit"
-done
-systemctl daemon-reload
-# 준비 중 실패한 release를 완료된 설치로 가리키지 않는다.
-ln -s "$release" /opt/homelab-aiops/current.new
-mv -T /opt/homelab-aiops/current.new /opt/homelab-aiops/current
-printf '%s\n' 'installed; worker and ingress remain disabled. Complete role credentials and acceptance before activation.'

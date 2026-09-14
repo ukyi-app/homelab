@@ -20,11 +20,11 @@ jobs:
   iac-validate:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04-arm
-    # timeout-minutes — 이 세 잡(iac-validate·iac-plan·accounting)은 그룹을 쥐지 **않는다**
+    # timeout-minutes — 이 잡(iac-validate)은 그룹을 쥐지 **않는다**
     # (homelab-mutation은 아래 apply 잡의 잡-레벨 concurrency뿐이다). 그래서 근거가 다르다 —
     # 그룹 밖 천장의 전문은 ci.yaml gate 잡 주석, 그룹 쪽 전문은 bump-poll.yaml preflight 잡 주석.
     # 값 근거 — 2026-09-03 라이브 실측(최근 40 run 중 완료 37건, 잡 실행구간): iac-validate p50 15s / max 20s
-    # (대부분이 terraform·툴체인 설치) · iac-plan p50 13s / max 24s · accounting p50 7s / max 11s.
+    # (대부분이 terraform·툴체인 설치).
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -45,6 +45,8 @@ jobs:
             terraform -chdir=infra/$r init -backend=false -lockfile=readonly
           done
           just tf-validate
+      - name: CI 권한 HCL mock plan (운영 자격 없음)
+        run: terraform -chdir=infra/github test -no-color
       - name: terraform 의존 bats 가드 (fmt/validate·prevent_destroy·apps.json SSOT)
         # gate(terraform 미설치)에 못 넣는 terraform-결합 테스트만 여기서 advisory로 실행한다.
         # argocd_values·root_app은 platform/argocd로 이동 → required gate 러너가 수집·실행(이중실행 방지로 제외).
@@ -55,113 +57,11 @@ jobs:
           bats infra/_tests/test_tf_validate.bats </dev/null # tf fmt/validate + R2 prevent_destroy 가드(이전엔 미게이트)
           bats infra/cloudflare/test_apps_data.bats </dev/null # apps.json DNS/tunnel SSOT(active/public·ingress 순서·host 유일성) — terraform validate 의존이라 gate 불가
 
-  # ── PR: cloudflare 루트 plan 미리보기 — 머지 전 add/change/destroy를 job summary에 게시(드리프트/변경 가시성) ──
-  # 라이브 state(R2) 대비 실제 plan을 돌려 리뷰어가 머지 전에 적용 diff를 본다. 정보성(required check는 gate) —
-  # plan은 entitlement 400(무료 플랜 rate-limit 등 apply-time 거부)까지는 못 잡지만 리소스 add/change/destroy는 보여준다.
-  iac-plan:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04-arm
-    # provider 다운로드 + R2 state 조회가 상류 대기 표면이다(실측 max 24s) — 근거는 iac-validate 잡 주석
-    timeout-minutes: 15
-    # 스텝-레벨 게이트라 시크릿이 없으면 스텝만 skip되고 job은 success다 — 그 상태의 **빈 job summary**를
-    # 리뷰어가 "변경 없음"으로 오독한다(정보 부재가 정보로 읽힌다). 준비상태 회계(accounting job)가
-    # 볼 수 있는 유일한 신호가 이 승격이다.
-    outputs:
-      executed: ${{ steps.plan.outputs.executed }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-      # 시크릿 부재(Phase 0 미완/외부 기여) 시 skip — 깨끗한 성공(required 아님).
-      - id: pf
-        env:
-          CF: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
-          R2: ${{ secrets.R2_ACCESS_KEY_ID }}
-        run: |
-          if [ -n "$CF" ] && [ -n "$R2" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::TF/R2 시크릿 미설정 — cloudflare plan 미리보기 skip"
-          fi
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
-        if: steps.pf.outputs.configured == 'true'
-        with:
-          # renovate: datasource=github-releases depName=hashicorp/terraform
-          terraform_version: "1.16.2"
-          terraform_wrapper: false
-      - name: terraform init (R2 backend, readonly)
-        if: steps.pf.outputs.configured == 'true'
-        uses: ./.github/actions/tf-r2-init
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        with:
-          root: cloudflare
-      - name: terraform plan → job summary
-        id: plan
-        if: steps.pf.outputs.configured == 'true'
-        env:
-          TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
-          TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
-          TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
-        run: |
-          # 준비상태 회계 신호 — 첫 줄에 둔다(실패는 이미 loud하다; 회계는 *조용한* 미실행만 잡는다).
-          echo "executed=true" >> "$GITHUB_OUTPUT"
-          set +e
-          terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s -no-color \
-            -detailed-exitcode -out=tf.plan > plan.txt 2>&1
-          rc=$?
-          set -e
-          {
-            echo "## Cloudflare plan 미리보기"
-            case "$rc" in
-              0) echo "✅ 변경 없음 (no-op)" ;;
-              2) echo "ℹ️ 적용 대기 변경 있음 — 아래 plan 확인" ;;
-              *) echo "⚠️ plan 실패(exit $rc)" ;;
-            esac
-            echo '```'
-            tail -c 60000 plan.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          # 0(no-op)·2(변경 있음)는 정상, 그 외만 실패로 가시화(required 아님 → PR 차단 안 함).
-          [ "$rc" = "0" ] || [ "$rc" = "2" ] || exit "$rc"
-      # 인라인 destroy jq 경고를 tf-destroy-guard composite(warn)로 치환 — 산출된 tf.plan을 검사.
-      # allow: app 공개 DNS(cloudflare_dns_record.app[*]) delete는 자동 apply 표면이라 경고 제외
-      # (teardown은 정상 흐름) — apex/www·구조적 delete/replace만 경고. allow_max 초과 대량 삭제도 경고.
-      # 실제 plan은 위 job summary에 게시된다.
-      - name: destroy 사전 경고 (warn)
-        if: steps.pf.outputs.configured == 'true'
-        uses: ./.github/actions/tf-destroy-guard
-        with:
-          mode: warn
-          root: infra/cloudflare
-          plan: tf.plan
-          allow: '^cloudflare_dns_record\.app\['
-          allow_max: '1'
-
-  # ── 준비상태 회계 — 게이트 **밖**의 감시자 (G-09) ───────────────────────────────────────────
-  # iac-plan이 시크릿 부재로 스텝을 전부 skip하면 job은 success이고 summary만 비는데, 그 빈 summary가
-  # "변경 없음"으로 읽힌다. 이 job이 needs.iac-plan.outputs.executed를 봐 그 침묵을 red로 바꾼다.
-  # ⚠️ fork PR은 **구조적으로** 시크릿을 못 받는다 — 원장 면제가 아니라 트리거 경계라 여기서 제외한다
-  #    (원장에 넣으면 same-repo PR의 진짜 미설정까지 함께 면제된다). 판정은 `head.repo.fork`가 아니라
-  #    **head 레포 == 이 레포**로 한다: 시크릿 가용성을 정하는 것은 "PR이 같은 레포에서 왔는가"이고,
-  #    `.fork`는 *이 레포 자신이 어딘가의 fork인지*를 함께 참으로 만들어 회계를 통째로 끌 수 있다.
-  # ⚠️ `if: !cancelled()` 필수(tf-reconcile 회계 job 주석과 동일 이유).
-  accounting:
-    needs: [iac-plan]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 5 # 보조 잡 — 원장 대조만(실측 max 11s). 근거는 iac-validate 잡 주석
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-      - uses: ./.github/actions/setup-bun
-      - env:
-          WORKFLOW_NEEDS: ${{ toJSON(needs) }}
-        # telegram 없음 — PR 컨텍스트라 red 체크 자체가 사람이 보는 신호다(매 PR 알림은 소음이 된다).
-        run: bun tools/check-workflow-readiness.ts --workflow iac.yaml
+  # PR은 자격 없는 validate만 실행한다. 인증 plan은 reviewed-plan.yaml의 검토 SHA 수동 요청이다.
 
   # ── push-to-main: cloudflare 루트 plan→apply (R2 state) ─────────────────────────────
   apply:
+    environment: homelab-main
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04-arm
     # timeout-minutes — 이 워크플로에서 homelab-mutation을 쥐는 잡은 여기뿐이다(잡-레벨 concurrency).
@@ -178,12 +78,43 @@ jobs:
       TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
       TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
     steps:
+      - name: main 운영 자격 경계 (실제 job마다 검사)
+        id: authority
+        env:
+          REF: ${{ github.ref }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        shell: bash
+        run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          ACTOR="${ACTOR,,}"
+          TRIGGERING="${TRIGGERING,,}"
+          # Environment의 서버 branch 정책이 권위다. 이 검사는 trusted main의 대리 실행·부분 재실행도 닫는다.
+          [ "$REF" = "refs/heads/main" ] && [ "$REPOSITORY_ID" = "1265054638" ] || { echo "::error::homelab main 실행만 허용"; exit 1; }
+          [ -n "$OWNER" ] || { echo "::error::HOMELAB_OWNER 미설정"; exit 1; }
+          case "$ATTEMPT" in ''|*[!0-9]*|0) echo "::error::run_attempt 불량"; exit 1;; esac
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행은 owner만 허용"; exit 1; }
+          case "$EVENT" in
+            workflow_dispatch)
+              [ "$ACTOR" = "$OWNER" ] || { echo "::error::dispatch actor 거부"; exit 1; }
+              [ "$TRIGGERING" = "$ACTOR" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::dispatch 개시자 거부"; exit 1; } ;;
+            push|schedule|workflow_run) ;;
+            *) echo "::error::운영 이벤트 거부"; exit 1 ;;
+          esac
       - name: replay 가드 (이벤트 구동 잡 — 재실행 개시자만 검사한다)
         env:
           ATTEMPT: ${{ github.run_attempt }}
           TRIGGERING: ${{ github.triggering_actor }}
           OWNER: ${{ vars.HOMELAB_OWNER }}
         run: |
+          # GitHub login은 대소문자를 구별하지 않는다. 모든 actor 가드가 같은 정규화를 쓴다.
+          OWNER="${OWNER,,}"
+          TRIGGERING="${TRIGGERING,,}"
           # 이 잡은 owner 디스패치 대상이 아니라 **이벤트 구동**이다 — 출처는 잡 `if:`와 branch
           # protection이 진다. 그래서 actor 축은 모양이 맞지 않고, 남는 축은 재실행뿐이다:
           # 재실행은 원래 이벤트를 **그대로 재생**하므로 출처 술어가 그대로 통과한다.
@@ -233,7 +164,7 @@ jobs:
           steps: ${{ toJSON(steps) }}
           primary-step: aiops_check
       - name: telegram notify
-        if: always()
+        if: ${{ (always()) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
         with:
           status: ${{ job.status }}

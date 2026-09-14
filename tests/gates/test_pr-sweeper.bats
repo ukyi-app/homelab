@@ -25,15 +25,21 @@ setup() {
   ! grep -q "DEPLOY_BOT_PAT" "$F"
 }
 
-@test "pr-sweeper updates behind branches via gh pr update-branch" {
-  grep -q "update-branch" "$F"
+@test "pr-sweeper advances a fixed main object with the head lease helper" {
+  grep -q 'bun tools/lib/ci-writeback.ts sweep' "$F"
+  run yq -r '.jobs.sweep.steps[] | select(.id == "aiops_check") | .run' "$F"
+  [ "$status" -eq 0 ]
+  code="$(printf '%s\n' "$output" | sed '/^[[:space:]]*#/d')"
+  case "$code" in *'gh api'*|*'gh pr update-branch'*) return 1;; esac
 }
 
-@test "pr-sweeper surfaces update-branch failures (tracks + exits nonzero, not silent green) (restale3 F2)" {
-  # ⚠️ update-branch 실패를 ::warning::로 삼키고 green 종료하면 멈춘 PR이 무알림으로 묻힌다.
-  # 실패 PR을 모아 exit 1(→ failure() telegram 발화)해야 한다. 정적 단언: 실패 추적 변수 + nonzero 종료.
-  grep -q 'failed=' "$F"
-  grep -qE 'failed.*exit 1' "$F"
+@test "pr-sweeper propagates helper failures to the existing failure notification" {
+  run yq -r '.jobs.sweep.steps[] | select(.id == "aiops_check") | .run' "$F"
+  [ "$status" -eq 0 ]
+  case "$output" in *'bun tools/lib/ci-writeback.ts sweep') ;; *) return 1;; esac
+  run yq -r '.jobs.sweep.steps[] | select(.id == "aiops_check") | .continue-on-error // false' "$F"
+  [ "$status" -eq 0 ]
+  [ "$output" = false ]
 }
 
 # ── 무장 초크포인트 스캔의 도구 ────────────────────────────────────────────────────────────────
@@ -199,4 +205,37 @@ probe_select() {
     fi
   done
   [ -z "$bad" ] || { echo "로컬 액션 쓰는데 checkout 없는 워크플로:$bad"; false; }
+}
+
+@test "sweeper actual script passes only validated writer refs and heads to the fixed-main helper" {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  export SWEEPER_FIXTURE="$BATS_TEST_TMPDIR/prs.json" SWEEPER_CALLS="$BATS_TEST_TMPDIR/calls"
+  bun -e '
+    const fs=require("fs");const p={number:10,headRefName:"create-cache/good",headRefOid:"a".repeat(40),baseRefName:"main",isDraft:false,isCrossRepository:false,author:{login:"app/ukyi-homelab-writer",is_bot:true},mergeStateStatus:"BEHIND",autoMergeRequest:{}};
+    const bad=[{isDraft:true},{isCrossRepository:true},{baseRefName:"other"},{author:{login:"app/aiops",is_bot:true}},{author:{login:"app/ukyi-homelab-writer",is_bot:false}},{headRefName:"aiops/incident-42"},{headRefName:"bump-poll/app/demo-sha"},{autoMergeRequest:null},{mergeStateStatus:"CLEAN"}];
+    fs.writeFileSync(process.env.SWEEPER_FIXTURE,JSON.stringify([p,...bad.map((b,i)=>({...p,...b,number:20+i}))]));
+  '
+  cat > "$BATS_TEST_TMPDIR/bin/gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1 $2" = 'pr list' ]; then
+  while [ "$1" != '--jq' ]; do shift; done
+  jq -r "$2" "$SWEEPER_FIXTURE"
+else
+  exit 99
+fi
+SH
+  cat > "$BATS_TEST_TMPDIR/bin/bun" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$*" = 'tools/lib/ci-writeback.ts sweep' ]
+jq -r '.[] | [.number, .headRefName, .headRefOid] | @tsv' "$SWEEP_CANDIDATES" >> "$SWEEPER_CALLS"
+SH
+  chmod +x "$BATS_TEST_TMPDIR/bin/gh" "$BATS_TEST_TMPDIR/bin/bun"
+  yq -r '.jobs.sweep.steps[] | select(.id == "aiops_check") | .run' "$F" > "$BATS_TEST_TMPDIR/sweep.sh"
+  run env PATH="$BATS_TEST_TMPDIR/bin:$PATH" TMPDIR="$BATS_TEST_TMPDIR" REPO=ukyi-app/homelab bash -e "$BATS_TEST_TMPDIR/sweep.sh"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$SWEEPER_CALLS" | tr -d ' ')" -eq 1 ]
+  run cat "$SWEEPER_CALLS"
+  [ "$output" = "$(printf '10\tcreate-cache/good\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')" ]
 }

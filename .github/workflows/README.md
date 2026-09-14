@@ -1,6 +1,6 @@
 # 워크플로 인덱스
 
-`.github/workflows`에서 **무엇을 수동 실행하고 무엇이 자동인지** 한눈에. **owner가 직접 누르는 건 ✨ 변이(생성류) + 🗑️ teardown-app(파괴 — confirm===app 가드+수동 머지)**. 그 외 파괴(리소스)·로컬 작업은 셸(아래 💻 owner-local).
+`.github/workflows`에서 **무엇을 수동 실행하고 무엇이 자동인지** 한눈에. **owner가 직접 누르는 건 ✨ 변이(생성류) + 🗑️ teardown-app(파괴 — confirm===app 가드+수동 머지) + 🔎 reviewed-plan(검토 SHA 인증 plan)**. 그 외 파괴(리소스)·로컬 작업은 셸(아래 💻 owner-local).
 
 > 네이밍: `<action>.yaml`=공개 디스패처(Run 버튼 O) · `_*.yaml`=내부 reusable(버튼 X, 디스패처가 `uses:`) · `reusable-*.yaml`=cross-repo 계약(외부 앱 레포가 `@main` 호출).
 
@@ -33,14 +33,30 @@
 
 run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서 구분된다.
 
-**준비상태 회계(G-09)** — 자격/설정이 없어 job이 통째로 skip되면 GHA는 run을 **초록**으로 끝내고, 그 job 안의 알림 스텝은 `if: always()`여도 함께 skip된다(skip된 job은 스텝을 0개 실행한다). 그래서 `tf-reconcile`·`bump-poll`·`renovate`·`iac`에는 게이트 **밖**의 `accounting` job이 있다: `if: ${{ !cancelled() }}`로 항상 뜨고, `needs.*.result`/`needs.*.outputs.executed`를 `policy/workflow-readiness.json` 원장과 대조해 미실행을 `::error::`(run red) 또는 `::warning::`으로 낸다. telegram은 스케줄 reconciler 3종(tf-reconcile·bump-poll·renovate)만 발화하고, `iac`는 PR 컨텍스트라 red 체크 자체가 신호다(매 PR 알림은 소음). 원장에 **선언된 갭**은 알림에 넣지 않는다 — 매 주기 재발해 진짜 신호를 덮는다. 선언되지 않은 미설정은 required gate(`ci.yaml`의 `bun tools/check-workflow-readiness.ts`)가 정적으로 막는다. ⚠️ 새 job에 시크릿 준비상태 게이트를 달면 **원장 선언이 필수**다(안 하면 gate red).
+**준비상태 회계(G-09)** — 자격/설정이 없어 job이 통째로 skip되면 GHA는 run을 **초록**으로 끝내고, 그 job 안의 알림 스텝은 `if: always()`여도 함께 skip된다(skip된 job은 스텝을 0개 실행한다). 그래서 `tf-reconcile`·`bump-poll`·`renovate`에는 게이트 **밖**의 `accounting` job이 있다: `if: ${{ !cancelled() }}`로 항상 뜨고, `needs.*.result`/`needs.*.outputs.executed`를 `policy/workflow-readiness.json` 원장과 대조해 미실행을 `::error::`(run red) 또는 `::warning::`으로 낸다. telegram은 이 스케줄 reconciler 3종에서 권한 검사 통과 후 발화한다. 기존 PR 자동 `iac-plan`과 그 `accounting`은 제거됐다. 원장에 **선언된 갭**은 알림에 넣지 않는다 — 매 주기 재발해 진짜 신호를 덮는다. 선언되지 않은 미설정은 required gate(`ci.yaml`의 `bun tools/check-workflow-readiness.ts`)가 정적으로 막는다. ⚠️ 새 job에 시크릿 준비상태 게이트를 달면 **원장 선언이 필수**다(안 하면 gate red).
+
+## 🔎 검토 SHA 인증 plan — owner 수동 (workflow_dispatch)
+
+| 워크플로 | 입력 | 동작 |
+|---|---|---|
+| [reviewed-plan.yaml](reviewed-plan.yaml) | reviewed_pr + reviewed_head_sha(소문자 40자리) | **main에서** 검토한 PR의 정확 head SHA로 Cloudflare 인증 plan 실행 |
+
+평소 PR은 운영 자격 없는 validate·mock Terraform test·`gate`를 실행한다. 인증 plan이 필요하면
+owner가 내용을 검토한 정확 SHA를 새 dispatch로 요청한다. 실행 코드는 dispatch 당시 main의
+workflow SHA, 후보는 별도 checkout의 검토 SHA다. 실행 전과 독립 runner의 결과 귀속 시
+head/repo/actor를 재검증하며, head 변경·재실행은 새 요청이 필요하다. 결과는 해당 SHA의
+summary와 JSON 수령증에만 연결되고 apply·PR 자동 머지 승인이 되지 않는다.
+
+운영 자격은 `homelab-main` Environment에서 branch main에만 공급한다(reusable 실제 job 포함).
+이 plan에는 CF/R2만 공급한다. 환경 복제·원본 공급 회수·서버 canary의 전환 절차와 미검증
+상태는 [infra/github/README.md](../../infra/github/README.md)에 기록한다.
 
 ## 🤖 자동 — 이벤트 트리거 (건들지 말 것)
 
 | 워크플로 | 트리거 | 역할 |
 |---|---|---|
 | ci | PR·push | 권위 게이트(job `gate` = 유일 required check) |
-| iac | PR·push(cloudflare) | terraform apply |
+| iac | PR·push(main의 cloudflare 변경) | PR은 무자격 validate·mock test, main push는 기존 Cloudflare plan→apply |
 | build | push(`ops/**`)·수동 | 플랫폼 ops 이미지 매트릭스 빌드(pg-tools→`:18-rclone` · skopeo→`:alpine`, 둘 다 `:sha-<sha>` 동반) — 배포-전용 apps/는 외부 레포에서 빌드 |
 | bump | build 완료(workflow_run) | 이미지 write-back |
 

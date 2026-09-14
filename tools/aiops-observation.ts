@@ -1,8 +1,17 @@
 // GHA 완료 결과를 선별한다. Telegram 조건과 독립적이며 원문 출력은 artifact에 싣지 않는다.
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { typedFlags } from "./lib/cli.ts";
-import { record, requireCondition } from "./lib/aiops/input.ts";
+
+// 생산자는 별도 실행기 패키지에 의존하지 않는다. 잘못된 관측은 산출물로 쓰지 않는다.
+function requireCondition(condition: unknown, code: string): asserts condition {
+  if (!condition) throw new Error(code);
+}
+function record(value: unknown): Record<string, unknown> {
+  requireCondition(value !== null && typeof value === "object" && !Array.isArray(value), "invalid-object");
+  return value as Record<string, unknown>;
+}
 
 type State = ["healthy" | "warning" | "unobservable", boolean];
 try {
@@ -10,6 +19,10 @@ try {
   requireCondition(output, "output-required");
   const producer = process.env.AIOPS_PRODUCER ?? "", target = process.env.AIOPS_TARGET ?? "", revision = process.env.AIOPS_REVISION ?? "";
   requireCondition(/^[a-z_-]+\.yaml\/[a-zA-Z0-9_-]+$/.test(producer) && /^[a-zA-Z0-9][a-zA-Z0-9_./:@+-]{0,255}$/.test(target) && /^[a-f0-9]{40}$/.test(revision), "invalid-observation-identity");
+  const contractBytes = readFileSync(new URL("./aiops-producers-v1.json", import.meta.url));
+  const contract = record(JSON.parse(contractBytes.toString("utf8")));
+  requireCondition(contract.version === 1 && typeof record(record(contract.producers)[producer]).workflow === "string", "unknown-producer-contract");
+  const contractSha256 = createHash("sha256").update(contractBytes).digest("hex");
   const steps = record(JSON.parse(process.env.AIOPS_STEPS ?? "{}")), needs = record(JSON.parse(process.env.AIOPS_NEEDS ?? "{}"));
   const step = (name: string) => record(steps[name] ?? {}), outputs = (name: string) => record(step(name).outputs ?? {});
   const classify = (): State => {
@@ -43,7 +56,7 @@ try {
     return process.env.AIOPS_PRIMARY && step(process.env.AIOPS_PRIMARY).outcome === "success" ? ["healthy", true] : ["unobservable", false];
   };
   const [status, completed] = classify();
-  const value: Record<string, unknown> = { version: 1, producer, check: producer.replace("/", ":"), target, repository: process.env.GITHUB_REPOSITORY, runId: Number(process.env.GITHUB_RUN_ID), attempt: Number(process.env.GITHUB_RUN_ATTEMPT), revision, runHeadSha: process.env.GITHUB_SHA, observedAt: new Date().toISOString(), status, completed };
+  const value: Record<string, unknown> = { version: 1, contractVersion: 1, contractSha256, producer, check: producer.replace("/", ":"), target, repository: process.env.GITHUB_REPOSITORY, runId: Number(process.env.GITHUB_RUN_ID), attempt: Number(process.env.GITHUB_RUN_ATTEMPT), revision, runHeadSha: process.env.GITHUB_SHA, observedAt: new Date().toISOString(), status, completed };
   requireCondition(Number.isSafeInteger(value.runId) && Number(value.runId) > 0 && Number.isSafeInteger(value.attempt) && Number(value.attempt) > 0, "invalid-run-identity");
   if (producer === "dns-drift.yaml/check" && outputs("check").observations !== undefined && step("check").outcome === "success") {
     const raw = JSON.parse(String(outputs("check").observations));

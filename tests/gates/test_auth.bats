@@ -20,10 +20,18 @@ setup() {
   [ "$status" -eq 1 ] # grep returns 1 when nothing matches
 }
 
-@test "bump.yaml mints an app token before checkout" {
-  # 첫 checkout 전에 create-github-app-token 인라인 step이 있어야 한다 (composite는 체크아웃 필요 — 순서 딜레마)
-  run grep -E "uses: actions/create-github-app-token@[0-9a-f]{40}" "$WF/bump.yaml"
-  [ "$status" -eq 0 ]
+@test "bump.yaml verifies upstream provenance with a read token before minting the writer" {
+  run env WF="$WF/bump.yaml" bun -e '
+    const {parse}=require("yaml"),fs=require("fs"),assert=require("assert/strict");
+    const steps=parse(fs.readFileSync(process.env.WF,"utf8")).jobs.writeback.steps;
+    const writer=steps.findIndex(s=>s.id==="token"),proof=steps.findIndex(s=>s.id==="provenance");
+    assert.ok(proof>0&&writer>proof);
+    assert.equal(steps[proof].env.GH_TOKEN,"${{ github.token }}");
+    assert.equal(steps[proof].run,"bun tools/lib/ci-writeback.ts verify-build");
+    const checkout=steps.find(s=>s.uses?.startsWith("actions/checkout@"));
+    assert.equal(checkout.with.ref,"${{ github.workflow_sha }}");assert.equal(checkout.with["persist-credentials"],false);
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "bump.yaml does not push directly to main (PR-first write model)" {
@@ -37,11 +45,7 @@ setup() {
 }
 
 @test "bump.yaml writeback only reacts to this repo's main (blocks fork/PR builds)" {
-  # wf-ci-build-bump-1: write-back(bump.yaml)의 유일한 신뢰 경계인 head_repository.full_name 비교는
-  # 어느 가드에도 증인이 없었다(전 레포에서 'head_repository' 리터럴이 이 파일 하나뿐 — grep 0건 확인).
-  # 오늘은 build.yaml 트리거(push main-only + workflow_dispatch actor 가드)가 이 조건을 항상 참으로
-  # 만들지만, 향후 build.yaml에 pull_request 트리거가 생기거나 동명(📦 build) 워크플로가 생기면
-  # 이 조건이 유일한 방어선이 된다 — 회귀 방지용 defense-in-depth 커버리지.
+  # 이벤트 조건은 사전 필터다. 권위는 App 토큰 전 helper의 API 신원·main ancestry 검증이다.
   run bash -c "yq -r '.jobs.writeback.if' '$WF/bump.yaml'"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -qF 'head_repository.full_name == github.repository'
@@ -51,7 +55,7 @@ setup() {
 @test "no github_actions_secret bot_pat resource remains in terraform" {
   # App 마이그레이션 후 DEPLOY_BOT_PAT(write-capable standing PAT)는 소비자 0 — 리소스가 남으면 안 됨
   # 양성 대조 — secrets.tf가 실재하고 여전히 시크릿 리소스를 선언하는 파일인지
-  run grep -nE '^resource[[:space:]]+"github_actions_secret"' "$ROOT/infra/github/secrets.tf"
+  run grep -nE '^resource[[:space:]]+"github_actions_environment_secret"' "$ROOT/infra/github/secrets.tf"
   [ "$status" -eq 0 ]
   # rc 2(파일 부재/리네임)를 통과로 읽지 않는다
   run grep -nE 'github_actions_secret"?[[:space:]]*"bot_pat"' "$ROOT/infra/github/secrets.tf"
