@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # AIOps 전용 설치. 일반 host-config와 분리하며 timer·인입·Codex 실행을 활성화하지 않는다.
 set -euo pipefail
+# 고정 실행 코드·의존성은 역할 UID도 읽는다. 인증·설정은 아래의 명시적 0600/0700으로 제한한다.
+umask 0022
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 action="${1:-}"
 case "$action" in

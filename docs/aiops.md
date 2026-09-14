@@ -44,6 +44,8 @@ Helm 템플릿·암호화 자료·live/Terraform·나머지 저장소 게이트�
 기준 main이 전진하면 저장소 사본과 설정을 갱신하고 수용 증거를 다시 확인한다. 오래된 기준으로 새 PR은 만들지 않는다.
 기본 kubectl 경로는 k3s의 `/usr/local/bin/kubectl`이며 설치 전 실행 가능 여부를 검사한다.
 SQLite DB/WAL은 `0660`, 운영 state 디렉토리는 root:`aiops-state`의 `2770`으로 유지한다.
+호출자의 umask가 `0077`이어도 설치 의존성 디렉터리는 다른 역할이 읽고 통과할 수 있게 생성한다.
+호스트 검사 코드는 `0444`, 작업 경로는 `0711`을 생성 후 명시하며 역할 입력 `0400`·출력 디렉터리 `0700`은 유지한다.
 
 | 역할 | 접근 자료 | 허용 작업 |
 |---|---|---|
@@ -112,6 +114,7 @@ bun tools/aiops.ts readiness --state-dir .scratch/aiops-install/state --config <
 ```
 
 `probe-host`는 모의 자격만 사용하는 임시 systemd 작업으로 허용 대조군·다른 UID 자격 거부·timeout·setsid 자식·OOM·출력 한도를 확인한다.
+실패 시 `stages`의 단계별 상태·종료 코드·정리 여부를 확인한다. `ReadOnlyPaths`는 Unix 파일 읽기 권한을 부여하지 않는다.
 실행할 수 없으면 sudo 인증을 완료한 owner가 이 명령을 실행한다. 로컬 프로세스 그룹 테스트 통과를 cgroup 증거로 기록하지 않는다.
 실제 재부팅 후 복구, 단계별 역할 접근, 구독 로그인, 모든 생산자 도달, fork Actions 비활성화, 실제 Draft PR/Telegram 발송은 별도 수용이다.
 발송 여부·권한은 실제 API 결과로 확인한다. 읽기 설정만 보고 쓰기 권한이 맞다고 판정하지 않는다.

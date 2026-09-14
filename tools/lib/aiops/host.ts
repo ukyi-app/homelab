@@ -113,8 +113,12 @@ export async function probeHost() {
   const output = join(directory, "output"); mkdirSync(output, { mode: 0o777 }); chmodSync(output, 0o777);
   const mock = join(directory, "mock-credential"); writeFileSync(mock, crypto.randomUUID(), { mode: 0o600 });
   const units: string[] = [], checks: Record<string, boolean> = {};
+  const stages: Record<string, Pick<ProcessResult, "status" | "exitCode" | "cleanup">> = {};
+  const note = (name: string, result: ProcessResult) => { stages[name] = { status: result.status, exitCode: result.exitCode, cleanup: result.cleanup }; };
   const run = async (program: string, seconds: number) => {
     const path = join(directory, `probe-${units.length}.py`); writeFileSync(path, program, { mode: 0o444 });
+    // CLI umask 0007이 다른 UID의 읽기를 지우므로 비밀 없는 검사 코드의 모드를 확정한다.
+    chmodSync(path, 0o444);
     return runHostStage({ role: "engine", stage: "collect", command: ["/usr/bin/python3", path], readable: [path, mock], writable: output, deadline: Date.now() + seconds * 1000, probe: true, onUnit: unit => units.push(unit) });
   };
   try {
@@ -122,13 +126,17 @@ export async function probeHost() {
     let proof: Record<string, unknown> = {};
     try { proof = JSON.parse(positive.stdout); } catch { /* 허용 대조군을 읽지 못하면 실패다. */ }
     checks.role = positive.status === "completed" && proof.uid === true && proof.credentialDenied === true;
+    note("role", positive);
     const timeout = await run("import os,signal,time\npid=os.fork()\nif pid==0:\n os.setsid();signal.signal(signal.SIGTERM,signal.SIG_IGN)\nwhile True:time.sleep(1)\n", 2);
     checks.timeoutAndEscapedChild = timeout.status === "timeout" && timeout.cleanup === "confirmed";
+    note("timeoutAndEscapedChild", timeout);
     const oom = await run("chunks=[]\nwhile True: chunks.append(bytearray(32*1024*1024))\n", 10);
     checks.oom = oom.status === "oom" && oom.cleanup === "confirmed";
+    note("oom", oom);
     const flood = await run("import os\nwhile True:os.write(1,b'x'*65536)\n", 10);
     checks.output = flood.status === "output-limit" && flood.cleanup === "confirmed";
-    return { ready: Object.values(checks).every(Boolean), checks, checkedAt: new Date().toISOString(), scope: "mock-systemd-cgroup-no-subscription-no-publication", units };
+    note("output", flood);
+    return { ready: Object.values(checks).every(Boolean), checks, stages, checkedAt: new Date().toISOString(), scope: "mock-systemd-cgroup-no-subscription-no-publication", units };
   } finally {
     if (units.map(cleanUnit).every(Boolean)) rmSync(directory, { recursive: true, force: true });
   }

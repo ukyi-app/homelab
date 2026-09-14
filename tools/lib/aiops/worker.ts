@@ -28,6 +28,7 @@ export async function worker(incidents: Incidents, input: unknown, state: string
   requireCondition(commissioning ? prepared.commissioning.ready : prepared.ready && config.enabled === true, "live-readiness-required");
   const work = "/var/lib/homelab-aiops/work";
   mkdirSync(work, { recursive: true, mode: 0o711 });
+  chmodSync(work, 0o711);
   const directory = mkdtempSync(join(work, "attempt-")); chmodSync(directory, 0o711);
   const deadline = Date.now() + 1200_000;
   let run: Execution | undefined, counter = 0, last: ProcessResult | undefined, publicationId: string | undefined;
@@ -35,6 +36,8 @@ export async function worker(incidents: Incidents, input: unknown, state: string
   let publicationBytes = 0;
   const stage = async (role: Role, kind: string, data: Record<string, unknown>, limit: keyof typeof STAGE_LIMITS, until = deadline) => {
     const jobDirectory = join(directory, String(counter++)); mkdirSync(jobDirectory, { mode: 0o711 });
+    // 생성 mode는 umask에 깎인다. 역할 UID가 경로만 통과하도록 다시 고정한다.
+    chmodSync(jobDirectory, 0o711);
     const output = join(jobDirectory, "output"); mkdirSync(output, { mode: 0o700 });
     const uid = spawnSync("/usr/bin/id", ["-u", `aiops-${role}`], { encoding: "utf8", timeout: 5000, maxBuffer: 4096, env: { PATH: "/usr/bin:/bin" } });
     const gid = spawnSync("/usr/bin/id", ["-g", `aiops-${role}`], { encoding: "utf8", timeout: 5000, maxBuffer: 4096, env: { PATH: "/usr/bin:/bin" } });
