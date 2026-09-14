@@ -81,8 +81,8 @@ preview/기존 apply destroy 정책을 확인한다. **이 로컬 결과는 GitH
 
 미검증: 실제 Environment 생성/복제/회수, 조직 공급 가시성, branch/tag/PR canary,
 강화된 GITHUB_TOKEN의 main 쓰기 거부, writer의 auto-merge 양성, 읽기 전용 TF 자격의
-새 대상 조회, 실제 reviewed plan 실행. 본 변경에서 GitHub mutation/TF apply/커밋/푸시는
-수행하지 않는다.
+새 대상 조회, 실제 reviewed plan 실행. 로컬 검사 결과와 별도로 운영 자격·서버 정책의
+전환 수용을 완료해야 한다.
 
 근거: [GitHub Environment 정책](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments),
 [provider 6.12.1의 branch protection](https://raw.githubusercontent.com/integrations/terraform-provider-github/v6.12.1/website/docs/r/branch_protection.html.markdown),
