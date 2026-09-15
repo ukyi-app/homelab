@@ -41,11 +41,48 @@ jobs:
     uses: ./.github/workflows/_public-decl.yaml
     secrets:
       AIOPS_REUSABLE_PUBLIC_CANARY_0915: ""
+  declared-expression-pass:
+    needs: origin
+    uses: ./.github/workflows/_public-decl.yaml
+    secrets:
+      AIOPS_REUSABLE_PUBLIC_CANARY_0915: ${{ secrets.AIOPS_REUSABLE_PUBLIC_CANARY_0915 }}
+  declared-placeholder-pass:
+    needs: origin
+    uses: ./.github/workflows/_public-decl.yaml
+    secrets:
+      AIOPS_REUSABLE_PUBLIC_CANARY_0915: environment-only-public-placeholder
+  declared-inherit:
+    needs: origin
+    uses: ./.github/workflows/_public-decl.yaml
+    secrets: inherit
+  direct:
+    environment: aiops-reusable-public-0915
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 2
+    outputs:
+      matched: ${{ steps.marker.outputs.matched }}
+    steps:
+      - id: marker
+        env:
+          PUBLIC: ${{ secrets.AIOPS_REUSABLE_PUBLIC_CANARY_0915 }}
+        shell: bash
+        run: |
+          python3 - <<'PYMARKER'
+          import os,json
+          matched=os.environ['PUBLIC']=='AIOPS-REUSABLE-PUBLIC-0915'
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('matched='+str(matched).lower()+'\n')
+          print(json.dumps({'matched':matched}))
+          PYMARKER
+    needs: origin
   report:
     needs:
       - no-declaration
       - declared-no-pass
       - declared-empty-pass
+      - declared-expression-pass
+      - declared-placeholder-pass
+      - declared-inherit
+      - direct
     if: always()
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 2
