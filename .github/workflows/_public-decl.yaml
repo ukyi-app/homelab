@@ -1,0 +1,29 @@
+name: Public reusable secret probe
+on:
+  workflow_call:
+    outputs:
+      matched:
+        value: ${{ jobs.probe.outputs.matched }}
+    secrets:
+      AIOPS_REUSABLE_PUBLIC_CANARY_0915:
+        required: false
+permissions: {}
+jobs:
+  probe:
+    environment: aiops-reusable-public-0915
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 2
+    outputs:
+      matched: ${{ steps.marker.outputs.matched }}
+    steps:
+      - id: marker
+        env:
+          PUBLIC: ${{ secrets.AIOPS_REUSABLE_PUBLIC_CANARY_0915 }}
+        shell: bash
+        run: |
+          python3 - <<'PYMARKER'
+          import os,json
+          matched=os.environ['PUBLIC']=='AIOPS-REUSABLE-PUBLIC-0915'
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('matched='+str(matched).lower()+'\n')
+          print(json.dumps({'matched':matched}))
+          PYMARKER
