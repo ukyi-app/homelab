@@ -245,11 +245,16 @@ jobs:
           ref: main
           token: ${{ steps.writer.outputs.token }}
       - uses: ./.github/actions/setup-bun
+      - name: private GHCR 읽기 자격 확인
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          [ -n "$GHCR_PULL_TOKEN" ] || { echo "::error::homelab-main GHCR_PULL_TOKEN 미설정 — private 이미지 조회 중단"; exit 1; }
       - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.HOMELAB_OWNER }}
+          password: ${{ secrets.GHCR_PULL_TOKEN }}
       - name: "plan (신뢰 경계 — 바인딩 + GitHub/GHCR 사실만)"
         env:
           GH_TOKEN: ${{ steps.reader.outputs.token }}

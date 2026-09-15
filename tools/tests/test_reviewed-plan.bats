@@ -144,6 +144,33 @@ TS
   [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
 
+@test "private package readers require protected credentials without blocking authorization reconciliation" {
+  run bun -e '
+    import assert from "node:assert/strict";import {parse} from "yaml";import {readFileSync,readdirSync} from "fs";import {spawnSync} from "child_process";
+    const load=f=>parse(readFileSync(".github/workflows/"+f,"utf8"));
+    const allowed=["_create-app.yaml/create","bump-poll.yaml/poll","create-app.yaml/create-app"],found=[];
+    for(const f of readdirSync(".github/workflows").filter(f=>f.endsWith(".yaml"))){
+      for(const [id,j] of Object.entries(load(f).jobs))if(JSON.stringify(j).includes("secrets.GHCR_PULL_TOKEN"))found.push(f+"/"+id);
+    }assert.deepEqual(found.sort(),allowed.sort());
+    for(const [file,id] of [["_create-app.yaml","create"],["bump-poll.yaml","poll"]]){
+      const j=load(file).jobs[id];assert.equal(j.environment,"homelab-main");assert.equal(j.steps[0].id,"authority");
+      const index=j.steps.findIndex(s=>s.uses?.startsWith("docker/login-action@"));assert.ok(index>1);
+      assert.equal(j.steps[index].with.registry,"ghcr.io");assert.equal(j.steps[index].with.username,"${{ vars.HOMELAB_OWNER }}");
+      assert.equal(j.steps[index].with.password,"${{ secrets.GHCR_PULL_TOKEN }}");
+      const check=j.steps[index-1];assert.equal(check.env.GHCR_PULL_TOKEN,"${{ secrets.GHCR_PULL_TOKEN }}");
+      for(const token of ["","fixture-read-package-token"]){
+        const r=spawnSync("bash",["-e","-c",check.run],{env:{PATH:process.env.PATH,GHCR_PULL_TOKEN:token},encoding:"utf8"});
+        assert.equal(r.status,token?0:1);if(token)assert.ok(!(r.stdout+r.stderr).includes(token));
+      }
+    }
+    const poll=load("bump-poll.yaml");
+    for(const id of ["preflight","reconcile","accounting"])assert.ok(!JSON.stringify(poll.jobs[id]).includes("GHCR_PULL_TOKEN"));
+    assert.equal(poll.jobs.reconcile.if,"needs.preflight.outputs.writer == " + String.fromCharCode(39)+"true"+String.fromCharCode(39));
+    assert.ok(!JSON.stringify(load("reusable-app-build.yaml")).includes("GHCR_PULL_TOKEN"));
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
 @test "result CLI persists a receipt for the reviewed SHA and emits none after head moves" {
   cat >> "$BATS_TEST_TMPDIR/probe.ts" <<'TS'
 Object.assign(process.env,env);
