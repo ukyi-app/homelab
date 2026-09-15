@@ -48,6 +48,13 @@ head/repo/actor를 재검증하며, head 변경·재실행은 새 요청이 필�
 summary와 JSON 수령증에만 연결되고 apply·PR 자동 머지 승인이 되지 않는다.
 
 운영 자격은 `homelab-main` Environment에서 branch main에만 공급한다(reusable 실제 job 포함).
+앱 생성과 `bump-poll`의 cross-repo private GHCR 조회는 같은 Environment의 `GHCR_PULL_TOKEN`
+(classic PAT, `read:packages`만)과 `HOMELAB_OWNER` 사용자명으로 인증한다. 클러스터의 기존
+`ghcr-pull` 공급을 재사용하며, 회전 시 Environment도 함께 갱신한다. 누락 시 명시 실패하고
+native `GITHUB_TOKEN`으로 대체하지 않는다. 인가 회수 job은 이 자격에 의존하지 않는다.
+패키지는 private으로 유지하고, 공개 homelab 레포에 패키지 Actions access를 추가하지 않는다.
+이 자격을 repository/organization secret에 복제하거나 앱 레포에 전달하지 않는다.
+
 이 plan에는 CF/R2만 공급한다. 환경 복제·원본 공급 회수·서버 canary의 전환 절차와 미검증
 상태는 [infra/github/README.md](../../infra/github/README.md)에 기록한다.
 

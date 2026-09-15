@@ -8,6 +8,8 @@ on:
   workflow_call:
     # 호출자의 명시 이름 연결이 있어야 보호 Environment 자격이 이 재사용 job에 도달한다.
     secrets:
+      GHCR_PULL_TOKEN:
+        required: false
       HOMELAB_READER_APP_ID:
         required: false
       HOMELAB_READER_APP_PRIVATE_KEY:
@@ -113,11 +115,16 @@ jobs:
         run: |
           jq -n --arg app "$APP" '{action:"create-app", app:$app}' > /tmp/mv-payload.json
           bun tools/validate-mutation.ts --action create-app --payload-file /tmp/mv-payload.json
+      - name: private GHCR 읽기 자격 확인
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          [ -n "$GHCR_PULL_TOKEN" ] || { echo "::error::homelab-main GHCR_PULL_TOKEN 미설정 — private 이미지 조회 중단"; exit 1; }
       - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.HOMELAB_OWNER }}
+          password: ${{ secrets.GHCR_PULL_TOKEN }}
       - name: GHCR digest 해석 (이미지 실존 필수 — 없으면 생성 중단)
         id: img
         env:
@@ -129,7 +136,7 @@ jobs:
           # 파이프 분리 — docker 실패/jq 파싱 실패를 구분하고, 성공-빈출력(digest="" 또는 null)도 형식 검사로 차단
           manifest=$(docker buildx imagetools inspect "ghcr.io/ukyi-app/${app}:${tag}" \
             --format '{{json .Manifest}}') \
-            || { echo "::error::이미지 미존재 — 앱 레포에서 빌드(GHCR push) 먼저"; exit 1; }
+            || { echo "::error::GHCR 이미지 조회 실패 — 이미지 존재·읽기 권한·레지스트리 상태 확인"; exit 1; }
           digest=$(jq -r .digest <<<"$manifest") \
             || { echo "::error::manifest JSON 파싱 실패"; exit 1; }
           case "$digest" in

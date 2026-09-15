@@ -73,6 +73,7 @@ jobs:
     uses: ./.github/workflows/_create-app.yaml
     # 값의 운영 공급은 재사용 job의 homelab-main Environment가 소유한다.
     secrets:
+      GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
       HOMELAB_READER_APP_ID: ${{ secrets.HOMELAB_READER_APP_ID }}
       HOMELAB_READER_APP_PRIVATE_KEY: ${{ secrets.HOMELAB_READER_APP_PRIVATE_KEY }}
       HOMELAB_WRITER_APP_ID: ${{ secrets.HOMELAB_WRITER_APP_ID }}
