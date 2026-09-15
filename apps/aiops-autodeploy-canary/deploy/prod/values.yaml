@@ -1,0 +1,22 @@
+image:
+  repo: ghcr.io/ukyi-app/aiops-autodeploy-canary
+  tag: sha-3850e7617e3f5236c81d4f42cb71db7be4ea4998
+  digest: sha256:31bd0cebab2777627eeabc6436dce0295be95e085b3350c5592f65b08e3ac77f
+kind: site
+replicas: 1
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    cpu: 100m
+    memory: 32Mi
+route:
+  host: aiops-autodeploy-canary.home.ukyi.app
+  paths:
+    - /
+  public: false
+static:
+  server: sws
+metrics:
+  enabled: false

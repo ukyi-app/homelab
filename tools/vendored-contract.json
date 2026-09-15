@@ -14,6 +14,12 @@
           "ref": "main",
           "path": "scaffold/common/tools/seal-secret.mts",
           "normalize": "typescript"
+        },
+        {
+          "repo": "aiops-autodeploy-canary",
+          "ref": "main",
+          "path": "tools/seal-secret.mts",
+          "normalize": "typescript"
         }
       ]
     },
@@ -24,6 +30,12 @@
           "repo": "homelab-app-template",
           "ref": "main",
           "path": "scaffold/common/tools/sealed-secrets-cert.pem",
+          "normalize": "exact"
+        },
+        {
+          "repo": "aiops-autodeploy-canary",
+          "ref": "main",
+          "path": "tools/sealed-secrets-cert.pem",
           "normalize": "exact"
         }
       ]
