@@ -127,7 +127,7 @@ spec:
                 # bump-tag.ts의 syncDigestExporter(bump한 앱이 이 목록에 있으면 태그를 같이 옮긴다 —
                 # 안 옮기면 stale 참조가 거짓 ImageDigestDrift를 낸다).
                 - name: APPS
-                  value: "aiops-autodeploy-canary=ghcr.io/ukyi-app/aiops-autodeploy-canary:sha-3850e7617e3f5236c81d4f42cb71db7be4ea4998" # 공개 git SHA 이미지 태그(시크릿 아님) — gitleaks:allow
+                  value: "aiops-autodeploy-canary=ghcr.io/ukyi-app/aiops-autodeploy-canary:sha-de266551de2cf867fb9fea9ff4c5774dbc70f385" # 공개 git SHA 이미지 태그(시크릿 아님) — gitleaks:allow
               resources:
                 requests: { cpu: 20m, memory: 32Mi }
                 limits: { memory: 64Mi }
