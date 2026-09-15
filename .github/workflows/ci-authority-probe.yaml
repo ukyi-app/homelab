@@ -1,0 +1,75 @@
+name: "🔬 CI authority probe"
+run-name: "AIOPS-CI-AUTHORITY-20260915 ${{ github.ref }} ${{ inputs.reviewed_revision }}"
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_revision:
+        description: "검토한 이 workflow의 정확한 Git SHA (40자리)"
+        type: string
+        required: true
+
+# 보호 환경의 공개 표식만 검사한다. 코드 checkout·API 요청·운영 자격 전달은 없다.
+permissions: {}
+jobs:
+  authorize:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 2
+    steps:
+      - name: 수동 시험의 owner와 고정 소스 확인
+        env:
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          EVENT_SHA: ${{ github.sha }}
+          REVIEWED: ${{ inputs.reviewed_revision }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          e = os.environ
+          def require(ok, message):
+              if not ok:
+                  print('::error::' + message)
+                  raise SystemExit(1)
+          require(bool(e['OWNER']), 'HOMELAB_OWNER 미설정')
+          require(e['ACTOR'].lower() == e['TRIGGERING'].lower() == e['OWNER'].lower(),
+                  'workflow_dispatch는 owner(최초 actor와 현재 개시자)만 허용')
+          require(e['REPOSITORY_ID'] == '1265054638' and e['EVENT'] == 'workflow_dispatch' and e['ATTEMPT'] == '1',
+                  'authority-probe-origin-invalid')
+          # tag는 환경 정책의 음성 시험에 필요하다. 실제 거부는 보호 job의 서버 annotation으로 판정한다.
+          require((e['REF_TYPE'], e['REF']) in [('branch', 'refs/heads/main'), ('tag', 'refs/tags/main')],
+                  'authority-probe-ref-invalid')
+          require(e['WORKFLOW_REF'] == 'ukyi-app/homelab/.github/workflows/ci-authority-probe.yaml@' + e['REF'],
+                  'authority-probe-workflow-invalid')
+          require(bool(re.fullmatch('[0-9a-f]{40}', e['REVIEWED'])) and e['REVIEWED'] == e['WORKFLOW_SHA'] == e['EVENT_SHA'],
+                  'authority-probe-revision-invalid')
+          print(json.dumps({'originVerified': True, 'ref': e['REF'], 'revision': e['REVIEWED']}))
+          PY
+  protected-environment:
+    needs: authorize
+    environment: homelab-main
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 2
+    steps:
+      - name: 보호 환경의 공개 표식 확인
+        env:
+          PUBLIC_CANARY: ${{ secrets.AIOPS_CI_PUBLIC_CANARY_0915 }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os
+          matched = os.environ['PUBLIC_CANARY'] == 'AIOPS-CI-AUTHORITY-20260915-public-marker'
+          main = (os.environ['REF_TYPE'], os.environ['REF']) == ('branch', 'refs/heads/main')
+          print(json.dumps({'protectedEnvironmentReached': True, 'publicMarkerMatched': matched, 'mainBranch': main}))
+          # tag job이 실행됐으면 marker 일치와 무관하게 정책 차단이 실패한 것이다.
+          raise SystemExit(0 if matched and main else 1)
+          PY

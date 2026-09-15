@@ -63,9 +63,11 @@ _fixture() {
   run bash "$S" --root "$d"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q '인덱스 표기'
-  # 대괄호는 ENUM을 늘리지 않는다(점 표기였다면 secrets 18) — 미분류 대조가 아니라 **표기 거부**가
+  # 대괄호는 ENUM을 늘리지 않는다 — 미분류 대조가 아니라 **표기 거부**가
   # red의 이유임을 SCAN 등식으로 고정한다.
-  echo "$output" | grep -qE '^SCAN: check-gh-secret-coverage:secrets: 17$'
+  expected="$(jq '[.secrets[] | select(.class != "provided")] | length' "$d/policy/gh-secret-var-classification.json")"
+  [ "$expected" -gt 0 ]
+  echo "$output" | grep -qE "^SCAN: check-gh-secret-coverage:secrets: ${expected}$"
 }
 
 @test "index notation on the vars lane is rejected by the same predicate" {

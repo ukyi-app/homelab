@@ -51,6 +51,13 @@ summary와 JSON 수령증에만 연결되고 apply·PR 자동 머지 승인이 �
 이 plan에는 CF/R2만 공급한다. 환경 복제·원본 공급 회수·서버 canary의 전환 절차와 미검증
 상태는 [infra/github/README.md](../../infra/github/README.md)에 기록한다.
 
+## 🔬 환경 권한 수용 — owner 수동 (workflow_dispatch)
+
+환경 권한 수용에는 [ci-authority-probe.yaml](ci-authority-probe.yaml)을 owner가 수동 실행한다.
+검토한 workflow SHA를 입력하며 main의 공개 표식 양성과 같은 이름 tag의 환경 정책 거부를 확인한다.
+코드 checkout·API 호출·운영 자격 사용·배포는 하지 않는다. tag 생성은 workflow가 수행하지 않는다.
+공개 표식이 없거나 다르면 실패하고, 재실행 대신 정확한 SHA로 새 요청해야 한다.
+
 ## 🤖 자동 — 이벤트 트리거 (건들지 말 것)
 
 | 워크플로 | 트리거 | 역할 |

@@ -95,6 +95,12 @@ TS
     for(const f of readdirSync(".github/workflows").filter(f=>f.endsWith(".yaml"))){const w=parse(readFileSync(".github/workflows/"+f,"utf8"));
       for(const [id,j] of Object.entries(w.jobs)){if(!/\$\{\{\s*secrets\.(?!GITHUB_TOKEN\b)/.test(JSON.stringify(j)))continue;
         if(f==="reusable-app-build.yaml"){assert.equal(id,"deploy-trigger");assert.deepEqual(Object.keys(w.on),["workflow_call"]);continue;}
+        // 공개 표식 전용 수용 job은 운영 자격 소비자가 아니다. 다른 secret이 추가되면 예외를 거부한다.
+        if(f==="ci-authority-probe.yaml"){
+          assert.equal(id,"protected-environment");assert.equal(j.environment,"homelab-main");assert.equal(j.needs,"authorize");
+          assert.deepEqual([...JSON.stringify(j).matchAll(/secrets\.([A-Z_0-9]+)/g)].map(m=>m[1]),["AIOPS_CI_PUBLIC_CANARY_0915"]);
+          assert.deepEqual(w.permissions,{});continue;
+        }
         n++;assert.equal(j.environment,"homelab-main",f+"/"+id);
         if(f!=="reviewed-plan.yaml"){
           assert.equal(j.steps[0].id,"authority");assert.ok(j.steps[0].run?.includes("$TRIGGERING"),f+"/"+id);assert.ok(j.steps[0].run.includes("refs/heads/main"));
