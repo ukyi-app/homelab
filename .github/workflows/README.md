@@ -70,6 +70,11 @@ summary와 JSON 수령증에만 연결되고 apply·PR 자동 머지 승인이 �
 ## 🧩 reusable — 직접 실행 불가 (Run 버튼 없음)
 
 `_create-app`·`_update-secrets`·`_create-database`·`_create-cache`·`_teardown-app` = 변이 디스패처가 `uses:`로 호출.
+운영 secret은 호출자가 필요한 이름을 `secrets.NAME` 표현식으로 연결하고, reusable은
+`workflow_call.secrets`에 그 이름을 선언한다. 실제 공급은 reusable job의 `homelab-main`
+Environment가 소유한다. 선언만 추가하거나 빈 문자열을 전달하면 값이 도달하지 않는다.
+2026-09-15 공개 표식의 실제 비교 run34981575222에서 명시 표현식 전달과 일반 job의 양성,
+무전달·빈 값·고정 placeholder의 음성을 확인했다. `secrets: inherit` 대신 소비 이름만 연결한다.
 `reusable-app-build` = 외부 앱 레포가 `@main`으로 호출하는 cross-repo 계약(파일명·입력이 계약).
 
 ## 💻 owner-local — Actions에 없음 (파괴/로컬, 의도적)

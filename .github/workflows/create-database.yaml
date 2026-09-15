@@ -124,6 +124,12 @@ jobs:
   create-database:
     needs: validate
     uses: ./.github/workflows/_create-database.yaml
+    # 값의 운영 공급은 재사용 job의 homelab-main Environment가 소유한다.
+    secrets:
+      HOMELAB_WRITER_APP_ID: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+      HOMELAB_WRITER_APP_PRIVATE_KEY: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     with:
       spec: ${{ needs.validate.outputs.spec }}   # validate가 조립·검증한 spec JSON
     permissions:
