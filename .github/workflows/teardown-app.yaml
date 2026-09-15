@@ -74,6 +74,12 @@ jobs:
   teardown-app:
     needs: validate
     uses: ./.github/workflows/_teardown-app.yaml
+    # 값의 운영 공급은 재사용 job의 homelab-main Environment가 소유한다.
+    secrets:
+      HOMELAB_WRITER_APP_ID: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+      HOMELAB_WRITER_APP_PRIVATE_KEY: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     with:
       app: ${{ github.event.inputs.app }}
       confirm: ${{ github.event.inputs.confirm }}   # 파괴 경계(reusable)에서 confirm===app 재검증용

@@ -71,6 +71,14 @@ jobs:
   create-app:
     needs: validate
     uses: ./.github/workflows/_create-app.yaml
+    # 값의 운영 공급은 재사용 job의 homelab-main Environment가 소유한다.
+    secrets:
+      HOMELAB_READER_APP_ID: ${{ secrets.HOMELAB_READER_APP_ID }}
+      HOMELAB_READER_APP_PRIVATE_KEY: ${{ secrets.HOMELAB_READER_APP_PRIVATE_KEY }}
+      HOMELAB_WRITER_APP_ID: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+      HOMELAB_WRITER_APP_PRIVATE_KEY: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     with:
       app: ${{ github.event.inputs.app }}
     permissions:

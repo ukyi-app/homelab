@@ -91,9 +91,23 @@ TS
 @test "every homelab operating secret consumer including reusable jobs has main environment and its own replay guard" {
   run bun -e '
     import assert from "node:assert/strict";import {parse} from "yaml";import {readdirSync,readFileSync} from "fs";
-    let n=0;
+    let n=0,routes=0;
     for(const f of readdirSync(".github/workflows").filter(f=>f.endsWith(".yaml"))){const w=parse(readFileSync(".github/workflows/"+f,"utf8"));
-      for(const [id,j] of Object.entries(w.jobs)){if(!/\$\{\{\s*secrets\.(?!GITHUB_TOKEN\b)/.test(JSON.stringify(j)))continue;
+      for(const [id,j] of Object.entries(w.jobs)){
+        // 내부 route도 실 소비자와 연결돼야 한다. 매핑 전체가 사라져도 이 검사는 생략되지 않는다.
+        if(j.uses?.startsWith("./.github/workflows/_")){
+          const child=parse(readFileSync(j.uses,"utf8"));
+          const names=[...new Set([...JSON.stringify(child.jobs).matchAll(/secrets\.([A-Z_0-9]+)/g)].map(m=>m[1]).filter(n=>n!=="GITHUB_TOKEN"))].sort();
+          if(names.length){
+            routes++;assert.equal(typeof j.secrets,"object",f+" named secret routing missing");
+            assert.deepEqual(Object.keys(j.secrets).sort(),names);
+            assert.deepEqual(Object.keys(child.on.workflow_call.secrets).sort(),names);
+            for(const name of names){assert.equal(j.secrets[name],"${{ secrets."+name+" }}");assert.deepEqual(child.on.workflow_call.secrets[name],{required:false});}
+            for(const actual of Object.values(child.jobs))assert.equal(actual.environment,"homelab-main",j.uses);
+          }
+          continue;
+        }
+        if(!/\$\{\{\s*secrets\.(?!GITHUB_TOKEN\b)/.test(JSON.stringify(j)))continue;
         if(f==="reusable-app-build.yaml"){assert.equal(id,"deploy-trigger");assert.deepEqual(Object.keys(w.on),["workflow_call"]);continue;}
         // 공개 표식 전용 수용 job은 운영 자격 소비자가 아니다. 다른 secret이 추가되면 예외를 거부한다.
         if(f==="ci-authority-probe.yaml"){
@@ -107,7 +121,7 @@ TS
           for(const s of j.steps.filter(s=>/\/actions\/(telegram-notify|mutation-notify)$/.test(s.uses??"")))assert.ok(/steps\.authority\.outcome == .success./.test(s.if??""),f+" notify authority");
         }
       }
-    }assert.ok(n>=30);
+    }assert.ok(n>=30);assert.equal(routes,5);
     const i=parse(readFileSync(".github/workflows/iac.yaml","utf8"));assert.equal(i.jobs["iac-plan"],undefined);assert.equal(i.jobs.accounting,undefined);assert.ok(!JSON.stringify(i.jobs["iac-validate"]).includes("secrets."));assert.equal(i.jobs["iac-validate"].environment,undefined);
   '
   [ "$status" -eq 0 ] || { echo "$output"; false; }
