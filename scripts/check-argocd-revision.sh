@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ArgoCD **자기레포** 리비전 핀 정합 가드 — 이 레포를 소스로 삼는 모든 ArgoCD 참조가 같은 브랜치를
-# 가리키는지, 그리고 (CI에서 main으로 들어갈 때) 그 값이 main인지 강제한다.
+# 가리키는지, 그리고 (CI에서 main으로 들어갈 때) 그 값이 refs/heads/main인지 강제한다.
+# 짧은 main은 같은 이름의 tag와 충돌한다. branch 보호만으로 GitOps 소비자의 ref 선택은 보호되지 않는다.
 #
 # 왜: `targetRevision`/`revision`이 **15곳**에 흩어져 있다(아래 열거는 파생이다 — 이 수치는 주석이지 계약이
 # 아니다). NUC 이전은 마이그레이션 브랜치에서 이 값을 브랜치 이름으로 바꾸는데, 그 브랜치가 main에

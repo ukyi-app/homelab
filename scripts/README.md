@@ -89,7 +89,8 @@
 - **`check-argocd-revision.sh`** — ArgoCD **자기레포** 리비전 핀 정합. `repoURL`을 가진 맵 노드를 **재귀로**
   뽑아(Application 단일/다중 소스 · ApplicationSet template 소스 · git generator `revision` — 모양을 세지 않는다)
   자기레포 참조 전건이 **같은 값**인지 강제한다(A). `EXPECT_REVISION`(또는 `--expect`)이 주어지면 그 값과의
-  일치까지 본다(B) — 그 변수는 **main 진입 시에만** 채워진다. (B)를 기본으로 켜면 마이그레이션 브랜치의
+  일치까지 본다(B) — 그 변수는 **main 진입 시에만 `refs/heads/main`**으로 채워져 같은 이름의 tag와
+  구분한다. (B)를 기본으로 켜면 마이그레이션 브랜치의
   gate가 영구 red가 되고, 무인자 rc=0을 요구하는 형제 게이트까지 같이 죽는다. 자기레포 판정은 앵커
   (`platform/argocd/root/root-app.yaml`의 repoURL) **정규화 후 비교** — 리터럴 대조는 `.git` 접미사 하나로 눈이 먼다.
 - **`check-bats-style.sh`** — bats **코드 표면**(`@test` 본문 + 0열 함수 본문) 단언-스타일 가드.

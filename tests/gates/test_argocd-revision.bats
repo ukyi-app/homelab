@@ -25,7 +25,7 @@ setup() {
 fx_reset() { git -C "$FX" checkout -q -- . ; git -C "$FX" clean -qfd ; }
 
 # ⚠️ 기준 리비전을 **리터럴로 쓰지 않는다.** 이 파일이 사는 브랜치마다 값이 다르다 —
-#    main에서는 `main`, NUC 마이그레이션 브랜치에서는 `nuc-migration`이다. 리터럴 'main'을 쓰면
+#    main에서는 `refs/heads/main`, 마이그레이션 브랜치에서는 다른 브랜치다. 리터럴 'main'을 쓰면
 #    그 브랜치에서 sed가 **no-op이 되어** 음성 @test는 red, 양성 @test는 **조용히 vacuous green**이
 #    된다(실측: nuc-migration에서 4 red + 3 vacuous). 앵커에서 파생한다.
 fx_rev() { yq -r '.spec.source.targetRevision' "$FX/platform/argocd/root/root-app.yaml"; }
@@ -102,7 +102,8 @@ fx_rewrite() {
 }
 
 @test "a self-repo source with no revision pin at all is rejected (ArgoCD would follow HEAD)" {
-  sed -i.bak "/targetRevision: $(fx_rev)\$/d" "$FX/platform/argocd/root/apps/victoria-stack.yaml"
+  # refs/heads/main의 slash를 sed 주소 구분자로 해석하지 않는다.
+  sed -i.bak "\|targetRevision: $(fx_rev)\$|d" "$FX/platform/argocd/root/apps/victoria-stack.yaml"
   run "$GUARD" --root "$FX"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -q '리비전 핀이 없다'
@@ -212,4 +213,24 @@ fx_rewrite() {
   expr="$(yq -r '.jobs.gate.steps[] | select(.run == "bash scripts/check-argocd-revision.sh") | .env.EXPECT_REVISION' "$y")"
   printf '%s' "$expr" | grep -qF "github.base_ref == 'main'"
   printf '%s' "$expr" | grep -qF "github.ref == 'refs/heads/main'"
+}
+
+@test "main CI accepts the qualified branch and rejects bare or same-name tag refs" {
+  # CI가 실제 전달하는 값으로 실행한다. 기대값을 테스트에서 새로 공급하면 배선 회귀를 놓친다.
+  local expr expected
+  expr="$(yq -r '.jobs.gate.steps[] | select(.run == "bash scripts/check-argocd-revision.sh") | .env.EXPECT_REVISION' "$ROOT/.github/workflows/ci.yaml")"
+  expected="$(printf '%s' "$expr" | sed -E "s/^.*&& '([^']*)' [|][|].*$/\1/")"
+  [ -n "$expected" ]
+  [ "$expected" != "$expr" ]
+  fx_rewrite "$(fx_rev)" refs/heads/main
+  run "$GUARD" --root "$FX" --expect "$expected"
+  [ "$status" -eq 0 ]
+  fx_rewrite refs/heads/main main
+  run "$GUARD" --root "$FX" --expect "$expected"
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -q '이어야 한다'
+  fx_rewrite main refs/tags/main
+  run "$GUARD" --root "$FX" --expect "$expected"
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -q '이어야 한다'
 }

@@ -191,7 +191,7 @@ jobs:
         # 돌려 rc=0을 요구하므로, 기본 모드가 red면 scan-floor 게이트까지 같이 죽는다.
         # base_ref = PR의 대상 브랜치 · ref = push 대상. 둘 다 봐서 두 진입 경로를 덮는다.
         env:
-          EXPECT_REVISION: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'main' || '' }}
+          EXPECT_REVISION: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'refs/heads/main' || '' }}
         run: bash scripts/check-argocd-revision.sh
       - name: CNPG 아카이브 serverName 분리 (main 진입 시 값 고정)
         # (A) 쓰기 serverName ≠ 복구 원본 serverName — 인자 없이 항상. 두 브랜치 형태 모두 green.

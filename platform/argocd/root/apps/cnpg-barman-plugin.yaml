@@ -13,7 +13,7 @@ spec:
   # (plugin-barman-cloud v0.13.0)를 platform/cnpg/barman-plugin/manifest.yaml에 벤더링했다.
   source:
     repoURL: https://github.com/ukyi-app/homelab.git
-    targetRevision: main
+    targetRevision: refs/heads/main
     path: platform/cnpg/barman-plugin
     # directory.recurse=false(zero-value)를 명시하면 컨트롤러의 spec 정규화가 매번 삭제하고
     # root의 selfHeal이 되살리는 플립플롭이 된다(라이브 generation 1111 검증) — 기본값이므로 생략.
