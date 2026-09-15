@@ -40,10 +40,12 @@ setup() {
 docindex_fixture() {
   local fx="$1"
   local p
-  mkdir -p "$fx/scripts/lib" "$fx/tools/lib" "$fx/.github/workflows"
+  mkdir -p "$fx/scripts/lib" "$fx/tools/lib" "$fx/tools/tests" "$fx/.github/workflows"
   for p in "$ROOT"/scripts/*.sh; do : > "$fx/scripts/$(basename "$p")"; done
   for p in "$ROOT"/tools/*; do if [ -f "$p" ]; then : > "$fx/tools/$(basename "$p")"; fi; done
   for p in "$ROOT"/tools/lib/*; do if [ -f "$p" ]; then : > "$fx/tools/lib/$(basename "$p")"; fi; done
+  # 테스트 파일의 독립 등재도 역방향 레인 대상이다. 내용 없이 파일 존재만 복제한다.
+  for p in "$ROOT"/tools/tests/*.bats; do : > "$fx/tools/tests/$(basename "$p")"; done
   cp "$ROOT/scripts/check-doc-index.sh" "$fx/scripts/check-doc-index.sh"
   cp "$ROOT/scripts/lib/guard.sh" "$fx/scripts/lib/guard.sh"
   cp "$ROOT/scripts/lib/scan-floor.sh" "$fx/scripts/lib/scan-floor.sh"
