@@ -4,6 +4,12 @@ on:
   pull_request:
     types:
       - synchronize
+  workflow_dispatch:
+    inputs:
+      reviewed_revision:
+        type: string
+        required: true
+        description: 검토한 branch SHA
 permissions:
   contents: write
   pull-requests: write
@@ -47,3 +53,32 @@ jobs:
           path: ${{ runner.temp }}/native-proof.json
           if-no-files-found: error
           retention-days: 7
+    if: ${{ github.event_name == 'pull_request' }}
+  protected-environment-negative:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 2
+    permissions: {}
+    environment: homelab-main
+    steps:
+      - name: 보호 환경의 비main 접근은 실행되면 실패
+        shell: bash
+        run: |
+          printf '%s\n' 'unexpected-protected-environment-access'
+          exit 1
+  empty-environment-marker:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 2
+    permissions: {}
+    environment: aiops-authority-empty-0916
+    steps:
+      - name: 새 환경의 공개 표식 부재 확인
+        env:
+          PUBLIC_CANARY: ${{ secrets.AIOPS_CI_PUBLIC_CANARY_0915 }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,os
+          absent=os.environ['PUBLIC_CANARY']==''
+          print(json.dumps({'publicMarkerAbsent':absent}))
+          raise SystemExit(0 if absent else 1)
+          PY
