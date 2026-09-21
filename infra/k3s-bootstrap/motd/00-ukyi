@@ -1,0 +1,236 @@
+#!/bin/bash
+# UKYI MOTD — 브라유 고양이 + UKYI 배너 + 시스템 게이지
+#
+#   아트 파일 : /usr/local/share/ukyi-motd/cat.txt
+#   되돌리기  : sudo /usr/local/share/ukyi-motd/uninstall.sh
+#
+# 표시 폭 93칸을 전제로 한다. 그보다 좁은 창에서는 줄바꿈으로 깨진다.
+# (게이지 행 = 라벨8 + 공백1 + 바16 + 공백2 + 퍼센트5 + 공백2 + 값. 값이 `777M / 1.8T`처럼
+#  11자가 되면 아트 폭 40 + 여백 5 를 더해 90칸이 된다. Usage 행의 부하 3연값 `0.98 0.74 0.60`
+#  14자가 최장이라 93칸이 상한이다.)
+# pam_motd는 stdout이 파일이라 터미널 폭을 알 수 없어 자동 축소는 하지 않는다.
+
+CAT_FILE="${CAT_FILE:-/usr/local/share/ukyi-motd/cat.txt}"
+BULK_MNT="${BULK_MNT:-/mnt/bulk}"
+# CPU 실사용률은 두 시점의 /proc/stat 차분이 필요하다. 타이머가 1분마다 부르므로
+# 직전 스냅샷을 tmpfs에 남겨 두고 다음 실행에서 차분을 낸다.
+CPU_STATE="${CPU_STATE:-/run/ukyi-motd-cpu.prev}"
+# k3s 조회 경로. 기본값은 root 만 읽을 수 있어 타이머 실행에서만 열린다(수동 검증용 오버라이드).
+K3S_KUBECONFIG="${K3S_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+MOTD_K3S_HELPER="${MOTD_K3S_HELPER:-/usr/local/share/ukyi-motd/k3s-status.py}"
+
+shopt -s extglob
+
+# 표시 폭 기준 좌측정렬. printf %-Ns는 바이트 수를 세기 때문에 브라유(1문자=3바이트)나
+# 색 코드가 섞이면 열이 어긋난다. ANSI를 걷어낸 문자 수로 세고 공백을 직접 채운다.
+padded() {
+  local s=$1 w=$2 plain n
+  plain=${s//$'\e['*([0-9;])m/}
+  n=$(( w - ${#plain} ))
+  printf '%s' "$s"
+  [ "$n" -gt 0 ] && printf "%${n}s" ""
+}
+
+R=$'\e[0m'; B=$'\e[1m'; D=$'\e[2m'
+L=$'\e[38;5;245m'; V=$'\e[38;5;255m'; A=$'\e[38;5;44m'
+OK=$'\e[38;5;42m'; WARN=$'\e[38;5;214m'; ERR=$'\e[38;5;203m'
+
+# pam_motd는 root로 실행되므로 로그인 사용자를 여러 경로로 추정한다.
+WHO="${PAM_USER:-${LOGNAME:-${USER:-}}}"
+[ -z "$WHO" ] && WHO=$(logname 2>/dev/null)
+[ -z "$WHO" ] && WHO=ukyi
+
+collect() {
+  HOST=$(hostname)
+  # shellcheck source=/dev/null
+  OSNAME=$(. /etc/os-release; echo "$PRETTY_NAME")
+  KERNEL=$(uname -r)
+  CPU=$(grep -m1 'model name' /proc/cpuinfo | sed 's/.*: //; s/(R)//g; s/(TM)//g; s/^Intel //')
+  CORES=$(nproc)
+
+  read -r up _ < /proc/uptime; UPS=${up%.*}
+  UD=$((UPS/86400)); UH=$((UPS%86400/3600)); UM=$((UPS%3600/60))
+  if   [ "$UD" -gt 0 ]; then UPTIME="${UD}d ${UH}h"
+  elif [ "$UH" -gt 0 ]; then UPTIME="${UH}h ${UM}m"
+  else                       UPTIME="${UM}m"; fi
+
+  LOAD1=$(cut -d' ' -f1 /proc/loadavg)
+  LOADS=$(cut -d' ' -f1-3 /proc/loadavg)
+
+  # 실사용률: /proc/stat 의 cpu 집계행에서 idle+iowait 를 뺀 비율을 직전 스냅샷과의 차분으로 낸다.
+  # guest/guest_nice(10·11열)는 user/nice 에 이미 포함되어 있어 2~9열만 더한다.
+  local ctot cidle ptot pidle
+  read -r ctot cidle < <(awk '/^cpu /{t=0; for(i=2;i<=9;i++) t+=$i; print t, $5+$6}' /proc/stat)
+  CPUP=""
+  if [ -r "$CPU_STATE" ]; then
+    read -r ptot pidle < "$CPU_STATE" 2>/dev/null || true
+    if [ -n "${ptot:-}" ] && [ "$ctot" -gt "${ptot:-0}" ]; then
+      CPUP=$(awk -v dt=$((ctot-ptot)) -v di=$((cidle-pidle)) \
+             'BEGIN{p=(dt-di)*100/dt; if(p<0)p=0; if(p>100)p=100; printf "%.0f", p}')
+    fi
+  fi
+  printf '%s %s\n' "$ctot" "$cidle" > "$CPU_STATE" 2>/dev/null || true
+  # 첫 실행이거나 스냅샷을 쓸 수 없으면(비-root 수동 실행) 종전처럼 load 기반으로 대체한다.
+  [ -z "$CPUP" ] && CPUP=$(awk -v l="$LOAD1" -v c="$CORES" 'BEGIN{p=l/c*100; if(p>100)p=100; printf "%.0f", p}')
+
+  MEM=$(free -h | awk '/^Mem:/{print $3" / "$2}' | sed 's/Gi/G/g; s/Mi/M/g')
+  MEMP=$(free -m | awk '/^Mem:/{printf "%d", $3*100/$2}')
+  DISK=$(df -h --output=used,size / | awk 'NR==2{printf "%s / %s", $1, $2}')
+  DISKP=$(df -h --output=pcent / | awk 'NR==2{gsub(/[ %]/,""); print}')
+
+  # 두 번째 SSD(bulk 티어). fstab에 nofail이 붙어 있어 미마운트인 채로 부팅될 수 있다.
+  # df는 대상이 마운트되어 있지 않으면 조용히 상위 마운트(/)의 수치를 돌려주므로,
+  # mountpoint로 '정확히 그 경로가 마운트포인트인지'를 먼저 확인한다.
+  if mountpoint -q "$BULK_MNT"; then
+    BULK=$(df -h --output=used,size "$BULK_MNT" | awk 'NR==2{printf "%s / %s", $1, $2}')
+    BULKP=$(df -h --output=pcent "$BULK_MNT" | awk 'NR==2{gsub(/[ %]/,""); print}')
+  else
+    BULK=""; BULKP=""
+  fi
+
+  TZF=$(grep -l x86_pkg_temp /sys/class/thermal/thermal_zone*/type 2>/dev/null | head -1)
+  if [ -n "$TZF" ]; then TEMP=$(awk '{printf "%d", $1/1000}' "${TZF%/type}/temp"); else TEMP=0; fi
+  # 게이지는 30~90°C를 0~100%로 매핑한다 (색 판정은 실제 온도값 기준)
+  TGP=$(( (TEMP-30)*100/60 )); [ "$TGP" -lt 0 ] && TGP=0; [ "$TGP" -gt 100 ] && TGP=100
+
+  LAN=$(ip -4 -o addr show scope global 2>/dev/null | grep -v tailscale | awk 'NR==1{print $4}' | cut -d/ -f1)
+  [ -z "$LAN" ] && LAN="-"
+  TS=$(ip -4 -o addr show tailscale0 2>/dev/null | awk 'NR==1{print $4}' | cut -d/ -f1)
+  [ -z "$TS" ] && TS="-"
+
+  FAILED=$(systemctl --failed --no-legend 2>/dev/null | grep -c .)
+  UPD=$(awk '/updates can be applied/{print $1}' /var/lib/update-notifier/updates-available 2>/dev/null)
+  [ -z "$UPD" ] && UPD=0
+  REBOOT=no; [ -f /var/run/reboot-required ] && REBOOT=yes
+
+  # NVMe 마모도. SMART 는 root 만 읽을 수 있고 타이머는 root 로 돌므로 여기서 읽힌다.
+  # 비-root 수동 실행이면 빈 값이 되어 n/a 로 표시된다.
+  NVME=""; NVME_BAD=0
+  if command -v nvme >/dev/null 2>&1; then
+    local d n log w e errs=0
+    for d in /dev/nvme?n1; do
+      [ -e "$d" ] || continue
+      log=$(nvme smart-log "$d" 2>/dev/null) || continue
+      w=$(printf '%s\n' "$log" | awk -F: '/percentage_used/{gsub(/[^0-9]/,"",$2); print $2; exit}')
+      e=$(printf '%s\n' "$log" | awk -F: '/media_errors/{gsub(/[^0-9]/,"",$2); print $2; exit}')
+      [ -n "$w" ] || continue
+      n=${d#/dev/}; n=${n%n1}
+      NVME="${NVME:+$NVME · }${n} ${w}%"
+      errs=$(( errs + 10#${e:-0} ))
+      [ "$((10#$w))" -ge 80 ] && NVME_BAD=1
+    done
+    [ -n "$NVME" ] && NVME="$NVME · err ${errs}"
+    [ "$errs" -gt 0 ] && NVME_BAD=1
+  fi
+
+  # 현재 Ready와 미해소 문제를 집계한다. 복구된 실패 기록은 별도 행에 보존한다.
+  K3S=""; K3S_BAD=0; K3S_RECOVERED=0
+  if [ -r "$K3S_KUBECONFIG" ] && [ -r "$MOTD_K3S_HELPER" ]; then
+    local nr nt pr pb summary
+    if summary=$(KUBECONFIG="$K3S_KUBECONFIG" python3 "$MOTD_K3S_HELPER" 2>/dev/null); then
+      read -r nr nt pr pb K3S_RECOVERED <<< "$summary"
+      K3S="node ${nr}/${nt} · ${pr} ready · ${pb} bad"
+      { [ "$nr" != "$nt" ] || [ "${pb:-0}" -gt 0 ]; } && K3S_BAD=1
+    fi
+  fi
+}
+
+GW=16
+bar() { local p=$1 f i out=""; f=$(( p * GW / 100 )); [ "$p" -gt 0 ] && [ "$f" -eq 0 ] && f=1
+        for ((i=0;i<GW;i++)); do [ $i -lt $f ] && out+="█" || out+="░"; done; printf '%s' "$out"; }
+ucolor() { if   [ "$1" -ge 90 ]; then printf '\e[38;5;196m'
+           elif [ "$1" -ge 75 ]; then printf '\e[38;5;208m'
+           elif [ "$1" -ge 50 ]; then printf '\e[38;5;220m'
+           else                       printf '\e[38;5;42m'; fi; }
+tcolor() { if   [ "$1" -ge 85 ]; then printf '\e[38;5;196m'
+           elif [ "$1" -ge 70 ]; then printf '\e[38;5;208m'
+           elif [ "$1" -ge 55 ]; then printf '\e[38;5;220m'
+           else                       printf '\e[38;5;42m'; fi; }
+
+irow() { printf "%s%-8s%s %s%s%s" "$L" "$1" "$R" "$V" "$2" "$R"; }
+srow() { printf "%s%-8s%s %s%s%s" "$L" "$1" "$R" "$3" "$2" "$R"; }
+grow() { printf "%s%-8s%s %s%s%s  %s%s%s" "$L" "$1" "$R" "$3" "$(bar "$2")" "$R" "$V" "$4" "$R"; }
+
+collect
+
+# bulk 행은 미마운트일 수 있어 배열 리터럴 안에서 조립할 수 없다. 먼저 만들어 둔다.
+if [ -n "$BULKP" ]; then
+  BULKROW=$(grow Bulk "$BULKP" "$(ucolor "$BULKP")" "$(padded "${BULKP}%" 5)  ${BULK}")
+else
+  BULKROW=$(grow Bulk 0 "$ERR" "not mounted")
+fi
+
+if [ -n "$NVME" ]; then
+  [ "$NVME_BAD" -eq 1 ] && NVMEROW=$(srow NVMe "$NVME" "$WARN") || NVMEROW=$(srow NVMe "$NVME" "$V")
+else
+  NVMEROW=$(srow NVMe "n/a" "$D")
+fi
+if [ -n "$K3S" ]; then
+  [ "$K3S_BAD" -eq 1 ] && K3SROW=$(srow k3s "$K3S" "$ERR") || K3SROW=$(srow k3s "$K3S" "$OK")
+  K3SJOBSROW=$(srow Jobs "${K3S_RECOVERED} recovered failures" "$D")
+else
+  K3SROW=$(srow k3s "unreachable" "$ERR")
+  K3SJOBSROW=$(srow Jobs "unknown" "$D")
+fi
+
+c1=$'\e[38;5;39m'; c2=$'\e[38;5;38m'; c3=$'\e[38;5;37m'; c4=$'\e[38;5;36m'; c5=$'\e[38;5;30m'
+RCOL=(
+  "${c1}██╗   ██╗██╗  ██╗██╗   ██╗██╗${R}"
+  "${c1}██║   ██║██║ ██╔╝╚██╗ ██╔╝██║${R}"
+  "${c2}██║   ██║█████╔╝  ╚████╔╝ ██║${R}"
+  "${c3}██║   ██║██╔═██╗   ╚██╔╝  ██║${R}"
+  "${c4}╚██████╔╝██║  ██╗   ██║   ██║${R}"
+  "${c5} ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝${R}"
+  ""
+  "${B}${A}${WHO}${R}${D}@${R}${B}${A}${HOST}${R}"
+  "${D}────────────────────────────────────────────${R}"
+  "$(irow OS     "$OSNAME")"
+  "$(irow Kernel "$KERNEL")"
+  "$(irow Uptime "$UPTIME")"
+  "$(irow CPU    "$CPU · ${CORES} cores")"
+  "$(grow Usage  "$CPUP"  "$(ucolor "$CPUP")"  "$(padded "${CPUP}%" 5)  ${LOADS}")"
+  "$(grow Memory "$MEMP"  "$(ucolor "$MEMP")"  "$(padded "${MEMP}%" 5)  ${MEM}")"
+  "$(grow Disk   "$DISKP" "$(ucolor "$DISKP")" "$(padded "${DISKP}%" 5)  ${DISK}")"
+  "$BULKROW"
+  "$(grow Temp   "$TGP"   "$(tcolor "$TEMP")"  "${TEMP}°C")"
+  "$NVMEROW"
+  "$K3SROW"
+  "$K3SJOBSROW"
+  "${L}$(padded Network 8)${R} ${V}${LAN}${R}${D}  ·  ${R}${A}${TS}${R}"
+)
+
+# 고양이 아트 로드 (없으면 오른쪽 열만 출력).
+# 아트는 모든 줄이 같은 표시폭으로 미리 패딩된 상태라 여기서 폭을 맞출 필요가 없다.
+# 폭은 아트 줄이 모자랄 때 채울 공백에만 쓰므로 sed+wc로 한 번만 잰다
+# (bash 패턴으로 ANSI를 걷어내면 색 코드가 많은 줄에서 수십 배 느려진다).
+CAT=(); CATW=0
+if [ -r "$CAT_FILE" ]; then
+  mapfile -t CAT < "$CAT_FILE"
+  CATW=$(sed 's/\x1b\[[0-9;]*m//g' "$CAT_FILE" | wc -L)
+fi
+
+printf '\n'
+if [ "$CATW" -gt 0 ]; then
+  rows=${#CAT[@]}; rrows=${#RCOL[@]}; off=0
+  [ "$rrows" -lt "$rows" ] && off=$(( (rows - rrows) / 2 ))
+  [ "$rrows" -gt "$rows" ] && rows=$rrows
+  for ((i=0;i<rows;i++)); do
+    ri=$((i - off))
+    if [ -n "${CAT[i]:-}" ]; then line="${CAT[i]}"; else line=$(printf "%${CATW}s" ""); fi
+    if [ "$ri" -ge 0 ] && [ "$ri" -lt "$rrows" ]; then
+      printf "  %s   %s\n" "$line" "${RCOL[ri]}"
+    else
+      printf "  %s\n" "$line"
+    fi
+  done
+else
+  for l in "${RCOL[@]}"; do printf "  %s\n" "$l"; done
+fi
+
+printf '\n'
+if [ "$UPD" -gt 0 ]; then printf "  %s● %s updates available%s" "$WARN" "$UPD" "$R"
+else                      printf "  %s● system up to date%s"    "$OK" "$R"; fi
+if [ "$FAILED" -gt 0 ]; then printf "%s     ▲ %s failed unit%s" "$ERR" "$FAILED" "$R"; [ "$FAILED" -gt 1 ] && printf "%ss%s" "$ERR" "$R"
+else                         printf "%s     ● all units healthy%s" "$OK" "$R"; fi
+[ "$REBOOT" = yes ] && printf "%s     ▲ reboot required%s" "$WARN" "$R"
+printf '\n\n'

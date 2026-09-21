@@ -4,6 +4,9 @@
 
 **적용 방식** — **bootstrap 스크립트(owner 로컬)**: `host-up.sh`로 k3s·스토리지를 올리고 `verify-cluster.sh`로 검증. 버전 핀은 `versions.env`. CI 아님.
 
+**로그인 상태 화면** — [`motd/`](motd/README.md)에 기존 호스트 화면과 k3s 집계기를 둔다.
+현재 Ready/미해소 문제와 복구된 CronJob 실패 기록을 구분한다. 프리뷰·두 파일 설치 절차는 해당 README를 따른다.
+
 **AIOps는 별도 설치** — `bash infra/k3s-bootstrap/aiops-install.sh --prepare <aiops-runtime.tar>`로 설치 계획을 생성한다.
 `--install`은 전용 계정·512 MiB 저장소·systemd 유닛을 설치하며 worker/인입을 활성화하지 않는다.
 `host-config.sh`에는 연결하지 않는다. 인증·수용·중지 절차는 [`docs/aiops.md`](../../docs/aiops.md).

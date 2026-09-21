@@ -10,7 +10,7 @@
 #    apiserver(노드서브넷:6443)·adguard-ui(:3000)·vmsingle(:8428)·DNS(:53)만 허용하고 인터넷 직결 egress는 0으로 둔다.
 #    (⚠️ 잔여: DNS(:53) 허용은 CoreDNS 재귀 경유 exfil(DNS 터널링)을 이론상 남긴다 — 느리고 시끄럽고 공격자
 #     인프라 필요라 수용. 애초에 발송 자격을 이 파드에 두지 않음 — 통지는 메트릭→vmalert→alertmanager 경유.)
-# ⚠️ F6(중첩/무한대기 금지): concurrencyPolicy Forbid + activeDeadline 120 + startingDeadline 300 + backoffLimit 0.
+# ⚠️ F6(중첩/무한대기 금지): concurrencyPolicy Forbid + activeDeadline 150 + startingDeadline 300 + backoffLimit 0.
 # ⚠️ F7(비원자성 회피): AdGuard v0.107.45+ 원자적 /control/rewrite/update로 stale→want 교체(delete→add 갭 없음)
 #    + read-back 재조회 통과 후에만 성공 하트비트.
 ---
@@ -75,7 +75,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0          # 재시도 없이 다음 주기 — staleness 알림이 침묵을 잡는다
-      activeDeadlineSeconds: 150 # 주기(600s)의 1/4 — 행 걸림 방지(DNS 대기 30 + 지연 2×50 = 130 편입)
+      activeDeadlineSeconds: 150 # 준비 대기 30 + 시드 대조 12 + 지연 2×50 = 142초 편입
       template:
         metadata:
           labels: { app: rewrite-reconciler }
@@ -124,8 +124,8 @@ spec:
                   #   응답만 20s+ 지연" 창에서 add 중복 위험이 잔존하고, 그 감지는 list_answer의 중복
                   #   카운트가 진다(아래). connrefused는 커넥션 수립 전 실패라 언제나 안전.
                   # 재시도 예산: 양 등급 모두 retry-max-time 30이 상한 — 호출당 최악 ≈ 30+20=50s.
-                  #   DNS pre-flight 최대 대기(DNS_WAIT_MAX=30, 아래) + 지연 2개(READ/WRITE 조합 무관)
-                  #   = 30+2×50=130 < 150s 데드라인. CoreDNS 롤링은 상관 장애라 READ 4곳을 동시에
+                  #   DNS·LB IP 준비의 공유 대기(DNS_WAIT_MAX=30) + 시드 대조 4×3 + 지연 2개
+                  #   = 30+12+2×50=142 < 150s 데드라인. CoreDNS 롤링은 상관 장애라 여러 READ를 동시에
                   #   때릴 수 있다 — 3개+ 동시 지연은 DeadlineExceeded→다음 주기 수용(staleness 알림
                   #   소관). 산술 증인은 test_rewrite_reconciler.bats.
                   CURL_READ="curl -fsS --connect-timeout 5 --max-time 20 --retry 6 --retry-delay 3 --retry-connrefused --retry-all-errors --retry-max-time 30"
@@ -142,15 +142,18 @@ spec:
                   # (2026-08-27, 위 F6 주석)이 반증 — 재시도는 되지만, 부팅 급 장기 부재(수십 초)는 어떤
                   # 재시도 창으로도 덮기 애매하고 명시 대기가 판정도 명확하다(rc 6만 대기 — 그 외(연결거부
                   # 7 포함)는 해석이 된 것이라 즉시 통과). 정상 경로 비용은 프로브 1회(~ms).
-                  # 프로브는 재시도 없는 rc 판별용이라 세 번째 등급(PROBE)이다 — 판별이 목적이라 -f도
-                  # --retry도 주지 않는다. 최악 DNS_WAIT_MAX초는 아래 데드라인 산술에 편입된다.
+                  # DNS·LB 준비는 벽시계 30초를 공유한다. 각 요청도 남은 시간으로 잘라
+                  # 요청 소요 시간을 세지 않는 sleep 카운터의 상한 초과를 막는다.
+                  # PROBE 변수는 재시도 없는 원시 rc 판별용이며, LB 조회 호출부만 -f를 붙인다.
                   DNS_WAIT_MAX=30
+                  ready_deadline=$((SECONDS + DNS_WAIT_MAX))
                   CURL_PROBE="curl -s --connect-timeout 2 --max-time 3"
-                  dns_wait=0
-                  while [ "$dns_wait" -lt "$DNS_WAIT_MAX" ]; do
-                    rc=0; $CURL_PROBE -o /dev/null "$AG/" || rc=$?
+                  while [ "$SECONDS" -lt "$ready_deadline" ]; do
+                    remaining=$((ready_deadline - SECONDS))
+                    probe_timeout=$((remaining < 3 ? remaining : 3))
+                    rc=0; $CURL_PROBE --max-time "$probe_timeout" -o /dev/null "$AG/" || rc=$?
                     if [ "$rc" -ne 6 ]; then break; fi
-                    dns_wait=$((dns_wait + 1)); sleep 1
+                    if [ "$SECONDS" -lt "$ready_deadline" ]; then sleep 1; fi
                   done
                   # ── 시드 대조 스텝(ADR-0007 결정 2 — adguard 본체 설정의 SSOT는 **라이브**) ──────
                   # adguardhome.yaml의 ConfigMap은 initContainer `cp -n`이 쓰는 **첫 부팅 시드**다
@@ -379,12 +382,30 @@ spec:
                     echo "seed-drift: upstream=${d_up} bootstrap=${d_bs} ratelimit=${d_rl} ratelimit_whitelist=${d_wl} ptr=${d_ptr} querylog.enabled=${d_qe} querylog.interval=${d_qi} statistics.interval=${d_si}"
                   }
                   seed_drift_report || echo "시드 대조 실패 — 게이지·하트비트 미push(관측 실패는 드리프트가 아니다). rewrite 수렴은 계속한다." >&2
-                  # 1) want = traefik-ts LB tailscale IP (apiserver로 svc 조회 — status.loadBalancer.ingress[].ip)
-                  want=$($CURL_READ --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" \
-                    "$APISERVER/api/v1/namespaces/gateway/services/traefik-ts" \
-                    | sed -n 's/.*"ip"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p')
-                  want=${want%%$'\n'*}   # 첫 매치만(다중 라인 방어) — `| head`의 SIGPIPE+pipefail 141 회피
-                  [ -n "$want" ] || { echo "traefik-ts LB IP 추출 실패"; exit 1; }
+                  # 1) want = traefik-ts LB tailscale IP. 부팅 때 HTTP 200이어도 아직 IP가 없을 수 있다.
+                  # DNS와 같은 마감 시각을 사용하므로 빈 응답 재조회가 실행 예산을 추가하지 않는다.
+                  # 전송 오류·408/429/5xx도 재시도한다. 그 외 HTTP 오류는 자격/RBAC 등 실제 오류로 반환한다.
+                  want=""
+                  while [ "$SECONDS" -lt "$ready_deadline" ]; do
+                    remaining=$((ready_deadline - SECONDS))
+                    probe_timeout=$((remaining < 3 ? remaining : 3))
+                    if svc=$($CURL_PROBE -f -w '\n%{http_code}' --max-time "$probe_timeout" --cacert "$SA/ca.crt" \
+                      -H "Authorization: Bearer $TOKEN" "$APISERVER/api/v1/namespaces/gateway/services/traefik-ts"); then
+                      want=$(printf '%s' "$svc" | sed -n 's/.*"ip"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p')
+                      want=${want%%$'\n'*} # 첫 매치만 — head의 SIGPIPE 회피
+                      [ -z "$want" ] || break
+                    else
+                      rc=$?
+                      if [ "$rc" -eq 22 ]; then
+                        case "${svc##*$'\n'}" in
+                          408|429|5[0-9][0-9]) : ;;
+                          *) echo "traefik-ts Service 조회 HTTP 오류" >&2; exit "$rc" ;;
+                        esac
+                      fi
+                    fi
+                    if [ "$SECONDS" -lt "$ready_deadline" ]; then sleep 1; fi
+                  done
+                  [ -n "$want" ] || { echo "traefik-ts LB IP 준비 시간 초과(${DNS_WAIT_MAX}s)" >&2; exit 1; }
                   # 2) have = AdGuard 현재 *.home rewrite answer
                   list_answer() {
                     # local 미사용(local var=$(...)는 종료코드를 삼켜 set -e를 무력화 — bash 함정). pipefail로 curl 실패 전파.
