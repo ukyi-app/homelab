@@ -102,8 +102,27 @@ for f in ${STUB_FAIL_URLS:-}; do
   esac
 done
 case "$url" in
+  http://adguard-ui.edge.svc/)
+    n=0
+    if [ -f "$OUTDIR/dns-reads" ]; then n=$(cat "$OUTDIR/dns-reads"); fi
+    n=$((n + 1)); printf '%s\n' "$n" > "$OUTDIR/dns-reads"
+    if [ "$n" -le "${STUB_DNS_ERRORS:-0}" ]; then exit 6; fi
+    ;;
   */api/v1/import/prometheus) cat >> "$OUTDIR/payload.txt" ;;
-  */api/v1/namespaces/gateway/services/traefik-ts) cat "$FIXDIR/svc.json" ;;
+  */api/v1/namespaces/gateway/services/traefik-ts)
+    n=0
+    if [ -f "$OUTDIR/lb-reads" ]; then n=$(cat "$OUTDIR/lb-reads"); fi
+    n=$((n + 1)); printf '%s\n' "$n" > "$OUTDIR/lb-reads"
+    if [ "$n" -le "${STUB_LB_ERRORS:-0}" ]; then exit 7; fi
+    if [ "$n" -eq 1 ] && [ -n "${STUB_LB_HTTP:-}" ]; then
+      printf '\n%s' "$STUB_LB_HTTP"; exit 22
+    fi
+    if [ "$n" -le "${STUB_LB_EMPTY_READS:-0}" ]; then
+      printf '%s\n' '{"status":{"loadBalancer":{"ingress":[]}}}'
+    else
+      cat "$FIXDIR/svc.json"
+    fi
+    ;;
   */control/rewrite/list) cat "$FIXDIR/rewrite-list.json" ;;
   */control/rewrite/add) echo '{}' ;;
   */control/rewrite/update) echo '{}' ;;
@@ -119,6 +138,9 @@ CURL
 # 추출한 CronJob 스크립트를 스텁 PATH로 실행한다. SEED_FILE 기본값은 합성 시드.
 run_script() {
   OUTDIR="$OUTDIR" FIXDIR="$FIXDIR" STUB_FAIL_URLS="${STUB_FAIL_URLS:-}" \
+    STUB_LB_EMPTY_READS="${STUB_LB_EMPTY_READS:-0}" STUB_LB_ERRORS="${STUB_LB_ERRORS:-0}" \
+    STUB_LB_HTTP="${STUB_LB_HTTP:-}" \
+    STUB_DNS_ERRORS="${STUB_DNS_ERRORS:-0}" \
     SA="$SADIR" SEED_FILE="${SEED_FILE:-$FIXDIR/AdGuardHome.yaml}" \
     ADGUARD_USER=stub ADGUARD_PASSWORD=stub \
     PATH="$STUB:$PATH" bash "$BATS_TEST_TMPDIR/run.sh" < /dev/null
@@ -128,6 +150,69 @@ run_script() {
 drift() { sed -n "s/^adguard_seed_drift{section=\"$1\"} \([0-9][0-9]*\)\$/\1/p" "$OUTDIR/payload.txt"; }
 # 방출된 섹션 라벨 전수(정렬).
 sections() { sed -n 's/^adguard_seed_drift{section="\([^"]*\)"} [0-9][0-9]*$/\1/p' "$OUTDIR/payload.txt" | LC_ALL=C sort; }
+
+@test "rewrite waits for a successful service response to acquire its LB IP" {
+  STUB_LB_EMPTY_READS=2
+  run run_script
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUTDIR/lb-reads")" = "3" ]
+  grep '^adguard_rewrite_reconcile_timestamp ' "$OUTDIR/payload.txt"
+}
+
+@test "rewrite retries connection refusal while waiting for the LB IP" {
+  STUB_LB_ERRORS=1
+  run run_script
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUTDIR/lb-reads")" = "2" ]
+  grep '^adguard_rewrite_reconcile_timestamp ' "$OUTDIR/payload.txt"
+}
+
+@test "rewrite times out without a success heartbeat when the LB IP stays empty" {
+  # 실제 args의 대기 상수만 축소한다. 제어 흐름과 curl 호출은 그대로 실행한다.
+  sed 's/DNS_WAIT_MAX=30/DNS_WAIT_MAX=1/' "$BATS_TEST_TMPDIR/run.sh" > "$BATS_TEST_TMPDIR/short.sh"
+  mv "$BATS_TEST_TMPDIR/short.sh" "$BATS_TEST_TMPDIR/run.sh"
+  STUB_LB_EMPTY_READS=999
+  run run_script
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -F 'traefik-ts LB IP 준비 시간 초과'
+  grep '^adguard_seed_drift_checked_timestamp_seconds ' "$OUTDIR/payload.txt"
+  run grep '^adguard_rewrite_reconcile_timestamp ' "$OUTDIR/payload.txt"
+  [ "$status" -eq 1 ]
+}
+
+@test "rewrite retries a transient HTTP failure during LB readiness" {
+  STUB_LB_HTTP=503
+  run run_script
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUTDIR/lb-reads")" = "2" ]
+  grep '^adguard_rewrite_reconcile_timestamp ' "$OUTDIR/payload.txt"
+}
+
+@test "rewrite fails promptly on an authorization error during LB readiness" {
+  STUB_LB_HTTP=403
+  run run_script
+  [ "$status" -eq 22 ]
+  [ "$(cat "$OUTDIR/lb-reads")" = "1" ]
+  grep '^adguard_seed_drift_checked_timestamp_seconds ' "$OUTDIR/payload.txt"
+  run grep '^adguard_rewrite_reconcile_timestamp ' "$OUTDIR/payload.txt"
+  [ "$status" -eq 1 ]
+}
+
+@test "DNS and empty LB responses consume the same readiness budget" {
+  # DNS가 1초를 소비한 뒤 LB의 두 빈 응답까지 받으면 3초 공유 예산은 소진된다.
+  # LB에서 마감 시각을 새로 만들면 세 번째 조회가 성공해 이 테스트가 red다.
+  sed 's/DNS_WAIT_MAX=30/DNS_WAIT_MAX=3/' "$BATS_TEST_TMPDIR/run.sh" > "$BATS_TEST_TMPDIR/short.sh"
+  mv "$BATS_TEST_TMPDIR/short.sh" "$BATS_TEST_TMPDIR/run.sh"
+  STUB_DNS_ERRORS=1
+  STUB_LB_EMPTY_READS=2
+  run run_script
+  [ "$status" -eq 1 ]
+  [ "$(cat "$OUTDIR/dns-reads")" = "2" ]
+  printf '%s\n' "$output" | grep -F 'traefik-ts LB IP 준비 시간 초과'
+  grep '^adguard_seed_drift_checked_timestamp_seconds ' "$OUTDIR/payload.txt"
+  run grep '^adguard_rewrite_reconcile_timestamp ' "$OUTDIR/payload.txt"
+  [ "$status" -eq 1 ]
+}
 
 @test "seed check emits zero for every section when the seed matches the live API" {
   run run_script
