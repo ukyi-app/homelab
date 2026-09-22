@@ -824,6 +824,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 ### AIOps 파일럿
 
 - **`aiops-observation.ts`** — GHA `aiops-observation` composite가 검사 결과를 선별된 artifact로 기록한다. 정상·경고·관측 불가와 대상별 부분 결과를 구별하며 `aiops-producers-v1.json`의 버전·바이트 해시를 기록한다.
+- **`lib/aiops-provenance.ts`** — checkout 직후 고정한 검사 코드 출처와 변경 제안 revision을 분리·검증한다. `tests/test_aiops-provenance.bats`가 Git 출처 회귀와 `tests/aiops-provenance.test.ts` 단위 검사를 실행한다.
 
 실행기·검증기·게시기는 별도 `ukyi-app/aiops` 레포에 둔다. 이 레포는 `aiops-producers-v1.json`의 생산자 계약과 `infra/k3s-bootstrap/aiops-runtime.json`의 release 핀을 소유한다. 연결·설치 순서는 [`docs/aiops.md`](../docs/aiops.md).
 

@@ -1,0 +1,31 @@
+# 관측 출처 캡처 composite — actions/checkout 직후, 어떤 HEAD/워크트리 변이보다 앞에서 실행한다.
+#
+# 축 셋을 구분한다(AGENTS.md·docs/aiops.md GHA 수용 계약):
+#   · source revision  — 이 캡처가 고정한 SHA. 관측 artifact의 `revision`으로만 나간다.
+#                        검사 코드의 신뢰 출처라서 collector의 main 도달성 검사를 통과해야 한다.
+#   · runHeadSha       — 실행 HEAD(GITHUB_SHA). collector가 run 객체와 대조하는 실행 축이며 출처가 아니다.
+#   · proposal revision— 실행 중 pr-first-commit이 만든 제안 커밋. 출처가 아니며 별도 메타데이터로만 나간다.
+#
+# ⚠️ 관측 composite는 이 값을 받아서만 쓴다 — `git rev-parse HEAD`를 관측 시점에 다시 읽으면
+#    pr-first-commit 뒤의 주변 HEAD(제안 커밋)를 main 출처로 보내는 결함이 재발한다
+#    (실제 실행 34989120451 artifact 10405176316 — collector artifact-revision-not-trusted-main).
+# ⚠️ main 재checkout 생산자(bump 계열)는 검사 코드를 workflow_sha 같은 신뢰 main 조상에 고정하므로
+#    source revision이 runHeadSha와 다를 수 있다. 그래서 GITHUB_SHA 일괄 대체는 금지다.
+name: aiops-provenance
+description: 검사 코드의 신뢰 출처 revision을 checkout 직후 고정한다(제안 커밋과 분리)
+outputs:
+  source-revision:
+    description: "검사 코드 출처 SHA(40-hex) — 관측 revision으로 전달한다"
+    value: ${{ steps.capture.outputs.source-revision }}
+  run-head-sha:
+    description: "실행 HEAD(github.sha) — 출처와 구분되는 축(진단용)"
+    value: ${{ steps.capture.outputs.run-head-sha }}
+runs:
+  using: composite
+  steps:
+    - id: capture
+      shell: bash
+      env:
+        RUN_HEAD_SHA: ${{ github.sha }}
+      # 스크립트를 밖에 두는 이유: bats 회귀가 실제 임시 Git 저장소에서 같은 바이트를 직접 실행한다.
+      run: bash "${{ github.action_path }}/capture.sh"
