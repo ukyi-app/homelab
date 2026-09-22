@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: database
 
 resources:
+  - aiops-observation-auth.sealed.yaml # AIOps 전용 수신 인증
   - namespace.yaml # database ns(PSA baseline 라벨) — cnpg-data App 소유, wave -3
   - object-store.yaml
   - cluster.yaml
