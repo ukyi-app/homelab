@@ -16,20 +16,23 @@ global:
   resolve_timeout: 5m
 route:
   receiver: telegram
-  group_by: ['alertname','namespace']
+  group_by: ['alertname', 'namespace']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
   routes:
-    - matchers: [ 'alertname = Watchdog' ]
+    - receiver: aiops
+      continue: true
+    - matchers: ['alertname = Watchdog']
       receiver: deadmanswitch
       group_wait: 0s
       group_interval: 1m
       repeat_interval: 1m
       continue: false
-    - matchers: [ 'severity = critical' ]
+    - matchers: ['severity = critical']
       receiver: telegram
       repeat_interval: 1h
+    - receiver: telegram
 receivers:
   - name: telegram
     telegram_configs:
@@ -105,16 +108,24 @@ receivers:
     webhook_configs:
       - url: http://deadmanswitch-relay:9095/ping
         send_resolved: false
+  - name: aiops
+    webhook_configs:
+      - url: http://192.168.117.15:21980/sources/alertmanager
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/aiops/token
 inhibit_rules:
-  - source_matchers: [ 'severity = critical' ]
-    target_matchers: [ 'severity = warning' ]
-    equal: ['alertname','namespace']
+  - source_matchers: ['severity = critical']
+    target_matchers: ['severity = warning']
+    equal: ['alertname', 'namespace']
   # 같은 디스크의 critical(예: StandardSSDFilling)이 warning(StandardSSDWarning/Trend)을 억제한다.
   # 둘은 alertname이 달라 위 규칙(equal:alertname)으로는 매치 안 돼 둘 다 발화하던 것을 교정.
   # disk 라벨이 있는 알림으로만 한정(=~".+")해 비-디스크 알림을 과억제하지 않는다.
   # (WAL은 disk:pgwal로 분리 — 루트 fs critical이 WAL 충전 경고를 가리지 않게: 원인이 WAL일 수 있다.)
-  - source_matchers: [ 'severity = critical', 'disk =~ ".+"' ]
-    target_matchers: [ 'severity = warning', 'disk =~ ".+"' ]
+  - source_matchers: ['severity = critical', 'disk =~ ".+"']
+    target_matchers: ['severity = warning', 'disk =~ ".+"']
     equal: ['disk']
   # 같은 unit의 critical(SystemdUnitFailed — `OnFailure=` 이벤트 축)이 warning
   # (SystemdHostUnitFailed — 주기 스윕 축)을 억제한다. 두 축은 **직교**라 같은 고장을 양쪽이
@@ -124,6 +135,6 @@ inhibit_rules:
   #    엉뚱한 억제가 생긴다(disk 규칙이 같은 이유로 같은 한정을 건다).
   # ★ 이 규칙이 있어야 "critical이 필요하면 유닛 파일에 OnFailure= 한 줄을 넣어 승격하라"는
   #   스윕 알림의 처방이 **페이지를 늘리지 않는다**.
-  - source_matchers: [ 'alertname = SystemdUnitFailed', 'unit =~ ".+"' ]
-    target_matchers: [ 'alertname = SystemdHostUnitFailed', 'unit =~ ".+"' ]
+  - source_matchers: ['alertname = SystemdUnitFailed', 'unit =~ ".+"']
+    target_matchers: ['alertname = SystemdHostUnitFailed', 'unit =~ ".+"']
     equal: ['unit']

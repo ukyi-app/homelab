@@ -33,26 +33,31 @@ setup() {
   [ "$output" = "1" ]
 }
 
-@test "route.routes is a closed pair: Watchdog fast-path and critical fast-repeat" {
-  # 두 서브라우트 모두 값 단언이 없었다. 어느 쪽을 통째로 지워도 최상위
-  # 기본 receiver(telegram)가 흡수해 게이트 전건이 초록이었다(73/73·63/63 실측). length 등식으로
-  # 폐집합을 잠그고 각 라우트의 필드를 등식으로 잰다.
+@test "route.routes is a closed set of four: aiops mirror, Watchdog, critical, telegram fallback" {
+  # 인덱스 결합을 줄이려 receiver/matchers로 select하되, 폐집합 크기(4)와 선두/말미 위치는 값으로
+  # 잠근다. aiops 무매처 미러가 선두(continue:true), 명시적 telegram 폴백이 말미다 — aiops 미러가
+  # root 기본 receiver(telegram)를 삼키지 않게 하는 두 자리다.
   n="$(yq '.route.routes | length' "$AMCFG")"
-  [ "$n" = "2" ]
-  # Watchdog → deadmanswitch(오프노드 dead-man 백스톱 — healthchecks.io ping), 즉시 반복 + 폴백 금지.
-  m="$(yq '.route.routes[0].matchers[0]' "$AMCFG")"; [ "$m" = "alertname = Watchdog" ]
-  r="$(yq '.route.routes[0].receiver' "$AMCFG")"; [ "$r" = "deadmanswitch" ]
-  c="$(yq '.route.routes[0].continue' "$AMCFG")"; [ "$c" = "false" ]
-  gw="$(yq '.route.routes[0].group_wait' "$AMCFG")"; [ "$gw" = "0s" ]
-  gi="$(yq '.route.routes[0].group_interval' "$AMCFG")"; [ "$gi" = "1m" ]
-  rp="$(yq '.route.routes[0].repeat_interval' "$AMCFG")"; [ "$rp" = "1m" ]
-  # severity=critical → telegram 1h 재통지(최상위 기본 4h보다 4배 빠름). 인덱스가 아니라 matchers로
-  # select — Watchdog 라우트가 앞으로 재배열돼도 라우트 순서에 결합되지 않는다(위 receiver-length
-  # 테스트와 같은 select 관용구).
+  [ "$n" = "4" ]
+  # ① 선두: 무매처 aiops 미러(continue:true) — 전건을 AIOps로도 전달하고 다음 라우트 평가를 막지 않는다.
+  ar="$(yq '.route.routes[0].receiver' "$AMCFG")"; [ "$ar" = "aiops" ]
+  ac="$(yq '.route.routes[0].continue' "$AMCFG")"; [ "$ac" = "true" ]
+  am="$(yq '.route.routes[0] | has("matchers")' "$AMCFG")"; [ "$am" = "false" ]
+  # ② Watchdog → deadmanswitch(오프노드 dead-man 백스톱 — healthchecks.io ping), 즉시 반복 + 폴백 금지.
+  m="$(yq '.route.routes[] | select(.receiver=="deadmanswitch") | .matchers[0]' "$AMCFG")"; [ "$m" = "alertname = Watchdog" ]
+  c="$(yq '.route.routes[] | select(.receiver=="deadmanswitch") | .continue' "$AMCFG")"; [ "$c" = "false" ]
+  gw="$(yq '.route.routes[] | select(.receiver=="deadmanswitch") | .group_wait' "$AMCFG")"; [ "$gw" = "0s" ]
+  gi="$(yq '.route.routes[] | select(.receiver=="deadmanswitch") | .group_interval' "$AMCFG")"; [ "$gi" = "1m" ]
+  rp="$(yq '.route.routes[] | select(.receiver=="deadmanswitch") | .repeat_interval' "$AMCFG")"; [ "$rp" = "1m" ]
+  # ③ severity=critical → telegram 1h 재통지(최상위 기본 4h보다 4배 빠름). matchers로 select.
   cr="$(yq '.route.routes[] | select(.matchers[0]=="severity = critical") | .receiver' "$AMCFG")"
   [ "$cr" = "telegram" ]
   cri="$(yq '.route.routes[] | select(.matchers[0]=="severity = critical") | .repeat_interval' "$AMCFG")"
   [ "$cri" = "1h" ]
+  # ④ 말미: 무매처 telegram 폴백 — continue 없음(false)이라 매치 알림에서 평가가 멈춘다.
+  fr="$(yq '.route.routes[3].receiver' "$AMCFG")"; [ "$fr" = "telegram" ]
+  fm="$(yq '.route.routes[3] | has("matchers")' "$AMCFG")"; [ "$fm" = "false" ]
+  fc="$(yq '.route.routes[3].continue // false' "$AMCFG")"; [ "$fc" = "false" ]
 }
 
 @test "telegram config keeps parse_mode HTML and send_resolved true" {
@@ -208,16 +213,24 @@ setup() {
   printf '%s' "$am" | grep -q 'disk =~'             # disk 라벨 보유 알림만 한정(비-디스크 과억제 방지)
 }
 
-@test "receivers is a closed set of two: telegram and deadmanswitch (no rogue webhook)" {
-  # receivers 배열 전체 길이에 등식이 없었다. 3번째
-  # receiver(어떤 라우트도 참조하지 않는 rogue webhook 등)를 몰래 추가해도 :28 "exactly one telegram
-  # receiver" @test는 name=="telegram"만 select해 세므로 형제 원소 추가에 반응하지 않는다(무증인).
-  # :36 route.routes 폐집합 등식과 동형으로 receivers 배열 자체를 length로 잠근다.
+@test "receivers is a closed set of three: telegram, deadmanswitch, aiops webhook" {
+  # length 등식으로 폐집합을 잠그고, aiops receiver의 webhook 형태(resolved 전달·토큰 파일 인증)까지
+  # 값으로 고정한다. rogue webhook 추가는 이름 목록·개수 등식이 막는다.
   n="$(yq '.receivers | length' "$AMCFG")"
-  [ "$n" = "2" ]
+  [ "$n" = "3" ]
   names="$(yq '.receivers[].name' "$AMCFG")"
   printf '%s' "$names" | grep -qFx 'telegram'
   printf '%s' "$names" | grep -qFx 'deadmanswitch'
+  printf '%s' "$names" | grep -qFx 'aiops'
+  # aiops receiver는 webhook_configs 1개·send_resolved:true·credentials_file:/etc/alertmanager/aiops/token이어야 한다.
+  aw="$(yq '.receivers[] | select(.name=="aiops") | .webhook_configs | length' "$AMCFG")"
+  [ "$aw" = "1" ]
+  asr="$(yq '.receivers[] | select(.name=="aiops") | .webhook_configs[0].send_resolved' "$AMCFG")"
+  [ "$asr" = "true" ]
+  acf="$(yq '.receivers[] | select(.name=="aiops") | .webhook_configs[0].http_config.authorization.credentials_file' "$AMCFG")"
+  [ "$acf" = "/etc/alertmanager/aiops/token" ]
+  au="$(yq '.receivers[] | select(.name=="aiops") | .webhook_configs[0].url' "$AMCFG")"
+  printf '%s' "$au" | grep -qE '/sources/alertmanager$'
 }
 
 @test "deadmanswitch receiver's webhook url matches the relay Service host:port (no silent drift)" {

@@ -40,7 +40,7 @@ spec:
       initContainers:
         - name: render-config
           image: busybox:1.38@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
-          command: ["sh", "-c"]
+          command: [ "sh", "-c" ]
           args:
             - |
               sed "s/__CHAT_ID__/$TELEGRAM_CHAT_ID/" /config-in/alertmanager.yml > /config-out/alertmanager.yml
@@ -49,7 +49,7 @@ spec:
           volumeMounts:
             - { name: config-in, mountPath: /config-in }
             - { name: config-out, mountPath: /config-out }
-          securityContext: { runAsNonRoot: true, runAsUser: 65534, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+          securityContext: { runAsNonRoot: true, runAsUser: 65534, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ "ALL" ] } }
       containers:
         - name: alertmanager
           image: prom/alertmanager:v0.33.0@sha256:af26fbe4dd1886ac0efd7bd55cd9027da262e105b137a376522b7c14c3626e4a
@@ -58,7 +58,7 @@ spec:
             - --storage.path=/alertmanager
             - --cluster.listen-address=
             - --web.listen-address=:9093
-          ports: [{ name: http, containerPort: 9093 }]
+          ports: [ { name: http, containerPort: 9093 } ]
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 64Mi }
@@ -66,16 +66,22 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            capabilities: { drop: [ "ALL" ] }
           volumeMounts:
             - { name: config-out, mountPath: /etc/alertmanager }
             - { name: secrets, mountPath: /etc/alertmanager/secrets, readOnly: true }
             - { name: data, mountPath: /alertmanager }
+            - name: aiops-auth
+              mountPath: /etc/alertmanager/aiops
+              readOnly: true
       volumes:
         - { name: config-in, configMap: { name: alertmanager-config } }
         - { name: config-out, emptyDir: {} }
         - { name: secrets, secret: { secretName: alerting-secrets } }
         - { name: data, emptyDir: { sizeLimit: 128Mi } }
+        - name: aiops-auth
+          secret:
+            secretName: aiops-observation-auth
 ---
 apiVersion: v1
 kind: Service
@@ -84,4 +90,4 @@ metadata:
   labels: { app.kubernetes.io/name: alertmanager }
 spec:
   selector: { app.kubernetes.io/name: alertmanager }
-  ports: [{ name: http, port: 9093, targetPort: 9093 }]
+  ports: [ { name: http, port: 9093, targetPort: 9093 } ]

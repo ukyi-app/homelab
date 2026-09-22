@@ -72,7 +72,7 @@ repoServer:
   initContainers:
     - name: install-ksops
       image: viaductoss/ksops:v4.3.3@sha256:6b5ec4b6144307f78bcddffd8f09020482836eee34cf77bf4ce8614b0452a73c
-      command: ["/bin/sh", "-c"]
+      command: [ "/bin/sh", "-c" ]
       args:
         - |
           echo "installing ksops + kustomize (exec-enabled)";
@@ -142,6 +142,13 @@ notifications:
   notifiers:
     service.telegram: |
       token: $telegram-token
+    service.webhook.aiops: |
+      url: http://192.168.117.15:21980/sources/argocd
+      headers:
+        - name: Authorization
+          value: Bearer $aiops-token
+        - name: Content-Type
+          value: application/json
   # line1 메시지 계약(3채널): {글리프} *{제목}* — {상태}. native가 Markdown 강제라 bold=*…*(HTML <b> 대신).
   # app 이름은 k8s DNS명(소문자·숫자·'-'만)이라 Markdown 특수문자(_ * ` [) 없음 → 이스케이프 불요.
   templates:
@@ -166,6 +173,32 @@ notifications:
         {{- $s := $l | trunc 300 | replace "_" "-" | replace "*" "·" | replace "`" "'" | replace "[" "(" -}}
         ⚠️ *동기화 실패* — {{.app.metadata.name}} ({{.app.status.operationState.phase}})
         {{ $s }}
+    template.aiops-health: |
+      webhook:
+        aiops:
+          method: POST
+          body: '{"check":"health","name":{{ .app.metadata.name | toJson }},"namespace":{{
+            .app.metadata.namespace | toJson }},"phase":{{ if
+            .app.status.operationState }}{{ .app.status.operationState.phase | default
+            "" | toJson }}{{ else }}""{{ end }},"health":{{ .app.status.health.status
+            | default "" | toJson }},"sync":{{ .app.status.sync.status | default "" |
+            toJson }},"observedAt":{{ .app.status.reconciledAt | toJson
+            }},"revision":{{ if regexMatch "^[a-f0-9]{40}$" (.app.status.sync.revision
+            | default "") }}{{ .app.status.sync.revision | toJson }}{{ else }}null{{
+            end }}}'
+    template.aiops-sync: |
+      webhook:
+        aiops:
+          method: POST
+          body: '{"check":"sync","name":{{ .app.metadata.name | toJson }},"namespace":{{
+            .app.metadata.namespace | toJson }},"phase":{{ if
+            .app.status.operationState }}{{ .app.status.operationState.phase | default
+            "" | toJson }}{{ else }}""{{ end }},"health":{{ .app.status.health.status
+            | default "" | toJson }},"sync":{{ .app.status.sync.status | default "" |
+            toJson }},"observedAt":{{ .app.status.reconciledAt | toJson
+            }},"revision":{{ if regexMatch "^[a-f0-9]{40}$" (.app.status.sync.revision
+            | default "") }}{{ .app.status.sync.revision | toJson }}{{ else }}null{{
+            end }}}'
   triggers:
     trigger.on-deployed: |
       # oncePer는 "실제 sync 작업이 돈 revision"(operationState.syncResult)에 건다 — status.sync.revision(관측된 desired
@@ -192,14 +225,30 @@ notifications:
       - when: app.status.operationState.phase in ['Error', 'Failed'] and app.status.operationState.syncResult != nil
         oncePer: 'app.status.operationState.syncResult.revisions != nil ? join(app.status.operationState.syncResult.revisions, ",") : app.status.operationState.syncResult.revision'
         send: [app-sync-failed]
-  subscriptions:                       # ⚠️ YAML 리스트 — 블록 스칼라 `|` 금지(차트가 cm.data.subscriptions로 래핑; `|`면 중첩되어 무효)
+    trigger.aiops-health: |
+      - when: app.status.health.status == 'Healthy'
+        send: [aiops-health]
+      - when: app.status.health.status == 'Degraded'
+        send: [aiops-health]
+    trigger.aiops-sync: |
+      - when: app.status.operationState != nil and app.status.operationState.phase == 'Succeeded'
+        send: [aiops-sync]
+      - when: app.status.operationState != nil and app.status.operationState.phase in ['Failed', 'Error']
+        send: [aiops-sync]
+  subscriptions:
+    # ⚠️ YAML 리스트 — 블록 스칼라 `|` 금지(차트가 cm.data.subscriptions로 래핑; `|`면 중첩되어 무효)
     - recipients:
         # recipient = telegram 서비스 + 음수 그룹 chatId(리터럴·비-credential; native는 '-' 접두 음수 그룹만 지원).
         # -5468340205 = "homelab" telegram 그룹. ⚠️ basic group이 supergroup으로 승격되면 id가 -100…으로 바뀐다
         #   (그때 발송 실패 → getUpdates로 새 id 재조회 후 갱신).
         - telegram:-5468340205
-      triggers: [on-deployed, on-health-degraded, on-sync-failed]
+      triggers: [ on-deployed, on-health-degraded, on-sync-failed ]
       selector: notify.homelab/telegram=true
+    - recipients:
+        - "aiops:"
+      triggers:
+        - aiops-health
+        - aiops-sync
 
 dex:
   enabled: false
@@ -273,7 +322,7 @@ extraObjects:
     spec:
       podSelector:
         matchLabels: { app.kubernetes.io/name: argocd-notifications-controller }
-      policyTypes: [Egress]
+      policyTypes: [ Egress ]
       # 규칙 없음 => 컨트롤러 egress 전부 거부; 아래 allow가 최소만 재개방.
   - apiVersion: networking.k8s.io/v1
     kind: NetworkPolicy
@@ -284,18 +333,21 @@ extraObjects:
     spec:
       podSelector:
         matchLabels: { app.kubernetes.io/name: argocd-notifications-controller }
-      policyTypes: [Egress]
+      policyTypes: [ Egress ]
       egress:
-        - to: # DNS — api.telegram.org 해석(CoreDNS)
+        - to:
+            # DNS — api.telegram.org 해석(CoreDNS)
             - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
               podSelector: { matchLabels: { k8s-app: kube-dns } }
-          ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
-        - to: # apiserver — Application/Secret watch. ClusterIP 아닌 node-subnet:6443(kube-router DNAT-후 트랩)
+          ports: [ { protocol: UDP, port: 53 }, { protocol: TCP, port: 53 } ]
+        - to:
+            # apiserver — Application/Secret watch. ClusterIP 아닌 node-subnet:6443(kube-router DNAT-후 트랩)
             - ipBlock: { cidr: 192.168.117.0/24 } # NUC LAN 서브넷(노드 InternalIP 192.168.117.15)
-          ports: [{ protocol: TCP, port: 6443 }]
-        - to: # 외부 telegram(api.telegram.org:443) — 사설대역 except로 내부 lateral 차단
-            - ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16] }
-          ports: [{ protocol: TCP, port: 443 }]
+          ports: [ { protocol: TCP, port: 6443 } ]
+        - to:
+            # 외부 telegram(api.telegram.org:443) — 사설대역 except로 내부 lateral 차단
+            - ipBlock: { cidr: 0.0.0.0/0, except: [ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 ] }
+          ports: [ { protocol: TCP, port: 443 } ]
         # ⚠️ apiserver allow는 별도 to 블록 — 위 telegram except의 192.168.0.0/16이 apiserver(192.168.117.x)도 제외하기 때문.
         # (repo-server는 기본 미사용 → 제외. 연결 테스트가 막히면 아래 주석 해제.)
         # - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: argocd-repo-server } } }]

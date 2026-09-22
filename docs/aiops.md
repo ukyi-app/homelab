@@ -60,16 +60,21 @@ SQLite DB/WAL은 `0660`, 운영 state 디렉토리는 root:`aiops-state`의 `277
 | 역할 | 접근 자료 | 허용 작업 |
 |---|---|---|
 | `aiops-collector` | 읽기 전용 kubeconfig·GitHub·healthchecks, 생산자 토큰, 사건 저장소 | 정해진 관측 조회·수신 |
-| `aiops-engine` | 전용 구독 인증, 선별 증거·Git 사본 | 네트워크 없는 Codex 도구 sandbox 안에서 조사 |
+| `aiops-engine` | 전용 gateway의 제한된 client key, 선별 증거·Git 사본 | CLIProxyAPI로 고정 모델 진단 요청 |
 | `aiops-validator` | 기준·후보 사본 | 무자격 검사 |
 | `aiops-writer` / `aiops-pr` | 각 역할로 축소 발급한 GitHub App 토큰 | homelab 사건 브랜치 Git Data 쓰기 / Draft PR 생성·조회 |
 | `aiops-telegram` | 전용 Telegram 토큰·chat ID | 요약 발송 |
 
 조정기는 root로 역할 토큰을 발급하고 systemd 작업과 사건 상태를 조정한다. 모델을 root 프로세스 안에서 실행하지 않는다.
-역할 작업에는 표준 입출력 외 FD와 상속 인증 환경을 전달하지 않는다. engine 인증은 도구 workspace 밖에 놓으며
-직접 파일·symlink·부모 `/proc`·환경·FD·소켓·네트워크 접근을 실제 Codex sandbox로 검증한다.
-설치된 Codex는 `0.154.0`이며 모델 기본값은 `gpt-6-astra`다. API 키 fallback은 허용하지 않는다.
-`forced_login_method="chatgpt"`와 파일 인증 저장소를 고정한다.
+역할 작업에는 표준 입출력 외 FD와 상속 인증 환경을 전달하지 않는다. 운영 provider는 `cliproxyapi`다.
+root가 사건마다 전용 transient gateway를 시작하고 TLS·모델 등록·OAuth 계정 목록을 확인한다.
+`aiops-proxy`는 별도 UID로 구독 OAuth를 보관하며 engine은 OAuth·TLS 개인 키를 읽지 못한다.
+engine에는 `/run/homelab-aiops/credentials/engine/cliproxy`의 root:engine `0440` client key만 전달한다.
+이전 Codex 인증은 보존하며 CLIProxyAPI 실패 시 직접 CLI·Polyrelay·유료 API로 자동 전환하지 않는다.
+
+등록 계정 수에는 상한을 두지 않는다. 고정한 같은 모델에서 CLIProxyAPI의 응답 전 계정 순회를 허용한다.
+AIOps runner는 모델 POST를 재전송하지 않는다. gateway의 계정 순회 중 원격 사용량이 불확실할 수 있어
+계정 수나 사건 수를 실제 HTTP 시도 수·토큰 상한으로 해석하지 않는다. 동시 1사건·하루 최대 20사건은 유지한다.
 
 수집 120초/512MiB/1MiB, Codex 600초/2GiB/8MiB, 검증 300초/2GiB/8MiB, 게시 합계 60초/256MiB/1MiB다.
 전체 시도는 1200초다. systemd `KillMode=control-group`, `TimeoutStopSec=10`, 메모리·CPU·PID 제한을 사용한다.
@@ -93,29 +98,37 @@ writer에는 Contents/Workflows 쓰기, PR 역할에는 Contents 읽기/Pull req
 AIOps App·PR의 `GITHUB_TOKEN` 거부와 기존 운영 흐름의 성공을 실제로 확인해야 한다. Draft·workflow 조건·기본 read 권한은 이 증거를 대체하지 않는다.
 인증 Terraform plan은 owner가 main의 `reviewed-plan.yaml`에 정확한 검토 PR head SHA를 지정해 실행한다.
 재실행이나 head 변경은 새 검토 요청이 필요하다. 일반 PR은 운영 자격 없이 검사한다.
-ChatGPT 로그인은 `aiops-engine` 계정의 `/var/lib/homelab-aiops/auth`에서 진행한다. 설치 이전 개인 인증을 복사하지 않는다.
+ChatGPT 구독 OAuth는 전용 `aiops-proxy` 계정의 CLIProxyAPI 인증 저장소에 연결한다.
+engine에는 gateway client key만 전달한다. 이전 직접 Codex 인증은 보존하며 운영 provider의 인증으로 복사하지 않는다.
 healthchecks에는 **읽기 전용 API 키**를 사용한다. UUID·ping URL 대신 읽기 전용 `unique_key`로 체크와 flips를 조회한다.
 
-```bash
-bun tools/aiops.ts producer-plan --state-dir .scratch/aiops-install/state \
-  --repo /path/to/homelab --output .scratch/aiops-install/producers --address <NUC-사설-IP>
-```
-
-생성된 Alertmanager 설정은 기존 Telegram/Watchdog 경로 앞에 병렬 수신자를 추가한다. 배포 패치의 토큰 Secret을 먼저 준비한다.
-ArgoCD는 **bootstrap seed만 바꾸면 live에 적용되지 않는다**. 생성된 merge JSON을 live notifications ConfigMap에 병합하고
+생산자 배선은 이 레포의 Alertmanager 설정·ArgoCD bootstrap 값·CNPG endpoint를 기준으로 검토한다.
+runtime의 `producer-plan` 산출물을 그대로 적용하지 않는다. 실제 NUC 주소·Pod CIDR·기존 알림 경로와 대조해야 한다.
+Alertmanager의 첫 하위 경로는 AIOps로 복사하고 `continue: true`로 기존 Telegram/Watchdog 처리를 이어간다.
+배포 패치의 토큰 Secret을 먼저 준비한다. 기존 Telegram 기본 수신도 마지막 하위 경로에서 유지한다.
+ArgoCD는 **bootstrap seed만 바꾸면 live에 적용되지 않는다**. 검토한 변경을 live notifications ConfigMap에 병합하고
 기존 subscriptions에 AIOps 구독을 추가한다. 같은 변경을 bootstrap seed에도 반영해 재구축 드리프트를 막는다.
 토큰은 notifications Secret의 `aiops-token`이다. URL에는 토큰을 넣지 않는다.
 정상과 실패는 별도 trigger 조건으로 두고 revision `oncePer`로 같은 SHA의 상태 전이를 억제하지 않는다.
 조건 묶음과 선택 필드는 [ArgoCD trigger 계약](https://argo-cd.readthedocs.io/en/stable/operator-manual/notifications/triggers/)을 따른다.
 
 CNPG 두 Job은 선택적 `aiops-endpoint` ConfigMap과 `aiops-observation-auth` Secret을 읽는다.
-database Secret의 `authorization` 키에는 HTTP Authorization 헤더를 저장한다. restore-drill은 정리 완료까지 확인한 후 healthy를 보낸다.
+database Secret의 `authorization` 키에는 `Authorization: Bearer <토큰>` 전체 헤더를 저장한다.
+소비 스크립트는 `curl --header @파일`을 사용하므로 `Bearer <토큰>`만 넣으면 인증 헤더가 전송되지 않는다.
+restore-drill은 정리 완료까지 확인한 후 healthy를 보낸다.
 Alertmanager의 observability Secret은 raw `token` 키를 사용한다. 서로 다른 생산자 토큰을 재사용하지 않는다.
 기존 `.enc.yaml`은 직접 편집하지 않고 SOPS 복호화→편집→재암호화 또는 새 SealedSecret 절차를 쓴다.
 
 21980/TCP는 고정 사설 인입이다. NUC 방화벽과 해당 namespace의 NetworkPolicy에서 필요한 Pod→NUC 경로만 연다.
-생성물 `host-ingress.nft`는 실제 Pod CIDR·NUC 주소와 대조한 뒤 기존 방화벽에 추가한다.
-`argocd-aiops-egress.yaml`은 이미 격리된 notifications의 NUC 접근만 허용한다. AM/CNPG의 기존 통신을 닫는 새 Egress 정책을 만들지 않는다.
+호스트의 `inet homelab_aiops` table은 127.0.0.1·192.168.117.15·10.42.0.0/24의 21980/TCP만 허용하고 나머지는 거부한다.
+검토한 root helper가 전체 table을 대조해 일치 시 유지하고 부재 시에만 생성한다. 표류·조회 실패는 중단한다.
+방화벽 소스는 `infra/k3s-bootstrap/aiops-ingress-firewall.py`이며 `render`가 고정 nft 파일·unit·drop-in을 출력한다.
+root 설치 경로는 `/usr/local/libexec/homelab-aiops-ingress-firewall.py`다. `apply`는 부재일 때만 생성하고
+일치하면 쓰지 않으며, 기존 전용 table의 표류는 오류로 반환한다. `verify`는 읽기 전용이다.
+`homelab-aiops-nft.service`는 nftables 뒤에서 실행하고, ingress drop-in의 `Requires`와 `After`가
+방화벽 실패 시 인입 시작을 차단한다. 기존 nftables 서비스를 강제 시작하거나 k3s/Tailscale table을 변경하지 않는다.
+`argocd-notifications-aiops-egress.yaml`은 notifications의 기존 통신과 NUC 인입 경로를 함께 명시한다.
+AM/CNPG의 기존 통신을 닫는 새 Egress 정책을 만들지 않는다.
 수신기는 전 인터페이스 주소·공개 주소를 거부하며 bearer 인증 후 영속 저장을 완료해야 응답한다.
 GHA는 Telegram 조건과 독립된 artifact를 기록한다. `tools/aiops-producers-v1.json`의 버전·바이트 해시를
 `contractVersion`/`contractSha256`으로 싣는다. 실행기는 `github.producerContract`가 핀한 homelab 기준 Git blob과 대조한다.
@@ -177,7 +190,11 @@ bun tools/aiops.ts evaluate --state-dir .scratch/aiops-eval/state \
 
 ## 5. 관찰을 시작하거나 중지한다
 
-관찰의 최소 사건 수·다섯 계열 범위·품질 기준·수동 대응 시간 비교를 설정의 `observation`에 먼저 채운다.
+관찰 기준은 14일·최소 20사건·다섯 소스(Alertmanager/ArgoCD/CNPG/GHA/Healthchecks)로 확정했다.
+검토 사례의 80% 이상에서 근거 있는 원인 후보를 제시하고 위험한 수정 제안은 0건이어야 한다.
+AI 결과 검토 시간을 포함한 대응 시간 중앙값이 실제 측정한 수동 진단보다 30% 이상 짧아야 한다.
+표본·소스 범위·측정 자료가 부족하면 성공으로 판정하지 않고 관찰을 연장한다. 이 기준을 설정의
+`observation`에 먼저 채우며 미측정 시간을 추정치로 채우지 않는다.
 수용을 통과한 뒤에만 `observation-start --config`와 `enabled:true`, worker timer·ingress 활성화를 진행한다.
 `observation-record --input`은 사건 ID와 `manualMinutes,reviewMinutes,falsePositive,deferred`를 기록한다.
 `observation-summary`는 표본·기간·확인된 사용량/미확인 사용량을 구별한다. 14일 경과만으로 성공 판정을 내리지 않는다.

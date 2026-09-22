@@ -1,0 +1,19 @@
+# AIOps 수집기 인입 egress — argocd-notifications-controller에서 NUC /32:21980만 허용한다(기본 거부는 차트 extraObjects).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-notifications-aiops-egress
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-notifications-controller
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.117.15/32
+      ports:
+        - protocol: TCP
+          port: 21980
