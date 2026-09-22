@@ -122,6 +122,10 @@ jobs:
           [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — replay 가드 fail-closed"; exit 1; }
           [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행(attempt=$ATTEMPT)은 owner($OWNER)만 개시 가능 — 개시자=$TRIGGERING 거부"; exit 1; }
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0 — push 이벤트의 머지 SHA가 기본 체크아웃 — SHA 고정
+      # ★ 검사 코드 출처 — checkout 직후·terraform(local plan/apply) 앞에서 고정한다.
+      - name: 검사 코드 출처 캡처 (checkout 직후 — HEAD 변이 앞)
+        id: aiops_source
+        uses: ./.github/actions/aiops-provenance
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:
           # renovate: datasource=github-releases depName=hashicorp/terraform
@@ -163,6 +167,7 @@ jobs:
           job-result: ${{ job.status }}
           steps: ${{ toJSON(steps) }}
           primary-step: aiops_check
+          source-revision: ${{ steps.aiops_source.outputs.source-revision }}
       - name: telegram notify
         if: ${{ (always()) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify

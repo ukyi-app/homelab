@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { typedFlags } from "./lib/cli.ts";
+import { readProvenance } from "./lib/aiops-provenance.ts";
 
 // 생산자는 별도 실행기 패키지에 의존하지 않는다. 잘못된 관측은 산출물로 쓰지 않는다.
 function requireCondition(condition: unknown, code: string): asserts condition {
@@ -17,8 +18,10 @@ type State = ["healthy" | "warning" | "unobservable", boolean];
 try {
   const output = typedFlags(process.argv.slice(2), { value: ["--output"], bool: [] }).str("--output");
   requireCondition(output, "output-required");
-  const producer = process.env.AIOPS_PRODUCER ?? "", target = process.env.AIOPS_TARGET ?? "", revision = process.env.AIOPS_REVISION ?? "";
-  requireCondition(/^[a-z_-]+\.yaml\/[a-zA-Z0-9_-]+$/.test(producer) && /^[a-zA-Z0-9][a-zA-Z0-9_./:@+-]{0,255}$/.test(target) && /^[a-f0-9]{40}$/.test(revision), "invalid-observation-identity");
+  const producer = process.env.AIOPS_PRODUCER ?? "", target = process.env.AIOPS_TARGET ?? "";
+  requireCondition(/^[a-z_-]+\.yaml\/[a-zA-Z0-9_-]+$/.test(producer) && /^[a-zA-Z0-9][a-zA-Z0-9_./:@+-]{0,255}$/.test(target), "invalid-observation-identity");
+  // 출처는 checkout 직후 캡처된 값만 받는다 — 관측 시점 주변 HEAD를 다시 읽지 않는다(제안 커밋 오결합 차단).
+  const provenance = readProvenance(process.env);
   const contractBytes = readFileSync(new URL("./aiops-producers-v1.json", import.meta.url));
   const contract = record(JSON.parse(contractBytes.toString("utf8")));
   requireCondition(contract.version === 1 && typeof record(record(contract.producers)[producer]).workflow === "string", "unknown-producer-contract");
@@ -56,7 +59,8 @@ try {
     return process.env.AIOPS_PRIMARY && step(process.env.AIOPS_PRIMARY).outcome === "success" ? ["healthy", true] : ["unobservable", false];
   };
   const [status, completed] = classify();
-  const value: Record<string, unknown> = { version: 1, contractVersion: 1, contractSha256, producer, check: producer.replace("/", ":"), target, repository: process.env.GITHUB_REPOSITORY, runId: Number(process.env.GITHUB_RUN_ID), attempt: Number(process.env.GITHUB_RUN_ATTEMPT), revision, runHeadSha: process.env.GITHUB_SHA, observedAt: new Date().toISOString(), status, completed };
+  // revision=검사 코드 출처 · runHeadSha=실행 HEAD · proposalRevision=제안 커밋(별도 축, 있으면).
+  const value: Record<string, unknown> = { version: 1, contractVersion: 1, contractSha256, producer, check: producer.replace("/", ":"), target, repository: process.env.GITHUB_REPOSITORY, runId: Number(process.env.GITHUB_RUN_ID), attempt: Number(process.env.GITHUB_RUN_ATTEMPT), revision: provenance.sourceRevision, runHeadSha: process.env.GITHUB_SHA, ...(provenance.proposalRevision === undefined ? {} : { proposalRevision: provenance.proposalRevision }), observedAt: new Date().toISOString(), status, completed };
   requireCondition(Number.isSafeInteger(value.runId) && Number(value.runId) > 0 && Number.isSafeInteger(value.attempt) && Number(value.attempt) > 0, "invalid-run-identity");
   if (producer === "dns-drift.yaml/check" && outputs("check").observations !== undefined && step("check").outcome === "success") {
     const raw = JSON.parse(String(outputs("check").observations));

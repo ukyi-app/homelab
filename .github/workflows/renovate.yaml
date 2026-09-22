@@ -209,6 +209,9 @@ jobs:
             *) echo "::error::운영 이벤트 거부"; exit 1 ;;
           esac
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: 검사 코드 출처 캡처 (checkout 직후 — HEAD 변이 없음)
+        id: aiops_source
+        uses: ./.github/actions/aiops-provenance
       - uses: ./.github/actions/setup-bun
       - id: acct
         env:
@@ -224,6 +227,7 @@ jobs:
           job-result: ${{ job.status }}
           steps: ${{ toJSON(steps) }}
           primary-step: acct
+          source-revision: ${{ steps.aiops_source.outputs.source-revision }}
       - name: telegram notify (required 미실행 · 원장 불일치 시에만 — 선언된 갭은 제외)
         if: ${{ (always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify

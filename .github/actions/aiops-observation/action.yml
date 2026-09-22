@@ -1,4 +1,6 @@
 # Telegram 조건과 독립된 관측 작성·업로드. 실패가 기존 알림 시도를 바꾸지 않는다.
+# revision은 호출부가 aiops-provenance로 checkout 직후 캡처한 출처만 쓴다 — 여기서 `git rev-parse HEAD`를
+# 다시 읽지 않는다(pr-first-commit 뒤의 주변 HEAD = 제안 커밋을 main 출처로 보내는 결함의 원인).
 name: aiops-observation
 description: AIOps 검사 완료·경고·관측 불가 artifact
 inputs:
@@ -8,6 +10,8 @@ inputs:
   steps: { description: "검사 단계의 toJSON(steps)", required: true }
   needs: { description: "위임 작업의 toJSON(needs)", required: false, default: "{}" }
   primary-step: { description: "실제 검사 완료를 나타내는 step id", required: false, default: "" }
+  source-revision: { description: "aiops-provenance가 checkout 직후 캡처한 검사 코드 출처 SHA(40-hex)", required: true }
+  proposal-revision: { description: "실행이 만든 제안 커밋 SHA(있으면) — revision과 독립된 별도 필드", required: false, default: "" }
 runs:
   using: composite
   steps:
@@ -22,10 +26,10 @@ runs:
         AIOPS_STEPS: ${{ inputs.steps }}
         AIOPS_NEEDS: ${{ inputs.needs }}
         AIOPS_PRIMARY: ${{ inputs.primary-step }}
+        AIOPS_SOURCE_REVISION: ${{ inputs.source-revision }}
+        AIOPS_PROPOSAL_REVISION: ${{ inputs.proposal-revision }}
       run: |
         set -euo pipefail
-        AIOPS_REVISION="$(git rev-parse HEAD)"
-        export AIOPS_REVISION
         destination="${RUNNER_TEMP}/aiops-observation-${GITHUB_JOB}-${GITHUB_RUN_ATTEMPT}"
         bun tools/aiops-observation.ts --output "$destination/observation.json"
         echo "path=$destination/observation.json" >> "$GITHUB_OUTPUT"

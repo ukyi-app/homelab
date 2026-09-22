@@ -152,6 +152,10 @@ jobs:
         with:
           ref: main
           token: ${{ steps.writer.outputs.token }}
+      # ★ 검사 코드 출처 — checkout 직후·원격 변이(ensure-bump-pr) 앞에서 고정한다.
+      - name: 검사 코드 출처 캡처 (checkout 직후 — HEAD 변이 앞)
+        id: aiops_source
+        uses: ./.github/actions/aiops-provenance
       - uses: ./.github/actions/setup-bun
       - name: reconcile (낡은 auto-merge 인가 회수 — 대상은 bump-poll/* 네임스페이스, 플래너 무관)
         id: aiops_check
@@ -173,6 +177,7 @@ jobs:
           job-result: ${{ job.status }}
           steps: ${{ toJSON(steps) }}
           primary-step: aiops_check
+          source-revision: ${{ steps.aiops_source.outputs.source-revision }}
       - name: telegram notify (실패 시)
         if: ${{ (failure()) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
@@ -244,6 +249,10 @@ jobs:
         with:
           ref: main
           token: ${{ steps.writer.outputs.token }}
+      # ★ 검사 코드 출처 — checkout 직후·항목 러너(격리 worktree) 앞에서 고정한다.
+      - name: 검사 코드 출처 캡처 (checkout 직후 — HEAD 변이 앞)
+        id: aiops_source
+        uses: ./.github/actions/aiops-provenance
       - uses: ./.github/actions/setup-bun
       - name: private GHCR 읽기 자격 확인
         env:
@@ -294,6 +303,7 @@ jobs:
           job-result: ${{ job.status }}
           steps: ${{ toJSON(steps) }}
           primary-step: aiops_check
+          source-revision: ${{ steps.aiops_source.outputs.source-revision }}
       - name: telegram notify (실패 시)
         if: ${{ (failure()) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
@@ -349,6 +359,9 @@ jobs:
           esac
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with: { ref: main } # 원장의 권위는 머지된 상태다
+      - name: 검사 코드 출처 캡처 (checkout 직후 — HEAD 변이 없음)
+        id: aiops_source
+        uses: ./.github/actions/aiops-provenance
       - uses: ./.github/actions/setup-bun
       - id: acct
         env:
@@ -364,6 +377,7 @@ jobs:
           job-result: ${{ job.status }}
           steps: ${{ toJSON(steps) }}
           primary-step: acct
+          source-revision: ${{ steps.aiops_source.outputs.source-revision }}
       - name: telegram notify (required 미실행 · 원장 불일치 시에만 — 선언된 갭은 제외)
         if: ${{ (always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')) && steps.authority.outcome == 'success' }}
         uses: ./.github/actions/telegram-notify
