@@ -11,6 +11,12 @@
 `--install`은 전용 계정·512 MiB 저장소·systemd 유닛을 설치하며 worker/인입을 활성화하지 않는다.
 `host-config.sh`에는 연결하지 않는다. 인증·수용·중지 절차는 [`docs/aiops.md`](../../docs/aiops.md).
 
+**AIOps 인입 방화벽** — `aiops-ingress-firewall.py render`가 전용 nft table·oneshot 유닛·인입
+`Requires`/`After` drop-in을 생성한다. `apply`는 root 고정 경로의 파일을 검증해 최초 부재일 때만
+table을 추가하고, 일치하면 쓰기 없이 끝난다. 다른 규칙이 있으면 덮어쓰지 않고 실패한다.
+`verify`는 읽기 전용이다. 기존 nftables 서비스를 시작하거나 전체 규칙을 flush하지 않는다.
+Python 회귀는 `tests/test_aiops-ingress-firewall.bats`를 통해 표준 게이트에서도 실행한다.
+
 **`versions.env` 어휘와 단일 값 리더** — 이 파일은 **두 방식으로** 읽힌다: 같은 트리 6파일이 `source`하고, 파괴 경계(`scripts/destroy-node.sh` · `scripts/dr-drill.sh`)와 게이트/포스처/툴링 테스트(`tests/gates/test_files-backup-phase-a.bats` · `tests/posture/test_networking-e2e.bats` · `tools/tests/test_pg-tools.bats`)는 `versions-read.sh <KEY>`로 **한 값만 텍스트로** 읽는다(파괴 직전 셸이 남의 export를 자기 환경에 들이지 않기 위해). 두 관측이 같으려면 어휘가 좁아야 한다 — 정본 형태는 `export <KEY>="<값>"` 한 줄이고 **값에 `"` · `$` · 백틱 · 백슬래시를 쓸 수 없다**. 백슬래시를 허용하면 `source`는 이스케이프를 해석하고(`"a\\b"` → `a\b`) 텍스트 리더는 원시 바이트를 돌려줘 두 소비자가 다른 값을 본다(후행 `\"`는 더 나쁘다 — 선언이 미종료로 남는다).
 
 리더의 종료코드는 **2분기**다: `rc 0` = 정본 선언 1회(stdout = 그 값, **선언된 빈 값 포함**) · `rc 1` = 판정 불가(파일 부재 · 키 부재 · 형태 위반 · 중복) + stderr 사유 한 줄. 옛 `sed -n 's/^export KEY="\(.*\)"$/\1/p' … || true` 한 줄은 그 셋을 **전부 빈 문자열로 접었고**, `BULK_MIGRATION_WINDOW_UNTIL`에서 그 빈 문자열은 "국면 B — 파괴해도 좋다"로 읽혔다. 어휘 강제는 `versions-read.sh --lint`이고, required 게이트에서 그것을 돌리는 것은 `infra/k3s-bootstrap/tests/test_11-versions-read.bats`다.
