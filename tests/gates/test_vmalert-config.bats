@@ -224,7 +224,15 @@ alert_defined() {
 @test "relay single-down has an in-band signal via AM webhook failure (faster than off-node deadman)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   alert_defined "$C" DeadmanswitchRelayUnreachable
-  grep -q 'alertmanager_notifications_failed_total{integration="webhook"}' "$C"
+  E="$BATS_TEST_TMPDIR/deadman-expr.txt"
+  yq -e '.data["core.yaml"]' "$C" | yq '.groups[].rules[] | select(.alert=="DeadmanswitchRelayUnreachable") | .expr' > "$E"
+  grep -qF 'receiver_name="deadmanswitch"' "$E"
+}
+
+@test "alertmanager exposes receiver names to distinguish webhook failures" {
+  yq '.spec.template.spec.containers[] | select(.name=="alertmanager") | .args[]' \
+    "$ROOT/platform/victoria-stack/prod/alertmanager.yaml" > "$BATS_TEST_TMPDIR/am-args.txt"
+  grep -qxF -- '--enable-feature=receiver-name-in-metrics' "$BATS_TEST_TMPDIR/am-args.txt"
 }
 
 @test "vector sink backpressure has a partial-degradation alert (PR-B, uses PR-A exposed vector_utilization)" {
