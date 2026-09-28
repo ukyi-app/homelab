@@ -58,6 +58,8 @@ spec:
             - --storage.path=/alertmanager
             - --cluster.listen-address=
             - --web.listen-address=:9093
+            # webhook 수신처별 실패를 분리한다. AIOps 실패를 deadman 장애로 오인하지 않는다.
+            - --enable-feature=receiver-name-in-metrics
           ports: [ { name: http, containerPort: 9093 } ]
           resources:
             requests: { cpu: 10m, memory: 32Mi }
