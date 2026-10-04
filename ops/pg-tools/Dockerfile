@@ -1,9 +1,9 @@
-# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # kubectl/psql/rclone 기반 운영(ops) 이미지 (Postgres 백업/복구 + 캐시 백업).
 # restore-drill·pg_dump→rclone→R2 헤지·ensure-role-password Job, 캐시(Valkey) 백업,
 # AdGuard rewrite 리컨실러, pvc-du-exporter가 사용한다.
 # ghcr.io/<owner>/pg-tools:18-rclone으로 게시된다(.github/workflows/build.yaml matrix).
-FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
 # ⚠️ 기본값을 주지 않는다. stage-level ARG 기본값은 BuildKit predefined platform arg를 **이긴다**
 #   (실측: `ARG TARGETARCH=arm64` + `--platform linux/amd64` → TARGETARCH=[arm64]).
