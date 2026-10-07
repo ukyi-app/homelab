@@ -4,6 +4,12 @@ k3s 단일 노드(**Intel NUC 베어메탈** · Ubuntu 26.04 LTS · amd64) 홈�
 싱크해 전 스택을 운영한다. 앱 코드는 **별도 레포**(`ukyi-app/<app>`, 템플릿:
 `ukyi-app/homelab-app-template`)에 살고, 이 레포에는 배포 설정만 둔다.
 
+## Code Review Rules
+
+- Write all review finding titles and descriptions in Korean.
+- Write review summaries and explanations in Korean.
+- Keep code identifiers, file paths, commands, and quoted code unchanged.
+
 ## 디렉토리 지도
 
 | 경로 | 역할 |
