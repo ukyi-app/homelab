@@ -1,7 +1,7 @@
 image:
   repo: ghcr.io/ukyi-app/aiops-autodeploy-canary
-  tag: sha-200c47593580ae482d5add1a9bf04d1b6159a169
-  digest: sha256:1f888b35c3e8c864c1c6d5320d30ca11e60b4a81113a4fa2fd8ae9c35bd666d3
+  tag: sha-46c4f899c6b77df9675c5793be97a454922e9fc9
+  digest: sha256:ac1a0997c26c55bd5488608fd8458b1884c4ce09a9b038d3601fd713ef1b5aa4
 kind: site
 replicas: 1
 resources:
