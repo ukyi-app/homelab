@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # skopeo 운영(ops) 이미지 — victoria-stack의 digest-exporter·gha-liveness-exporter가 쓴다.
 # ghcr.io/<owner>/skopeo:alpine으로 게시된다.
 #
@@ -10,7 +10,7 @@
 #    ⇒ 상류 GC와 무관한 자기 소유 이미지로 옮긴다. 이 파일의 base는 Docker Hub의 alpine이고,
 #      Docker Hub는 옛 매니페스트를 GC하지 않는다(같은 레포의 `debian:bookworm-slim` 핀이
 #      오래 살아 있는 것이 그 증거다).
-FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
 
 # skopeo — `inspect --authfile`을 쓴다(소비자 두 곳 모두). curl은 vmsingle push용이고,
 # ca-certificates는 GHCR·vmsingle TLS 검증에 필요하다.

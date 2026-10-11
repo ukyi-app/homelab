@@ -49,7 +49,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: warmup
-          image: busybox:1.38@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+          image: busybox:1.38@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
           command: ["/bin/true"] # 마운트가 목적이다 — 볼륨을 읽지도 쓰지도 않는다
           securityContext:
             allowPrivilegeEscalation: false
