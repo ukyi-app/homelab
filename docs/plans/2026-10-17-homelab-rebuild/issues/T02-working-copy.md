@@ -1,7 +1,7 @@
 # T02 새 작업 사본 준비
 
 - 단계: P0 정리·준비
-- 상태: 준비됨 (로컬 단계 1~7과 push 단계 8~11. push는 사람 승인 뒤)
+- 상태: 완료 (2026-10-17). 원격 `rebuild` 첫 push `4bb61ef`
 - 명세: [../spec.md](../spec.md)
 - Blocked by: 없음
 - 선행 결정: D-03 (확정: 히스토리 유지, `legacy` 태그 + 교체 커밋), D-23 (확정 2026-10-17: public 유지, 계획 문서 공개 수용)
@@ -65,3 +65,11 @@
 - `git ls-tree -r --name-only origin/rebuild`에 `docs/plans/` 아래 파일만 있다.
 - `git merge-base --is-ancestor 2d2054aa294b3862de1b1af6eada88fb15e656e6 origin/rebuild`가 성공한다. `rebuild`가 옛 main에서 이어졌다는 확인이다. 히스토리가 무관하면 T07에서 main으로 PR을 만들 수 없다.
 - `c=$(git rev-list --reverse --ancestry-path 2d2054aa294b3862de1b1af6eada88fb15e656e6..origin/rebuild | head -n 1); test -n "$c" && test -z "$(git ls-tree "$c")"`가 성공한다. 옛 main 바로 위 커밋(삭제 커밋)이 빈 트리라는 확인이다. 그 위에 커밋이 더 쌓여도 그대로 쓸 수 있다.
+
+## 실행 기록
+
+- 2026-10-17. 백업 `/home/ukyi/homelab-plans-backup-2026-10-17`(NUC 안, 저장소 밖). `init -b rebuild`, `fetch --no-tags origin main`, `origin/main` = `2d2054aa294b3862de1b1af6eada88fb15e656e6` 확인, `update-ref`로 옛 파일 929개를 삭제로 잡았다. 작업 트리에는 옛 파일이 풀리지 않았다.
+- 커밋: `56eeb54`(삭제, 빈 트리), `53fc932`(docs/plans), `4bb61ef`(T01 기록).
+- push 전 시크릿 모양 문자열 검색 결과 없음. 2026-10-17 21:48 KST `git push -u origin refs/heads/rebuild:refs/heads/rebuild`.
+- push 뒤 검증 6개 통과: 추적 파일 깨끗함, 원격 `rebuild` = 로컬, 원격 main 불변, `docs/plans/`만 있음, `2d2054a`의 후손, 삭제 커밋이 빈 트리. Actions는 꺼져 있어 check run 0개.
+- 기록: [../approvals.md](../approvals.md). 이 기록 커밋은 다음 승인된 push와 함께 올라간다.

@@ -9,3 +9,4 @@
 | 2026-10-17 | 사용자 결정 | GitHub `ukyi-app/homelab` 공개 범위 | public 유지, 계획·설계 문서 공개 수용(D-23). 이 결정에 따른 push는 T02에서 따로 승인받는다 | 대화 기록 | D-23 |
 | 2026-10-17 21:47 | 사용자 승인 | GitHub `ukyi-app/homelab` 태그 | annotated `legacy` 태그 생성. 태그 객체 `594b3839b15a01d34eb2b36128bf30deb3aa79b9` → 커밋 `2d2054aa294b3862de1b1af6eada88fb15e656e6` | `gh api repos/ukyi-app/homelab/git/tags`, `gh api repos/ukyi-app/homelab/git/refs` | T01, AC-P1 |
 | 2026-10-17 21:48 | 사용자 승인 | GitHub `ukyi-app/homelab` PR | 열린 PR 10개 닫기(#749, #740, #739, #737, #730, #729, #726, #725, #721, #720). 브랜치는 유지 | `gh pr close <n> --comment "Frozen for rebuild (tag legacy)"` | T01, AC-P1 |
+| 2026-10-17 21:48 | 사용자 승인 | GitHub `ukyi-app/homelab` 브랜치 | `rebuild` 브랜치 push(계획 문서 공개, D-23). 원격 `rebuild` = `4bb61ef`. main은 `2d2054a` 그대로 | `git push -u origin refs/heads/rebuild:refs/heads/rebuild` | T02, D-23 |
