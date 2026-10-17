@@ -4,7 +4,7 @@
 - 상태: 대기
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T01, T02, T06
-- 선행 결정: D-03 (확정: 히스토리 유지), D-12, D-25 (병합 방식), D-26 (Codex Connector)
+- 선행 결정: D-03 (확정: 히스토리 유지), D-12, D-25 (병합 방식), D-26 (Codex Connector), D-28 (확정(사용자 2026-10-18): 이 티켓의 GitHub 설정 변경은 `gh api`, T10에서 import)
 - 연결 AC: AC-P1, AC-P5, AC-P12
 - 수행: 에이전트 (구성 작성) + 사람 (sudo 설치, main 병합 승인, Actions 재활성화 승인)
 
@@ -24,6 +24,7 @@ main을 새 구조로 바꾸고, 새 클러스터의 바닥을 세운다.
    - 병합 방식은 D-25를 따른다(추천 squash). 저장소는 squash 병합만 허용하고, 병합 뒤 head 브랜치를 자동으로 지운다. 그래서 병합하면 `rebuild` 브랜치가 사라진다. 옛 main은 새 main의 조상으로 남고, rebuild의 중간 커밋은 PR 기록에 남는다.
    - D-25가 merge commit을 고르면 이 병합 때만 허용했다가 되돌린다(사람 승인).
    - 필수 검사 `gate`는 T06에서 해제됐다. 옛 Argo CD도 T06에서 이미 없으므로 병합을 먼저 해도 안전하다.
+   - main에는 T06의 임시 ruleset `main-interim`(PR 필수, 승인 1)이 걸려 있고 자기 PR은 승인할 수 없다. 그래서 검토한 SHA를 적어 둔 뒤 owner가 관리자 bypass로 병합한다: `gh pr merge <n> --squash --admin --match-head-commit <검토한 SHA>`. 검토 뒤 새 커밋이 들어오면 이 명령이 거부한다(설계 C.4.7).
    - 병합 뒤 로컬 작업 사본을 main으로 옮긴다: `git -C /home/ukyi/homelab fetch --no-tags origin main` 뒤 `git -C /home/ukyi/homelab diff --quiet rebuild origin/main`으로 트리가 같은지 확인하고 `git -C /home/ukyi/homelab switch -C main origin/main`. 이 시점부터 T02의 switch 금지는 풀린다.
    - 병합 뒤 이후 티켓의 문서 변경은 PR로 main에 병합한다(명세 AC-X1, §12). 관리자 직접 push는 쓰지 않는다. 새 Argo CD가 main을 보기 시작하면 직접 push가 곧바로 배포된다.
 3. 설계 문서대로 호스트 설정을 Git에서 적용하고, 버전을 고정해 k3s를 설치한다.
@@ -42,7 +43,9 @@ main을 새 구조로 바꾸고, 새 클러스터의 바닥을 세운다.
 
 ## 제약
 
-옛 `legacy` 태그와 옛 브랜치는 건드리지 않는다.
+- 옛 `legacy` 태그와 옛 브랜치는 건드리지 않는다.
+- 이 티켓의 GitHub 설정 변경(main 교체 뒤 필수 검사 `ci` ruleset 등, T05 할 일 11)은 `gh api`로 한다. Terraform github root(D-28)는 T10에서 생기고, 그때 import하면서 `ci` ruleset의 이름을 제자리에서 `main-checks`로 바꾼다.
+- rebuild → main squash 병합 커밋은 GitHub에서 만들어져 작성자 이메일이 GitHub 계정 설정을 따른다. 병합 전에 GitHub 이메일 비공개 설정(사람, 명세 §11)을 끝낸다. 작업 사본의 로컬 git 설정은 2026-10-18에 noreply로 바꿨다.
 
 ## 완료 조건
 

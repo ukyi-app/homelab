@@ -36,14 +36,17 @@
 
 ## 산출물
 
-봇 저장소 `docs/ai-bot/` (D-13): `DISCOVERY.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `VERIFICATION.md`, `V1_PLAN.md`, `PROJECT_STATUS.md`, 비밀값 없는 설정 초안, HANDOFF.
+산출물은 공개 여부로 나눈다(D-13 일부 확정: 봇 저장소는 public, 운영 산출물은 저장소 밖이나 private 위치).
+
+- 봇 저장소 `docs/ai-bot/`(공개): `DISCOVERY.md`(내부 경로·실제 허용 목록을 뺀 판), `ARCHITECTURE.md`, `DECISIONS.md`, `VERIFICATION.md`, `V1_PLAN.md`, `PROJECT_STATUS.md`, 비밀값 없는 설정 초안(키 이름만).
+- 저장소 밖이나 private 위치(D-13의 나머지로 T14가 정한 곳): HANDOFF, evidence, DISCOVERY의 내부 경로·실측 세부, runtime-policies와 허용 목록의 실제 값.
 
 봇 저장소가 아직 없으면 같은 구성을 로컬 초안으로 두고, 저장소 커밋을 `blocked`(사유: 봇 저장소 없음, 해소: T14의 생성 요청)로 기록한다. 초안의 위치는 HANDOFF에 적는다.
 
 ## 제약
 
 - 계정 생성, App 설치, 외부 PR·댓글 게시, 운영 배포를 하지 않는다 (`00` §2).
-- 봇 저장소가 public이면(D-13) 산출물은 공개된다. 시크릿 값과 운영 민감 정보(토큰 목록, 내부 접근 경로의 세부)는 쓰지 않는다. 플랫폼 프롬프트 머리말의 "공개 범위"와 같은 기준이다.
+- 봇 저장소는 public이다(D-13 일부 확정). 저장소에 넣는 산출물은 공개되므로 시크릿 값과 운영 민감 정보(토큰 목록, 내부 접근 경로의 세부)를 쓰지 않는다. 플랫폼 프롬프트 머리말의 "공개 범위"와 같은 기준이다. HANDOFF와 운영 산출물은 위 "산출물"대로 저장소 밖이나 private 위치에 둔다.
 - Discord 서버·봇 계정과 모델 계정은 사람이 준비하고 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
 
 ## 완료 조건
@@ -51,7 +54,7 @@
 - `01` §3 완료 조건을 채웠다.
 - D-14~D-17, D-24가 결정됐고, spec §5.1과 `../bot/` 자리에 반영됐다.
 - `V1_PLAN.md`에 범위 조정안과 사용자의 선택이 있다.
-- 산출물이 봇 저장소에 커밋돼 있다(push는 사람 승인 뒤). spec·`bot/` 변경은 homelab `rebuild`(T07 뒤에는 PR로 main)에 커밋돼 있다 (명세 AC-X1).
+- 공개 산출물이 봇 저장소에 PR로 병합돼 있고(main은 `app-main`으로 보호돼 PR로만 들어간다. 병합은 사람 승인 뒤), HANDOFF와 운영 산출물은 T14가 정한 저장소 밖이나 private 위치에 있다. spec·`bot/` 변경은 homelab `rebuild`(T07 뒤에는 PR로 main)에 커밋돼 있다 (명세 AC-X1).
 
 ## 검증
 

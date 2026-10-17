@@ -6,11 +6,11 @@
 
 | 경로 | 무엇 | 기준이 되는 것 |
 |---|---|---|
-| [spec.md](spec.md) | 전체 계획 | 현재 상태, 결정(C-xx와 §5.1로 옮긴 D-xx는 확정, §5.2·§5.3의 D-xx는 미정), 단계 순서, 인수 조건, 티켓 그래프 |
+| [spec.md](spec.md) | 전체 계획 | 현재 상태, 결정(C-xx와 §5.1로 옮긴 D-xx는 확정, §5.2·§5.3의 D-xx는 미정. D-13은 일부만 확정돼 두 곳에 나뉨), 단계 순서, 인수 조건, 티켓 그래프 |
 | [issues/](issues/) | 티켓 T01~T22 | 각 작업의 범위, 선행 관계, 완료 조건 |
-| [approvals.md](approvals.md) | 외부 변경 승인 기록 | 계정·App·삭제·배포·병합·공개 같은 외부 변경의 승인 (AC-X2) |
+| [approvals.md](approvals.md) | 외부 변경 승인 기록 | 계정·App·삭제·배포·병합·공개 같은 외부 변경의 승인과 그 전제가 되는 사용자 결정 (AC-X2) |
 | [platform/design-prompt.md](platform/design-prompt.md) | 플랫폼 설계 프롬프트 (T04가 실행) | 플랫폼 설계 지시, 검증 시나리오 1~17 |
-| `platform/design.md` | 플랫폼 설계 결과 (T04 산출물, 아직 없음) | 새 플랫폼의 실제 구성 |
+| [platform/design.md](platform/design.md) | 플랫폼 설계 결과 (T04 산출물) | 새 플랫폼의 실제 구성 |
 | [bot/00-start.md](bot/00-start.md) | 봇 시작점 (`00`) | 제품 정의, V1 필수 기능, 보안 경계, 공통 규칙 |
 | [bot/01-v1-build.md](bot/01-v1-build.md) | 봇 V1 (`01`) | STAGE 7개, F01~F09, R01~R18 |
 | [bot/02-v2-v3.md](bot/02-v2-v3.md) | 봇 V2·V3 (`02`) | V2-01~V2-12, V3-01~V3-09 |

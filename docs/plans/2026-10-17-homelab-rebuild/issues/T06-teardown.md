@@ -4,7 +4,7 @@
 - 상태: 대기
 - 명세: [../spec.md](../spec.md) §4.5, §10
 - Blocked by: T05, T02(push), T01(열린 PR 닫기)
-- 선행 결정: D-02 (확정: T05 뒤, 부트스트랩 직전), D-10, D-11, D-12, D-13 (옛 AIOps 줄만. 정하는 티켓은 T14, 실행은 T22), D-26, D-27
+- 선행 결정: D-02 (확정: T05 뒤, 부트스트랩 직전), D-10, D-11, D-12, D-13 (옛 AIOps 줄만. 일부 확정(사용자 2026-10-18): aiops 저장소·App 제거, 실행은 T22), D-26, D-27, D-28 (확정(사용자 2026-10-18): 이 티켓의 GitHub 설정 변경은 `gh api`, T10에서 import), D-29 (확정(사용자 2026-10-18): `page`·`trip-mate-api` 삭제, 비앱 저장소 private 보관)
 - 연결 AC: AC-P4, AC-X2
 - 수행: 사람 (sudo, 콘솔, 삭제). 에이전트는 목록 작성과 대조
 
@@ -45,10 +45,14 @@
    - 옛 state 객체(`homelab-tfstate`의 `cloudflare/prod`, `github/prod`, `tailscale/prod` 아래 `terraform.tfstate`)에는 평문 자격이 들어 있다. 비공개 위치로 옮겨 보관한 뒤 원래 키를 지운다.
    - 새 root는 옛 키를 쓰지 않는다. 같은 키를 쓰면 새 root가 옛 state를 읽어, plan이 옛 자원의 삭제를 제안한다.
    - cloudflare·tailscale root: D-11에 따라 폐기하거나 새 코드로 import한다.
-5. 브랜치 보호·ruleset·webhook을 정리한다(사람 승인).
-   - main의 필수 검사 `gate`와 push 제한(writer App)을 해제한다. `gate`가 남으면 T07의 main 교체 PR이 끝없이 검사를 기다린다.
-   - ruleset 2개와 webhook 647791528을 지운다.
-   - 명령 형태: `gh api -X DELETE repos/ukyi-app/homelab/rulesets/19598965`, `gh api -X DELETE repos/ukyi-app/homelab/rulesets/23257797`, `gh api -X DELETE repos/ukyi-app/homelab/hooks/647791528`. 보호 해제는 `gh api -X DELETE repos/ukyi-app/homelab/branches/main/protection/required_status_checks`와 `.../branches/main/protection/restrictions`.
+5. 브랜치 보호·ruleset·webhook을 정리한다(사람 승인). 순서는 설계 문서 E1이다. 옛 보호를 지우기 전에 임시 보호를 먼저 건다. 그래야 T10에서 ruleset A~D가 생길 때까지 main이 열리지 않는다(T07부터 Argo CD가 main을 자동 동기화하고, Codex Connector는 contents write가 있다).
+   1. 임시 ruleset `main-interim`을 `gh api`로 만든다. 대상 main, PR 필수, 승인 1, code owner 리뷰 필수, 새 push 때 승인 무효화, force push·삭제 금지, bypass는 저장소 관리자 역할(`pull_request` 모드)만.
+   2. `main-interim`이 active인지 확인한다: `gh api repos/ukyi-app/homelab/rulesets/<id> --jq .enforcement` → `active`, `gh api repos/ukyi-app/homelab/rules/branches/main --jq '[.[].type]'`에 `pull_request`. 같은 때 `gh api repos/ukyi-app/homelab/rulesets/<id> --jq .current_user_can_bypass`(owner) → `pull_requests_only`를 기록한다(U08 셋째 조건).
+   3. 확인한 뒤에만 옛 브랜치 보호 전체(`gate`, push 제한 포함)를 지운다: `gh api -X DELETE repos/ukyi-app/homelab/branches/main/protection`. 같은 경로가 404인지 본다. T10부터 Terraform guard 6이 이 404를 계속 확인하므로, 일부만 지우면(필수 검사·push 제한만) 보호 객체가 남아 T10의 guard가 실패한다. `gate`가 남으면 T07의 main 교체 PR이 끝없이 검사를 기다린다.
+   4. `gh api -X PATCH repos/ukyi-app/homelab -F allow_auto_merge=false`.
+   5. ruleset 2개와 webhook 647791528을 지운다: `gh api -X DELETE repos/ukyi-app/homelab/rulesets/19598965`, `gh api -X DELETE repos/ukyi-app/homelab/rulesets/23257797`, `gh api -X DELETE repos/ukyi-app/homelab/hooks/647791528`.
+   6. 옛 aiops App(`ukyi-homelab-aiops`)이 homelab에 설치돼 있으면 homelab 설치만 해제한다(App 삭제는 T22). 남아 있으면 그 App의 승인 리뷰가 `main-interim`의 승인 1을 채울 수 있다(추측). 옛 main에는 `CODEOWNERS`가 없어 T07의 main 교체 전까지는 승인 1만 막기 때문이다.
+   - 이 단계의 GitHub 설정 변경은 `gh api`로 한다. 새 Terraform github root(D-28)는 T10에서 생기고, 그때 이 단계 뒤에 남는 ruleset을 import한다(T05 할 일 11).
 6. 자격 폐기 표대로 폐기한다. state 처리에 쓰는 자격은 할 일 4가 끝난 뒤 마지막에 폐기한다.
 7. 선행 확인과 할 일 2~6의 모든 실행을 [approvals.md](../approvals.md)에 기록한다. 식별자만 쓰고 값은 쓰지 않는다.
 8. T07의 main 병합 전에, 이 티켓의 정리 목록·자격 폐기 표 상태와 approvals.md를 `rebuild`에 커밋하고 push한다(사람 승인, 명세 §12). 이 티켓에는 이름·ID·상태만 있으므로 공개돼도 된다.
@@ -76,14 +80,14 @@
 - tagged 기기 `homelab-1`, `pg-rw-1`.
 - operator 기기 `homelab-operator`. NUC에서는 ACL 때문에 보이지 않아 존재를 먼저 확인한다.
 - OAuth 클라이언트 3종: owner 부트스트랩(Terraform 밖, 쓰기 스코프), CI 읽기 전용, operator.
-- NUC 노드 키 만료 설정. 2026-10-17에는 만료가 해제돼 있다. OS를 재설치해 다시 등록하면 만료가 기본값(켜짐)으로 돌아오고 Tailscale IP가 바뀔 수 있다. 그러면 만료를 다시 해제하고 전역 nameserver의 NUC 주소를 고친다.
-- ACL·DNS: 옛 root를 apply도 destroy도 하지 않는다. 새 코드(T08)가 덮어쓴다. 새 ACL은 `autogroup:self`와 ssh 규칙을 유지해야 NUC 원격 접속이 끊기지 않는다.
+- NUC 노드 키 만료 설정. 2026-10-17에는 만료가 해제돼 있다. OS를 재설치해 다시 등록하면 만료가 기본값(켜짐)으로 돌아오고 Tailscale IP가 바뀔 수 있다. 그러면 만료를 다시 해제하고 전역 nameserver의 NUC 주소를 고친다. T08의 Terraform(D-08)은 hostname으로 NUC를 찾아 새 IP를 쓰고, 만료 해제를 precondition으로 확인한다.
+- ACL·DNS: 옛 root를 apply도 destroy도 하지 않는다. 새 코드(T08)가 덮어쓴다. DNS는 D-08(확정(사용자 2026-10-18))대로 Terraform `tailscale_dns_configuration`이 맡는다. 새 ACL은 `autogroup:self`와 ssh 규칙을 유지해야 NUC 원격 접속이 끊기지 않는다.
 
 ### GitHub
 
 - App 4개:
   - `ukyi-homelab-reader`(4043034), `ukyi-homelab-writer`(4043080).
-  - `ukyi-homelab-aiops`(4937062): 보류(D-13, 실행 T22).
+  - `ukyi-homelab-aiops`(4937062): 제거(D-13 일부 확정, 2026-10-18). 실행은 T22라 이 티켓의 줄 상태는 `보류(D-13, T22)`.
   - `ukyi-homelab-dispatch`(4178609): org 설치는 없다. 등록만 남았는지 확인한다.
 - ChatGPT Codex Connector: D-26대로 처리한다.
 - environment 4개: `homelab-main`(secret 19개), `aiops-authority-empty-0915`, `aiops-authority-empty-0916`, `aiops-reusable-public-0915`(secret 1개).
@@ -92,7 +96,10 @@
 - ruleset 2개: 19598965 `bump-poll-writer-only`, 23257797 `mutation-branches-writer-only`. 둘 다 브랜치 생성·갱신을 막고 writer App만 우회한다. writer App을 지우면 ruleset이 남아 있는 동안 그 접두사(`bump-poll/`, `bump/`, `create-app/`, `create-database/`, `create-cache/`, `update-secrets/`)의 브랜치는 아무도 만들 수 없다. 그래서 할 일 5에서 지운다.
 - 저장소 webhook 647791528: push 이벤트를 `argocd-webhook.ukyi.app`으로 보낸다. 터널을 지운 뒤에는 전송이 계속 실패한다.
 - 브랜치 보호(main): 필수 검사 `gate`, push 제한(users `ukkiee`, apps writer).
-- GHCR 패키지 6개: `pg-tools`, `skopeo`, `page`, `trip-mate-api`, `files`, `aiops-autodeploy-canary`. 유지 / 삭제를 정한다.
+- GHCR 패키지 6개: `pg-tools`, `skopeo`, `page`, `trip-mate-api`, `files`, `aiops-autodeploy-canary`.
+  - `page`, `trip-mate-api`: 삭제(2026-10-18 결정, D-29). 실행은 사람 스크립트 대기다. 이 티켓 시작 때 다시 조회해 지워졌으면 `삭제됨`, 남아 있으면 할 일 3에서 사람이 지운다.
+  - 나머지 4개: 유지 / 삭제를 정한다.
+- 앱 저장소 `ukyi-app/page`, `ukyi-app/trip-mate-api`: 삭제(2026-10-18 결정, D-29). 쓰지 않는 앱이다. 실행은 사람 스크립트 대기라 처리는 위 GHCR 줄과 같다. 두 앱의 옛 자격은 자격 폐기 표에서 폐기한다.
 
 ### 외부 감시·알림
 
@@ -101,8 +108,9 @@
 
 ### 옛 AIOps 저장소
 
-- `ukyi-app/aiops`, `ukyi-app/aiops-autodeploy-canary`, App `ukyi-homelab-aiops`: 보류(D-13, 실행 T22).
-- `mac-uptime-guard`(private, 옛 맥 미니용, 옛 Telegram 토큰 사용): 보류(담당 T22).
+- `ukyi-app/aiops`와 App `ukyi-homelab-aiops`: 제거(D-13 일부 확정, 2026-10-18. aiops는 쓰지 않는다). 실행은 T22라 줄 상태는 `보류(D-13, T22)`.
+- `ukyi-app/aiops-autodeploy-canary`: 공개하지 않고 private로 보관(D-29, 삭제도 가능). 실행은 T22라 줄 상태는 `보류(D-13, T22)`.
+- `mac-uptime-guard`(private, 옛 맥 미니용, 옛 Telegram 토큰 사용): 공개하지 않고 private로 보관(D-29). 줄 상태는 `보류(담당 T22)`.
 
 ### NUC 호스트 잔여물 (D-12)
 
@@ -131,15 +139,19 @@
 
 ## 자격 폐기 표 (할 일 1·6)
 
-새로 발급해도(D-20) 옛 자격은 따로 폐기하기 전까지 살아 있다. 각 줄을 `폐기 / 유지(이유) / 보류(결정 ID, 담당 T09)` 중 하나로 정한다. 값은 쓰지 않는다.
+새로 발급해도(D-20) 옛 자격은 따로 폐기하기 전까지 살아 있다. 각 줄을 `폐기 / 유지(이유) / 보류(결정 ID, 담당 티켓)` 중 하나로 정한다. 담당은 보통 T09다. 값은 쓰지 않는다.
 
-철거 뒤에는 옛 자격을 쓰는 곳이 없으므로 기본은 이 티켓에서 폐기한다. 새 플랫폼이 이어 쓰는 자산의 자격(D-10에 따라 재사용하는 Telegram 봇 토큰과 healthchecks ping URL, D-20에 따른 SOPS age 키)만 `보류(…, T09)`로 두고, T09가 새 자격을 등록하면서 닫는다.
+철거 뒤에는 옛 자격을 쓰는 곳이 없으므로 기본은 이 티켓에서 폐기한다. 새 플랫폼이 이어 쓰는 자산의 자격(D-20에 따른 SOPS age 키)만 `보류(…, T09)`로 두고, T09가 새 자격을 등록하면서 닫는다.
+
+**예외: 옛 healthchecks ping URL은 `보류(D-10, T08)`로 둔다.** 체크는 선행 확인 4에서 일시 정지돼 있다. T08이 새 외부 생존 감시를 연결하고 정상(초록)을 확인한 뒤 옛 체크를 지우거나 재사용 결과를 기록하며 이 줄을 닫는다. D-10이 healthchecks.io를 쓰지 않기로 정하면 T08 시작 때 바로 지운다.
+
+**예외: 옛 Telegram 봇 토큰은 D-10 결정과 상관없이 이 티켓에서 폐기하지 않는다.** 저장소 밖의 `mac-uptime-guard`가 같은 토큰을 쓰기 때문에, 폐기하면 그쪽 알림이 아무 표시 없이 끊긴다. 줄은 `보류(D-10, T22)`로 둔다. D-10이 옛 봇을 다시 쓰기로 정하면 T09가 `mac-uptime-guard` 설정을 함께 바꾸고 이 줄을 닫는다. 새 봇을 쓰기로 정하면 T22가 `mac-uptime-guard`를 처리한 뒤 닫는다.
 
 **순서:** state 처리에 쓰는 자격(`r2-terraform-state`, `cf-tf-root-token` 등)은 할 일 4가 끝난 뒤에 폐기한다. 먼저 폐기하면 할 일 4가 막힌다.
 
 | 자격 | 무엇 | 주의 |
 |---|---|---|
-| `ghcr-pull-pat` | GHCR 읽기용 classic PAT, 무만료 | |
+| `ghcr-pull-pat` | GHCR 읽기용 classic PAT, 무만료 | 새 구조에는 GHCR pull 자격이 없다(D-29) |
 | `github-tf-root-pat` | github root용 PAT(Administration·Secrets 읽기·쓰기), 무만료 | |
 | `github-tf-ci-pat` | CI 읽기용 PAT | |
 | `tailscale-ci-oauth-client` | Tailscale CI 읽기 전용 OAuth 클라이언트 | owner 부트스트랩 OAuth와 별개 |
@@ -148,13 +160,17 @@
 | `argocd-github-webhook` | webhook 647791528의 secret | webhook 삭제(할 일 5)와 함께 |
 | `github-dispatch-app` | App `ukyi-homelab-dispatch`(4178609) | 설치는 없다. 등록이 남았는지 확인 |
 | `cf-tf-root-token` | Cloudflare 토큰 `homelab-terraform-cloudflare`(Account·Zone Edit) | 할 일 4 뒤 |
-| `cf-certmanager-token` | Cloudflare 토큰 `homelab-certmanager-dns01` | |
+| `cf-certmanager-token` | Cloudflare 토큰 `homelab-certmanager-dns01` | 새 구조에는 대응 토큰이 없다(D-08) |
 | `r2-backups-pg-cache` | 백업 버킷용 R2 키 `homelab-backups-pg-cache` | |
-| 옛 App 키 | `ukyi-homelab-reader`, `ukyi-homelab-writer` | `ukyi-homelab-aiops` 키는 보류(D-13, 실행 T22) |
+| 옛 App 키 | `ukyi-homelab-reader`, `ukyi-homelab-writer` | `ukyi-homelab-aiops` 키는 `보류(D-13, T22)`. T22가 App 제거(D-13 일부 확정)와 함께 폐기한다 |
 | Tailscale 부트스트랩 OAuth | owner 로컬용, Terraform 밖, 쓰기 스코프 | |
 | Tailscale operator OAuth | 옛 operator용(devices:core·auth_keys) | |
-| Telegram 봇 토큰 | 옛 알림 봇 | D-10. `mac-uptime-guard`도 이 봇을 쓴다 |
-| healthchecks ping URL | `homelab-watchdog` 체크 | D-10, D-11 |
+| Telegram 봇 토큰 | 옛 알림 봇 | `보류(D-10, T22)` 고정(위 예외). `mac-uptime-guard`도 이 봇을 쓴다 |
+| healthchecks ping URL | `homelab-watchdog` 체크 | `보류(D-10, T08)` 고정(위 예외). D-11 |
+| `trip-mate-api` Google OAuth client | `trip-mate-api` 로그인용 Google OAuth 클라이언트 | 앱 삭제로 폐기(D-29). Google Cloud 콘솔에서 지운다 |
+| `trip-mate-api` OXR app id | `trip-mate-api`가 쓰던 OXR app id | 앱 삭제로 폐기(D-29). 발급처 계정에서 폐기한다 |
+| `trip-mate-api` `BETTER_AUTH_SECRET` | `trip-mate-api`의 Better Auth 비밀값 | 앱 삭제로 폐기(D-29). 외부 발급처가 없는 값이라 저장된 사본이 남지 않았는지 확인하고 닫는다 |
+| `page` admin token | `page` 관리자 토큰 | 앱 삭제로 폐기(D-29). 저장된 사본이 남지 않았는지 확인하고 닫는다 |
 | SealedSecrets 봉인 키 | 클러스터 안의 키는 k3s 제거로 사라진다 | out-of-band 백업본이 있으면 그 처리도 정한다 |
 | SOPS age 키 | `~/.config/sops/age` | 옛 SOPS 파일의 recipient와 맞으면 옛 공개 히스토리의 SOPS 파일을 풀 수 있다(일치 여부 미확인). D-20에 따라 보류(T09) 또는 할 일 4와 다른 자격 폐기 뒤 폐기 |
 
@@ -178,4 +194,5 @@
 - `systemctl list-unit-files | grep -E 'aiops|files-data|systemd-failed-sweep|unit-failure|motd-refresh'`의 결과가 비어 있다. D-12에서 남기기로 한 유닛은 제외한다.
 - 옛 데이터 경로(`/mnt/bulk`와 fstab 항목, `/var/backups/files-data`, `/var/lib/homelab-aiops.img`)가 D-12 판정대로 처리됐다.
 - `gh api repos/ukyi-app/homelab --jq .archived`가 `false`다.
+- `gh api repos/ukyi-app/homelab/rulesets --jq '[.[] | {name, enforcement}]'`가 `main-interim` 하나, `active`다. `gh api repos/ukyi-app/homelab/branches/main/protection`이 404다. `gh api repos/ukyi-app/homelab --jq .allow_auto_merge`가 `false`다. 옛 aiops App이 homelab에 설치돼 있지 않다(`gh api orgs/ukyi-app/installations`의 그 App `repository_selection`이 `all`이면 설치된 것이고, `selected`면 org 설정의 설치된 App 화면 Repository access에서 homelab이 없는지 본다).
 - [approvals.md](../approvals.md)에 선행 확인 3의 사용자 확인과 이 티켓의 외부 변경이 모두 있다.
