@@ -19,8 +19,8 @@
 | 항목 | 상태 |
 |---|---|
 | 옛 저장소 GitHub Actions | 비활성화 완료 (되살리기: `enabled=true`, `allowed_actions=all`) |
-| 옛 저장소 열린 PR | 10개(renovate 5, aiops 5). renovate PR 5개는 `gate`가 이미 통과해 지금도 병합 가능한 상태다. auto-merge는 모두 꺼져 있다 |
-| 원격 main | `2d2054aa294b3862de1b1af6eada88fb15e656e6` (2026-10-07 이후 변화 없음). `legacy` 태그와 `rebuild` 브랜치는 아직 없다 |
+| 옛 저장소 열린 PR | 0개. 2026-10-17에 10개(renovate 5, aiops 5)를 닫았다(T01). 그중 renovate 5개는 `gate`가 통과한 병합 가능 상태였다. 브랜치는 남아 있다 |
+| 원격 main | `2d2054aa294b3862de1b1af6eada88fb15e656e6` (2026-10-07 이후 변화 없음). annotated `legacy` 태그가 이 커밋을 가리킨다(T01, 2026-10-17) |
 | GitHub org·저장소 | org는 Free 플랜. `homelab`은 public이고, 브랜치 보호·ruleset은 public이라서 동작한다(Free에서는 private 저장소에 쓸 수 없다). squash 병합만 허용하고 병합 뒤 브랜치를 자동 삭제한다 |
 | org GitHub App | 옛 reader·writer(전체 저장소), 옛 aiops(선택 저장소), ChatGPT Codex Connector(2026-10-07 설치, 전체 저장소, 쓰기 권한, PR을 열면 자동 리뷰) |
 | 옛 클러스터 | 가동 중. NUC `nuc-15-pro`(LAN `192.168.117.15`)에서 k3s active. Application 22개가 모두 main을 따라간다 |
@@ -272,7 +272,7 @@ T14에 남은 일: T05 뒤 위 자리에 플랫폼 값을 채운다. D-13과 D-1
 
 | ID | 제목 | 단계 | Blocked by | 상태 | 수행 |
 |---|---|---|---|---|---|
-| [T01](issues/T01-legacy-freeze.md) | 옛 저장소 동결·보존 | P0 | 없음 | 진행 중 | 사람 (에이전트 준비) |
+| [T01](issues/T01-legacy-freeze.md) | 옛 저장소 동결·보존 | P0 | 없음 | 완료 (2026-10-17) | 사람 (에이전트 준비) |
 | [T02](issues/T02-working-copy.md) | 새 작업 사본 준비 | P0 | 없음 | 준비됨 | 에이전트 + 사람 |
 | [T03](issues/T03-platform-prompt-gaps.md) | 플랫폼 설계 프롬프트 보강 | P1 | 없음 | 완료 (2026-10-17) | 에이전트 |
 | [T04](issues/T04-platform-design.md) | 플랫폼 설계 실행 | P1 | T02(로컬 단계), T03 | 대기 (T02 로컬 단계 뒤) | 에이전트 |
@@ -346,7 +346,7 @@ T16 → T22
 
 ### 8.3 실행 상태
 
-- **완료:** T03 (2026-10-17).
+- **완료:** T01, T03 (2026-10-17).
 - **지금 실행 가능:** T01(남은 일: annotated `legacy` 태그, 열린 PR 10개 닫기), T02(작업 사본, `rebuild` 브랜치, docs 커밋, 사람 승인 뒤 push).
 - **선행 대기:** T04(T02 로컬 단계 뒤), T05~T22.
 - **통합 검증 담당:** T13은 플랫폼 전체(플랫폼 프롬프트 §9 시나리오 1~17), T21은 봇 V1 전체(`04` §4 시험 30개).

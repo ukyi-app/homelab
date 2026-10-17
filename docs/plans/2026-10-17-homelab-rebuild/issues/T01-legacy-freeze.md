@@ -1,7 +1,7 @@
 # T01 옛 저장소 동결·보존
 
 - 단계: P0 정리·준비
-- 상태: 진행 중 (Actions 비활성화 완료, 2026-10-17)
+- 상태: 완료 (2026-10-17). Actions는 T07까지 비활성으로 유지한다
 - 명세: [../spec.md](../spec.md)
 - Blocked by: 없음
 - 연결 AC: AC-P1, AC-X2
@@ -14,18 +14,18 @@
 ## 할 일
 
 1. [x] 저장소 Actions 비활성화 (2026-10-17). 되살리기: `enabled=true`, `allowed_actions=all`.
-2. [ ] annotated `legacy` 태그를 로컬 사본 없이 `gh api`로 만든다.
+2. [x] annotated `legacy` 태그를 로컬 사본 없이 `gh api`로 만든다.
    - 먼저 원격 main이 그대로인지 확인한다. `git ls-remote https://github.com/ukyi-app/homelab refs/heads/main`이 `2d2054aa294b3862de1b1af6eada88fb15e656e6`이어야 한다. 다르면 멈추고 사람에게 알린다.
    - 태그 객체를 만든다. `gh api repos/ukyi-app/homelab/git/tags -f tag=legacy -f message="<누가·언제·왜>" -f object=2d2054aa294b3862de1b1af6eada88fb15e656e6 -f type=commit`. 응답의 `sha`가 태그 객체 SHA다.
    - 그 SHA로 태그 ref를 만든다. `gh api repos/ukyi-app/homelab/git/refs -f ref=refs/tags/legacy -f sha=<태그 객체 SHA>`.
    - 옛 사본(`~/workspace/homelab`)에서는 fetch하지 않는다. 전역 git 설정이 `fetch.prune=true`, `fetch.prunetags=true`라서 fetch하면 원격에 없는 로컬 태그와 원격 추적 ref가 지워진다. 옛 사본은 그대로 둔다(T02 제약).
-3. [ ] 열린 PR 10개를 닫는다. 필수다. T06 전에 끝내고, 가능하면 지금 한다.
+3. [x] 열린 PR 10개를 닫는다. 필수다. T06 전에 끝내고, 가능하면 지금 한다.
    - 이유: renovate PR 5개(#749, #740, #739, #721, #720)는 필수 검사 `gate`가 이미 SUCCESS인 병합 가능 상태다. 지금 자동 병합이 일어나지 않는 진짜 이유는 auto-merge가 모두 꺼져 있고, 병합 자동화가 Actions 위에서 돌았기 때문이다. 누가 병합하면 main이 바뀌고 옛 Argo CD가 바로 적용한다.
    - 닫기 전에 `gh pr list -R ukyi-app/homelab --state open`의 목록이 아래 10개와 같은지 확인한다.
    - 명령: `for n in 749 740 739 737 730 729 726 725 721 720; do gh pr close $n -R ukyi-app/homelab --comment "Frozen for rebuild (tag legacy)"; done`.
    - PR을 닫아도 브랜치는 남는다.
-4. [ ] 실행한 외부 변경(태그 생성, PR 닫기)을 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
-5. [ ] 태그 SHA와 실행 기록을 이 티켓의 "실행 기록"에 적고 `rebuild`에 커밋한다(spec §12). `rebuild`는 T02가 만든다. push는 사람 승인 뒤에 한다.
+4. [x] 실행한 외부 변경(태그 생성, PR 닫기)을 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
+5. [x] 태그 SHA와 실행 기록을 이 티켓의 "실행 기록"에 적고 `rebuild`에 커밋한다(spec §12). `rebuild`는 T02가 만든다. push는 사람 승인 뒤에 한다.
 
 ## 제약
 
@@ -55,6 +55,9 @@
 
 ## 실행 기록
 
-- `legacy` 태그 객체 SHA: 아직 없음.
-- 태그가 가리키는 커밋: 아직 없음 (기대값 `2d2054aa294b3862de1b1af6eada88fb15e656e6`).
-- 열린 PR 닫기: 아직 없음.
+- 2026-10-17 21:47 KST. 원격 main이 `2d2054aa294b3862de1b1af6eada88fb15e656e6`인 것을 확인한 뒤 태그를 만들었다.
+- `legacy` 태그 객체 SHA: `594b3839b15a01d34eb2b36128bf30deb3aa79b9`.
+- 태그가 가리키는 커밋: `2d2054aa294b3862de1b1af6eada88fb15e656e6`. `git ls-remote "refs/tags/legacy^{}"`와 `refs/heads/main`이 같다.
+- 2026-10-17 21:48 KST. 열린 PR 10개를 닫았다(#749, #740, #739, #737, #730, #729, #726, #725, #721, #720). 닫은 뒤 열린 PR은 0개이고, 원격 브랜치(aiops 12, renovate 5, create-app 1, main)는 그대로다.
+- `gh api repos/ukyi-app/homelab/actions/permissions`: `enabled:false`.
+- 기록: [../approvals.md](../approvals.md).
