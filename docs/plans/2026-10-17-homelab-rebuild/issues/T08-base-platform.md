@@ -23,7 +23,7 @@ CI/CD와 앱이 올라갈 네트워크·DNS·관측·알림·백업을 세운다
 - Tailscale operator와 DNS 설정 (D-08). 새 ACL은 `autogroup:self` 허용과 ssh 규칙을 유지한다. 빠지면 운영자의 NUC 원격 접속이 끊긴다.
   - 목표 값: Override local DNS 켬, 전역 nameserver = [NUC Tailscale IP(AdGuard Home), `94.140.14.14`, `94.140.15.15`](AdGuard 공용 DNS, AdGuard Home 기본값과 같은 AdGuard DNS filter), C-05의 임시 Cloudflare 4개 삭제, MagicDNS 켬, HTTPS 켬, `use_with_exit_node` 기본 끔. 목적은 Tailscale을 켠 기기가 집 안팎 어디서든 차단을 받고, NUC 장애 때도 공용 서버가 차단하며 답하는 것이다. 대가 다섯은 명세 §4.5 "Tailscale DNS"에 있다.
   - Terraform `tailscale_dns_configuration`(provider v0.29.2, 정식)으로 관리한다. `data.tailscale_devices`로 hostname이 일치하는 기기를 받아 precondition을 건다: 정확히 1대, 소유자·태그 기대값, `key_expiry_disabled`. IPv4는 `100.` 대역으로 골라낸다. `tailscale_dns_nameservers`와 함께 쓰지 않는다.
-  - 이 자원은 DNS 설정 전체를 소유한다. 첫 apply 전에 콘솔 값을 그대로 옮겨 plan 무변경을 확인한 뒤 목표 값으로 바꾼다.
+  - 이 자원은 DNS 설정 전체를 소유한다. 첫 apply 전에 콘솔의 현재 값을 기록하고, 그 값을 그대로 옮긴 HCL로 새 state에 import한 뒤(import 블록, provider가 지원) plan 무변경을 확인하고 목표 값으로 바꾼다. import 없이 새 state로 plan하면 생성 계획이 나온다.
   - DNS는 ACL과 나눈 별도 root `infra/tailscale-dns`(state 키 `v2/tailscale-dns/terraform.tfstate`)에 두고 리소스에 `prevent_destroy`를 건다. NUC가 없을 때 precondition 오류가 ACL apply까지 막지 않게 하려는 것이다. 조건부(`count`)는 쓰지 않는다. NUC가 없는 동안 apply가 DNS 설정 전체의 삭제를 계획해 공용 폴백과 Override까지 사라지기 때문이다. NUC가 tailnet에 없는 동안은 이 root를 apply하지 않는다. Override를 켠 상태에서 AdGuard가 죽어도 공용 서버가 답하므로 Terraform 실행 기기의 DNS 문제는 작다.
   - Terraform 자격: R2 state 키는 Infisical `homelab-admin`의 `/terraform/state`, provider 자격은 `/terraform/cloudflare`·`/terraform/tailscale`에 둔다. 실행은 `infisical run --path=/terraform/state -- infisical run --path=<provider 경로> -- terraform ...`처럼 두 번 겹친다(provider 경로는 `/terraform/cloudflare` 또는 `/terraform/tailscale`. `infra/tailscale-dns`도 `/terraform/tailscale`을 쓴다, 설계 C.3.9 표). 겹친 실행이 바깥 경로의 R2 키를 넘기는지 첫 apply에서 확인한다(U02).
   - NUC를 Tailscale에 다시 등록하면 키 만료가 기본값(켜짐)으로 돌아오고 Tailscale IP가 바뀔 수 있다. 키 만료를 해제한 뒤 apply하면 data source가 새 IP를 쓴다. 만료가 켜진 채면 precondition이 apply를 멈춘다.
@@ -44,21 +44,21 @@ CI/CD와 앱이 올라갈 네트워크·DNS·관측·알림·백업을 세운다
 ## 제약
 
 - 외부 변경(터널, DNS, 버킷, Tailscale 설정, 감시·알림 계정)은 사람 승인 뒤에 하고 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
-- Tailscale 전역 DNS의 임시 Cloudflare 항목(C-05)은 D-08대로 지우고 AdGuard 공용 DNS 2개를 넣는다. 바꾸기 전에 콘솔 값을 옮긴 Terraform plan이 무변경인지 확인한다.
+- Tailscale 전역 DNS의 임시 Cloudflare 항목(C-05)은 D-08대로 지우고 AdGuard 공용 DNS 2개를 넣는다. 바꾸기 전에 콘솔 값을 옮겨 새 state에 import한 Terraform plan이 무변경인지 확인한다.
 - 옛 `infra/tailscale` root는 apply도 destroy도 하지 않는다 (명세 §10의 12).
 
 ## 완료 조건
 
 - 시나리오 14(DNS), 16(비AI 경보), 17(외부 감시)을 통과한다.
-- 시나리오 14에 D-08 추가 확인 둘이 들어간다: 셀룰러 Tailscale 기기 확인(AdGuard 정지 중 광고 도메인 차단, 일반 도메인 정상), 사용자 규칙 적용률 측정(AdGuard Home 전용 시험 차단 규칙을 집 Wi-Fi·셀룰러에서 20회씩, 결과 기록).
+- 시나리오 14에 D-08 추가 확인 둘이 들어간다: 셀룰러 Tailscale 기기 확인(AdGuard 정지 중 광고 도메인 차단, 일반 도메인 정상), 사용자 규칙 적용률 측정(AdGuard Home 전용 시험 차단 규칙을 집 Wi-Fi·셀룰러에서 20회씩, 결과 기록. 시험 이름은 공용 DNS에서 정상 주소가 나오는 `adg-<날짜>-<회차>.ukyi.app`이고 `0.0.0.0` 응답만 차단으로 센다, 설계 G 시나리오 14).
 - "tailnet 출처 질의 1시간 0건" 경보의 실제 발화 시험을 통과했다(아래 검증).
 
 ## 검증
 
 - AdGuard를 멈추고 LAN 기기, Tailscale 기기(집 Wi-Fi와 셀룰러), 노드 자신의 이름 해석을 각각 확인한다. Tailscale 기기에서는 광고 도메인이 차단되고 일반 도메인이 풀리는지 본다.
-- AdGuard Home에만 있는 시험 차단 규칙을 집 Wi-Fi와 셀룰러의 Tailscale 기기에서 20회씩 조회해 차단된 횟수를 기록한다.
+- 규칙을 넣기 전에 시험 이름(`adg-<날짜>-<회차>.ukyi.app`)이 두 경로 모두 정상 주소로 풀리는지 본다. 그다음 AdGuard Home에만 있는 시험 차단 규칙으로 집 Wi-Fi와 셀룰러의 Tailscale 기기에서 20회씩 조회해 `0.0.0.0` 응답 수를 기록하고 AdGuard Home 질의 로그와 대조한다. 없는 이름은 공용 서버도 NXDOMAIN이라 차단으로 잘못 세므로 쓰지 않는다.
 - AdGuard Home이 tailnet 질의를 받지 못하는 상태를 만든다(NUC를 `tag:nuc`로 태그했으면 정책 사본을 남기고 `tag:nuc:53` 규칙을 뺀 정책 apply, 승인 기록. 태그하지 않아 `autogroup:self:*`가 모든 포트를 열면 사람이 sudo로 `tailscale0`의 53번을 raw PREROUTING에서 임시 차단하고 시험 뒤 지운다, 설계 E4b). 1시간 무질의 뒤 다음 평가 주기 안에 Telegram 경보가 오는지 확인하고, 정책을 되돌린 뒤 resolved를 확인한다. 그 동안 Tailscale 기기는 공용 서버로 해석한다.
-- Tailscale DNS root의 첫 plan이 콘솔 값을 옮긴 상태에서 무변경인지 확인한다.
+- Tailscale DNS root에 콘솔 값을 옮겨 import한 뒤 첫 plan이 무변경인지 확인한다.
 - svclb를 거친 질의의 출처 주소와 ratelimit 버킷 공유 여부를 확인한다.
 - 같은 state로 Terraform을 동시에 두 번 실행해 하나가 잠금으로 멈추는지 확인한다(U02).
 - 테스트 경보를 보내 봇 없이 도착하는지 확인한다.
