@@ -1,8 +1,0 @@
-image: { repo: ghcr.io/owner/api, tag: sha-abc1234 }
-kind: web
-route: { host: api.example.com, public: true, paths: ["/"] }
-envFrom:
-  - secretRef: { name: api-secrets }
-resources:
-  requests: { cpu: 50m, memory: 64Mi }
-  limits:   { cpu: 500m, memory: 64Mi }

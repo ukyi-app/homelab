@@ -1,7 +1,0 @@
-image: { repo: ghcr.io/owner/worker, tag: sha-abc1234 }
-kind: worker
-envFrom:
-  - secretRef: { name: worker-secrets }
-resources:
-  requests: { cpu: 50m, memory: 64Mi }
-  limits:   { cpu: 500m, memory: 64Mi }

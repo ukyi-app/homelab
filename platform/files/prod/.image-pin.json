@@ -1,5 +1,0 @@
-{
-  "file": "deployment.yaml",
-  "path": ["spec", "template", "spec", "containers", 0, "image"],
-  "autoDeploy": true
-}
