@@ -1,7 +1,7 @@
 # T14 봇 문서 정비
 
 - 단계: P3 봇 준비 (P2와 병행)
-- 상태: 진행 중 (2026-10-18). D-13 나머지, D-19, R14 배정은 확정(사용자 2026-10-18, T14)이고 `bot/` 반영과 의도한 언급 목록은 끝났다. 봇 저장소 생성(사람)과 문서 이동(PR)이 남았다. 이동은 사용자가 고른 D-13 결정의 일부라 이 티켓이 맡고, 이동이 끝나야 완료다. T15는 이동 전에도 복사용 프롬프트의 "옮기기 전" 위치로 시작할 수 있다. 옛 스냅샷 걷어내기는 2026-10-17 문서 이관 때 끝났다
+- 상태: 진행 중 (2026-10-18). D-13 나머지, D-19, R14 배정은 확정(사용자 2026-10-18, T14)이고 `bot/` 반영과 의도한 언급 목록은 끝났다. 봇 저장소 둘은 2026-10-18에 만들었다. 문서 이동(PR)이 남았다. 이동은 사용자가 고른 D-13 결정의 일부라 이 티켓이 맡고, 이동이 끝나야 완료다. T15는 이동 전에도 복사용 프롬프트의 "옮기기 전" 위치로 시작할 수 있다. 옛 스냅샷 걷어내기는 2026-10-17 문서 이관 때 끝났다
 - 명세: [../spec.md](../spec.md) §4.3, §12
 - Blocked by: T05
 - 선행 결정: D-13 (봇 저장소 가시성과 옛 aiops 처리는 확정(사용자 2026-10-18), 나머지는 이 티켓에서 확정(사용자 2026-10-18, T14)), D-19 (이 티켓에서 확정(사용자 2026-10-18, T14): 넣는다), D-29 (확정(사용자 2026-10-18): 저장소 공개 정책). T05가 정한 결정과 [../platform/design.md](../platform/design.md)를 입력으로 쓴다
@@ -27,7 +27,7 @@
    - 만드는 방법은 설계 문서 C.8 "봇 저장소"를 따른다. 템플릿을 쓰지 않고 빈 public 저장소로 만든다(T10 전 템플릿은 옛 내용이다). 내용을 넣기 전에 결정 5와 같은 하드닝(`.github/CODEOWNERS`, secret scanning·push protection, private vulnerability reporting, fork PR 승인 `all_external_contributors`, 그리고 T10 전이면 `app-main`)을 건다. 그 뒤 내용은 PR로만 넣는다.
    - T10 전에 만들면 T10이 `app-repos.json`에 넣고 그 `app-main`을 import한다. T10 뒤에 만들면 `app-repos.json` PR 병합 → 저장소 생성 → `app-main`을 뺀 하드닝 → apply가 `app-main`을 만든다. 목록에 없는 public 저장소가 있는 동안 T10의 guard 8이 모든 GitHub plan을 멈춘다.
    - T16(설계 E9)은 이 저장소를 새로 만들지 않고 `homelab app add`로 등록한다.
-   - 진행 메모: 아직 요청하지 않았다. 저장소 둘(`ukyi-app/homelab-bot` public, `ukyi-app/homelab-bot-ops` private, spec §11)의 생성과 하드닝은 사람에게 스크립트로 전달할 예정이다. 생성되면 [../approvals.md](../approvals.md)에 기록한다.
+   - 진행 메모: 2026-10-18 14:30에 사람이 스크립트로 만들었다([../approvals.md](../approvals.md)). `ukyi-app/homelab-bot`은 public이고 내용 전에 하드닝을 걸었다(CODEOWNERS 커밋 `e9e1bbd`, `app-main` ruleset 25332733 active, owner bypass `pull_requests_only`, secret scanning·push protection, private vulnerability reporting, fork PR 승인 `all_external_contributors`, CODEOWNERS 오류 0). `ukyi-app/homelab-bot-ops`는 private이고 비어 있다. T10 전에 만들었으므로 T10이 `app-repos.json`에 넣고 이 `app-main`을 import한다.
 3. D-19(`02`·`03`을 이번 정비 범위에 넣을지)를 정한다. 추천은 넣지 않는 것이다.
    - 진행 메모: 확정(사용자 2026-10-18, T14): 넣는다. 추천(넣지 않음)이 아니라 사용자가 골랐다. 기록은 spec §5.1 D-19다.
 4. 결정 자리를 채운다. 자리는 `../bot/` 전체에서 D-ID를 검색해 찾는다. 색인(`01` §11, `04` §10)은 두 문서의 자리만 모은 것이다. `00`에는 색인이 없고 §1·§3·§4·§5·§6·§8 곳곳에 자리가 있다. `02`·`03` 머리의 "앞당기는 경우" 줄에도 D-19가 있다.
