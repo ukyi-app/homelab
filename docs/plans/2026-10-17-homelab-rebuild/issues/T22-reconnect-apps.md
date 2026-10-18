@@ -14,7 +14,7 @@
 
 ## 배경
 
-- `page`와 `trip-mate-api`는 쓰지 않으므로 저장소와 GHCR 패키지를 삭제하기로 했다(2026-10-18, D-29. 실행은 사람 스크립트 대기). 이 티켓의 대상이 아니다. 두 앱의 옛 자격은 T06 자격 폐기 표에서 폐기한다.
+- `page`와 `trip-mate-api`는 쓰지 않으므로 저장소와 GHCR 패키지를 삭제했다(2026-10-18 결정·실행, D-29). 이 티켓의 대상이 아니다. 두 앱의 옛 자격은 T06 자격 폐기 표에서 폐기한다.
 - `files`와 `aiops-autodeploy-canary`는 `ukyi-app/homelab/.github/workflows/reusable-app-build.yaml@main`을 호출한다(2026-10-17 실측. 삭제할 `page`·`trip-mate-api`도 호출했다).
 - `homelab-app-template`은 두 경로로 의존한다. 자기 CI(`template-ci.yaml`)가 매주 homelab main의 `tools/app-config-schema.json`을 받아 오고, scaffold가 새 앱 저장소에 reusable@main 호출을 심는다.
 - `aiops`에는 의존이 없다.

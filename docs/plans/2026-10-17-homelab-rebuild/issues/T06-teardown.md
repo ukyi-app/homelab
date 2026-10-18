@@ -97,9 +97,9 @@
 - 저장소 webhook 647791528: push 이벤트를 `argocd-webhook.ukyi.app`으로 보낸다. 터널을 지운 뒤에는 전송이 계속 실패한다.
 - 브랜치 보호(main): 필수 검사 `gate`, push 제한(users `ukkiee`, apps writer).
 - GHCR 패키지 6개: `pg-tools`, `skopeo`, `page`, `trip-mate-api`, `files`, `aiops-autodeploy-canary`.
-  - `page`, `trip-mate-api`: 삭제(2026-10-18 결정, D-29). 실행은 사람 스크립트 대기다. 이 티켓 시작 때 다시 조회해 지워졌으면 `삭제됨`, 남아 있으면 할 일 3에서 사람이 지운다.
-  - 나머지 4개: 유지 / 삭제를 정한다.
-- 앱 저장소 `ukyi-app/page`, `ukyi-app/trip-mate-api`: 삭제(2026-10-18 결정, D-29). 쓰지 않는 앱이다. 실행은 사람 스크립트 대기라 처리는 위 GHCR 줄과 같다. 두 앱의 옛 자격은 자격 폐기 표에서 폐기한다.
+  - `page`, `trip-mate-api`: `삭제됨`(2026-10-18 결정·실행, D-29, [../approvals.md](../approvals.md)). `page` 패키지는 API 삭제가 거부돼(아래) 사람이 직접 지웠다.
+  - 나머지 4개: 유지 / 삭제를 정한다. public 패키지는 한 버전이라도 다운로드가 5000회를 넘으면 API로 지울 수 없다(2026-10-18 `page`에서 HTTP 400). 그날 UI의 전체 다운로드는 `skopeo` 1.76k, `pg-tools` 973, `aiops-autodeploy-canary` 9.37k(private라 이 제한과 무관)였다.
+- 앱 저장소 `ukyi-app/page`, `ukyi-app/trip-mate-api`: `삭제됨`(2026-10-18 결정·실행, D-29). 쓰지 않는 앱이다. 두 앱의 옛 자격은 자격 폐기 표에서 폐기한다.
 
 ### 외부 감시·알림
 
