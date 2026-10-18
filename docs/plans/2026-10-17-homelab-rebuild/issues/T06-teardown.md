@@ -99,7 +99,7 @@
   - `ukyi-homelab-reader`(4043034), `ukyi-homelab-writer`(4043080): 삭제(D-11). writer는 ruleset 2개를 지운 뒤에 지운다(할 일 5).
   - `ukyi-homelab-aiops`(4937062): 제거(D-13 일부 확정, 2026-10-18). 실행은 T22라 이 티켓의 줄 상태는 `보류(D-13, T22)`.
   - `ukyi-homelab-dispatch`(4178609): org 설치는 없다. 등록만 남았는지 확인하고, 남았으면 삭제(D-11).
-- ChatGPT Codex Connector: 유지(D-26, 확정(사용자 2026-10-18, T05)). 줄 상태는 `유지(D-26)`. 설계 0절 실측으로 org 전체 저장소에 actions·contents·issues·pull_requests·workflows write다. 유지 조건 넷은 설계 F D-26이다(어떤 ruleset bypass에도 넣지 않음 등). 설치 범위 축소는 D-16(T15)과 함께 본다.
+- ChatGPT Codex Connector: 유지(D-26, 확정(사용자 2026-10-18, T05)). 줄 상태는 `유지(D-26)`. 설계 0절 실측으로 org 전체 저장소에 actions·contents·issues·pull_requests·workflows write다. 유지 조건 넷은 설계 F D-26이다(어떤 ruleset bypass에도 넣지 않음 등). 설치 범위 축소는 확정(사용자 2026-10-18, T15): 선택 저장소로 줄이고 `homelab-bot-ops`를 뺀다. 사람 작업이고 T15에서 `homelab-bot-ops`에 운영 산출물을 처음 올리기 전에 하기로 했으며, 2026-10-18 17:45에 완료했다(spec §11, D-16, [../approvals.md](../approvals.md)).
 - environment 4개: `homelab-main`(secret 19개), `aiops-authority-empty-0915`, `aiops-authority-empty-0916`, `aiops-reusable-public-0915`(secret 1개). 삭제(D-11).
 - "저장소 시크릿"은 실제로 environment `homelab-main`의 secret이다. 저장소 수준 secret은 0개다.
 - 저장소 변수 2개: `HOMELAB_DOMAIN`, `HOMELAB_OWNER`. 삭제(D-11).
@@ -117,13 +117,13 @@
 ### 외부 감시·알림
 
 - healthchecks.io: 계정은 이어 쓰고 체크는 새로 만든다(D-10). 옛 체크 `homelab-watchdog`는 선행 확인 4에서 일시 정지하고, T08b가 새 체크의 초록을 확인한 뒤 지운다(D-11). 줄 상태는 `보류(D-10, T08b)`.
-- Telegram 봇: homelab 알림용 새 봇은 T09가 만든다(D-10). 옛 봇과 토큰은 `mac-uptime-guard`를 처리하는 T22까지 그대로 둔다. 줄 상태는 `보류(D-10, T22)`. 토큰은 자격 폐기 표에 있다.
+- Telegram 봇: homelab 알림용 새 봇은 T09가 만든다(D-10). 옛 봇과 토큰은 T22가 `mac-uptime-guard` 장치를 끌 때까지 그대로 둔다. 줄 상태는 `보류(D-10, T22)`. 토큰은 자격 폐기 표에 있다.
 
 ### 옛 AIOps 저장소
 
 - `ukyi-app/aiops`와 App `ukyi-homelab-aiops`: 제거(D-13 일부 확정, 2026-10-18. aiops는 쓰지 않는다). 실행은 T22라 줄 상태는 `보류(D-13, T22)`.
 - `ukyi-app/aiops-autodeploy-canary`: 공개하지 않고 private로 보관(D-29, 삭제도 가능). 실행은 T22라 줄 상태는 `보류(D-13, T22)`.
-- `mac-uptime-guard`(private, 옛 맥 미니용, 옛 Telegram 토큰 사용): 공개하지 않고 private로 보관(D-29). 줄 상태는 `보류(담당 T22)`.
+- `mac-uptime-guard`(private, 옛 맥 미니용, 옛 Telegram 토큰 사용): 제거(D-29, 사용자 2026-10-18 17:46. 그 전에는 private 보관이었다). 실행은 T22다: 장치를 끄고 옛 Telegram 봇 토큰을 폐기한 뒤 저장소를 지운다. 줄 상태는 `보류(담당 T22)`.
 
 ### NUC 호스트 잔여물 (D-12)
 
@@ -163,7 +163,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 
 **예외: 옛 healthchecks ping URL은 `보류(D-10, T08b)`로 둔다.** 체크는 선행 확인 4에서 일시 정지돼 있다. D-10대로 healthchecks.io 계정은 이어 쓰고 체크는 새로 만든다. T08b가 새 외부 생존 감시를 연결하고 정상(초록)을 확인한 뒤 옛 체크를 지우며 이 줄을 닫는다.
 
-**예외: 옛 Telegram 봇 토큰은 이 티켓에서 폐기하지 않는다.** 저장소 밖의 `mac-uptime-guard`가 같은 토큰을 쓰기 때문에, 폐기하면 그쪽 알림이 아무 표시 없이 끊긴다. 줄은 `보류(D-10, T22)`로 둔다. D-10은 homelab 알림용 새 봇(T09가 만듦)을 골랐다. 그래서 T22가 `mac-uptime-guard`를 처리한 뒤 옛 봇 토큰을 폐기하고 옛 봇을 지우며 이 줄을 닫는다. 옛 봇 토큰을 재발급하는 대안은 고르지 않았으므로 T09가 이 줄을 닫는 일은 없다.
+**예외: 옛 Telegram 봇 토큰은 이 티켓에서 폐기하지 않는다.** 저장소 밖의 `mac-uptime-guard`가 같은 토큰을 쓰기 때문에, 폐기하면 그쪽 알림이 아무 표시 없이 끊긴다. 줄은 `보류(D-10, T22)`로 둔다. D-10은 homelab 알림용 새 봇(T09가 만듦)을 골랐다. 그래서 T22가 `mac-uptime-guard` 장치를 끈 뒤 옛 봇 토큰을 폐기하고 옛 봇을 지우며 이 줄을 닫는다. `mac-uptime-guard` 저장소는 그 뒤 지운다(D-29). 옛 봇 토큰을 재발급하는 대안은 고르지 않았으므로 T09가 이 줄을 닫는 일은 없다.
 
 **순서:** state 처리에 쓰는 자격(`r2-terraform-state`, `cf-tf-root-token` 등)은 할 일 4가 끝난 뒤에 폐기한다. 먼저 폐기하면 할 일 4가 막힌다.
 
@@ -183,7 +183,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | 옛 App 키 | `ukyi-homelab-reader`, `ukyi-homelab-writer` | `ukyi-homelab-aiops` 키는 `보류(D-13, T22)`. T22가 App 제거(D-13 일부 확정)와 함께 폐기한다 |
 | Tailscale 부트스트랩 OAuth | owner 로컬용, Terraform 밖, 쓰기 스코프 | |
 | Tailscale operator OAuth | 옛 operator용(devices:core·auth_keys) | |
-| Telegram 봇 토큰 | 옛 알림 봇 | `보류(D-10, T22)` 고정(위 예외). `mac-uptime-guard`도 이 봇을 쓴다 |
+| Telegram 봇 토큰 | 옛 알림 봇 | `보류(D-10, T22)` 고정(위 예외). `mac-uptime-guard`도 이 봇을 쓴다. T22가 그 장치를 끈 뒤 폐기한다 |
 | healthchecks ping URL | `homelab-watchdog` 체크 | `보류(D-10, T08b)` 고정(위 예외). 옛 체크 삭제도 T08b(D-11) |
 | `trip-mate-api` Google OAuth client | `trip-mate-api` 로그인용 Google OAuth 클라이언트 | 앱 삭제로 폐기(D-29). Google Cloud 콘솔에서 지운다 |
 | `trip-mate-api` OXR app id | `trip-mate-api`가 쓰던 OXR app id | 앱 삭제로 폐기(D-29). 발급처 계정에서 폐기한다 |

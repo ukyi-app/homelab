@@ -26,7 +26,7 @@
    - 생성은 사람이 하고 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
    - 만드는 방법은 설계 문서 C.8 "봇 저장소"를 따른다. 템플릿을 쓰지 않고 빈 public 저장소로 만든다(T10 전 템플릿은 옛 내용이다). 내용을 넣기 전에 결정 5와 같은 하드닝(`.github/CODEOWNERS`, secret scanning·push protection, private vulnerability reporting, fork PR 승인 `all_external_contributors`, 그리고 T10 전이면 `app-main`)을 건다. 그 뒤 내용은 PR로만 넣는다.
    - T10 전에 만들면 T10이 `app-repos.json`에 넣고 그 `app-main`을 import한다. T10 뒤에 만들면 `app-repos.json` PR 병합 → 저장소 생성 → `app-main`을 뺀 하드닝 → apply가 `app-main`을 만든다. 목록에 없는 public 저장소가 있는 동안 T10의 guard 8이 모든 GitHub plan을 멈춘다.
-   - T16(설계 E9)은 이 저장소를 새로 만들지 않고 `homelab app add`로 등록한다.
+   - T16b(설계 E9)는 이 저장소를 새로 만들지 않고 `homelab app add`로 등록한다.
    - 진행 메모: 2026-10-18 14:30에 사람이 스크립트로 만들었다([../approvals.md](../approvals.md)). `ukyi-app/homelab-bot`은 public이고 내용 전에 하드닝을 걸었다(CODEOWNERS 커밋 `e9e1bbd`, `app-main` ruleset 25332733 active, owner bypass `pull_requests_only`, secret scanning·push protection, private vulnerability reporting, fork PR 승인 `all_external_contributors`, CODEOWNERS 오류 0). `ukyi-app/homelab-bot-ops`는 private이고 비어 있다. T10 전에 만들었으므로 T10이 `app-repos.json`에 넣고 이 `app-main`을 import한다.
 3. D-19(`02`·`03`을 이번 정비 범위에 넣을지)를 정한다. 추천은 넣지 않는 것이다.
    - 진행 메모: 확정(사용자 2026-10-18, T14): 넣는다. 추천(넣지 않음)이 아니라 사용자가 골랐다. 기록은 spec §5.1 D-19다.

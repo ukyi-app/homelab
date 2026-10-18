@@ -42,7 +42,7 @@
 - 외부 토큰 새로 발급과 등록(D-20): Cloudflare Terraform용 토큰, R2 state 버킷 키, Tailscale Terraform용 OAuth(ACL과 DNS 쓰기, 기기 읽기). 셋 다 `homelab-admin`에 등록한다. 옛 자격 폐기는 T06의 자격 폐기 표가 맡는다. D-20 확정으로 T06이 `보류(…, T09)`로 미리 정한 줄은 없다. 실행 중 그런 줄이 생기면 이 티켓이 새 자격을 등록한 뒤 옛 자격을 폐기해 닫는다. 새 구조에 대응 자격이 없는 것은 새로 발급하지 않는다: cert-manager DNS-01용 Cloudflare 토큰(D-08), GHCR pull PAT(D-29).
 - homelab 알림용 Telegram 봇을 새로 만든다(BotFather, D-10). 새 봇은 대화를 먼저 시작할 수 없어 사람이 새 봇에게 먼저 메시지를 보낸다. 토큰은 `homelab`에 등록한다. 옛 봇의 토큰은 재발급하지 않는다. 재발급은 옛 토큰을 끊는다고 봐야 하고(추측), 그 토큰을 쓰는 저장소 밖 `mac-uptime-guard`의 알림이 T22까지 아무 표시 없이 멈추기 때문이다. 옛 봇과 토큰은 T22가 `mac-uptime-guard`를 처리할 때까지 그대로 둔다.
 - 옛 SOPS age 개인 키: NUC에 `~/.config/sops/age/keys.txt`가 있다. 옛 SOPS 파일의 recipient와 맞으면 옛 공개 저장소 히스토리의 SOPS 파일을 풀 수 있다(일치 여부 미확인). 새 구조에서 쓰지 않으므로 복구 자산에 넣지 않는다. T06이 자격 폐기 완료를 확인한 뒤 지운다(D-20). 키 값은 다루지 않는다.
-- 같은 앱 안의 시크릿 범위 분리. 같은 봇 안에서도 게시 서버와 작업자의 시크릿 범위를 나눌 수 있는 구조를 이 티켓이 준비한다(명세 §4.2). 작업자 쪽은 T08b 격리 작업 공간이 받는 모델 자격 범위다(작업자 전용 ClusterSecretStore `infisical-sandbox`도 T08b). 봇 시크릿(Discord 토큰, 봇 GitHub App 키, 모델 자격) 등록 자체는 T16~T18에서 한다.
+- 같은 앱 안의 시크릿 범위 분리. 같은 봇 안에서도 게시 서버와 작업자의 시크릿 범위를 나눌 수 있는 구조를 이 티켓이 준비한다(명세 §4.2). 작업자 쪽은 T08b 격리 작업 공간이 받는 모델 자격 범위다(작업자 전용 ClusterSecretStore `infisical-sandbox`도 T08b). 봇 시크릿(Discord 토큰, 봇 GitHub App 키, 모델 자격) 등록 자체는 T16b~T19에서 한다(명세 §11 Infisical 행).
 - 회전 절차 초안(`docs/runbooks-public/rotate.md`)에 병합 App 키 회전 순서를 넣는다: (T10 뒤) `homelab github verify` exit 0 확인 → 새 키 발급 → Infisical 값 교체 → environment secret `updated_at`이 교체 시각 이후인지 확인 → 옛 키 삭제. App 키는 만료가 없고 25개까지 동시에 유효해 `deploy-merge` 성공만으로는 새 키 반영을 증명하지 못한다. sync 실패 알림은 프로젝트 Admin 메일로 온다.
 
 ## 시나리오 6·7의 E3 동등 절차

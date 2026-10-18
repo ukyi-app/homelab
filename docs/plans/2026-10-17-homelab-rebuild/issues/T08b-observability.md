@@ -5,7 +5,7 @@
 - 명세: [../spec.md](../spec.md) §4.2, §4.4
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4b, E.3, C.3.7, C.8
 - Blocked by: T08a, T09
-- 선행 결정: D-08 (확정(사용자 2026-10-18): Tailscale DNS (b′). 그래서 tailnet 출처 질의 1시간 0건 경보를 둔다), D-09 (확정(사용자 2026-10-18, T05): 옛 계열 최소 구성), D-10 (확정(사용자 2026-10-18, T05): homelab 알림용 Telegram 새 봇 + healthchecks.io 계정 재사용·새 체크), D-11 (확정(사용자 2026-10-18, T05): Tailscale ACL (a), 옛 healthchecks 체크는 새 체크가 초록이 된 뒤 삭제), D-20 (확정(사용자 2026-10-18, T05): 모든 값 새로 발급, 옛 healthchecks ping URL은 `보류(D-10, T08b)`), 격리 작업 공간 기본 방식 (확정(사용자 2026-10-18, T05): 설계 C.8 기본값. 라벨·포트와 코드 읽기 호스트 좁히기는 D-15(T15)가 정한다)
+- 선행 결정: D-08 (확정(사용자 2026-10-18): Tailscale DNS (b′). 그래서 tailnet 출처 질의 1시간 0건 경보를 둔다), D-09 (확정(사용자 2026-10-18, T05): 옛 계열 최소 구성), D-10 (확정(사용자 2026-10-18, T05): homelab 알림용 Telegram 새 봇 + healthchecks.io 계정 재사용·새 체크), D-11 (확정(사용자 2026-10-18, T05): Tailscale ACL (a), 옛 healthchecks 체크는 새 체크가 초록이 된 뒤 삭제), D-20 (확정(사용자 2026-10-18, T05): 모든 값 새로 발급, 옛 healthchecks ping URL은 `보류(D-10, T08b)`), 격리 작업 공간 기본 방식 (확정(사용자 2026-10-18, T05): 설계 C.8 기본값), D-14 (확정(사용자 2026-10-18, T15): 봇 전용 ChatGPT 구독 계정 + 작업자 전용 CODEX_HOME. 이 티켓에 주는 것은 인증 갱신본을 되쓰는 작업자 전용 영속 쓰기 공간(`CODEX_HOME`용 PVC 하나, 설계 C.8 변경)과 작업 직렬 1개다), D-15 (확정(사용자 2026-10-18, T15): 작업자는 `sandbox` ns 상주 파드 하나(동시성 1), 앱·작업자 포트 8080, 경보 수신 포트 8081, 라벨 `homelab-bot`(봇 값은 T16b가 `target`에 넣는다). 작업자 코드 읽기는 `codeload.github.com`만이고 egress에서 `github.com`·`api.github.com`·`gist.github.com`을 뺀다. 파드 방화벽(U13)이 안 되면 호스트 전용 UID + nft)
 - 연결 AC: AC-P6, AC-P10, AC-P11, AC-P12
 - 수행: 에이전트 + 사람 (healthchecks.io 새 체크와 옛 체크 삭제, 새 Telegram 봇의 수신 chat 확인, 시험 경보·장애 주입 승인, 이탈 시험의 sudo 임시 규칙, 시나리오 17의 NUC 현장 차단. 명세 §11)
 
@@ -44,7 +44,7 @@
 
 - 봇과 독립된 비AI 알림 (D-10, AC-P11). D-10 확정(사용자 2026-10-18, T05)대로 homelab 알림용 새 Telegram 봇을 쓴다. 봇은 T09가 만들고 토큰을 Infisical `homelab`의 `/platform/alerting`에 등록한다. 옛 Telegram 봇과 토큰은 `mac-uptime-guard`를 처리하는 T22까지 그대로 두고 이 티켓에서 쓰지 않는다.
 - Alertmanager 기본 receiver `telegram`(내장 `telegram_configs`)이 봇을 거치지 않고 보낸다. 토큰은 `bot_token_file`이고 `chat_id`는 비밀이 아니라 values에 둔다. 자동 HTML escape 위에 이중 escape를 하지 않는다. 전송 확인은 로그가 아니라 `alertmanager_notifications_total{integration="telegram"}`이다.
-- 라우트 모양은 설계 C.3.7 예시다. 봇 자리 route 네 줄(`severity=~"warning|critical"` → `bot`과 `continue: true`, 이어서 같은 matcher → `telegram` 형제 route)은 주석으로 둔다. `continue: true`는 부모 receiver로 되돌려 보내지 않으므로, 봇 route를 켤 때는 Telegram 형제 route를 함께 켠다(T16).
+- 라우트 모양은 설계 C.3.7 예시다. 봇 자리 route 네 줄(`severity=~"warning|critical"` → `bot`과 `continue: true`, 이어서 같은 matcher → `telegram` 형제 route)은 주석으로 둔다. `continue: true`는 부모 receiver로 되돌려 보내지 않으므로, 봇 route를 켤 때는 Telegram 형제 route를 함께 켠다(T16b).
 
 ### 외부 생존 감시 (D-10, AC-P11)
 
@@ -77,22 +77,26 @@
 
 ### 격리 작업 공간 (AC-P12, `platform/sandbox`, egress 프록시)
 
-- 격리 작업 실행 공간 (AC-P12, 명세 §4.2). 기본 방식 확정(사용자 2026-10-18, T05): 설계 C.8 기본값이다. 운영·게시 자격(kubeconfig, GitHub 쓰기 키, Discord 토큰, SSH, 호스트 소켓)과 운영 네트워크(LAN, 클러스터 내부, Kubernetes API, tailnet, Infisical)에 닿지 못한다. 모델 자격만 별도 시크릿 범위로 받는다. egress는 허용 목록(모델 API, 코드 저장소 읽기, 패키지 레지스트리)으로 제한한다. 봇이 이 공간을 쓰는 세부 방식(라벨·포트, 코드 읽기를 읽기 전용 호스트로 좁힐지)은 D-15(T15)다.
+- 격리 작업 실행 공간 (AC-P12, 명세 §4.2). 기본 방식 확정(사용자 2026-10-18, T05): 설계 C.8 기본값이다. 운영·게시 자격(kubeconfig, GitHub 쓰기 키, Discord 토큰, SSH, 호스트 소켓)과 운영 네트워크(LAN, 클러스터 내부, Kubernetes API, tailnet, Infisical)에 닿지 못한다. 모델 자격만 별도 시크릿 범위로 받는다. egress는 허용 목록(모델 API, 코드 읽기용 `codeload.github.com`, 패키지 레지스트리)으로 제한한다. 봇이 이 공간을 쓰는 세부 방식은 D-14·D-15(확정(사용자 2026-10-18, T15))가 정했다: 작업자 전용 영속 쓰기 공간, 상주 작업자 하나(동시성 1), 컨테이너 포트 8080, `codeload.github.com`만 허용하는 코드 읽기(아래).
 - 위치: ns `sandbox`(작업자) + ns `egress`(허용 목록 프록시). 프록시 이미지는 digest로 고정하고 버전은 이 티켓 시작 때 정한다(U14).
 - 자격: SA 토큰 미마운트, RBAC 없음, hostPath·hostNetwork·호스트 소켓 없음. Secret은 Infisical `/apps/<bot>/worker`의 모델 자격 하나다. 작업자 전용 ClusterSecretStore `infisical-sandbox`(conditions는 `sandbox` ns 하나, `secretsPath` `/apps/<bot>/worker`)로 받는다. ExternalSecret은 `platform/sandbox`의 Git 매니페스트로만 생기고, sandbox 서비스 계정에는 ExternalSecret 생성 권한이 없다. 남는 위험: store identity `eso-homelab`은 Free에 경로 RBAC가 없어 `homelab` 프로젝트의 다른 경로도 읽을 수 있다.
+- 영속 쓰기 공간(D-14, 설계 C.8 격리 행): `sandbox` ns에 작업자 전용 영속 쓰기 공간(`CODEX_HOME`용 PVC 하나)을 둔다. 모델 자격은 봇 전용 구독 계정의 Codex 인증 파일(`auth.json`)이고, Codex가 토큰을 갱신하면 이 파일을 다시 쓴다. ESO 한 방향 전달로는 갱신본을 지키지 못해 이 공간이 필요하다. Infisical `/apps/<bot>/worker`의 값은 첫 시드와 재시드용이고, 작업자는 영속 공간에 파일이 없을 때만 시드를 복사한다. 실제 시드는 T16b 전(모델을 처음 쓰는 단계 전) 사람 작업이다(설계 E9). 이 티켓은 시험 파일로 공간이 유지되는지만 본다. PVC 크기와 백업 여부는 설계에 없어 이 티켓에서 정한다(봇 저장소 `ARCHITECTURE.md` §10 열린 항목).
+- 상주 작업자 자리(D-14, D-15): 작업자는 상주 파드 하나(Deployment replicas 1, 동시성 1)이고 컨테이너 포트는 8080이다. 작업 단위 파드는 두지 않는다. [제안] `strategy: Recreate`. RollingUpdate면 교체 중 두 파드가 같은 `auth.json`을 쓴다(설계 C.8).
 - 네트워크: 기본 거부. egress는 `egress` ns 프록시 파드의 3128 하나뿐이고 DNS(CoreDNS 53)는 열지 않는다. 작업자 egress에서 DNS를 빼는 이유는 CoreDNS가 임의 이름을 공용 DNS에 재귀 질의해 이름에 실은 자격이 허용 목록 밖으로 나갈 수 있어서다. 작업자는 프록시를 고정 ClusterIP로 받는다(프록시 Service의 `spec.clusterIP`를 서비스 대역 안 고정값으로 선언, 작업자 env `HTTPS_PROXY=http://<프록시 ClusterIP>:3128`). 목적지 이름 해석은 프록시가 한다([미검증] U29. 안 되면 그 도구만 프록시 설정을 따로 주거나, `egress` ns에 허용 목록 도메인만 푸는 전용 DNS를 둔다).
-- 노드 로컬 경로(노드 IP의 6443·10250·22)는 NetworkPolicy로 못 막으므로, 작업자 파드 netns 안에서 init 컨테이너(NET_ADMIN, 그 컨테이너만)가 출력을 셋만 허용한다: loopback(`-o lo`), conntrack `ESTABLISHED,RELATED`, 프록시 ClusterIP:3128로 가는 새 연결. 본 컨테이너는 NET_ADMIN이 없다. 그래서 이 ns의 PSA는 privileged이고 파드는 Git(Argo CD)만 만든다. 이 방식은 [미검증] U13이다. 안 되면 D-15 대안(호스트 전용 UID + nft, 또는 호스트 방화벽을 지원하는 CNI)으로 간다.
+- egress 허용 목록(D-15): 프록시는 모델 API, 코드 읽기용 `codeload.github.com`, 패키지 레지스트리만 통과시킨다. `github.com`·`api.github.com`·`gist.github.com`은 넣지 않는다. 작업자에는 GitHub 자격이 없다. 구독 인증(D-14)이 쓰는 모델·인증 호스트 목록은 [미검증]이고 T16b가 실측해 넣는다(설계 E9).
+- 노드 로컬 경로(노드 IP의 6443·10250·22)는 NetworkPolicy로 못 막으므로, 작업자 파드 netns 안에서 init 컨테이너(NET_ADMIN, 그 컨테이너만)가 출력을 셋만 허용한다: loopback(`-o lo`), conntrack `ESTABLISHED,RELATED`, 프록시 ClusterIP:3128로 가는 새 연결. 본 컨테이너는 NET_ADMIN이 없다. 그래서 이 ns의 PSA는 privileged이고 파드는 Git(Argo CD)만 만든다. 이 방식은 [미검증] U13이다. 안 되면 호스트 전용 UID + nft(옛 AIOps 방식)로 물러난다(D-15, 확정(사용자 2026-10-18, T15)).
 - 작업 전달은 봇 → 작업자 Service ingress 하나다. 이 허용은 봇 자리 Application에 있고 `platform/sandbox`에는 기본 거부만 있다.
-- 남는 위험(쓰기 유출): 프록시는 CONNECT의 호스트 이름만 보므로 `github.com`을 허용하면 읽기와 쓰기를 가르지 못한다. 줄이는 선택지(코드 읽기를 `codeload.github.com` 같은 읽기 전용 호스트로만)는 D-15다.
+- 남는 위험(쓰기 유출): 프록시는 CONNECT의 호스트 이름만 보므로 `github.com`을 허용하면 읽기와 쓰기를 가르지 못한다. 그래서 D-15(확정(사용자 2026-10-18, T15))로 코드 읽기를 `codeload.github.com` 압축본만으로 좁혔다(위 허용 목록). 패키지 레지스트리의 게시 API는 이 결정으로 줄지 않는다(설계 C.8).
 
 ### 봇 자리 Application (`platform/bot-slot`, 설계 C.8)
 
 - 봇 자리 Application `platform/bot-slot`: root 아래 작은 Helm 차트, wave 1, `retry.limit: -1`(무제한)과 `retry.refresh: true`. 대상 ns를 만들지 않는다(`CreateNamespace` 없음).
 - 대상 값 하나: `values.yaml`의 `target`(ns, 앱 라벨 `homelab.ukyi.app/app`의 값, 작업자 포트, 봇의 경보 수신 포트)이 모든 리소스의 대상과 출처를 정한다. 이 티켓에서는 시험 ns `bot-slot-probe`, 시험 라벨, 시험 작업자·시험 수신기의 포트다. 작업자 포트는 `platform/sandbox`의 작업자 컨테이너 포트와 같아야 한다.
+- 경보 수신 포트의 Service: 공유 차트 values의 포트는 `port` 하나뿐이라 Alertmanager가 가리킬 경보 수신 포트(봇은 8081, D-15)의 Service가 따로 필요할 수 있다 [추측]. 이 Application이 `target`으로 함께 만들지는 이 티켓에서 정한다 [제안] (설계 C.8 봇 자리 Application).
 - 담는 것: (1) `target` ns의 NetworkPolicy(egress를 `sandbox` 작업자, `observability` Grafana, `argocd` `argocd-server`로, ingress를 `observability` Alertmanager에서 경보 수신 포트로), (2) `sandbox` ns의 NetworkPolicy(`target` ns·라벨에서 작업자 포트로 오는 ingress), (3) SA `bot-reader`, ClusterRole `homelab-readonly`, ClusterRoleBinding, (4) `probe: true`일 때만 시험 ns `bot-slot-probe`의 Namespace(이 Application 안 앞 sync-wave)와 설계 C.4.5 네트워크 행을 손으로 옮긴 정책(기본 거부, DNS, 같은 ns, 인터넷 443).
 - 손으로 옮긴 정책의 인터넷 443은 ipBlock `0.0.0.0/0`에 except `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`(tailnet)을 명시한다. IPv6 허용 줄은 두지 않는다. 공유 차트는 T10이 만들어 이 티켓이 쓸 수 없으므로 손으로 옮기고, 차트 egress의 같은 tailnet 제외는 T10이 둔다.
 - 받는 쪽: `observability` ns에는 ingress NetworkPolicy를 두지 않는다. `argocd-server`는 공식 install.yaml의 정책이 모든 출처를 연다.
-- 이 Application의 변경은 platform 변경이라 자동 병합 조건 밖이고 사람이 검토 후 병합한다. `target`을 봇 ns로 바꾸는 PR은 T16이 봇 등록 PR보다 먼저 병합한다.
+- 이 Application의 변경은 platform 변경이라 자동 병합 조건 밖이고 사람이 검토 후 병합한다. `target`을 봇 ns로 바꾸는 PR은 T16b가 봇 등록 PR보다 먼저 병합한다.
 
 ### 시나리오 6·7의 경보 부분 (T09가 넘긴 것)
 
@@ -106,7 +110,7 @@
 | healthchecks.io 새 체크 ping URL | `homelab`의 플랫폼 경로(설계 C.2 `/platform/<구성 요소>`) → ESO | Alertmanager `healthchecks` | 이 티켓(계정 재사용, 사람이 체크를 만들고 등록) |
 | Grafana 관리자 자격 | `homelab` → ESO | Grafana | T09 |
 | `eso-homelab` identity | ESO 부트스트랩 Secret | `infisical-sandbox`, 시나리오 6·7 장애 주입 | T09. 시험용 두 번째 client secret은 이 티켓에서 사람이 발급·폐기(승인 기록) |
-| 작업자 모델 자격 | `homelab` `/apps/<bot>/worker` → `infisical-sandbox` | 작업자 파드 | 실제 값은 봇 티켓(명세 §11 모델 행 T15·T18) |
+| 작업자 모델 자격 | `homelab` `/apps/<bot>/worker` → `infisical-sandbox` | 작업자 파드(영속 공간에 파일이 없을 때만 시드로 복사) | 실제 값(봇 전용 구독 계정의 시드 `auth.json`, D-14)은 T16b 전(모델을 처음 쓰는 단계 전) 사람 작업(명세 §11 모델 행, 설계 E9). 이 티켓은 시험 값만 |
 
 - Grafana SA `bot-reader` 토큰은 준비 확인(`GET /api/search`, `POST /api/dashboards/db`)에 쓰고 이 티켓에서 만든다. 봇이 쓸 토큰의 보관 위치는 설계에 없다.
 - 옛 Telegram 봇 토큰은 쓰지 않는다(`보류(D-10, T22)`).
@@ -125,7 +129,7 @@
 - 시나리오 16(비AI 경보), 17(외부 감시)을 통과한다.
 - 시나리오 6·7의 경보 부분(T09가 넘긴 것)을 통과한다.
 - "tailnet 출처 질의 1시간 0건" 경보의 실제 발화 시험을 통과했다(아래 검증).
-- 설계 C.8의 읽기 전용 접근(CI 검사 L30은 T10)·경보 외부 수신자·격리 작업 공간 준비 확인을 통과한다.
+- 설계 C.8의 읽기 전용 접근(CI 검사 L30은 T10)·경보 외부 수신자·격리 작업 공간 준비 확인을 통과한다(D-14 영속 공간 유지와 상주 작업자 모양, D-15 허용 목록 확인 포함. 설계 E4b).
 - 핵심 룰 단위 시험을 통과한다.
 - 새 체크가 초록이 된 뒤 옛 healthchecks 체크를 지웠고, T06 자격 폐기 표의 그 줄(옛 ping URL, `보류(D-10, T08b)`)이 닫혔고, approvals에 기록돼 있다.
 
@@ -143,6 +147,8 @@
   - 안에서 `curl -m 5`로 `https://10.43.0.1`, `https://<노드 IP>:6443`, `<노드 IP>:22`, 공유기 IP, tailnet 주소, `https://app.infisical.com` → 모두 실패.
   - `nslookup example.com` → 실패(DNS 차단), `nc -z -w 3 <CoreDNS ClusterIP> 53` → 실패.
   - `HTTPS_PROXY`만 둔 채 `curl -sI https://<허용 도메인>` → 연결(이름 해석은 프록시), `curl -x http://<프록시 ClusterIP>:3128 https://<허용 밖 도메인>` → 프록시 거부.
+  - D-15 허용 목록: `HTTPS_PROXY`만 둔 채 `curl -sfo /dev/null https://codeload.github.com/ukyi-app/<public 시험 저장소>/tar.gz/<SHA>` → 성공, `https://github.com`·`https://api.github.com`·`https://gist.github.com` → 프록시 거부.
+  - D-14 영속 공간: 시험 작업자가 `CODEX_HOME` 볼륨에 시험 파일을 쓰고 파드를 지운 뒤 새 파드에서 같은 내용이 남는다. `kubectl -n sandbox get deploy <작업자> -o jsonpath='{.spec.replicas} {.spec.strategy.type}'` → `1 Recreate`([제안] 값을 쓴 경우).
   - 시험 작업자 파드가 HTTP를 받는 상태에서 안에서 `curl -sf http://127.0.0.1:<포트>/` → 성공(loopback 허용).
   - 봇 자리 시험 파드(`bot-slot-probe`, 시험 라벨)에서 `curl -sf http://<작업자 Service>.sandbox:<포트>/` → 성공(응답 패킷이 `ESTABLISHED` 허용으로 나감), Grafana·Argo CD API → 연결, vmsingle·Alertmanager API → 실패. 같은 라벨이 없는 파드에서 작업자 Service → 실패.
   - `/var/run/secrets/kubernetes.io/serviceaccount` 없음. `kubectl auth can-i --as=system:serviceaccount:sandbox:default list secrets -n sandbox`와 `create externalsecrets.external-secrets.io -n sandbox` → 둘 다 no.

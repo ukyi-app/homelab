@@ -15,6 +15,7 @@ V1을 판정한다. 판정 정의는 `04` §9, end-to-end 흐름은 `01` §9, �
 
 1. `04` §1 감사 프롬프트를 실행한다.
 2. `04` §4의 시험 30개 결과를 모두 기록한다.
+   - V1 범위 조정 안 3(확정(사용자 2026-10-18, T15))의 STAGE별 시범 운영 기록(승인은 [../approvals.md](../approvals.md), 증거는 `authorized_external`)이 있으면 해당 시험의 증거로 함께 본다. 판정 정의(`04` §9)는 바꾸지 않는다.
 3. F01~F09, R01~R18의 구현 위치와 증거를 추적한다.
 4. `01` §9의 end-to-end 흐름 5개를 확인한다.
 5. 판정을 내린다: `NOT_READY`, `LOCAL_VERIFIED_INTEGRATION_PENDING`, `READY_FOR_SCOPED_PILOT`, `V1_ACCEPTED`.
