@@ -4,7 +4,7 @@
 - 상태: 대기
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T14
-- 선행 결정: D-14~D-17과 D-24(봇 변경 PR 작성 자격). 모두 이 티켓에서 결정한다. 산출물 위치는 D-13(T14)
+- 선행 결정: D-14~D-17과 D-24(봇 변경 PR 작성 자격). 모두 이 티켓에서 결정한다. 산출물 위치는 D-13(확정(사용자 2026-10-18, T14))
 - 연결 AC: AC-B2
 - 수행: 개발 에이전트 (`MODE=plan`) + 사람 (D-14~D-17·D-24 결정과 검토, Discord 서버·봇 계정과 모델 계정 준비)
 
@@ -25,7 +25,7 @@
 1. `01` §3의 질문 7개를 조사한다.
 2. 능력표를 실측한다: Discord, Codex(NUC에 codex-cli 0.163.0), herdr(0.9.5), GitHub App.
 3. D-16 대안은 Codex Connector로 실측한다. 트리거, 게시 방식, 설치 범위, 결과를 Discord로 가져올 수 있는지를 본다. 기존 PR 기록을 읽기 전용으로 조회해 확인하고(예: homelab PR #752의 리뷰 기록), 시험 PR이 더 필요하면 사람에게 요청한다.
-4. D-14(모델 계정·인증)는 공식 약관을 확인한 뒤, D-15(실행 호스트·격리)·D-16(리뷰 방식)·D-17(Discord 대상)·D-24(봇 변경 PR 작성 자격)와 함께 결정한다. 에이전트는 근거와 추천을 `DECISIONS.md`에 적고, 결정은 사용자가 한다.
+4. D-14(모델 계정·인증)는 공식 약관을 확인한 뒤, D-15(실행 호스트·격리)·D-16(리뷰 방식)·D-17(Discord 대상)·D-24(봇 변경 PR 작성 자격)와 함께 결정한다. 에이전트는 근거와 추천을 `DECISIONS.md`에 적고, 결정은 사용자가 한다. D-16을 정할 때 모델 호출 전 `author_association` 확인(OWNER·MEMBER·COLLABORATOR, 설계 C.8)이 Renovate App PR과 봇 변경 PR App의 PR을 막는지 실측하고, 막으면 허용할 App을 따로 둘지 정한다(V1 기능 7, AC-B4).
 5. 결정이 나면 같은 변경에서 spec §5.1로 옮기고 근거를 적는다. `../bot/` 전체에서 그 D-ID를 검색해 자리를 고친다(spec §12).
 6. `V1_PLAN.md`에 일정 위험(spec §10 6번) 대응으로 범위 조정안을 제안한다. 사용자가 정한다.
    - 예: STAGE별 제한 시범 운영(T17 뒤 시험 저장소에서 PR 리뷰만 실사용), T16의 로컬·mock 구현을 T13 완료 전에 시작하고 실연동만 T13 뒤로.
@@ -36,17 +36,18 @@
 
 ## 산출물
 
-산출물은 공개 여부로 나눈다(D-13 일부 확정: 봇 저장소는 public, 운영 산출물은 저장소 밖이나 private 위치).
+산출물은 공개 여부로 나눈다(D-13 확정(사용자 2026-10-18, T14): 봇 저장소는 public, 운영 산출물은 봇 저장소에 두지 않는다).
 
-- 봇 저장소 `docs/ai-bot/`(공개): `DISCOVERY.md`(내부 경로·실제 허용 목록을 뺀 판), `ARCHITECTURE.md`, `DECISIONS.md`, `VERIFICATION.md`, `V1_PLAN.md`, `PROJECT_STATUS.md`, 비밀값 없는 설정 초안(키 이름만).
-- 저장소 밖이나 private 위치(D-13의 나머지로 T14가 정한 곳): HANDOFF, evidence, DISCOVERY의 내부 경로·실측 세부, runtime-policies와 허용 목록의 실제 값.
+- 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/`(공개): `DISCOVERY.md`(내부 경로·실제 허용 목록을 뺀 판), `ARCHITECTURE.md`, `DECISIONS.md`, `VERIFICATION.md`(요약. 내부 정보는 뺀다), `V1_PLAN.md`, `PROJECT_STATUS.md`, 비밀값 없는 설정 초안(키 이름만).
+- private 저장소 `ukyi-app/homelab-bot-ops`: HANDOFF, evidence, DISCOVERY의 내부 경로·실측 세부.
+- Infisical `/apps/homelab-bot/`: runtime-policies와 허용 목록의 실제 값(봇이 실행 중 읽는 값). 등록은 사람이 한다(spec §11). 봇 저장소에는 키 이름만 둔다.
 
-봇 저장소가 아직 없으면 같은 구성을 로컬 초안으로 두고, 저장소 커밋을 `blocked`(사유: 봇 저장소 없음, 해소: T14의 생성 요청)로 기록한다. 초안의 위치는 HANDOFF에 적는다.
+봇 저장소(`homelab-bot`, `homelab-bot-ops`)가 아직 없으면 같은 구성을 로컬 초안으로 두고, 저장소 커밋을 `blocked`(사유: 봇 저장소 없음, 해소: T14의 생성 요청)로 기록한다. 초안의 위치는 HANDOFF에 적는다.
 
 ## 제약
 
 - 계정 생성, App 설치, 외부 PR·댓글 게시, 운영 배포를 하지 않는다 (`00` §2).
-- 봇 저장소는 public이다(D-13 일부 확정). 저장소에 넣는 산출물은 공개되므로 시크릿 값과 운영 민감 정보(토큰 목록, 내부 접근 경로의 세부)를 쓰지 않는다. 플랫폼 프롬프트 머리말의 "공개 범위"와 같은 기준이다. HANDOFF와 운영 산출물은 위 "산출물"대로 저장소 밖이나 private 위치에 둔다.
+- 봇 저장소 `ukyi-app/homelab-bot`은 public이다(D-13). 저장소에 넣는 산출물은 공개되므로 시크릿 값과 운영 민감 정보(토큰 목록, 내부 접근 경로의 세부)를 쓰지 않는다. 플랫폼 프롬프트 머리말의 "공개 범위"와 같은 기준이다. HANDOFF와 운영 산출물은 위 "산출물"대로 `homelab-bot-ops`와 Infisical에 둔다.
 - Discord 서버·봇 계정과 모델 계정은 사람이 준비하고 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
 
 ## 완료 조건
@@ -54,7 +55,7 @@
 - `01` §3 완료 조건을 채웠다.
 - D-14~D-17, D-24가 결정됐고, spec §5.1과 `../bot/` 자리에 반영됐다.
 - `V1_PLAN.md`에 범위 조정안과 사용자의 선택이 있다.
-- 공개 산출물이 봇 저장소에 PR로 병합돼 있고(main은 `app-main`으로 보호돼 PR로만 들어간다. 병합은 사람 승인 뒤), HANDOFF와 운영 산출물은 T14가 정한 저장소 밖이나 private 위치에 있다. spec·`bot/` 변경은 homelab `rebuild`(T07 뒤에는 PR로 main)에 커밋돼 있다 (명세 AC-X1).
+- 공개 산출물이 봇 저장소에 PR로 병합돼 있고(main은 `app-main`으로 보호돼 PR로만 들어간다. 병합은 사람 승인 뒤), HANDOFF와 개발 산출물은 private 저장소 `ukyi-app/homelab-bot-ops`에 있고, 봇 저장소에는 운영 산출물이 없다(D-13). spec·`bot/` 변경은 homelab `rebuild`(T07 뒤에는 PR로 main)에 커밋돼 있다 (명세 AC-X1).
 
 ## 검증
 

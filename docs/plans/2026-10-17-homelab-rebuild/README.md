@@ -6,7 +6,7 @@
 
 | 경로 | 무엇 | 기준이 되는 것 |
 |---|---|---|
-| [spec.md](spec.md) | 전체 계획 | 현재 상태, 결정(C-xx와 §5.1로 옮긴 D-xx는 확정, §5.2·§5.3의 D-xx는 미정. D-13은 일부만 확정돼 두 곳에 나뉨), 단계 순서, 인수 조건, 티켓 그래프 |
+| [spec.md](spec.md) | 전체 계획 | 현재 상태, 결정(C-xx와 §5.1로 옮긴 D-xx는 확정, §5.2·§5.3의 D-xx는 미정), 단계 순서, 인수 조건, 티켓 그래프 |
 | [issues/](issues/) | 티켓 T01~T22, 23개(T08은 T05 재분해로 [T08a](issues/T08a-network.md)·[T08b](issues/T08b-observability.md)로 나뉨) | 각 작업의 범위, 선행 관계, 완료 조건. 목록과 상태는 [spec.md](spec.md) §8.1 |
 | [approvals.md](approvals.md) | 외부 변경 승인 기록 | 계정·App·삭제·배포·병합·공개 같은 외부 변경의 승인과 그 전제가 되는 사용자 결정 (AC-X2) |
 | [platform/design-prompt.md](platform/design-prompt.md) | 플랫폼 설계 프롬프트 (T04가 실행) | 플랫폼 설계 지시, 검증 시나리오 1~17 |

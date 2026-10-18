@@ -30,7 +30,7 @@
 | Tailscale 전역 DNS | NUC(AdGuard) + Cloudflare Public DNS. 임시 폴백이라 광고 차단은 불안정. D-08이 확정(사용자 2026-10-18)돼 T08a에서 NUC(AdGuard Home) + AdGuard 공용 DNS 2개로 바꾼다(§4.5) |
 | NUC 로컬 전용 자료 | git 밖 옛 런북, Terraform 자격 파일, 원격 없는 다른 프로젝트가 이 디스크에만 있다(§4.5). OS를 유지하고(D-12), T06 목록 작성에만 읽기 전용으로 쓴다(D-27). 둘 다 확정(사용자 2026-10-18, T05) |
 | 플랫폼 프롬프트 | [platform/design-prompt.md](platform/design-prompt.md). T03 보강과 2026-10-17 감사 반영. 확정 결정의 자리는 2026-10-18에 T05가 채웠다 |
-| 봇 문서 | [bot/](bot/)의 `00`~`04`. T05 결정의 자리는 2026-10-18에 채웠다. 설계 문서 값 반영과 빠진 자리 점검은 T14 (§4.3) |
+| 봇 문서 | [bot/](bot/)의 `00`~`04`. T05 결정의 자리는 2026-10-18에 채웠다. 설계 문서 값 반영과 빠진 자리 점검은 T14 (§4.3). 최종 위치는 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/`이고 아직 옮기지 않았다(D-13, §4.3) |
 | `docs/` | `/home/ukyi/homelab`이 `ukyi-app/homelab`의 작업 사본이다(브랜치 `rebuild`, T02). 계획 문서는 원격 `rebuild`에 있다 |
 
 ---
@@ -39,7 +39,7 @@
 
 | 단계 | 상태 | 근거 |
 |---|---|---|
-| A. 합의 | 계획 수준 완료 | 확정 결정 30개(§5.1: C-01~C-08, D-01~D-12, D-18, D-20~D-23, D-25~D-29)와 D-13의 일부(봇 저장소 가시성, 옛 aiops 처리). 그중 T05 결정 게이트 14개(D-05~D-07, D-09~D-12, D-18, D-20~D-22, D-25~D-27)와 설계 F "추가 확인"의 기본값은 2026-10-18 T05 질문 응답으로 확정했다. 지금 정할 결정 없음. 남은 단계 결정 7개(D-13 나머지, D-14~D-17, D-19, D-24)는 각 결정 게이트 티켓(T14, T15)에서 정함 |
+| A. 합의 | 계획 수준 완료 | 확정 결정 32개(§5.1: C-01~C-08, D-01~D-13, D-18~D-23, D-25~D-29). 그중 T05 결정 게이트 14개(D-05~D-07, D-09~D-12, D-18, D-20~D-22, D-25~D-27)와 설계 F "추가 확인"의 기본값은 2026-10-18 T05 질문 응답으로, T14 결정 게이트(D-13의 나머지, D-19)는 같은 날 T14 질문 응답으로 확정했다. 지금 정할 결정 없음. 남은 단계 결정 5개(D-14~D-17, D-24)는 결정 게이트 티켓 T15에서 정함 |
 | B. 명세 | 갱신 완료 | 이 문서. 인수 조건은 §7, 대응표는 §9 |
 | C. 티켓 | 갱신 완료 | `issues/` 23개(T01~T05 완료). T05가 2026-10-18에 P2 티켓을 설계 E에 맞춰 다시 쪼갰다(T08 → T08a·T08b). 의존성 그래프는 §8 |
 
@@ -103,9 +103,10 @@
 
 - **`00` §3·§6 (C-08 보호):** 문장은 사용자가 제공한 패키지 원문 그대로다. 옛 홈랩을 가리키는 곳에는 "> 참고:" 주석이 있다. `01` §5는 같은 뜻을 새 플랫폼 표현으로 적어서 두 문서의 문구가 다르다.
 - **`04` §9:** V1 판정 정의의 유일한 기준이다. `01` §9는 판정 이름과 포인터만 둔다.
-- **`02`·`03`:** 옛 홈랩을 전제로 한 문장이 남아 있고, 각 문서 머리의 "다시 검토할 문장" 표에 모여 있다. V2·V4 계획 때 처리한다 (D-19).
+- **`02`·`03`:** D-19(확정(사용자 2026-10-18, T14))로 T14에서 정비했다. 옛 홈랩을 전제로 한 문장은 `00`·`01`·`04`와 같은 방식으로 고쳤고, 처리 기록은 각 문서 머리의 "T14에서 처리한 문장" 표(T14 전 "다시 검토할 문장" 표)에 있다. 복사용 프롬프트(`02` §0, `03` §0)도 고쳤다.
+- **위치 (D-13):** 봇 문서의 최종 위치는 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/`다. 파일 이름(`00-start.md`~`04-audit-handoff.md`)은 그대로다. 옮기기는 봇 저장소 생성·하드닝 뒤 PR로 하고 T14가 맡는다(T14 할 일 8, 완료 조건). 그때까지 이 명세와 티켓의 `bot/` 링크는 지금 위치를 가리킨다. `bot/` 문서는 지금부터 최종 위치 기준으로 고친다(참조 규칙은 §12).
 
-T14에 남은 일: 위 자리에 플랫폼 값을 채운다. T05의 플랫폼 결정은 확정(사용자 2026-10-18, T05)이다(§5.1). D-13의 나머지(봇 저장소 이름, 산출물 위치, 프롬프트 문서의 최종 위치)와 D-19를 정한다. 봇 코드 저장소가 public이고 운영 산출물은 저장소 밖이나 private 위치에 둔다는 것, 옛 aiops 저장소·App 제거는 확정(사용자 2026-10-18)이다(D-13 일부, §5.1). D-13의 나머지를 정한 뒤 봇 저장소 생성을 사람에게 요청한다.
+T14 진행: 위 자리에 플랫폼 값을 채웠다. T05의 플랫폼 결정은 확정(사용자 2026-10-18, T05)이다(§5.1). D-13의 나머지(봇 저장소 이름, 산출물 위치, 프롬프트 문서의 최종 위치)와 D-19는 2026-10-18 T14 질문 응답으로 확정했다(§5.1). 같은 응답에서 R14 배정도 정했다: R14는 PR_REVIEW(`01` §5, T17)에서 빼고 CHANGE_PR(`01` §7, T19)에만 남긴다. 시험 CHANGE-01·03은 그대로다. 봇 저장소 생성은 둘(`ukyi-app/homelab-bot` public, `ukyi-app/homelab-bot-ops` private)이고 사람에게 요청한다(§11). 남은 일은 저장소 생성과 문서 이동 PR이다.
 
 ### 4.4 플랫폼 문서에 남은 공백
 
@@ -131,13 +132,13 @@ T14에 남은 일: 위 자리에 플랫폼 값을 채운다. T05의 플랫폼 �
   - DNS 차단은 같은 도메인에서 나오는 광고(유튜브 등)를 막지 못하고, 브라우저 보안 DNS와 안드로이드 개인 DNS는 이 경로를 우회한다.
 - **노드 자신의 DNS:** 공유기의 주 DNS가 NUC의 AdGuard라서, 노드가 DHCP DNS를 쓰면 "노드 → 공유기 → 노드 위 AdGuard" 순환이 생긴다. 옛 host-config는 resolved drop-in(공용 DNS 직접 사용)과 `tailscale set --accept-dns=false`로 이를 막았다. T06은 이 설정(설계 B.4의 H5)을 남기고, T07(설계 E2)이 drop-in을 같은 이름으로 덮어쓴다(D-12, 확정(사용자 2026-10-18, T05)). 대체 없이 지우면 순환이 다시 생긴다.
 - **HSTS:** `.app` 최상위 도메인 전체가 브라우저 HSTS preload 목록에 있어 `ukyi.app` 아래 모든 이름은 처음 접속하는 브라우저에서도 HTTPS 전용이다. 그래서 공개 이름은 처음부터 유효한 인증서를 써야 한다. `ukyi.app` zone의 HSTS 헤더(includeSubDomains, 180일)는 이와 별개이고 유지한다(D-11). 새 구조는 내부 UI를 Tailscale operator Ingress의 `<서비스>.<tailnet>.ts.net`(UI마다 단독 프록시)으로 옮기고 `*.home.ukyi.app` 내부 이름을 두지 않는다(D-08). 그래서 내부 와일드카드 인증서와 cert-manager DNS-01용 Cloudflare 토큰이 필요 없다. 대신 tailnet HTTPS 인증서를 켜면 기기 이름과 tailnet DNS 이름이 공개 CT 로그에 실리므로, 공개해도 되는 기기 이름만 쓴다.
-- **GitHub 요금제와 공개 범위:** org는 Free 플랜이고 `homelab`은 public이다. Free에서 브랜치 보호와 ruleset은 public 저장소에서만 동작한다. 그래서 봇 저장소를 private로 만들면 보호 규칙을 걸 수 없고(D-13), `homelab`을 private로 돌리면 AC-P8의 전제가 무너진다. T02 push부터 계획 문서가 공개되고, 사용자가 이를 받아들였다(D-23, 확정). 저장소 공개 정책은 D-29다(확정(사용자 2026-10-18)): 앱 저장소는 public만 허용하고, 봇 코드 저장소도 public이다(D-13 일부). 앱이 아닌 저장소는 공개하지 않는다.
+- **GitHub 요금제와 공개 범위:** org는 Free 플랜이고 `homelab`은 public이다. Free에서 브랜치 보호와 ruleset은 public 저장소에서만 동작한다. 그래서 봇 저장소를 private로 만들면 보호 규칙을 걸 수 없고(D-13), `homelab`을 private로 돌리면 AC-P8의 전제가 무너진다. T02 push부터 계획 문서가 공개되고, 사용자가 이를 받아들였다(D-23, 확정). 저장소 공개 정책은 D-29다(확정(사용자 2026-10-18)): 앱 저장소는 public만 허용하고, 봇 코드 저장소 `ukyi-app/homelab-bot`도 public이다(D-13). 앱이 아닌 저장소는 공개하지 않는다. 봇 운영 산출물 저장소 `ukyi-app/homelab-bot-ops`는 private라서 같은 이유로 보호 규칙을 걸 수 없다(D-13).
 - **Codex Connector:** ChatGPT Codex Connector App이 org 전체 저장소에 쓰기 권한(contents, workflows, actions, issues, pull_requests)으로 설치돼 있고, PR을 열면 코드·보안 리뷰를 자동으로 단다. `homelab`에서는 main push 허용 목록에 없어서 main에 직접 쓰지는 못한다. 앱 저장소는 main 보호가 없어서 이 App이 main에 직접 쓸 수 있다(2026-10-17 실측). 새 구조의 자동 배포 경로가 앱 저장소 main을 믿으면 이 점이 AC-P8의 간접 자동 병합 경로가 된다. rebuild → main PR(T07)에도 돈다. 처리는 D-26, 봇 PR 리뷰와의 관계는 D-16이다. 결정 5(2026-10-18, §5.1)로 `files`·`homelab-app-template` main에 `CODEOWNERS`와 `app-main` ruleset을 걸었다(2026-10-18 실행). 이 App은 bypass 목록에 없어 두 저장소 main 직접 쓰기는 ruleset이 막는다(규칙 조회로 확인, 실제 push 시험은 하지 않음). `page`·`trip-mate-api`는 삭제한다(D-29).
 - **봇 규모:** V1만으로 필수 기능 7개, 공통 계약 9개, 요구 18개, 수용 시험 30개다. 일정 위험 1순위다.
 - **모델 계정:** NUC에 Codex 홈이 3개(`~/.codex`, `~/.codex-sub`, `~/.codex-work`) 있다. `~/.codex2`와 `~/.codex3`은 각각 `-sub`와 `-work`를 가리키는 심링크다. 옛 AIOps의 ChatGPT 구독 OAuth는 시스템 사용자 `aiops-proxy`의 CLIProxyAPI 저장소에 따로 있다. 봇 문서는 개인 CODEX_HOME(`~/.codex*` 전체) 자동 탐색을 금지하고, 구독 약관을 자동 호출 권한으로 가정하지 말라고 한다 (D-14).
 - **NUC에 설치된 도구:** codex-cli 0.163.0, herdr 0.9.5, bun 1.4.3, Terraform 1.16.6, kubectl 1.37.1, k3s v1.36.4+k3s1, tailscale 1.104.1, gh 2.102.0, sops 3.13.1, age 1.3.2, helm v4.3.1. argocd, wrangler, infisical CLI는 없다. OS는 Ubuntu 26.04.1이다.
 - **옛 규모 (교훈 대상):** 워크플로 25개(디렉터리 파일 26개, README 포함), bats 시험 파일 313개, AIOps 관련 파일 58개(경로 기준. 내용에서 언급하는 파일은 104개). 전체 파일 929개.
-- **옛 AIOps 잔여물:** GitHub `ukyi-app/aiops`(Codex 진단·Draft PR 실행기)와 `ukyi-app/aiops-autodeploy-canary`(옛 homelab 공통 워크플로를 호출), GitHub App `ukyi-homelab-aiops`가 남아 있다. NUC에는 호스트 유닛 4종(`aiops-ingress.service`, `aiops-worker.service`·`.timer`, `homelab-aiops-nft.service`, `var-lib-homelab\x2daiops.mount`)과 nft 규칙이 있다. mount 유닛 이름의 `\x2d`는 systemd 경로 이스케이프라서, 셸에서는 작은따옴표로 감싸거나 `systemctl status /var/lib/homelab-aiops`처럼 경로로 지정한다. 이 mount는 2026-10-17에 active다. 그 밖에 `/opt/homelab-aiops`, `/etc/homelab-aiops`(AIOps App 개인 키), 시스템 사용자 8개 등이 있다. 전체 목록은 T06에 있다. 봇에는 교훈 자료이고, 철거에서는 정리 대상이다 (T06, T15, T22). aiops는 쓰지 않으므로 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App은 제거(삭제)하고, `aiops-autodeploy-canary`는 공개하지 않고 private로 보관한다(삭제도 가능). 둘 다 확정(사용자 2026-10-18)이고 실행은 T22다(D-13 일부, D-29).
+- **옛 AIOps 잔여물:** GitHub `ukyi-app/aiops`(Codex 진단·Draft PR 실행기)와 `ukyi-app/aiops-autodeploy-canary`(옛 homelab 공통 워크플로를 호출), GitHub App `ukyi-homelab-aiops`가 남아 있다. NUC에는 호스트 유닛 4종(`aiops-ingress.service`, `aiops-worker.service`·`.timer`, `homelab-aiops-nft.service`, `var-lib-homelab\x2daiops.mount`)과 nft 규칙이 있다. mount 유닛 이름의 `\x2d`는 systemd 경로 이스케이프라서, 셸에서는 작은따옴표로 감싸거나 `systemctl status /var/lib/homelab-aiops`처럼 경로로 지정한다. 이 mount는 2026-10-17에 active다. 그 밖에 `/opt/homelab-aiops`, `/etc/homelab-aiops`(AIOps App 개인 키), 시스템 사용자 8개 등이 있다. 전체 목록은 T06에 있다. 봇에는 교훈 자료이고, 철거에서는 정리 대상이다 (T06, T15, T22). aiops는 쓰지 않으므로 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App은 제거(삭제)하고, `aiops-autodeploy-canary`는 공개하지 않고 private로 보관한다(삭제도 가능). 둘 다 확정(사용자 2026-10-18)이고 실행은 T22다(D-13, D-29). 새 봇 저장소는 옛 `ukyi-app/aiops`를 재사용하지 않고 `ukyi-app/homelab-bot`을 새로 만든다(D-13).
 - **옛 호스트 유닛의 옛 사본 의존:** `files-data-backup`(매일), `systemd-failed-sweep`(5분), `unit-failure-notify@`가 `~/workspace/homelab/scripts/`의 스크립트를 root로 실행하고, `files-data-backup`은 옛 사본의 kubeconfig도 쓴다. T06 전에 옛 사본을 옮기거나 지우면 이 유닛이 실패한다.
 - **옛 데이터 경로:** k3s 표준 제거(`k3s-uninstall.sh`)는 `/var/lib/rancher/k3s`만 지우고 `/var/lib/rancher/k3s-storage`(옛 PV 데이터, AdGuard 라이브 설정 포함)를 남긴다. `/mnt/bulk`와 `/var/backups/files-data`도 남는다. T06은 AdGuard 라이브 설정을 먼저 내보낸 뒤(T08a 입력) 이 경로들을 지운다(D-12).
 - **NUC 로컬 전용 자료:** 옛 운영 런북은 사용자 결정(2026-06-11)으로 public 저장소 밖에 두었다(`~/workspace/homelab/docs/runbooks/`, `~/workspace/homelab-infra/`). Terraform 자격 파일(`.env.secrets`, `backend.hcl`, `terraform.tfvars`), SOPS age 키, 원격 없는 다른 프로젝트(`~/workspace/polyrelay` 등)도 이 디스크에만 있다. 옛 사본에는 push하지 않은 로컬 브랜치와 워크트리도 있다. 사용 범위는 D-27이다. OS를 유지하므로(D-12) 이 자료는 디스크에 남는다. 예외는 SOPS age 키로, T06 자격 폐기 완료를 확인한 뒤 지운다(D-20). 셋 다 확정(사용자 2026-10-18, T05)이다.
@@ -177,8 +178,9 @@ T14에 남은 일: 위 자리에 플랫폼 값을 채운다. T05의 플랫폼 �
 | D-10 | 비AI 알림은 homelab 알림용 Telegram 새 봇(설계 E3에서 생성)이고, 외부 생존 감시는 healthchecks.io다(계정 재사용, 체크 새로). 옛 Telegram 봇·토큰은 그것을 쓰는 `mac-uptime-guard`를 처리하는 T22까지 그대로 둔다. 옛 healthchecks 체크는 새 체크가 초록인 것을 확인한 뒤 지운다(설계 E4b). 옛 봇 토큰을 재발급하는 대안은 고르지 않았다. 그래서 E3(T09)이 옛 봇 토큰 행을 닫는 분기는 쓰이지 않는다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락. 옛 봇 토큰 재발급 대안은 고르지 않음) |
 | D-11 | 설계 F D-11 표대로 한다. Cloudflare zone `ukyi.app`, Tailscale tailnet, R2 state 버킷 `homelab-tfstate`만 이어 쓰고, 나머지 옛 외부 자원은 표대로 지우거나 새로 정의한다. 새 root의 state 키 접두는 `v2/`다. zone 설정 9개(HSTS includeSubDomains 180일 포함)는 값을 유지해 새 Terraform으로 가져온다. Tailscale ACL은 (a): NUC는 태그 없는 사용자 기기이고, 옛 self·ssh 규칙(`accept`, `autogroup:nonroot` + `root`)을 유지한다. (c) `tag:nuc`로 바꿀 조건은 E4a에서 U28 결과로 다시 본다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
 | D-12 | OS를 유지하고 k3s를 제거하며 호스트를 정리한다(설계 B.4의 H1·H2·H3·H7·H8·H9). H8은 옛 데이터 경로(`/var/lib/rancher/k3s-storage`, `/mnt/bulk`, `/var/backups/files-data`)와 AIOps loop 이미지이고, AdGuard 라이브 설정을 먼저 내보낸다. `/mnt/bulk`는 비우고 fstab 항목을 지운다. 노드 DNS drop-in(H5)과 sshd·journald·tmpfiles drop-in(H4)은 남기고 E2(T07)가 같은 이름으로 덮어쓴다. 빈 NUC 재구축 검증은 VM에서 하고, VM은 설계 E8의 격리 조건 여섯을 지킨다. VM 호스트는 tailnet에 넣지 않는다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
-| D-13 (일부) | 가시성과 옛 aiops 부분만 확정. 봇 코드 저장소는 public이다. 운영 산출물(evidence, handoffs, runtime-policies 실제 값, DISCOVERY의 내부 경로, 허용 목록 실제 값)은 저장소 밖이나 private 위치에 둔다. 옛 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App은 제거(삭제)한다(실행 T22). 나머지(봇 저장소 이름, 산출물 위치, 프롬프트 문서의 최종 위치)는 미정으로 §5.3에 남고 T14가 정한다 | 사용자 2026-10-18: "aiops는 사용안할거긴해. 참고해. 제거예정.", 공개 정책은 "추천대로" |
+| D-13 | 봇 코드 저장소는 `ukyi-app/homelab-bot`(public)이다. 새로 만들고 옛 `ukyi-app/aiops`는 재사용하지 않는다. 앱 이름도 `homelab-bot`이라 namespace `app-homelab-bot`, Infisical `/apps/homelab-bot/`(게시 서버)와 `/apps/homelab-bot/worker`(작업자), 이미지 이름이 이를 따른다. 배포 설정은 homelab(`apps/homelab-bot/`, `data/homelab-bot/`)이다. 운영 산출물(evidence, handoffs, runtime-policies 실제 값, DISCOVERY의 내부 경로, 허용 목록 실제 값)은 봇 저장소에 두지 않는다. 산출물 위치는 셋이다: (1) 공개해도 되는 봇 산출물(`PROJECT_STATUS.md`, `DECISIONS.md`, `VERIFICATION.md` 요약 등 내부 정보 없는 것)은 봇 저장소 `docs/ai-bot/`. (2) 운영 산출물 중 개발 산출물(evidence, handoffs, DISCOVERY의 내부 경로)은 private 저장소 `ukyi-app/homelab-bot-ops`. (3) 봇이 실행 중 읽는 값(runtime-policies 실제 값, 허용 목록 실제 값)은 Infisical `/apps/homelab-bot/`에 두고 봇 저장소에는 키 이름만 둔다. 봇 프롬프트 문서(`bot/`의 `00`~`04`)의 최종 위치는 봇 저장소 `docs/ai-bot/prompts/`이고 파일 이름은 그대로다. 옮기기는 봇 저장소 생성·하드닝 뒤 PR로 한다(§4.3). 옛 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App은 제거(삭제)한다(실행 T22) | 가시성·운영 산출물 공개 기준·옛 aiops: 사용자 2026-10-18: "aiops는 사용안할거긴해. 참고해. 제거예정.", 공개 정책은 "추천대로". 나머지: 사용자 2026-10-18, T14 질문 응답. 저장소 이름과 산출물 위치는 권장안 수락. 프롬프트 문서 위치는 권장안(지금 위치 유지)이 아니라 "봇 저장소로 옮김"을 골랐다 |
 | D-18 | 호스팅형 Renovate App을 homelab과 앱 저장소에 저장소별로 설치하고 homelab Actions와 분리한다. 자동 병합은 모두 끈다. Renovate PR은 자동 병합 조건 밖이라 사람이 병합하고, 봇 V1 기능 7의 리뷰 대상이 된다(설계 F D-18) | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
+| D-19 | `02`·`03`도 T14 정비에 넣는다. 두 문서 머리의 "다시 검토할 문장" 표에 모인 옛 홈랩 전제 문장을 `00`·`01`·`04`와 같은 방식으로 정비하고, 복사용 프롬프트(`02` §0, `03` §0)도 고친다 | 사용자 2026-10-18, T14 질문 응답. 권장안(넣지 않음)이 아니라 "넣음"을 골랐다 |
 | D-20 | 시크릿 값은 모두 새로 발급해 Infisical에 등록하고 옛 값은 쓰지 않는다. 옛 자격은 E1(T06)에서 폐기한다. 예외는 둘이다: 옛 Telegram 봇 토큰은 `보류(D-10, T22)`, 옛 healthchecks ping URL은 `보류(D-10, T08b)`다. SOPS age 개인 키는 T06 자격 폐기 완료를 확인한 뒤 지운다. 새 구조에 대응 자격이 없는 옛 자격(cert-manager DNS-01용 Cloudflare 토큰은 D-08, GHCR pull PAT는 D-29)은 새로 발급하지 않는다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
 | D-21 | `homelab-app-template` 저장소와 이름을 재사용하고 내용을 교체한다(설계 F D-21 목록). 새 내용은 Dockerfile, `/healthz`, `CODEOWNERS`, 공통 워크플로를 태그로 호출하는 짧은 `build.yaml`, 로컬 compose, `infisical run` 개발 안내, 마이그레이션 예시, Renovate 설정이다. 옛 SealedSecrets 도구·인증서 사본, `.app-config.yml`, main 스키마 받기 CI는 지운다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
 | D-22 | 앱 DB 마이그레이션은 Argo CD Sync 단계 hook Job(`BeforeHookCreation`, ExternalSecret 다음 wave) + `pg-rw` 직결로 한다. 앱은 시작 때 스키마 버전 확인만 한다. expand/contract는 필수다. 이미 self-migration으로 짠 앱은 replicas 1에서 선택으로 허용한다(설계 C.5.4) | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
@@ -194,20 +196,18 @@ T14에 남은 일: 위 자리에 플랫폼 값을 채운다. T05의 플랫폼 �
 
 ### 5.2 추천, 확인 대기 (지금 정할 것)
 
-없음. D-01~D-03은 2026-10-17에 확정돼 §5.1로 옮겼고, D-23도 같은 날 확정돼 §5.1로 옮겼다. D-04·D-08, 새 결정 D-28·D-29, D-13의 일부(봇 저장소 가시성, 옛 aiops 처리)는 2026-10-18에 확정돼 §5.1로 옮겼다. T05 결정 게이트의 D-05~D-07, D-09~D-12, D-18, D-20~D-22, D-25~D-27과 설계 "추가 확인" 기본값도 2026-10-18 12:32에 사용자가 T05 질문에 답해 확정했고(전부 설계 권장안) §5.1로 옮겼다.
+없음. D-01~D-03은 2026-10-17에 확정돼 §5.1로 옮겼고, D-23도 같은 날 확정돼 §5.1로 옮겼다. D-04·D-08, 새 결정 D-28·D-29, D-13의 일부(봇 저장소 가시성, 옛 aiops 처리)는 2026-10-18에 확정돼 §5.1로 옮겼다. T05 결정 게이트의 D-05~D-07, D-09~D-12, D-18, D-20~D-22, D-25~D-27과 설계 "추가 확인" 기본값도 2026-10-18 12:32에 사용자가 T05 질문에 답해 확정했고(전부 설계 권장안) §5.1로 옮겼다. T14 결정 게이트의 D-13 나머지와 D-19도 2026-10-18 13:51에 사용자가 T14 질문에 답해 확정했고 §5.1로 옮겼다.
 
 ### 5.3 단계 결정 게이트
 
-T05가 정할 게이트는 모두 확정돼 §5.1로 옮겼다(사용자 2026-10-18, T05 질문 응답). 남은 게이트는 T14·T15가 정한다.
+T05가 정할 게이트는 모두 확정돼 §5.1로 옮겼다(사용자 2026-10-18, T05 질문 응답). T14가 정할 게이트(D-13의 나머지, D-19)도 확정돼 §5.1로 옮겼다(사용자 2026-10-18, T14 질문 응답). 남은 게이트는 T15가 정한다.
 
 | ID | 결정 | 정하는 티켓 | 추천 기본값 |
 |---|---|---|---|
-| D-13 | 봇 저장소 이름, 산출물 위치, 봇 프롬프트 문서의 최종 위치. 봇 저장소 가시성(public)과 옛 aiops 처리(제거)는 확정(사용자 2026-10-18)이라 §5.1에 있다 | T14 | 별도 저장소 `ukyi-app/<봇 이름>`을 새로 만든다(public). 배포 설정은 homelab. 공개해도 되는 봇 산출물은 봇 저장소 `docs/ai-bot/`에 두고, 운영 산출물(evidence, handoffs 등, §5.1 D-13)은 저장소 밖이나 private 위치에 둔다. 그 위치를 여기서 정한다. 프롬프트 문서는 지금 위치 유지 |
 | D-14 | 봇 모델 계정과 인증 | T15 | 전용 계정과 전용 CODEX_HOME. 자동 호출 약관 확인 후 결정 |
 | D-15 | 봇 실행 호스트와 작업자 격리 | T15 | NUC. 작업자는 P1이 설계하고 P2(T08b)가 지은 격리 공간의 Pod. 격리 작업 공간 기본 방식은 설계 C.8 기본값으로 확정(사용자 2026-10-18, T05)됐고, D-15는 그 라벨·포트와 코드 읽기를 읽기 전용 호스트로 좁힐지를 정한다 |
 | D-16 | PR 리뷰 방식 | T15 | 전용 GitHub App + 격리 리뷰어 (`01` 기본안). 이미 설치된 Codex Connector 자동 리뷰(D-26)를 대안 비교에 넣는다. Codex Connector는 유지로 확정(D-26, 사용자 2026-10-18, T05)이고, 설치 범위 축소는 여기서 함께 본다 |
 | D-17 | Discord 서버, 채널, 허용 사용자 | T15 | 사용자 제공 |
-| D-19 | `02`·`03`을 T14 정비 범위에 넣을지 | T14 | 넣지 않는다. 두 문서 머리의 "다시 검토할 문장" 표는 V2·V4 계획 때 처리한다 |
 | D-24 | 봇 변경 PR 작성 자격 (CHANGE_PR의 브랜치 push와 PR 생성 신원) | T15 | 리뷰 App·배포 App과 분리한 봇 전용 쓰기 신원(GitHub App). 허용 저장소에만 설치하고, `bot/` 브랜치 push와 PR 생성만 한다. merge, auto-merge, workflow, 관리 권한은 없다. 이 신원의 PR은 자동 병합 조건(D-07)에 걸리지 않는다 |
 
 ---
@@ -264,7 +264,7 @@ T05가 정할 게이트는 모두 확정돼 §5.1로 옮겼다(사용자 2026-10
 
 ### 봇
 
-- **AC-B1 봇 문서 정비:** 봇 문서에 옛 저장소 스냅샷에 의존하는 문장이 남지 않고, 플랫폼 설계 문서를 가리킨다. 옛 표현을 일부러 남긴 곳은 T14가 만드는 줄 단위 "의도한 언급 목록"(파일:줄, 이유)으로 관리한다. 범주는 교훈 자료, C-08 보호 문장의 본문과 주석, `04` §2 반례 표, `04` §4 시험 문구, `02`·`03` 머리의 "다시 검토할 문장" 표다. 범위는 `00`·`01`·`04`이고, `02`·`03`은 D-19를 따른다.
+- **AC-B1 봇 문서 정비:** 봇 문서에 옛 저장소 스냅샷에 의존하는 문장이 남지 않고, 플랫폼 설계 문서를 가리킨다. 옛 표현을 일부러 남긴 곳은 T14가 만드는 줄 단위 "의도한 언급 목록"(파일:줄, 이유)으로 관리한다. 범주는 교훈 자료, C-08 보호 문장의 본문과 주석, `04` §2 반례 표, `04` §4 시험 문구, `02`·`03` 머리의 처리 기록 표(T14 전 "다시 검토할 문장" 표), 새 플랫폼의 정상 용어(예: D-07의 자동 병합 범위), 철거 대상 표시(옛 자산을 지운다는 문장), 일반 낱말(키워드와 글자만 같은 낱말)이다. 범위는 `00`~`04` 다섯 문서다(D-19 확정(사용자 2026-10-18, T14): `02`·`03`도 넣는다).
 - **AC-B2 DISCOVERY:** `01` §3 산출물 6종(`DISCOVERY.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `VERIFICATION.md`(능력표), `V1_PLAN.md`, `PROJECT_STATUS.md`)과 비밀값 없는 설정 초안, HANDOFF가 있고 D-14~D-17, D-24가 결정됐다.
 - **AC-B3 FOUNDATION:** AUTH-01·02, EVENT-01~04, CHAT-01·02, READ-01·02, SEC-01, OPS-01·02. 봇이 플랫폼에 처음 배포됐다는 증거.
 - **AC-B4 PR_REVIEW:** REVIEW-01~05, SEC-01·02, DATA-01, EVENT-02, 그리고 PR 경로의 AUTH-01·EVENT-01·EVENT-03. 의존성 갱신 PR(D-18)의 리뷰 결과 1건 이상(D-18이 "없음"이면 `not_applicable`과 근거).
@@ -279,7 +279,7 @@ T05가 정할 게이트는 모두 확정돼 §5.1로 옮겼다(사용자 2026-10
 
 ### 공통
 
-- **AC-X1 단계 산출물:** 모든 티켓이 끝날 때 산출물 또는 HANDOFF를 티켓에 적힌 경로에 남기고 커밋한다. 봇 산출물은 D-13의 봇 저장소(public)에, 그 밖은 homelab `rebuild`(T07 뒤에는 PR로 main)에 둔다. 공개되면 안 되는 자료(D-23)와 봇 운영 산출물(evidence, handoffs, runtime-policies 실제 값, DISCOVERY의 내부 경로, 허용 목록 실제 값. D-13 일부)은 저장소 밖이나 private 위치에 두고 위치만 적는다. 다음 티켓이 그것을 입력으로 쓴다.
+- **AC-X1 단계 산출물:** 모든 티켓이 끝날 때 산출물 또는 HANDOFF를 티켓에 적힌 경로에 남기고 커밋한다. 공개해도 되는 봇 산출물은 봇 저장소 `ukyi-app/homelab-bot`(public)의 `docs/ai-bot/`에, 그 밖은 homelab `rebuild`(T07 뒤에는 PR로 main)에 둔다. 봇 운영 산출물은 봇 저장소에 두지 않는다(D-13): 개발 산출물(evidence, handoffs, DISCOVERY의 내부 경로)은 private 저장소 `ukyi-app/homelab-bot-ops`에, 봇이 실행 중 읽는 값(runtime-policies 실제 값, 허용 목록 실제 값)은 Infisical `/apps/homelab-bot/`에 두고 봇 저장소에는 키 이름만 둔다. 공개되면 안 되는 그 밖의 자료(D-23)는 저장소 밖이나 private 위치에 두고 위치만 적는다. 다음 티켓이 그것을 입력으로 쓴다.
   잡는 것: 이 디스크에만 남은 산출물, 입력 없는 다음 단계. 놓치는 것: 산출물의 질.
 - **AC-X2 외부 변경 승인:** 계정·App·삭제·배포·병합·공개 같은 외부 변경은 매번 사람 승인 기록이 [approvals.md](approvals.md)에 있다 (§11).
   잡는 것: 승인 없는 외부 변경. 놓치는 것: §11 목록에 없는 외부 변경(목록을 갱신해 줄인다).
@@ -306,7 +306,7 @@ T05가 정할 게이트는 모두 확정돼 §5.1로 옮겼다(사용자 2026-10
 | [T11](issues/T11-data-services.md) | 데이터 서비스 | P2 | T08a, T09, T10 | 대기 | 에이전트 + 사람 |
 | [T12](issues/T12-cli.md) | CLI | P2 | T10, T11 | 대기 | 에이전트 + 사람 |
 | [T13](issues/T13-platform-integration.md) | 테스트 앱 통합 검증 | P2 | T08a, T08b, T10, T11, T12 | 대기 | 에이전트 + 사람 |
-| [T14](issues/T14-bot-docs-refresh.md) | 봇 문서 정비 | P3 | T05 | 대기 | 에이전트 + 사람 |
+| [T14](issues/T14-bot-docs-refresh.md) | 봇 문서 정비 | P3 | T05 | 진행 중 | 에이전트 + 사람 |
 | [T15](issues/T15-bot-discovery.md) | 봇 V1 DISCOVERY | P3 | T14 | 대기 | 에이전트 + 사람 |
 | [T16](issues/T16-bot-foundation.md) | 봇 FOUNDATION | P4 | T13, T15 | 대기 | 에이전트 + 사람 |
 | [T17](issues/T17-bot-pr-review.md) | 봇 PR_REVIEW | P4 | T16 | 대기 | 에이전트 + 사람 |
@@ -386,7 +386,7 @@ T16 → T22
 | T09 · T10(착수) | T07 뒤 | 디렉터리는 T04 설계 구조로 나눈다. Argo CD 루트 앱 목록(`platform/root`)은 T07이 T08a·T08b·T09·T10·T11의 자리를 미리 만들어 둔다. T10 완료는 T09 뒤다 |
 | T08a · T10 | T09 뒤 | T08a: `infra/cloudflare`, `infra/tailscale`, `infra/tailscale-dns`, `platform/cloudflared`·`traefik`·`tailscale`·`adguard`·`cert-manager`. T10: `platform/charts/app`, `.github/workflows/`, `infra/github`, `tools/tf-github.sh`(설계 E5). R2 state를 처음 쓰는 것은 T08a이고, T10의 `infra/github` 첫 apply는 T08a의 U02 잠금 시험 뒤에 한다 |
 | T08b · T11 | T08a·T10 뒤 | T08b: `platform/observability`, `platform/sandbox`, `platform/bot-slot`. T11: `platform/cnpg`, `platform/charts/app-data` 등(설계 E6). T08b는 T11의 선행이 아니다 |
-| P3(T14·T15) · P2(T06~T13) | T05 뒤 | T14: `bot/` 문서. T15: 봇 저장소, 그리고 결정 기록 예외로 spec §5와 `bot/`의 D-14~D-17·D-24 자리. P2: 플랫폼 디렉터리 |
+| P3(T14·T15) · P2(T06~T13) | T05 뒤 | T14: `bot/` 문서. T15: 봇 저장소 `homelab-bot`과 운영 산출물 저장소 `homelab-bot-ops`(D-13), 그리고 결정 기록 예외로 spec §5와 `bot/`의 D-14~D-17·D-24 자리. P2: 플랫폼 디렉터리 |
 | T17 · T18 · T20 | T16 뒤 | 공유 계약(event·job·outbox 스키마, 게시 서버)은 T16 소유. 나머지는 추가 변경만 |
 | T22 · T17~T21 | T16 뒤 | T22: 기존 앱 저장소. P4: 봇 저장소 |
 
@@ -443,7 +443,7 @@ AC-X1·AC-X2는 모든 티켓에 적용된다. 티켓 머리말의 연결 AC에 
 8. **단일 호스트 격리.** worktree는 보안 샌드박스가 아니다(`00` §6). 대응: T03에서 격리 실행 공간을 플랫폼 요구로 넣었다. 기본 방식은 설계 C.8 기본값이다(확정(사용자 2026-10-18, T05)). 라벨·포트와 코드 읽기를 읽기 전용 호스트로 좁힐지는 D-15(T15)에서 정한다.
 9. **부트스트랩 자격증명 유실.** Infisical 접속 자격을 잃으면 모든 시크릿 전달이 멈춘다. 대응: 복구 자산 목록과 별도 암호화 보관 (T09, AC-P10). 저장소가 public이면 복구 자산 목록은 저장소 밖에 둔다 (D-23).
 10. **문서 유실.** 이 폴더는 T02(2026-10-17)로 원격 `rebuild`에 올라갔다. 남은 위험은 커밋·push하지 않은 이후 변경이다. 대응: 문서를 만드는 티켓은 끝날 때 커밋하고, 승인받아 push한다 (§12).
-11. **옛 AIOps 잔여물.** T07에서 main을 바꾸면 `aiops-autodeploy-canary` 빌드가 깨진다. OS를 유지하므로(D-12, 확정(사용자 2026-10-18, T05)) NUC의 옛 AIOps 유닛과 nft 규칙이 새 네트워크와 부딪칠 수 있다(추측). 대응: T06 정리 목록(D-12의 철거 범위 H1·H2), T22에서 aiops 저장소·App 삭제와 `aiops-autodeploy-canary` private 보관(D-13 일부, D-29), D-12.
+11. **옛 AIOps 잔여물.** T07에서 main을 바꾸면 `aiops-autodeploy-canary` 빌드가 깨진다. OS를 유지하므로(D-12, 확정(사용자 2026-10-18, T05)) NUC의 옛 AIOps 유닛과 nft 규칙이 새 네트워크와 부딪칠 수 있다(추측). 대응: T06 정리 목록(D-12의 철거 범위 H1·H2), T22에서 aiops 저장소·App 삭제와 `aiops-autodeploy-canary` private 보관(D-13, D-29), D-12.
 12. **옛 tailscale root apply·destroy.** 옛 `infra/tailscale` root를 apply하면 Tailscale 기기의 임시 DNS 폴백(C-05)이 사라진다. ACL을 덮어쓸 때 운영자 원격 접속 규칙이 빠지면 NUC 원격 접속이 끊긴다. 대응: 옛 root는 apply도 destroy도 하지 않는다. 새 ACL은 autogroup:self와 ssh 규칙을 유지한다 (T06, T08a).
 13. **계획 공개.** `homelab`이 public이라 T02 push부터 계획·설계 문서가 공개된다. 대응: 공개를 받아들이고(D-23, 확정) 운영 민감 문서는 저장소 밖에 둔다.
 14. **옛 클러스터·데이터 부활.** k3s를 멈추기만 하거나 표준 제거만 하면 옛 datastore나 PV 데이터가 남는다. 그 위에 새 k3s를 설치하면 옛 클러스터나 옛 데이터가 되살아날 수 있다. 대응: T06 검증 강화, T07 시작 조건.
@@ -467,10 +467,10 @@ AC-X1·AC-X2는 모든 티켓에 적용된다. 티켓 머리말의 연결 AC에 
 | GitHub | 결정 5 하드닝 스크립트 실행(`files`·`homelab-app-template`의 `CODEOWNERS`·`app-main`·secret scanning·push protection, 저장소와 org의 fork PR 승인 `all_external_contributors`), `page`·`trip-mate-api` 저장소와 GHCR 패키지 삭제. 자동 권한 검사가 에이전트의 org·저장소 설정 변경을 막아 사람이 실행한다(2026-10-18 결정·실행. GitHub 이메일 비공개와 전역 git 설정은 하지 않기로 했다) | 지금 (티켓 밖) |
 | GitHub | `legacy` 태그 생성, 열린 PR 닫기, `rebuild` 브랜치 push, 문서 커밋 push, 브랜치 보호·ruleset·webhook 정리, `allow_auto_merge` 끄기(D-07), environment·저장소 변수·GHCR 패키지 정리, main 교체 squash 병합(D-25), Actions 재활성화 | T01, T02, T04, T05, T06, T07, T14 |
 | GitHub | 옛 App 정리(reader, writer, dispatch 등록), Codex Connector 설치 범위 축소 여부(D-26은 유지로 확정, 축소는 D-16과 함께), 옛 PAT 폐기, 새 App 생성·설치, 호스팅형 Renovate App 저장소별 설치(D-18), 보호 설정의 Terraform apply(owner 로컬, D-28), Actions 허용 범위, GHCR 패키지 Public 전환(D-29, 되돌릴 수 없음), Infisical App Connection용 fine-grained PAT 발급(D-04), 시험 PR 게시, 앱 저장소 병합 | T06, T10, T17, T19, T22 |
-| GitHub | 봇 저장소 생성(public, D-13. 내용을 넣기 전에 결정 5와 같은 하드닝, 설계 C.8), 봇 쓰기 신원(D-24) 생성·설치, 옛 aiops 저장소·`ukyi-homelab-aiops` App 삭제, `aiops-autodeploy-canary`·`mac-uptime-guard` private 보관 | T14, T19, T22 |
+| GitHub | 봇 저장소 둘 생성(D-13): `ukyi-app/homelab-bot`(public. 내용을 넣기 전에 결정 5와 같은 하드닝, 설계 C.8)과 `ukyi-app/homelab-bot-ops`(private, 운영 산출물), 봇 쓰기 신원(D-24) 생성·설치, 옛 aiops 저장소·`ukyi-homelab-aiops` App 삭제, `aiops-autodeploy-canary`·`mac-uptime-guard` private 보관 | T14, T19, T22 |
 | Cloudflare | R2 옛 버킷 삭제, 옛 state 객체 이동·삭제, 옛 터널·DNS·WAF·캐시 규칙 삭제(zone과 zone 설정은 남김, D-11), 옛 API 토큰 폐기, 새 토큰 발급, 새 터널·와일드카드 DNS·버킷 `homelab-backups`, zone 설정 9개를 새 Terraform으로 가져오기(D-11) | T06, T08a, T09 |
 | Tailscale | tagged 기기와 OAuth 클라이언트 정리, 노드 키 만료 설정, ACL·DNS 설정(D-08: 첫 Terraform apply 전 콘솔 값을 옮겨 새 state에 import, Override 켬, 전역 nameserver를 NUC + AdGuard 공용 DNS 2개로, C-05 Cloudflare 4개 삭제, MagicDNS·HTTPS 켬), 새 OAuth 발급 | T06, T08a, T09 |
-| Infisical | 가입, 요금제(Free, D-04), identity 4개, 병합 키 Secret Sync·App Connection 설정, 봇 시크릿 등록 | T09, T10, T16, T17, T18, T19 |
+| Infisical | 가입, 요금제(Free, D-04), identity 4개, 병합 키 Secret Sync·App Connection 설정, 봇 시크릿 등록(runtime-policies·허용 목록 실제 값 포함, `/apps/homelab-bot/`, D-13) | T09, T10, T16, T17, T18, T19 |
 | 외부 감시·알림 | healthchecks.io 옛 체크 일시 정지, 같은 계정에 새 체크 생성, 새 체크 확인 뒤 옛 체크 삭제(D-10), homelab 알림용 Telegram 새 봇 생성(D-10), 옛 Telegram 봇·토큰은 `mac-uptime-guard` 처리 뒤 삭제 | T06, T08b, T09, T22 |
 | NUC | 로컬 자료 보존, 돌아갈 수 없는 지점 확인, k3s 제거·설치, 호스트 정리와 데이터 경로 삭제(OS 유지, `/mnt/bulk`는 비우고 fstab 항목 삭제, D-12) (sudo) | T06, T07 |
 | 검증 VM | 시나리오 13용 VM 준비와 VM 전용 자격·R2 버킷(NUC가 아닌 기기 우선, VM 호스트는 tailnet 밖, D-12) | T13 |
@@ -485,9 +485,10 @@ AC-X1·AC-X2는 모든 티켓에 적용된다. 티켓 머리말의 연결 AC에 
 - 티켓 상태가 바뀌면 해당 티켓 머리말과 §8.1을 함께 고친다.
 - T05가 T06~T13을 설계 문서 E에 맞춰 다시 쪼개고(T08 → T08a·T08b) §8.2 그래프를 갱신했다(2026-10-18). 기준은 설계 E.2·E.3이다.
 - T15가 끝나면 T16~T21을 `V1_PLAN.md`에 맞춰 갱신한다.
-- 결정이 나면 §5의 해당 줄을 "확정"으로 옮기고 근거(누가, 언제)를 적는다. 같은 변경에서 그 결정 ID로 자리를 둔 문서 위치를 채운다. `bot/` 전체와 플랫폼 프롬프트에서 그 D-ID를 검색해 모두 고친다. 색인이 있는 곳은 `01` §11, `04` §10, 플랫폼 프롬프트 §0·§10-F다. 결정을 정한 티켓이 이 갱신을 맡는다(T15의 D-14~D-17, D-24 포함).
+- 결정이 나면 §5의 해당 줄을 "확정"으로 옮기고 근거(누가, 언제)를 적는다. 같은 변경에서 그 결정 ID로 자리를 둔 문서 위치를 채운다. `bot/` 전체와 플랫폼 프롬프트에서 그 D-ID를 검색해 모두 고친다. 색인이 있는 곳은 `01` §11, `04` §10, 플랫폼 프롬프트 §0·§10-F다. 결정을 정한 티켓이 이 갱신을 맡는다(T15의 D-14~D-17, D-24 포함). 봇 문서를 봇 저장소로 옮긴 뒤에는 `bot/` 대신 봇 저장소 `docs/ai-bot/prompts/`에서 검색해 고치고, 그 변경은 봇 저장소 PR로 한다(D-13).
 - 문서를 만들거나 바꾸는 티켓(T01의 SHA 기록, T04, T05, T06, T14, T15 등)은 끝날 때 `rebuild`에 커밋한다. push는 사람 승인 뒤에 한다. T07 뒤에는 PR로 main에 병합하고, 관리자 직접 push는 쓰지 않는다(새 Argo CD가 main을 보면 직접 push가 곧바로 배포된다).
 - 문서 경로나 § 번호를 바꾸면 spec, issues, 프롬프트 문서의 복사용 프롬프트, 메모리의 참조를 같은 변경에서 고친다.
+- 봇 문서의 참조 규칙(D-13): `bot/` 문서는 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/`로 옮겨질 것이므로 지금부터 그 위치 기준으로 쓴다. 기준 문서(spec.md, platform/design.md, platform/design-prompt.md, issues, approvals.md)는 상대 링크 대신 글로 적는다: "`ukyi-app/homelab` 저장소의 `docs/plans/2026-10-17-homelab-rebuild/<경로>`(T07 전에는 `rebuild` 브랜치, 뒤에는 main)". 처음 한 번은 전체를 쓰고, 같은 문서의 뒤쪽은 "homelab 명세(spec.md)"처럼 줄여도 된다. 이유는 셋이다: 봇 저장소에서는 상대 링크가 깨지고, `rebuild` 브랜치는 T07 squash 병합 때 지워지며, 그 전에는 main에 이 문서가 없다. `bot/` 문서끼리의 링크는 같은 폴더로 함께 옮겨지므로 상대 링크로 둔다. 옮기는 PR은 봇 저장소 생성·하드닝 뒤에 하고, 그때 homelab 쪽 spec·issues·README의 `bot/` 링크와 메모리 참조를 이동에 맞춰 고친다.
 - 새 결정 ID를 만들면(2026-10-18의 D-28, D-29) §5.1과 설계 문서 F에 함께 넣고, 그 ID를 쓰는 티켓 머리말의 선행 결정에 더한다.
-- 2026-10-18 결정(D-04, D-08, D-13 일부, D-28, D-29)은 티켓 밖 대화에서 났다. 그때의 변경은 spec, approvals.md, 티켓, `platform/design.md`(T04 산출물)를 고쳤고 `bot/`과 플랫폼 프롬프트의 자리는 채우지 않았다. 플랫폼 프롬프트 자리는 T05가 2026-10-18에 T05 결정과 함께 채웠다. `bot/` 자리는 T14가 채운다.
+- 2026-10-18 결정(D-04, D-08, D-13 일부, D-28, D-29)은 티켓 밖 대화에서 났다. 그때의 변경은 spec, approvals.md, 티켓, `platform/design.md`(T04 산출물)를 고쳤고 `bot/`과 플랫폼 프롬프트의 자리는 채우지 않았다. 플랫폼 프롬프트 자리는 T05가 2026-10-18에 T05 결정과 함께 채웠다. `bot/` 자리는 T14가 2026-10-18에 채웠다.
 - 결정은 났지만 외부 실행이 남은 일(2026-10-18의 `page`·`trip-mate-api` 삭제, 결정 5 하드닝)은 문서에 "실행 대기"로 적고 [approvals.md](approvals.md)에는 결정 줄만 둔다. 실행 줄은 실행한 뒤에 더하고, 같은 변경에서 "실행 대기" 표시를 고친다.

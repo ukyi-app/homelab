@@ -2,7 +2,7 @@
 
 > **문서 역할:** 플랫폼 설계 에이전트(T04)에게 그대로 주는 설계 프롬프트다. 설계 결과는 [design.md](design.md)에 쓴다(T04 산출물, 2026-10-18 작성). 계획의 상태·결정·순서·인수 조건은 [spec.md](../spec.md)가 기준이다.
 >
-> **이력:** 2026-10-17. 사용자가 옛 홈랩 개선용으로 쓴 원본 프롬프트를 신규 구축 기준으로 다시 쓰고, T03 보강(봇을 위한 여지, 옛 함정 기록, 시나리오 16·17, 결정 D-10~D-12, D-18, D-20~D-22)과 2026-10-17 심층 감사(공개 범위, 확인 경로, 교훈 표 단위, 자동 병합 주체 조건, 격리 공간 범위 등)를 반영한 문서다. 원본에만 있던 지시 중 지금도 유효한 것(금지 목록의 DB·시크릿 변경, 권한 공유 기본값, 옛 결정을 바꿀 때의 이유)도 옮겼다. 옛 `docs/cicd-simplification-prompt.md`와 `docs/archive/cicd-simplification-prompt.orig.md`를 대체한다. 2026-10-18에 spec §12대로 확정 결정을 각 자리에 채웠다: 대화에서 확정된 D-04·D-08·D-13(일부)·D-28·D-29, T05에서 확정된 D-05~D-07·D-09~D-12·D-18·D-20~D-22·D-25~D-27, 설계 기본값(ESO, 공개 DNS, Argo CD 폴링, 백업 보존, 격리 작업 공간).
+> **이력:** 2026-10-17. 사용자가 옛 홈랩 개선용으로 쓴 원본 프롬프트를 신규 구축 기준으로 다시 쓰고, T03 보강(봇을 위한 여지, 옛 함정 기록, 시나리오 16·17, 결정 D-10~D-12, D-18, D-20~D-22)과 2026-10-17 심층 감사(공개 범위, 확인 경로, 교훈 표 단위, 자동 병합 주체 조건, 격리 공간 범위 등)를 반영한 문서다. 원본에만 있던 지시 중 지금도 유효한 것(금지 목록의 DB·시크릿 변경, 권한 공유 기본값, 옛 결정을 바꿀 때의 이유)도 옮겼다. 옛 `docs/cicd-simplification-prompt.md`와 `docs/archive/cicd-simplification-prompt.orig.md`를 대체한다. 2026-10-18에 spec §12대로 확정 결정을 각 자리에 채웠다: 대화에서 확정된 D-04·D-08·D-13(일부)·D-28·D-29, T05에서 확정된 D-05~D-07·D-09~D-12·D-18·D-20~D-22·D-25~D-27, 설계 기본값(ESO, 공개 DNS, Argo CD 폴링, 백업 보존, 격리 작업 공간). 같은 날 T14에서 확정된 D-13의 나머지(봇 저장소 이름, 산출물 위치, 봇 문서의 최종 위치)도 채웠다.
 >
 > **문서 관리:** spec·티켓·봇 문서가 이 문서를 § 번호와 §9 시나리오 번호로 참조한다. 새 내용은 해당 절 안이나 끝에 덧붙이고, 기존 번호는 다시 매기지 않는다.
 
@@ -46,11 +46,11 @@
 | 하드웨어 | 같은 NUC 한 대(`nuc-15-pro`, LAN `192.168.117.15`), k3s 새로 설치. 옛 클러스터와 동시에 돌릴 수 없어 구축 기간에는 홈랩 서비스가 멈춘다. 철거 방식은 OS 유지 + k3s 제거 + 호스트 정리다(설계 문서 F D-12) | 확정 (C-07 단일 서버. 철거 방식은 D-12 확정(사용자 2026-10-18, T05). 사실은 spec §1·§4.5) |
 | 이어 쓰는 외부 자산 | Cloudflare zone(apex 도메인), Tailscale tailnet, R2 state 버킷 `homelab-tfstate`(새 state 키 접두 `v2/`), GitHub org `ukyi-app`, 저장소 `homelab-app-template`(내용 교체). healthchecks.io는 계정만 재사용하고 체크는 새로 만든다(옛 `homelab-watchdog`는 새 체크가 초록이 된 뒤 삭제). Telegram은 homelab 알림용 새 봇을 쓰고, 옛 봇·토큰은 `mac-uptime-guard`를 처리하는 T22까지 그대로 둔다. 나머지 옛 외부 자원은 새로 정의하고, 하나뿐인 설정(Tailscale ACL·DNS)은 덮어쓴다. zone 설정 9개는 새 Terraform으로 가져온다 | zone·tailnet·`homelab-tfstate`·나머지 처리: D-11 확정(사용자 2026-10-18, T05). `ukyi-app` org: 확정 (C-01). `homelab-app-template` 재사용: D-21 확정(사용자 2026-10-18, T05). healthchecks.io 계정 재사용·새 체크, Telegram 새 봇: D-10·D-11 확정(사용자 2026-10-18, T05) |
 | 시크릿 | 원본은 Infisical(§7). 값은 새로 발급해 Infisical에 등록하고, 옛 SOPS 파일과 SealedSecrets의 값은 가져오지 않는다. 옛 자격은 T06에서 폐기한다(옛 Telegram 봇 토큰은 T22, 옛 healthchecks ping URL은 T08b까지 보류). Kubernetes 전달 계층은 ESO v2.13.x다 | Infisical 원본: 확정 (C-07). 새로 발급·옛 값 미사용: D-20 확정(사용자 2026-10-18, T05). ESO: 확정(사용자 2026-10-18, T05) |
-| 첫 실제 앱 | 홈랩 Discord AI 봇. 봇 문서는 `docs/plans/2026-10-17-homelab-rebuild/bot/`의 `00-start.md`~`04-audit-handoff.md`(이 문서에서는 `00`~`04`). 봇 기능 설계는 범위 밖(§2) | 확정 (D-01) |
+| 첫 실제 앱 | 홈랩 Discord AI 봇. 봇 코드 저장소는 `ukyi-app/homelab-bot`(public)이고, 앱 이름도 `homelab-bot`이다. 봇 문서는 지금 `docs/plans/2026-10-17-homelab-rebuild/bot/`의 `00-start.md`~`04-audit-handoff.md`(이 문서에서는 `00`~`04`)에 있고, 봇 저장소 생성·하드닝 뒤 그 저장소의 `docs/ai-bot/prompts/`로 옮긴다. 봇 기능 설계는 범위 밖(§2) | 확정 (D-01). 봇 저장소 이름과 봇 문서 위치: D-13 확정(사용자 2026-10-18, T14) |
 
 이 표 밖에서 "기본값"이나 "기본 후보"로 적은 것(CLI 언어, 갱신 방식, 인증 방식 등)은 그 자리에 확정 표시가 없으면 추천, 미정이다. 바꾸면 §10-A에 적고, 사용자 결정이 필요하면 §10-F에 올린다.
 
-다른 확정 결정은 해당 절에 있다: C-04 공유기 DNS 유지(§4), C-05 Tailscale 전역 DNS 임시 폴백(§1 5항), C-06 옛 저장소 Actions 비활성화(§1 1항), C-07 플랫폼 원칙(§2 유지할 전제, §6 CNPG), C-08 봇 V1~V3 운영 읽기 전용(§2 봇을 위한 여지). 2026-10-18에 확정된 D-04~D-12, D-13(일부), D-18, D-20~D-22, D-25~D-29는 해당 절과 §10-F에 확정 값을 적었고, 세부는 설계 문서 F다.
+다른 확정 결정은 해당 절에 있다: C-04 공유기 DNS 유지(§4), C-05 Tailscale 전역 DNS 임시 폴백(§1 5항), C-06 옛 저장소 Actions 비활성화(§1 1항), C-07 플랫폼 원칙(§2 유지할 전제, §6 CNPG), C-08 봇 V1~V3 운영 읽기 전용(§2 봇을 위한 여지). 2026-10-18에 확정된 D-04~D-13, D-18, D-20~D-22, D-25~D-29는 해당 절과 §10-F에 확정 값을 적었고, 세부는 설계 문서 F다. D-13은 §0 첫 실제 앱 줄, §3 조사 항목 9, §5, §10-F D-11·D-29 줄에 있다.
 
 ---
 
@@ -147,7 +147,7 @@
 6. 앱 삭제가 DB·PVC·시크릿에 미치는 영향.
 7. 전역 검사·드리프트 감지·수동 원장이 막으려던 사고.
 8. 기반 구성(네트워크, AdGuard, Tailscale, Cloudflare 터널, 관측, 백업)의 운영 함정. 주석과 아래 "교훈 입력"에 실측으로 기록된 함정을 우선 수집한다.
-9. 옛 공통 워크플로·차트·GitHub App에 기대는 org 안의 다른 저장소. 2026-10-17 실측 의존은 이렇다. `files`·`page`·`trip-mate-api`·`aiops-autodeploy-canary`는 `reusable-app-build.yaml@main`을 호출한다. `homelab-app-template`은 자기 CI가 매주 homelab main의 `tools/app-config-schema.json`을 받아 오고, scaffold가 새 앱에 reusable@main 호출을 심는다. 옛 AIOps 실행기 저장소 `ukyi-app/aiops`는 의존이 없다. org에는 `mac-uptime-guard`(private, homelab 의존 없음)도 있다. main을 교체하면 옛 공통 워크플로를 호출하거나 main의 파일을 받아 오는 빌드가 깨진다. 결과는 §10-E의 재연결 단계와, D-11이 아니라 D-13·D-29(aiops 두 저장소와 `ukyi-homelab-aiops` App), D-21(`homelab-app-template`), T22(앱 저장소)의 입력이 된다. 처리는 확정이다: `aiops` 저장소와 `ukyi-homelab-aiops` App은 제거하고, `aiops-autodeploy-canary`·`mac-uptime-guard`는 공개하지 않고 private으로 보관한다(D-13 일부·D-29 확정(사용자 2026-10-18), 실행 T22). `page`·`trip-mate-api`는 저장소와 GHCR 패키지를 삭제해(2026-10-18) 재연결 대상은 `files`다. `homelab-app-template`은 저장소·이름을 재사용하고 내용을 교체한다(D-21 확정(사용자 2026-10-18, T05)).
+9. 옛 공통 워크플로·차트·GitHub App에 기대는 org 안의 다른 저장소. 2026-10-17 실측 의존은 이렇다. `files`·`page`·`trip-mate-api`·`aiops-autodeploy-canary`는 `reusable-app-build.yaml@main`을 호출한다. `homelab-app-template`은 자기 CI가 매주 homelab main의 `tools/app-config-schema.json`을 받아 오고, scaffold가 새 앱에 reusable@main 호출을 심는다. 옛 AIOps 실행기 저장소 `ukyi-app/aiops`는 의존이 없다. org에는 `mac-uptime-guard`(private, homelab 의존 없음)도 있다. main을 교체하면 옛 공통 워크플로를 호출하거나 main의 파일을 받아 오는 빌드가 깨진다. 결과는 §10-E의 재연결 단계와, D-11이 아니라 D-13·D-29(aiops 두 저장소와 `ukyi-homelab-aiops` App), D-21(`homelab-app-template`), T22(앱 저장소)의 입력이 된다. 처리는 확정이다: `aiops` 저장소와 `ukyi-homelab-aiops` App은 제거하고, `aiops-autodeploy-canary`·`mac-uptime-guard`는 공개하지 않고 private으로 보관한다(D-13·D-29 확정(사용자 2026-10-18), 실행 T22). `page`·`trip-mate-api`는 저장소와 GHCR 패키지를 삭제해(2026-10-18) 재연결 대상은 `files`다. `homelab-app-template`은 저장소·이름을 재사용하고 내용을 교체한다(D-21 확정(사용자 2026-10-18, T05)).
 
 **교훈 입력:** 옛 저장소의 아래 기록을 함께 읽는다. 각 장치가 막으려던 사고의 근거로 쓴다.
 
@@ -223,7 +223,7 @@ CI/CD가 올라갈 바닥이다. 필요한 최소 구성만 고르고, 각 구�
 
 인증 격리는 확인으로 판단한다. 기본 `GITHUB_TOKEN`의 범위, 저장소 간 쓰기용 GitHub App의 권한과 설치 범위, 브랜치 보호, 허용 변경 경로를 확인한다. 옛 reader/writer GitHub App은 자동 병합 경로와 엮여 있었으므로, 최소 권한의 새 App을 기본값으로 둔다.
 
-새 보호 구성(필수 검사, main push 제한, ruleset)은 새 App ID 기준으로 정의한다. 보호 설정은 Terraform root `infra/github`로 관리한다(D-28 확정(사용자 2026-10-18), 설계 문서 F D-28). 옛 구성은 옛 writer App만 main push와 특정 접두사 브랜치를 허용했다(§1 4항). org가 Free 플랜이라 브랜치 보호와 ruleset은 public 저장소에서만 동작한다. 그래서 서버 쪽 강제의 전제는 저장소 공개 범위(D-23)와 봇 저장소 가시성(D-13 일부 확정(사용자 2026-10-18): public)이다. 앱 저장소는 public만 허용한다(D-29 확정(사용자 2026-10-18)). 공개 저장소의 Actions 위협(fork PR, `pull_request_target`, self-hosted runner, GHCR 패키지 공개 여부)을 점검한다. 이미 org 전체 저장소에 쓰기 권한(contents, workflows, pull_requests 등)으로 설치돼 PR을 열면 자동 리뷰를 다는 ChatGPT Codex Connector를 권한 경계 설계의 입력으로 둔다(D-26 확정(사용자 2026-10-18, T05): 유지하고 설계 문서 F D-26의 조건 넷을 건다. 설치 범위 축소는 D-16(T15)과 함께 본다). main push 허용 목록에는 없지만 다른 브랜치와 워크플로에는 쓸 수 있다.
+새 보호 구성(필수 검사, main push 제한, ruleset)은 새 App ID 기준으로 정의한다. 보호 설정은 Terraform root `infra/github`로 관리한다(D-28 확정(사용자 2026-10-18), 설계 문서 F D-28). 옛 구성은 옛 writer App만 main push와 특정 접두사 브랜치를 허용했다(§1 4항). org가 Free 플랜이라 브랜치 보호와 ruleset은 public 저장소에서만 동작한다. 그래서 서버 쪽 강제의 전제는 저장소 공개 범위(D-23)와 봇 저장소 가시성(D-13 확정(사용자 2026-10-18): `ukyi-app/homelab-bot`, public)이다. 앱 저장소는 public만 허용한다(D-29 확정(사용자 2026-10-18)). 공개 저장소의 Actions 위협(fork PR, `pull_request_target`, self-hosted runner, GHCR 패키지 공개 여부)을 점검한다. 이미 org 전체 저장소에 쓰기 권한(contents, workflows, pull_requests 등)으로 설치돼 PR을 열면 자동 리뷰를 다는 ChatGPT Codex Connector를 권한 경계 설계의 입력으로 둔다(D-26 확정(사용자 2026-10-18, T05): 유지하고 설계 문서 F D-26의 조건 넷을 건다. 설치 범위 축소는 D-16(T15)과 함께 본다). main push 허용 목록에는 없지만 다른 브랜치와 워크플로에는 쓸 수 있다.
 
 저장소 간 쓰기용 App 키의 원본은 Infisical이다(C-07, §7). 설계는 이 키를 GitHub Actions 실행에 전달하는 방식(예: Infisical의 GitHub 동기화, 실행 시 조회)을 고른다. GitHub Secrets를 원본으로 두는 안을 권한다면 C-07의 예외이므로 §10-F에 이유와 함께 올린다. 이 답은 spec §8.2의 미확정 간선 T09 → T10(시크릿 체계를 CI/CD보다 먼저 지을지)을 T05에서 확정하는 근거가 된다. 전달 방식은 D-04 확정(사용자 2026-10-18)이다: 배포 키는 Infisical OIDC Auth로 실행 때 조회하고, 병합 키는 Secret Sync로 homelab environment `automerge`에 사본 하나를 둔다(설계 문서 C.4.8, F D-04). 간선은 T05가 2026-10-18에 정했다: 착수 T07 → T10, 완료 T09 → T10, `infra/github` 첫 apply는 T08a 뒤(spec §8.2, 설계 문서 C.4.8).
 
@@ -436,7 +436,7 @@ Git과 Infisical 등 여러 시스템의 변경은 하나의 원자적 트랜잭
 - ChatGPT Codex Connector App 처리(D-26). §5 인증 격리 점검 결과를 근거로 유지·설치 범위 축소·제거 중 하나를 권한다. 봇 PR 리뷰와의 관계는 D-16(T15)이다. 확정(사용자 2026-10-18, T05): 유지 + 설계 문서 F D-26의 조건 넷. 설치 범위 축소는 D-16(T15)과 함께 본다.
 - NUC 로컬 전용 자료를 T06 입력으로 쓸지(D-27). T04는 이 자료를 읽지 않으므로, 교훈 표나 정리 목록에서 이 자료 없이는 판정할 수 없는 곳만 표시한다. 확정(사용자 2026-10-18, T05): T06 목록 작성에만 읽기 전용으로 쓰고, 값·절차 원문은 저장소 문서에 옮기지 않는다.
 - GitHub 보호 설정 관리 방식(D-28). 2026-10-18에 새로 생긴 결정이다. 확정(사용자 2026-10-18): Terraform root `infra/github`(저장소·시크릿 리소스 없음, guard, owner 로컬 래퍼만, CI는 plan 없음). 세부는 설계 문서 F D-28.
-- 저장소 공개 정책(D-29). 2026-10-18에 새로 생긴 결정이다. 확정(사용자 2026-10-18): 앱 저장소는 public만 허용하고, 앱이 아닌 저장소는 공개하지 않는다. 봇 코드 저장소는 public이고 운영 산출물은 저장소 밖이나 private 위치에 둔다(D-13 일부). `page`·`trip-mate-api`는 저장소와 GHCR 패키지를 삭제했다. 세부는 설계 문서 F D-29.
+- 저장소 공개 정책(D-29). 2026-10-18에 새로 생긴 결정이다. 확정(사용자 2026-10-18): 앱 저장소는 public만 허용하고, 앱이 아닌 저장소는 공개하지 않는다. 봇 코드 저장소 `ukyi-app/homelab-bot`은 public이고, 운영 산출물은 봇 저장소에 두지 않는다(개발 산출물은 private 저장소 `ukyi-app/homelab-bot-ops`, 봇이 실행 중 읽는 값은 Infisical `/apps/homelab-bot/`. D-13 확정(사용자 2026-10-18, T14)). `page`·`trip-mate-api`는 저장소와 GHCR 패키지를 삭제했다. 세부는 설계 문서 F D-29.
 - 설계 기본값(설계 문서 F "추가 확인"). 확정(사용자 2026-10-18, T05): 공개 DNS는 와일드카드 레코드 하나(원격 관리 터널에서 안 되면 host별 Terraform 레코드), Argo CD 공개 webhook은 두지 않고 60초 폴링, 백업 보존은 PostgreSQL·Valkey 14일과 R2 버킷 `homelab-backups` 하나, 격리 작업 공간 기본 방식은 설계 문서 C.8 기본값(라벨·포트와 코드 읽기 호스트 좁히기는 D-15, T15).
 
 사소한 선택은 합리적인 기본값과 가정을 명시하고 계속 진행한다.

@@ -4,7 +4,7 @@
 - 상태: 대기
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T13, T16 (봇 첫 배포 증거)
-- 선행 결정: D-10 (확정(사용자 2026-10-18, T05): 옛 Telegram 봇·토큰은 `mac-uptime-guard`를 처리하는 이 티켓까지 둔다), D-13 (일부 확정(사용자 2026-10-18): 옛 aiops 저장소·App 제거), D-18 (의존성 업데이트 방식. 확정(사용자 2026-10-18, T05): 호스팅형 Renovate App 저장소별 설치, 자동 병합 모두 끔), D-21 (확정(사용자 2026-10-18, T05): `homelab-app-template` 재사용, 내용 교체는 T10), D-28 (확정(사용자 2026-10-18): 보호 설정 대조), D-29 (확정(사용자 2026-10-18): 앱 저장소 public만, 비앱 저장소 private 보관, `page`·`trip-mate-api` 삭제)
+- 선행 결정: D-10 (확정(사용자 2026-10-18, T05): 옛 Telegram 봇·토큰은 `mac-uptime-guard`를 처리하는 이 티켓까지 둔다), D-13 (확정(사용자 2026-10-18). 이 티켓에 걸리는 것은 옛 aiops 저장소·App 제거), D-18 (의존성 업데이트 방식. 확정(사용자 2026-10-18, T05): 호스팅형 Renovate App 저장소별 설치, 자동 병합 모두 끔), D-21 (확정(사용자 2026-10-18, T05): `homelab-app-template` 재사용, 내용 교체는 T10), D-28 (확정(사용자 2026-10-18): 보호 설정 대조), D-29 (확정(사용자 2026-10-18): 앱 저장소 public만, 비앱 저장소 private 보관, `page`·`trip-mate-api` 삭제)
 - 연결 AC: AC-P14
 - 수행: 에이전트 + 사람 (재연결 확인, 병합, 저장소 삭제·보관, App 정리)
 
@@ -33,7 +33,7 @@
 2. 재연결하면 옛 워크플로 호출을 새 공통 워크플로로 바꾸고(옛 SealedSecrets 산출물이 있으면 함께 지운다) CLI로 등록한다. 결정 5로 건 `CODEOWNERS`·`app-main`이 그대로인지 `homelab github verify`(D-28)로 대조한다.
 3. `homelab-app-template`이 T10에서 바뀐 새 구조(main 의존과 SealedSecrets 사본 없음, 공통 워크플로 태그 호출)를 따르는지 확인한다.
 4. 열린 renovate PR(`homelab-app-template` 5, `aiops-autodeploy-canary` 4)은 D-18 결정에 따라 닫거나 새 방식으로 다시 연다. 옛 봉인본을 건드리는 PR은 병합하지 않는다.
-5. 옛 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App을 삭제한다(D-13 일부 확정). T06에서 넘겨받은 일이다. App 키 폐기(T06 자격 폐기 표의 `보류(D-13, T22)` 줄)를 함께 닫는다. 삭제는 되돌릴 수 없다. 옛 AIOps를 교훈 자료로 읽는 T15는 이 티켓의 선행(T16)보다 앞이다.
+5. 옛 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App을 삭제한다(D-13 확정). T06에서 넘겨받은 일이다. App 키 폐기(T06 자격 폐기 표의 `보류(D-13, T22)` 줄)를 함께 닫는다. 삭제는 되돌릴 수 없다. 옛 AIOps를 교훈 자료로 읽는 T15는 이 티켓의 선행(T16)보다 앞이다.
 6. `aiops-autodeploy-canary`는 공개하지 않고 private로 보관한다. 삭제해도 된다(D-29).
 7. `mac-uptime-guard`(private, 옛 맥 미니용)는 공개하지 않고 private로 보관한다(D-29). 이 저장소는 옛 Telegram 봇 토큰을 쓴다. 장치 쪽 `mac-uptime-guard` 처리(새 구조로 옮기거나 끔) 뒤 옛 Telegram 봇 토큰을 폐기하고 옛 봇을 삭제한다. 이것으로 T06 자격 폐기 표의 `보류(D-10, T22)` 줄을 닫는다(설계 E10, D-10).
 
