@@ -28,7 +28,7 @@
    - **그대로 둠(따로 보존하지 않음):** 옛 인계·계획 문서 `~/workspace/homelab-infra/`(git 아님, 파일 77개: Markdown 41개와 macOS `._` 사이드카 36개), 원격 없는 다른 프로젝트(`~/workspace/polyrelay` 등), `~/.codex*`, `~/.claude*`, `~/.agents`, `~/.ssh`, `~/.config`, `~/.gnupg`. OS를 유지하므로 디스크에 남고, 이 티켓은 이 경로를 건드리지 않는다. OS 재설치 때만 필요했던 보존 목록이다.
    - **읽기 전용 점검:** 옛 런북(`~/workspace/homelab/docs/runbooks/`, `~/workspace/homelab-infra/`)은 D-27(확정(사용자 2026-10-18, T05))대로 할 일 1의 목록 작성에만 읽기 전용으로 쓴다. `~/workspace/homelab-infra/`에 저장소에 없는 운영 자산이 있는지도 이때 본다(설계 B.9). 값과 절차 원문은 저장소 문서에 옮기지 않고 이름만 옮긴다. 2026-10-18에 마쳤다(아래 "할 일 1 결과"). `~/workspace/homelab-infra/`에는 저장소에 없는 운영 자산이 없다(인계·계획 문서뿐). 그래서 설계 B.9 셋째 줄(`homelab-infra`)과 첫째 줄(자격 폐기 표 완전성, 로컬 런북 대조)은 이 결과로 닫는다.
 3. 돌아갈 수 없는 지점 확인. T06이 끝나면 옛 홈랩으로 돌아갈 수 없다. 외부 자원이 지워지고, 클러스터 안의 SealedSecrets 봉인 키도 k3s와 함께 사라진다. `/mnt/bulk` 비우기(H8)는 확인된 유일한 봉인 키 디스크 백업(`homelab-backups/sealed-secrets`, 1개. `/mnt/bulk`의 나머지와 `/mnt/bulk-new` 내용은 sudo 확인 전)과 로컬 런북 암호화 사본(6개)도 함께 지운다(2026-10-18 실측). 런북 원본은 옛 사본에 그대로 남는다. 시작 전에 사용자가 이를 확인하고 [approvals.md](../approvals.md)에 남긴다.
-4. healthchecks.io 체크 `homelab-watchdog`를 철거 전에 일시 정지한다. 철거하면 ping이 끊겨 down 알림이 간다. ping은 호스트가 아니라 클러스터 안 `deadmanswitch-relay`가 보낸다(`2d2054a:platform/victoria-stack/prod/deadmanswitch-relay.yaml`). 그래서 할 일 2의 컨트롤러 축소나 k3s 제거보다 먼저 멈춘다. 라이브 체크 이름이 `homelab-watchdog`인지도 이때 콘솔에서 본다. 옛 체크는 T08b가 새 체크의 초록을 확인한 뒤 지운다(D-10).
+4. healthchecks.io 체크 `homelab-watchdog`를 철거 전에 일시 정지한다. 철거하면 ping이 끊겨 down 알림이 간다. ping은 호스트가 아니라 클러스터 안 `deadmanswitch-relay`가 보낸다(`2d2054a:platform/victoria-stack/prod/deadmanswitch-relay.yaml`). 옛 relay가 1분마다 ping하고 일시 정지는 ping 한 번에 풀리므로, k3s 제거 바로 전에 멈추고 콘솔에서 paused를 본다. k3s를 지운 뒤에는 ping이 끊겨 정지가 유지되므로 한 번 더 확인한다. 라이브 체크 이름이 `homelab-watchdog`인지도 콘솔에서 본다. 옛 체크는 T08b가 새 체크의 초록을 확인한 뒤 지운다(D-10).
 5. T01의 열린 PR 닫기가 끝났다(명세 AC-P1). `gh pr list -R ukyi-app/homelab`에 열린 PR이 없다. 할 일 5에서 `gate`를 풀면 남은 PR을 검사 없이 병합할 수 있게 된다.
 6. 2026-10-18에 실행한 설계 0절 7항(`page`·`trip-mate-api` 삭제)과 8항(결정 5 하드닝)을 확인 명령으로 다시 본다. `gh api repos/ukyi-app/page`, `gh api repos/ukyi-app/trip-mate-api`, `gh api orgs/ukyi-app/packages/container/page`, `gh api orgs/ukyi-app/packages/container/trip-mate-api`가 모두 404다. `files`와 `homelab-app-template`의 `app-main` ruleset이 active다(`gh api repos/ukyi-app/<저장소>/rulesets --jq '[.[] | {name, enforcement}]'`).
 
@@ -225,7 +225,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | 1 | 완료 | 원격 `rebuild` = `902a86f`(2026-10-19 push). 이 할 일 1 결과까지 들어 있다. 할 일 2 전에 티켓을 더 고쳤으면 다시 push한다 |
 | 2 | 사람 작업 대기 | 번들 없음(옛 사본 실측은 선행 확인 2). `k3s-storage/internal`이 root 0700이라 AdGuard PVC는 존재부터 sudo로 확인해야 한다. 로컬 런북·`homelab-infra` 점검은 완료 |
 | 3 | 사람 작업 대기 | approvals 기록 없음. `/mnt/bulk`의 봉인 키 백업과 런북 암호화 사본도 함께 알린다 |
-| 4 | 사람 작업 대기 | 콘솔은 에이전트가 볼 수 없다. ping은 클러스터 안에서 나간다 |
+| 4 | 사람 작업 대기(k3s 제거 직전) | 콘솔은 에이전트가 볼 수 없다. ping은 클러스터 안에서 1분마다 나가고, 일시 정지는 ping 한 번에 풀린다 |
 | 5 | 완료 | `gh pr list -R ukyi-app/homelab --state open` → 0개 |
 | 6 | 완료 | 저장소·패키지 4개 모두 404. `app-main`: `files` 25327498 active, `homelab-app-template` 25327516 active |
 
