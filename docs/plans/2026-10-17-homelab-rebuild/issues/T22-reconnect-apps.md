@@ -21,7 +21,7 @@
 - main을 교체하면(T07) reusable 호출과 스키마 가져오기가 모두 깨진다. `homelab-app-template`의 내용 교체는 T10(D-21)이 한다. `aiops-autodeploy-canary`는 private로 보관한다(D-29).
 - 옛 homelab Actions가 꺼진 뒤(C-06) 다른 저장소의 Renovate도 멈췄다. 다른 저장소에 열린 renovate PR은 29개다(`page` 10, `trip-mate-api` 10, `homelab-app-template` 5, `aiops-autodeploy-canary` 4. 2026-10-17 실측, D-18). `page`·`trip-mate-api`를 지우면 9개(`homelab-app-template` 5, `aiops-autodeploy-canary` 4)가 남는다.
 - 옛 SealedSecrets 사본이 저장소에 남아 있다(2026-10-17 `gh api repos/ukyi-app/<repo>/git/trees/main?recursive=1`로 경로 확인). 봉인본 `deploy/*-secrets.sealed.yaml`은 `page`, `trip-mate-api`에 있고 두 저장소와 함께 지워진다. 공개 인증서 `tools/sealed-secrets-cert.pem`과 `tools/seal-secret.mts`는 `aiops-autodeploy-canary`에 있고(삭제할 두 저장소에도 있다), `homelab-app-template`에는 `scaffold/common/tools/` 아래에 있다. 봉인 키는 T06에서 k3s와 함께 사라지므로 새 구조에서는 쓸 수 없다.
-- 앱 저장소 main 보호: 2026-10-17에는 `files`, `homelab-app-template`(public)에 보호도 ruleset도 없었고, org 전체에 쓰기 권한이 있는 Codex Connector가 main에 직접 쓸 수 있었다(명세 §4.5). 결정 5(명세 §5.1, 2026-10-18, 실행 대기)로 두 저장소에 `CODEOWNERS`와 `app-main` ruleset을 건다. `aiops-autodeploy-canary`는 private라 Free에서 보호할 수 없고, 앱이 아니므로 공개하지 않는다(D-29).
+- 앱 저장소 main 보호: 2026-10-17에는 `files`, `homelab-app-template`(public)에 보호도 ruleset도 없었고, org 전체에 쓰기 권한이 있는 Codex Connector가 main에 직접 쓸 수 있었다(명세 §4.5). 결정 5(명세 §5.1)로 2026-10-18에 두 저장소에 `CODEOWNERS`와 `app-main` ruleset을 걸었다. `aiops-autodeploy-canary`는 private라 Free에서 보호할 수 없고, 앱이 아니므로 공개하지 않는다(D-29).
 
 ## 순서
 
