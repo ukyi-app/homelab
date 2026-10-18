@@ -32,7 +32,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - 터널: 원격 관리 터널을 새로 만든다. ingress 규칙은 Terraform 한 곳에만 둔다: `*.ukyi.app`과 `ukyi.app` → `http://traefik.traefik.svc.cluster.local:80`, 마지막은 `http_status:404`. 커넥터는 1개(롤링 업데이트 `maxSurge: 1`)다. 단일 노드라 복제본을 늘려도 고가용성은 아니다. cloudflared는 2026.10.1을 이미지 태그 + digest로 고정한다(2026.8.0·8.1은 쓰지 않는다). 같은 토큰으로 커넥터가 둘 붙으면 공개 요청이 비결정적으로 나뉘므로 옛 터널을 쓰지 않는다. 클러스터에는 Cloudflare API 토큰을 두지 않고 터널 토큰만 ESO로 받는다.
 - 공개 DNS: 와일드카드 `*` CNAME 하나와 apex를 터널로(proxied) 둔다. 확정(사용자 2026-10-18, T05). 어느 이름이 공개되는지는 Git의 Ingress가 정하고, 모르는 host는 Traefik이 404다. 원격 관리 터널이 와일드카드 hostname을 받는지는 [미검증] U01이다. 안 되면 공개 host마다 Terraform DNS 레코드를 둔다(사람 apply, 앱 등록 PR에 안내). 이 레코드는 운영 터널만 가리킨다.
 - Traefik: Service는 ClusterIP라 LAN·tailnet에서 직접 닿지 않는다. Ingress class `traefik` 하나, 엔트리포인트 `web` 하나다. Gateway API와 내부 TLS 리스너는 두지 않는다. 버전은 이 티켓 시작 때 정해 고정한다(U14). 공개 host는 `^[a-z0-9-]+\.ukyi\.app$` 한 단계만이다(Universal SSL은 apex와 첫 단계 하위 도메인만 덮는다. 공유 차트 schema는 T10).
-- zone 설정 9개: 값을 유지한 채 새 Terraform으로 가져온다(HSTS includeSubDomains 180일, preload 끔, `always_use_https`, TLS 1.2 최소, TLS 1.3, `browser_check`, `security_level` medium 등, 설계 F D-11 표).
+- zone 설정 9개: 값을 유지한 채 새 Terraform으로 가져온다(HSTS includeSubDomains·nosniff 180일, preload 끔, `always_use_https`, TLS 1.2 최소, TLS 1.3, `browser_check`, `security_level` medium 등, 설계 F D-11 표).
 - WAF(Free, 사용자 규칙 5개, 정규식 불가): 규칙 1 "host가 `hooks.ukyi.app`이고 (path ≠ `/github` 또는 method ≠ POST)면 Block". `eq`·`ne`만 쓴다. 나머지는 zone 기본 보호를 상속한다. 일부 값은 apply에서만 400이 나므로 apply는 사람이 보며 한다.
 - Argo CD 공개 webhook은 두지 않는다. Argo CD는 60초 폴링(`timeout.reconciliation` 60s, jitter 0. T07이 설정)으로 main을 본다. 확정(사용자 2026-10-18, T05). 그래서 이 티켓의 공개 경로에는 Argo CD로 가는 webhook이 없다.
 
