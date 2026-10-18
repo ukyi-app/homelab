@@ -39,7 +39,7 @@
    6. 플랫폼 프롬프트 §9 시나리오 1 형태로 실행을 확인한다(배포 PR, 병합, Argo CD 배포, 실행 확인).
    - 못 하면 `blocked`와 사유를 HANDOFF에 적는다.
    - 승인은 [../approvals.md](../approvals.md)에 남긴다 (AC-X2).
-5. 봇 중단 경보(OPS-02)를 실제로 확인한다. T16a가 만든 readiness 연동과 하트비트를 쓰려면 사람이 봇 전용 healthchecks.io 체크를 만들고 ping URL을 `/apps/homelab-bot/`에 등록한다(봇 저장소 `ARCHITECTURE.md` §8 제안). Bun 위 Discord Gateway의 네트워크 차단·복구 시험(discord.js 이슈 #10840, not planned 종료)을 여기서 한다. 실패하면 Node 24 전환을 검토한다 [가정: `ARCHITECTURE.md` §3].
+5. 봇 중단 경보(OPS-02)를 실제로 확인한다. Gateway만 끊겼을 때 봇이 Ready를 유지해 webhook(8080)·경보 수신(8081)이 계속 되는지와 Gateway 연결 지표 경보가 오는지를 함께 본다. T16a가 만든 readiness 연동과 하트비트를 쓰려면 사람이 봇 전용 healthchecks.io 체크를 만들고 ping URL을 `/apps/homelab-bot/`에 등록한다(봇 저장소 `ARCHITECTURE.md` §8 제안). Bun 위 Discord Gateway의 네트워크 차단·복구 시험(discord.js 이슈 #10840, not planned 종료)을 여기서 한다. 실패하면 Node 24 전환을 검토한다 [가정: `ARCHITECTURE.md` §3].
 
 ### 봇 자리 `target` 변경 (설계 E9, C.8)
 
