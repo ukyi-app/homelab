@@ -24,7 +24,7 @@
 | GitHub org·저장소 | org는 Free 플랜. `homelab`은 public이고, 브랜치 보호·ruleset은 public이라서 동작한다(Free에서는 private 저장소에 쓸 수 없다). squash 병합만 허용하고 병합 뒤 브랜치를 자동 삭제한다. 저장소 설정 `allow_auto_merge`가 켜져 있다(D-07 입력). 앱 저장소(`page`, `trip-mate-api`, `files`, `homelab-app-template`)는 public인데 main 보호와 ruleset이 없다. `aiops`, `aiops-autodeploy-canary`는 private라 보호를 걸 수 없다. 2026-10-18 결정: 앱 저장소는 public만 허용한다(D-29). `page`·`trip-mate-api`는 저장소와 GHCR 패키지를 삭제했다(2026-10-18 실행). `files`·`homelab-app-template`에는 `CODEOWNERS`와 `app-main` ruleset 등을 걸었다(결정 5, §5.1, 2026-10-18 실행) |
 | org GitHub App | 옛 reader·writer(전체 저장소), 옛 aiops(선택 저장소. 제거 확정, 실행 T22), ChatGPT Codex Connector(2026-10-07 설치, 전체 저장소, contents·workflows·actions·issues·pull_requests 쓰기, PR을 열면 자동 리뷰) |
 | 다른 저장소의 열린 renovate PR | 29개(`page` 10, `trip-mate-api` 10, `homelab-app-template` 5, `aiops-autodeploy-canary` 4). `page`·`trip-mate-api`를 지우면 9개가 남는다(예정). D-18 입력 |
-| 커밋 작성자 이메일 | homelab 작업 사본의 저장소 로컬 git 설정을 noreply 주소로 바꿨다(2026-10-18). 원격 `rebuild`에 이미 올라간 커밋 `56eeb54`, `53fc932`, `4bb61ef`의 작성자 이메일은 noreply가 아니다. GitHub 이메일 비공개 설정과 전역 git 설정은 사람이 바꾼다(§11) |
+| 커밋 작성자 이메일 | homelab 작업 사본의 저장소 로컬 git 설정을 noreply 주소로 바꿨다(2026-10-18). 원격 `rebuild`에 이미 올라간 커밋 `56eeb54`, `53fc932`, `4bb61ef`의 작성자 이메일은 noreply가 아니다. 커밋 작성자 이메일 공개는 사용자가 받아들여(2026-10-18) GitHub 이메일 비공개 설정과 전역 git 설정은 바꾸지 않는다 |
 | 옛 클러스터 | 가동 중. NUC `nuc-15-pro`(LAN `192.168.117.15`)에서 k3s active. Application 22개가 모두 main을 따라간다 |
 | 공유기 DNS | 주 `192.168.117.15`(AdGuard), 보조 `1.1.1.1`. 변경하지 않음 |
 | Tailscale 전역 DNS | NUC(AdGuard) + Cloudflare Public DNS. 임시 폴백이라 광고 차단은 불안정. D-08이 확정(사용자 2026-10-18)돼 T08에서 NUC(AdGuard Home) + AdGuard 공용 DNS 2개로 바꾼다(§4.5) |
@@ -438,7 +438,7 @@ AC-X1·AC-X2는 모든 티켓에 적용된다. 티켓 머리말의 연결 AC에 
 19. **GitHub Terraform provider 결함과 state 보호 (D-28).** provider v6.13.0의 ruleset etag 버그(#3519, 수정 #3637 미출시)로 apply가 실패할 수 있다. R2에는 versioning이 없어 state를 잘못 덮으면 되돌릴 수 없다. guard가 실패하면 모든 apply가 막힌다. 대응: 6.13.0 정확 핀, 래퍼의 apply 전 state pull 백업, apply 실패 시 그 plan의 ruleset을 state rm 뒤 import, 비상 경로(-target 재생성 뒤 전체 verify)를 런북에 둔다(T10).
 20. **public 앱 저장소 노출 (D-29).** 앱 코드, Actions 로그, 이미지가 공개된다. GHCR 패키지는 public으로 바꾸면 되돌릴 수 없고, `GITHUB_TOKEN`으로 만든 패키지의 가시성 상속은 문서끼리 어긋난다. 대응: D-23 금지 항목을 앱 저장소 코드·로그·이미지까지 넓히고 템플릿 CI에 금지 패턴 검사, push job 캐시 없음, T10에서 `homelab-probe` 첫 push로 시험, public 앱 저장소 기본 설정(§5.1 D-29).
 21. **병합 키 sync의 PAT 의존 (D-04).** App Connection의 fine-grained PAT는 owner 계정에 묶이고 만료가 있다. 만료되면 sync가 멈추고, 실패 알림은 Infisical 프로젝트 Admin 메일로만 온다. 대응: 만료일 관리, 회전 뒤 environment secret `updated_at` 확인(§5.1 D-04).
-22. **커밋 작성자 이메일 공개.** public 저장소 커밋에는 작성자 이메일이 남는다. 원격 `rebuild`의 커밋 3개(`56eeb54`, `53fc932`, `4bb61ef`)는 noreply가 아닌 주소이고, force push를 하지 않으므로(D-03) 그대로 남는다. 대응: 작업 사본의 로컬 git 설정은 noreply로 바꿨다(2026-10-18). GitHub 이메일 비공개와 전역 git 설정은 사람이 바꾼다(§11).
+22. **커밋 작성자 이메일 공개.** public 저장소 커밋에는 작성자 이메일이 남는다. 원격 `rebuild`의 커밋 3개(`56eeb54`, `53fc932`, `4bb61ef`)는 noreply가 아닌 주소이고, force push를 하지 않으므로(D-03) 그대로 남는다. 대응: 작업 사본의 로컬 git 설정은 noreply로 바꿨다(2026-10-18). 남는 노출(옛 커밋, GitHub이 만드는 squash 병합 커밋)은 사용자가 받아들였다(2026-10-18). 그래서 GitHub 이메일 비공개와 전역 git 설정은 바꾸지 않는다. 이 결정은 커밋 작성자 정보에만 해당한다.
 
 ---
 
@@ -448,7 +448,7 @@ AC-X1·AC-X2는 모든 티켓에 적용된다. 티켓 머리말의 연결 AC에 
 
 | 대상 | 작업 | 티켓 |
 |---|---|---|
-| GitHub | 결정 5 하드닝 스크립트 실행(`files`·`homelab-app-template`의 `CODEOWNERS`·`app-main`·secret scanning·push protection, 저장소와 org의 fork PR 승인 `all_external_contributors`), `page`·`trip-mate-api` 저장소와 GHCR 패키지 삭제, GitHub 이메일 비공개 설정과 전역 git 설정. 자동 권한 검사가 에이전트의 org·저장소 설정 변경을 막아 사람이 실행한다(2026-10-18 결정. 하드닝과 삭제는 2026-10-18 실행, 이메일 비공개와 전역 git 설정은 실행 대기) | 지금 (티켓 밖) |
+| GitHub | 결정 5 하드닝 스크립트 실행(`files`·`homelab-app-template`의 `CODEOWNERS`·`app-main`·secret scanning·push protection, 저장소와 org의 fork PR 승인 `all_external_contributors`), `page`·`trip-mate-api` 저장소와 GHCR 패키지 삭제. 자동 권한 검사가 에이전트의 org·저장소 설정 변경을 막아 사람이 실행한다(2026-10-18 결정·실행. GitHub 이메일 비공개와 전역 git 설정은 하지 않기로 했다) | 지금 (티켓 밖) |
 | GitHub | `legacy` 태그 생성, 열린 PR 닫기, `rebuild` 브랜치 push, 문서 커밋 push, 브랜치 보호·ruleset·webhook 정리, environment·저장소 변수·GHCR 패키지 정리, main 교체 병합, Actions 재활성화 | T01, T02, T04, T05, T06, T07, T14 |
 | GitHub | 옛 App 정리(reader, writer, dispatch 등록), Codex Connector 처리(D-26), 옛 PAT 폐기, 새 App 생성·설치, 보호 설정의 Terraform apply(owner 로컬, D-28), Actions 허용 범위, GHCR 패키지 Public 전환(D-29, 되돌릴 수 없음), Infisical App Connection용 fine-grained PAT 발급(D-04), 시험 PR 게시, 앱 저장소 병합 | T06, T10, T17, T19, T22 |
 | GitHub | 봇 저장소 생성(public, D-13. 내용을 넣기 전에 결정 5와 같은 하드닝, 설계 C.8), 봇 쓰기 신원(D-24) 생성·설치, 옛 aiops 저장소·`ukyi-homelab-aiops` App 삭제, `aiops-autodeploy-canary`·`mac-uptime-guard` private 보관 | T14, T19, T22 |
