@@ -45,7 +45,7 @@ main을 새 구조로 바꾸고, 새 클러스터의 바닥을 세운다.
 
 - 옛 `legacy` 태그와 옛 브랜치는 건드리지 않는다.
 - 이 티켓의 GitHub 설정 변경(main 교체 뒤 필수 검사 `ci` ruleset 등, T05 할 일 11)은 `gh api`로 한다. Terraform github root(D-28)는 T10에서 생기고, 그때 import하면서 `ci` ruleset의 이름을 제자리에서 `main-checks`로 바꾼다.
-- rebuild → main squash 병합 커밋은 GitHub에서 만들어져 작성자 이메일이 GitHub 계정 설정을 따른다. 여기에 개인 이메일이 들어가는 것은 사용자가 받아들였다(2026-10-18, 명세 §10 22항). 작업 사본의 로컬 git 설정은 2026-10-18에 noreply로 바꿨다.
+- rebuild → main squash 병합 커밋은 GitHub에서 만들어져 작성자 이메일이 GitHub 계정 설정을 따른다. 여기에 개인 이메일이 들어가는 것은 사용자가 받아들였다(2026-10-18, 명세 §10 22항). 작업 사본의 커밋도 개인 이메일이다(로컬 noreply 설정은 2026-10-18에 지움).
 
 ## 완료 조건
 
