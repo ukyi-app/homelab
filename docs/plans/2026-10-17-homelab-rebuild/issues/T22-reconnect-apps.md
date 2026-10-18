@@ -4,7 +4,7 @@
 - 상태: 대기
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T13, T16 (봇 첫 배포 증거)
-- 선행 결정: D-13 (일부 확정(사용자 2026-10-18): 옛 aiops 저장소·App 제거), D-18 (의존성 업데이트 방식), D-21 (`homelab-app-template` 재사용), D-28 (확정(사용자 2026-10-18): 보호 설정 대조), D-29 (확정(사용자 2026-10-18): 앱 저장소 public만, 비앱 저장소 private 보관, `page`·`trip-mate-api` 삭제)
+- 선행 결정: D-10 (확정(사용자 2026-10-18, T05): 옛 Telegram 봇·토큰은 `mac-uptime-guard`를 처리하는 이 티켓까지 둔다), D-13 (일부 확정(사용자 2026-10-18): 옛 aiops 저장소·App 제거), D-18 (의존성 업데이트 방식. 확정(사용자 2026-10-18, T05): 호스팅형 Renovate App 저장소별 설치, 자동 병합 모두 끔), D-21 (확정(사용자 2026-10-18, T05): `homelab-app-template` 재사용, 내용 교체는 T10), D-28 (확정(사용자 2026-10-18): 보호 설정 대조), D-29 (확정(사용자 2026-10-18): 앱 저장소 public만, 비앱 저장소 private 보관, `page`·`trip-mate-api` 삭제)
 - 연결 AC: AC-P14
 - 수행: 에이전트 + 사람 (재연결 확인, 병합, 저장소 삭제·보관, App 정리)
 
@@ -35,7 +35,7 @@
 4. 열린 renovate PR(`homelab-app-template` 5, `aiops-autodeploy-canary` 4)은 D-18 결정에 따라 닫거나 새 방식으로 다시 연다. 옛 봉인본을 건드리는 PR은 병합하지 않는다.
 5. 옛 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App을 삭제한다(D-13 일부 확정). T06에서 넘겨받은 일이다. App 키 폐기(T06 자격 폐기 표의 `보류(D-13, T22)` 줄)를 함께 닫는다. 삭제는 되돌릴 수 없다. 옛 AIOps를 교훈 자료로 읽는 T15는 이 티켓의 선행(T16)보다 앞이다.
 6. `aiops-autodeploy-canary`는 공개하지 않고 private로 보관한다. 삭제해도 된다(D-29).
-7. `mac-uptime-guard`(private, 옛 맥 미니용)는 공개하지 않고 private로 보관한다(D-29). 이 저장소는 옛 Telegram 봇 토큰을 쓴다. 장치 쪽 처리(새 구조로 옮기거나 끔) 뒤 T06 자격 폐기 표의 `보류(D-10, T22)` 줄을 닫는다(옛 토큰 폐기 또는 유지와 이유). T09가 이미 닫았으면 그 기록을 확인만 한다.
+7. `mac-uptime-guard`(private, 옛 맥 미니용)는 공개하지 않고 private로 보관한다(D-29). 이 저장소는 옛 Telegram 봇 토큰을 쓴다. 장치 쪽 `mac-uptime-guard` 처리(새 구조로 옮기거나 끔) 뒤 옛 Telegram 봇 토큰을 폐기하고 옛 봇을 삭제한다. 이것으로 T06 자격 폐기 표의 `보류(D-10, T22)` 줄을 닫는다(설계 E10, D-10).
 
 ## 제약
 
@@ -47,6 +47,7 @@
 
 - `files`를 재연결했으면 시나리오 1(첫 배포)을 통과하고, `homelab github verify`가 차이 없음이다(`CODEOWNERS` 존재, `codeowners/errors` 빈 결과, code owner 리뷰·승인 무효화 규칙 포함). 재연결하지 않기로 했으면 그 결정과 이유가 기록돼 있다.
 - 할 일 5~7의 저장소와 App마다 처리(삭제, private 보관, 유지와 이유)가 실행됐고, approvals.md에 승인 기록이 있다.
+- T06 자격 폐기 표의 옛 Telegram 봇 토큰 줄(`보류(D-10, T22)`)이 닫혔다(`mac-uptime-guard` 처리 뒤 토큰 폐기와 옛 봇 삭제).
 
 ## 검증
 
