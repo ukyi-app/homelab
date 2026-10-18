@@ -14,7 +14,7 @@
 
 ## 입력
 
-- `00`과 `01` (T14 정비본). 실행 프롬프트는 [`00` §2](../bot/00-start.md).
+- `00`과 `01` (T14 정비본). 실행 프롬프트는 [`00` §2](https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/prompts/00-start.md)(봇 저장소, 2026-10-18에 옮김).
 - 플랫폼 설계 문서 [../platform/design.md](../platform/design.md) (T05 결정 포함).
 - 이 명세 §1, §4.5, §5.
 - `01` §3 "참고 입력: 옛 AIOps 교훈". 커밋 `2d2054a`(`legacy` 태그가 가리킬 커밋)에서 읽는다. 옛 사본에서는 fetch하지 않는다(`00` §5).
@@ -26,7 +26,7 @@
 2. 능력표를 실측한다: Discord, Codex(NUC에 codex-cli 0.163.0), herdr(0.9.5), GitHub App.
 3. D-16 대안은 Codex Connector로 실측한다. 트리거, 게시 방식, 설치 범위, 결과를 Discord로 가져올 수 있는지를 본다. 기존 PR 기록을 읽기 전용으로 조회해 확인하고(예: homelab PR #752의 리뷰 기록), 시험 PR이 더 필요하면 사람에게 요청한다.
 4. D-14(모델 계정·인증)는 공식 약관을 확인한 뒤, D-15(실행 호스트·격리)·D-16(리뷰 방식)·D-17(Discord 대상)·D-24(봇 변경 PR 작성 자격)와 함께 결정한다. 에이전트는 근거와 추천을 `DECISIONS.md`에 적고, 결정은 사용자가 한다. D-16을 정할 때 모델 호출 전 `author_association` 확인(OWNER·MEMBER·COLLABORATOR, 설계 C.8)이 Renovate App PR과 봇 변경 PR App의 PR을 막는지 실측하고, 막으면 허용할 App을 따로 둘지 정한다(V1 기능 7, AC-B4).
-5. 결정이 나면 같은 변경에서 spec §5.1로 옮기고 근거를 적는다. `../bot/` 전체에서 그 D-ID를 검색해 자리를 고친다(spec §12).
+5. 결정이 나면 같은 변경에서 spec §5.1로 옮기고 근거를 적는다. 봇 저장소 `docs/ai-bot/prompts/` 전체에서 그 D-ID를 검색해 자리를 고친다(spec §12). 이 변경은 봇 저장소 PR로 한다.
 6. `V1_PLAN.md`에 일정 위험(spec §10 6번) 대응으로 범위 조정안을 제안한다. 사용자가 정한다.
    - 예: STAGE별 제한 시범 운영(T17 뒤 시험 저장소에서 PR 리뷰만 실사용), T16의 로컬·mock 구현을 T13 완료 전에 시작하고 실연동만 T13 뒤로.
    - 기능 수를 줄이는 것은 C-08 변경이라 별도 결정이다.
@@ -53,9 +53,9 @@
 ## 완료 조건
 
 - `01` §3 완료 조건을 채웠다.
-- D-14~D-17, D-24가 결정됐고, spec §5.1과 `../bot/` 자리에 반영됐다.
+- D-14~D-17, D-24가 결정됐고, spec §5.1과 봇 저장소 `docs/ai-bot/prompts/`의 자리에 반영됐다.
 - `V1_PLAN.md`에 범위 조정안과 사용자의 선택이 있다.
-- 공개 산출물이 봇 저장소에 PR로 병합돼 있고(main은 `app-main`으로 보호돼 PR로만 들어간다. 병합은 사람 승인 뒤), HANDOFF와 개발 산출물은 private 저장소 `ukyi-app/homelab-bot-ops`에 있고, 봇 저장소에는 운영 산출물이 없다(D-13). spec·`bot/` 변경은 homelab `rebuild`(T07 뒤에는 PR로 main)에 커밋돼 있다 (명세 AC-X1).
+- 공개 산출물이 봇 저장소에 PR로 병합돼 있고(main은 `app-main`으로 보호돼 PR로만 들어간다. 병합은 사람 승인 뒤), HANDOFF와 개발 산출물은 private 저장소 `ukyi-app/homelab-bot-ops`에 있고, 봇 저장소에는 운영 산출물이 없다(D-13). spec 변경은 homelab `rebuild`(T07 뒤에는 PR로 main)에, 봇 문서 변경은 봇 저장소 PR로 들어가 있다 (명세 AC-X1).
 
 ## 검증
 

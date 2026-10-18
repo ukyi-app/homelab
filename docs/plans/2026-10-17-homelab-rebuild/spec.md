@@ -30,7 +30,7 @@
 | Tailscale 전역 DNS | NUC(AdGuard) + Cloudflare Public DNS. 임시 폴백이라 광고 차단은 불안정. D-08이 확정(사용자 2026-10-18)돼 T08a에서 NUC(AdGuard Home) + AdGuard 공용 DNS 2개로 바꾼다(§4.5) |
 | NUC 로컬 전용 자료 | git 밖 옛 런북, Terraform 자격 파일, 원격 없는 다른 프로젝트가 이 디스크에만 있다(§4.5). OS를 유지하고(D-12), T06 목록 작성에만 읽기 전용으로 쓴다(D-27). 둘 다 확정(사용자 2026-10-18, T05) |
 | 플랫폼 프롬프트 | [platform/design-prompt.md](platform/design-prompt.md). T03 보강과 2026-10-17 감사 반영. 확정 결정의 자리는 2026-10-18에 T05가 채웠다 |
-| 봇 문서 | [bot/](bot/)의 `00`~`04`. T05 결정의 자리는 2026-10-18에 채웠다. 설계 문서 값 반영과 빠진 자리 점검은 T14 (§4.3). 최종 위치는 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/`이고 아직 옮기지 않았다(D-13, §4.3) |
+| 봇 문서 | [봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/`](https://github.com/ukyi-app/homelab-bot/tree/main/docs/ai-bot/prompts)의 `00`~`04`. 2026-10-18에 homelab `bot/`에서 PR로 옮겼다(봇 저장소 PR #1, D-13, §4.3). 결정 자리는 T05·T14가 채웠다 |
 | `docs/` | `/home/ukyi/homelab`이 `ukyi-app/homelab`의 작업 사본이다(브랜치 `rebuild`, T02). 계획 문서는 원격 `rebuild`에 있다 |
 
 ---
@@ -54,7 +54,7 @@
 | ID | 출처 | 상태 |
 |---|---|---|
 | S1 | [platform/design-prompt.md](platform/design-prompt.md) (플랫폼 프롬프트) | 플랫폼 설계 지시. T03 보강과 2026-10-17 감사 반영 |
-| S2 | [bot/](bot/) `00-start.md`~`04-audit-handoff.md` (봇 문서 `00`~`04`) | 봇 V1~V5 지시, 요구 ID, 시험 카탈로그 |
+| S2 | 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/` `00-start.md`~`04-audit-handoff.md` (봇 문서 `00`~`04`. 2026-10-18 전에는 homelab `bot/`) | 봇 V1~V5 지시, 요구 ID, 시험 카탈로그 |
 | S3 | 2026-10-17·2026-10-18 대화의 결정 | §5.1 |
 | S4 | 실측 | 옛 저장소 `origin/main` `2d2054a`(2026-10-07 fetch 기준), NUC 상태, GitHub·Tailscale 조회, 2026-10-17 감사의 읽기 전용 조회(`gh api` GET, `systemctl`, `tailscale` CLI, 옛 사본 kubeconfig로 한 `kubectl get`) |
 
@@ -99,12 +99,12 @@
 
 ### 4.3 봇 문서의 결정 대기 자리
 
-봇 문서는 새 플랫폼을 기준으로 한다. 플랫폼 설계 값이 필요한 곳은 결정 ID로 자리만 두었다. 색인은 `01` §11과 `04` §10에 있다. `00`에는 색인이 없고 §1·§3·§4·§5·§6·§8 곳곳에 자리가 있다. 결정이 나면 `bot/` 전체에서 그 D-ID를 검색해 모두 고친다(§12). 결정 ID 자리는 결정을 정한 티켓이 채우고(T05, T14, T15), 설계 문서의 값 반영과 빠진 자리 점검은 T14가 한다.
+봇 문서는 새 플랫폼을 기준으로 한다. 플랫폼 설계 값이 필요한 곳은 결정 ID로 자리만 두었다. 색인은 `01` §11과 `04` §10에 있다. `00`에는 색인이 없고 §1·§3·§4·§5·§6·§8 곳곳에 자리가 있다. 결정이 나면 봇 저장소 `docs/ai-bot/prompts/` 전체에서 그 D-ID를 검색해 모두 고친다(§12, 봇 저장소 PR). 결정 ID 자리는 결정을 정한 티켓이 채우고(T05, T14, T15), 설계 문서의 값 반영과 빠진 자리 점검은 T14가 한다.
 
 - **`00` §3·§6 (C-08 보호):** 문장은 사용자가 제공한 패키지 원문 그대로다. 옛 홈랩을 가리키는 곳에는 "> 참고:" 주석이 있다. `01` §5는 같은 뜻을 새 플랫폼 표현으로 적어서 두 문서의 문구가 다르다.
 - **`04` §9:** V1 판정 정의의 유일한 기준이다. `01` §9는 판정 이름과 포인터만 둔다.
 - **`02`·`03`:** D-19(확정(사용자 2026-10-18, T14))로 T14에서 정비했다. 옛 홈랩을 전제로 한 문장은 `00`·`01`·`04`와 같은 방식으로 고쳤고, 처리 기록은 각 문서 머리의 "T14에서 처리한 문장" 표(T14 전 "다시 검토할 문장" 표)에 있다. 복사용 프롬프트(`02` §0, `03` §0)도 고쳤다.
-- **위치 (D-13):** 봇 문서의 최종 위치는 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/`다. 파일 이름(`00-start.md`~`04-audit-handoff.md`)은 그대로다. 옮기기는 봇 저장소 생성·하드닝 뒤 PR로 하고 T14가 맡는다(T14 할 일 8, 완료 조건). 그때까지 이 명세와 티켓의 `bot/` 링크는 지금 위치를 가리킨다. `bot/` 문서는 지금부터 최종 위치 기준으로 고친다(참조 규칙은 §12).
+- **위치 (D-13):** 봇 문서의 최종 위치는 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/`다. 파일 이름(`00-start.md`~`04-audit-handoff.md`)은 그대로다. 2026-10-18에 봇 저장소 생성·하드닝 뒤 PR #1(squash 커밋 `0e9dfd4`)로 옮겼고, homelab의 `bot/` 폴더는 같은 날 지웠다(T14). 이 명세와 티켓은 새 위치를 가리킨다(참조 규칙은 §12).
 
 T14 진행: 위 자리에 플랫폼 값을 채웠다. T05의 플랫폼 결정은 확정(사용자 2026-10-18, T05)이다(§5.1). D-13의 나머지(봇 저장소 이름, 산출물 위치, 프롬프트 문서의 최종 위치)와 D-19는 2026-10-18 T14 질문 응답으로 확정했다(§5.1). 같은 응답에서 R14 배정도 정했다: R14는 PR_REVIEW(`01` §5, T17)에서 빼고 CHANGE_PR(`01` §7, T19)에만 남긴다. 시험 CHANGE-01·03은 그대로다. 봇 저장소 둘(`ukyi-app/homelab-bot` public, `ukyi-app/homelab-bot-ops` private)은 2026-10-18에 사람이 만들었다(approvals.md). 남은 일은 문서 이동 PR이다.
 
@@ -178,7 +178,7 @@ T14 진행: 위 자리에 플랫폼 값을 채웠다. T05의 플랫폼 결정은
 | D-10 | 비AI 알림은 homelab 알림용 Telegram 새 봇(설계 E3에서 생성)이고, 외부 생존 감시는 healthchecks.io다(계정 재사용, 체크 새로). 옛 Telegram 봇·토큰은 그것을 쓰는 `mac-uptime-guard`를 처리하는 T22까지 그대로 둔다. 옛 healthchecks 체크는 새 체크가 초록인 것을 확인한 뒤 지운다(설계 E4b). 옛 봇 토큰을 재발급하는 대안은 고르지 않았다. 그래서 E3(T09)이 옛 봇 토큰 행을 닫는 분기는 쓰이지 않는다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락. 옛 봇 토큰 재발급 대안은 고르지 않음) |
 | D-11 | 설계 F D-11 표대로 한다. Cloudflare zone `ukyi.app`, Tailscale tailnet, R2 state 버킷 `homelab-tfstate`만 이어 쓰고, 나머지 옛 외부 자원은 표대로 지우거나 새로 정의한다. 새 root의 state 키 접두는 `v2/`다. zone 설정 9개(HSTS includeSubDomains 180일 포함)는 값을 유지해 새 Terraform으로 가져온다. Tailscale ACL은 (a): NUC는 태그 없는 사용자 기기이고, 옛 self·ssh 규칙(`accept`, `autogroup:nonroot` + `root`)을 유지한다. (c) `tag:nuc`로 바꿀 조건은 E4a에서 U28 결과로 다시 본다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
 | D-12 | OS를 유지하고 k3s를 제거하며 호스트를 정리한다(설계 B.4의 H1·H2·H3·H7·H8·H9). H8은 옛 데이터 경로(`/var/lib/rancher/k3s-storage`, `/mnt/bulk`, `/var/backups/files-data`)와 AIOps loop 이미지이고, AdGuard 라이브 설정을 먼저 내보낸다. `/mnt/bulk`는 비우고 fstab 항목을 지운다. 노드 DNS drop-in(H5)과 sshd·journald·tmpfiles drop-in(H4)은 남기고 E2(T07)가 같은 이름으로 덮어쓴다. 빈 NUC 재구축 검증은 VM에서 하고, VM은 설계 E8의 격리 조건 여섯을 지킨다. VM 호스트는 tailnet에 넣지 않는다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
-| D-13 | 봇 코드 저장소는 `ukyi-app/homelab-bot`(public)이다. 새로 만들고 옛 `ukyi-app/aiops`는 재사용하지 않는다. 앱 이름도 `homelab-bot`이라 namespace `app-homelab-bot`, Infisical `/apps/homelab-bot/`(게시 서버)와 `/apps/homelab-bot/worker`(작업자), 이미지 이름이 이를 따른다. 배포 설정은 homelab(`apps/homelab-bot/`, `data/homelab-bot/`)이다. 운영 산출물(evidence, handoffs, runtime-policies 실제 값, DISCOVERY의 내부 경로, 허용 목록 실제 값)은 봇 저장소에 두지 않는다. 산출물 위치는 셋이다: (1) 공개해도 되는 봇 산출물(`PROJECT_STATUS.md`, `DECISIONS.md`, `VERIFICATION.md` 요약 등 내부 정보 없는 것)은 봇 저장소 `docs/ai-bot/`. (2) 운영 산출물 중 개발 산출물(evidence, handoffs, DISCOVERY의 내부 경로)은 private 저장소 `ukyi-app/homelab-bot-ops`. (3) 봇이 실행 중 읽는 값(runtime-policies 실제 값, 허용 목록 실제 값)은 Infisical `/apps/homelab-bot/`에 두고 봇 저장소에는 키 이름만 둔다. 봇 프롬프트 문서(`bot/`의 `00`~`04`)의 최종 위치는 봇 저장소 `docs/ai-bot/prompts/`이고 파일 이름은 그대로다. 옮기기는 봇 저장소 생성·하드닝 뒤 PR로 한다(§4.3). 옛 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App은 제거(삭제)한다(실행 T22) | 가시성·운영 산출물 공개 기준·옛 aiops: 사용자 2026-10-18: "aiops는 사용안할거긴해. 참고해. 제거예정.", 공개 정책은 "추천대로". 나머지: 사용자 2026-10-18, T14 질문 응답. 저장소 이름과 산출물 위치는 권장안 수락. 프롬프트 문서 위치는 권장안(지금 위치 유지)이 아니라 "봇 저장소로 옮김"을 골랐다 |
+| D-13 | 봇 코드 저장소는 `ukyi-app/homelab-bot`(public)이다. 새로 만들고 옛 `ukyi-app/aiops`는 재사용하지 않는다. 앱 이름도 `homelab-bot`이라 namespace `app-homelab-bot`, Infisical `/apps/homelab-bot/`(게시 서버)와 `/apps/homelab-bot/worker`(작업자), 이미지 이름이 이를 따른다. 배포 설정은 homelab(`apps/homelab-bot/`, `data/homelab-bot/`)이다. 운영 산출물(evidence, handoffs, runtime-policies 실제 값, DISCOVERY의 내부 경로, 허용 목록 실제 값)은 봇 저장소에 두지 않는다. 산출물 위치는 셋이다: (1) 공개해도 되는 봇 산출물(`PROJECT_STATUS.md`, `DECISIONS.md`, `VERIFICATION.md` 요약 등 내부 정보 없는 것)은 봇 저장소 `docs/ai-bot/`. (2) 운영 산출물 중 개발 산출물(evidence, handoffs, DISCOVERY의 내부 경로)은 private 저장소 `ukyi-app/homelab-bot-ops`. (3) 봇이 실행 중 읽는 값(runtime-policies 실제 값, 허용 목록 실제 값)은 Infisical `/apps/homelab-bot/`에 두고 봇 저장소에는 키 이름만 둔다. 봇 프롬프트 문서(`00`~`04`)의 최종 위치는 봇 저장소 `docs/ai-bot/prompts/`이고 파일 이름은 그대로다. 2026-10-18에 PR로 옮겼다(§4.3). 옛 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App은 제거(삭제)한다(실행 T22) | 가시성·운영 산출물 공개 기준·옛 aiops: 사용자 2026-10-18: "aiops는 사용안할거긴해. 참고해. 제거예정.", 공개 정책은 "추천대로". 나머지: 사용자 2026-10-18, T14 질문 응답. 저장소 이름과 산출물 위치는 권장안 수락. 프롬프트 문서 위치는 권장안(지금 위치 유지)이 아니라 "봇 저장소로 옮김"을 골랐다 |
 | D-18 | 호스팅형 Renovate App을 homelab과 앱 저장소에 저장소별로 설치하고 homelab Actions와 분리한다. 자동 병합은 모두 끈다. Renovate PR은 자동 병합 조건 밖이라 사람이 병합하고, 봇 V1 기능 7의 리뷰 대상이 된다(설계 F D-18) | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
 | D-19 | `02`·`03`도 T14 정비에 넣는다. 두 문서 머리의 "다시 검토할 문장" 표에 모인 옛 홈랩 전제 문장을 `00`·`01`·`04`와 같은 방식으로 정비하고, 복사용 프롬프트(`02` §0, `03` §0)도 고친다 | 사용자 2026-10-18, T14 질문 응답. 권장안(넣지 않음)이 아니라 "넣음"을 골랐다 |
 | D-20 | 시크릿 값은 모두 새로 발급해 Infisical에 등록하고 옛 값은 쓰지 않는다. 옛 자격은 E1(T06)에서 폐기한다. 예외는 둘이다: 옛 Telegram 봇 토큰은 `보류(D-10, T22)`, 옛 healthchecks ping URL은 `보류(D-10, T08b)`다. SOPS age 개인 키는 T06 자격 폐기 완료를 확인한 뒤 지운다. 새 구조에 대응 자격이 없는 옛 자격(cert-manager DNS-01용 Cloudflare 토큰은 D-08, GHCR pull PAT는 D-29)은 새로 발급하지 않는다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
@@ -306,7 +306,7 @@ T05가 정할 게이트는 모두 확정돼 §5.1로 옮겼다(사용자 2026-10
 | [T11](issues/T11-data-services.md) | 데이터 서비스 | P2 | T08a, T09, T10 | 대기 | 에이전트 + 사람 |
 | [T12](issues/T12-cli.md) | CLI | P2 | T10, T11 | 대기 | 에이전트 + 사람 |
 | [T13](issues/T13-platform-integration.md) | 테스트 앱 통합 검증 | P2 | T08a, T08b, T10, T11, T12 | 대기 | 에이전트 + 사람 |
-| [T14](issues/T14-bot-docs-refresh.md) | 봇 문서 정비 | P3 | T05 | 진행 중 | 에이전트 + 사람 |
+| [T14](issues/T14-bot-docs-refresh.md) | 봇 문서 정비 | P3 | T05 | 완료 (2026-10-18) | 에이전트 + 사람 |
 | [T15](issues/T15-bot-discovery.md) | 봇 V1 DISCOVERY | P3 | T14 | 대기 | 에이전트 + 사람 |
 | [T16](issues/T16-bot-foundation.md) | 봇 FOUNDATION | P4 | T13, T15 | 대기 | 에이전트 + 사람 |
 | [T17](issues/T17-bot-pr-review.md) | 봇 PR_REVIEW | P4 | T16 | 대기 | 에이전트 + 사람 |
@@ -373,9 +373,9 @@ T16 → T22
 
 ### 8.3 실행 상태
 
-- **완료:** T01, T02, T03 (2026-10-17), T04 (2026-10-18, push 2026-10-18), T05 (2026-10-18. 문서 변경은 사람이 확인한 뒤 커밋한다, §12).
-- **지금 실행 가능:** T06(선행 T05·T02·T01 완료. 수행은 사람), T14(선행 T05 완료).
-- **선행 대기:** T07, T08a, T08b, T09~T13, T15~T22.
+- **완료:** T01, T02, T03 (2026-10-17), T04 (2026-10-18, push 2026-10-18), T05 (2026-10-18, push 2026-10-18), T14 (2026-10-18. 봇 문서는 봇 저장소로 옮김, D-13).
+- **지금 실행 가능:** T06(선행 T05·T02·T01 완료. 수행은 사람), T15(선행 T14 완료).
+- **선행 대기:** T07, T08a, T08b, T09~T13, T16~T22.
 - **통합 검증 담당:** T13은 플랫폼 전체(플랫폼 프롬프트 §9 시나리오 1~17), T21은 봇 V1 전체(`04` §4 시험 30개).
 
 ### 8.4 병렬 후보와 소유 범위
@@ -386,7 +386,7 @@ T16 → T22
 | T09 · T10(착수) | T07 뒤 | 디렉터리는 T04 설계 구조로 나눈다. Argo CD 루트 앱 목록(`platform/root`)은 T07이 T08a·T08b·T09·T10·T11의 자리를 미리 만들어 둔다. T10 완료는 T09 뒤다 |
 | T08a · T10 | T09 뒤 | T08a: `infra/cloudflare`, `infra/tailscale`, `infra/tailscale-dns`, `platform/cloudflared`·`traefik`·`tailscale`·`adguard`·`cert-manager`. T10: `platform/charts/app`, `.github/workflows/`, `infra/github`, `tools/tf-github.sh`(설계 E5). R2 state를 처음 쓰는 것은 T08a이고, T10의 `infra/github` 첫 apply는 T08a의 U02 잠금 시험 뒤에 한다 |
 | T08b · T11 | T08a·T10 뒤 | T08b: `platform/observability`, `platform/sandbox`, `platform/bot-slot`. T11: `platform/cnpg`, `platform/charts/app-data` 등(설계 E6). T08b는 T11의 선행이 아니다 |
-| P3(T14·T15) · P2(T06~T13) | T05 뒤 | T14: `bot/` 문서. T15: 봇 저장소 `homelab-bot`과 운영 산출물 저장소 `homelab-bot-ops`(D-13), 그리고 결정 기록 예외로 spec §5와 `bot/`의 D-14~D-17·D-24 자리. P2: 플랫폼 디렉터리 |
+| P3(T14·T15) · P2(T06~T13) | T05 뒤 | T14: 봇 문서(완료). T15: 봇 저장소 `homelab-bot`과 운영 산출물 저장소 `homelab-bot-ops`(D-13), 그리고 결정 기록 예외로 spec §5와 봇 저장소 `docs/ai-bot/prompts/`의 D-14~D-17·D-24 자리(봇 저장소 PR). P2: 플랫폼 디렉터리 |
 | T17 · T18 · T20 | T16 뒤 | 공유 계약(event·job·outbox 스키마, 게시 서버)은 T16 소유. 나머지는 추가 변경만 |
 | T22 · T17~T21 | T16 뒤 | T22: 기존 앱 저장소. P4: 봇 저장소 |
 
@@ -485,10 +485,10 @@ AC-X1·AC-X2는 모든 티켓에 적용된다. 티켓 머리말의 연결 AC에 
 - 티켓 상태가 바뀌면 해당 티켓 머리말과 §8.1을 함께 고친다.
 - T05가 T06~T13을 설계 문서 E에 맞춰 다시 쪼개고(T08 → T08a·T08b) §8.2 그래프를 갱신했다(2026-10-18). 기준은 설계 E.2·E.3이다.
 - T15가 끝나면 T16~T21을 `V1_PLAN.md`에 맞춰 갱신한다.
-- 결정이 나면 §5의 해당 줄을 "확정"으로 옮기고 근거(누가, 언제)를 적는다. 같은 변경에서 그 결정 ID로 자리를 둔 문서 위치를 채운다. `bot/` 전체와 플랫폼 프롬프트에서 그 D-ID를 검색해 모두 고친다. 색인이 있는 곳은 `01` §11, `04` §10, 플랫폼 프롬프트 §0·§10-F다. 결정을 정한 티켓이 이 갱신을 맡는다(T15의 D-14~D-17, D-24 포함). 봇 문서를 봇 저장소로 옮긴 뒤에는 `bot/` 대신 봇 저장소 `docs/ai-bot/prompts/`에서 검색해 고치고, 그 변경은 봇 저장소 PR로 한다(D-13).
+- 결정이 나면 §5의 해당 줄을 "확정"으로 옮기고 근거(누가, 언제)를 적는다. 같은 변경에서 그 결정 ID로 자리를 둔 문서 위치를 채운다. 봇 저장소 `docs/ai-bot/prompts/` 전체와 플랫폼 프롬프트에서 그 D-ID를 검색해 모두 고친다. 색인이 있는 곳은 `01` §11, `04` §10, 플랫폼 프롬프트 §0·§10-F다. 결정을 정한 티켓이 이 갱신을 맡는다(T15의 D-14~D-17, D-24 포함). 봇 문서의 변경은 봇 저장소 PR로 한다(D-13. 2026-10-18에 옮김).
 - 문서를 만들거나 바꾸는 티켓(T01의 SHA 기록, T04, T05, T06, T14, T15 등)은 끝날 때 `rebuild`에 커밋한다. push는 사람 승인 뒤에 한다. T07 뒤에는 PR로 main에 병합하고, 관리자 직접 push는 쓰지 않는다(새 Argo CD가 main을 보면 직접 push가 곧바로 배포된다).
 - 문서 경로나 § 번호를 바꾸면 spec, issues, 프롬프트 문서의 복사용 프롬프트, 메모리의 참조를 같은 변경에서 고친다.
-- 봇 문서의 참조 규칙(D-13): `bot/` 문서는 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/`로 옮겨질 것이므로 지금부터 그 위치 기준으로 쓴다. 기준 문서(spec.md, platform/design.md, platform/design-prompt.md, issues, approvals.md)는 상대 링크 대신 글로 적는다: "`ukyi-app/homelab` 저장소의 `docs/plans/2026-10-17-homelab-rebuild/<경로>`(T07 전에는 `rebuild` 브랜치, 뒤에는 main)". 처음 한 번은 전체를 쓰고, 같은 문서의 뒤쪽은 "homelab 명세(spec.md)"처럼 줄여도 된다. 이유는 셋이다: 봇 저장소에서는 상대 링크가 깨지고, `rebuild` 브랜치는 T07 squash 병합 때 지워지며, 그 전에는 main에 이 문서가 없다. `bot/` 문서끼리의 링크는 같은 폴더로 함께 옮겨지므로 상대 링크로 둔다. 옮기는 PR은 봇 저장소 생성·하드닝 뒤에 하고, 그때 homelab 쪽 spec·issues·README의 `bot/` 링크와 메모리 참조를 이동에 맞춰 고친다.
+- 봇 문서의 참조 규칙(D-13): 봇 문서는 2026-10-18부터 봇 저장소 `ukyi-app/homelab-bot`의 `docs/ai-bot/prompts/`에 있다. homelab 문서는 봇 문서를 GitHub 주소(main 브랜치)로 가리킨다. 기준 문서(spec.md, platform/design.md, platform/design-prompt.md, issues, approvals.md)는 상대 링크 대신 글로 적는다: "`ukyi-app/homelab` 저장소의 `docs/plans/2026-10-17-homelab-rebuild/<경로>`(T07 전에는 `rebuild` 브랜치, 뒤에는 main)". 처음 한 번은 전체를 쓰고, 같은 문서의 뒤쪽은 "homelab 명세(spec.md)"처럼 줄여도 된다. 이유는 셋이다: 봇 저장소에서는 상대 링크가 깨지고, `rebuild` 브랜치는 T07 squash 병합 때 지워지며, 그 전에는 main에 이 문서가 없다. 봇 문서끼리의 링크는 같은 폴더라 상대 링크로 둔다.
 - 새 결정 ID를 만들면(2026-10-18의 D-28, D-29) §5.1과 설계 문서 F에 함께 넣고, 그 ID를 쓰는 티켓 머리말의 선행 결정에 더한다.
 - 2026-10-18 결정(D-04, D-08, D-13 일부, D-28, D-29)은 티켓 밖 대화에서 났다. 그때의 변경은 spec, approvals.md, 티켓, `platform/design.md`(T04 산출물)를 고쳤고 `bot/`과 플랫폼 프롬프트의 자리는 채우지 않았다. 플랫폼 프롬프트 자리는 T05가 2026-10-18에 T05 결정과 함께 채웠다. `bot/` 자리는 T14가 2026-10-18에 채웠다.
 - 결정은 났지만 외부 실행이 남은 일(2026-10-18의 `page`·`trip-mate-api` 삭제, 결정 5 하드닝)은 문서에 "실행 대기"로 적고 [approvals.md](approvals.md)에는 결정 줄만 둔다. 실행 줄은 실행한 뒤에 더하고, 같은 변경에서 "실행 대기" 표시를 고친다.
