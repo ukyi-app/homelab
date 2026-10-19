@@ -30,7 +30,7 @@ test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" && git diff --quie
 새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깐다(Ubuntu 26.04 기준).
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git jq curl
+sudo apt-get update && sudo apt-get install -y git jq curl gnupg
 ```
 
 ### 0.1 운영 NUC를 OS부터 다시 설치했을 때만
@@ -38,12 +38,26 @@ sudo apt-get update && sudo apt-get install -y git jq curl
 tailnet에 이미 있으면 건너뛴다.
 
 1. Tailscale 콘솔에서 옛 NUC 기기를 먼저 지운다. 남아 있으면 새 이름에 `-1`이 붙고, 나중에 지워도 이름이 돌아오지 않는다.
-2. Tailscale을 공식 설치 스크립트로 깔고 등록한다. 설치 스크립트는 Tailscale의 패키지 저장소(`pkgs.tailscale.com`)를 apt에 더하고 `tailscale` 패키지를 설치한다.
+2. Tailscale을 서명된 apt 저장소에서 깔고 등록한다. 설치 스크립트를 `curl | sh`로 돌리지 않는다. 배포 경로가 침해되면 그 스크립트가 root로 무엇이든 실행하고, 이어서 sudo로 도는 `host/install.sh`까지 바꿀 수 있기 때문이다. 대신 저장소 서명 키를 지문으로 확인하고, 패키지는 그 키로 서명된 저장소에서만 받는다.
 
    ```bash
-   curl -fsSL https://tailscale.com/install.sh | sh
+   bash -euo pipefail <<'EOF'
+   codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"   # 26.04는 resolute
+   key="$(mktemp)"
+   curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${codename}.noarmor.gpg" -o "$key"
+   fpr="$(gpg --show-keys --with-colons "$key" | awk -F: '/^fpr/ { print $10; exit }')"
+   # Tailscale 저장소 서명 키(2026-10-19 확인, 운영 NUC 설치본과 같음). 다르면 멈춘다
+   test "$fpr" = 2596A99EAAB33821893C0A79458CA832957F5868 || { echo "키 지문이 다르다: $fpr"; exit 1; }
+   sudo install -m 0644 "$key" /usr/share/keyrings/tailscale-archive-keyring.gpg
+   echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu ${codename} main" \
+     | sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null
+   sudo apt-get update
+   sudo apt-get install -y tailscale
+   EOF
    sudo tailscale up --hostname=<prod.env의 NODE_NAME>
    ```
+
+   외부 패키지를 깐 뒤에는 0.0의 `origin/main` 일치 확인을 다시 한다.
 3. 이름을 확인한다. 아래 명령의 첫 라벨이 `prod.env`의 `NODE_NAME`과 같아야 한다.
 
    ```bash
