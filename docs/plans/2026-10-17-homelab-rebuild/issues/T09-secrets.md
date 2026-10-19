@@ -1,7 +1,7 @@
 # T09 시크릿 체계
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 대기
+- 상태: 진행 중 (2026-10-19 착수. Infisical 가입·프로젝트 5개·identity 3개 완료(사용자). 첫 작업 U05 완료: Free에서 OIDC Auth 사용 가능, 개별 claim(`repository_owner_id`, `event_name`, glob이 든 `job_workflow_ref`)으로 묶임, claim 불일치 401, 다른 프로젝트 403. 그래서 배포 키는 OIDC로 확정(Secret Sync 전환 없음). 다음: ESO·ClusterSecretStore)
 - 명세: [../spec.md](../spec.md)
 - 설계: [../platform/design.md](../platform/design.md) E.1 E3과 "E3의 동등 절차", E.2 E3 행, C.4.8, C.6, B.8 "E3 시크릿", F D-04·D-10·D-20
 - Blocked by: T07
@@ -31,7 +31,7 @@
 
 - Infisical 프로젝트 5개와 identity 4개(D-04, 설계 C.6.3). Free 요금제다.
   - 프로젝트는 읽는 주체가 다른 키마다 나눈다. Free에는 경로 RBAC가 없어 프로젝트만 경계가 되기 때문이다: `homelab`(`prod`, 운영 값), `homelab-dev`(`dev`, 로컬 개발·VM 검증 값), 사람 전용 `homelab-admin`(`prod`, Terraform 자격, machine identity 없음), 배포 키 `homelab-ci-deploy`(`prod`), 병합 키 `homelab-ci-merge`(`prod`, machine identity 없음).
-  - identity는 5개 한도 중 4개를 쓴다: 사람, `eso-homelab`(운영 ESO, `homelab`만 읽기), `eso-homelab-vm`(VM 시험 ESO, `homelab-dev`만 읽기. client secret은 T13이 VM을 준비할 때 발급), `gha-homelab-deploy`(배포 App 키, OIDC, `homelab-ci-deploy`만 읽기). `gha-homelab-merge`는 만들지 않는다.
+  - identity는 5개 한도 중 4개를 쓴다: 사람, `eso-homelab`(운영 ESO, `homelab`만 읽기), `eso-homelab-dev`(VM 시험 ESO, `homelab-dev`만 읽기. client secret은 T13이 VM을 준비할 때 발급), `gha-homelab-deploy`(배포 App 키, OIDC, `homelab-ci-deploy`만 읽기). `gha-homelab-merge`는 만들지 않는다.
   - 병합 App 키의 원본 자리는 프로젝트 `homelab-ci-merge`다. GitHub environment `automerge`로 가는 Secret Sync와 그 App Connection(fine-grained PAT)은 environment를 만드는 T10에서 설정한다. D-07(확정)이 자동 병합을 골라 병합 키와 sync는 유지된다.
   - 더 필요하면 Pro(identity당 월 $20 연간, $23 월간)로 바꾼다. 옛 비상안(VM identity를 시험 때만 만듦)은 영구 여유를 만들지 못해 쓰지 않는다.
 - `platform/external-secrets`: ESO v2.13.x(설계 기준 v2.13.0, chart 2.13.0)와 ClusterSecretStore 2개(`infisical-platform`, `infisical-apps`). Infisical 연결은 Universal Auth다. 규칙은 `external-secrets.io/v1`만, 키는 `data[]`로 하나씩 명시, `deletionPolicy: Retain`, `creationPolicy: Owner`, `find`·`recursive` 금지다(설계 C.6.1). ESO는 2~3주마다 새 minor가 나와 D-18의 갱신 대상이다.
@@ -74,7 +74,7 @@
 - T10: Infisical 프로젝트와 배포 OIDC identity `gha-homelab-deploy`, R2 state 자격(`homelab-admin`), 병합 키 원본 자리 `homelab-ci-merge`.
 - T11: 플랫폼 시크릿 전달.
 - Argo CD 관리자 자격(`homelab`): 이 티켓이 받는다(사용자 결정 2026-10-19, T07). `argocd-secret`에 `accounts.owner.password`(bcrypt)와 `accounts.owner.passwordMtime`을 합치는 ExternalSecret(`creationPolicy: Merge`)을 둔다. T07은 `admin`을 끄고 `owner`만 두므로 그 전까지 Argo CD는 `kubectl`·`argocd --core`로만 다룬다. `platform/argocd` kustomization에서 `argocd-secret`을 patch하지 않는다(T07 주석).
-- T13: `eso-homelab-vm` identity와 `homelab-dev` 프로젝트. client secret 발급과 키 채우기는 T13이 VM을 준비할 때 한다.
+- T13: `eso-homelab-dev` identity와 `homelab-dev` 프로젝트. client secret 발급과 키 채우기는 T13이 VM을 준비할 때 한다.
 
 ## 제약
 
@@ -85,7 +85,7 @@
 ## 완료 조건
 
 - ClusterSecretStore 2개(`infisical-platform`, `infisical-apps`)가 Ready다. 시험 ns의 ExternalSecret이 동기화된다.
-- identity가 4개(사람, `eso-homelab`, `eso-homelab-vm`, `gha-homelab-deploy`)다. `homelab-ci-merge`에 machine identity가 없다.
+- identity가 4개(사람, `eso-homelab`, `eso-homelab-dev`, `gha-homelab-deploy`)다. `homelab-ci-merge`에 machine identity가 없다.
 - `eso-homelab`이 `homelab` 밖의 프로젝트(`homelab-admin`, `homelab-dev`, `homelab-ci-*`)를 읽지 못한다.
 - 배포 키 OIDC 방식이 확정됐다. 안 되면 배포 키도 앱별 Secret Sync로 전환하고 기록했다(설계 F D-04).
 - 위 동등 절차로 시나리오 6·7의 E3 범위를 통과한다: `SecretSyncedError`, Secret 불변, `CreateContainerConfigError`, 기존 Secret 유지, ExternalSecret health 덮어쓰기. 경보·Telegram 수신(T08b), 배포 PR 자동 병합 흐름(T10), `homelab status` 표시(T13)는 이 티켓의 완료 조건에서 뺀다. 어느 항목도 T08b·T10·T12의 산출물을 쓰지 않는다.
