@@ -82,6 +82,11 @@
   - 손으로 등록하는 시험 앱 저장소 `ukyi-app/homelab-probe`. 템플릿에서 `gh repo create --public --template`로 만든다. T11·T12가 이어 쓰고, T12 끝에 등록과 데이터를 지운다. T13의 `homelab-smoke`는 T13이 CLI로 새로 만든다.
   - 봇 신원 대신 쓸 시험 App. homelab과 `homelab-probe`에 설치한다. T13은 `homelab-smoke`에도 설치한다.
 - 외부 변경(App 생성·설치, Terraform github root apply, Actions 허용 범위, Secret Sync·App Connection, GHCR 패키지 Public 전환, Renovate 설치, `homelab-probe` 생성, 템플릿 내용 교체)은 사람 승인 뒤에 하고 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
+- T07에서 넘긴 주의(2026-10-19, T07 작성 중 발견):
+  - AppProject `apps`는 T07이 `platform/root/templates/project-apps.yaml`로 미리 만들었고, 설계 C.3.3 표대로 cluster-scoped kind를 모두 막는다. ApplicationSet이 `CreateNamespace`·`managedNamespaceMetadata`로 `app-*` ns를 만들면 Argo CD의 sync 권한 검사가 그 Namespace를 거부할 수 있다(추측). 이 티켓에서 확인하고 정한다.
+  - 같은 허용 목록에 ReplicaSet·Pod가 없으면 Argo CD UI 트리에서 Deployment·Job의 자식이 안 보였다(옛 실측 `2d2054a:platform/argocd/root/projects.yaml:23-24`). 넣을지 이 티켓에서 정한다.
+  - AppProject `apps`·`data`의 위치: 설계 C.1은 `platform/appsets/`인데 T07은 root 템플릿에 프로젝트마다 파일 하나로 두었다. 옮길지는 이 티켓(`data`는 T11)이 정한다.
+  - T07의 최소 `ci`는 `kustomize build platform/argocd`가 raw.githubusercontent.com에서 install.yaml을 받고, 도구 넷을 GitHub Releases에서 받는다. 그쪽이 장애면 `ci`가 빨개지고, bypass 없는 `ci` 필수 검사가 급한 수정까지 막는다(설계 C.4.6이 외부 레지스트리 조회를 필수 검사에서 빼는 이유와 같은 종류, P27·R10). install.yaml을 sha256과 함께 벤더링할지 이 티켓에서 정한다.
 
 ## 필요한 자격
 

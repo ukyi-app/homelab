@@ -1,7 +1,7 @@
 # T07 부트스트랩: main 교체·k3s·Argo CD
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 대기
+- 상태: 진행 중 (2026-10-19 착수. 할 일 0 시작 조건: T06 재부팅 뒤 `verify-t06.sh` 14:59 PASS 49 / FAIL 0, k3s 부재 V01(티켓의 시작 조건 명령과 같음)·V02와 데이터 경로 V23~V27 포함(sudo 판정). 할 일 1 완료: 커밋 `77029eb`, 독립 리뷰 P0·P1 0개, P2 3개·P3 4개 반영. 설계 결정 3개(사용자 2026-10-19): 비Helm 구성 요소의 클러스터 값은 A안(작은 로컬 차트), root는 `default` 프로젝트, Argo CD `owner` 비밀번호는 T09. 다음: push 승인 → 할 일 2 main 교체 PR)
 - 명세: [../spec.md](../spec.md)
 - 설계: [../platform/design.md](../platform/design.md) E.1 E2, E.2 E2 행, C.3.2, C.3.3, B.8 "E2 호스트·k3s·Argo CD", F D-25·D-26
 - Blocked by: T01, T02, T06
