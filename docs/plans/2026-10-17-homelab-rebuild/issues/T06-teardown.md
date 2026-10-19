@@ -1,7 +1,7 @@
 # T06 옛 클러스터 철거·외부 자원 정리
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-18 할 일 1 실측 완료. 2026-10-19 선행 확인 1·2·3 완료와 NUC sudo 조회 완료, 할 일 2의 2a·2b 완료. 4는 k3s 제거 직전)
+- 상태: 진행 중 (2026-10-18 할 일 1 실측 완료. 2026-10-19 선행 확인 1·2·3 완료와 NUC sudo 조회 완료, 할 일 2(2a~2d) 완료. 선행 확인 4는 체크 삭제로 다르게 끝남)
 - 명세: [../spec.md](../spec.md) §4.5, §10
 - 설계: [../platform/design.md](../platform/design.md) E.1 E1, E.2 E1 행, B.4, B.8 "E1 철거", F D-10·D-11·D-12·D-20
 - Blocked by: T05, T02(push), T01(열린 PR 닫기)
@@ -226,7 +226,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | 1 | 완료 | 원격 `rebuild` = `fdb7dfe`(2026-10-19 11:41 push). 선행 확인 2·3 결과까지 들어 있다. 할 일 2 전에 티켓을 더 고쳤으면 다시 push한다 |
 | 2 | 완료 | 2026-10-19: 번들 `homelab-local-2026-10-19.bundle` 생성·`bundle verify` 통과(ref 52개, fetch 없이). AdGuard 라이브 설정 내보내기 완료(PV `pvc-4b2e658f-16cc-440d-bd2d-739bdc373bf6`, 결과 sha256 `a7bc4239…990a2`, 비밀 키 3개 삭제). D-08 (b′) 대가: 사용자 규칙 0개, 허용 목록 0개, 추가 필터 목록 0개(AdGuard DNS filter 1개만 켜짐), 재작성 1개. 두 파일은 맥 `~/Documents`(iCloud 동기화 밖)에 복사하고 sha256을 대조했다(approvals). AdGuard NUC 사본은 순서표 9장까지 둔다. 로컬 런북·`homelab-infra` 점검은 완료 |
 | 3 | 완료 | 2026-10-19 11:40 사용자 확인(approvals). 봉인 키와 그 디스크 백업, 런북 암호화 사본, 옛 Postgres 데이터 사본 전부, 지표·로그, 외부 자원·자격 손실을 알렸다 |
-| 4 | 다르게 끝남(일시 정지 대신 삭제) | 2026-10-19 13:14 이전에 사용자가 콘솔에서 `homelab-watchdog`를 지웠다(approvals). 알림을 보낼 체크가 없으니 k3s 제거 뒤 down 알림도 없다. 2c 직전에 콘솔에서 체크가 다시 생기지 않았는지 본다 |
+| 4 | 다르게 끝남(일시 정지 대신 삭제) | 2026-10-19 13:14 이전에 사용자가 콘솔에서 `homelab-watchdog`를 지웠다(approvals). 알림을 보낼 체크가 없으니 k3s 제거 뒤 down 알림도 없다. 2c 직전 사용자가 콘솔에서 다시 생기지 않았음을 확인했다("없음 진행") |
 | 5 | 완료 | `gh pr list -R ukyi-app/homelab --state open` → 0개 |
 | 6 | 완료 | 저장소·패키지 4개 모두 404. `app-main`: `files` 25327498 active, `homelab-app-template` 25327516 active |
 
@@ -278,12 +278,12 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | NUC | H5 노드 DNS | drop-in 있음, `/etc/resolv.conf`는 stub 아님, "Tailscale DNS: disabled" | 유지(D-12, T07이 맡음) |
 | NUC | H6 swap | fstab swap 항목 0개 | 유지(할 일 없음) |
 | NUC | H7 MOTD | motd-refresh timer active. 범위를 고쳤다(H7 줄) | 삭제됨(2026-10-19 12:52 s2b, D-12, 사용자 결정 2026-10-19: k3s 상태 표시만 지움. `00-ukyi` 원본 복원, 고양이 MOTD 유지) |
-| NUC | H9 `k3s.service` | active·enabled. 옛 Argo CD 워크로드 6개 모두 replicas 1 | 삭제 예정(D-12) |
-| 옛 데이터 | `/var/lib/rancher/k3s-storage` | 있음. 2026-10-19 sudo 조회: `internal` 아래 PVC 4개(1.3G: AdGuard, `pg-1`, `pg-1-wal`, `trip-mate-data`) | 삭제 예정(H8. AdGuard 내보내기는 2026-10-19 완료) |
-| 옛 데이터 | `/mnt/bulk`와 fstab | ext4 마운트, 2.2G. 2026-10-19 sudo 조회: 항목 5개(옛 PVC 4개와 `homelab-backups`, 선행 확인 3), fstab 줄 1개 | 삭제 예정(H8, 비운 뒤 fstab 항목 삭제) |
-| 옛 데이터 | `/mnt/bulk-new` | root 0700 디렉터리, 마운트 아님. 2026-10-19 sudo 조회: 비어 있음 | 삭제 예정(H8, `T06_RM_BULK_NEW=1`) |
-| 옛 데이터 | `/var/backups/files-data` | 있음. 2026-10-19 sudo 조회: sha256 파일 55개와 `data`·`data.prev`(280K) | 삭제 예정(H8, H3 뒤) |
-| 옛 데이터 | `/var/lib/homelab-aiops.img` | loop로 마운트 중 | 삭제 예정(H8, mount 해제 뒤) |
+| NUC | H9 `k3s.service` | active·enabled. 옛 Argo CD 워크로드 6개 모두 replicas 1 | 삭제됨(2026-10-19 13:20 s2c, D-12) |
+| 옛 데이터 | `/var/lib/rancher/k3s-storage` | 있음. 2026-10-19 sudo 조회: `internal` 아래 PVC 4개(1.3G: AdGuard, `pg-1`, `pg-1-wal`, `trip-mate-data`) | 삭제됨(2026-10-19 13:21 s2d, H8. 항목 1402개. 빈 `/var/lib/rancher`도 지움) |
+| 옛 데이터 | `/mnt/bulk`와 fstab | ext4 마운트, 2.2G. 2026-10-19 sudo 조회: 항목 5개(옛 PVC 4개와 `homelab-backups`, 선행 확인 3), fstab 줄 1개 | 삭제됨(2026-10-19 13:21 s2d, H8. 항목 5273개, umount, fstab 줄 1개 삭제(백업 `/etc/fstab.t06-2026-10-19.bak`). 디스크·파일시스템과 빈 마운트 지점은 남김) |
+| 옛 데이터 | `/mnt/bulk-new` | root 0700 디렉터리, 마운트 아님. 2026-10-19 sudo 조회: 비어 있음 | 삭제됨(2026-10-19 13:21 s2d, H8) |
+| 옛 데이터 | `/var/backups/files-data` | 있음. 2026-10-19 sudo 조회: sha256 파일 55개와 `data`·`data.prev`(280K) | 삭제됨(2026-10-19 13:21 s2d, H8. 항목 71개) |
+| 옛 데이터 | `/var/lib/homelab-aiops.img` | loop로 마운트 중 | 삭제됨(2026-10-19 13:21 s2d, H8. mount 해제는 2b) |
 
 ### 실측으로 더한 줄
 
@@ -295,7 +295,8 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | GitHub | org 수준 secret·변수·runner | 모두 0 | 유지(정리할 것 없음) |
 | GitHub | org webhook | 조회 불가(`admin:org_hook` 범위 없음) | 콘솔 확인(있으면 삭제 예정, D-11) |
 | GitHub | org fine-grained PAT 목록 | 조회 불가(GitHub App 토큰만 받는 API) | 콘솔 확인(자격 폐기 표의 PAT 줄과 대조) |
-| NUC | `/usr/local/bin/kubectl`·`crictl`·`ctr` | `k3s` 심링크 | 삭제 예정(H9, `k3s-uninstall.sh`가 지움) |
+| NUC | `/usr/local/bin/kubectl`·`crictl`·`ctr` | `k3s` 심링크 | 삭제됨(2026-10-19 13:20 s2c, `k3s-uninstall.sh`가 지움) |
+| NUC | `/etc/rancher/node` | 2026-10-19 s2c 뒤 남음. 옛 노드 비밀번호 파일(`k3s-uninstall.sh`가 지우지 않는다. 같은 노드로 다시 붙을 때 쓰려는 것으로 추측). 받던 옛 서버는 사라졌다 | 사용자 결정 대기(추천: 삭제. T07의 k3s가 처음 시작할 때 새로 만든다) |
 | NUC | `/usr/local/bin/sops` | 일반 실행 파일 | 유지(기본값: 자격 아님, 새 구조와 충돌 없음. 지우기로 하면 할 일 6 뒤) |
 | 옛 사본 | `.scratch`의 평문 자격(App PEM 3개, kubeconfig 사본 2개, 입력 파일) | 디렉터리 0700, 내용은 열지 않음 | 유지(기본값: 선행 확인 2대로 옛 사본은 디스크에 그대로 둠. reader·writer 키는 할 일 5.6, kubeconfig는 k3s 제거, aiops 키와 Telegram 토큰은 T22에 무효) |
 | 옛 사본 | `.scratch`의 CLIProxyAPI fixture | 토큰 필드가 있는 파일 72개. README는 합성 fixture라 적음 | 확인 불가(사람이 합성인지 확인. 실제면 D-20대로 폐기) |
