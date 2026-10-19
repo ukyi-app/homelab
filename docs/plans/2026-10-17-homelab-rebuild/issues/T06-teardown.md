@@ -1,7 +1,7 @@
 # T06 옛 클러스터 철거·외부 자원 정리
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-18 할 일 1 실측 완료. 선행 확인 2·3·4는 사람 작업 대기)
+- 상태: 진행 중 (2026-10-18 할 일 1 실측 완료. 2026-10-19 선행 확인 2 완료(번들·AdGuard 내보내기, NUC 밖 보관)와 NUC sudo 조회 완료. 선행 확인 3·4는 사람 작업 대기)
 - 명세: [../spec.md](../spec.md) §4.5, §10
 - 설계: [../platform/design.md](../platform/design.md) E.1 E1, E.2 E1 행, B.4, B.8 "E1 철거", F D-10·D-11·D-12·D-20
 - Blocked by: T05, T02(push), T01(열린 PR 닫기)
@@ -27,7 +27,7 @@
    - **보존하지 않음: SOPS age 키 `~/.config/sops/age`.** 새 구조에서 쓰지 않는다. 할 일 6의 다른 자격 폐기가 끝난 것을 확인한 뒤 지운다(D-20). 그 전에는 지우지 않는다.
    - **그대로 둠(따로 보존하지 않음):** 옛 인계·계획 문서 `~/workspace/homelab-infra/`(git 아님, 파일 77개: Markdown 41개와 macOS `._` 사이드카 36개), 원격 없는 다른 프로젝트(`~/workspace/polyrelay` 등), `~/.codex*`, `~/.claude*`, `~/.agents`, `~/.ssh`, `~/.config`, `~/.gnupg`. OS를 유지하므로 디스크에 남고, 이 티켓은 이 경로를 건드리지 않는다. OS 재설치 때만 필요했던 보존 목록이다.
    - **읽기 전용 점검:** 옛 런북(`~/workspace/homelab/docs/runbooks/`, `~/workspace/homelab-infra/`)은 D-27(확정(사용자 2026-10-18, T05))대로 할 일 1의 목록 작성에만 읽기 전용으로 쓴다. `~/workspace/homelab-infra/`에 저장소에 없는 운영 자산이 있는지도 이때 본다(설계 B.9). 값과 절차 원문은 저장소 문서에 옮기지 않고 이름만 옮긴다. 2026-10-18에 마쳤다(아래 "할 일 1 결과"). `~/workspace/homelab-infra/`에는 저장소에 없는 운영 자산이 없다(인계·계획 문서뿐). 그래서 설계 B.9 셋째 줄(`homelab-infra`)과 첫째 줄(자격 폐기 표 완전성, 로컬 런북 대조)은 이 결과로 닫는다.
-3. 돌아갈 수 없는 지점 확인. T06이 끝나면 옛 홈랩으로 돌아갈 수 없다. 외부 자원이 지워지고, 클러스터 안의 SealedSecrets 봉인 키도 k3s와 함께 사라진다. `/mnt/bulk` 비우기(H8)는 확인된 유일한 봉인 키 디스크 백업(`homelab-backups/sealed-secrets`, 1개. `/mnt/bulk`의 나머지와 `/mnt/bulk-new` 내용은 sudo 확인 전)과 로컬 런북 암호화 사본(6개)도 함께 지운다(2026-10-18 실측). 런북 원본은 옛 사본에 그대로 남는다. 시작 전에 사용자가 이를 확인하고 [approvals.md](../approvals.md)에 남긴다.
+3. 돌아갈 수 없는 지점 확인. T06이 끝나면 옛 홈랩으로 돌아갈 수 없다. 외부 자원이 지워지고, 클러스터 안의 SealedSecrets 봉인 키도 k3s와 함께 사라진다. `/mnt/bulk` 비우기(H8)는 확인된 유일한 봉인 키 디스크 백업(`homelab-backups/sealed-secrets`, 1개)과 로컬 런북 암호화 사본(6개)도 함께 지운다(2026-10-18 실측). 2026-10-19 sudo 조회로 본 `/mnt/bulk`의 나머지는 옛 PVC 4개다: 로컬 Postgres base backup(`pg-basebackup-local`, 35M), 지표(`vmsingle-data-bulk`, 1.9G), 로그(`vlogs-bulk`, 235M), `files-data`(32K). 옛 Postgres 데이터는 `k3s-storage`의 `pg-1`·`pg-1-wal`(H8)과 R2 `homelab-pg-backups-prod`(할 일 3)도 함께 지워져, 이 티켓이 아는 사본은 하나도 남지 않는다. `/mnt/bulk-new`는 비어 있다. 런북 원본은 옛 사본에 그대로 남는다. 시작 전에 사용자가 이를 확인하고 [approvals.md](../approvals.md)에 남긴다.
 4. healthchecks.io 체크 `homelab-watchdog`를 철거 전에 일시 정지한다. 철거하면 ping이 끊겨 down 알림이 간다. ping은 호스트가 아니라 클러스터 안 `deadmanswitch-relay`가 보낸다(`2d2054a:platform/victoria-stack/prod/deadmanswitch-relay.yaml`). 옛 relay가 1분마다 ping하고 일시 정지는 ping 한 번에 풀리므로, k3s 제거 바로 전에 멈추고 콘솔에서 paused를 본다. k3s를 지운 뒤에는 ping이 끊겨 정지가 유지되므로 한 번 더 확인한다. 라이브 체크 이름이 `homelab-watchdog`인지도 콘솔에서 본다. 옛 체크는 T08b가 새 체크의 초록을 확인한 뒤 지운다(D-10).
 5. T01의 열린 PR 닫기가 끝났다(명세 AC-P1). `gh pr list -R ukyi-app/homelab`에 열린 PR이 없다. 할 일 5에서 `gate`를 풀면 남은 PR을 검사 없이 병합할 수 있게 된다.
 6. 2026-10-18에 실행한 설계 0절 7항(`page`·`trip-mate-api` 삭제)과 8항(결정 5 하드닝)을 확인 명령으로 다시 본다. `gh api repos/ukyi-app/page`, `gh api repos/ukyi-app/trip-mate-api`, `gh api orgs/ukyi-app/packages/container/page`, `gh api orgs/ukyi-app/packages/container/trip-mate-api`가 모두 404다. `files`와 `homelab-app-template`의 `app-main` ruleset이 active다(`gh api repos/ukyi-app/<저장소>/rulesets --jq '[.[] | {name, enforcement}]'`).
@@ -136,7 +136,7 @@ D-12(확정(사용자 2026-10-18, T05))는 OS를 유지하고 설계 B.4의 H1·
 - mount 유닛 이름의 `\x2d`는 systemd 경로 이스케이프다. 셸에서는 작은따옴표로 감싸거나 `systemctl status /var/lib/homelab-aiops`처럼 경로로 지정한다. 이스케이프 없는 이름으로 조회하면 not-found가 나와 "이미 없음"으로 잘못 닫힌다. 2026-10-17에는 active이고, loop 이미지 위의 ext4다.
 - H2 파일: `/var/lib/homelab-aiops.img`, `/opt/homelab-aiops`, `/etc/homelab-aiops`(AIOps App 개인 키), `/usr/local/libexec/homelab-aiops-ingress-firewall.py`, `/etc/nftables.d/homelab-aiops.nft`, drop-in(`aiops-ingress.service.d/*`, `aiops-worker.service.d/*`), `/etc/tmpfiles.d/homelab-aiops.conf`. 파일은 이 티켓에서 지운다. `/etc/homelab-aiops`의 App 키 폐기는 옛 aiops App 삭제와 함께 T22에서 한다(D-29, 자격 폐기 표의 `보류(D-13, T22)`).
 - H2 시스템 사용자 `aiops-*` 8개와 그룹 `aiops-state`, 사용자별 기본 그룹 8개. `aiops-proxy`의 CLIProxyAPI 저장소에 ChatGPT 구독 OAuth가 있다(자격 폐기 표).
-- H2 추가(2026-10-18 실측, 설계 B.4 목록 밖): `/etc/sysusers.d/homelab-aiops.conf`(남기면 부팅 때 `aiops-*` 사용자가 다시 생길 수 있다, 추측), 마운트 지점 `/var/lib/homelab-aiops`(mount 해제 뒤), `/var/tmp`의 AIOps 작업 디렉터리 125개(`homelab-aiops-*` 124개, `aiops-cgroup-path-*` 1개), `/nonexistent`(root 0700, 2026-10-01. `aiops-*` 7명과 `nobody` 등 시스템 계정 5개가 홈 경로로 적은, 원래 없어야 하는 디렉터리다. 누가 만들었는지는 모른다(AIOps로 추측). 내용은 sudo로 보고 AIOps 것만이면 지움), `/etc/nftables.d` 디렉터리(root 0700, 안이 AIOps 파일뿐이면 함께 지움).
+- H2 추가(2026-10-18 실측, 설계 B.4 목록 밖): `/etc/sysusers.d/homelab-aiops.conf`(남기면 부팅 때 `aiops-*` 사용자가 다시 생길 수 있다, 추측), 마운트 지점 `/var/lib/homelab-aiops`(mount 해제 뒤), `/var/tmp`의 AIOps 작업 디렉터리 125개(`homelab-aiops-*` 124개, `aiops-cgroup-path-*` 1개), `/nonexistent`(root 0700, 2026-10-01. `aiops-*` 7명과 `nobody` 등 시스템 계정 5개가 홈 경로로 적은, 원래 없어야 하는 디렉터리다. 누가 만들었는지는 모른다(AIOps로 추측). 내용은 sudo로 보고 AIOps 것만이면 지움. 2026-10-19 sudo 조회: bun 캐시 `.bun`(root 0700, 1.5M) 하나뿐이다. 이 호스트의 bun은 `/opt/homelab-aiops/current/bin/bun`뿐이고 `aiops-worker`·`aiops-ingress`가 그것을 실행한다. 그래서 AIOps 잔여물로 보고 지운다(`T06_RM_NONEXISTENT=1`, 추측 근거)), `/etc/nftables.d` 디렉터리(root 0700, 안이 AIOps 파일뿐이면 함께 지움).
 
 옛 `host-config.sh --apply`가 깐 것:
 
@@ -204,7 +204,8 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | `files` 앱 자격 | `FILES_ADMIN_TOKEN`, 클라이언트 키 `keys.json` | SealedSecret `files-keys`, `.env.secrets` | 발급처 없음. T22 재연결 때 새 값(D-20). 외부 클라이언트가 옛 키를 가졌는지는 저장소로 알 수 없다 | 폐기 예정 |
 | 클러스터 내부 자기생성 비밀번호 | Grafana·AdGuard·Argo CD 관리자, CNPG superuser·앱 역할, 앱 DB·Valkey 자격 | SealedSecret·SOPS 파일, `.env.secrets`, 비밀번호 관리자(있으면) | 발급처 없음. 받던 클러스터가 k3s 제거·H8로 사라지면 닫는다 | 폐기 예정 |
 | AIOps 생산자 토큰 3개 | Argo CD 알림·관측 경로가 NUC `aiops-ingress`로 보내던 토큰 | 클러스터 Secret 3개(`argocd-notifications-secret`, 네임스페이스 둘의 `aiops-observation-auth`) | 발급처 없음. k3s 제거와 H1·H2 삭제로 양쪽이 사라진다 | 폐기 예정 |
-| `aiops-proxy` ChatGPT 구독 OAuth | 옛 AIOps CLIProxyAPI의 구독 로그인 | NUC `aiops-proxy` 저장 공간(H2) | 파일은 H2 삭제로 지운다. OpenAI 계정 쪽 세션 해제는 사람이 한다. D-13 일부 확정은 aiops 저장소·App만 다루므로 D-20을 따른다 | 폐기 예정 |
+| `aiops-proxy` ChatGPT 구독 OAuth | 옛 AIOps CLIProxyAPI의 구독 로그인 | NUC `aiops-proxy` 저장 공간(H2): `/var/lib/homelab-aiops/cliproxy-auth`(파일 2개), `cliproxy-staging/<id>/auth`(1개)(2026-10-19 sudo 조회) | 파일은 H2 삭제로 지운다. OpenAI 계정 쪽 세션 해제는 사람이 한다. D-13 일부 확정은 aiops 저장소·App만 다루므로 D-20을 따른다 | 폐기 예정 |
+| `aiops-engine` Codex ChatGPT 로그인 | 옛 AIOps 엔진 계정의 Codex CLI `auth.json`. 2026-10-19 키 이름만 봤다(값은 출력하지 않음): `OPENAI_API_KEY`는 null, `auth_mode`, `tokens`(`access_token`, `refresh_token`, `id_token`, `account_id`) | NUC `/var/lib/homelab-aiops/auth/auth.json`(H2, `aiops-engine` 홈. 2026-10-19 sudo 조회로 찾음) | 파일은 H2 삭제로 지운다. 갱신 토큰이 있으므로 `aiops-proxy` 줄과 함께 OpenAI 계정에서 세션을 해제한다 | 폐기 예정 |
 | SealedSecrets 봉인 키 | 클러스터 안의 키는 k3s 제거로 사라진다 | `/mnt/bulk/homelab-backups/sealed-secrets`(1개, age로 암호화), 비밀번호 관리자 첨부(있으면) | 봉인본 10개(공개 히스토리 포함)를 풀 수 있는 키다. 디스크 사본은 H8 비우기로 지운다 | 폐기 예정 |
 | SOPS age 키(cluster) | `~/.config/sops/age` | 클러스터 Secret `sops-age` | 옛 `.sops.yaml`의 recipient 2개(cluster, recovery)는 확인했다. 이 파일이 cluster recipient와 맞는지는 사람이 `age-keygen -y`로 대조한다. 맞으면 공개 히스토리의 SOPS 파일 9개를 풀 수 있다. 새 구조에서 쓰지 않는다. 할 일 4와 이 표의 다른 폐기가 끝난 것을 확인한 뒤 지운다(보류 아님) | 폐기 예정 |
 | SOPS age 키(recovery) | 비밀번호 관리자 항목 `homelab age recovery` | 비밀번호 관리자만(디스크 사본 없음, 런북) | 옛 SOPS 파일 9개와 봉인 키 백업을 모두 풀 수 있다. cluster 키와 같은 때 마지막에 사람이 지운다 | 폐기 예정 |
@@ -223,8 +224,8 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | # | 상태 | 근거 |
 |---|---|---|
 | 1 | 완료 | 원격 `rebuild` = `902a86f`(2026-10-19 push). 이 할 일 1 결과까지 들어 있다. 할 일 2 전에 티켓을 더 고쳤으면 다시 push한다 |
-| 2 | 사람 작업 대기 | 번들 없음(옛 사본 실측은 선행 확인 2). `k3s-storage/internal`이 root 0700이라 AdGuard PVC는 존재부터 sudo로 확인해야 한다. 로컬 런북·`homelab-infra` 점검은 완료 |
-| 3 | 사람 작업 대기 | approvals 기록 없음. `/mnt/bulk`의 봉인 키 백업과 런북 암호화 사본도 함께 알린다 |
+| 2 | 완료 | 2026-10-19: 번들 `homelab-local-2026-10-19.bundle` 생성·`bundle verify` 통과(ref 52개, fetch 없이). AdGuard 라이브 설정 내보내기 완료(PV `pvc-4b2e658f-16cc-440d-bd2d-739bdc373bf6`, 결과 sha256 `a7bc4239…990a2`, 비밀 키 3개 삭제). D-08 (b′) 대가: 사용자 규칙 0개, 허용 목록 0개, 추가 필터 목록 0개(AdGuard DNS filter 1개만 켜짐), 재작성 1개. 두 파일은 맥 `~/Documents`(iCloud 동기화 밖)에 복사하고 sha256을 대조했다(approvals). AdGuard NUC 사본은 순서표 9장까지 둔다. 로컬 런북·`homelab-infra` 점검은 완료 |
+| 3 | 사람 작업 대기 | approvals 기록 없음. `/mnt/bulk`의 봉인 키 백업과 런북 암호화 사본, 2026-10-19에 본 옛 Postgres base backup도 함께 알린다 |
 | 4 | 사람 작업 대기(k3s 제거 직전) | 콘솔은 에이전트가 볼 수 없다. ping은 클러스터 안에서 1분마다 나가고, 일시 정지는 ping 한 번에 풀린다 |
 | 5 | 완료 | `gh pr list -R ukyi-app/homelab --state open` → 0개 |
 | 6 | 완료 | 저장소·패키지 4개 모두 404. `app-main`: `files` 25327498 active, `homelab-app-template` 25327516 active |
@@ -271,17 +272,17 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | 옛 AIOps | `aiops-autodeploy-canary` | private | 보류(D-29, T22) |
 | 옛 AIOps | `mac-uptime-guard` | private, NUC 로컬 클론 있음 | 보류(담당 T22) |
 | NUC | H1 유닛 | nft 서비스·mount active, ingress·worker inactive | 삭제 예정(D-12) |
-| NUC | H2 파일·사용자·추가 잔여물 | `/etc/nftables.d/homelab-aiops.nft`만 확인 불가(상위 root 0700), 나머지 있음. 추가 잔여물은 H2 추가 줄 | 삭제 예정(D-12) |
+| NUC | H2 파일·사용자·추가 잔여물 | 모두 있음. 2026-10-19 sudo 조회: nft table `inet homelab_aiops`, `/etc/nftables.d`에는 `homelab-aiops.nft` 1개뿐(패키지 소유 아님, `/etc/nftables.conf`가 include하지 않음), `/etc/homelab-aiops` 항목 39개(13G), `/var/tmp` 작업 디렉터리 125개(4.8G). 추가 잔여물은 H2 추가 줄 | 삭제 예정(D-12. `/etc/nftables.d`는 디렉터리째, `T06_RM_NFTABLES_D=1`) |
 | NUC | H3 유닛 | timer 둘 active, 옛 사본 스크립트 실행 | 삭제 예정(D-12, 옛 사본 이동 전) |
 | NUC | H4 drop-in | 셋 다 있음 | 유지(D-12, T07이 덮어씀) |
 | NUC | H5 노드 DNS | drop-in 있음, `/etc/resolv.conf`는 stub 아님, "Tailscale DNS: disabled" | 유지(D-12, T07이 맡음) |
 | NUC | H6 swap | fstab swap 항목 0개 | 유지(할 일 없음) |
 | NUC | H7 MOTD | motd-refresh timer active. 범위를 고쳤다(H7 줄) | 삭제 예정(D-12, 사용자 결정 2026-10-19: k3s 상태 표시만, 고양이 MOTD 유지) |
 | NUC | H9 `k3s.service` | active·enabled. 옛 Argo CD 워크로드 6개 모두 replicas 1 | 삭제 예정(D-12) |
-| 옛 데이터 | `/var/lib/rancher/k3s-storage` | 있음(아래는 root 0700) | 삭제 예정(H8, AdGuard 내보내기 뒤) |
-| 옛 데이터 | `/mnt/bulk`와 fstab | 마운트됨, 2.2G 사용 | 삭제 예정(H8, 비운 뒤 fstab 항목 삭제) |
-| 옛 데이터 | `/mnt/bulk-new` | root 0700 디렉터리, 내용 확인 불가 | 확인 불가(sudo로 보고 옛 데이터면 삭제 예정, H8) |
-| 옛 데이터 | `/var/backups/files-data` | 있음 | 삭제 예정(H8, H3 뒤) |
+| 옛 데이터 | `/var/lib/rancher/k3s-storage` | 있음. 2026-10-19 sudo 조회: `internal` 아래 PVC 4개(1.3G: AdGuard, `pg-1`, `pg-1-wal`, `trip-mate-data`) | 삭제 예정(H8. AdGuard 내보내기는 2026-10-19 완료) |
+| 옛 데이터 | `/mnt/bulk`와 fstab | ext4 마운트, 2.2G. 2026-10-19 sudo 조회: 항목 5개(옛 PVC 4개와 `homelab-backups`, 선행 확인 3), fstab 줄 1개 | 삭제 예정(H8, 비운 뒤 fstab 항목 삭제) |
+| 옛 데이터 | `/mnt/bulk-new` | root 0700 디렉터리, 마운트 아님. 2026-10-19 sudo 조회: 비어 있음 | 삭제 예정(H8, `T06_RM_BULK_NEW=1`) |
+| 옛 데이터 | `/var/backups/files-data` | 있음. 2026-10-19 sudo 조회: sha256 파일 55개와 `data`·`data.prev`(280K) | 삭제 예정(H8, H3 뒤) |
 | 옛 데이터 | `/var/lib/homelab-aiops.img` | loop로 마운트 중 | 삭제 예정(H8, mount 해제 뒤) |
 
 ### 실측으로 더한 줄
@@ -308,10 +309,10 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 - Tailscale: Machines의 `homelab-1`·`pg-rw-1`·`homelab-operator`, OAuth 클라이언트 개수·이름, "Override local DNS" 토글.
 - healthchecks.io: 체크 전체 목록(이름), 연결된 통합, 읽기 전용 API 키, 선행 확인 4의 일시 정지.
 - 비밀번호 관리자와 외장 매체: `homelab age recovery`, writer App 키 백업, 봉인 키 첨부, Tailscale CI OAuth 백업, 외장 SSD의 SOPS·App 키 사본.
-- NUC sudo(할 일 2 전·중): `/etc/nftables.d`와 nft table 이름, AdGuard PVC, `/mnt/bulk`·`/mnt/bulk-new`·`/var/backups/files-data`·`/var/tmp/homelab-aiops-*`·`/nonexistent` 내용, `aiops-proxy` OAuth 저장 위치.
+- NUC sudo(할 일 2 전·중): `/etc/nftables.d`와 nft table 이름, AdGuard PVC, `/mnt/bulk`·`/mnt/bulk-new`·`/var/backups/files-data`·`/var/tmp/homelab-aiops-*`·`/nonexistent` 내용, `aiops-proxy` OAuth 저장 위치. 2026-10-19 `s0-inspect.sh`와 `aiops-engine` `auth.json` 키 이름 조회로 마쳤다(결과는 위 표, 자격 폐기 표, approvals).
 - 로컬 파일 키 이름만: `~/workspace/page`·`~/workspace/trip-mate-api`·`~/workspace/example-app`의 `.env.local`, 옛 사본 `infra/*/.terraform/terraform.tfstate` 3개, `~/workspace/mac-uptime-guard/config.env`, 옛 사본 `.env.secrets`. `~/.config/sops/age`의 공개키(`age-keygen -y`)와 옛 `.sops.yaml` cluster recipient 대조.
 - 옛 사본 `.scratch`의 CLIProxyAPI fixture 72개가 합성 값인지.
-- 번들 전에 옛 사본에서 fetch할지(원격 추적 ref가 2026-09-23 기준).
+- 번들 전에 옛 사본에서 fetch할지(원격 추적 ref가 2026-09-23 기준). 2026-10-19 번들은 fetch 없이 만들었다. 로컬 브랜치와 커밋은 fetch와 무관하게 모두 들어 있다.
 - OpenAI 계정: CLIProxyAPI 구독 세션 해제. 옛 AIOps 계획의 Claude 구독 토큰 발급 여부.
 - Google Cloud·OXR: `trip-mate-api` 자격 폐기.
 
