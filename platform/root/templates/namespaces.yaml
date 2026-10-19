@@ -1,0 +1,26 @@
+# namespaces: 플랫폼 ns와 PSA 라벨(설계 C.3.1, C.3.3). T07. wave -9. 항상 켜져 있다(자리 스위치 없음).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: namespaces
+  namespace: argocd
+  annotations:
+    # 구성 요소(-8부터)보다 먼저 ns와 PSA 라벨을 세운다. 라벨 없는 ns 위에 파드가 뜨는 틈을 없앤다.
+    argocd.argoproj.io/sync-wave: "-9"
+  # resources-finalizer를 붙이지 않는다. 이 Application을 지워도 ns가 cascade로 지워지지 않게 한다(옛 namespaces Application).
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/namespaces
+  destination:
+    server: https://kubernetes.default.svc
+    # namespace를 적지 않는다. Namespace는 cluster-scoped다.
+  syncPolicy:
+    automated:
+      # 각 Namespace에 Prune=false가 있어 prune이 ns를 지우지 않는다.
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}

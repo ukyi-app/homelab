@@ -1,0 +1,122 @@
+# 필수 검사 ci(ruleset A, 설계 C.4.6·C.4.7). T07의 최소판이고 T10이 전체 ci로 넓힌다.
+# 필수 검사 이름은 job id ci에서 나온다. job id를 바꾸거나 job에 name을 붙이면
+# ruleset이 오지 않는 검사를 영원히 기다려 모든 PR이 멈춘다(설계 B.8 E5).
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 최소 권한. fork PR의 코드도 이 토큰으로 돈다.
+permissions:
+  contents: read
+
+# 같은 PR의 이전 실행은 취소한다. main push는 커밋마다 남긴다.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # 정렬·문자 분류를 러너 로케일에 맡기지 않는다. 옛 저장소에서 en_US sort -u가 -1과 1을 같게 봤다(설계 B.8).
+  LC_ALL: C
+
+defaults:
+  run:
+    # shell: bash를 적어야 -eo pipefail로 돈다. 적지 않은 기본 셸에는 pipefail이 없다(설계 B.8 E5).
+    shell: bash
+
+jobs:
+  ci:
+    # NUC와 같은 amd64라 로컬 mise와 같은 linux x64 바이너리를 쓴다.
+    runs-on: ubuntu-24.04
+    # 기본 상한은 6시간이다. 멈춘 job이 필수 검사를 그만큼 붙잡지 않게 한다.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 토큰을 .git/config에 남기지 않는다. 뒤 단계는 쓰기도 인증도 필요 없다.
+          persist-credentials: false
+
+      - name: Install pinned tools
+        # 버전은 .tool-versions에서 읽고, 받은 파일은 아래 sha256과 대조한다. TLS만 믿지 않는다(옛 R29).
+        # .tool-versions에서 버전을 바꾸면 아래 sha256도 같은 커밋에서 바꾼다. 안 바꾸면 여기서 실패한다.
+        # GITHUB_PATH는 PATH 앞에 붙으므로 러너 이미지에 깔린 같은 이름의 도구보다 이것이 먼저 잡힌다.
+        env:
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8" # 1.7.12 linux_amd64
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb" # 8.30.1 linux_x64
+          KUSTOMIZE_SHA256: "029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d" # 5.8.1 linux_amd64
+          SHELLCHECK_SHA256: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198" # 0.11.0 linux.x86_64
+        run: |
+          bin="$RUNNER_TEMP/bin"
+          dl="$RUNNER_TEMP/dl"
+          mkdir -p "$bin" "$dl"
+
+          # 결과는 전역 v에 둔다. $(...)로 받으면 아래 ::error:: 줄까지 삼켜 로그에 안 남는다.
+          ver() {
+            v=$(awk -v t="$1" '$1 == t { print $2 }' .tool-versions)
+            if [[ -z $v ]]; then
+              echo "::error::.tool-versions에 $1 버전이 없다"
+              return 1
+            fi
+          }
+
+          fetch() {
+            local url=$1 sum=$2 out=$3
+            curl -fsSL --retry 3 -o "$out" "$url"
+            if ! echo "$sum  $out" | sha256sum -c --quiet -; then
+              echo "::error::sha256 불일치: $url (.tool-versions 버전을 바꿨다면 ci.yaml의 sha256도 바꾼다)"
+              return 1
+            fi
+          }
+
+          ver actionlint
+          fetch "https://github.com/rhysd/actionlint/releases/download/v${v}/actionlint_${v}_linux_amd64.tar.gz" "$ACTIONLINT_SHA256" "$dl/actionlint.tar.gz"
+          tar -xzf "$dl/actionlint.tar.gz" -C "$bin" actionlint
+
+          ver gitleaks
+          fetch "https://github.com/gitleaks/gitleaks/releases/download/v${v}/gitleaks_${v}_linux_x64.tar.gz" "$GITLEAKS_SHA256" "$dl/gitleaks.tar.gz"
+          tar -xzf "$dl/gitleaks.tar.gz" -C "$bin" gitleaks
+
+          ver kustomize
+          fetch "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${v}/kustomize_v${v}_linux_amd64.tar.gz" "$KUSTOMIZE_SHA256" "$dl/kustomize.tar.gz"
+          tar -xzf "$dl/kustomize.tar.gz" -C "$bin" kustomize
+
+          # actionlint가 run: 블록을 검사할 때 PATH의 shellcheck를 쓴다. 러너 이미지 버전에 맡기면 결과가 바뀐다.
+          ver shellcheck
+          fetch "https://github.com/koalaman/shellcheck/releases/download/v${v}/shellcheck-v${v}.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256" "$dl/shellcheck.tar.xz"
+          tar -xJf "$dl/shellcheck.tar.xz" -C "$bin" --strip-components=1 "shellcheck-v${v}/shellcheck"
+
+          "$bin/actionlint" -version
+          "$bin/gitleaks" version
+          "$bin/kustomize" version
+          "$bin/shellcheck" --version
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: gitleaks
+        # 작업 트리만 본다. 히스토리 전체를 보면 옛 커밋의 오탐이나 이미 폐기한 옛 값 하나가 모든 PR을 막는다.
+        # push된 커밋은 저장소의 secret scanning·push protection이 먼저 본다.
+        run: gitleaks dir --config .gitleaks.toml --redact --no-banner --exit-code 1 .
+
+      - name: actionlint
+        run: actionlint
+
+      - name: kustomize build
+        # 디렉터리 목록을 적지 않고 추적 파일에서 찾는다. 구성 요소가 늘거나 빠져도 이 파일은 그대로다.
+        # 찾은 대상이 0개면 실패한다. 찾는 식이 깨졌을 때 초록으로 지나가지 않게 하려는 것이다(옛 L40).
+        # platform/root 같은 Helm 차트의 helm template 렌더와 kubeconform은 T10의 전체 ci가 더한다.
+        run: |
+          files=$(git ls-files -- ':(glob)platform/**/kustomization.yaml' ':(glob)platform/**/kustomization.yml' ':(glob)platform/**/Kustomization')
+          if [[ -z $files ]]; then
+            echo "::error::platform/ 아래 추적된 kustomization 파일이 0개다"
+            exit 1
+          fi
+          n=0
+          while IFS= read -r f; do
+            d=$(dirname "$f")
+            echo "::group::kustomize build $d"
+            kustomize build "$d" >/dev/null
+            echo "::endgroup::"
+            n=$((n + 1))
+          done <<<"$files"
+          echo "kustomize build ${n}개 통과"

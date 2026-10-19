@@ -1,0 +1,23 @@
+# 운영 클러스터 값(E8 VM 격리 1번). root-prod.yaml이 helm.valueFiles로 읽는다.
+#
+# 클러스터마다 다른 값은 이 파일과 values-vm.yaml에만 둔다. 두 파일은 키 모양이 같아야 한다.
+# 키를 더하면 두 파일에 함께 더한다(VM 값은 T13 전에 채운다).
+# 시크릿 값과 시크릿 키 이름은 여기 두지 않는다. VM은 Infisical 프로젝트·환경만 바꿔 같은 키 이름을 읽는다.
+#
+# 구성 요소에 넘기는 방법: 그 구성 요소의 템플릿(templates/<이름>.yaml)이 필요한 키만
+# spec.source.helm.valuesObject로 넘긴다. 구성 요소 매니페스트는 cluster.name으로 분기하지 않고 받은 값만 쓴다.
+# 받는 쪽은 Helm 차트여야 한다. 클러스터 값이 필요한 평문 매니페스트(ClusterSecretStore, CNPG Cluster 등)는
+# Chart.yaml을 둔 작은 로컬 차트로 감싼다. Kustomize로 두고 값을 직접 적으면 VM이 운영 값을 읽는다
+# (사용자 결정 2026-10-19, T07, 설계 E8 VM 격리 1번 A안. 자세한 규칙은 templates/_helpers.tpl).
+cluster:
+  # templates/cluster-check.yaml이 이 값이 있는지 본다. 값 파일 없이 root를 렌더하는 실수를 막는다.
+  name: prod
+
+  # T09. ClusterSecretStore가 읽을 Infisical 프로젝트·환경. 운영은 homelab / prod.
+  infisical: {}
+
+  # T08a. Tailscale operator Ingress hostname과 operator 기기 이름의 접두. 운영은 접두 없음.
+  tailscale: {}
+
+  # T11. CNPG 백업 버킷·serverName·복구 원본. 운영 버킷은 homelab-backups.
+  cnpg: {}

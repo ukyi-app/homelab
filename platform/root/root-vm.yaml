@@ -1,0 +1,29 @@
+# 시나리오 13 검증 VM의 root Application(설계 C.3.3, E8 VM 격리 1번). 운영에는 apply하지 않는다.
+# root-prod.yaml과 같은 모양이고 이름과 helm.valueFiles만 다르다. 주석의 이유는 root-prod.yaml을 본다.
+# values-vm.yaml을 채우는 T13의 PR이 병합된 뒤에 VM에서 apply한다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-vm
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ukyi-app/homelab
+    targetRevision: main
+    path: platform/root
+    helm:
+      valueFiles:
+        - values-vm.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        maxDuration: 5m

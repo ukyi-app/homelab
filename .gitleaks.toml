@@ -1,0 +1,11 @@
+# CI(.github/workflows/ci.yaml)와 pre-commit이 --config로 이 파일을 읽는다.
+# 기본 룰셋을 그대로 쓴다. 지금은 면제가 없다.
+#
+# 면제를 더할 때는 경로와 룰을 함께 좁힌다([[allowlists]]에 paths와 targetRules를 둘 다).
+# 경로만 적으면 그 파일에서 기본 룰셋 전체가 꺼진다. 옛 저장소에서 평문 Secret을 면제된
+# 파일 이름으로 커밋해도 스캐너가 조용했던 일이 있다(설계 B.8 E5).
+#
+# kubernetes-secret-yaml 룰은 면제하지 않는다. 새 구조는 저장소에 kind: Secret을 두지 않는다(설계 C.4.6).
+
+[extend]
+useDefault = true

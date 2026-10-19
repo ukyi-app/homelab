@@ -1,0 +1,29 @@
+{{- /*
+자리: observability. 맡은 티켓 T08b, wave -4(설계 C.3.1). 메트릭·로그·경보 스택(설계 C.3.7).
+켜기: values.yaml의 components.observability.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
+source와 destination은 자리표시다. 맡은 티켓이 정한다(외부 Helm 차트면 chart와 고정 semver, _helpers.tpl).
+*/}}
+{{- if .Values.components.observability.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/observability
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}

@@ -1,0 +1,37 @@
+{{- /*
+자리: bot-slot(봇 자리 Application, 설계 C.8). 맡은 티켓 T08b, wave 1(맨 뒤, 설계 C.3.1).
+작은 Helm 차트 platform/bot-slot이고 대상 값 target은 그 차트의 values.yaml에 둔다(T08b, T16b가 봇 ns로 바꿈).
+대상 ns를 만들지 않는다(CreateNamespace 없음). 봇 ns는 앱 Application(ApplicationSet apps, wave 0)이 만든다.
+켜기: values.yaml의 components.botSlot.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
+*/}}
+{{- if .Values.components.botSlot.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bot-slot
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/bot-slot
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # 다른 Application과 달리 homelab.retry를 쓰지 않는다(설계 C.3.3).
+    # 빈 클러스터에서 봇 ns가 아직 없으면 sync가 실패한 채 생길 때까지 무제한으로 기다린다(limit -1).
+    # 이보다 뒤 wave가 없어 root는 이 health를 기다리지 않고 끝난다. 그래서 교착이 아니다(설계 C.3.1).
+    # refresh: true가 없으면 무제한 재시도가 처음 실패한 revision을 계속 써서, 고치는 PR이 반영되지 않는다.
+    retry:
+      limit: -1
+      refresh: true
+      backoff:
+        duration: 30s
+        maxDuration: 5m
+{{- end }}

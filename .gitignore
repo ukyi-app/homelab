@@ -1,0 +1,48 @@
+# 공개 저장소다. 자격이 담길 수 있는 파일은 이름을 바꾼 사본까지 무시한다(옛 R41).
+# 옛 사고 둘: terraform.tfvars.pre-cutover.bak이 *.tfvars에 안 걸려 커밋될 뻔했고,
+# 이름만 바꾼 backend.hcl 사본(R2 state 키 평문)을 git add -A가 스테이징했다.
+# 자격은 파일로 두지 않고 infisical run으로만 넣는다(설계 C.2). 이 목록은 그 규칙을 어겼을 때의 그물이다.
+
+# 환경변수 파일. host/versions.env·host/clusters/*.env는 공개 값이라 추적한다. 그래서 *.env는 쓰지 않는다.
+.env
+.env.*
+
+# 키
+*.pem
+*.key
+*.agekey
+
+# Terraform. .terraform.lock.hcl은 provider 해시를 고정하므로 커밋한다.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+# 접미사 사본(.bak, .json, .auto.tfvars)까지 잡으려고 끝에 *를 붙인다.
+*.tfvars*
+backend.hcl*
+# override 파일은 일반 .tf 위에 병합돼 리소스를 덮는다. 래퍼(tools/tf-github.sh)도 이 이름을 거부한다(설계 C.3.9).
+*override.tf*
+tfplan
+*.tfplan
+crash.log
+crash.*.log
+
+# kubeconfig에는 cluster-admin 토큰이 있다(설계 B.8 E2).
+kubeconfig*
+*.kubeconfig
+.kube/
+
+# 운영 민감 문서(로컬 런북, 복구 자산 목록)는 저장소 밖에 둔다(D-23). 공개 런북은 docs/runbooks-public/.
+docs/runbooks/
+
+# 로컬 도구
+mise.local.toml
+.mise.local.toml
+node_modules/
+# .claude/ 대신 .claude/*로 둔다. 디렉터리째 무시하면 나중에 하위 파일을 !로 되살릴 수 없다.
+.claude/*
+
+# OS·편집기
+.DS_Store
+*.swp
+.idea/
+.vscode/

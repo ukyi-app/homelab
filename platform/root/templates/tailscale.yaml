@@ -1,0 +1,29 @@
+{{- /*
+자리: tailscale. 맡은 티켓 T08a, wave -5(설계 C.3.1). 내부 UI Ingress(*.ts.net)용 operator. 클러스터 값(cluster.tailscale)을 받는다.
+켜기: values.yaml의 components.tailscale.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
+source와 destination은 자리표시다. 맡은 티켓이 정한다(외부 Helm 차트면 chart와 고정 semver, _helpers.tpl).
+*/}}
+{{- if .Values.components.tailscale.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tailscale
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/tailscale
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tailscale
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}

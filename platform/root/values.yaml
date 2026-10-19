@@ -1,0 +1,60 @@
+# 클러스터와 무관한 기본값. 클러스터마다 다른 값은 values-prod.yaml·values-vm.yaml에만 둔다(E8 VM 격리 1번).
+#
+# 뒤 티켓의 자리(T07 할 일 1). 구성 요소마다 templates/<이름>.yaml 하나와 아래 enabled 하나가 있다.
+# 자리를 맡은 티켓은 자기 템플릿 파일과 자기 블록의 enabled만 고친다. 블록 사이에 빈 줄과 주석을 둬
+# 다른 티켓의 PR끼리 같은 줄이나 맞닿은 줄을 고치지 않게 했다(Git 병합 충돌이 나지 않는다).
+# 새 자리가 더 필요하면 새 템플릿 파일을 만든다. 파일을 새로 더하는 것은 충돌하지 않는다.
+#
+# enabled를 클러스터 값 파일이 아니라 여기 두는 이유: VM은 운영과 같은 Git 트리를 따르므로,
+# 어느 구성 요소가 켜졌는지는 두 클러스터가 같아야 한다. 값 파일에 두면 한쪽만 켜는 실수가 생긴다.
+#
+# 끄면(true → false) root가 그 Application을 prune한다. 자식 Application에는 resources-finalizer가 없어
+# 구성 요소의 리소스는 지워지지 않고 클러스터에 남는다.
+#
+# wave는 각 템플릿에 적혀 있고 설계 C.3.1 표의 "순서" 열이다.
+components:
+  # T09. external-secrets(ESO operator, wave -8)와 external-secrets-stores(ClusterSecretStore, wave -7)
+  externalSecrets:
+    enabled: false
+
+  # T08a. cert-manager, wave -7
+  certManager:
+    enabled: false
+
+  # T11. cnpg-operator(CNPG operator와 Barman Cloud Plugin), wave -6
+  cnpgOperator:
+    enabled: false
+
+  # T08a. traefik, cloudflared, tailscale, adguard, 모두 wave -5
+  traefik:
+    enabled: false
+  cloudflared:
+    enabled: false
+  tailscale:
+    enabled: false
+  adguard:
+    enabled: false
+
+  # T08b. observability, wave -4
+  observability:
+    enabled: false
+
+  # T11. cnpg-cluster(Cluster pg, ObjectStore, ScheduledBackup), wave -3
+  cnpgCluster:
+    enabled: false
+
+  # T08b. sandbox(격리 작업 공간과 egress 프록시), wave -2
+  sandbox:
+    enabled: false
+
+  # T10. appset-apps(ApplicationSet apps), wave 0
+  appsetApps:
+    enabled: false
+
+  # T11. appset-data(ApplicationSet data), wave 0
+  appsetData:
+    enabled: false
+
+  # T08b. bot-slot(봇 자리, 설계 C.8), wave 1
+  botSlot:
+    enabled: false

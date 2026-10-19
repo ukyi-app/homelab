@@ -1,0 +1,7 @@
+{{- /*
+리소스를 만들지 않는 확인용 템플릿.
+root는 클러스터 값 파일(values-prod.yaml 또는 values-vm.yaml)을 helm.valueFiles로 읽어야 한다.
+빠지면 구성 요소가 클러스터 값 없이 렌더된다. 그래서 cluster.name이 없으면 렌더를 실패시킨다.
+*/}}
+{{- $cluster := .Values.cluster | default dict }}
+{{- $_ := required "cluster.name is missing: render root with values-<cluster>.yaml (helm.valueFiles or -f)" $cluster.name }}

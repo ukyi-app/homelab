@@ -1,0 +1,13 @@
+# argocd-rbac-cm patch(설계 C.3.3 표).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+data:
+  # 비워 둔다. policy.default로 준 권한은 deny 정책으로도 막을 수 없다. 계정마다 아래에 명시한다.
+  policy.default: ""
+  # owner에게 p 정책으로 전체 권한을 직접 준다. g로 role:admin에 묶지 않는 이유: 나중에 SSO를 붙이면
+  # 같은 이름의 그룹이 그 역할을 물려받을 수 있다(옛 bootstrap-values.yaml).
+  # 봇 계정 bot-reader의 읽기 전용 정책은 T08b가 더한다.
+  policy.csv: |
+    p, owner, *, *, *, allow

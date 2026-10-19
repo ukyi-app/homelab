@@ -1,0 +1,15 @@
+# 시나리오 13의 검증 VM 클러스터 값(E8 VM 격리 1번). root-vm.yaml이 helm.valueFiles로 읽는다.
+# values-prod.yaml과 키 모양이 같다. 아래 빈 값은 T13의 VM 준비 PR에서 채운다(그 전에 root-vm.yaml을 apply하지 않는다).
+# VM은 운영이 쓰는 외부 상태(Infisical 운영 값, 백업 prefix, tailnet 이름, 공개 터널, 감시 체크)에 쓰지 않는다.
+cluster:
+  name: vm
+
+  # T13 전에 채움. VM은 homelab-dev / dev만 읽는다(identity eso-homelab-vm, E8 VM 격리 2번).
+  infisical: {}
+
+  # T13 전에 채움. 접두 vm-(예: vm-argocd, operator 기기 이름 vm-tailscale-operator, E8 VM 격리 4번).
+  tailscale: {}
+
+  # T13 전에 채움. VM 전용 버킷(예: homelab-backups-vm), serverName pg-vm-<YYYYMMDD>,
+  # 복구 원본은 운영 serverName(시나리오 13, E8 VM 격리 3번).
+  cnpg: {}

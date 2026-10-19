@@ -1,0 +1,29 @@
+{{- /*
+자리: appset-apps. 맡은 티켓 T10, wave 0(설계 C.3.1). ApplicationSet apps(git files 생성기, requeueAfterSeconds 60). AppProject apps는 project-apps.yaml.
+켜기: values.yaml의 components.appsetApps.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
+source와 destination은 자리표시다. 맡은 티켓이 정한다(외부 Helm 차트면 chart와 고정 semver, _helpers.tpl).
+*/}}
+{{- if .Values.components.appsetApps.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: appset-apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/appsets/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}

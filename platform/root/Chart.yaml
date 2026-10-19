@@ -1,0 +1,11 @@
+# root Application이 렌더하는 차트(설계 C.3.3). 클러스터마다 root가 하나다(root-prod.yaml, root-vm.yaml).
+# 각 root는 자기 클러스터 값 파일(values-prod.yaml, values-vm.yaml)을 helm.valueFiles로 읽는다(E8 VM 격리 1번).
+#
+# Helm은 templates/ 아래만 렌더한다. 그래서 차트 루트에 둔 root-*.yaml은 root의 자식이 되지 않고,
+# 운영 root가 root-vm을(반대도) 만들지 않는다.
+# 확인: helm template root platform/root -f platform/root/values-prod.yaml | yq -N 'select(.kind == "Application") | .metadata.name'
+apiVersion: v2
+name: root
+description: Root app-of-apps for one homelab cluster
+type: application
+version: 0.1.0

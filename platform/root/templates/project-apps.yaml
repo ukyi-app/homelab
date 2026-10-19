@@ -1,0 +1,40 @@
+# AppProject apps(설계 C.3.3 AppProject 표). ApplicationSet apps가 만드는 앱 Application이 쓴다.
+# T07이 표대로 미리 두고, 바꿀 일이 생기면 T10이 이 파일만 고친다.
+# ApplicationSet 템플릿의 project는 고정값이어야 한다. 값으로 열면 앱 등록이 이 경계를 고를 수 있다.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-11"
+spec:
+  description: App deployments from ApplicationSet apps
+  sourceRepos:
+    - https://github.com/ukyi-app/homelab
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: app-*
+  # clusterResourceWhitelist를 적지 않는다. 없으면 cluster-scoped 리소스는 모두 거부된다.
+  # Secret은 목록에 없다. 앱 Secret은 ExternalSecret으로 ESO가 만든다.
+  # 옛 실측: 이 목록은 UI 리소스 트리도 거른다. ReplicaSet·Pod가 없으면 트리에서 Deployment·Job의 자식이 안 보인다
+  # (옛 projects.yaml:23-24). 표에 없어 넣지 않았다. 필요하면 T10이 정한다.
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    - group: external-secrets.io
+      kind: ExternalSecret
+    - group: batch
+      kind: Job
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: ConfigMap
+    - group: policy
+      kind: PodDisruptionBudget

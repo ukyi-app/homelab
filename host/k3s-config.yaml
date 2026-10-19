@@ -1,0 +1,26 @@
+# /etc/rancher/k3s/config.yaml의 원본. sudo host/install.sh --cluster <이름> --k3s가
+# host/clusters/<이름>.env 값으로 자리표시를 채워 그 경로에 0600으로 쓴다.
+# NODE_MAGICDNS는 env 파일에 없다(tailnet 이름 비공개). install.sh가 실행 때
+# tailscale status --self --peers=false --json으로 얻고, TAILNET_JOIN=false면 그 줄을 빼고 렌더한다.
+#
+# node-name, node-ip, tls-san은 설치 때만 정할 수 있다. 설치 뒤 바꾸면 노드 재등록이나
+# serving cert 재발급이 필요하다. install.sh는 기존 config와 이 세 값이 다르면 멈춘다.
+# verify.sh는 라이브 k3s.io/node-args 어노테이션을 이 파일의 렌더 결과와 대조한다.
+#
+# 유지하는 내장 구성: servicelb(AdGuard :53 LoadBalancer), local-path(PV, 옛 구성은 껐지만
+# 이번에는 켠다. local-retain StorageClass는 host/k3s-manifests/), CoreDNS, flannel,
+# kube-router netpol.
+node-name: ${NODE_NAME}
+node-ip: ${NODE_IP}               # 자동 검출에 맡기지 않는다. tailscale0이 먼저 떠 있어도 LAN 주소로 고정
+tls-san:
+  - ${NODE_NAME}
+  - ${NODE_IP}
+  - ${NODE_MAGICDNS}             # 운영자 기기에서 tailnet으로 kubectl. TAILNET_JOIN=false(VM)면 이 줄을 빼고 렌더
+disable:
+  - traefik                      # Argo CD가 관리하는 Traefik을 따로 둔다
+  - metrics-server               # Grafana가 대신한다(kubectl top 없음)
+secrets-encryption: true
+write-kubeconfig-mode: "0600"    # kubeconfig에는 cluster-admin 자격이 있다
+kubelet-arg:
+  - "system-reserved=cpu=500m,memory=1Gi"
+  - "eviction-hard=memory.available<500Mi,nodefs.available<10%"
