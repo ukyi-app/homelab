@@ -33,7 +33,7 @@
 2. 재연결하면 옛 워크플로 호출을 새 공통 워크플로로 바꾸고(옛 SealedSecrets 산출물이 있으면 함께 지운다) CLI로 등록한다. 결정 5로 건 `CODEOWNERS`·`app-main`이 그대로인지 `homelab github verify`(D-28)로 대조한다.
 3. `homelab-app-template`이 T10에서 바뀐 새 구조(main 의존과 SealedSecrets 사본 없음, 공통 워크플로 태그 호출)를 따르는지 확인한다.
 4. 열린 renovate PR(`homelab-app-template` 5, `aiops-autodeploy-canary` 4)은 D-18 결정에 따라 닫거나 새 방식으로 다시 연다. 옛 봉인본을 건드리는 PR은 병합하지 않는다.
-5. 옛 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App을 삭제한다(D-13 확정). T06에서 넘겨받은 일이다. App 키 폐기(T06 자격 폐기 표의 `보류(D-13, T22)` 줄)를 함께 닫는다. 삭제는 되돌릴 수 없다. 옛 AIOps를 교훈 자료로 읽는 T15는 이 티켓의 선행(T16b)보다 앞이다.
+5. 옛 `ukyi-app/aiops` 저장소와 `ukyi-homelab-aiops` App을 삭제한다(D-13 확정). T06에서 넘겨받은 일이다. App 키 폐기(T06 자격 폐기 표의 `보류(D-13, T22)` 줄)를 함께 닫는다. 삭제는 되돌릴 수 없다. 옛 AIOps를 교훈 자료로 읽는 T15는 이 티켓의 선행(T16b)보다 앞이다. **2026-10-19 실제:** App은 T06 할 일 5.7에서 사용자 결정으로 먼저 지웠고 App 키 줄도 닫혔다(approvals). 이 티켓은 `aiops` 저장소만 지운다.
 6. `aiops-autodeploy-canary`는 공개하지 않고 private로 보관한다. 삭제해도 된다(D-29).
 7. `mac-uptime-guard`(private, 옛 맥 미니용)는 제거한다(D-29. 사용자 2026-10-18 17:46, 그 전에는 private 보관이었다). 이 저장소는 옛 Telegram 봇 토큰을 쓴다. 아래 순서로 한다.
    1. 장치 쪽 `mac-uptime-guard`를 끈다.

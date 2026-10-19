@@ -59,7 +59,7 @@
    4. `gh api -X PATCH repos/ukyi-app/homelab -F allow_auto_merge=false`.
    5. ruleset 2개와 webhook 647791528을 지운다: `gh api -X DELETE repos/ukyi-app/homelab/rulesets/19598965`, `gh api -X DELETE repos/ukyi-app/homelab/rulesets/23257797`, `gh api -X DELETE repos/ukyi-app/homelab/hooks/647791528`. 새 구조는 공개 webhook을 두지 않고 Argo CD가 60초마다 폴링한다(확정(사용자 2026-10-18, T05)).
    6. ruleset을 지운 뒤에 environment 4개, 저장소 변수 2개, 옛 App `ukyi-homelab-reader`·`ukyi-homelab-writer`·`ukyi-homelab-dispatch`(등록이 남았으면)를 지운다(D-11). writer App을 ruleset보다 먼저 지우면 그 접두사 브랜치를 아무도 만들 수 없다(설계 B.8 "E1 철거").
-   7. 옛 aiops App(`ukyi-homelab-aiops`)이 homelab에 설치돼 있으면 homelab 설치만 해제한다(App 삭제는 T22). 남아 있으면 그 App의 승인 리뷰가 `main-interim`의 승인 1을 채울 수 있다(추측). 옛 main에는 `CODEOWNERS`가 없어 T07의 main 교체 전까지는 승인 1만 막기 때문이다.
+   7. 옛 aiops App(`ukyi-homelab-aiops`)이 homelab에 설치돼 있으면 homelab 설치만 해제한다(App 삭제는 T22). 남아 있으면 그 App의 승인 리뷰가 `main-interim`의 승인 1을 채울 수 있다(추측). 옛 main에는 `CODEOWNERS`가 없어 T07의 main 교체 전까지는 승인 1만 막기 때문이다. 2026-10-19 실제: 선택 저장소가 homelab 하나뿐이라 homelab만 뺄 수 없어, 사용자 결정으로 App 자체를 지웠다(approvals).
    - 이 단계의 GitHub 설정 변경은 `gh api`로 한다. 새 Terraform github root(D-28)는 T10에서 생기고, 그때 이 단계 뒤에 남는 ruleset을 import한다(T05 할 일 11).
    - `main-interim`은 T10이 ruleset B가 걸린 것을 확인한 뒤에만 끈다.
 6. 자격 폐기 표대로 폐기한다(D-20). state 처리에 쓰는 자격은 할 일 4가 끝난 뒤 마지막에 폐기한다. 표의 다른 폐기가 모두 끝난 것을 확인한 뒤 SOPS age 개인 키 둘(`~/.config/sops/age`의 cluster 키, 비밀번호 관리자의 `homelab age recovery`)을 지운다(D-20).
@@ -98,7 +98,7 @@
 
 - App 4개:
   - `ukyi-homelab-reader`(4043034), `ukyi-homelab-writer`(4043080): 삭제(D-11). writer는 ruleset 2개를 지운 뒤에 지운다(할 일 5).
-  - `ukyi-homelab-aiops`(4937062): 제거(D-13 일부 확정, 2026-10-18). 실행은 T22라 이 티켓의 줄 상태는 `보류(D-13, T22)`.
+  - `ukyi-homelab-aiops`(4937062): 제거(D-13 일부 확정, 2026-10-18). 실행은 T22라 이 티켓의 줄 상태는 `보류(D-13, T22)`. 2026-10-19 실제: App은 이 티켓 중에 지웠다(할 일 5.7). `aiops` 저장소는 T22.
   - `ukyi-homelab-dispatch`(4178609): org 설치는 없다. 등록만 남았는지 확인하고, 남았으면 삭제(D-11).
 - ChatGPT Codex Connector: 유지(D-26, 확정(사용자 2026-10-18, T05)). 줄 상태는 `유지(D-26)`. 설계 0절 실측으로 org 전체 저장소에 actions·contents·issues·pull_requests·workflows write다. 유지 조건 넷은 설계 F D-26이다(어떤 ruleset bypass에도 넣지 않음 등). 설치 범위 축소는 확정(사용자 2026-10-18, T15): 선택 저장소로 줄이고 `homelab-bot-ops`를 뺀다. 사람 작업이고 T15에서 `homelab-bot-ops`에 운영 산출물을 처음 올리기 전에 하기로 했으며, 2026-10-18 17:45에 완료했다(spec §11, D-16, [../approvals.md](../approvals.md)).
 - environment 4개: `homelab-main`(secret 19개), `aiops-authority-empty-0915`, `aiops-authority-empty-0916`, `aiops-reusable-public-0915`(secret 1개). 삭제(D-11).
@@ -122,7 +122,7 @@
 
 ### 옛 AIOps 저장소
 
-- `ukyi-app/aiops`와 App `ukyi-homelab-aiops`: 제거(D-13 일부 확정, 2026-10-18. aiops는 쓰지 않는다). 실행은 T22라 줄 상태는 `보류(D-13, T22)`.
+- `ukyi-app/aiops`와 App `ukyi-homelab-aiops`: 제거(D-13 일부 확정, 2026-10-18. aiops는 쓰지 않는다). 실행은 T22라 줄 상태는 `보류(D-13, T22)`. 2026-10-19 실제: App은 이 티켓 중에 지웠다(할 일 5.7). `aiops` 저장소는 T22.
 - `ukyi-app/aiops-autodeploy-canary`: 공개하지 않고 private로 보관(D-29, 삭제도 가능). 실행은 T22라 줄 상태는 `보류(D-29, T22)`.
 - `mac-uptime-guard`(private, 옛 맥 미니용, 옛 Telegram 토큰 사용): 제거(D-29, 사용자 2026-10-18 17:46. 그 전에는 private 보관이었다). 실행은 T22다: 장치를 끄고 옛 Telegram 봇 토큰을 폐기한 뒤 저장소를 지운다. NUC에 원격 없는 로컬 클론(`~/workspace/mac-uptime-guard`)도 있다. 줄 상태는 `보류(담당 T22)`.
 
@@ -185,13 +185,13 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | `tailscale-ci-oauth-client` | Tailscale CI 읽기 전용 OAuth 클라이언트(설명 `homelab ci drift-tailscale readonly 20260819`) | environment `homelab-main`(`TF_TAILSCALE_OAUTH_*`), 비밀번호 관리자 백업 | owner 부트스트랩 OAuth와 별개 | 폐기 예정 |
 | `r2-terraform-state` | `homelab-tfstate` 접근 R2 키(토큰 `homelab-terraform-state-20260820`) | 옛 사본 `backend.hcl` 3개와 `.terraform/terraform.tfstate` 3개(자격 포함 추정), environment `homelab-main`(`R2_*`) | 할 일 4 뒤. 2026-08-20 회전 전 옛 토큰이 실제로 폐기됐는지 콘솔에서 확인 | 폐기 예정 |
 | `ts-node-key-nuc` | NUC 노드 키(만료 해제) | 없음(기기 등록) | 폐기하면 NUC가 tailnet에서 빠져 Tailscale 경로의 원격 접속이 끊긴다. D-12가 OS 유지라 NUC는 지금 등록 그대로 tailnet에 남는다(설계 C.3.2). 2026-10-18 실측: 태그 없음, 만료 없음 | 유지(D-12) |
-| `argocd-github-webhook` | webhook 647791528의 secret | 클러스터 `argocd-secret`, `.env.secrets` | webhook 삭제(할 일 5)와 함께. 새 구조에는 공개 webhook이 없다(60초 폴링) | 폐기 예정 |
-| `github-dispatch-app` | App `ukyi-homelab-dispatch`(4178609) | 확인 불가(개인 키 개수는 App 설정 화면) | 2026-10-18 실측: 등록이 남아 있고 org 설치는 없다. 등록 삭제로 키도 무효 | 폐기 예정 |
+| `argocd-github-webhook` | webhook 647791528의 secret | 클러스터 `argocd-secret`, `.env.secrets` | webhook 삭제(할 일 5)와 함께. 새 구조에는 공개 webhook이 없다(60초 폴링) | 삭제됨(2026-10-19 13:27 webhook 삭제로 무효. 클러스터 사본은 k3s 제거로 사라짐) |
+| `github-dispatch-app` | App `ukyi-homelab-dispatch`(4178609) | 확인 불가(개인 키 개수는 App 설정 화면) | 2026-10-18 실측: 등록이 남아 있고 org 설치는 없다. 등록 삭제로 키도 무효 | 삭제됨(2026-10-19 App 등록 삭제로 무효, GET 404) |
 | `cf-tf-root-token` | Cloudflare 토큰 `homelab-terraform-cloudflare`(Account·Zone Edit) | `.env.secrets`, environment `homelab-main`(`TF_CLOUDFLARE_TOKEN`) | 할 일 4 뒤 | 폐기 예정 |
 | `cf-certmanager-token` | Cloudflare 토큰 `homelab-certmanager-dns01` | SOPS 파일(`2d2054a:platform/traefik/prod/cloudflare-api-token.enc.yaml`), `.env.secrets` | 새 구조에는 대응 토큰이 없다(D-08). 공개 히스토리의 SOPS 파일은 age 키로 풀린다 | 폐기 예정 |
 | `r2-backups-pg-cache` | 백업 버킷용 R2 키 `homelab-backups-pg-cache` | SOPS 파일 2개(cnpg, cache), `.env.secrets` | 버킷 삭제(할 일 3)와 함께 | 폐기 예정 |
-| 옛 App 키 | `ukyi-homelab-reader`, `ukyi-homelab-writer` | environment `homelab-main`(`HOMELAB_*_APP_PRIVATE_KEY`), 옛 사본 `.scratch`의 평문 PEM, 비밀번호 관리자 백업(있으면) | App 삭제(할 일 5.6)로 키도 무효 | 폐기 예정 |
-| `ukyi-homelab-aiops` App 키 | App 4937062 개인 키 | `/etc/homelab-aiops`(H2), 옛 사본 `.scratch`의 평문 PEM | T22가 App 제거(D-13 일부 확정)와 함께 폐기한다. `/etc/homelab-aiops` 파일은 이 티켓의 H2 삭제로 지운다 | 보류(D-13, T22) |
+| 옛 App 키 | `ukyi-homelab-reader`, `ukyi-homelab-writer` | environment `homelab-main`(`HOMELAB_*_APP_PRIVATE_KEY`), 옛 사본 `.scratch`의 평문 PEM, 비밀번호 관리자 백업(있으면) | App 삭제(할 일 5.6)로 키도 무효 | 삭제됨(2026-10-19 App 삭제로 무효, GET 404. environment 사본은 5.6에서 삭제. 비밀번호 관리자 백업이 있으면 할 일 6에서 지운다) |
+| `ukyi-homelab-aiops` App 키 | App 4937062 개인 키 | `/etc/homelab-aiops`(H2), 옛 사본 `.scratch`의 평문 PEM | T22가 App 제거(D-13 일부 확정)와 함께 폐기한다. `/etc/homelab-aiops` 파일은 이 티켓의 H2 삭제로 지운다 | 삭제됨(2026-10-19 App 삭제로 무효. 사용자 결정으로 T22에서 앞당김. `/etc/homelab-aiops` 사본은 2b가 지움) |
 | Tailscale 부트스트랩 OAuth | owner 로컬용, Terraform 밖, 쓰기 스코프 | `.env.secrets` | | 폐기 예정 |
 | Tailscale operator OAuth | 옛 operator용(devices:core·auth_keys) | SOPS 파일(`platform/tailscale/prod/operator-oauth.enc.yaml`) | | 폐기 예정 |
 | Cloudflare 터널 실행 토큰 | 터널 `homelab-prod`의 실행 토큰 | SOPS Secret `cloudflared-tunnel` | 터널 삭제(할 일 3)로 무효 | 폐기 예정 |
@@ -249,9 +249,9 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | Tailscale | OAuth 클라이언트 3종 | Terraform 선언은 operator 1개, 나머지 둘은 Terraform 밖 | 삭제 예정(D-11·D-20, 콘솔) |
 | Tailscale | NUC 노드 키 만료 | 태그 없음, 만료 없음 | 유지(D-12) |
 | Tailscale | ACL·DNS | 전역 resolver 5개(NUC 1 + Cloudflare 4, C-05), 이 노드는 "Tailscale DNS: disabled" | 유지(옛 root 손대지 않음, T08a가 덮어씀) |
-| GitHub | App reader(4043034), writer(4043080) | 등록·org 설치(`all`). writer는 새 저장소 `homelab-bot`·`homelab-bot-ops`에도 contents write가 닿는다 | 삭제 예정(D-11, 할 일 5.6) |
-| GitHub | App aiops(4937062) | 등록·org 설치(`selected`). homelab 포함 여부는 API로 볼 수 없다 | 보류(D-13, T22). homelab 설치 여부는 사람 확인(할 일 5.7) |
-| GitHub | App dispatch(4178609) | 등록 남음, org 설치 없음 | 삭제 예정(D-11, 할 일 5.6) |
+| GitHub | App reader(4043034), writer(4043080) | 등록·org 설치(`all`). writer는 새 저장소 `homelab-bot`·`homelab-bot-ops`에도 contents write가 닿는다 | 삭제됨(2026-10-19, 사람이 UI로. GET 404, org 설치 목록에 없음) |
+| GitHub | App aiops(4937062) | 등록·org 설치(`selected`). homelab 포함 여부는 API로 볼 수 없다 | 삭제됨(2026-10-19, 사용자 결정으로 T22에서 앞당김. 선택 저장소가 homelab 하나뿐이라 homelab만 뺄 수 없었다. GET 404. 설정 스냅숏 `~/t06-snapshot/github/`) |
+| GitHub | App dispatch(4178609) | 등록 남음, org 설치 없음 | 삭제됨(2026-10-19, 사람이 UI로. GET 404) |
 | GitHub | Codex Connector | `selected`(선택 모드만 API로 확인, 저장소 목록은 사람 확인) | 유지(D-26) |
 | GitHub | environment 4개 | `homelab-main` secret 19, `aiops-reusable-public-0915` 1, 나머지 둘 0. 변수 0 | 삭제됨(2026-10-19 13:27 s5, D-11. 4개 모두 GET 404) |
 | GitHub | 저장소 수준 secret | Actions·Dependabot·Codespaces 모두 0 | 유지(정리할 것 없음) |
