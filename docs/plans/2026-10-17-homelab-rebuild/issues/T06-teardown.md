@@ -179,17 +179,17 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 
 | 자격 | 무엇 | 사본 (위치만) | 주의 | 상태 |
 |---|---|---|---|---|
-| `ghcr-pull-pat` | GHCR 읽기용 classic PAT, 무만료 | environment `homelab-main`(`GHCR_PULL_TOKEN`), 클러스터 SealedSecret 3개, `.env.secrets` | 새 구조에는 GHCR pull 자격이 없다(D-29). PAT 존재는 API로 볼 수 없어 owner 계정 설정에서 확인 | 폐기 예정 |
-| `github-tf-root-pat` | github root용 fine-grained PAT `homelab-tf-github-root`(Administration·Secrets 읽기·쓰기), 무만료 | `.env.secrets` | 할 일 4 뒤(순서 문단) | 폐기 예정 |
-| `github-tf-ci-pat` | CI 읽기용 fine-grained PAT `ukyi-app-tf-github-ci-readonly` | environment `homelab-main`(`TF_GITHUB_TOKEN`) | | 폐기 예정 |
+| `ghcr-pull-pat` | GHCR 읽기용 classic PAT, 무만료 | environment `homelab-main`(`GHCR_PULL_TOKEN`), 클러스터 SealedSecret 3개, `.env.secrets` | 새 구조에는 GHCR pull 자격이 없다(D-29). PAT 존재는 API로 볼 수 없어 owner 계정 설정에서 확인 | 삭제됨 또는 없음(2026-10-19 사용자 "완료" 보고. classic 탭은 사용자가 봄, 있었는지는 기록 없음) |
+| `github-tf-root-pat` | github root용 fine-grained PAT `homelab-tf-github-root`(Administration·Secrets 읽기·쓰기), 무만료 | `.env.secrets` | 할 일 4 뒤(순서 문단) | 삭제됨(2026-10-19, 사용자. UI 이름은 `ukyi-app-tf-github`로 보였다(옛 문서 이름 `homelab-tf-github-root`와 다름, 같은 토큰으로 추측)) |
+| `github-tf-ci-pat` | CI 읽기용 fine-grained PAT `ukyi-app-tf-github-ci-readonly` | environment `homelab-main`(`TF_GITHUB_TOKEN`) | | 삭제됨(2026-10-19, 사용자. UI 이름 `ukyi-app-tf-github-ci-readonly`) |
 | `tailscale-ci-oauth-client` | Tailscale CI 읽기 전용 OAuth 클라이언트(설명 `homelab ci drift-tailscale readonly 20260819`) | environment `homelab-main`(`TF_TAILSCALE_OAUTH_*`), 비밀번호 관리자 백업 | owner 부트스트랩 OAuth와 별개 | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
-| `r2-terraform-state` | `homelab-tfstate` 접근 R2 키(토큰 `homelab-terraform-state-20260820`) | 옛 사본 `backend.hcl` 3개와 `.terraform/terraform.tfstate` 3개(자격 포함 추정), environment `homelab-main`(`R2_*`) | 할 일 4 뒤. 2026-08-20 회전 전 옛 토큰이 실제로 폐기됐는지 콘솔에서 확인 | 폐기 예정 |
+| `r2-terraform-state` | `homelab-tfstate` 접근 R2 키(토큰 `homelab-terraform-state-20260820`) | 옛 사본 `backend.hcl` 3개와 `.terraform/terraform.tfstate` 3개(자격 포함 추정), environment `homelab-main`(`R2_*`) | 할 일 4 뒤. 2026-08-20 회전 전 옛 토큰이 실제로 폐기됐는지 콘솔에서 확인 | 삭제됨(2026-10-19, 사용자가 R2 API 토큰 화면에서. 2026-08-20 회전 전 토큰 여부는 "완료" 보고에 포함) |
 | `ts-node-key-nuc` | NUC 노드 키(만료 해제) | 없음(기기 등록) | 폐기하면 NUC가 tailnet에서 빠져 Tailscale 경로의 원격 접속이 끊긴다. D-12가 OS 유지라 NUC는 지금 등록 그대로 tailnet에 남는다(설계 C.3.2). 2026-10-18 실측: 태그 없음, 만료 없음 | 유지(D-12) |
 | `argocd-github-webhook` | webhook 647791528의 secret | 클러스터 `argocd-secret`, `.env.secrets` | webhook 삭제(할 일 5)와 함께. 새 구조에는 공개 webhook이 없다(60초 폴링) | 삭제됨(2026-10-19 13:27 webhook 삭제로 무효. 클러스터 사본은 k3s 제거로 사라짐) |
 | `github-dispatch-app` | App `ukyi-homelab-dispatch`(4178609) | 확인 불가(개인 키 개수는 App 설정 화면) | 2026-10-18 실측: 등록이 남아 있고 org 설치는 없다. 등록 삭제로 키도 무효 | 삭제됨(2026-10-19 App 등록 삭제로 무효, GET 404) |
-| `cf-tf-root-token` | Cloudflare 토큰 `homelab-terraform-cloudflare`(Account·Zone Edit) | `.env.secrets`, environment `homelab-main`(`TF_CLOUDFLARE_TOKEN`) | 할 일 4 뒤 | 폐기 예정 |
-| `cf-certmanager-token` | Cloudflare 토큰 `homelab-certmanager-dns01` | SOPS 파일(`2d2054a:platform/traefik/prod/cloudflare-api-token.enc.yaml`), `.env.secrets` | 새 구조에는 대응 토큰이 없다(D-08). 공개 히스토리의 SOPS 파일은 age 키로 풀린다 | 폐기 예정 |
-| `r2-backups-pg-cache` | 백업 버킷용 R2 키 `homelab-backups-pg-cache` | SOPS 파일 2개(cnpg, cache), `.env.secrets` | 버킷 삭제(할 일 3)와 함께 | 폐기 예정 |
+| `cf-tf-root-token` | Cloudflare 토큰 `homelab-terraform-cloudflare`(Account·Zone Edit) | `.env.secrets`, environment `homelab-main`(`TF_CLOUDFLARE_TOKEN`) | 할 일 4 뒤 | 삭제됨(2026-10-19, 사용자. Cloudflare API 토큰 화면에서) |
+| `cf-certmanager-token` | Cloudflare 토큰 `homelab-certmanager-dns01` | SOPS 파일(`2d2054a:platform/traefik/prod/cloudflare-api-token.enc.yaml`), `.env.secrets` | 새 구조에는 대응 토큰이 없다(D-08). 공개 히스토리의 SOPS 파일은 age 키로 풀린다 | 삭제됨(2026-10-19, 사용자. Cloudflare API 토큰 화면에서) |
+| `r2-backups-pg-cache` | 백업 버킷용 R2 키 `homelab-backups-pg-cache` | SOPS 파일 2개(cnpg, cache), `.env.secrets` | 버킷 삭제(할 일 3)와 함께 | 삭제됨(2026-10-19, 사용자가 R2 API 토큰 화면에서) |
 | 옛 App 키 | `ukyi-homelab-reader`, `ukyi-homelab-writer` | environment `homelab-main`(`HOMELAB_*_APP_PRIVATE_KEY`), 옛 사본 `.scratch`의 평문 PEM, 비밀번호 관리자 백업(있으면) | App 삭제(할 일 5.6)로 키도 무효 | 삭제됨(2026-10-19 App 삭제로 무효, GET 404. environment 사본은 5.6에서 삭제. 비밀번호 관리자 백업이 있으면 할 일 6에서 지운다) |
 | `ukyi-homelab-aiops` App 키 | App 4937062 개인 키 | `/etc/homelab-aiops`(H2), 옛 사본 `.scratch`의 평문 PEM | T22가 App 제거(D-13 일부 확정)와 함께 폐기한다. `/etc/homelab-aiops` 파일은 이 티켓의 H2 삭제로 지운다 | 삭제됨(2026-10-19 App 삭제로 무효. 사용자 결정으로 T22에서 앞당김. `/etc/homelab-aiops` 사본은 2b가 지움) |
 | Tailscale 부트스트랩 OAuth | owner 로컬용, Terraform 밖, 쓰기 스코프 | `.env.secrets` | | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
@@ -197,21 +197,21 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | Cloudflare 터널 실행 토큰 | 터널 `homelab-prod`의 실행 토큰 | SOPS Secret `cloudflared-tunnel` | 터널 삭제(할 일 3)로 무효 | 삭제됨(2026-10-19 13:56 터널 삭제로 무효) |
 | Telegram 봇 토큰 | 옛 알림 봇 | 정리 목록 "Telegram 봇" 줄 | `mac-uptime-guard`도 이 봇을 쓴다. T22가 그 장치를 끈 뒤 폐기한다(위 예외) | 보류(D-10, T22) |
 | healthchecks ping URL | `homelab-watchdog` 체크 | SOPS Secret 2개(`alerting-secrets`, `restore-drill-alerting`), `.env.secrets` | 옛 체크 삭제도 T08b(D-11)(위 예외) | 삭제됨(2026-10-19, 사용자가 체크를 지워 URL 무효. 계획은 T08b에서 새 체크 초록 뒤 삭제였다) |
-| `trip-mate-api` Google OAuth client | `trip-mate-api` 로그인용 Google OAuth 클라이언트 | 후보: NUC 로컬 클론 `~/workspace/trip-mate-api/.env.local` | 앱 삭제로 폐기(D-29). Google Cloud 콘솔에서 지운다 | 폐기 예정 |
-| `trip-mate-api` OXR app id | `trip-mate-api`가 쓰던 OXR app id | 후보: 같은 `.env.local` | 앱 삭제로 폐기(D-29). 발급처 계정에서 폐기한다 | 폐기 예정 |
-| `trip-mate-api` `BETTER_AUTH_SECRET` | `trip-mate-api`의 Better Auth 비밀값 | 후보: 같은 `.env.local` | 앱 삭제로 폐기(D-29). 외부 발급처가 없는 값이라, 이 값을 받던 앱이 없어졌는지(저장소·배포 삭제) 확인하고 닫는다 | 폐기 예정 |
-| `page` admin token | `page` 관리자 토큰 | 후보: NUC 로컬 클론 `~/workspace/page/.env.local` | 앱 삭제로 폐기(D-29). 외부 발급처가 없는 값이라, 이 값을 받던 앱이 없어졌는지 확인하고 닫는다 | 폐기 예정 |
-| `files` 앱 자격 | `FILES_ADMIN_TOKEN`, 클라이언트 키 `keys.json` | SealedSecret `files-keys`, `.env.secrets` | 발급처 없음. T22 재연결 때 새 값(D-20). 외부 클라이언트가 옛 키를 가졌는지는 저장소로 알 수 없다 | 폐기 예정 |
-| 클러스터 내부 자기생성 비밀번호 | Grafana·AdGuard·Argo CD 관리자, CNPG superuser·앱 역할, 앱 DB·Valkey 자격 | SealedSecret·SOPS 파일, `.env.secrets`, 비밀번호 관리자(있으면) | 발급처 없음. 받던 클러스터가 k3s 제거·H8로 사라지면 닫는다 | 폐기 예정 |
-| AIOps 생산자 토큰 3개 | Argo CD 알림·관측 경로가 NUC `aiops-ingress`로 보내던 토큰 | 클러스터 Secret 3개(`argocd-notifications-secret`, 네임스페이스 둘의 `aiops-observation-auth`) | 발급처 없음. k3s 제거와 H1·H2 삭제로 양쪽이 사라진다 | 폐기 예정 |
-| `aiops-proxy` ChatGPT 구독 OAuth | 옛 AIOps CLIProxyAPI의 구독 로그인 | NUC `aiops-proxy` 저장 공간(H2): `/var/lib/homelab-aiops/cliproxy-auth`(파일 2개), `cliproxy-staging/<id>/auth`(1개)(2026-10-19 sudo 조회) | 파일은 H2 삭제로 지운다. OpenAI 계정 쪽 세션 해제는 사람이 한다. D-13 일부 확정은 aiops 저장소·App만 다루므로 D-20을 따른다 | 폐기 예정 |
-| `aiops-engine` Codex ChatGPT 로그인 | 옛 AIOps 엔진 계정의 Codex CLI `auth.json`. 2026-10-19 키 이름만 봤다(값은 출력하지 않음): `OPENAI_API_KEY`는 null, `auth_mode`, `tokens`(`access_token`, `refresh_token`, `id_token`, `account_id`) | NUC `/var/lib/homelab-aiops/auth/auth.json`(H2, `aiops-engine` 홈. 2026-10-19 sudo 조회로 찾음) | 파일은 H2 삭제로 지운다. 갱신 토큰이 있으므로 `aiops-proxy` 줄과 함께 OpenAI 계정에서 세션을 해제한다 | 폐기 예정 |
-| SealedSecrets 봉인 키 | 클러스터 안의 키는 k3s 제거로 사라진다 | `/mnt/bulk/homelab-backups/sealed-secrets`(1개, age로 암호화), 비밀번호 관리자 첨부(있으면) | 봉인본 10개(공개 히스토리 포함)를 풀 수 있는 키다. 디스크 사본은 H8 비우기로 지운다 | 폐기 예정 |
+| `trip-mate-api` Google OAuth client | `trip-mate-api` 로그인용 Google OAuth 클라이언트 | 후보: NUC 로컬 클론 `~/workspace/trip-mate-api/.env.local` | 앱 삭제로 폐기(D-29). Google Cloud 콘솔에서 지운다 | 유지(없음 확인, 2026-10-19, 사용자) |
+| `trip-mate-api` OXR app id | `trip-mate-api`가 쓰던 OXR app id | 후보: 같은 `.env.local` | 앱 삭제로 폐기(D-29). 발급처 계정에서 폐기한다 | 유지(없음 확인, 2026-10-19, 사용자) |
+| `trip-mate-api` `BETTER_AUTH_SECRET` | `trip-mate-api`의 Better Auth 비밀값 | 후보: 같은 `.env.local` | 앱 삭제로 폐기(D-29). 외부 발급처가 없는 값이라, 이 값을 받던 앱이 없어졌는지(저장소·배포 삭제) 확인하고 닫는다 | 삭제됨(2026-10-19 확인: 저장소 404(2026-10-18 삭제), 배포는 k3s 제거로 사라짐) |
+| `page` admin token | `page` 관리자 토큰 | 후보: NUC 로컬 클론 `~/workspace/page/.env.local` | 앱 삭제로 폐기(D-29). 외부 발급처가 없는 값이라, 이 값을 받던 앱이 없어졌는지 확인하고 닫는다 | 삭제됨(2026-10-19 확인: 저장소 404(2026-10-18 삭제), 배포는 k3s 제거로 사라짐) |
+| `files` 앱 자격 | `FILES_ADMIN_TOKEN`, 클라이언트 키 `keys.json` | SealedSecret `files-keys`, `.env.secrets` | 발급처 없음. T22 재연결 때 새 값(D-20). 외부 클라이언트가 옛 키를 가졌는지는 저장소로 알 수 없다 | 삭제됨(2026-10-19 확인: 받던 배포가 k3s 제거로 사라짐. T22 재연결 때 새 값) |
+| 클러스터 내부 자기생성 비밀번호 | Grafana·AdGuard·Argo CD 관리자, CNPG superuser·앱 역할, 앱 DB·Valkey 자격 | SealedSecret·SOPS 파일, `.env.secrets`, 비밀번호 관리자(있으면) | 발급처 없음. 받던 클러스터가 k3s 제거·H8로 사라지면 닫는다 | 삭제됨(2026-10-19 13:20·13:21 k3s 제거와 H8로 받던 클러스터·데이터가 사라짐) |
+| AIOps 생산자 토큰 3개 | Argo CD 알림·관측 경로가 NUC `aiops-ingress`로 보내던 토큰 | 클러스터 Secret 3개(`argocd-notifications-secret`, 네임스페이스 둘의 `aiops-observation-auth`) | 발급처 없음. k3s 제거와 H1·H2 삭제로 양쪽이 사라진다 | 삭제됨(2026-10-19 k3s 제거와 2b의 H1·H2 삭제로 양쪽이 사라짐) |
+| `aiops-proxy` ChatGPT 구독 OAuth | 옛 AIOps CLIProxyAPI의 구독 로그인 | NUC `aiops-proxy` 저장 공간(H2): `/var/lib/homelab-aiops/cliproxy-auth`(파일 2개), `cliproxy-staging/<id>/auth`(1개)(2026-10-19 sudo 조회) | 파일은 H2 삭제로 지운다. OpenAI 계정 쪽 세션 해제는 사람이 한다. D-13 일부 확정은 aiops 저장소·App만 다루므로 D-20을 따른다 | 유지(사용자 결정 2026-10-19: OpenAI 전체 로그아웃은 사용자의 지금 세션까지 끊는다. 토큰 파일은 2b·2d로 지워 디스크에 남은 사본 없음) |
+| `aiops-engine` Codex ChatGPT 로그인 | 옛 AIOps 엔진 계정의 Codex CLI `auth.json`. 2026-10-19 키 이름만 봤다(값은 출력하지 않음): `OPENAI_API_KEY`는 null, `auth_mode`, `tokens`(`access_token`, `refresh_token`, `id_token`, `account_id`) | NUC `/var/lib/homelab-aiops/auth/auth.json`(H2, `aiops-engine` 홈. 2026-10-19 sudo 조회로 찾음) | 파일은 H2 삭제로 지운다. 갱신 토큰이 있으므로 `aiops-proxy` 줄과 함께 OpenAI 계정에서 세션을 해제한다 | 유지(사용자 결정 2026-10-19: 위 줄과 같음. `auth.json`은 `.img`와 함께 2b·2d로 지움) |
+| SealedSecrets 봉인 키 | 클러스터 안의 키는 k3s 제거로 사라진다 | `/mnt/bulk/homelab-backups/sealed-secrets`(1개, age로 암호화), 비밀번호 관리자 첨부(있으면) | 봉인본 10개(공개 히스토리 포함)를 풀 수 있는 키다. 디스크 사본은 H8 비우기로 지운다 | 삭제됨(2026-10-19 클러스터 키는 k3s 제거로, 디스크 사본 `/mnt/bulk/homelab-backups`는 2d로 사라짐. 비밀번호 관리자 첨부가 있으면 할 일 6에서 사람이 지운다) |
 | SOPS age 키(cluster) | `~/.config/sops/age` | 클러스터 Secret `sops-age` | 옛 `.sops.yaml`의 recipient 2개(cluster, recovery)는 확인했다. 이 파일이 cluster recipient와 맞는지는 사람이 `age-keygen -y`로 대조한다. 맞으면 공개 히스토리의 SOPS 파일 9개를 풀 수 있다. 새 구조에서 쓰지 않는다. 할 일 4와 이 표의 다른 폐기가 끝난 것을 확인한 뒤 지운다(보류 아님) | 폐기 예정 |
 | SOPS age 키(recovery) | 비밀번호 관리자 항목 `homelab age recovery` | 비밀번호 관리자만(디스크 사본 없음, 런북) | 옛 SOPS 파일 9개와 봉인 키 백업을 모두 풀 수 있다. cluster 키와 같은 때 마지막에 사람이 지운다 | 폐기 예정 |
-| `HOMELAB_DISPATCH_PAT` | 앱 저장소가 쓰던 옛 dispatch PAT | 2026-09-03 기준 앱 저장소 secret 0개(런북) | GitHub에서 PAT 자체를 폐기했는지 기록이 없다 | 확인 불가(owner PAT 목록) |
-| healthchecks.io 읽기 전용 API 키 | 옛 AIOps의 healthchecks 조회용 | 저장소에 없음 | 발급됐는지 모른다 | 확인 불가(healthchecks 프로젝트 설정) |
-| Claude 구독 OAuth 토큰 | 옛 AIOps 계획의 인증 결정 | 저장소에 없음 | 계획 문서에만 있고 발급됐는지 모른다 | 확인 불가(사람) |
+| `HOMELAB_DISPATCH_PAT` | 앱 저장소가 쓰던 옛 dispatch PAT | 2026-09-03 기준 앱 저장소 secret 0개(런북) | GitHub에서 PAT 자체를 폐기했는지 기록이 없다 | 삭제됨 또는 없음(2026-10-19 사용자 "완료" 보고. 있었는지는 기록 없음) |
+| healthchecks.io 읽기 전용 API 키 | 옛 AIOps의 healthchecks 조회용 | 저장소에 없음 | 발급됐는지 모른다 | 유지(없음 확인, 2026-10-19, 사용자) |
+| Claude 구독 OAuth 토큰 | 옛 AIOps 계획의 인증 결정 | 저장소에 없음 | 계획 문서에만 있고 발급됐는지 모른다 | 유지(없음 확인, 2026-10-19, 사용자) |
 
 ## 할 일 1 결과 (2026-10-18 실측)
 
@@ -299,7 +299,8 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | NUC | `/etc/rancher/node` | 2026-10-19 s2c 뒤 남음. 옛 노드 비밀번호 파일(`k3s-uninstall.sh`가 지우지 않는다. 같은 노드로 다시 붙을 때 쓰려는 것으로 추측). 받던 옛 서버는 사라졌다 | 사용자 결정 대기(추천: 삭제. T07의 k3s가 처음 시작할 때 새로 만든다) |
 | NUC | `/usr/local/bin/sops` | 일반 실행 파일 | 유지(기본값: 자격 아님, 새 구조와 충돌 없음. 지우기로 하면 할 일 6 뒤) |
 | 옛 사본 | `.scratch`의 평문 자격(App PEM 3개, kubeconfig 사본 2개, 입력 파일) | 디렉터리 0700, 내용은 열지 않음 | 유지(기본값: 선행 확인 2대로 옛 사본은 디스크에 그대로 둠. reader·writer 키는 할 일 5.6, kubeconfig는 k3s 제거, aiops 키와 Telegram 토큰은 T22에 무효) |
-| 옛 사본 | `.scratch`의 CLIProxyAPI fixture | 토큰 필드가 있는 파일 72개. README는 합성 fixture라 적음 | 확인 불가(사람이 합성인지 확인. 실제면 D-20대로 폐기) |
+| 옛 사본 | `.scratch`의 CLIProxyAPI fixture | 토큰 필드가 있는 파일 72개. README는 합성 fixture라 적음 | 유지(합성으로 판단, 2026-10-19 형태 조회(값 미출력): 토큰 필드 JSON 99개(`accounts` 69, `ci-v176-commission-root` 30). access·refresh 토큰 모두 fake·test 같은 표식이 있고, id_token은 `iss` 없는 JWT 69개와 표식 있는 값 30개. OpenAI가 발급한 형태는 0개. 추론) |
+| GitHub | owner 계정 fine-grained PAT `homelab-aiops-collector` | 2026-10-19 사람 확인에서 처음 봄. 자격 표에 없던 옛 AIOps 수집기용, 무만료, 최근 2개월 안 사용 | 삭제됨(2026-10-19, 사용자. D-20, D-13) |
 | 기타 | 로컬 클론 `~/workspace/page`, `~/workspace/trip-mate-api`(같은 범주: `~/workspace/example-app`, 원격 없는 `~/workspace/trip-mate`) | GitHub 저장소는 삭제됐거나 없음, `.env.local` 있음(열지 않음) | 유지(기본값: 로컬 자료. 안의 자격은 자격 폐기 표에서 폐기) |
 
 ### 사람이 콘솔에서 확인할 것
