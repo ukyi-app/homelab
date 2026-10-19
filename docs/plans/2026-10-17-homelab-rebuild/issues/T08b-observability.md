@@ -51,7 +51,7 @@
 - 외부 생존 감시 (D-10, AC-P11). Alertmanager Watchdog → healthchecks.io 새 체크(Period 5분, Grace 5분). healthchecks.io 계정은 재사용하고 체크는 새로 만든다(D-10, D-20).
 - Watchdog 라우트는 `group_wait: 0s`, `group_interval: 1m`, `repeat_interval: 1m`이다. `repeat_interval`만 1m이면 기본 group_interval 5m이 실제 간격이 되어 여유가 Grace 5분뿐이다. receiver `healthchecks`는 `webhook_configs`의 `url_file`, `send_resolved: false`다. healthchecks.io 쪽 통지(이메일, Telegram)는 NUC를 거치지 않는다.
 - Alertmanager webhook이 ping URL로 직접 보내는 구성은 [미검증] U10이다. 안 되면 옛 relay를 가드(연결 없이 반환하면 ping하지 않음)와 함께 작게 둔다. 옛 relay는 그 가드가 없어 dead-man이 영구 초록이 됐다.
-- 옛 healthchecks 체크 `homelab-watchdog`는 T06에서 일시 정지돼 있고 재사용하지 않는다. 새 체크가 초록인 것을 확인한 뒤 옛 체크를 지우고, T06 자격 폐기 표의 `보류(D-10, T08b)` 줄(옛 ping URL. 재분해 전 표시는 `보류(D-10, T08)`)을 닫고 [../approvals.md](../approvals.md)에 남긴다(D-10, D-11 표, D-20).
+- 옛 healthchecks 체크 `homelab-watchdog`는 T06에서 일시 정지돼 있고 재사용하지 않는다. 새 체크가 초록인 것을 확인한 뒤 옛 체크를 지우고, T06 자격 폐기 표의 `보류(D-10, T08b)` 줄(옛 ping URL. 재분해 전 표시는 `보류(D-10, T08)`)을 닫고 [../approvals.md](../approvals.md)에 남긴다(D-10, D-11 표, D-20). **2026-10-19 실제:** 옛 체크는 T06 중에 사용자가 일시 정지 대신 지웠고, T06 표의 그 줄도 `삭제됨`으로 닫혔다(approvals). 이 티켓은 새 체크만 만든다.
 - 공개 경로 생존 확인용 두 번째 체크는 설계 C.3.7의 선택 항목이고 기본은 두지 않는다.
 
 ### AdGuard tailnet 이탈 감시 (D-08)
@@ -131,7 +131,7 @@
 - "tailnet 출처 질의 1시간 0건" 경보의 실제 발화 시험을 통과했다(아래 검증).
 - 설계 C.8의 읽기 전용 접근(CI 검사 L30은 T10)·경보 외부 수신자·격리 작업 공간 준비 확인을 통과한다(D-14 영속 공간 유지와 상주 작업자 모양, D-15 허용 목록 확인 포함. 설계 E4b).
 - 핵심 룰 단위 시험을 통과한다.
-- 새 체크가 초록이 된 뒤 옛 healthchecks 체크를 지웠고, T06 자격 폐기 표의 그 줄(옛 ping URL, `보류(D-10, T08b)`)이 닫혔고, approvals에 기록돼 있다.
+- 새 체크가 초록이 된 뒤 옛 healthchecks 체크를 지웠고, T06 자격 폐기 표의 그 줄(옛 ping URL, `보류(D-10, T08b)`)이 닫혔고, approvals에 기록돼 있다. (2026-10-19 T06 중 사용자가 먼저 지웠다. 이 항목은 그 approvals 기록과 콘솔에 옛 체크가 없음을 보는 것으로 닫는다)
 
 ## 검증
 
@@ -140,7 +140,7 @@
 - 시나리오 6·7 경보 부분: 시험 ns에 없는 키를 가리키는 ExternalSecret을 두고, 또 T09의 시험용 client secret 장애 주입으로 ESO 인증을 잠시 끊어(승인 기록) ExternalSecretNotReady 경보가 Telegram에 도착하는지 본다. 부트스트랩 Secret을 원래 client secret으로 되돌린 뒤 resolved와 시험 ns 삭제를 확인한다.
 - 이탈 경보 발화 시험: AdGuard Home이 tailnet 질의를 받지 못하는 상태를 감시 방식(T08a의 U32 결과)에 맞춰 tailnet 경로만 끊어 만든다. D-11 (a)라 NUC는 태그 없는 기기이고 `autogroup:self:*`가 모든 포트를 연다. 그래서 사람이 sudo로 `iptables -t raw -I PREROUTING -i tailscale0 -p udp --dport 53 -j DROP`(tcp도 같이)를 임시로 넣고 시험 뒤 지운다. raw PREROUTING은 hostPort DNAT보다 먼저라 svclb 경로까지 끊긴다(형식 미검증). T08a에서 (c)로 바꿔 NUC를 `tag:nuc`로 태그했으면 정책 사본을 남기고 `tag:nuc:53` 규칙을 뺀 정책을 apply한다(승인 기록). 그 동안 Tailscale 기기는 공용 서버로 해석한다. 1시간 무질의 뒤 다음 평가 주기 안에 Telegram 경보가 오는지 확인하고, 규칙이나 정책을 되돌린 뒤 resolved를 확인한다. 룰 논리는 단위 시험으로 따로 본다.
 - 핵심 룰: `vmalert-tool unittest`(형식 미검증, U11).
-- 외부 생존 감시: 새 체크가 초록(up)인 것을 healthchecks.io에서 확인한 뒤 옛 `homelab-watchdog`를 지운다.
+- 외부 생존 감시: 새 체크가 초록(up)인 것을 healthchecks.io에서 확인한 뒤 옛 `homelab-watchdog`를 지운다. (2026-10-19 T06 중 이미 지워졌다)
 - 읽기 전용 접근(설계 C.8): `kubectl auth can-i --as=system:serviceaccount:bot-slot-probe:bot-reader list pods -A` → yes, 같은 주체로 `get secrets -A`, `get pods --subresource=log -A`, `create deployments -n app-smoke` → no. `argocd admin settings rbac can bot-reader get applications '*/*'` → Yes, `sync` → No(argocd-rbac-cm 오프라인 평가). Grafana 토큰으로 `GET /api/search` → 200, `POST /api/dashboards/db` → 403.
 - 경보 외부 수신자(설계 C.8): `amtool config routes test ... severity=warning` → `bot` 포함, `amtool alert add alertname=BotRouteTest severity=warning` → 시험 수신기 로그 수신 + `alertmanager_notifications_total{integration="webhook"}` 증가 + Telegram도 수신.
 - 격리 작업 공간(설계 C.8, 시험 파드):

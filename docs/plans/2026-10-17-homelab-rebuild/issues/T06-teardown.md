@@ -117,7 +117,7 @@
 
 ### 외부 감시·알림
 
-- healthchecks.io: 계정은 이어 쓰고 체크는 새로 만든다(D-10). 옛 체크 `homelab-watchdog`는 선행 확인 4에서 일시 정지하고, T08b가 새 체크의 초록을 확인한 뒤 지운다(D-11). 줄 상태는 `보류(D-10, T08b)`.
+- healthchecks.io: 계정은 이어 쓰고 체크는 새로 만든다(D-10). 옛 체크 `homelab-watchdog`는 선행 확인 4에서 일시 정지하고, T08b가 새 체크의 초록을 확인한 뒤 지운다(D-11). 줄 상태는 `보류(D-10, T08b)`. 2026-10-19 실제: 사용자가 일시 정지 대신 지웠다(줄 상태 `삭제됨`, approvals).
 - Telegram 봇: homelab 알림용 새 봇은 T09가 만든다(D-10). 옛 봇과 토큰은 T22가 `mac-uptime-guard` 장치를 끌 때까지 그대로 둔다. 줄 상태는 `보류(D-10, T22)`. 토큰은 자격 폐기 표에 있다. 토큰 사본은 environment `homelab-main`, 클러스터 Secret 3개, `mac-uptime-guard`, NUC의 `~/workspace/mac-uptime-guard/config.env`, 옛 사본 `.scratch`의 입력 파일(토큰 모양 문자열, 추정)에 있다(2026-10-18 실측). T22가 토큰을 폐기하면 사본은 모두 무효가 된다.
 
 ### 옛 AIOps 저장소
@@ -169,7 +169,7 @@ H9 `k3s.service`: 할 일 2에서 제거한다(D-02, D-12).
 
 D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을 새로 발급하고(T09), 옛 자격은 이 티켓에서 폐기한다. 철거 뒤에는 옛 자격을 쓰는 곳이 없기 때문이다. 이 티켓에서 폐기하지 않는 줄은 넷이다: 아래 두 예외, 자격이 아니라 기기 등록인 `ts-node-key-nuc`(유지, D-12. 설계 C.3.2), T22가 App 제거와 함께 폐기하는 `ukyi-homelab-aiops` App 키(보류(D-13, T22)). 그래서 `보류(…, T09)`로 미리 정한 줄은 없다. 실행 중 그런 줄이 생기면 T09가 새 자격을 등록한 뒤 닫는다. SOPS age 개인 키(cluster·recovery 둘 다)도 보류하지 않고, 이 표의 다른 폐기가 끝난 것을 확인한 뒤 마지막에 지운다(할 일 6).
 
-**예외: 옛 healthchecks ping URL은 `보류(D-10, T08b)`로 둔다.** 체크는 선행 확인 4에서 일시 정지돼 있다. D-10대로 healthchecks.io 계정은 이어 쓰고 체크는 새로 만든다. T08b가 새 외부 생존 감시를 연결하고 정상(초록)을 확인한 뒤 옛 체크를 지우며 이 줄을 닫는다.
+**예외: 옛 healthchecks ping URL은 `보류(D-10, T08b)`로 둔다.** 체크는 선행 확인 4에서 일시 정지돼 있다. D-10대로 healthchecks.io 계정은 이어 쓰고 체크는 새로 만든다. T08b가 새 외부 생존 감시를 연결하고 정상(초록)을 확인한 뒤 옛 체크를 지우며 이 줄을 닫는다. 2026-10-19 실제: 사용자가 체크를 지워 이 줄은 `삭제됨`으로 닫혔다.
 
 **예외: 옛 Telegram 봇 토큰은 이 티켓에서 폐기하지 않는다.** 저장소 밖의 `mac-uptime-guard`가 같은 토큰을 쓰기 때문에, 폐기하면 그쪽 알림이 아무 표시 없이 끊긴다. 줄은 `보류(D-10, T22)`로 둔다. D-10은 homelab 알림용 새 봇(T09가 만듦)을 골랐다. 그래서 T22가 `mac-uptime-guard` 장치를 끈 뒤 옛 봇 토큰을 폐기하고 옛 봇을 지우며 이 줄을 닫는다. `mac-uptime-guard` 저장소는 그 뒤 지운다(D-29). 옛 봇 토큰을 재발급하는 대안은 고르지 않았으므로 T09가 이 줄을 닫는 일은 없다.
 
@@ -196,7 +196,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | Tailscale operator OAuth | 옛 operator용(devices:core·auth_keys) | SOPS 파일(`platform/tailscale/prod/operator-oauth.enc.yaml`) | | 폐기 예정 |
 | Cloudflare 터널 실행 토큰 | 터널 `homelab-prod`의 실행 토큰 | SOPS Secret `cloudflared-tunnel` | 터널 삭제(할 일 3)로 무효 | 폐기 예정 |
 | Telegram 봇 토큰 | 옛 알림 봇 | 정리 목록 "Telegram 봇" 줄 | `mac-uptime-guard`도 이 봇을 쓴다. T22가 그 장치를 끈 뒤 폐기한다(위 예외) | 보류(D-10, T22) |
-| healthchecks ping URL | `homelab-watchdog` 체크 | SOPS Secret 2개(`alerting-secrets`, `restore-drill-alerting`), `.env.secrets` | 옛 체크 삭제도 T08b(D-11)(위 예외) | 보류(D-10, T08b) |
+| healthchecks ping URL | `homelab-watchdog` 체크 | SOPS Secret 2개(`alerting-secrets`, `restore-drill-alerting`), `.env.secrets` | 옛 체크 삭제도 T08b(D-11)(위 예외) | 삭제됨(2026-10-19, 사용자가 체크를 지워 URL 무효. 계획은 T08b에서 새 체크 초록 뒤 삭제였다) |
 | `trip-mate-api` Google OAuth client | `trip-mate-api` 로그인용 Google OAuth 클라이언트 | 후보: NUC 로컬 클론 `~/workspace/trip-mate-api/.env.local` | 앱 삭제로 폐기(D-29). Google Cloud 콘솔에서 지운다 | 폐기 예정 |
 | `trip-mate-api` OXR app id | `trip-mate-api`가 쓰던 OXR app id | 후보: 같은 `.env.local` | 앱 삭제로 폐기(D-29). 발급처 계정에서 폐기한다 | 폐기 예정 |
 | `trip-mate-api` `BETTER_AUTH_SECRET` | `trip-mate-api`의 Better Auth 비밀값 | 후보: 같은 `.env.local` | 앱 삭제로 폐기(D-29). 외부 발급처가 없는 값이라, 이 값을 받던 앱이 없어졌는지(저장소·배포 삭제) 확인하고 닫는다 | 폐기 예정 |
@@ -226,7 +226,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | 1 | 완료 | 원격 `rebuild` = `fdb7dfe`(2026-10-19 11:41 push). 선행 확인 2·3 결과까지 들어 있다. 할 일 2 전에 티켓을 더 고쳤으면 다시 push한다 |
 | 2 | 완료 | 2026-10-19: 번들 `homelab-local-2026-10-19.bundle` 생성·`bundle verify` 통과(ref 52개, fetch 없이). AdGuard 라이브 설정 내보내기 완료(PV `pvc-4b2e658f-16cc-440d-bd2d-739bdc373bf6`, 결과 sha256 `a7bc4239…990a2`, 비밀 키 3개 삭제). D-08 (b′) 대가: 사용자 규칙 0개, 허용 목록 0개, 추가 필터 목록 0개(AdGuard DNS filter 1개만 켜짐), 재작성 1개. 두 파일은 맥 `~/Documents`(iCloud 동기화 밖)에 복사하고 sha256을 대조했다(approvals). AdGuard NUC 사본은 순서표 9장까지 둔다. 로컬 런북·`homelab-infra` 점검은 완료 |
 | 3 | 완료 | 2026-10-19 11:40 사용자 확인(approvals). 봉인 키와 그 디스크 백업, 런북 암호화 사본, 옛 Postgres 데이터 사본 전부, 지표·로그, 외부 자원·자격 손실을 알렸다 |
-| 4 | 사람 작업 대기(k3s 제거 직전) | 콘솔은 에이전트가 볼 수 없다. ping은 클러스터 안에서 1분마다 나가고, 일시 정지는 ping 한 번에 풀린다 |
+| 4 | 다르게 끝남(일시 정지 대신 삭제) | 2026-10-19 13:14 이전에 사용자가 콘솔에서 `homelab-watchdog`를 지웠다(approvals). 알림을 보낼 체크가 없으니 k3s 제거 뒤 down 알림도 없다. 2c 직전에 콘솔에서 체크가 다시 생기지 않았는지 본다 |
 | 5 | 완료 | `gh pr list -R ukyi-app/homelab --state open` → 0개 |
 | 6 | 완료 | 저장소·패키지 4개 모두 404. `app-main`: `files` 25327498 active, `homelab-app-template` 25327516 active |
 
@@ -266,7 +266,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | GitHub | GHCR `files` | public | 유지(T22 재연결 대상) |
 | GitHub | GHCR `aiops-autodeploy-canary` | private | 보류(D-29, T22) |
 | GitHub | 저장소 `page`, `trip-mate-api` | 404 | 삭제됨(D-29) |
-| 외부 감시·알림 | healthchecks `homelab-watchdog` | ping은 클러스터 안 `deadmanswitch-relay` | 보류(D-10, T08b) |
+| 외부 감시·알림 | healthchecks `homelab-watchdog` | ping은 클러스터 안 `deadmanswitch-relay` | 삭제됨(2026-10-19, 사용자. 계획은 일시 정지 뒤 T08b 삭제였다) |
 | 외부 감시·알림 | Telegram 봇 | 사본 위치는 정리 목록 줄 | 보류(D-10, T22) |
 | 옛 AIOps | `aiops`와 App | private, secret 등 0. App은 GitHub 행 | 보류(D-13, T22) |
 | 옛 AIOps | `aiops-autodeploy-canary` | private | 보류(D-29, T22) |
