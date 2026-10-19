@@ -13,16 +13,37 @@
 
 아래 `<이름>`은 이 이름 하나다. 스크립트와 매니페스트에는 클러스터 이름 분기가 없고, 값 파일만 바뀐다.
 
-- `vm.env`·`values-vm.yaml`의 `CHANGE_ME`는 VM을 준비할 때 채운다. 남아 있으면 스크립트가 멈춘다.
+- `vm.env`의 `CHANGE_ME`는 VM을 준비할 때 채운다. 남아 있으면 host 스크립트가 멈춘다.
+- `values-vm.yaml`은 아직 자동 검사가 없다. 지금은 키 모양만 있고 값이 비어 있다. T13이 VM 값을 채우면서 빈 값을 막는 검사도 더한다. 그 전에는 `root-vm.yaml`을 apply하지 않는다.
 - VM 호스트는 tailnet에 넣지 않는다(`TAILNET_JOIN=false`). VM 접근은 LAN 주소나 콘솔로 한다.
-- 작업 사본은 `origin/main`과 같아야 하고, `host/`에 커밋 안 한 변경이 없어야 한다. install·verify가 확인하고 멈춘다.
+
+### 0.0 작업 사본과 필요한 패키지
+
+작업 사본이 최신 `main`과 같아야 한다. 오래된 사본으로 시작하면 호스트·k3s는 옛 값으로, Argo CD는 최신 main으로 깔려 두 층의 revision이 어긋난다. 스크립트는 `host/`에 커밋 안 한 변경이 없는지만 보고 `origin/main`과는 비교하지 않으므로, 아래로 직접 확인한다.
+
+```bash
+git fetch --no-tags origin main
+git switch main
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" && git diff --quiet origin/main && echo "main과 같음"
+```
+
+새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깐다(Ubuntu 26.04 기준).
+
+```bash
+sudo apt-get update && sudo apt-get install -y git jq curl
+```
 
 ### 0.1 운영 NUC를 OS부터 다시 설치했을 때만
 
 tailnet에 이미 있으면 건너뛴다.
 
 1. Tailscale 콘솔에서 옛 NUC 기기를 먼저 지운다. 남아 있으면 새 이름에 `-1`이 붙고, 나중에 지워도 이름이 돌아오지 않는다.
-2. `sudo tailscale up --hostname=<prod.env의 NODE_NAME>`으로 등록한다.
+2. Tailscale을 공식 설치 스크립트로 깔고 등록한다. 설치 스크립트는 Tailscale의 패키지 저장소(`pkgs.tailscale.com`)를 apt에 더하고 `tailscale` 패키지를 설치한다.
+
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up --hostname=<prod.env의 NODE_NAME>
+   ```
 3. 이름을 확인한다. 아래 명령의 첫 라벨이 `prod.env`의 `NODE_NAME`과 같아야 한다.
 
    ```bash
@@ -70,17 +91,22 @@ kubectl config current-context
 
 ## 2. Argo CD 설치와 root
 
+한 단계라도 실패하면 멈춰야 한다. 대화형 셸에 줄을 붙여 넣으면 앞 명령이 실패해도 다음 줄이 돌아, 반쯤 깔린 Argo CD 위에 root가 생길 수 있다. 그래서 `set -euo pipefail`을 건 별도 bash로 돌린다. `<이름>`은 먼저 바꿔 넣는다.
+
 ```bash
+bash -euo pipefail <<'EOF'
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply --server-side --force-conflicts --field-manager=argocd-controller -k platform/argocd
 kubectl -n argocd wait --for=condition=Available deploy --all --timeout=300s
 kubectl -n argocd rollout status sts/argocd-application-controller --timeout=300s
 # (T09 뒤) ESO 부트스트랩 Secret. 아래 2.1
 kubectl apply -f platform/root/root-<이름>.yaml
+EOF
 ```
 
 - **`--field-manager=argocd-controller`를 빼지 않는다.** 기본 manager(`kubectl`)로 깔면 모든 필드를 Argo CD와 함께 소유한다. 그러면 나중에 Git에서 뺀 필드가 라이브에 영구히 남는다. 설치 뒤에는 managedFields를 손으로 고쳐야 한다.
 - root가 `argocd` Application까지 소유한다. 이후 Argo CD 변경은 PR → main이다. Argo CD는 공개 webhook 없이 main을 60초마다 본다(jitter 0).
+- **예외: root Application 자신은 Git에서 저절로 맞춰지지 않는다.** `root-prod.yaml`·`root-vm.yaml`은 차트의 `templates/` 밖에 있어 root가 렌더하지 않기 때문이다(운영 root가 VM root를 만들지 않게 하려는 배치). 그래서 이 두 파일(source, `valueFiles`, sync 정책)을 바꾸는 PR은 병합 뒤 `kubectl apply -f platform/root/root-<이름>.yaml`로 다시 적용하고, 그 PR 본문에 이 단계를 적는다. `templates/`와 값 파일 변경은 다시 적용할 필요가 없다.
 - `admin`은 꺼져 있고 사람 계정은 `owner`다. `owner` 비밀번호는 T09가 ExternalSecret으로 넣는다. 그 전까지는 `kubectl`이나 `argocd --core`로만 다룬다.
 
 ### 2.1 ESO 부트스트랩 Secret (T09에서 생김)
@@ -109,6 +135,7 @@ T11·T13이 이 절의 명령을 채운다.
 ## 3. 확인
 
 ```bash
+host/preflight.sh --cluster <이름> --after    # 스왑, 타임존, resolved 스텁, resolv.conf, 링크가 DHCP DNS 거부(drop-in 로드)
 host/verify.sh --cluster <이름>
 kubectl -n argocd get applications            # argocd, namespaces, root-<이름> 모두 Synced·Healthy
 kubectl -n argocd get cm argocd-cm -o jsonpath='{.data.timeout\.reconciliation} {.data.timeout\.reconciliation\.jitter}'   # 60s 0
@@ -116,4 +143,4 @@ resolvectl status | grep 'DNS Servers'        # 1.1.1.1 9.9.9.9
 tailscale dns status | grep 'Tailscale DNS'   # Tailscale DNS: disabled. (TAILNET_JOIN=true일 때)
 ```
 
-재부팅 뒤에도 같은 확인을 한다(시나리오 12). k3s는 enabled라 부팅 때 시작하고, Argo CD가 모든 Application을 다시 맞춘다.
+재부팅 뒤에도 `preflight --after`부터 같은 확인을 모두 한다(시나리오 12). `resolvectl`의 전역 DNS 줄만으로는 부팅 때 networkd drop-in이 안 실려 링크 DNS가 DHCP로 되살아난 경우를 못 잡는다. 그것은 `preflight --after`가 본다. k3s는 enabled라 부팅 때 시작하고, Argo CD가 모든 Application을 다시 맞춘다.

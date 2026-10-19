@@ -34,6 +34,7 @@
 5. 배포 갱신 주체가 아닌 신원의 digest PR이 자동 병합되지 않는지 확인한다 (AC-P8). T10의 시험 App을 `homelab-smoke`에도 설치해 시나리오 15로 본다.
 6. 시나리오 14에 D-08 추가 확인을 넣는다: 셀룰러 Tailscale 기기(AdGuard 정지 중 광고 도메인 차단, 일반 도메인 정상), 사용자 규칙 적용률(AdGuard Home 전용 시험 차단 규칙을 집 Wi-Fi·셀룰러에서 20회씩. 공용 DNS에서 정상 주소가 나오는 시험 이름을 쓰고 `0.0.0.0` 응답만 센다, 설계 G 시나리오 14). 측정값을 결과표에 남긴다.
 7. 시나리오 7·13 뒤 복구 자산의 운영 ESO client ID·secret으로 Infisical Universal Auth에 로그인해 성공을 확인한다. 토큰은 출력하지 않고 응답 코드만 본다. 시나리오 7의 장애 주입이 운영 client secret을 폐기하지 않았음을 확인하는 것이다(설계 E8).
+8. T07에서 넘긴 일(2026-10-19, PR #755 Codex 리뷰): `platform/root/values-vm.yaml`은 키 모양만 있고 값이 비어 있으며 빈 값을 막는 검사가 없다. VM 값을 채울 때 `templates/cluster-check.yaml`에 VM 격리 값(Infisical 프로젝트·환경, CNPG 버킷·serverName, Tailscale 이름 접두)이 비면 렌더가 실패하는 검사를 더한다. 그 전에는 `root-vm.yaml`을 apply하지 않는다(`bootstrap.md` 0절).
 
 ## 필요한 자격
 
