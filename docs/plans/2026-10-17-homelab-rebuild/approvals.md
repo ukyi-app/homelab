@@ -94,3 +94,5 @@
 | 2026-10-19 14:31 이전(사용자 보고) | 사용자 확인 | Google Cloud OAuth client(`trip-mate-api`), OXR app id, healthchecks 읽기 전용 API 키, Claude 구독 OAuth 토큰 | 모두 없음 | 각 콘솔(사람) | T06 할 일 6, D-29 |
 | 2026-10-19 14:31 이전(사용자 보고) | 사용자 결정 | OpenAI 계정 세션(`aiops-proxy` 구독 OAuth, `aiops-engine` Codex 로그인) | 전체 로그아웃하지 않고 유지("유지해도 될까?", 에이전트 동의). 전체 로그아웃은 사용자의 지금 세션까지 끊는다. 토큰 파일은 2b·2d로 지워 디스크에 남은 사본 없음 | 해당 없음 | T06 할 일 6, D-20 |
 | 2026-10-19 14:31 이전(사용자 보고) | 사용자 수행 | 비밀번호 관리자·메모의 옛 백업 | 사용자가 적어 둔 옛 자격 메모 삭제("메모해뒀는데 지워버렸음") | 사람 | T06 할 일 6 |
+| 2026-10-19 14:31 | 사용자 요청(에이전트가 herdr 새 탭에서 실행, 런북 7장 C 순서) | SOPS age 키(cluster) `~/.config/sops/age/keys.txt` | 키 1개, `age-keygen -y` 공개키가 옛 `.sops.yaml`의 `&cluster` recipient와 같음을 확인한 뒤 파일과 빈 디렉터리 삭제. 이 키를 쓰는 다른 저장소 없음(`homelab-infra`의 인수인계 문서에 공개키만 적혀 있음) | `rm ~/.config/sops/age/keys.txt` | T06 할 일 6, D-20 |
+| 2026-10-19 14:39 | 사용자 요청(에이전트가 herdr 탭에서 실행, sudo는 사용자 입력) | T06 검증, 재부팅 전(NUC nuc-15-pro, GitHub ukyi-app/homelab) | PASS 47 / FAIL 2 / SKIP 0, 부팅 2026-10-17 17:03:47. FAIL V46(티켓 열린 줄 2개: `homelab age recovery`, `/etc/rancher/node`) V47(설계 0절 3·4·6항). 14:37 1차는 sudo 입력 시간 초과로 판정 불가 10개 | `./verify-t06.sh` | T06 검증, AC-P4 |
