@@ -1,0 +1,5 @@
+# root가 platform/root/values-<클러스터>.yaml의 cluster.infisical에서 넘긴다. 여기는 빈 자리만 둔다.
+# 비어 있으면 렌더가 실패한다(templates/clustersecretstores.yaml의 required).
+infisical:
+  projectSlug: ""
+  environmentSlug: ""

@@ -20,7 +20,7 @@
    - 결과표는 `platform/verification.md`(설계 문서 옆)다.
 2. 시나리오 13(빈 환경 재구축)은 D-12 방식(확정: VM)으로 실행한다. VM은 설계 E8 "VM 격리"의 조건 여섯을 지킨다.
    - (1) 클러스터 값 주입: `platform/root/values-vm.yaml`, root `root-vm.yaml`(T07이 만들어 둠), 호스트 값 파일 `host/clusters/vm.env`(노드 이름 `vm-` 접두, 운영자 기기가 LAN으로 닿는 노드 IP). VM 값 파일 둘은 VM 시험 전에 PR로 채운다. 시크릿의 키 이름은 클러스터 값으로 바꾸지 않고 운영과 같다.
-   - (2) Infisical: VM의 ESO는 프로젝트 `homelab-dev`(환경 `dev`)를 VM 전용 identity `eso-homelab-vm`으로만 읽는다. 운영 ExternalSecret 키 목록을 운영 클러스터에서 뽑아 `homelab-dev`의 같은 경로에 시험 값을 채우고, 키 이름만 `comm -23`으로 대조해 빠진 키 0을 확인한다. 운영 값을 복사하지 않는다.
+   - (2) Infisical: VM의 ESO는 프로젝트 `homelab-dev`(환경 `dev`)를 VM 전용 identity `eso-homelab-dev`으로만 읽는다. 운영 ExternalSecret 키 목록을 운영 클러스터에서 뽑아 `homelab-dev`의 같은 경로에 시험 값을 채우고, 키 이름만 `comm -23`으로 대조해 빠진 키 0을 확인한다. 운영 값을 복사하지 않는다.
    - (3) 백업 버킷과 serverName: VM 전용 R2 버킷(예: `homelab-backups-vm`)과 serverName `pg-vm-<YYYYMMDD>`로만 아카이브한다. 운영 아카이브는 복구 원본으로만 쓰고, 그 자격은 복구 자산의 R2 읽기 전용 토큰으로 VM에 손으로 넣는 Secret 하나다(Infisical 밖). 복구 PR을 VM root apply 전에 병합하고, 시험 뒤 정리 PR로 values-vm의 복구 원본을 지운다(설계 C.6.4와 같은 순서).
    - (4) Tailscale 이름: VM operator Ingress와 operator 자신의 기기 이름에 `vm-` 접두를 쓰고, VM operator OAuth client를 따로 발급한다. VM 호스트는 tailnet에 넣지 않는다(`vm.env`의 `TAILNET_JOIN=false`). 접근은 LAN 주소나 콘솔로 한다. C.6.4 복구 순서의 "옛 클러스터 operator·프록시 기기 삭제" 단계는 건너뛰고, 시험 뒤 `vm-*` 기기만 지운다. VM은 운영 Tailscale 기기를 건드리지 않는다.
    - (5) 공개 터널·감시·알림: 시험 터널(별도 토큰), 시험 healthchecks 체크, 시험 Telegram 수신자(시험 봇 토큰)를 쓴다. VM은 운영 공개 URL을 쓰지 않는다. 공개 경로는 VM cloudflared `/ready` 200과 `cloudflared_tunnel_ha_connections` 1 이상, Traefik port-forward에 `Host: smoke.ukyi.app` 헤더로 `/healthz` 200과 없는 host 404로 확인한다. 운영 DNS 레코드를 VM용으로 바꾸지 않는다.
@@ -40,7 +40,7 @@
 
 설계 E8 선행 조건의 사람 작업이다. VM 쪽 값은 운영과 같은 키 이름으로 `homelab-dev`/`dev`에 두고 운영 값을 복사하지 않는다.
 
-- `eso-homelab-vm`의 Universal Auth client secret: identity는 T09가 만들었다. client secret은 이 티켓에서 VM을 준비할 때 발급해 저장소 밖 VM 준비 자산(복구 자산과 따로 표시한 항목)에 두고, VM 폐기 때 폐기한다.
+- `eso-homelab-dev`의 Universal Auth client secret: identity는 T09가 만들었다. client secret은 이 티켓에서 VM을 준비할 때 발급해 저장소 밖 VM 준비 자산(복구 자산과 따로 표시한 항목)에 두고, VM 폐기 때 폐기한다.
 - VM 전용 R2 버킷과 그 버킷 전용 Object Read & Write 토큰: 이 티켓에서 사람이 만든다. 토큰은 `homelab-dev`에 둔다.
 - VM operator OAuth client, 시험 터널 토큰, 시험 healthchecks 체크 ping URL, 시험 Telegram 봇 토큰: 이 티켓에서 사람이 발급해 `homelab-dev`에 둔다.
 - 그 밖의 `homelab-dev` 시험 값(Grafana·AdGuard·Argo CD 관리자 자격, `homelab-smoke`의 앱 키·DB·Valkey 비밀번호 등): 이 티켓에서 새 시험 값으로 채운다.
@@ -66,5 +66,5 @@
 
 - 시험 앱은 `homelab app remove` 뒤 `homelab data purge`로 지운다.
 - VM은 폐기한다. VM 전용 R2 버킷과 tailnet의 `vm-*` 기기(VM operator·프록시)를 지운다.
-- `eso-homelab-vm` client secret을 폐기한다.
+- `eso-homelab-dev` client secret을 폐기한다.
 - values-vm의 복구 원본은 정리 PR로 지운다.

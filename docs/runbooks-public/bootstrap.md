@@ -140,7 +140,7 @@ EOF
 
 ### 2.2 root보다 먼저 손으로 넣는 Secret (T09 이후)
 
-T09 전(2026-10-19 운영 최초 설치)에는 건너뛴다. 평상시 사람이 손으로 넣는 Secret은 ESO 부트스트랩 Secret 하나다. 값은 복구 자산에서 오고(VM은 VM 준비 자산의 `eso-homelab-vm` 값), 출력하지 않는다. 변수는 `export`해야 아래 bash가 받는다. 비었으면 Secret을 만들지 않고 멈춘다.
+T09 전(2026-10-19 운영 최초 설치)에는 건너뛴다. 평상시 사람이 손으로 넣는 Secret은 ESO 부트스트랩 Secret 하나다. 값은 복구 자산에서 오고(VM은 VM 준비 자산의 `eso-homelab-dev` 값), 출력하지 않는다. 변수는 `export`해야 아래 bash가 받는다. 비었으면 Secret을 만들지 않고 멈춘다.
 
 ```bash
 bash -euo pipefail <<'EOF'
@@ -159,7 +159,7 @@ EOF
 **vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). T11·T13이 명령을 채운다.
 
 1. ESO Secret 전에, 운영 클러스터의 ExternalSecret 키 목록과 `homelab-dev`의 키를 대조한다. 빠진 키가 0이어야 한다. 하나라도 빠지면 멈춘다. 값은 출력하지 않는다.
-2. ESO Secret의 값은 `eso-homelab-vm`이다.
+2. ESO Secret의 값은 `eso-homelab-dev`이다.
 3. root apply 전에 복구 원본 R2 읽기 자격 Secret을 넣는다. 복구가 끝나면 지운다.
 
 ### 2.3 root apply

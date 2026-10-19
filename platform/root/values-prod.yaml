@@ -14,7 +14,10 @@ cluster:
   name: prod
 
   # T09. ClusterSecretStore가 읽을 Infisical 프로젝트·환경. 운영은 homelab / prod.
-  infisical: {}
+  # slug는 프로젝트 이름이 아니다. Infisical이 앞에 조직 접두를 붙인 값이라 프로젝트 설정의 "Copy Project Slug"로 확인한다.
+  infisical:
+    projectSlug: ukyi-homelab
+    environmentSlug: prod
 
   # T08a. Tailscale operator Ingress hostname과 operator 기기 이름의 접두. 운영은 접두 없음.
   tailscale: {}
