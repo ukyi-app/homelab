@@ -19,18 +19,20 @@
 
 ### 0.0 작업 사본과 필요한 패키지
 
-작업 사본이 최신 `main`과 같아야 한다. 오래된 사본으로 시작하면 호스트·k3s는 옛 값으로, Argo CD는 최신 main으로 깔려 두 층의 revision이 어긋난다. 스크립트는 `host/`에 커밋 안 한 변경이 없는지만 보고 `origin/main`과는 비교하지 않으므로, 아래로 직접 확인한다.
+새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깔고, 작업 사본이 없으면 만든다(Ubuntu 26.04 기준).
+
+```bash
+sudo apt-get update && sudo apt-get install -y git jq curl gnupg
+[ -d ~/homelab/.git ] || git clone https://github.com/ukyi-app/homelab ~/homelab
+cd ~/homelab
+```
+
+작업 사본이 최신 `main`과 같아야 한다. 오래된 사본으로 시작하면 호스트·k3s는 옛 값으로, Argo CD는 최신 main으로 깔려 두 층의 revision이 어긋난다. 스크립트는 `host/`에 커밋 안 한 변경이 없는지만 보고 `origin/main`과는 비교하지 않으므로, 아래로 직접 확인한다. 이 문서의 명령은 모두 이 저장소 루트에서 한다.
 
 ```bash
 git fetch --no-tags origin main
 git switch main
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" && git diff --quiet origin/main && echo "main과 같음"
-```
-
-새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깐다(Ubuntu 26.04 기준).
-
-```bash
-sudo apt-get update && sudo apt-get install -y git jq curl gnupg
 ```
 
 ### 0.1 운영 NUC를 OS부터 다시 설치했을 때만
@@ -45,9 +47,12 @@ tailnet에 이미 있으면 건너뛴다.
    codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"   # 26.04는 resolute
    key="$(mktemp)"
    curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${codename}.noarmor.gpg" -o "$key"
-   fpr="$(gpg --show-keys --with-colons "$key" | awk -F: '/^fpr/ { print $10; exit }')"
-   # Tailscale 저장소 서명 키(2026-10-19 확인, 운영 NUC 설치본과 같음). 다르면 멈춘다
-   test "$fpr" = 2596A99EAAB33821893C0A79458CA832957F5868 || { echo "키 지문이 다르다: $fpr"; exit 1; }
+   # signed-by에 키링 파일을 주면 APT는 그 안의 모든 키를 서명자로 믿는다. 그래서 첫 키만 보지 않고,
+   # 기본 키가 정확히 하나이고 그 지문이 Tailscale 저장소 서명 키(2026-10-19 확인, 운영 NUC 설치본과 같음)인지 본다
+   pubs="$(gpg --show-keys --with-colons "$key" | awk -F: '/^pub/ { n++ } END { print n + 0 }')"
+   fpr="$(gpg --show-keys --with-colons "$key" | awk -F: '/^pub/ { getline; print $10; exit }')"
+   test "$pubs" = 1 && test "$fpr" = 2596A99EAAB33821893C0A79458CA832957F5868 \
+     || { echo "키링이 예상과 다르다: 기본 키 ${pubs}개, 첫 지문 ${fpr}"; exit 1; }
    sudo install -m 0644 "$key" /usr/share/keyrings/tailscale-archive-keyring.gpg
    echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu ${codename} main" \
      | sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null
