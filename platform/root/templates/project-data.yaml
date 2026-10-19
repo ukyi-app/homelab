@@ -1,0 +1,41 @@
+# AppProject data(설계 C.3.3 AppProject 표). ApplicationSet data가 만드는 데이터 Application이 쓴다.
+# 앱과 데이터의 수명을 나눈다. T07이 표대로 미리 두고, 바꿀 일이 생기면 T11이 이 파일만 고친다.
+# 복원용 Job·임시 Cluster는 여기 없다. CLI가 kubectl로 만드는 GitOps 밖 일회성 객체다(설계 C.5.7).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: data
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-11"
+spec:
+  description: App data from ApplicationSet data
+  sourceRepos:
+    - https://github.com/ukyi-app/homelab
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: database
+    - server: https://kubernetes.default.svc
+      namespace: app-*
+  # clusterResourceWhitelist를 적지 않는다. 없으면 cluster-scoped 리소스는 모두 거부된다.
+  namespaceResourceWhitelist:
+    - group: postgresql.cnpg.io
+      kind: Database
+    - group: postgresql.cnpg.io
+      kind: DatabaseRole
+    - group: external-secrets.io
+      kind: ExternalSecret
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: PersistentVolumeClaim
+    - group: ""
+      kind: ConfigMap
+    - group: batch
+      kind: CronJob
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    - group: ""
+      kind: ServiceAccount

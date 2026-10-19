@@ -1,94 +1,48 @@
-# --- Secrets & keys — NEVER commit (only SOPS-encrypted *.enc.yaml belong in git) ---
-*.agekey
-age.key
-*.age
-key.txt
-keys.txt
+# 공개 저장소다. 자격이 담길 수 있는 파일은 이름을 바꾼 사본까지 무시한다(옛 R41).
+# 옛 사고 둘: terraform.tfvars.pre-cutover.bak이 *.tfvars에 안 걸려 커밋될 뻔했고,
+# 이름만 바꾼 backend.hcl 사본(R2 state 키 평문)을 git add -A가 스테이징했다.
+# 자격은 파일로 두지 않고 infisical run으로만 넣는다(설계 C.2). 이 목록은 그 규칙을 어겼을 때의 그물이다.
+
+# 환경변수 파일. host/versions.env·host/clusters/*.env는 공개 값이라 추적한다. 그래서 *.env는 쓰지 않는다.
 .env
 .env.*
-!.env.example
-!.env.secrets.example
-*.decrypted.yaml
-*.dec.yaml
 
-# --- Terraform ---
-**/.terraform/*
+# 키
+*.pem
+*.key
+*.agekey
+
+# Terraform. .terraform.lock.hcl은 provider 해시를 고정하므로 커밋한다.
+**/.terraform/
 *.tfstate
 *.tfstate.*
-*.tfvars
-# ⚠️ 파생 사본도 함께 무시한다(`*.tfstate.*`와 대칭). tfvars는 시크릿을 담아 무시되는데
-#    `terraform.tfvars.pre-cutover.bak` 같은 사본은 `*.tfvars`에 **안 걸려** untracked로 남고,
-#    `git add -A` 한 번에 커밋될 수 있었다. 게다가 `just ci-guard-tracked`가 untracked 게이트
-#    대상 파일을 보고 exit 4로 막으므로, 그런 백업 하나가 로컬 `just ci` 재현을 통째로 세운다
-#    (2026-08-17 컷오버 백업이 실제로 그렇게 막았다).
-*.tfvars.*
-!*.tfvars.example
-# ⚠️ `backend.hcl`도 **똑같이** 접미사 사본이 빠져나간다 — 위 tfvars 교훈이 여기엔 적용돼 있지 않았고,
-#    2026-08-19에 실제로 밟았다: 맥 폐기 절차에서 apply 경로를 닫으려고 `backend.hcl` 3개를
-#    `.MOVED-TO-NUC-20260819`로 rename했더니 `git add -A`가 그걸 **전부 스테이징했다**.
-#    이 파일들엔 R2 state의 access_key/secret_key가 평문으로 들어 있고 레포는 public이다.
-backend.hcl
-backend.hcl.*
-!backend.hcl.example
+# 접미사 사본(.bak, .json, .auto.tfvars)까지 잡으려고 끝에 *를 붙인다.
+*.tfvars*
+backend.hcl*
+# override 파일은 일반 .tf 위에 병합돼 리소스를 덮는다. 래퍼(tools/tf-github.sh)도 이 이름을 거부한다(설계 C.3.9).
+*override.tf*
+tfplan
+*.tfplan
 crash.log
-override.tf
-override.tf.json
-# terraform override 파일은 일반 .tf 뒤에 병합돼 리소스를 재정의/비활성화한다 —
-# 신뢰 앵커(bump-poll ruleset 등) 우회 방지로 전 형태를 무시(bats no-override 가드와 이중화).
-*_override.tf
-*_override.tf.json
+crash.*.log
 
-# --- SOPS plaintext scratch ---
-*.tmp.yaml
-
-# --- 외부(비신뢰) 앱 레포 sparse-checkout 경로 — create-app/update-secrets가 여기에 푼다 ---
-.apprepo/
-
-# --- 컨덕터 임시 상태(feature/bugfix/deepen 파이프라인 conductor·로컬 티켓) — 커밋 아티팩트는 docs/reviews/ ---
-.scratch/
-
-# --- Kubeconfig / cluster creds ---
-kubeconfig
+# kubeconfig에는 cluster-admin 토큰이 있다(설계 B.8 E2).
+kubeconfig*
 *.kubeconfig
 .kube/
 
-# --- Node / pnpm ---
+# 운영 민감 문서(로컬 런북, 복구 자산 목록)는 저장소 밖에 둔다(D-23). 공개 런북은 docs/runbooks-public/.
+docs/runbooks/
+
+# 로컬 도구
+mise.local.toml
+.mise.local.toml
 node_modules/
-dist/
-build/
-.turbo/
-*.tsbuildinfo
-.pnpm-store/
-
-# --- Claude Code 하네스 / 런타임 상태 ---
-# 런타임/세션/크레덴셜은 통째 무시하되, 추적할 하네스 자산만 화이트리스트로 되살린다.
-# 디렉토리 매치(.claude/)는 하위 부정(!)을 무력화하므로 반드시 `.claude/*`(직접 자식)형으로.
+# .claude/ 대신 .claude/*로 둔다. 디렉터리째 무시하면 나중에 하위 파일을 !로 되살릴 수 없다.
 .claude/*
-!.claude/settings.json
-!.claude/hooks/
-!.claude/hooks/**
-!.claude/agents/
-!.claude/agents/**
-!.claude/commands/
-!.claude/commands/**
-!.claude/skills/
-!.claude/skills/**
 
-# --- OS / editor ---
+# OS·편집기
 .DS_Store
 *.swp
 .idea/
-.vscode/*
-!.vscode/extensions.json
-
-# --- kustomize `--enable-helm` chart-pull cache (build artifact, never commit) ---
-platform/*/prod/charts/
-# Terraform provider lock files: 멀티플랫폼(linux_arm64=CI, linux_amd64=owner-local NUC, darwin_arm64) 락을 커밋한다 —
-# 무인 apply/reconcile가 -lockfile=readonly로 핀된 provider만 쓰도록(재현성·공급망).
-# 운영 런북은 로컬 전용 — public 레포에 올리지 않는다(사용자 결정 2026-06-11)
-docs/runbooks/
-.just-ci-uneval
-
-# python 바이트코드 — tests/gates/*.py(하네스 생성기)를 py_compile로 검사할 때 생긴다.
-__pycache__/
-*.pyc
+.vscode/

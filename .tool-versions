@@ -1,0 +1,14 @@
+# 도구 버전은 이 파일 한 곳에 둔다(설계 C.4.6, 옛 R29·R37: 버전 선언이 여러 곳이면 어긋났다).
+# 로컬은 mise install, CI는 .github/workflows/ci.yaml이 이 값을 읽는다.
+# CI가 받는 도구(actionlint, gitleaks, kustomize, shellcheck)의 버전을 바꾸면 ci.yaml의 sha256도 같은 커밋에서 바꾼다.
+# 안 바꾸면 ci의 설치 단계가 sha256 불일치로 실패한다.
+actionlint 1.7.12
+gitleaks 8.30.1
+# helm·kustomize는 Argo CD v3.5.5에 들어 있는 버전과 맞춘다(argo-cd hack/tool-versions.sh).
+# 로컬·CI 렌더가 Argo CD 렌더와 같아야 하므로 Argo CD를 올릴 때 함께 옮긴다.
+helm 4.2.1
+kustomize 5.8.1
+# k3s(host/versions.env)와 같은 minor. kubectl은 서버와 한 minor 차이까지만 지원한다.
+kubectl 1.36.5
+shellcheck 0.11.0
+yq 4.54.1

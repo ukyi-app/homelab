@@ -1,0 +1,29 @@
+{{- /*
+자리: cnpg-operator. 맡은 티켓 T11, wave -6(설계 C.3.1). CNPG operator와 Barman Cloud Plugin. plugin은 cert-manager(-7) 뒤다.
+켜기: values.yaml의 components.cnpgOperator.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
+source와 destination은 자리표시다. 맡은 티켓이 정한다(외부 Helm 차트면 chart와 고정 semver, _helpers.tpl).
+*/}}
+{{- if .Values.components.cnpgOperator.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnpg-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/cnpg/operator
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}

@@ -1,0 +1,29 @@
+# Argo CD 설치(설계 C.3.3). 공식 install.yaml을 base로 두고 ConfigMap patch만 얹는다.
+# Helm 차트는 커뮤니티 유지라 쓰지 않는다.
+#
+# 최초 설치는 bootstrap이 kubectl apply --server-side로 하고, 그 뒤로는 root의 argocd Application이
+# ServerSideApply로 이 디렉터리를 맞춘다(자기 관리, platform/root/templates/argocd.yaml).
+# bootstrap은 반드시 --field-manager=argocd-controller로 적용한다(Argo CD SSA의 manager 이름).
+# 기본 manager(kubectl)로 깔면 모든 필드를 두 manager가 함께 소유해, 나중에 Git에서 뺀 필드
+# (업그레이드로 사라진 env·인자, patch에서 뺀 argocd-cm 키)를 SSA가 지우지 않고 라이브에 영구히 남긴다.
+# Argo CD는 그래도 Synced로 보인다. 설치 뒤에는 managedFields를 손으로 고쳐야 하므로 처음에 맞춘다.
+#
+# replica 수는 공식 방식(StatefulSet replicas와 그에 맞춘 설정)으로만 바꾼다. ARGOCD_CONTROLLER_REPLICAS를
+# env로 직접 넣으면 install.yaml에 이미 있는 같은 env 키와 겹쳐 SSA가 중복 키로 거부한다(설계 B.8 E2).
+#
+# 업그레이드는 아래 URL의 버전 문자열 하나를 바꾸는 PR이다. 같은 PR에서 두 가지를 함께 본다.
+# - .tool-versions의 helm·kustomize를 그 Argo CD 버전에 든 버전으로 옮긴다. 로컬·CI 렌더가 Argo CD 렌더와 같아야 한다.
+# - argocd-cm.yaml의 resource.exclusions를 새 install.yaml의 기본 목록과 대조한다. 그 키는 통째로 덮어쓴다.
+#
+# argocd-secret은 여기서 patch하지 않는다. data를 여기 적으면 Argo CD가 그 Secret의 data 소유권을 가져,
+# 서버나 다른 컨트롤러가 넣은 키(owner 비밀번호 등)를 sync 때 지울 수 있다(옛 bootstrap-values.yaml의 경고).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: argocd
+resources:
+  # 공식 매니페스트의 NetworkPolicy 7개(구성 요소별 ingress 제한)를 그대로 둔다. 옛 구성에서는 repo-server에
+  # 정책이 없어 다른 ns의 파드가 렌더를 요청할 수 있었다(설계 B.8 E2). 라이브 적용 확인은 T07에서 한다.
+  - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.5/manifests/install.yaml
+patches:
+  - path: argocd-cm.yaml
+  - path: argocd-rbac-cm.yaml

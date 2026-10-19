@@ -1,3 +1,0 @@
-# bun install 동작 핀 — frozen lockfile로 deterministic 설치(.npmrc engine-strict/prefer-frozen 대체).
-[install]
-frozenLockfile = true

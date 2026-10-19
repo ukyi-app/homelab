@@ -1,0 +1,28 @@
+{{- /*
+자리: sandbox. 맡은 티켓 T08b, wave -2(설계 C.3.1). 격리 작업 공간(ns sandbox)과 egress 프록시(ns egress). 두 ns에 걸쳐 destination.namespace를 비운다.
+켜기: values.yaml의 components.sandbox.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
+source와 destination은 자리표시다. 맡은 티켓이 정한다(외부 Helm 차트면 chart와 고정 semver, _helpers.tpl).
+*/}}
+{{- if .Values.components.sandbox.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sandbox
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/sandbox
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}

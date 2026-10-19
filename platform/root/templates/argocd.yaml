@@ -1,0 +1,28 @@
+# argocd: Argo CD 자기 관리(설계 C.3.3). T07. wave -10. 항상 켜져 있다(자리 스위치 없음).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+  # resources-finalizer를 붙이지 않는다. 이 Application을 지워도 Argo CD 자신은 남아야 한다.
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      # prune을 적지 않는다(= 끔). 자기 관리 App이 prune으로 자기 리소스를 지우지 않게 보수적으로 간다
+      # [미검증, 커뮤니티 사례만]. false를 직접 적으면 zero-value 플립플롭이 난다(_helpers.tpl).
+      selfHeal: true
+    syncOptions:
+      # 공식 권장. install.yaml의 CRD가 커서 client-side apply의 last-applied 주석 한도를 넘는다.
+      - ServerSideApply=true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}

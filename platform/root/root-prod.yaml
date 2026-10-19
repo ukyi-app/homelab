@@ -1,0 +1,37 @@
+# 운영 클러스터의 root Application(설계 C.3.3). bootstrap 3번에서 사람이 한 번 kubectl apply한다.
+# VM에는 root-vm.yaml을 apply한다. 두 파일은 이름과 helm.valueFiles만 다르다.
+#
+# root 자신은 templates/ 밖이라 Git에서 다시 맞춰지지 않는다. 이 파일을 고치면 다시 apply한다.
+# 그 대신 argocd Application은 root가 소유한다(templates/argocd.yaml). 옛 구성은 자기 관리 App과 root를
+# 부트스트랩에서 따로 만들어, 하나만 다시 apply하면 핀 이동이 한쪽만 됐다(옛 scripts/bootstrap.sh:33-44, L21).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-prod
+  namespace: argocd
+  # resources-finalizer를 붙이지 않는다. 붙이면 root를 지울 때 자식 Application이 cascade로 지워진다.
+spec:
+  # root는 default 프로젝트다. platform 프로젝트는 root가 만든다(templates/project-platform.yaml).
+  # root가 platform에 들면 최초 apply 때 "Application referencing project platform which does not exist"로 멈춘다.
+  project: default
+  source:
+    repoURL: https://github.com/ukyi-app/homelab
+    # 자기 저장소 참조는 모두 main이다. 브랜치 이름이 남은 채 병합하면 Argo CD가 죽은 브랜치를 따라간다(L31).
+    targetRevision: main
+    path: platform/root
+    helm:
+      valueFiles:
+        - values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # 자식과 같은 retry 규칙(templates/_helpers.tpl의 homelab.retry). 이 파일은 템플릿이 아니라 직접 적는다.
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        maxDuration: 5m
