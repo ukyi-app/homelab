@@ -65,8 +65,9 @@ tailnet에 이미 있으면 건너뛴다.
      | sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null
    sudo apt-get update
    sudo apt-get install -y tailscale
-   EOF
+   # 검증된 설치가 끝난 뒤에만 등록한다. 블록 밖에 두면 설치가 실패해도 남아 있던 옛 바이너리로 등록된다
    sudo tailscale up --hostname=<prod.env의 NODE_NAME>
+   EOF
    ```
 
    외부 패키지를 깐 뒤에는 0.0의 `origin/main` 일치 확인을 다시 한다.
