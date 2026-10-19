@@ -173,7 +173,7 @@ kubectl apply -f platform/root/root-<이름>.yaml
 
 ## 3. 확인
 
-다른 블록처럼 한 항목이라도 틀리면 멈추고, 끝까지 가면 `확인 통과`를 출력한다. 재부팅 뒤 새 셸에서도 이 블록을 그대로 돌린다(`KUBECONFIG`를 안에서 잡는다).
+다른 블록처럼 한 항목이라도 틀리면 멈추고, 모든 항목(prod의 Tailscale DNS 포함)이 맞을 때만 마지막에 `확인 통과`를 출력한다. 재부팅 뒤 새 셸에서도 이 블록을 그대로 돌린다(`KUBECONFIG`를 안에서 잡는다).
 
 ```bash
 bash -euo pipefail <<'EOF'
@@ -187,14 +187,13 @@ test "$(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.statu
 test "$(kubectl -n argocd get cm argocd-cm -o jsonpath='{.data.timeout\.reconciliation} {.data.timeout\.reconciliation\.jitter}')" = "60s 0"
 # 노드 DNS는 공용 DNS 직접
 resolvectl status | grep -F 'DNS Servers: 1.1.1.1 9.9.9.9'
+# TAILNET_JOIN=true(prod)만: Tailscale DNS를 받지 않는다. 받으면 노드 DNS가 AdGuard에 다시 묶인다.
+# VM은 tailnet에 없고 Tailscale도 깔지 않으므로 건너뛴다
+if [ "$(. host/clusters/<이름>.env && echo "$TAILNET_JOIN")" = true ]; then
+  tailscale dns status | grep -Fx 'Tailscale DNS: disabled.'
+fi
 echo "확인 통과"
 EOF
-```
-
-`TAILNET_JOIN=true`인 클러스터(prod)만 더 본다. VM은 tailnet에 없고 Tailscale도 깔지 않으므로 건너뛴다.
-
-```bash
-tailscale dns status | grep -Fx 'Tailscale DNS: disabled.'   # 이 줄이 그대로 나와야 한다. 안 나오면 노드 DNS가 AdGuard에 다시 묶인다
 ```
 
 재부팅 뒤에도 `preflight --after`부터 같은 확인을 모두 한다(시나리오 12). `resolvectl`의 전역 DNS 줄만으로는 부팅 때 networkd drop-in이 안 실려 링크 DNS가 DHCP로 되살아난 경우를 못 잡는다. 그것은 `preflight --after`가 본다. k3s는 enabled라 부팅 때 시작하고, Argo CD가 모든 Application을 다시 맞춘다.
