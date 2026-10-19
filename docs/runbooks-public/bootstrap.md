@@ -66,7 +66,9 @@ tailnet에 이미 있으면 건너뛴다.
    sudo apt-get update
    sudo apt-get install -y tailscale
    # 검증된 설치가 끝난 뒤에만 등록한다. 블록 밖에 두면 설치가 실패해도 남아 있던 옛 바이너리로 등록된다
-   sudo tailscale up --hostname=<prod.env의 NODE_NAME> --accept-dns=false   # 등록 순간부터 노드 DNS를 tailnet(AdGuard)과 떼어 둔다(H5)
+   # --accept-dns=false: 등록 순간부터 노드 DNS를 tailnet(AdGuard)과 떼어 둔다(H5)
+   # --ssh: 원격 접속은 Tailscale SSH다(sshd는 LAN 키 인증만). 2026-10-19 운영 NUC 설정(RunSSH=true)과 같다
+   sudo tailscale up --hostname=<prod.env의 NODE_NAME> --accept-dns=false --ssh
    EOF
    ```
 
@@ -171,15 +173,22 @@ kubectl apply -f platform/root/root-<이름>.yaml
 
 ## 3. 확인
 
-각 줄의 기대값을 눈으로 본다. 재부팅 뒤 새 셸이면 `KUBECONFIG`부터 다시 잡는다.
+다른 블록처럼 한 항목이라도 틀리면 멈추고, 끝까지 가면 `확인 통과`를 출력한다. 재부팅 뒤 새 셸에서도 이 블록을 그대로 돌린다(`KUBECONFIG`를 안에서 잡는다).
 
 ```bash
+bash -euo pipefail <<'EOF'
 export KUBECONFIG=~/.kube/<KUBE_CONTEXT>.yaml   # prod는 homelab, vm은 homelab-vm
-host/preflight.sh --cluster <이름> --after    # 스왑, 타임존, resolved 스텁, resolv.conf, 링크가 DHCP DNS 거부(drop-in 로드)
-host/verify.sh --cluster <이름>
-kubectl -n argocd get applications            # argocd, namespaces, root-<이름> 모두 Synced·Healthy
-kubectl -n argocd get cm argocd-cm -o jsonpath='{.data.timeout\.reconciliation} {.data.timeout\.reconciliation\.jitter}'   # 60s 0
-resolvectl status | grep 'DNS Servers'        # 1.1.1.1 9.9.9.9
+host/preflight.sh --cluster <이름> --after      # 스왑, 타임존, resolved 스텁, resolv.conf, 링크가 DHCP DNS 거부(drop-in 로드)
+host/verify.sh --cluster <이름>                 # 노드 Ready, k3s 버전, node-args, SAN, local-retain
+kubectl -n argocd get applications
+# 모든 Application이 Synced·Healthy
+test "$(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.status.sync.status}/{.status.health.status}{"\n"}{end}' | sort -u)" = "Synced/Healthy"
+# 공개 webhook 없이 60초 폴링, jitter 0
+test "$(kubectl -n argocd get cm argocd-cm -o jsonpath='{.data.timeout\.reconciliation} {.data.timeout\.reconciliation\.jitter}')" = "60s 0"
+# 노드 DNS는 공용 DNS 직접
+resolvectl status | grep -F 'DNS Servers: 1.1.1.1 9.9.9.9'
+echo "확인 통과"
+EOF
 ```
 
 `TAILNET_JOIN=true`인 클러스터(prod)만 더 본다. VM은 tailnet에 없고 Tailscale도 깔지 않으므로 건너뛴다.
