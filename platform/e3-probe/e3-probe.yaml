@@ -64,10 +64,10 @@ spec:
           type: RuntimeDefault
       containers:
         - name: probe
-          # busybox 1.38.0(멀티 아키텍처 index digest, 2026-10-19 Docker Hub에서 확인).
-          # 시나리오 7의 digest만 바꾸는 PR은 같은 버전 musl 변형으로 바꾼다:
-          # sha256:ea2b9914a16a4ac1981994af97b318f7c7d4db76b580c56177f08bf76f4a0be8
-          image: docker.io/library/busybox@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+          # busybox 1.38.0-musl(멀티 아키텍처 index digest, 2026-10-20 Docker Hub에서 확인). 시나리오 7의
+          # digest만 바꾸는 PR로 같은 버전 musl 변형이 됐다. 원래 glibc 변형:
+          # sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+          image: docker.io/library/busybox@sha256:ea2b9914a16a4ac1981994af97b318f7c7d4db76b580c56177f08bf76f4a0be8
           command: ["sleep", "2147483647"]
           env:
             # 키마다 secretKeyRef로 넣고 optional을 적지 않는다(기본 false). Secret에 키가 없으면 새 파드가
