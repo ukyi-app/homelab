@@ -66,7 +66,7 @@ tailnet에 이미 있으면 건너뛴다.
    sudo apt-get update
    sudo apt-get install -y tailscale
    # 검증된 설치가 끝난 뒤에만 등록한다. 블록 밖에 두면 설치가 실패해도 남아 있던 옛 바이너리로 등록된다
-   sudo tailscale up --hostname=<prod.env의 NODE_NAME>
+   sudo tailscale up --hostname=<prod.env의 NODE_NAME> --accept-dns=false   # 등록 순간부터 노드 DNS를 tailnet(AdGuard)과 떼어 둔다(H5)
    EOF
    ```
 
