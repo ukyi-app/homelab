@@ -308,7 +308,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | [T04](issues/T04-platform-design.md) | 플랫폼 설계 실행 | P1 | T02(로컬 단계), T03 | 완료 | 에이전트 |
 | [T05](issues/T05-platform-decisions.md) | 플랫폼 결정 확정·구축 티켓 재분해 | P1 | T04 | 완료 (2026-10-18) | 사람 + 에이전트 |
 | [T06](issues/T06-teardown.md) | 옛 클러스터 철거·외부 자원 정리 | P2 | T05, T02, T01 | 완료 (2026-10-19, 재부팅 뒤 검증 FAIL 0. 옛 Telegram 봇 토큰 폐기는 사용자 작업 대기) | 사람 |
-| [T07](issues/T07-bootstrap.md) | 부트스트랩: main 교체·k3s·Argo CD | P2 | T01, T02, T06 | 진행 중 (2026-10-19 착수) | 에이전트 + 사람 |
+| [T07](issues/T07-bootstrap.md) | 부트스트랩: main 교체·k3s·Argo CD | P2 | T01, T02, T06 | 완료 (2026-10-19, main `eaf7bb5`, 재부팅 뒤 확인 통과) | 에이전트 + 사람 |
 | [T08a](issues/T08a-network.md) | 네트워크·DNS·외부 공개 | P2 | T07, T09 | 대기 | 에이전트 + 사람 |
 | [T08b](issues/T08b-observability.md) | 관측·알림·봇 자리 | P2 | T08a, T09 | 대기 | 에이전트 + 사람 |
 | [T09](issues/T09-secrets.md) | 시크릿 체계 | P2 | T07 | 대기 | 에이전트 + 사람 |
