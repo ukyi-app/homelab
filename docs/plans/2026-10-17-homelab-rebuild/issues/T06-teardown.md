@@ -1,7 +1,7 @@
 # T06 옛 클러스터 철거·외부 자원 정리
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-18 할 일 1 실측 완료. 2026-10-19 선행 확인 1·2·3 완료와 NUC sudo 조회 완료. 4는 k3s 제거 직전)
+- 상태: 진행 중 (2026-10-18 할 일 1 실측 완료. 2026-10-19 선행 확인 1·2·3 완료와 NUC sudo 조회 완료, 할 일 2의 2a·2b 완료. 4는 k3s 제거 직전)
 - 명세: [../spec.md](../spec.md) §4.5, §10
 - 설계: [../platform/design.md](../platform/design.md) E.1 E1, E.2 E1 행, B.4, B.8 "E1 철거", F D-10·D-11·D-12·D-20
 - Blocked by: T05, T02(push), T01(열린 PR 닫기)
@@ -271,13 +271,13 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | 옛 AIOps | `aiops`와 App | private, secret 등 0. App은 GitHub 행 | 보류(D-13, T22) |
 | 옛 AIOps | `aiops-autodeploy-canary` | private | 보류(D-29, T22) |
 | 옛 AIOps | `mac-uptime-guard` | private, NUC 로컬 클론 있음 | 보류(담당 T22) |
-| NUC | H1 유닛 | nft 서비스·mount active, ingress·worker inactive | 삭제 예정(D-12) |
-| NUC | H2 파일·사용자·추가 잔여물 | 모두 있음. 2026-10-19 sudo 조회: nft table `inet homelab_aiops`, `/etc/nftables.d`에는 `homelab-aiops.nft` 1개뿐(패키지 소유 아님, `/etc/nftables.conf`가 include하지 않음), `/etc/homelab-aiops` 항목 39개(13G), `/var/tmp` 작업 디렉터리 125개(4.8G). 추가 잔여물은 H2 추가 줄 | 삭제 예정(D-12. `/etc/nftables.d`는 디렉터리째, `T06_RM_NFTABLES_D=1`) |
-| NUC | H3 유닛 | timer 둘 active, 옛 사본 스크립트 실행 | 삭제 예정(D-12, 옛 사본 이동 전) |
+| NUC | H1 유닛 | nft 서비스·mount active, ingress·worker inactive | 삭제됨(2026-10-19 12:52 s2b, D-12. nft table 삭제, mount·loop 해제 확인) |
+| NUC | H2 파일·사용자·추가 잔여물 | 모두 있음. 2026-10-19 sudo 조회: nft table `inet homelab_aiops`, `/etc/nftables.d`에는 `homelab-aiops.nft` 1개뿐(패키지 소유 아님, `/etc/nftables.conf`가 include하지 않음), `/etc/homelab-aiops` 항목 39개(13G), `/var/tmp` 작업 디렉터리 125개(4.8G). 추가 잔여물은 H2 추가 줄 | 삭제됨(2026-10-19 12:52 s2b, D-12. `/etc/nftables.d`·`/nonexistent` 디렉터리째, `aiops-*` 사용자 8명·그룹 9개, `/var/tmp` 125개. `.img`는 H8) |
+| NUC | H3 유닛 | timer 둘 active, 옛 사본 스크립트 실행 | 삭제됨(2026-10-19 12:52 s2b, D-12) |
 | NUC | H4 drop-in | 셋 다 있음 | 유지(D-12, T07이 덮어씀) |
 | NUC | H5 노드 DNS | drop-in 있음, `/etc/resolv.conf`는 stub 아님, "Tailscale DNS: disabled" | 유지(D-12, T07이 맡음) |
 | NUC | H6 swap | fstab swap 항목 0개 | 유지(할 일 없음) |
-| NUC | H7 MOTD | motd-refresh timer active. 범위를 고쳤다(H7 줄) | 삭제 예정(D-12, 사용자 결정 2026-10-19: k3s 상태 표시만, 고양이 MOTD 유지) |
+| NUC | H7 MOTD | motd-refresh timer active. 범위를 고쳤다(H7 줄) | 삭제됨(2026-10-19 12:52 s2b, D-12, 사용자 결정 2026-10-19: k3s 상태 표시만 지움. `00-ukyi` 원본 복원, 고양이 MOTD 유지) |
 | NUC | H9 `k3s.service` | active·enabled. 옛 Argo CD 워크로드 6개 모두 replicas 1 | 삭제 예정(D-12) |
 | 옛 데이터 | `/var/lib/rancher/k3s-storage` | 있음. 2026-10-19 sudo 조회: `internal` 아래 PVC 4개(1.3G: AdGuard, `pg-1`, `pg-1-wal`, `trip-mate-data`) | 삭제 예정(H8. AdGuard 내보내기는 2026-10-19 완료) |
 | 옛 데이터 | `/mnt/bulk`와 fstab | ext4 마운트, 2.2G. 2026-10-19 sudo 조회: 항목 5개(옛 PVC 4개와 `homelab-backups`, 선행 확인 3), fstab 줄 1개 | 삭제 예정(H8, 비운 뒤 fstab 항목 삭제) |
