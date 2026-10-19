@@ -1,7 +1,7 @@
 # T06 옛 클러스터 철거·외부 자원 정리
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-18 할 일 1 실측 완료. 2026-10-19 선행 확인 1·2·3 완료와 NUC sudo 조회 완료, 할 일 2(2a~2d) 완료. 선행 확인 4는 체크 삭제로 다르게 끝남)
+- 상태: 진행 중 (2026-10-18 할 일 1 실측 완료. 2026-10-19 선행 확인 1·2·3 완료와 NUC sudo 조회 완료, 할 일 2(2a~2d)·3·4·5 완료(콘솔 정리, GHCR, 옛 state 보관·R2 키 삭제, GitHub 보호). 남은 것: 할 일 6 자격 폐기, 검증, 마무리. 선행 확인 4는 체크 삭제로 다르게 끝남)
 - 명세: [../spec.md](../spec.md) §4.5, §10
 - 설계: [../platform/design.md](../platform/design.md) E.1 E1, E.2 E1 행, B.4, B.8 "E1 철거", F D-10·D-11·D-12·D-20
 - Blocked by: T05, T02(push), T01(열린 PR 닫기)
@@ -242,7 +242,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | Cloudflare | Access 앱·정책 | 옛 선언 0건 | 유지(없음 확인, 2026-10-19: API가 "Access is not enabled") |
 | R2 | `homelab-pg-backups-prod`, `homelab-media-prod` | 선언 있음, `prevent_destroy` | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 API 조회로 남은 버킷은 `homelab-tfstate` 하나) |
 | R2 | `homelab-cache-backups-prod` | 선언 있음 | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 API 조회로 남은 버킷은 `homelab-tfstate` 하나) |
-| R2 | `homelab-tfstate` | Terraform 밖 수동 생성, 옛 root 3개의 백엔드 | 유지(D-11) |
+| R2 | `homelab-tfstate` | Terraform 밖 수동 생성, 옛 root 3개의 백엔드 | 유지(D-11). 2026-10-19 14:08 옛 키 3개 삭제(보관본 `~/t06-tfstate-archive`), 버킷은 비어 있음 |
 | Tailscale | tailnet | NUC 접속 중 | 유지(D-11) |
 | Tailscale | `homelab-1`, `pg-rw-1` | online, tagged | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 NUC `tailscale status`에서 안 보임) |
 | Tailscale | `homelab-operator` | NUC에서 안 보임(ACL 때문일 수 있음) | 삭제됨 또는 없음(2026-10-19 사용자 "완료" 보고. 있었는지는 기록 없음. NUC에서 안 보임) |
@@ -262,7 +262,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | GitHub | 브랜치 보호(main) | 정리 목록 줄의 설정 그대로 | 삭제됨(2026-10-19 13:26 s5. GET 404) |
 | GitHub | `main-interim` | 2026-10-19 13:24 생성(id 25372131), active, bypass `pull_requests_only` 확인 | 유지(T10까지, T10 import) |
 | GitHub | GHCR `page`, `trip-mate-api` | 404 | 삭제됨(D-29) |
-| GitHub | GHCR `pg-tools`, `skopeo` | public | 삭제 예정(D-11. API가 거부하면 사람이 UI로) |
+| GitHub | GHCR `pg-tools`, `skopeo` | public | 삭제됨(2026-10-19 14:05 s3, API로. 버전 25개·9개, GET 404. 30일 안 복원 가능) |
 | GitHub | GHCR `files` | public | 유지(T22 재연결 대상) |
 | GitHub | GHCR `aiops-autodeploy-canary` | private | 보류(D-29, T22) |
 | GitHub | 저장소 `page`, `trip-mate-api` | 404 | 삭제됨(D-29) |
