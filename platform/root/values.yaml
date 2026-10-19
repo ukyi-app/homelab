@@ -15,6 +15,11 @@
 components:
   # T09. external-secrets(ESO operator, wave -8)와 external-secrets-stores(ClusterSecretStore, wave -7)
   externalSecrets:
+    enabled: true
+
+  # T09. e3-probe(시나리오 6·7의 E3 동등 절차 시험 앱, wave 0). 사람이 Infisical에 시험 키
+  # /apps/e3-probe/PROBE_VALUE를 만든 뒤 켠다. 키 없이 켜면 Degraded로 시작한다. 시험이 끝나면 템플릿째 지운다.
+  e3Probe:
     enabled: false
 
   # T08a. cert-manager, wave -7

@@ -1,0 +1,8 @@
+# ClusterSecretStore 두 개(설계 C.6.3). root의 external-secrets-stores Application(wave -7)이 렌더한다.
+# 평문 매니페스트가 아니라 차트인 이유: Infisical 프로젝트·환경이 클러스터마다 달라 root가 valuesObject로 넘긴다
+# (사용자 결정 2026-10-19, T07, 설계 E8 VM 격리 1번 A안). 값을 여기 직접 적으면 VM이 운영 값을 읽는다.
+apiVersion: v2
+name: external-secrets-stores
+description: Infisical ClusterSecretStores for one homelab cluster
+type: application
+version: 0.1.0

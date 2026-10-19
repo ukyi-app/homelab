@@ -1,0 +1,34 @@
+{{- /*
+e3-probe: 시나리오 6·7의 E3 동등 절차 시험 앱(설계 E3, T09). wave 0, 원본 platform/e3-probe.
+켜기: values.yaml의 components.e3Probe.enabled. 기본은 꺼짐이다. 사람이 Infisical homelab/prod의
+/apps/e3-probe/PROBE_VALUE를 만든 뒤 켠다. 정리 PR은 이 파일, platform/e3-probe, values.yaml의 e3Probe 블록을 함께 지운다.
+*/}}
+{{- if .Values.components.e3Probe.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: e3-probe
+  namespace: argocd
+  annotations:
+    # 앱 자리와 같은 wave. ESO(-8)와 infisical-apps store(-7)가 Healthy가 된 뒤에 만든다.
+    argocd.argoproj.io/sync-wave: "0"
+  # _helpers.tpl 규칙의 예외: 시험 앱이라 Application을 지우면 ns(platform/e3-probe/namespace.yaml)까지 지워지게 한다.
+  # 이것이 없으면 정리 PR 뒤에도 시험 ns·Deployment·Secret이 클러스터에 남는다.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/e3-probe
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-e3-probe
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}
