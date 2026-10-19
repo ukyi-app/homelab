@@ -182,7 +182,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | `ghcr-pull-pat` | GHCR 읽기용 classic PAT, 무만료 | environment `homelab-main`(`GHCR_PULL_TOKEN`), 클러스터 SealedSecret 3개, `.env.secrets` | 새 구조에는 GHCR pull 자격이 없다(D-29). PAT 존재는 API로 볼 수 없어 owner 계정 설정에서 확인 | 폐기 예정 |
 | `github-tf-root-pat` | github root용 fine-grained PAT `homelab-tf-github-root`(Administration·Secrets 읽기·쓰기), 무만료 | `.env.secrets` | 할 일 4 뒤(순서 문단) | 폐기 예정 |
 | `github-tf-ci-pat` | CI 읽기용 fine-grained PAT `ukyi-app-tf-github-ci-readonly` | environment `homelab-main`(`TF_GITHUB_TOKEN`) | | 폐기 예정 |
-| `tailscale-ci-oauth-client` | Tailscale CI 읽기 전용 OAuth 클라이언트(설명 `homelab ci drift-tailscale readonly 20260819`) | environment `homelab-main`(`TF_TAILSCALE_OAUTH_*`), 비밀번호 관리자 백업 | owner 부트스트랩 OAuth와 별개 | 폐기 예정 |
+| `tailscale-ci-oauth-client` | Tailscale CI 읽기 전용 OAuth 클라이언트(설명 `homelab ci drift-tailscale readonly 20260819`) | environment `homelab-main`(`TF_TAILSCALE_OAUTH_*`), 비밀번호 관리자 백업 | owner 부트스트랩 OAuth와 별개 | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
 | `r2-terraform-state` | `homelab-tfstate` 접근 R2 키(토큰 `homelab-terraform-state-20260820`) | 옛 사본 `backend.hcl` 3개와 `.terraform/terraform.tfstate` 3개(자격 포함 추정), environment `homelab-main`(`R2_*`) | 할 일 4 뒤. 2026-08-20 회전 전 옛 토큰이 실제로 폐기됐는지 콘솔에서 확인 | 폐기 예정 |
 | `ts-node-key-nuc` | NUC 노드 키(만료 해제) | 없음(기기 등록) | 폐기하면 NUC가 tailnet에서 빠져 Tailscale 경로의 원격 접속이 끊긴다. D-12가 OS 유지라 NUC는 지금 등록 그대로 tailnet에 남는다(설계 C.3.2). 2026-10-18 실측: 태그 없음, 만료 없음 | 유지(D-12) |
 | `argocd-github-webhook` | webhook 647791528의 secret | 클러스터 `argocd-secret`, `.env.secrets` | webhook 삭제(할 일 5)와 함께. 새 구조에는 공개 webhook이 없다(60초 폴링) | 삭제됨(2026-10-19 13:27 webhook 삭제로 무효. 클러스터 사본은 k3s 제거로 사라짐) |
@@ -192,9 +192,9 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | `r2-backups-pg-cache` | 백업 버킷용 R2 키 `homelab-backups-pg-cache` | SOPS 파일 2개(cnpg, cache), `.env.secrets` | 버킷 삭제(할 일 3)와 함께 | 폐기 예정 |
 | 옛 App 키 | `ukyi-homelab-reader`, `ukyi-homelab-writer` | environment `homelab-main`(`HOMELAB_*_APP_PRIVATE_KEY`), 옛 사본 `.scratch`의 평문 PEM, 비밀번호 관리자 백업(있으면) | App 삭제(할 일 5.6)로 키도 무효 | 삭제됨(2026-10-19 App 삭제로 무효, GET 404. environment 사본은 5.6에서 삭제. 비밀번호 관리자 백업이 있으면 할 일 6에서 지운다) |
 | `ukyi-homelab-aiops` App 키 | App 4937062 개인 키 | `/etc/homelab-aiops`(H2), 옛 사본 `.scratch`의 평문 PEM | T22가 App 제거(D-13 일부 확정)와 함께 폐기한다. `/etc/homelab-aiops` 파일은 이 티켓의 H2 삭제로 지운다 | 삭제됨(2026-10-19 App 삭제로 무효. 사용자 결정으로 T22에서 앞당김. `/etc/homelab-aiops` 사본은 2b가 지움) |
-| Tailscale 부트스트랩 OAuth | owner 로컬용, Terraform 밖, 쓰기 스코프 | `.env.secrets` | | 폐기 예정 |
-| Tailscale operator OAuth | 옛 operator용(devices:core·auth_keys) | SOPS 파일(`platform/tailscale/prod/operator-oauth.enc.yaml`) | | 폐기 예정 |
-| Cloudflare 터널 실행 토큰 | 터널 `homelab-prod`의 실행 토큰 | SOPS Secret `cloudflared-tunnel` | 터널 삭제(할 일 3)로 무효 | 폐기 예정 |
+| Tailscale 부트스트랩 OAuth | owner 로컬용, Terraform 밖, 쓰기 스코프 | `.env.secrets` | | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
+| Tailscale operator OAuth | 옛 operator용(devices:core·auth_keys) | SOPS 파일(`platform/tailscale/prod/operator-oauth.enc.yaml`) | | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
+| Cloudflare 터널 실행 토큰 | 터널 `homelab-prod`의 실행 토큰 | SOPS Secret `cloudflared-tunnel` | 터널 삭제(할 일 3)로 무효 | 삭제됨(2026-10-19 13:56 터널 삭제로 무효) |
 | Telegram 봇 토큰 | 옛 알림 봇 | 정리 목록 "Telegram 봇" 줄 | `mac-uptime-guard`도 이 봇을 쓴다. T22가 그 장치를 끈 뒤 폐기한다(위 예외) | 보류(D-10, T22) |
 | healthchecks ping URL | `homelab-watchdog` 체크 | SOPS Secret 2개(`alerting-secrets`, `restore-drill-alerting`), `.env.secrets` | 옛 체크 삭제도 T08b(D-11)(위 예외) | 삭제됨(2026-10-19, 사용자가 체크를 지워 URL 무효. 계획은 T08b에서 새 체크 초록 뒤 삭제였다) |
 | `trip-mate-api` Google OAuth client | `trip-mate-api` 로그인용 Google OAuth 클라이언트 | 후보: NUC 로컬 클론 `~/workspace/trip-mate-api/.env.local` | 앱 삭제로 폐기(D-29). Google Cloud 콘솔에서 지운다 | 폐기 예정 |
@@ -234,19 +234,19 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 
 | 구역 | 줄 | 실측 | 상태 |
 |---|---|---|---|
-| Cloudflare | 터널 `homelab-prod` | 옛 선언 있음(`2d2054a:infra/cloudflare/tunnel.tf`) | 삭제 예정(D-11, 콘솔 확인) |
-| Cloudflare | DNS 레코드 | 선언 CNAME 4개(apex, `www`, `argocd-webhook`, `files`) 모두 공개 해석됨. 코드 밖 레코드는 콘솔에서만 보인다 | 삭제 예정(D-11, 콘솔 확인) |
-| Cloudflare | WAF 2개, 캐시 규칙 1개 | 선언 있음 | 삭제 예정(D-11, 콘솔 확인) |
+| Cloudflare | 터널 `homelab-prod` | 옛 선언 있음(`2d2054a:infra/cloudflare/tunnel.tf`) | 삭제됨(2026-10-19 13:56. 콘솔 삭제 뒤에도 API에 남아 있어 API로 지움. `deleted_at` 확인, 남은 터널 0개) |
+| Cloudflare | DNS 레코드 | 선언 CNAME 4개(apex, `www`, `argocd-webhook`, `files`) 모두 공개 해석됨. 코드 밖 레코드는 콘솔에서만 보인다 | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 API 조회로 남은 레코드 0개. CNAME 4개 말고 코드 밖 레코드가 있었는지는 사용자 확인 대기) |
+| Cloudflare | WAF 2개, 캐시 규칙 1개 | 선언 있음 | 삭제됨(2026-10-19 13:52, API로 phase 진입점째. 남은 zone ruleset 0개) |
 | Cloudflare | zone `ukyi.app` | data source로만 참조 | 유지(D-11) |
 | Cloudflare | zone 설정 9개 | 선언 9개(HSTS nosniff 포함) | import 예정(D-11, T08a) |
-| Cloudflare | Access 앱·정책 | 옛 선언 0건 | 콘솔 확인(있으면 삭제 예정, D-11) |
-| R2 | `homelab-pg-backups-prod`, `homelab-media-prod` | 선언 있음, `prevent_destroy` | 삭제 예정(D-11, 콘솔) |
-| R2 | `homelab-cache-backups-prod` | 선언 있음 | 삭제 예정(D-11, 콘솔) |
+| Cloudflare | Access 앱·정책 | 옛 선언 0건 | 유지(없음 확인, 2026-10-19: API가 "Access is not enabled") |
+| R2 | `homelab-pg-backups-prod`, `homelab-media-prod` | 선언 있음, `prevent_destroy` | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 API 조회로 남은 버킷은 `homelab-tfstate` 하나) |
+| R2 | `homelab-cache-backups-prod` | 선언 있음 | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 API 조회로 남은 버킷은 `homelab-tfstate` 하나) |
 | R2 | `homelab-tfstate` | Terraform 밖 수동 생성, 옛 root 3개의 백엔드 | 유지(D-11) |
 | Tailscale | tailnet | NUC 접속 중 | 유지(D-11) |
-| Tailscale | `homelab-1`, `pg-rw-1` | online, tagged | 삭제 예정(D-11) |
-| Tailscale | `homelab-operator` | NUC에서 안 보임(ACL 때문일 수 있음) | 삭제 예정(D-11, 콘솔에서 존재 확인) |
-| Tailscale | OAuth 클라이언트 3종 | Terraform 선언은 operator 1개, 나머지 둘은 Terraform 밖 | 삭제 예정(D-11·D-20, 콘솔) |
+| Tailscale | `homelab-1`, `pg-rw-1` | online, tagged | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 NUC `tailscale status`에서 안 보임) |
+| Tailscale | `homelab-operator` | NUC에서 안 보임(ACL 때문일 수 있음) | 삭제됨 또는 없음(2026-10-19 사용자 "완료" 보고. 있었는지는 기록 없음. NUC에서 안 보임) |
+| Tailscale | OAuth 클라이언트 3종 | Terraform 선언은 operator 1개, 나머지 둘은 Terraform 밖 | 삭제됨(2026-10-19, 사용자가 콘솔에서) |
 | Tailscale | NUC 노드 키 만료 | 태그 없음, 만료 없음 | 유지(D-12) |
 | Tailscale | ACL·DNS | 전역 resolver 5개(NUC 1 + Cloudflare 4, C-05), 이 노드는 "Tailscale DNS: disabled" | 유지(옛 root 손대지 않음, T08a가 덮어씀) |
 | GitHub | App reader(4043034), writer(4043080) | 등록·org 설치(`all`). writer는 새 저장소 `homelab-bot`·`homelab-bot-ops`에도 contents write가 닿는다 | 삭제됨(2026-10-19, 사람이 UI로. GET 404, org 설치 목록에 없음) |
@@ -293,8 +293,8 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | GitHub | 저장소 `homelab-bot`, `homelab-bot-ops` | 새 구조 저장소. secret 등 0 | 유지(새 구조, 정리 대상 아님) |
 | GitHub | homelab 원격 브랜치 | `aiops/*` 12개, `renovate/*` 5개, `create-app/…` 1개 | 유지(T01: 원격 브랜치는 그대로 둠) |
 | GitHub | org 수준 secret·변수·runner | 모두 0 | 유지(정리할 것 없음) |
-| GitHub | org webhook | 조회 불가(`admin:org_hook` 범위 없음) | 콘솔 확인(있으면 삭제 예정, D-11) |
-| GitHub | org fine-grained PAT 목록 | 조회 불가(GitHub App 토큰만 받는 API) | 콘솔 확인(자격 폐기 표의 PAT 줄과 대조) |
+| GitHub | org webhook | 조회 불가(`admin:org_hook` 범위 없음) | 유지(없음 확인, 2026-10-19, 사용자) |
+| GitHub | org fine-grained PAT 목록 | 조회 불가(GitHub App 토큰만 받는 API) | 유지(없음 확인, 2026-10-19, 사용자. owner 계정 PAT 목록은 할 일 6에서 본다) |
 | NUC | `/usr/local/bin/kubectl`·`crictl`·`ctr` | `k3s` 심링크 | 삭제됨(2026-10-19 13:20 s2c, `k3s-uninstall.sh`가 지움) |
 | NUC | `/etc/rancher/node` | 2026-10-19 s2c 뒤 남음. 옛 노드 비밀번호 파일(`k3s-uninstall.sh`가 지우지 않는다. 같은 노드로 다시 붙을 때 쓰려는 것으로 추측). 받던 옛 서버는 사라졌다 | 사용자 결정 대기(추천: 삭제. T07의 k3s가 처음 시작할 때 새로 만든다) |
 | NUC | `/usr/local/bin/sops` | 일반 실행 파일 | 유지(기본값: 자격 아님, 새 구조와 충돌 없음. 지우기로 하면 할 일 6 뒤) |
