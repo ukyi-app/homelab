@@ -110,7 +110,11 @@ kubectl config current-context
 
 ## 2. Argo CD 설치와 root
 
-한 단계라도 실패하면 멈춰야 한다. 대화형 셸에 줄을 붙여 넣으면 앞 명령이 실패해도 다음 줄이 돌아, 반쯤 깔린 Argo CD 위에 root가 생길 수 있다. 그래서 `set -euo pipefail`을 건 별도 bash로 돌린다. `<이름>`은 먼저 바꿔 넣는다.
+순서는 설계 C.3.3 그대로다: Argo CD 설치 → (T09 이후) 손으로 넣는 Secret → root apply. root가 먼저 생기면 자동 동기화가 Secret 없이 시작해 Store와 뒤 Application이 오류 상태로 들어간다.
+
+한 단계라도 실패하면 멈춰야 한다. 대화형 셸에 줄을 붙여 넣으면 앞 명령이 실패해도 다음 줄이 돈다. 그래서 각 블록을 `set -euo pipefail`을 건 별도 bash로 돌리고, 블록이 실패하면 다음 블록으로 가지 않는다. `<이름>`은 먼저 바꿔 넣는다.
+
+### 2.1 Argo CD 설치
 
 ```bash
 bash -euo pipefail <<'EOF'
@@ -118,38 +122,42 @@ kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply --server-side --force-conflicts --field-manager=argocd-controller -k platform/argocd
 kubectl -n argocd wait --for=condition=Available deploy --all --timeout=300s
 kubectl -n argocd rollout status sts/argocd-application-controller --timeout=300s
-# (T09 뒤) ESO 부트스트랩 Secret. 아래 2.1
-kubectl apply -f platform/root/root-<이름>.yaml
 EOF
 ```
 
 - **`--field-manager=argocd-controller`를 빼지 않는다.** 기본 manager(`kubectl`)로 깔면 모든 필드를 Argo CD와 함께 소유한다. 그러면 나중에 Git에서 뺀 필드가 라이브에 영구히 남는다. 설치 뒤에는 managedFields를 손으로 고쳐야 한다.
-- root가 `argocd` Application까지 소유한다. 이후 Argo CD 변경은 PR → main이다. Argo CD는 공개 webhook 없이 main을 60초마다 본다(jitter 0).
-- **예외: root Application 자신은 Git에서 저절로 맞춰지지 않는다.** `root-prod.yaml`·`root-vm.yaml`은 차트의 `templates/` 밖에 있어 root가 렌더하지 않기 때문이다(운영 root가 VM root를 만들지 않게 하려는 배치). 그래서 이 두 파일(source, `valueFiles`, sync 정책)을 바꾸는 PR은 병합 뒤 `kubectl apply -f platform/root/root-<이름>.yaml`로 다시 적용하고, 그 PR 본문에 이 단계를 적는다. `templates/`와 값 파일 변경은 다시 적용할 필요가 없다.
 - `admin`은 꺼져 있고 사람 계정은 `owner`다. `owner` 비밀번호는 T09가 ExternalSecret으로 넣는다. 그 전까지는 `kubectl`이나 `argocd --core`로만 다룬다.
 
-### 2.1 ESO 부트스트랩 Secret (T09에서 생김)
+### 2.2 root보다 먼저 손으로 넣는 Secret (T09 이후)
 
-root apply 전에 복구 자산의 값으로 한 번 넣는다. VM은 VM 준비 자산의 `eso-homelab-vm` 값이다. 값은 출력하지 않는다.
+T09 전(2026-10-19 운영 최초 설치)에는 건너뛴다. 평상시 사람이 손으로 넣는 Secret은 ESO 부트스트랩 Secret 하나다. 값은 복구 자산에서 오고(VM은 VM 준비 자산의 `eso-homelab-vm` 값), 출력하지 않는다. 변수는 `export`해야 아래 bash가 받는다. 비었으면 Secret을 만들지 않고 멈춘다.
 
 ```bash
+bash -euo pipefail <<'EOF'
+: "${ESO_CLIENT_ID:?ESO_CLIENT_ID가 비었다}" "${ESO_CLIENT_SECRET:?ESO_CLIENT_SECRET가 비었다}"
 kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n external-secrets create secret generic infisical-universal-auth \
   --from-literal=clientId="$ESO_CLIENT_ID" --from-literal=clientSecret="$ESO_CLIENT_SECRET"
+EOF
 ```
 
-평상시 사람이 손으로 넣는 Secret은 이것 하나다. T09가 이 단계를 확정하면 이 절을 고친다.
+T09가 이 단계를 확정하면 이 절을 고친다.
 
-### 2.2 vm 분기의 추가 단계 (시나리오 13)
+**vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). T11·T13이 명령을 채운다.
 
-설계 C.3.3 "vm 분기의 추가 단계"를 이 순서로 한다.
+1. ESO Secret 전에, 운영 클러스터의 ExternalSecret 키 목록과 `homelab-dev`의 키를 대조한다. 빠진 키가 0이어야 한다. 하나라도 빠지면 멈춘다. 값은 출력하지 않는다.
+2. ESO Secret의 값은 `eso-homelab-vm`이다.
+3. root apply 전에 복구 원본 R2 읽기 자격 Secret을 넣는다. 복구가 끝나면 지운다.
 
-1. 2.1 전에, 운영 클러스터의 ExternalSecret 키 목록과 `homelab-dev`의 키를 대조한다. 빠진 키가 0이어야 한다. 하나라도 빠지면 멈춘다. 값은 출력하지 않는다.
-2. 2.1의 ESO 자격은 `eso-homelab-vm` 값이다.
-3. root apply 전에, 복구 원본 R2 읽기 자격 Secret을 넣는다. 복구가 끝나면 지운다.
-4. `root-vm.yaml`을 apply한다.
+### 2.3 root apply
 
-T11·T13이 이 절의 명령을 채운다.
+```bash
+kubectl apply -f platform/root/root-<이름>.yaml
+```
+
+- root가 `argocd` Application까지 소유한다. 이후 Argo CD 변경은 PR → main이다. Argo CD는 공개 webhook 없이 main을 60초마다 본다(jitter 0).
+- **예외: root Application 자신은 Git에서 저절로 맞춰지지 않는다.** `root-prod.yaml`·`root-vm.yaml`은 차트의 `templates/` 밖에 있어 root가 렌더하지 않기 때문이다(운영 root가 VM root를 만들지 않게 하려는 배치). 그래서 이 두 파일(source, `valueFiles`, sync 정책)을 바꾸는 PR은 병합 뒤 `kubectl apply -f platform/root/root-<이름>.yaml`로 다시 적용하고, 그 PR 본문에 이 단계를 적는다. `templates/`와 값 파일 변경은 다시 적용할 필요가 없다.
+
 
 ## 3. 확인
 
@@ -159,7 +167,7 @@ host/verify.sh --cluster <이름>
 kubectl -n argocd get applications            # argocd, namespaces, root-<이름> 모두 Synced·Healthy
 kubectl -n argocd get cm argocd-cm -o jsonpath='{.data.timeout\.reconciliation} {.data.timeout\.reconciliation\.jitter}'   # 60s 0
 resolvectl status | grep 'DNS Servers'        # 1.1.1.1 9.9.9.9
-tailscale dns status | grep 'Tailscale DNS'   # Tailscale DNS: disabled. (TAILNET_JOIN=true일 때)
+tailscale dns status | grep -Fx 'Tailscale DNS: disabled.'   # 이 줄이 그대로 나와야 한다(TAILNET_JOIN=true일 때). 안 나오면 노드 DNS가 AdGuard에 다시 묶인다
 ```
 
 재부팅 뒤에도 `preflight --after`부터 같은 확인을 모두 한다(시나리오 12). `resolvectl`의 전역 DNS 줄만으로는 부팅 때 networkd drop-in이 안 실려 링크 DNS가 DHCP로 되살아난 경우를 못 잡는다. 그것은 `preflight --after`가 본다. k3s는 enabled라 부팅 때 시작하고, Argo CD가 모든 Application을 다시 맞춘다.
