@@ -19,20 +19,27 @@
 
 ### 0.0 작업 사본과 필요한 패키지
 
-새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깔고, 작업 사본이 없으면 만든다(Ubuntu 26.04 기준).
+이 문서의 여러 줄짜리 명령은 모두 한 단계라도 실패하면 멈추게 적는다. 대화형 셸에 줄을 붙여 넣으면 앞 명령이 실패해도 다음 줄이 돌기 때문이다. 그래서 `&&`로 잇거나 `set -euo pipefail`을 건 별도 bash(`bash -euo pipefail <<'EOF'`)로 돌린다. 블록이 실패하면 다음 블록으로 가지 않는다.
+
+새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깔고, 작업 사본이 없으면 만든다(Ubuntu 26.04 기준). `openssh-server`는 `host/install.sh --host-config`가 sshd 설정을 검사(`sshd -t`)하는 데 필요하다. 최소 설치나 VM에는 없을 수 있다.
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git jq curl gnupg
-[ -d ~/homelab/.git ] || git clone https://github.com/ukyi-app/homelab ~/homelab
-cd ~/homelab
+sudo apt-get update \
+  && sudo apt-get install -y git jq curl gnupg openssh-server \
+  && { [ -d ~/homelab/.git ] || git clone https://github.com/ukyi-app/homelab ~/homelab; } \
+  && cd ~/homelab
 ```
 
-작업 사본이 최신 `main`과 같아야 한다. 오래된 사본으로 시작하면 호스트·k3s는 옛 값으로, Argo CD는 최신 main으로 깔려 두 층의 revision이 어긋난다. 스크립트는 `host/`에 커밋 안 한 변경이 없는지만 보고 `origin/main`과는 비교하지 않으므로, 아래로 직접 확인한다. 이 문서의 명령은 모두 이 저장소 루트에서 한다.
+작업 사본이 최신 `main`과 같아야 한다. 오래된 사본으로 시작하면 호스트·k3s는 옛 값으로, Argo CD는 최신 main으로 깔려 두 층의 revision이 어긋난다. 스크립트는 `host/`에 커밋 안 한 변경이 없는지만 보고 `origin/main`과는 비교하지 않으므로, 아래로 직접 확인한다. fetch가 실패하면 예전에 받아 둔 `origin/main`과 비교하게 되므로, 실패하면 여기서 멈춘다. 이 문서의 명령은 모두 이 저장소 루트에서 한다.
 
 ```bash
+bash -euo pipefail <<'EOF'
 git fetch --no-tags origin main
 git switch main
-test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" && git diff --quiet origin/main && echo "main과 같음"
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+git diff --quiet origin/main
+echo "main과 같음"
+EOF
 ```
 
 ### 0.1 운영 NUC를 OS부터 다시 설치했을 때만
@@ -80,14 +87,14 @@ tailnet에 이미 있으면 건너뛴다.
 
 ## 1. 호스트 설정과 k3s
 
-저장소 루트에서 한다. sudo가 필요한 단계는 파이프에 넣지 않는다. 한 단계라도 실패하면 다음으로 가지 않는다.
+저장소 루트에서 한다. sudo가 필요한 단계는 파이프에 넣지 않는다. 한 단계라도 실패하면 다음으로 가지 않게 `&&`로 잇는다(2026-10-19 운영 설치도 이렇게 돌렸다).
 
 ```bash
-host/preflight.sh --cluster <이름> --before
-sudo host/install.sh --cluster <이름> --host-config
-host/preflight.sh --cluster <이름> --after
-sudo host/install.sh --cluster <이름> --k3s
-host/verify.sh --cluster <이름>
+host/preflight.sh --cluster <이름> --before \
+  && sudo host/install.sh --cluster <이름> --host-config \
+  && host/preflight.sh --cluster <이름> --after \
+  && sudo host/install.sh --cluster <이름> --k3s \
+  && host/verify.sh --cluster <이름>
 ```
 
 - `--before`: 노드 IP와 인터페이스, k3s 잔여 경로(`/var/lib/rancher/k3s`, `/var/lib/rancher/k3s-storage`, `/etc/rancher/k3s`) 부재.
@@ -112,7 +119,7 @@ kubectl config current-context
 
 순서는 설계 C.3.3 그대로다: Argo CD 설치 → (T09 이후) 손으로 넣는 Secret → root apply. root가 먼저 생기면 자동 동기화가 Secret 없이 시작해 Store와 뒤 Application이 오류 상태로 들어간다.
 
-한 단계라도 실패하면 멈춰야 한다. 대화형 셸에 줄을 붙여 넣으면 앞 명령이 실패해도 다음 줄이 돈다. 그래서 각 블록을 `set -euo pipefail`을 건 별도 bash로 돌리고, 블록이 실패하면 다음 블록으로 가지 않는다. `<이름>`은 먼저 바꿔 넣는다.
+각 블록은 `set -euo pipefail`을 건 별도 bash로 돌리고, 블록이 실패하면 다음 블록으로 가지 않는다. `<이름>`은 먼저 바꿔 넣는다. 재부팅 뒤 새 셸이면 1절의 `export KUBECONFIG=...`부터 다시 한다.
 
 ### 2.1 Argo CD 설치
 
@@ -136,13 +143,15 @@ T09 전(2026-10-19 운영 최초 설치)에는 건너뛴다. 평상시 사람이
 bash -euo pipefail <<'EOF'
 : "${ESO_CLIENT_ID:?ESO_CLIENT_ID가 비었다}" "${ESO_CLIENT_SECRET:?ESO_CLIENT_SECRET가 비었다}"
 kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n external-secrets create secret generic infisical-universal-auth \
-  --from-literal=clientId="$ESO_CLIENT_ID" --from-literal=clientSecret="$ESO_CLIENT_SECRET" \
-  --dry-run=client -o yaml | kubectl apply --server-side --field-manager=bootstrap -f -
+# 값을 명령행 인자로 넘기지 않는다(ps·/proc로 보인다). jq가 환경변수에서 읽어 stdin으로 넘긴다
+jq -n '{apiVersion: "v1", kind: "Secret", type: "Opaque",
+        metadata: {name: "infisical-universal-auth", namespace: "external-secrets"},
+        stringData: {clientId: env.ESO_CLIENT_ID, clientSecret: env.ESO_CLIENT_SECRET}}' \
+  | kubectl apply --server-side --field-manager=bootstrap -f -
 EOF
 ```
 
-다시 실행해도 같은 Secret을 덮어쓸 뿐 멈추지 않는다. `--server-side`로 적용해 client-side apply가 남기는 `last-applied-configuration` 주석에 값이 한 벌 더 복사되지 않게 한다. T09가 이 단계를 확정하면 이 절을 고친다.
+다시 실행해도 같은 Secret을 덮어쓸 뿐 멈추지 않는다. 값은 `kubectl`의 명령행 인자에 들어가지 않고(`--from-literal`은 `ps`·`/proc`로 보인다), `--server-side`로 적용해 client-side apply가 남기는 `last-applied-configuration` 주석에 값이 한 벌 더 복사되지도 않는다. T09가 이 단계를 확정하면 이 절을 고친다.
 
 **vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). T11·T13이 명령을 채운다.
 
@@ -159,16 +168,23 @@ kubectl apply -f platform/root/root-<이름>.yaml
 - root가 `argocd` Application까지 소유한다. 이후 Argo CD 변경은 PR → main이다. Argo CD는 공개 webhook 없이 main을 60초마다 본다(jitter 0).
 - **예외: root Application 자신은 Git에서 저절로 맞춰지지 않는다.** `root-prod.yaml`·`root-vm.yaml`은 차트의 `templates/` 밖에 있어 root가 렌더하지 않기 때문이다(운영 root가 VM root를 만들지 않게 하려는 배치). 그래서 이 두 파일(source, `valueFiles`, sync 정책)을 바꾸는 PR은 병합 뒤 `kubectl apply -f platform/root/root-<이름>.yaml`로 다시 적용하고, 그 PR 본문에 이 단계를 적는다. `templates/`와 값 파일 변경은 다시 적용할 필요가 없다.
 
-
 ## 3. 확인
 
+각 줄의 기대값을 눈으로 본다. 재부팅 뒤 새 셸이면 `KUBECONFIG`부터 다시 잡는다.
+
 ```bash
+export KUBECONFIG=~/.kube/<KUBE_CONTEXT>.yaml   # prod는 homelab, vm은 homelab-vm
 host/preflight.sh --cluster <이름> --after    # 스왑, 타임존, resolved 스텁, resolv.conf, 링크가 DHCP DNS 거부(drop-in 로드)
 host/verify.sh --cluster <이름>
 kubectl -n argocd get applications            # argocd, namespaces, root-<이름> 모두 Synced·Healthy
 kubectl -n argocd get cm argocd-cm -o jsonpath='{.data.timeout\.reconciliation} {.data.timeout\.reconciliation\.jitter}'   # 60s 0
 resolvectl status | grep 'DNS Servers'        # 1.1.1.1 9.9.9.9
-tailscale dns status | grep -Fx 'Tailscale DNS: disabled.'   # 이 줄이 그대로 나와야 한다(TAILNET_JOIN=true일 때). 안 나오면 노드 DNS가 AdGuard에 다시 묶인다
+```
+
+`TAILNET_JOIN=true`인 클러스터(prod)만 더 본다. VM은 tailnet에 없고 Tailscale도 깔지 않으므로 건너뛴다.
+
+```bash
+tailscale dns status | grep -Fx 'Tailscale DNS: disabled.'   # 이 줄이 그대로 나와야 한다. 안 나오면 노드 DNS가 AdGuard에 다시 묶인다
 ```
 
 재부팅 뒤에도 `preflight --after`부터 같은 확인을 모두 한다(시나리오 12). `resolvectl`의 전역 DNS 줄만으로는 부팅 때 networkd drop-in이 안 실려 링크 DNS가 DHCP로 되살아난 경우를 못 잡는다. 그것은 `preflight --after`가 본다. k3s는 enabled라 부팅 때 시작하고, Argo CD가 모든 Application을 다시 맞춘다.
