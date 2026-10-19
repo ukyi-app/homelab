@@ -253,14 +253,14 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | GitHub | App aiops(4937062) | 등록·org 설치(`selected`). homelab 포함 여부는 API로 볼 수 없다 | 보류(D-13, T22). homelab 설치 여부는 사람 확인(할 일 5.7) |
 | GitHub | App dispatch(4178609) | 등록 남음, org 설치 없음 | 삭제 예정(D-11, 할 일 5.6) |
 | GitHub | Codex Connector | `selected`(선택 모드만 API로 확인, 저장소 목록은 사람 확인) | 유지(D-26) |
-| GitHub | environment 4개 | `homelab-main` secret 19, `aiops-reusable-public-0915` 1, 나머지 둘 0. 변수 0 | 삭제 예정(D-11, 할 일 5.6) |
+| GitHub | environment 4개 | `homelab-main` secret 19, `aiops-reusable-public-0915` 1, 나머지 둘 0. 변수 0 | 삭제됨(2026-10-19 13:27 s5, D-11. 4개 모두 GET 404) |
 | GitHub | 저장소 수준 secret | Actions·Dependabot·Codespaces 모두 0 | 유지(정리할 것 없음) |
-| GitHub | 저장소 변수 2개 | 그대로 | 삭제 예정(D-11, 할 일 5.6) |
-| GitHub | `allow_auto_merge` | `true` | 변경 예정(할 일 5.4, D-07) |
-| GitHub | ruleset 19598965, 23257797 | 둘 다 active, bypass는 writer App만 | 삭제 예정(할 일 5.5) |
-| GitHub | webhook 647791528 | active, 마지막 응답 200 | 삭제 예정(할 일 5.5) |
-| GitHub | 브랜치 보호(main) | 정리 목록 줄의 설정 그대로 | 삭제 예정(할 일 5.3) |
-| GitHub | `main-interim` | 아직 없음 | 생성 예정(할 일 5.1. 만든 뒤 `유지(T10까지, T10 import)`) |
+| GitHub | 저장소 변수 2개 | 그대로 | 삭제됨(2026-10-19 13:27 s5, D-11. `HOMELAB_DOMAIN`·`HOMELAB_OWNER` GET 404) |
+| GitHub | `allow_auto_merge` | `true` | 유지(false로 바꿈, D-07. 2026-10-19 13:27 s5) |
+| GitHub | ruleset 19598965, 23257797 | 둘 다 active, bypass는 writer App만 | 삭제됨(2026-10-19 13:27 s5. 둘 다 GET 404) |
+| GitHub | webhook 647791528 | active, 마지막 응답 200 | 삭제됨(2026-10-19 13:27 s5. GET 404) |
+| GitHub | 브랜치 보호(main) | 정리 목록 줄의 설정 그대로 | 삭제됨(2026-10-19 13:26 s5. GET 404) |
+| GitHub | `main-interim` | 2026-10-19 13:24 생성(id 25372131), active, bypass `pull_requests_only` 확인 | 유지(T10까지, T10 import) |
 | GitHub | GHCR `page`, `trip-mate-api` | 404 | 삭제됨(D-29) |
 | GitHub | GHCR `pg-tools`, `skopeo` | public | 삭제 예정(D-11. API가 거부하면 사람이 UI로) |
 | GitHub | GHCR `files` | public | 유지(T22 재연결 대상) |
