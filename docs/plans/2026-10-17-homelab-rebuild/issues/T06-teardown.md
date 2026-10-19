@@ -208,7 +208,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | `aiops-engine` Codex ChatGPT 로그인 | 옛 AIOps 엔진 계정의 Codex CLI `auth.json`. 2026-10-19 키 이름만 봤다(값은 출력하지 않음): `OPENAI_API_KEY`는 null, `auth_mode`, `tokens`(`access_token`, `refresh_token`, `id_token`, `account_id`) | NUC `/var/lib/homelab-aiops/auth/auth.json`(H2, `aiops-engine` 홈. 2026-10-19 sudo 조회로 찾음) | 파일은 H2 삭제로 지운다. 갱신 토큰이 있으므로 `aiops-proxy` 줄과 함께 OpenAI 계정에서 세션을 해제한다 | 유지(사용자 결정 2026-10-19: 위 줄과 같음. `auth.json`은 `.img`와 함께 2b·2d로 지움) |
 | SealedSecrets 봉인 키 | 클러스터 안의 키는 k3s 제거로 사라진다 | `/mnt/bulk/homelab-backups/sealed-secrets`(1개, age로 암호화), 비밀번호 관리자 첨부(있으면) | 봉인본 10개(공개 히스토리 포함)를 풀 수 있는 키다. 디스크 사본은 H8 비우기로 지운다 | 삭제됨(2026-10-19 클러스터 키는 k3s 제거로, 디스크 사본 `/mnt/bulk/homelab-backups`는 2d로 사라짐. 비밀번호 관리자 첨부가 있으면 할 일 6에서 사람이 지운다) |
 | SOPS age 키(cluster) | `~/.config/sops/age` | 클러스터 Secret `sops-age` | 옛 `.sops.yaml`의 recipient 2개(cluster, recovery)는 확인했다. 이 파일이 cluster recipient와 맞는지는 사람이 `age-keygen -y`로 대조한다. 맞으면 공개 히스토리의 SOPS 파일 9개를 풀 수 있다. 새 구조에서 쓰지 않는다. 할 일 4와 이 표의 다른 폐기가 끝난 것을 확인한 뒤 지운다(보류 아님) | 삭제됨(2026-10-19 14:31, `age-keygen -y`로 cluster recipient와 대조 뒤 파일 삭제) |
-| SOPS age 키(recovery) | 비밀번호 관리자 항목 `homelab age recovery` | 비밀번호 관리자만(디스크 사본 없음, 런북) | 옛 SOPS 파일 9개와 봉인 키 백업을 모두 풀 수 있다. cluster 키와 같은 때 마지막에 사람이 지운다 | 폐기 예정 |
+| SOPS age 키(recovery) | 비밀번호 관리자 항목 `homelab age recovery` | 비밀번호 관리자만(디스크 사본 없음, 런북) | 옛 SOPS 파일 9개와 봉인 키 백업을 모두 풀 수 있다. cluster 키와 같은 때 마지막에 사람이 지운다 | 유지(행방 모름, 2026-10-19 사용자 "현재 age 는 알수없는 상태야". 풀 수 있는 옛 SOPS 값은 이 표에서 모두 폐기·무효가 됐고(Telegram 봇 토큰은 2026-10-19 폐기하기로 함), 봉인 키 사본은 2d로 사라져 남아도 쓸 곳이 없다고 판단. 찾으면 지운다) |
 | `HOMELAB_DISPATCH_PAT` | 앱 저장소가 쓰던 옛 dispatch PAT | 2026-09-03 기준 앱 저장소 secret 0개(런북) | GitHub에서 PAT 자체를 폐기했는지 기록이 없다 | 삭제됨 또는 없음(2026-10-19 사용자 "완료" 보고. 있었는지는 기록 없음) |
 | healthchecks.io 읽기 전용 API 키 | 옛 AIOps의 healthchecks 조회용 | 저장소에 없음 | 발급됐는지 모른다 | 유지(없음 확인, 2026-10-19, 사용자) |
 | Claude 구독 OAuth 토큰 | 옛 AIOps 계획의 인증 결정 | 저장소에 없음 | 계획 문서에만 있고 발급됐는지 모른다 | 유지(없음 확인, 2026-10-19, 사용자) |
@@ -296,7 +296,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | GitHub | org webhook | 조회 불가(`admin:org_hook` 범위 없음) | 유지(없음 확인, 2026-10-19, 사용자) |
 | GitHub | org fine-grained PAT 목록 | 조회 불가(GitHub App 토큰만 받는 API) | 유지(없음 확인, 2026-10-19, 사용자. owner 계정 PAT 목록은 할 일 6에서 본다) |
 | NUC | `/usr/local/bin/kubectl`·`crictl`·`ctr` | `k3s` 심링크 | 삭제됨(2026-10-19 13:20 s2c, `k3s-uninstall.sh`가 지움) |
-| NUC | `/etc/rancher/node` | 2026-10-19 s2c 뒤 남음. 옛 노드 비밀번호 파일(`k3s-uninstall.sh`가 지우지 않는다. 같은 노드로 다시 붙을 때 쓰려는 것으로 추측). 받던 옛 서버는 사라졌다 | 사용자 결정 대기(추천: 삭제. T07의 k3s가 처음 시작할 때 새로 만든다) |
+| NUC | `/etc/rancher/node` | 2026-10-19 s2c 뒤 남음. 옛 노드 비밀번호 파일(`k3s-uninstall.sh`가 지우지 않는다. 같은 노드로 다시 붙을 때 쓰려는 것으로 추측). 받던 옛 서버는 사라졌다 | 삭제됨(2026-10-19 14:48, 사용자 결정(에이전트 추천 수락). `password` 파일 1개(33 bytes)와 빈 `/etc/rancher`까지 지움) |
 | NUC | `/usr/local/bin/sops` | 일반 실행 파일 | 유지(기본값: 자격 아님, 새 구조와 충돌 없음. 지우기로 하면 할 일 6 뒤) |
 | 옛 사본 | `.scratch`의 평문 자격(App PEM 3개, kubeconfig 사본 2개, 입력 파일) | 디렉터리 0700, 내용은 열지 않음 | 유지(기본값: 선행 확인 2대로 옛 사본은 디스크에 그대로 둠. reader·writer 키는 할 일 5.6, kubeconfig는 k3s 제거, aiops 키와 Telegram 토큰은 T22에 무효) |
 | 옛 사본 | `.scratch`의 CLIProxyAPI fixture | 토큰 필드가 있는 파일 72개. README는 합성 fixture라 적음 | 유지(합성으로 판단, 2026-10-19 형태 조회(값 미출력): 토큰 필드 JSON 99개(`accounts` 69, `ci-v176-commission-root` 30). access·refresh 토큰 모두 fake·test 같은 표식이 있고, id_token은 `iss` 없는 JWT 69개와 표식 있는 값 30개. OpenAI가 발급한 형태는 0개. 추론) |
