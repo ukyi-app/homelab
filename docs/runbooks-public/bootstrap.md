@@ -137,11 +137,12 @@ bash -euo pipefail <<'EOF'
 : "${ESO_CLIENT_ID:?ESO_CLIENT_ID가 비었다}" "${ESO_CLIENT_SECRET:?ESO_CLIENT_SECRET가 비었다}"
 kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n external-secrets create secret generic infisical-universal-auth \
-  --from-literal=clientId="$ESO_CLIENT_ID" --from-literal=clientSecret="$ESO_CLIENT_SECRET"
+  --from-literal=clientId="$ESO_CLIENT_ID" --from-literal=clientSecret="$ESO_CLIENT_SECRET" \
+  --dry-run=client -o yaml | kubectl apply --server-side --field-manager=bootstrap -f -
 EOF
 ```
 
-T09가 이 단계를 확정하면 이 절을 고친다.
+다시 실행해도 같은 Secret을 덮어쓸 뿐 멈추지 않는다. `--server-side`로 적용해 client-side apply가 남기는 `last-applied-configuration` 주석에 값이 한 벌 더 복사되지 않게 한다. T09가 이 단계를 확정하면 이 절을 고친다.
 
 **vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). T11·T13이 명령을 채운다.
 
