@@ -1,0 +1,1 @@
+{"expect": 2, "why": "fork의 같은 이름 브랜치", "patch": {"run": {"headRepo": "someone/homelab"}, "pr": {"headRepo": "someone/homelab"}}}

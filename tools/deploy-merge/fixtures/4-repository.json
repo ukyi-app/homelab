@@ -1,0 +1,1 @@
+{"expect": 4, "why": "repository를 다른 이미지로", "patch": {"headImage": "repository: ghcr.io/ukyi-app/files\ndigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nrevision: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nhold: false\n"}}

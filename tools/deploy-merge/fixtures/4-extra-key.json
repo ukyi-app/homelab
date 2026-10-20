@@ -1,0 +1,1 @@
+{"expect": 4, "why": "image.yaml에 다른 키", "patch": {"headImage": "repository: ghcr.io/ukyi-app/homelab-probe\ndigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nrevision: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nhold: false\nreplicas: 3\n"}}

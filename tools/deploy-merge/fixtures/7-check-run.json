@@ -1,0 +1,1 @@
+{"expect": 7, "why": "head SHA의 ci check run 하나가 실패", "patch": {"ciChecks": [{"name": "ci", "conclusion": "success", "app": "github-actions"}, {"name": "ci", "conclusion": "failure", "app": "github-actions"}]}}

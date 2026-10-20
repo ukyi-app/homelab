@@ -10,6 +10,7 @@ import { type Doc, type Violation, ROOT, endGroup, errorLine, fmt, gitFiles, gro
 import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkWorkloads } from "./policy";
 import { kubeconform, renderAll } from "./render";
 import { RULES, checkActionFile, checkWorkflow, checkWorkflows } from "./workflow-guard";
+import { type Facts, evaluate } from "../deploy-merge/conditions";
 
 type Step = { name: string; run: () => Violation[] };
 
@@ -65,6 +66,20 @@ const steps: Step[] = [
         }
         if (found) out.push({ rule: "no-secret", where: f, message: "kind: Secret 매니페스트를 두지 않는다" });
       }
+      // apps/<앱>/image.yaml은 app-build의 deploy-pr이 줄 단위로 읽는다(셸, 의존성 없음). 같은 형식을 여기서 강제한다:
+      // 네 키가 한 줄씩 한 번, 그 밖에는 주석·빈 줄뿐. 사람이 롤백으로 고칠 때도 이 형식을 지킨다.
+      for (const f of gitFiles("apps/*/image.yaml")) {
+        const app = basename(dirname(f));
+        const lines = readText(f).split("\n").filter((l) => !/^\s*(#.*)?$/.test(l));
+        const want = [
+          new RegExp(`^repository: ghcr\\.io/ukyi-app/${app}$`),
+          /^digest: sha256:[0-9a-f]{64}$/,
+          /^revision: [0-9a-f]{40}$/,
+          /^hold: (true|false)$/,
+        ];
+        const ok = lines.length === want.length && want.every((re) => lines.filter((l) => re.test(l)).length === 1);
+        if (!ok) out.push({ rule: "image-yaml", where: f, message: `repository: ghcr.io/ukyi-app/${app}, digest: sha256:<64자>, revision: <40자>, hold: true|false 네 줄만 둔다` });
+      }
       // override 파일은 일반 .tf 위에 병합돼 리소스를 덮고, tfvars에는 자격이 들어가기 쉽다(설계 C.3.9, 옛 R41).
       for (const f of gitFiles()) {
         const b = basename(f);
@@ -112,6 +127,40 @@ const steps: Step[] = [
       }
       for (const r of RULES) if (!covered.has(r)) out.push({ rule: "fixture", where: "tools/ci/fixtures/workflow-guard", message: `규칙 ${r}의 음성 fixture가 없다` });
       console.log(`workflow-guard fixture ${files.length}개`);
+      return out;
+    },
+  },
+  {
+    name: "deploy-merge fixtures",
+    // 자동 병합 조건 9개(tools/deploy-merge/conditions.ts). ok.json은 모두 참인 대조군이고, 나머지는 ok.json에
+    // patch 하나를 얹어 기대한 조건 하나만 거짓이 되는지 본다. 조건마다 음성 fixture가 하나 이상 있어야 한다.
+    run: () => {
+      const out: Violation[] = [];
+      const dir = "tools/deploy-merge/fixtures";
+      const files = gitFiles(`${dir}/*.json`);
+      if (!files.includes(`${dir}/ok.json`)) return [{ rule: "fixture", where: dir, message: "대조군 ok.json이 없다" }];
+      const base = JSON.parse(readText(`${dir}/ok.json`));
+      const merge = (a: any, b: any): any => {
+        if (b && typeof b === "object" && !Array.isArray(b) && a && typeof a === "object" && !Array.isArray(a)) {
+          const o = { ...a };
+          for (const [k, v] of Object.entries(b)) o[k] = merge(a[k], v);
+          return o;
+        }
+        return b;
+      };
+      const okFailures = evaluate(base as Facts).failures;
+      if (okFailures.length > 0) out.push({ rule: "fixture", where: `${dir}/ok.json`, message: `대조군이 걸렸다: ${JSON.stringify(okFailures)}` });
+      const covered = new Set<number>();
+      for (const f of files.filter((x) => !x.endsWith("/ok.json"))) {
+        const fx = JSON.parse(readText(f));
+        const got = evaluate(merge(base, fx.patch) as Facts).failures.map((x) => x.cond);
+        covered.add(fx.expect);
+        if (!got.includes(fx.expect)) out.push({ rule: "fixture", where: f, message: `조건 ${fx.expect}가 걸리지 않았다(걸린 것: ${got.join(", ") || "없음"})` });
+        const others = [...new Set(got.filter((c) => c !== fx.expect))];
+        if (others.length > 0) out.push({ rule: "fixture", where: f, message: `다른 조건도 걸렸다: ${others.join(", ")}` });
+      }
+      for (let c = 1; c <= 9; c++) if (!covered.has(c)) out.push({ rule: "fixture", where: dir, message: `조건 ${c}의 음성 fixture가 없다` });
+      console.log(`deploy-merge fixture ${files.length}개`);
       return out;
     },
   },

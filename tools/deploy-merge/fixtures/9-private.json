@@ -1,0 +1,1 @@
+{"expect": 9, "why": "앱 저장소를 private으로 바꿈", "patch": {"appRepo": {"visibility": "private"}}}

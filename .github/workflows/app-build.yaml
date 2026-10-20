@@ -1,0 +1,275 @@
+# 앱 공통 빌드(설계 C.4.1~C.4.3). 앱 저장소의 짧은 build.yaml이 태그로 부른다:
+#   uses: ukyi-app/homelab/.github/workflows/app-build.yaml@app-build-vX.Y.Z
+# 태그는 관리자만 만들고(ruleset D2) 아무도 옮기거나 지우지 못한다(D1). 배포 키 identity가 이 파일의
+# 태그 ref에만 묶이므로(job_workflow_ref claim) 브랜치 ref로 부르면 키를 받지 못한다(설계 C.4.8).
+# 이 파일을 바꾸면 새 태그를 만들고 앱 저장소가 Renovate PR로 따라간다. main이 바뀌어도 앱 빌드는 그대로다.
+#
+# 앱 저장소 계약(템플릿 homelab-app-template이 심는다):
+# - 저장소 이름이 앱 이름이고 public이다(D-29). 이미지는 ghcr.io/ukyi-app/<앱>.
+# - Dockerfile에 test 단계(target)가 있다. 앱 시험은 그 단계에서 돈다. 언어와 무관하게 하려는 것이다.
+# - 호출 job이 권한 상한을 준다: contents read, packages write, id-token write, attestations write.
+#   reusable 워크플로 권한은 caller를 넘을 수 없고, 넘기면 run 전체가 죽는다(설계 B.8 E5).
+name: app-build
+
+on:
+  workflow_call:
+
+# job마다 다시 좁힌다. 앱 코드(시험, 의존성, Dockerfile RUN)가 도는 job에는 id-token이 없어
+# OIDC 토큰을 만들 수 없다(설계 C.4.1, C.4.8).
+permissions: {}
+
+env:
+  LC_ALL: C
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 공개 금지 패턴(D-23)
+        # 앱 저장소는 public이다. tailnet 이름(*.ts.net)과 Tailscale 주소(100.64.0.0/10, fd7a:115c:a1e0::/48)를
+        # 코드·이미지에 두지 않는다(D-29가 D-23을 앱 저장소까지 넓힘). 찾은 줄의 내용은 출력하지 않는다.
+        run: |
+          pattern='[a-z0-9-]+\.ts\.net|(^|[^0-9.])100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}|fd7a:115c:a1e0:'
+          if hits=$(git grep -nIiE -l "$pattern"); then
+            echo "::error::공개 금지 패턴이 있다(tailnet 이름 또는 Tailscale 주소). 파일: $(echo "$hits" | tr '\n' ' ')"
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: 시험(Dockerfile target test)
+        # amd64 네이티브 단일 빌드. QEMU 다중 아키텍처는 옛 구성에서 release를 6시간 태웠다(설계 B.8 E5).
+        run: docker buildx build --platform linux/amd64 --target test --progress plain .
+
+      - name: 빌드 확인(push 없음)
+        # 기본 브랜치 push는 push job이 캐시 없이 다시 빌드한다. 여기서는 PR·다른 브랜치의 빌드 실패만 본다.
+        if: github.event_name != 'push' || github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+        run: docker buildx build --platform linux/amd64 --progress plain .
+
+  push:
+    needs: test
+    # 기본 브랜치 push만. PR과 다른 브랜치는 이미지를 올리지 않는다.
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      # build-push-action이 빌드 기록을 Actions 아티팩트로 올리지 않게 한다. 배포 이미지 경로에 부산물을 두지 않는다.
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+      DOCKER_BUILD_SUMMARY: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 빌드·push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          # 이미지 인덱스 안 provenance·SBOM을 끈다. 켜면 같은 소스도 digest가 매번 달라져 배포가 헛돈다.
+          # 출처 확인은 이미지 밖에 저장하는 GitHub attestation으로 따로 한다(deploy-pr, 설계 C.4.3).
+          provenance: false
+          sbom: false
+          # 캐시는 같은 저장소의 다른 실행이 남긴 내용이라 배포 이미지의 입력에서 뺀다(D-29). 대가는 빌드 시간이다.
+          no-cache: true
+          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+  deploy-pr:
+    needs: push
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # id-token·attestations는 이 job만. 앱 코드를 체크아웃·실행하지 않는다. contents read는 GITHUB_TOKEN으로
+    # 앱 저장소 compare를 읽는 데 쓴다(App 토큰은 homelab 쪽에만, 설계 C.4.8).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    # 낭비를 줄이는 보조 장치일 뿐 순서를 보장하지 않는다. 순서는 아래 compare 규칙이 지킨다(설계 C.4.3).
+    concurrency:
+      group: deploy-${{ github.repository }}
+      cancel-in-progress: true
+    env:
+      APP: ${{ github.event.repository.name }}
+      DIGEST: ${{ needs.push.outputs.digest }}
+      # 공개해도 되는 식별자다(자격 아님). 키는 Infisical 프로젝트 homelab-ci-deploy에만 있다(D-04).
+      # identity gha-homelab-deploy는 claim으로 이 파일의 태그 ref·main push·ukyi-app에 묶여 있다(approvals 2026-10-19).
+      INFISICAL_IDENTITY_ID: 44ba77ec-d301-4226-8a9d-3e1321579416
+      INFISICAL_PROJECT_SLUG: ukyi-homelab-ci-deploy
+      # App homelab-deploy의 client ID. App을 만든 뒤 사람이 채운다(HUMAN-STEPS). 채우기 전에는 아래 확인에서 멈춘다.
+      DEPLOY_APP_CLIENT_ID: REPLACE_WITH_HOMELAB_DEPLOY_CLIENT_ID
+    steps:
+      - name: build provenance attestation
+        # 첫 단계다. 앱 저장소가 private이면 Free에서 attestation을 만들 수 없어 여기서 실패하고 배포 PR을 만들지 않는다
+        # (fail-safe, D-29). 가시성 분기를 두지 않는다. 미등록 앱도 만든다.
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ needs.push.outputs.digest }}
+          # GitHub API에만 저장한다. 레지스트리에 올리려면 이 job에 packages write가 필요하다.
+          push-to-registry: false
+          create-storage-record: false
+
+      - name: 입력 확인
+        run: |
+          [[ $GITHUB_REPOSITORY_OWNER == ukyi-app ]] || { echo "::error::ukyi-app 저장소만"; exit 1; }
+          [[ $APP =~ ^[a-z0-9]([a-z0-9-]{0,57}[a-z0-9])?$ ]] || { echo "::error::앱 이름(저장소 이름)이 DNS 라벨 59자 이하가 아니다: $APP"; exit 1; }
+          [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::push job의 digest가 없다"; exit 1; }
+          [[ $DEPLOY_APP_CLIENT_ID != REPLACE_* ]] || { echo "::error::app-build.yaml의 DEPLOY_APP_CLIENT_ID가 아직 비어 있다(App homelab-deploy 생성 뒤 채운다)"; exit 1; }
+
+      - name: 배포 App 키(Infisical OIDC)
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: oidc
+          identity-id: ${{ env.INFISICAL_IDENTITY_ID }}
+          # identity의 Audiences 값과 같아야 한다(GitHub 기본값인 소유자 URL).
+          oidc-audience: https://github.com/ukyi-app
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /
+          # 없으면 오류로 끝난다. 프로젝트에는 이 키 하나만 있다.
+          secret-name: HOMELAB_DEPLOY_KEY
+          include-imports: false
+          export-type: env
+
+      - name: homelab 설치 토큰
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ env.DEPLOY_APP_CLIENT_ID }}
+          private-key: ${{ env.HOMELAB_DEPLOY_KEY }}
+          # owner·repositories·permission을 모두 적는다. owner를 비우면 현재(앱) 저장소로 잡힌다(설계 B.8 E5).
+          owner: ukyi-app
+          repositories: homelab
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: 키 지우기
+        # 설치 토큰을 받았으니 키는 더 쓰지 않는다. 뒤 단계 환경에서 뺀다.
+        run: echo "HOMELAB_DEPLOY_KEY=" >> "$GITHUB_ENV"
+
+      - name: 배포 PR(deploy/<앱>)
+        env:
+          HOMELAB_TOKEN: ${{ steps.token.outputs.token }}
+          APP_REPO_TOKEN: ${{ github.token }}
+          NEW_REV: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/ukyi-app/${APP}"
+          branch="deploy/${APP}"
+          note() { echo "$*"; echo "$*" >> "$GITHUB_STEP_SUMMARY"; }
+
+          # image.yaml을 엄격하게 읽는다. 4개 키가 한 줄씩, 다른 내용은 주석·빈 줄뿐이어야 한다(ci가 같은 형식을 강제).
+          # 결과: cur_repo cur_digest cur_rev cur_hold. 파일이 없으면 1을 돌려준다.
+          read_image() {
+            local ref=$1 out err
+            err=$(mktemp)
+            if ! out=$(GH_TOKEN=$HOMELAB_TOKEN gh api -H 'Accept: application/vnd.github.raw' \
+                "repos/ukyi-app/homelab/contents/apps/${APP}/image.yaml?ref=${ref}" 2>"$err"); then
+              if grep -q 'HTTP 404' "$err"; then return 1; fi
+              cat "$err" >&2; exit 1
+            fi
+            # grep -q로 끝내지 않는다. pipefail 아래에서 앞 grep이 SIGPIPE로 죽으면 찾은 줄을 놓친다(설계 C.3.9 실측).
+            local bad
+            bad=$(printf '%s\n' "$out" | grep -vE '^(repository|digest|revision|hold): ' | grep -vE '^[[:space:]]*(#.*)?$' || true)
+            [[ -z $bad ]] || { echo "::error::${ref}의 apps/${APP}/image.yaml에 모르는 줄이 있다"; exit 1; }
+            field() { printf '%s\n' "$out" | sed -nE "s/^$1: (.*)\$/\\1/p"; }
+            cur_repo=$(field repository); cur_digest=$(field digest); cur_rev=$(field revision); cur_hold=$(field hold)
+            [[ $cur_repo == "$image" ]] || { echo "::error::${ref}의 repository가 ${image}가 아니다"; exit 1; }
+            [[ $cur_digest =~ ^sha256:[0-9a-f]{64}$ && $cur_rev =~ ^[0-9a-f]{40}$ && $cur_hold =~ ^(true|false)$ ]] ||
+              { echo "::error::${ref}의 apps/${APP}/image.yaml 형식이 틀렸다"; exit 1; }
+          }
+
+          # 새 revision이 base보다 앞인지(앱 저장소 compare, GITHUB_TOKEN). ahead만 갱신한다(설계 C.4.3).
+          compare() {
+            GH_TOKEN=$APP_REPO_TOKEN gh api "repos/${GITHUB_REPOSITORY}/compare/$1...${NEW_REV}" --jq .status
+          }
+
+          # 토큰을 argv에 두지 않는다. git 설정은 환경 변수로 넘긴다.
+          basic=$(printf 'x-access-token:%s' "$HOMELAB_TOKEN" | base64 -w0)
+          echo "::add-mask::${basic}"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${basic}"
+          bot_id=$(gh api '/users/homelab-deploy%5Bbot%5D' --jq .id)
+
+          for attempt in 1 2; do
+            if ! read_image main; then
+              note "미등록 앱: homelab main에 apps/${APP}/image.yaml이 없다. 최초 등록은 사람 PR이다. digest ${DIGEST}"
+              exit 0
+            fi
+            if [[ $cur_hold == true ]]; then
+              note "배포 보류(hold: true): main의 revision ${cur_rev}. 새 빌드 ${NEW_REV}는 PR을 만들지 않는다"
+              exit 0
+            fi
+            status=$(compare "$cur_rev")
+            if [[ $status != ahead ]]; then
+              note "main의 배포 revision ${cur_rev} 대비 ${status}: 갱신하지 않는다(늦게 끝난 빌드는 behind)"
+              exit 0
+            fi
+
+            lease=$(GH_TOKEN=$HOMELAB_TOKEN gh api "repos/ukyi-app/homelab/git/ref/heads/${branch}" --jq .object.sha 2>/dev/null || true)
+            if [[ -n $lease ]] && read_image "$branch"; then
+              status=$(compare "$cur_rev")
+              if [[ $status != ahead ]]; then
+                note "열린 ${branch}의 revision ${cur_rev} 대비 ${status}: 갱신하지 않는다"
+                exit 0
+              fi
+            fi
+
+            work=$(mktemp -d)
+            git -C "$work" init -q
+            git -C "$work" remote add origin https://github.com/ukyi-app/homelab.git
+            git -C "$work" fetch -q --depth=1 origin main
+            git -C "$work" checkout -q FETCH_HEAD
+            mkdir -p "$work/apps/${APP}"
+            printf 'repository: %s\ndigest: %s\nrevision: %s\nhold: false\n' "$image" "$DIGEST" "$NEW_REV" > "$work/apps/${APP}/image.yaml"
+            git -C "$work" add "apps/${APP}/image.yaml"
+            git -C "$work" -c user.name='homelab-deploy[bot]' -c user.email="${bot_id}+homelab-deploy[bot]@users.noreply.github.com" \
+              commit -q -m "deploy(${APP}): ${NEW_REV:0:12}" -m "digest ${DIGEST}" -m "source https://github.com/${GITHUB_REPOSITORY}/commit/${NEW_REV}"
+            # 읽은 브랜치 SHA를 lease로. 그 사이 다른 빌드가 브랜치를 바꿨으면 거부되고, 한 번 다시 읽어 규칙을 재평가한다.
+            if git -C "$work" push -q --force-with-lease="refs/heads/${branch}:${lease}" origin "HEAD:refs/heads/${branch}"; then
+              break
+            fi
+            if [[ $attempt == 2 ]]; then echo "::error::${branch} push가 두 번 경합했다"; exit 1; fi
+            note "${branch}가 그 사이 바뀌었다. 다시 읽는다"
+          done
+
+          title="deploy(${APP}): ${NEW_REV:0:12}"
+          body=$(printf 'App homelab-deploy가 만든 배포 PR이다. 자동 병합 조건은 .github/workflows/README.md.\n\n- image: %s@%s\n- revision: https://github.com/%s/commit/%s\n- run: %s/%s/actions/runs/%s' \
+            "$image" "$DIGEST" "$GITHUB_REPOSITORY" "$NEW_REV" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          pr=$(GH_TOKEN=$HOMELAB_TOKEN gh api "repos/ukyi-app/homelab/pulls?head=ukyi-app:${branch}&state=open" --jq '.[0].number // empty')
+          if [[ -n $pr ]]; then
+            GH_TOKEN=$HOMELAB_TOKEN gh api -X PATCH "repos/ukyi-app/homelab/pulls/${pr}" -f title="$title" -f body="$body" >/dev/null
+            note "배포 PR #${pr} 갱신: ${NEW_REV}"
+          else
+            pr=$(GH_TOKEN=$HOMELAB_TOKEN gh api "repos/ukyi-app/homelab/pulls" -f title="$title" -f head="$branch" -f base=main -f body="$body" --jq .number)
+            note "배포 PR #${pr} 생성: ${NEW_REV}"
+          fi

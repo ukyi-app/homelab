@@ -1,0 +1,1 @@
+{"expect": 3, "why": "image.yaml 말고 다른 파일도 바꿨다", "patch": {"files": [{"filename": "apps/homelab-probe/image.yaml", "status": "modified"}, {"filename": "apps/homelab-probe/values.yaml", "status": "modified"}]}}

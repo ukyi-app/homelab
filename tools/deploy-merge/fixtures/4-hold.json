@@ -1,0 +1,1 @@
+{"expect": 4, "why": "롤백으로 main이 hold: true인데 열린 PR이 남았다", "patch": {"mainImage": "repository: ghcr.io/ukyi-app/homelab-probe\ndigest: sha256:0000000000000000000000000000000000000000000000000000000000000000\nrevision: cccccccccccccccccccccccccccccccccccccccc\nhold: true\n"}}

@@ -1,0 +1,1 @@
+{"expect": 1, "why": "봇 ID를 아직 채우지 않았으면(0) 누구의 PR도 병합하지 않는다", "patch": {"deployBotId": 0, "pr": {"userId": 0}}}
