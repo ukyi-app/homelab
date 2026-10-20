@@ -53,9 +53,9 @@ function isKustomizeDir(dir: string): boolean {
 }
 
 function plainDir(dir: string): { ok: boolean; out: string } {
-  // Argo CD directory 소스의 기본값(recurse 없음)과 같이 바로 아래 YAML만.
-  const files = gitFiles(`${dir}/*.yaml`, `${dir}/*.yml`).filter((f) => dirname(f) === dir);
-  if (files.length === 0) return { ok: false, out: `${dir}에 YAML이 없다` };
+  // Argo CD directory 소스의 기본값(recurse 없음)과 같이 바로 아래 .yaml·.yml·.json. JSON은 YAML로도 읽힌다.
+  const files = gitFiles(`${dir}/*.yaml`, `${dir}/*.yml`, `${dir}/*.json`).filter((f) => dirname(f) === dir);
+  if (files.length === 0) return { ok: false, out: `${dir}에 매니페스트가 없다` };
   return { ok: true, out: files.map((f) => readFileSync(join(ROOT, f), "utf8")).join("\n---\n") };
 }
 
@@ -81,7 +81,13 @@ export function renderAll(): RenderResult {
   const renderSource = (app: any, cluster: string, src: any): string | undefined => {
     const name = app.metadata?.name;
     if (!sameRepo(src.repoURL)) {
-      res.skipped.push(`${name}[${cluster}]: ${src.repoURL} ${src.chart ?? src.path ?? ""}@${src.targetRevision ?? ""}`);
+      // 외부 Helm 차트만 렌더하지 않는다(revision은 정책이 정확한 semver로 묶는다). 외부 git source는 렌더하지 않으면
+      // 그 매니페스트가 검사 없이 배포되므로 받지 않는다. 필요해지면 이 파일이 그 SHA를 받아 렌더하도록 넓힌다.
+      if (!src.chart) {
+        fail(`${name}[${cluster}]`, `외부 git source(${src.repoURL})는 렌더 검사를 못 해 받지 않는다`);
+        return undefined;
+      }
+      res.skipped.push(`${name}[${cluster}]: ${src.repoURL} ${src.chart}@${src.targetRevision ?? ""}`);
       return undefined;
     }
     if (src.ref && !src.path) return undefined; // 값 파일 참조용 source는 렌더 대상이 아니다
@@ -184,7 +190,11 @@ export function renderAll(): RenderResult {
     else add(`kustomize:${dir}`, r.out);
   }
 
-  // 4. 차트 시험 values
+  // 4. 차트 시험 values. 차트마다 하나 이상 있어야 한다. 아직 어느 Application도 쓰지 않는 새 차트는 이것이 유일한 렌더다.
+  for (const c of gitFiles(":(glob)platform/charts/*/Chart.yaml")) {
+    const dir = dirname(c);
+    if (gitFiles(`${dir}/ci/*.yaml`).length === 0) fail(dir, "차트 시험 values(ci/*.yaml)가 없다");
+  }
   for (const f of gitFiles(":(glob)platform/charts/*/ci/*.yaml")) {
     const chartDir = dirname(dirname(f));
     const chart = relative("platform/charts", chartDir);

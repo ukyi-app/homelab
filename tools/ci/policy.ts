@@ -28,9 +28,9 @@ function upstreamArgocdWorkload(d: Doc, images: string[]): boolean {
   );
 }
 
-const WORKLOAD_KINDS = new Set(["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "Pod"]);
+const WORKLOAD_KINDS = new Set(["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController", "Job", "CronJob", "Pod"]);
 const DIGEST_IMAGE = /^[a-z0-9][a-z0-9._\-/:]*@sha256:[0-9a-f]{64}$/;
-const PUBLIC_HOST = /^[a-z0-9-]+\.ukyi\.app$/;
+const PUBLIC_HOST = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.ukyi\.app$/;
 const DNS_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 // D-30 리다이렉터의 tailnet 이름. 다른 것이 이 이름을 가져가면 go/ 짧은 주소가 깨진다.
 const RESERVED_TAILNET_NAMES = new Set(["go", "vm-go"]);
@@ -50,8 +50,15 @@ const READONLY_FORBIDDEN_RESOURCES = new Set([
   "nodes/proxy",
   "serviceaccounts/token",
 ]);
-// 봇 읽기 계정 SA. 이 SA를 묶는 바인딩은 읽기 전용 라벨이 붙은 역할만 가리켜야 한다(roleRef 우회, L30).
+// 봇 읽기 계정 SA. 이 SA를 포함하는 주체를 묶는 바인딩은 읽기 전용 라벨이 붙은 역할만 가리켜야 한다(roleRef 우회, L30).
+// SA는 system:serviceaccounts, system:serviceaccounts:<ns>, system:authenticated 그룹에 자동으로 든다.
 const READONLY_SUBJECTS = new Set(["bot-reader"]);
+function coversReader(s: any): boolean {
+  if (s?.kind === "ServiceAccount") return READONLY_SUBJECTS.has(s.name);
+  if (s?.kind === "User") return /^system:serviceaccount:[^:]+:bot-reader$/.test(String(s.name));
+  if (s?.kind === "Group") return /^system:(serviceaccounts(:.+)?|authenticated)$/.test(String(s.name));
+  return false;
+}
 
 // kind: List의 items를 펼친다. kubectl·Argo CD는 List 안 리소스를 각각 적용한다.
 function expand(docs: Doc[]): Doc[] {
@@ -118,9 +125,11 @@ export function checkWorkloads(docs: Doc[]): Violation[] {
 
 // L31 자기 저장소를 가리키는 Argo CD 참조는 main. 공유 차트만 자기 태그(app-chart-v*, data-chart-v*)다.
 // ApplicationSet git 생성기의 키는 targetRevision이 아니라 revision이라 따로 본다.
+// 정확한 릴리스 태그만. 접두만 보면 app-chart-v-dev 같은 움직이는 브랜치를 가리킬 수 있다.
+// ApplicationSet 템플릿은 앱마다 고른 버전을 쓰므로 그 템플릿 식 하나만 더 받는다(값은 차트 schema가 semver로 묶는다).
 const CHART_TAGS: Record<string, RegExp> = {
-  "platform/charts/app": /^app-chart-v/,
-  "platform/charts/app-data": /^data-chart-v/,
+  "platform/charts/app": /^app-chart-v(\d+\.\d+\.\d+|\{\{ \.chartVersion \}\})$/,
+  "platform/charts/app-data": /^data-chart-v(\d+\.\d+\.\d+|\{\{ \.chartVersion \}\})$/,
 };
 
 // 외부 source는 움직이지 않는 revision만: Helm 차트는 정확한 semver, 그 밖(git)은 40자 커밋 SHA.
@@ -220,9 +229,9 @@ export function checkReadonlyRbac(docs: Doc[]): Violation[] {
     const ref = d.obj.roleRef ?? {};
     const target = find(context(d.origin), ref.kind, ref.name, d.obj.metadata?.namespace);
     const refDesc = `${ref.kind}/${ref.name}`;
-    const bindsReader = subjects.some((s) => s.kind === "ServiceAccount" && READONLY_SUBJECTS.has(s.name));
+    const bindsReader = subjects.some(coversReader);
     if (bindsReader && !(target && isReadonly(target))) {
-      out.push({ rule: "readonly-rbac", where: id(d), message: `bot-reader를 같은 렌더의 읽기 전용 라벨 역할이 아닌 ${refDesc}에 묶는다` });
+      out.push({ rule: "readonly-rbac", where: id(d), message: `bot-reader(또는 그 SA가 드는 그룹)를 같은 렌더의 읽기 전용 라벨 역할이 아닌 ${refDesc}에 묶는다` });
     }
     if (ref.name === "homelab-readonly" && !target) {
       out.push({ rule: "readonly-rbac", where: id(d), message: `읽기 전용 역할 ${refDesc}가 같은 렌더에 없다` });

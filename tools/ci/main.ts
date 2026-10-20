@@ -25,8 +25,17 @@ function header(text: string, key: string): string | undefined {
   return text.match(new RegExp(`^# ${key}: (.+)$`, "m"))?.[1].trim();
 }
 
-// 들여쓴 kind(목록 항목 안, List 매니페스트 등)도 잡는다. 따옴표로 감싼 값도.
-const SECRET_KIND = /^\s*(-\s+)?kind:\s*["']?Secret["']?\s*(#.*)?$/m;
+// YAML로 읽히는 파일은 구조로(흐름 매핑 {kind: Secret} 포함), Helm 템플릿처럼 읽히지 않는 파일은 원문으로 본다.
+const SECRET_KIND = /^\s*(-\s+)?["']?kind["']?\s*:\s*["']?Secret["']?\s*(#.*)?$/m;
+function hasSecret(v: unknown): boolean {
+  if (Array.isArray(v)) return v.some(hasSecret);
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (o.kind === "Secret" && typeof o.apiVersion === "string" && o.apiVersion === "v1") return true;
+    return Object.values(o).some(hasSecret);
+  }
+  return false;
+}
 
 const steps: Step[] = [
   {
@@ -42,7 +51,16 @@ const steps: Step[] = [
       // kind: Secret 매니페스트 0건(설계 C.6.2). Helm 템플릿도 원문으로 본다. 음성 fixture는 뺀다.
       for (const f of gitFiles("*.yaml", "*.yml", "*.tpl")) {
         if (f.startsWith("tools/ci/fixtures/") || f.startsWith("docs/")) continue;
-        if (SECRET_KIND.test(readText(f))) out.push({ rule: "no-secret", where: f, message: "kind: Secret 매니페스트를 두지 않는다" });
+        const text = readText(f);
+        let found = SECRET_KIND.test(text);
+        if (!found) {
+          try {
+            found = hasSecret(parseAll(text));
+          } catch {
+            // 템플릿 등 YAML이 아닌 파일은 원문 검사만.
+          }
+        }
+        if (found) out.push({ rule: "no-secret", where: f, message: "kind: Secret 매니페스트를 두지 않는다" });
       }
       // override 파일은 일반 .tf 위에 병합돼 리소스를 덮고, tfvars에는 자격이 들어가기 쉽다(설계 C.3.9, 옛 R41).
       for (const f of gitFiles()) {

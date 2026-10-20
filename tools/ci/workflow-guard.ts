@@ -31,8 +31,6 @@ const MERGE_FILE = "deploy-merge.yaml";
 const MERGE_JOB = "merge";
 const MERGE_ENV = "automerge";
 const MERGE_KEY = "HOMELAB_MERGE_KEY";
-// 공통 워크플로를 태그로 부르는 앱 저장소 호출만 SHA 대신 태그를 쓴다(설계 C.4.5). homelab 안에서는 쓰지 않는다.
-const SELF_TAG_CALL = /^ukyi-app\/homelab\/\.github\/workflows\/app-build\.yaml@app-build-v\d+\.\d+\.\d+$/;
 const SHA_PIN = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(\/[^@\s]+)?@[0-9a-f]{40}$/;
 // 액션 허용 목록(설계 C.4.10). 저장소 Actions 설정(selected: GitHub 소유, 검증된 제작자, Infisical/secrets-action)보다
 // 좁게 적는다. 검증된 제작자 표시는 바뀔 수 있어 쓰는 제작자만 적는다. 더할 때는 이 목록과 infra/github의
@@ -81,34 +79,31 @@ function walk(v: unknown, visit: (key: string | undefined, s: string, jobId: str
   }
 }
 
-function pins(file: WorkflowFile, parsedUses: number): Violation[] {
+// 파싱한 uses 값마다 검사한다(원문 줄을 세지 않는다. run 블록 안의 "uses:" 글자는 액션이 아니다).
+// 버전 주석은 파싱하면 사라지므로, 같은 값을 쓴 "uses: <값> # <버전>" 한 줄이 원문에 있어야 한다.
+// 흐름 매핑({uses: ...})처럼 그 줄이 없으면 실패다.
+function pins(file: WorkflowFile, uses: { where: string; ref: string }[]): Violation[] {
   const out: Violation[] = [];
-  let lineUses = 0;
-  file.text.split("\n").forEach((line, i) => {
-    const m = line.match(/^\s*(?:-\s+)?uses:\s*(['"]?)([^'"\s#]+)\1\s*(#.*)?$/);
-    if (!m) return;
-    lineUses++;
-    const ref = m[2];
-    const where = `${file.path}:${i + 1}`;
-    if (ref.startsWith("./")) return;
+  const lines = file.text.split("\n");
+  for (const { where, ref } of uses) {
+    if (ref.startsWith("./")) continue;
     if (ref.startsWith("docker://")) {
       if (!/@sha256:[0-9a-f]{64}$/.test(ref)) out.push({ rule: "pin", where, message: `docker 액션은 digest로 고정한다: ${ref}` });
-      return;
+      continue;
     }
-    if (SELF_TAG_CALL.test(ref)) return;
     const pin = ref.match(SHA_PIN);
     if (!pin) {
       out.push({ rule: "pin", where, message: `uses는 40자 커밋 SHA로 고정한다: ${ref} (L33)` });
-      return;
+      continue;
     }
     if (!ALLOWED_OWNERS.has(pin[1]) && !ALLOWED_ACTIONS.has(`${pin[1]}/${pin[2]}`)) {
       out.push({ rule: "pin", where, message: `허용 목록 밖 액션이다: ${pin[1]}/${pin[2]} (설계 C.4.10)` });
     }
-    if (!m[3] || !/#\s*v?\d/.test(m[3])) out.push({ rule: "pin", where, message: `SHA 옆에 버전 주석(# vX.Y.Z)을 단다: ${ref}` });
-  });
-  // 한 줄 블록 형식이 아닌 uses(흐름 매핑 등)는 원문 검사를 피한다. 개수가 다르면 실패로 둔다.
-  if (lineUses !== parsedUses) {
-    out.push({ rule: "pin", where: file.path, message: `uses ${parsedUses}개 중 ${lineUses}개만 줄 단위로 읽었다. "uses: <ref> # <버전>" 한 줄 형식으로 쓴다` });
+    const esc = ref.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    const line = new RegExp(`^\\s*(-\\s+)?uses:\\s*(['"]?)${esc}\\2\\s*#\\s*v?\\d`);
+    if (!lines.some((l) => line.test(l))) {
+      out.push({ rule: "pin", where, message: `"uses: ${ref} # <버전>" 한 줄 형식이 아니거나 버전 주석이 없다` });
+    }
   }
   return out;
 }
@@ -132,7 +127,7 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
   const jobs: Record<string, any> = wf.jobs && typeof wf.jobs === "object" ? wf.jobs : {};
   const isMergeFile = name === MERGE_FILE;
   let declaresEnv = false;
-  let parsedUses = 0;
+  const uses: { where: string; ref: string }[] = [];
   const usedSecrets = new Set<string>();
 
   if (on.includes("pull_request_target")) add("pull-request-target", file.path, "pull_request_target를 쓰지 않는다(설계 C.4.10)");
@@ -150,8 +145,13 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
   for (const [jobId, job] of Object.entries(jobs)) {
     const where = `${file.path} jobs.${jobId}`;
     if (!job || typeof job !== "object") continue;
-    if (Array.isArray(job.steps)) parsedUses += job.steps.filter((s: any) => s && typeof s === "object" && "uses" in s).length;
-    if ("uses" in job) parsedUses++;
+    if (Array.isArray(job.steps)) {
+      job.steps.forEach((st: any, i: number) => {
+        if (st && typeof st === "object" && "uses" in st) uses.push({ where: `${where} steps[${i}]`, ref: String(st.uses) });
+      });
+    }
+    // 로컬 reusable 호출(./)만 받는다(reusable-call 규칙). 앱 저장소가 쓰는 태그 호출은 이 저장소 워크플로에 두지 않는다.
+    if ("uses" in job) uses.push({ where, ref: String(job.uses) });
 
     const env = job.environment;
     if (env !== undefined) {
@@ -214,7 +214,7 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
     add("dispatch-secrets", file.path, `${dispatch.join(", ")} 워크플로가 secret을 쓴다: ${[...usedSecrets].join(", ")}`);
   }
 
-  out.push(...pins(file, parsedUses));
+  out.push(...pins(file, uses));
   return out;
 }
 
