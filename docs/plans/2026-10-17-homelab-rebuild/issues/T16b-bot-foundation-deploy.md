@@ -23,6 +23,7 @@
    - 봇 토큰과 서버·채널·허용 사용자(owner 1명) ID는 Infisical `/apps/homelab-bot/`에만 둔다. 저장소와 공개 문서에는 쓰지 않는다.
 3. T16a의 계약을 실제 Discord와 플랫폼 읽기 계정에 연결하고 실연동 결과를 낸다. Grafana 질의 템플릿은 실제 Grafana에서 허용 밖 질의가 거부되는지 본다(READ-02). Grafana·Argo CD `bot-reader` 토큰은 설계에 보관 위치가 없어 봇 저장소 `ARCHITECTURE.md` §5가 `/apps/homelab-bot/`의 키 이름(`GRAFANA_READER_TOKEN`, `ARGOCD_READER_TOKEN`)을 제안했다.
 4. 첫 배포를 아래 순서로 한다(설계 E9).
+   - **선행(보안): capability nonce 정규화.** T16a PR #5에서 이월한 지적이다(할 일 6). 봇 저장소 `src/worker.ts`에서 서명에 `=`·`!` 같은 문자를 덧붙인 비정규 base64url이 같은 바이트로 검증되지만 nonce는 새 값으로 소비돼, 30초 안에 같은 작업을 다시 실행할 수 있다. canonical base64url만 받거나 검증된 payload와 서명 바이트로 nonce 키를 만든다. 이 수정이 봇 저장소 main에 병합된 뒤에 아래 1을 시작한다 [제안].
    1. 에이전트: 등록 전에 봇 저장소 워크플로를 템플릿의 `build.yaml`(`app-build@<태그>` 호출)로 맞추는 PR을 먼저 병합한다(설계 E9 선행 조건, 병합은 사람). 플랫폼 CLI(`homelab app add homelab-bot`)로 봇을 등록하고, DB를 추가하고, 시크릿 참조를 선언한다. 값은 넣지 않는다. 봇 values에 `serviceAccountName: bot-reader`를 둔다(설계 C.4.5).
    2. 사람: Infisical에 봇 시크릿을 등록한다. 게시 서버 값은 `/apps/homelab-bot/`, 작업자 값은 `/apps/homelab-bot/worker`로 나눈다(설계 E9). 봇이 실행 중 읽는 runtime-policies와 허용 목록의 실제 값도 `/apps/homelab-bot/`에 둔다(D-13).
       - 작업자 값은 봇 전용 ChatGPT 구독 계정(D-14)의 시드 `auth.json`이다. 계정 준비와 시드를 만들어 `/apps/homelab-bot/worker`에 등록하는 일은 사람이 한다(설계 E9 선행 조건의 사람 작업, spec §11 모델 행). 이 단계에서는 등록돼 있는지 확인한다. 개인 `~/.codex*`는 쓰거나 복사하지 않는다. [../approvals.md](../approvals.md)에 기록한다.
@@ -41,7 +42,7 @@
    - 승인은 [../approvals.md](../approvals.md)에 남긴다 (AC-X2).
 5. 봇 중단 경보(OPS-02)를 실제로 확인한다. Gateway만 끊겼을 때 봇이 Ready를 유지해 webhook(8080)·경보 수신(8081)이 계속 되는지와 Gateway 연결 지표 경보가 오는지를 함께 본다. T16a가 만든 readiness 연동과 하트비트를 쓰려면 사람이 봇 전용 healthchecks.io 체크를 만들고 ping URL을 `/apps/homelab-bot/`에 등록한다(봇 저장소 `ARCHITECTURE.md` §8 제안). Bun 위 Discord Gateway의 네트워크 차단·복구 시험(discord.js 이슈 #10840, not planned 종료)을 여기서 한다. 실패하면 Node 24 전환을 검토한다 [가정: `ARCHITECTURE.md` §3].
 6. T16a PR #5(`ukyi-app/homelab-bot`, 병합 `7f649c9`)에서 이월한 Codex 리뷰 P2 6개를 봇 저장소 PR로 고친다. 마지막 재리뷰(head `1a639db`)에 P1이 없으면 병합하고 남은 P2는 이 티켓으로 옮긴다는 멈춤 규칙에 따른 것이다(사용자 2026-10-20). 스레드마다 처리 방향을 답글로 남겼다.
-   - **capability nonce 정규화(`src/worker.ts`, 보안 성격):** 서명에 `=`·`!` 같은 문자를 덧붙인 비정규 base64url이 같은 바이트로 검증되지만 nonce는 새 값으로 소비돼, 30초 안에 같은 작업을 다시 실행할 수 있다. canonical base64url만 받거나 검증된 payload와 서명 바이트로 nonce 키를 만든다. 첫 배포(할 일 4) 전에 고친다 [제안].
+   - **capability nonce 정규화(`src/worker.ts`, 보안 성격):** 첫 배포 전에 고치도록 할 일 4의 선행 단계로 옮겼다.
    - **JSON 페이지 밖 marker(`src/discord.ts`):** 긴 `/list` 게시물의 각 페이지 뒤에 붙는 `[ref:...]`가 JSON 파싱을 깬다. marker를 JSON 필드나 별도 메타데이터로 옮긴다.
    - **모델 응답 생략 표시(`src/runtime.ts`):** 섹션 350자 `slice()`가 항목을 조용히 버린다. 완결 항목 단위로 줄이고 생략 건수를 표시한다(`summaryItems()`와 같은 방식).
    - **marker 검색 실패 backoff(`src/discord.ts`):** `external_id`가 없는 unknown 행이 매 `reconcile()`마다 최대 10페이지 history를 다시 조회한다. 검색 실패 때도 다음 대조 시각을 저장하고 조회 조건에 쓴다.
