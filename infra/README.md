@@ -56,7 +56,8 @@ unset TAILSCALE_API_KEY TAILSCALE_TAILNET CLOUDFLARE_API_KEY CLOUDFLARE_EMAIL
 unset AWS_PROFILE AWS_SESSION_TOKEN TF_CLI_ARGS TF_CLI_ARGS_init TF_CLI_ARGS_plan TF_CLI_ARGS_apply
 unset TF_WORKSPACE
 export TF_IN_AUTOMATION=1
-export TF_INPUT=0
+# TF_INPUT=0은 넣지 않는다. -input=false와 같아서 apply가 승인 질문을 못 하고 변경을 거부한다.
+# 변수 누락 때 질문하지 않고 실패하도록 init·plan에만 -input=false를 붙인다.
 read -r -p 'homelab-admin project ID: ' HOMELAB_ADMIN_PROJECT_ID
 read -r -p 'R2 S3 API endpoint (https://...r2.cloudflarestorage.com): ' R2_ENDPOINT
 
@@ -90,11 +91,11 @@ done
 같은 키 이름에 서로 다른 값이 들어 있으면 안 된다.
 
 ```bash
-tf cloudflare init -reconfigure -lockfile=readonly \
+tf cloudflare init -input=false -reconfigure -lockfile=readonly \
   "-backend-config=endpoints={s3=\"$R2_ENDPOINT\"}"
-tf tailscale init -reconfigure -lockfile=readonly \
+tf tailscale init -input=false -reconfigure -lockfile=readonly \
   "-backend-config=endpoints={s3=\"$R2_ENDPOINT\"}"
-tf tailscale-dns init -reconfigure -lockfile=readonly \
+tf tailscale-dns init -input=false -reconfigure -lockfile=readonly \
   "-backend-config=endpoints={s3=\"$R2_ENDPOINT\"}"
 ```
 
@@ -129,13 +130,13 @@ ACL·DNS도 `cloudflare` 부분을 각 root 이름으로 바꿔 백업한다.
 3. 아래 plan을 검토하고 사람이 apply한다. `-auto-approve`는 쓰지 않는다.
 
 ```bash
-tf cloudflare plan -lock-timeout=0s
+tf cloudflare plan -input=false -lock-timeout=0s
 tf cloudflare apply -lock-timeout=0s
-tf cloudflare plan -detailed-exitcode -lock-timeout=0s
+tf cloudflare plan -input=false -detailed-exitcode -lock-timeout=0s
 
-tf tailscale plan -lock-timeout=0s
+tf tailscale plan -input=false -lock-timeout=0s
 tf tailscale apply -lock-timeout=0s
-tf tailscale plan -detailed-exitcode -lock-timeout=0s
+tf tailscale plan -input=false -detailed-exitcode -lock-timeout=0s
 tailscale ssh nuc-15-pro
 ```
 
@@ -159,7 +160,7 @@ DNS 목표 전환은 AdGuard가 NUC의 tailnet 주소에서 TCP/UDP 53으로 응
 터미널 두 개에서 2절의 환경을 준비한다. 두 터미널에서 아래 명령을 동시에 실행한다.
 
 ```bash
-tf cloudflare plan -lock-timeout=0s
+tf cloudflare plan -input=false -lock-timeout=0s
 ```
 
 한쪽은 plan 성공, 다른 쪽은 **Error acquiring the state lock**으로 exit 1이어야 한다.
@@ -227,7 +228,7 @@ NUC는 정확히 1대, 태그 없음, 키 만료 해제, `100.`으로 시작하�
 IPv6가 주소 목록 첫 항목이어도 HCL은 IPv4만 고른다.
 
 ```bash
-tf tailscale-dns plan -lock-timeout=0s
+tf tailscale-dns plan -input=false -lock-timeout=0s
 ```
 
 HCL의 import 블록이 기존 singleton 설정을 읽는다.
@@ -240,7 +241,7 @@ Import ID `dns_configuration`은 tailnet 이름이 아니라
 
 ```bash
 tf tailscale-dns apply -lock-timeout=0s
-tf tailscale-dns plan -detailed-exitcode -lock-timeout=0s
+tf tailscale-dns plan -input=false -detailed-exitcode -lock-timeout=0s
 ```
 
 Apply가 다시 보여 주는 계획도 **import만** 있는지 보고 승인한다.
@@ -259,10 +260,10 @@ Override·MagicDNS 켬, NUC IPv4 + `94.140.14.14` + `94.140.15.15`,
 HTTPS 인증서는 이 리소스의 속성이 아니므로 사람이 콘솔에서 따로 켜고 승인 기록에 남긴다.
 
 ```bash
-tf tailscale-dns plan -lock-timeout=0s
+tf tailscale-dns plan -input=false -lock-timeout=0s
 # 2절대로 tailscale-dns state를 저장소 밖에 백업한 뒤 실행한다.
 tf tailscale-dns apply -lock-timeout=0s
-tf tailscale-dns plan -detailed-exitcode -lock-timeout=0s
+tf tailscale-dns plan -input=false -detailed-exitcode -lock-timeout=0s
 tailscale dns status --all
 ```
 
