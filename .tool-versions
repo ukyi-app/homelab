@@ -14,4 +14,6 @@ shellcheck 0.11.0
 # uv: 로그인 비밀번호의 bcrypt 해시(docs/runbooks-public/rotate.md 2절, bcrypt는 실행 때 정확한 버전으로 받는다).
 # CI는 받지 않으므로 ci.yaml에 sha256이 없다.
 uv 0.13.3
+# Terraform은 owner 로컬에서만 실행하며 CI는 아직 받지 않아 ci.yaml sha256 대상이 아니다.
+terraform 1.16.6
 yq 4.54.1

@@ -1,0 +1,15 @@
+{
+  "tagOwners": {
+    "tag:k8s-operator": ["autogroup:admin"],
+    "tag:k8s": ["tag:k8s-operator"]
+  },
+  "acls": [
+    // 이 규칙이 빠지면 운영자의 NUC 원격 접속과 AdGuard :53 경로가 끊긴다.
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self:*"] },
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s:443"] }
+  ],
+  "ssh": [
+    // root는 기존 비대화형 운영 경로다. 좁히려면 D-11 결정을 먼저 바꾼다.
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot", "root"] }
+  ]
+}
