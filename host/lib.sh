@@ -88,7 +88,7 @@ tailscale_self_json() {
 }
 
 # TAILNET_JOIN=true면 NODE_MAGICDNS를 채운다. 이름은 env 파일에 두지 않고(tailnet 이름 비공개)
-# 실행 때마다 얻는다. 첫 라벨이 NODE_NAME과 다르면 TLS SAN, tailnet kubectl, tailscale ssh
+# 실행 때마다 얻는다. 첫 라벨이 NODE_NAME과 다르면 TLS SAN, tailnet kubectl, 이름으로 하는 ssh
 # 확인이 어긋난다. 콘솔에 옛 기기가 남아 있으면 새 등록 이름에 -1이 붙고, 옛 기기를 나중에
 # 지워도 이름이 되돌아가지 않는다(C.3.2 0번).
 resolve_magicdns() {
@@ -111,7 +111,7 @@ resolve_magicdns() {
 }
 
 # TAILNET_JOIN=false인 호스트(VM)가 tailnet에 들어가 있으면 멈춘다. 사람 기기로 등록된 VM은
-# ACL autogroup:self로 운영 NUC의 모든 포트와 Tailscale SSH root에 닿는다(E8 VM 격리 4번).
+# 운영자 ACL로 운영 NUC의 SSH·kubectl 포트에, self 규칙으로 사람 기기 전체에 닿는다(E8 VM 격리 4번).
 assert_not_in_tailnet() {
   local js state
   [ "$TAILNET_JOIN" = "false" ] || return 0

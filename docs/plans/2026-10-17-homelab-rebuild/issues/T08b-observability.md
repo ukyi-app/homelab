@@ -57,7 +57,7 @@
 ### AdGuard tailnet 이탈 감시 (D-08)
 
 - AdGuard Home이 tailnet에서 조용히 빠져도 공용 서버가 답해 증상이 없다. 관측 스택에 "tailnet 출처 질의가 1시간 0건이면 경보"를 둔다. 이 경보가 이탈을 잡는 유일한 장치라 실제 발화 시험을 완료 조건에 둔다.
-- 질의 로그를 세는 방식은 이 티켓에서 T08a의 U32 결과로 정한다(설계 C.3.7 제안: 작은 CronJob이 AdGuard API를 읽어 지표를 내거나 healthchecks 체크를 ping). servicelb MASQUERADE로 모든 질의가 svclb 파드 IP 하나로 보이면 출처로 가를 수 없으므로, hostNetwork로 바꾸거나(T08a의 AdGuard 변경) 다른 방식(예: tailnet 쪽 기기의 주기 시험 질의)을 쓴다.
+- 질의 로그를 세는 방식은 이 티켓에서 T08a의 U32 결과로 정한다(설계 C.3.7 제안: 작은 CronJob이 AdGuard API를 읽어 지표를 내거나 healthchecks 체크를 ping). T08a의 U32 결과(2026-10-21): 공유기 경유 LAN 질의는 `10.42.0.1`(노드 cni0), tailnet 질의는 svclb 파드 IP로 보인다. tailnet 질의는 "지금 svclb 파드 IP"(kube-system의 `svccontroller.k3s.cattle.io/svcname=adguard-dns` 라벨 파드 IP를 셀 때마다 API로 읽는다. 재시작마다 바뀐다)인 출처로 센다. "`10.42.0.1`이 아닌 출처"로 세면 AdGuard Service에 직접 묻는 클러스터 파드(10.42.0.x)도 tailnet으로 잡혀, tailnet 경로가 끊겨도 경보가 울리지 않는다(DNS ingress는 출처를 좁히지 않음). 대안은 tailnet 기기의 주기 시험 질의다. 노드 자신은 AdGuard에 묻지 않는다(T08a).
 - 경보는 1시간 무질의가 지난 뒤 다음 평가 주기에 울린다.
 - **AdGuard 정지 경보(AC-P6 한계 승인의 완화, T08a 2026-10-20):** 공유기가 보조 DNS로 넘어가지 않아 AdGuard Home이 멈추면 Tailscale 없는 LAN 기기의 DNS가 전부 끊긴다. 그래서 AdGuard Home Deployment의 사용 가능 replica가 1분 넘게 1 미만이거나(`kube_deployment_status_replicas_available{namespace="adguard",deployment="adguard"} < 1`) 그 시계열이 없으면(`absent(...)`) 경보하고, 경보 문구에 런북 `docs/runbooks-public/nuc-dns-outage.md`를 넣는다. Ready가 아닌 파드만 보는 조건은 파드가 아예 없을 때(`replicas: 0`, 시나리오 14에서 실제로 쓴 정지 방식, 잘못된 replica 설정) 시계열이 없어 발화하지 않는다. 핵심 룰의 KubePodNotReady(15분)로는 늦다. NUC 전체 정지는 외부 생존 감시가 잡는다. 발화 시험을 완료 조건에 둔다.
 

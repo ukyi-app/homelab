@@ -22,12 +22,10 @@ data:
       # 대가: 사설 클라이언트는 이름 대신 IP로 보인다. VM도 운영 공유기에 질의하지 않는다.
       local_ptr_upstreams: []
       use_private_ptr_resolvers: false
-      ratelimit: 100
-      # LAN 전체가 공유기 한 주소로 들어와 기본 20/s에서 질의가 유실됐으므로 예외로 둔다.
-      # 주소는 목적지가 아니라 출처 예외다. VM에서는 일치할 때만 적용되며 DNS 경로는 바뀌지 않는다.
-      # svclb가 출처를 바꾸면 이 예외가 안 맞는다. 켤 때 U32로 실제 출처와 버킷 공유를 확인한다.
-      ratelimit_whitelist:
-        - 192.168.117.1
+      # 끈다. servicelb를 거치면 공유기 경유 LAN 질의는 10.42.0.1(cni0), tailnet 질의는 svclb 파드 IP로 보여
+      # 집 전체가 /24 버킷 하나를 함께 쓰고, 공유기 주소 예외는 맞는 일이 없다(U32, 2026-10-21).
+      # 파드 IP 예외는 재시작마다 바뀌어 조용히 깨진다. :53은 LAN과 tailnet에만 열려 있다.
+      ratelimit: 0
     filtering:
       protection_enabled: true
       filtering_enabled: true
