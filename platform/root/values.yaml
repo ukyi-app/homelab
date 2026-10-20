@@ -38,7 +38,7 @@ components:
   tailscale:
     enabled: true
   adguard:
-    enabled: false
+    enabled: true
 
   # T08b. observability, wave -4
   observability:
