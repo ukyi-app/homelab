@@ -56,6 +56,10 @@ export function readText(path: string): string {
 }
 
 // 추적 파일만 본다. 작업 사본의 미추적 파일이 결과를 바꾸지 않게 한다.
+// Argo CD는 source 경로의 .argocd-source.yaml·.argocd-source-<앱>.yaml을 source 매개변수(kustomize.images,
+// helm.parameters 등) 위에 합친다. ci는 그 합치기를 재현하지 않으므로 파일 자체를 막는다(작업 트리는 main.ts tracked files, 태그 트리는 render.ts).
+export const ARGOCD_SOURCE_OVERRIDE = /^\.argocd-source(-.+)?\.ya?ml$/;
+
 export function gitFiles(...pathspecs: string[]): string[] {
   const out = mustRun(["git", "ls-files", "-z", "--", ...pathspecs]);
   return out.split("\0").filter(Boolean).sort();

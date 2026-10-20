@@ -84,9 +84,10 @@ function coversReader(s: any): boolean {
 }
 
 // kind: List의 items를 펼친다. kubectl·Argo CD는 List 안 리소스를 각각 적용한다.
+// kind: List를 펼친다. 항목은 List와 같은 Application에서 렌더됐으므로 부모의 유효 ns(destination)를 물려받는다.
 function expand(docs: Doc[]): Doc[] {
   return docs.flatMap((d) =>
-    d.obj?.kind === "List" && Array.isArray(d.obj.items) ? expand(d.obj.items.map((obj: any) => ({ origin: d.origin, obj }))) : [d],
+    d.obj?.kind === "List" && Array.isArray(d.obj.items) ? expand(d.obj.items.map((obj: any) => ({ origin: d.origin, obj, ns: d.ns }))) : [d],
   );
 }
 

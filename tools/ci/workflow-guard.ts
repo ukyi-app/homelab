@@ -4,7 +4,7 @@
 // 병합 키의 경계는 environment automerge의 배포 브랜치 정책(main)과 main을 바꾸는 사람 검토(ruleset B)다.
 //
 // YAML은 별칭(&·*)과 병합 키(<<)까지 푸는 파서로 읽는다. 원문 검색만으로는 *alias로 넣은 environment를 놓친다.
-// uses의 SHA 고정과 버전 주석은 원문 줄로 본다(파싱하면 주석이 사라진다).
+// uses의 버전 주석은 원문 줄로 본다(파싱하면 주석이 사라진다). 그 줄이 파싱한 uses 위치인지는 다시 파싱해 확인한다.
 import { basename } from "node:path";
 import { type Violation, parseAll } from "./lib";
 
@@ -89,11 +89,10 @@ function walk(v: unknown, visit: (key: string | undefined, s: string, jobId: str
 }
 
 // 파싱한 uses 값마다 검사한다(원문 줄을 세지 않는다. run 블록 안의 "uses:" 글자는 액션이 아니다).
-// 버전 주석은 파싱하면 사라지므로, 같은 값을 쓴 "uses: <값> # <버전>" 한 줄이 원문에 있어야 한다.
-// 흐름 매핑({uses: ...})처럼 그 줄이 없으면 실패다.
-function pins(file: WorkflowFile, uses: { where: string; ref: string }[]): Violation[] {
+// 버전 주석은 파싱하면 사라지므로, 파싱한 uses마다 그 위치의 원문 줄이 "uses: <값> # <버전>"이어야 한다.
+// 흐름 매핑({uses: ...})처럼 그 줄이 없으면 실패다. stepUses는 파싱한 문서에서 step uses 값을 모은다.
+function pins(file: WorkflowFile, uses: { where: string; ref: string }[], stepUses: (doc: any) => unknown[]): Violation[] {
   const out: Violation[] = [];
-  const lines = file.text.split("\n");
   for (const { where, ref } of uses) {
     if (ref.startsWith("./")) continue;
     if (ref.startsWith("docker://")) {
@@ -109,7 +108,24 @@ function pins(file: WorkflowFile, uses: { where: string; ref: string }[]): Viola
       out.push({ rule: "pin", where, message: `허용 목록 밖 액션이다: ${pin[1]}/${pin[2]} (설계 C.4.10)` });
     }
   }
-  // 같은 ref를 여러 번 쓰면 occurrence마다 주석이 있어야 한다. 파싱한 개수만큼 "uses: <ref> # <버전>" 줄이 있어야 한다.
+  // 원문 줄과 파싱한 uses를 잇는다. "uses:" 줄의 값만 표식으로 바꿔 다시 파싱하고, 표식이 step uses로 나오면 그 줄이
+  // 실제 uses 위치다. block scalar(run: |) 안이나 여러 줄 문자열 안의 같은 글자는 파싱 결과를 바꾸지 않아 세지 않는다.
+  const lines = file.text.split("\n");
+  const PROBE = "__pin_probe__";
+  const commented = new Map<string, number>();
+  lines.forEach((l, i) => {
+    const m = l.match(/^(\s*(?:-\s+)?uses:\s*)(['"]?)([^'"\s#]+)\2(\s+#.*)?\s*$/);
+    if (!m) return;
+    const probe = [...lines.slice(0, i), `${m[1]}${PROBE}`, ...lines.slice(i + 1)].join("\n");
+    let found = false;
+    try {
+      found = stepUses(parseAll(probe)[0]).includes(PROBE);
+    } catch {
+      found = false;
+    }
+    if (found && /^\s+#\s*v?\d/.test(m[4] ?? "")) commented.set(m[3], (commented.get(m[3]) ?? 0) + 1);
+  });
+  // 같은 ref를 여러 번 쓰면 occurrence마다 그 위치에 주석이 있어야 한다.
   const count = new Map<string, { n: number; where: string }>();
   for (const { where, ref } of uses) {
     if (ref.startsWith("./") || ref.startsWith("docker://")) continue;
@@ -118,13 +134,17 @@ function pins(file: WorkflowFile, uses: { where: string; ref: string }[]): Viola
     count.set(ref, c);
   }
   for (const [ref, { n, where }] of count) {
-    const esc = ref.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-    const line = new RegExp(`^\\s*(-\\s+)?uses:\\s*(['"]?)${esc}\\2\\s*#\\s*v?\\d`);
-    const ok = lines.filter((l) => line.test(l)).length;
-    if (ok < n) out.push({ rule: "pin", where, message: `${ref}를 ${n}번 쓰는데 "uses: <ref> # <버전>" 한 줄 형식은 ${ok}개다(occurrence마다 버전 주석)` });
+    const ok = commented.get(ref) ?? 0;
+    if (ok < n) out.push({ rule: "pin", where, message: `${ref}를 ${n}번 쓰는데 그 위치의 "uses: <ref> # <버전>" 한 줄 형식은 ${ok}개다(occurrence마다 버전 주석)` });
   }
   return out;
 }
+
+const workflowStepUses = (wf: any): unknown[] =>
+  Object.values(wf?.jobs && typeof wf.jobs === "object" ? wf.jobs : {}).flatMap((job: any) =>
+    Array.isArray(job?.steps) ? job.steps.map((st: any) => st?.uses) : [],
+  );
+const actionStepUses = (a: any): unknown[] => (Array.isArray(a?.runs?.steps) ? a.runs.steps.map((st: any) => st?.uses) : []);
 
 export function checkWorkflow(file: WorkflowFile): Violation[] {
   const out: Violation[] = [];
@@ -249,7 +269,7 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
     add("dispatch-secrets", file.path, `${dispatch.join(", ")} 워크플로가 secret을 쓴다: ${[...usedSecrets].join(", ")}`);
   }
 
-  out.push(...pins(file, uses));
+  out.push(...pins(file, uses, workflowStepUses));
   return out;
 }
 
@@ -271,7 +291,7 @@ export function checkActionFile(file: WorkflowFile): Violation[] {
   const uses = steps
     .map((st, i) => (st && typeof st === "object" && "uses" in st ? { where: `${file.path} runs.steps[${i}]`, ref: String(st.uses) } : undefined))
     .filter((x): x is { where: string; ref: string } => !!x);
-  return [...out, ...pins(file, uses)];
+  return [...out, ...pins(file, uses, actionStepUses)];
 }
 
 export function checkWorkflows(files: WorkflowFile[]): Violation[] {

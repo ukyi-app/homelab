@@ -21,6 +21,7 @@ NUC 한 대의 k3s 홈랩을 Git으로 운영하는 공개(public) 저장소다.
 
 - main은 PR로만 바꾼다. 필수 검사는 `ci` 하나다. 사람 PR은 owner가 검토한 뒤 병합하고, 자동 병합은 배포 App의 digest PR뿐이다(설계 C.4.7).
 - 로컬 확인은 `mise install` 뒤 `pre-commit run --all-files`와 `bun run ci`. 필수 검사 `ci`는 같은 `bun run ci`를 부른다(검사 내용은 `tools/ci/`).
+- 로컬 도구(`mise install`, `pre-commit`, `bun run ci`, `tools/*.sh`)는 직접 만든 브랜치에서만 돌린다. 남이 만든 PR(fork, 외부 기여자, 봇)은 체크아웃하지 않고 GitHub diff와 CI 결과로 검토한다. 훅 설정과 검사 코드가 그 PR의 트리에서 와 로컬 자격으로 돌기 때문이다(`docs/runbooks-public/github.md` 2절).
 - 이 저장소를 가리키는 Argo CD 참조(`repoURL`)의 revision은 `main`이다(공유 차트만 태그). 브랜치 이름이 남은 채 병합하면 Argo CD가 지워진 브랜치를 따라간다.
 - 버전은 고정한다: 도구는 `.tool-versions`, k3s는 `host/versions.env`, 외부 차트는 정확한 semver, 이미지는 digest. `.tool-versions`를 바꾸면 `ci.yaml`의 sha256도 같은 커밋에서 바꾼다.
 - 워크플로의 `uses:`는 40자 커밋 SHA와 버전 주석으로 고정하고, 설계 C.4.10의 허용 목록 안 액션만 쓴다. `permissions`는 job마다 최소로, PR 트리거는 `pull_request`를 쓴다.

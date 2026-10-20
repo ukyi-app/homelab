@@ -2,6 +2,8 @@
 # gitleaks·actionlint·shellcheck는 local 훅이다. 바이너리 버전은 .tool-versions 한 곳에서 오고
 # 여기 rev로 다시 적지 않는다. 같은 도구의 버전을 두 곳에 적으면 어긋난다(옛 R29·R37).
 # 외부 훅 저장소는 태그가 아니라 커밋 SHA로 고정한다. 태그는 옮겨질 수 있다.
+# 이 파일과 local 훅이 부르는 코드(tools/ci/ 등)는 체크아웃한 트리에서 온다. 남이 만든 PR 브랜치에서는 돌리지 않는다
+# (AGENTS.md, docs/runbooks-public/github.md 2절). 이 파일 안의 방어는 그 PR이 함께 고칠 수 있어 경계가 아니다.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
