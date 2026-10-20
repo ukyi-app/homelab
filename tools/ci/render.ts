@@ -12,7 +12,7 @@
 //    이것이 그 PR의 렌더 검사다(설계 C.4.5).
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { type Doc, type Violation, ROOT, gitFiles, parseAll, run, sameRepo, tempDir, toolVersion } from "./lib";
+import { type Doc, type Violation, ROOT, effectiveSources, gitFiles, parseAll, run, sameRepo, tempDir, toolVersion } from "./lib";
 
 export type Rendered = { origin: string; text: string };
 export type RenderResult = { targets: Rendered[]; docs: Doc[]; violations: Violation[]; skipped: string[] };
@@ -123,17 +123,27 @@ export function renderAll(): RenderResult {
   const cache = new Map<string, { ok: boolean; out: string }>();
   const covered = new Set<string>();
 
-  const add = (origin: string, text: string) => {
+  const add = (origin: string, text: string, ns?: string) => {
     res.targets.push({ origin, text });
     try {
       for (const obj of parseAll(text)) {
-        if (typeof obj === "object" && !Array.isArray(obj)) res.docs.push({ origin, obj });
+        if (typeof obj === "object" && !Array.isArray(obj)) res.docs.push({ origin, obj, ns: obj.metadata?.namespace ?? ns });
       }
     } catch (e) {
       res.violations.push({ rule: "render", where: origin, message: `YAML 파싱 실패: ${(e as Error).message}` });
     }
   };
   const fail = (origin: string, message: string) => res.violations.push({ rule: "render", where: origin, message });
+
+  // 모든 로컬 차트 렌더(Application source, 시험 values) 앞의 공통 검사. Argo CD는 대상 클러스터의 API 목록·버전을
+  // Helm에 넘기고 CI는 그것을 재현하지 않으므로 Capabilities 자체를 막는다. 별칭($c := .Capabilities)이나 index로
+  // 돌아가도 이름은 남으므로 토큰으로 찾는다. 의존 차트(charts/<dep>, charts/*.tgz)도 본다. 지금 쓰는 차트는 없다.
+  const capsOk = (where: string, chartDir: string): boolean => {
+    const caps = templateFiles(chartDir, tmp).filter((f) => /\bCapabilities\b/.test(readFileSync(f, "utf8")));
+    if (caps.length === 0) return true;
+    fail(where, `로컬 차트가 Capabilities를 쓴다(CI 렌더와 Argo CD 렌더가 달라진다): ${caps.map((f) => (f.startsWith(tmp) ? `(묶음 의존 차트) ${relative(join(tmp, "deps"), f)}` : relative(ROOT, f))).join(", ")}`);
+    return false;
+  };
 
   // Application 하나의 자기 저장소 source를 렌더한다. 렌더한 텍스트를 돌려준다(실패·외부 source면 undefined).
   const renderSource = (app: any, cluster: string, src: any): string | undefined => {
@@ -183,11 +193,7 @@ export function renderAll(): RenderResult {
       // Argo CD는 대상 클러스터의 API 목록·버전을 Helm에 넘긴다. CI는 그것을 재현하지 않으므로 Capabilities 자체를 막는다.
       // 별칭($c := .Capabilities)이나 index로 돌아가도 이름은 남으므로 토큰으로 찾는다. 의존 차트(charts/)도 본다.
       // 지금 쓰는 차트는 없다.
-      const caps = templateFiles(srcDir, tmp).filter((f) => /\bCapabilities\b/.test(readFileSync(f, "utf8")));
-      if (caps.length > 0) {
-        fail(where, `로컬 차트가 Capabilities를 쓴다(CI 렌더와 Argo CD 렌더가 달라진다): ${caps.map((f) => (f.startsWith(tmp) ? `(묶음 의존 차트) ${relative(join(tmp, "deps"), f)}` : relative(ROOT, f))).join(", ")}`);
-        return undefined;
-      }
+      if (!capsOk(where, srcDir)) return undefined;
       const helm = src.helm ?? {};
       const unknown = Object.keys(helm).filter((k) => !HELM_KEYS.has(k));
       if (unknown.length > 0) {
@@ -225,7 +231,7 @@ export function renderAll(): RenderResult {
       fail(where, r.out.trim());
       return undefined;
     }
-    add(where, r.out);
+    add(where, r.out, ns);
     return r.out;
   };
 
@@ -269,7 +275,7 @@ export function renderAll(): RenderResult {
           fail(`${app.metadata?.name}[${cluster}]`, "Application 중첩이 너무 깊다(3단계까지)");
           continue;
         }
-        const sources: any[] = app.spec?.sources ?? (app.spec?.source ? [app.spec.source] : []);
+        const sources = effectiveSources(app.spec);
         for (const s2 of sources) {
           const t2 = renderSource(app, cluster, s2);
           if (t2 === undefined) continue;
@@ -304,6 +310,7 @@ export function renderAll(): RenderResult {
       continue;
     }
     const chart = relative(dirname(dir), dir);
+    if (!capsOk(`chart:${relative("platform", dir)}`, dir)) continue;
     for (const f of ciFiles) {
       const origin = `chart:${relative("platform", dir)}/${relative(dir, f)}`;
       const r = helmTemplate(chart, dir, `app-${chart}`, [f]);

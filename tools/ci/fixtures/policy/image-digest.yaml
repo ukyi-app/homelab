@@ -1,5 +1,7 @@
 # check: workload
 # expect: fail
+# rule: image-digest
+# match: digest 고정이 아니다
 # 접두만 재면 sha256:deadbeef가 핀으로 통과한다(L27).
 apiVersion: apps/v1
 kind: Deployment

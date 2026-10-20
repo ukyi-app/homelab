@@ -1,5 +1,7 @@
 # check: revision
 # expect: fail
+# rule: revision
+# match: 외부 source의 revision
 # 외부 차트는 렌더하지 않으므로 움직이는 revision이 검토 없이 배포된다.
 apiVersion: argoproj.io/v1alpha1
 kind: Application

@@ -1,5 +1,7 @@
 # check: ingress
 # expect: fail
+# rule: ingress
+# match: 예약돼 있다
 # go는 짧은 주소 리다이렉터의 tailnet 이름이다(D-30).
 apiVersion: networking.k8s.io/v1
 kind: Ingress

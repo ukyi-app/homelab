@@ -1,7 +1,7 @@
 // 렌더 결과 정책 검사(설계 C.4.6 "렌더 결과 정책"). 입력은 render.ts의 Doc 목록이고, 위반 목록을 돌려준다.
 // 규칙마다 "대상 0건이면 실패"는 main.ts가 아니라 여기서 센다(L40). 앱이 없는 저장소처럼 대상이 0일 수 있는 규칙은
 // 세지 않는다.
-import { type Doc, type Violation, sameRepo } from "./lib";
+import { type Doc, type Violation, effectiveSources, sameRepo } from "./lib";
 
 // 렌더에 나오는 상류 매니페스트의 예외. Argo CD는 공식 install.yaml을 그대로 쓴다(설계 C.3.3).
 // 이미지는 URL의 버전 태그로 고정되고(digest 아님), 자원 상한이 없고, 빈 Secret 둘을 낸다. 값은 저장소에 없다.
@@ -196,12 +196,11 @@ export function checkRevisions(docs: Doc[]): Violation[] {
     const where = id(d);
     if (d.obj.kind === "Application" && d.obj.apiVersion?.startsWith("argoproj.io/")) {
       seen++;
-      for (const s of d.obj.spec?.sources ?? [d.obj.spec?.source]) checkRevision(where, s, out);
+      for (const s of effectiveSources(d.obj.spec)) checkRevision(where, s, out);
     }
     if (d.obj.kind === "ApplicationSet" && d.obj.apiVersion?.startsWith("argoproj.io/")) {
       seen++;
-      const spec = d.obj.spec?.template?.spec ?? {};
-      for (const s of spec.sources ?? [spec.source]) checkRevision(where, s, out);
+      for (const s of effectiveSources(d.obj.spec?.template?.spec)) checkRevision(where, s, out);
       walkGenerators(d.obj.spec?.generators, where, out);
     }
   }
@@ -223,16 +222,16 @@ export function checkReadonlyRbac(docs: Doc[]): Violation[] {
     (d) => (d.obj.kind === "ClusterRole" || d.obj.kind === "Role") && d.obj.apiVersion === "rbac.authorization.k8s.io/v1",
   );
   const isReadonly = (d: Doc) => d.obj.metadata?.labels?.[READONLY_LABEL] !== undefined;
+  // Role·RoleBinding의 ns는 렌더한 Application의 유효 destination namespace까지 본다(metadata.namespace가 없을 때).
+  const nsOf = (d: Doc) => d.obj.metadata?.namespace ?? d.ns;
   const find = (ctx: string, kind: string, name: string, ns?: string) =>
-    roles.find(
-      (r) => context(r.origin) === ctx && r.obj.kind === kind && r.obj.metadata?.name === name && (kind === "ClusterRole" || r.obj.metadata?.namespace === ns),
-    );
+    roles.find((r) => context(r.origin) === ctx && r.obj.kind === kind && r.obj.metadata?.name === name && (kind === "ClusterRole" || (ns !== undefined && nsOf(r) === ns)));
 
   // 같은 맥락에 같은 역할이 둘이면 어느 쪽이 적용될지 렌더만으로 알 수 없다(Argo CD 다중 source는 뒤가 이긴다).
   // roleRef 판정이 앞의 것을 보고 통과하지 않게 중복 자체를 막는다.
   const seenRoles = new Set<string>();
   for (const d of roles) {
-    const key = `${context(d.origin)}|${d.obj.kind}|${d.obj.metadata?.namespace ?? ""}|${d.obj.metadata?.name}`;
+    const key = `${context(d.origin)}|${d.obj.kind}|${d.obj.kind === "ClusterRole" ? "" : (nsOf(d) ?? "")}|${d.obj.metadata?.name}`;
     if (seenRoles.has(key)) out.push({ rule: "readonly-rbac", where: id(d), message: "같은 렌더 맥락에 같은 kind·이름의 역할이 둘 있다" });
     seenRoles.add(key);
   }
@@ -263,7 +262,7 @@ export function checkReadonlyRbac(docs: Doc[]): Violation[] {
     if (k !== "ClusterRoleBinding" && k !== "RoleBinding") continue;
     const subjects: any[] = d.obj.subjects ?? [];
     const ref = d.obj.roleRef ?? {};
-    const target = find(context(d.origin), ref.kind, ref.name, d.obj.metadata?.namespace);
+    const target = find(context(d.origin), ref.kind, ref.name, nsOf(d));
     const refDesc = `${ref.kind}/${ref.name}`;
     const bindsReader = subjects.some(coversReader);
     if (bindsReader && !(target && isReadonly(target))) {

@@ -1,8 +1,0 @@
-# path: .github/workflows/other.yaml
-# expect: pin
-# 태그 호출은 앱 저장소용이다. 이 저장소의 워크플로는 SHA로 고정한다.
-name: other
-on: push
-jobs:
-  build:
-    uses: ukyi-app/homelab/.github/workflows/app-build.yaml@app-build-v1.0.0

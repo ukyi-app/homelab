@@ -1,0 +1,26 @@
+# check: readonly-rbac
+# expect: fail
+# rule: readonly-rbac
+# match: 읽기 전용 라벨 역할이 아닌 ClusterRole/bot-extra
+# 다른 이름의 라벨 없는 역할에 bot-reader를 묶어 라벨 검사를 피한다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bot-extra
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bot-reader-extra
+subjects:
+  - kind: ServiceAccount
+    name: bot-reader
+    namespace: bot-slot-probe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bot-extra

@@ -104,7 +104,10 @@ const steps: Step[] = [
           if (got.length > 0) out.push({ rule: "fixture", where: f, message: `대조군이 걸렸다: ${got.join(", ")}` });
         } else {
           covered.add(expect);
+          // 기대 규칙만 걸려야 한다. 다른 위반이 섞이면 기대 규칙이 사라져도 fixture가 초록으로 남는다.
           if (!got.includes(expect)) out.push({ rule: "fixture", where: f, message: `${expect}가 걸리지 않았다(걸린 것: ${got.join(", ") || "없음"})` });
+          const other = [...new Set(got.filter((r) => r !== expect))];
+          if (other.length > 0) out.push({ rule: "fixture", where: f, message: `기대하지 않은 규칙도 걸렸다: ${other.join(", ")}` });
         }
       }
       for (const r of RULES) if (!covered.has(r)) out.push({ rule: "fixture", where: "tools/ci/fixtures/workflow-guard", message: `규칙 ${r}의 음성 fixture가 없다` });
@@ -138,9 +141,11 @@ const steps: Step[] = [
         const text = readText(f);
         const check = header(text, "check");
         const expect = header(text, "expect");
+        const rule = header(text, "rule");
+        const match = header(text, "match");
         const fn = check ? checks[check] : undefined;
-        if (!fn || (expect !== "pass" && expect !== "fail")) {
-          out.push({ rule: "fixture", where: f, message: `머리 주석 # check:(${Object.keys(checks).join("|")})와 # expect:(pass|fail)가 필요하다` });
+        if (!fn || (expect !== "pass" && expect !== "fail") || (expect === "fail" && (!rule || !match))) {
+          out.push({ rule: "fixture", where: f, message: `머리 주석 # check:(${Object.keys(checks).join("|")}), # expect:(pass|fail), 음성이면 # rule:과 # match:(메시지 일부)가 필요하다` });
           continue;
         }
         const docs = parseAll(text).map((obj) => ({ origin: `fixture:${basename(f)}`, obj }));
@@ -148,7 +153,10 @@ const steps: Step[] = [
         if (expect === "pass" && got.length > 0) out.push({ rule: "fixture", where: f, message: `대조군이 걸렸다: ${got.map(fmt).join("; ")}` });
         if (expect === "fail") {
           covered.add(check!);
-          if (got.length === 0) out.push({ rule: "fixture", where: f, message: `${check}가 걸리지 않았다` });
+          // 모든 위반이 기대한 규칙·메시지여야 한다. 다른 위반이 섞이면 대상 검사가 사라져도 fixture가 초록으로 남는다.
+          if (!got.some((v) => v.rule === rule && v.message.includes(match!))) out.push({ rule: "fixture", where: f, message: `${rule}(${match})가 걸리지 않았다` });
+          const other = got.filter((v) => v.rule !== rule || !v.message.includes(match!));
+          if (other.length > 0) out.push({ rule: "fixture", where: f, message: `기대하지 않은 위반: ${other.map(fmt).join("; ")}` });
         }
       }
       for (const c of Object.keys(checks)) if (!covered.has(c)) out.push({ rule: "fixture", where: "tools/ci/fixtures/policy", message: `검사 ${c}의 음성 fixture가 없다` });

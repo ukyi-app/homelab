@@ -108,11 +108,20 @@ function pins(file: WorkflowFile, uses: { where: string; ref: string }[]): Viola
     if (!ALLOWED_OWNERS.has(pin[1]) && !ALLOWED_ACTIONS.has(`${pin[1]}/${pin[2]}`)) {
       out.push({ rule: "pin", where, message: `허용 목록 밖 액션이다: ${pin[1]}/${pin[2]} (설계 C.4.10)` });
     }
+  }
+  // 같은 ref를 여러 번 쓰면 occurrence마다 주석이 있어야 한다. 파싱한 개수만큼 "uses: <ref> # <버전>" 줄이 있어야 한다.
+  const count = new Map<string, { n: number; where: string }>();
+  for (const { where, ref } of uses) {
+    if (ref.startsWith("./") || ref.startsWith("docker://")) continue;
+    const c = count.get(ref) ?? { n: 0, where };
+    c.n++;
+    count.set(ref, c);
+  }
+  for (const [ref, { n, where }] of count) {
     const esc = ref.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
     const line = new RegExp(`^\\s*(-\\s+)?uses:\\s*(['"]?)${esc}\\2\\s*#\\s*v?\\d`);
-    if (!lines.some((l) => line.test(l))) {
-      out.push({ rule: "pin", where, message: `"uses: ${ref} # <버전>" 한 줄 형식이 아니거나 버전 주석이 없다` });
-    }
+    const ok = lines.filter((l) => line.test(l)).length;
+    if (ok < n) out.push({ rule: "pin", where, message: `${ref}를 ${n}번 쓰는데 "uses: <ref> # <버전>" 한 줄 형식은 ${ok}개다(occurrence마다 버전 주석)` });
   }
   return out;
 }
@@ -169,8 +178,7 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
         if (st && typeof st === "object" && "uses" in st) uses.push({ where: `${where} steps[${i}]`, ref: String(st.uses) });
       });
     }
-    // 로컬 reusable 호출(./)만 받는다(reusable-call 규칙). 앱 저장소가 쓰는 태그 호출은 이 저장소 워크플로에 두지 않는다.
-    if ("uses" in job) uses.push({ where, ref: String(job.uses) });
+    // job 수준 uses(reusable 호출)는 로컬(./)만 받고 그 밖은 reusable-call 규칙이 막는다. 고정 규칙은 step uses에만 건다.
 
     const env = job.environment;
     if (env !== undefined) {

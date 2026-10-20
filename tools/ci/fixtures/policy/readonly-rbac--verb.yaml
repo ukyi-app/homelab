@@ -1,5 +1,7 @@
 # check: readonly-rbac
 # expect: fail
+# rule: readonly-rbac
+# match: 읽기 밖 verb: delete
 # 옛 사고: 관측 ClusterRole에 전역 delete를 더해도 필수 검사가 통과했다(L30).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

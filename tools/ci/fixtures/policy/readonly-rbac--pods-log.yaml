@@ -1,0 +1,15 @@
+# check: readonly-rbac
+# expect: fail
+# rule: readonly-rbac
+# match: pods/log를 읽는다
+# 로그 전체 수집도 막는다(설계 C.8, 봇 R05~R06).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab-readonly
+  labels:
+    homelab.ukyi.app/readonly: "true"
+rules:
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]

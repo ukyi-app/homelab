@@ -1,5 +1,7 @@
 # check: ingress
 # expect: fail
+# rule: ingress
+# match: 한 단계만
 # Universal SSL은 첫 단계 하위 도메인만 덮는다(설계 C.3.4).
 apiVersion: networking.k8s.io/v1
 kind: Ingress

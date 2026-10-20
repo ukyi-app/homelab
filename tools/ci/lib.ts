@@ -7,7 +7,14 @@ export const REPO_URL = "https://github.com/ukyi-app/homelab";
 export const ROOT = join(import.meta.dir, "..", "..");
 
 // 렌더된 매니페스트 하나와 그 출처. 출처는 실패 메시지와 출처별 예외(policy.ts)에 쓴다.
-export type Doc = { origin: string; obj: Record<string, any> };
+// ns: 렌더한 Application의 유효 destination namespace. metadata.namespace가 없는 namespaced 리소스는 Argo CD가 여기에 적용한다.
+export type Doc = { origin: string; obj: Record<string, any>; ns?: string };
+
+// Argo CD는 spec.sources가 비어 있지 않을 때만 그것을 쓰고, 비었거나 없으면 단수 spec.source로 돌아간다.
+export function effectiveSources(spec: any): any[] {
+  if (Array.isArray(spec?.sources) && spec.sources.length > 0) return spec.sources;
+  return spec?.source ? [spec.source] : [];
+}
 
 export type Violation = { rule: string; where: string; message: string };
 

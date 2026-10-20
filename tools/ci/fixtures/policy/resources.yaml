@@ -1,5 +1,7 @@
 # check: workload
 # expect: fail
+# rule: resources
+# match: limits.memory가 없다
 # 단일 노드라 한 파드의 무제한 메모리는 전체 장애다(L28).
 apiVersion: batch/v1
 kind: CronJob

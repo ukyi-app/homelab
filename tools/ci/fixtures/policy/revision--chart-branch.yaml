@@ -1,5 +1,7 @@
 # check: revision
 # expect: fail
+# rule: revision
+# match: 자기 태그로 고정한다: app-chart-v-dev
 # 접두만 맞는 움직이는 브랜치(app-chart-v-dev)는 태그가 아니다.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
