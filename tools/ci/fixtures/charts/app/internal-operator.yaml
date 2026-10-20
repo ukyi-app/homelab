@@ -1,0 +1,13 @@
+# expect: fail
+# match: at '/internal/name': 'not' failed
+# operator 기기 이름과 겹친다.
+chartVersion: 1.0.0
+kind: web
+port: 8080
+resources: {cpu: 10m, memory: 32Mi}
+internal: {name: tailscale-operator}
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

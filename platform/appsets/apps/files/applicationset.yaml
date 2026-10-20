@@ -1,0 +1,93 @@
+# ApplicationSet apps(설계 C.3.3, C.4.5). apps/<앱>/ 하나가 앱 하나다. values.yaml(사람)과 image.yaml(배포 App)을
+# 같은 디렉터리에서 짝지어 공유 차트의 values로 넘긴다.
+#
+# 차트는 태그(app-chart-v<chartVersion>), values는 main이다. 같은 저장소의 두 revision을 한 Application의
+# source 둘(차트 + ref: values)로 섞으면 Argo CD v3.5.5가 "cannot reference a different revision of the same
+# repository"로 거부한다(reposerver/repository/repository.go). 그래서 ApplicationSet이 main의 두 파일을 읽어
+# helm.valuesObject로 넣는다(merge 생성기, templatePatch).
+#
+# merge의 짝 키는 values.app(= 디렉터리 이름)이다. goTemplate에서 path는 파일마다 filename이 달라 짝 키가 못 된다.
+# image.yaml이 없는 앱은 values만으로 만들어지고, 공유 차트 schema(digest 필수)가 그 앱만 렌더 실패로 멈춘다.
+#
+# goTemplateOptions에 missingkey=error를 두지 않는다. 한 앱의 파일이 깨지면 ApplicationSet 전체가 생성 오류로
+# 모든 앱의 갱신(배포 포함)을 멈춘다. 기본값이면 깨진 앱의 targetRevision만 틀려 그 앱만 실패한다.
+# 빠진 키는 ci가 같은 렌더(tools/ci/render.ts)와 차트 schema로 PR에서 막는다.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - merge:
+        mergeKeys:
+          - values
+        generators:
+          - git:
+              repoURL: https://github.com/ukyi-app/homelab
+              # 자기 저장소 참조는 main(L31). git 생성기의 키는 targetRevision이 아니라 revision이다.
+              revision: main
+              # 공개 webhook이 없어 60초 폴링(설계 C.3.3).
+              requeueAfterSeconds: 60
+              files:
+                - path: apps/*/values.yaml
+              values:
+                app: "{{ .path.basename }}"
+          - git:
+              repoURL: https://github.com/ukyi-app/homelab
+              revision: main
+              requeueAfterSeconds: 60
+              files:
+                - path: apps/*/image.yaml
+              values:
+                app: "{{ .path.basename }}"
+  # 생성된 Application을 Git에서 빼면(apps/<앱> 삭제) 그 Application과 리소스를 지운다(설계 C.5.5 app remove).
+  # 데이터는 다른 ApplicationSet(data)이라 여기서 지워지지 않는다.
+  syncPolicy:
+    applicationsSync: sync
+  template:
+    metadata:
+      name: "{{ .values.app }}"
+      namespace: argocd
+      labels:
+        homelab.ukyi.app/app: "{{ .values.app }}"
+    spec:
+      # 고정값이다. 템플릿 값으로 열면 앱 등록이 프로젝트 경계를 고를 수 있다(ApplicationSet Security 문서).
+      project: apps
+      source:
+        repoURL: https://github.com/ukyi-app/homelab
+        targetRevision: "app-chart-v{{ .chartVersion }}"
+        path: platform/charts/app
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "app-{{ .values.app }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          # 앱 ns는 앱 Application이 만든다(봇 ns 포함, 설계 C.8). AppProject apps가 Namespace app-*만 허용한다.
+          # 이렇게 만든 ns는 Argo CD가 지우지 않는다. 앱을 지워도 ns는 남는다(설계 C.5.5).
+          - CreateNamespace=true
+        managedNamespaceMetadata:
+          labels:
+            # 앱 ns는 restricted(설계 B.8 E4). database ns 정책이 이 kind 라벨의 ns에서 오는 5432만 받는다(설계 C.5.1).
+            pod-security.kubernetes.io/enforce: restricted
+            pod-security.kubernetes.io/warn: restricted
+            pod-security.kubernetes.io/audit: restricted
+            homelab.ukyi.app/kind: app
+        retry:
+          limit: 10
+          backoff:
+            duration: 30s
+            maxDuration: 5m
+  # 사람(values.yaml)과 배포 App(image.yaml)의 키를 그대로 차트 values로. path·values는 생성기 변수라 뺀다.
+  # tailnetPrefix는 클러스터 값이다(운영 "", VM "vm-"). 앱 values에 같은 키가 있어도 이 값이 이긴다.
+  templatePatch: |
+    spec:
+      source:
+        helm:
+          valuesObject:
+            {{- omit . "path" "values" "tailnetPrefix" | toYaml | nindent 8 }}
+            tailnetPrefix: __TAILNET_PREFIX__

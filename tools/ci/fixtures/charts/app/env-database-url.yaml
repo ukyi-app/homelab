@@ -1,0 +1,14 @@
+# expect: fail
+# match: env 이름 DATABASE_URL가 두 번
+# uses.postgres가 넣는 DATABASE_URL을 secrets로 또 넣는다.
+chartVersion: 1.0.0
+kind: web
+port: 8080
+resources: {cpu: 10m, memory: 32Mi}
+uses: {postgres: true}
+secrets: [DATABASE_URL]
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

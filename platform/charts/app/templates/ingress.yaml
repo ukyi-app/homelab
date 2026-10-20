@@ -1,0 +1,51 @@
+{{- $name := include "app.name" . }}
+{{- with .Values.public }}
+---
+# 공개 경로: Cloudflare → 터널 → Traefik(설계 C.3.4). 모르는 host는 Traefik이 404를 낸다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}-public
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ .host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  name: http
+{{- end }}
+{{- with .Values.internal }}
+{{- $host := printf "%s%s" $.Values.tailnetPrefix .name }}
+{{- if gt (len $host) 63 }}
+{{- fail (printf "tailnet 이름 %s가 63자를 넘는다(클러스터 접두 포함)" $host) }}
+{{- end }}
+---
+# tailnet 전용(설계 C.3.5). 이름은 <접두><name>.<tailnet>.ts.net, 전체 이름으로만 열린다.
+# operator Ingress reconcile은 메타데이터만 바뀐 변경을 무시한다. 이름을 바꾸면 Ingress를 다시 만든다(설계 P21).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}-internal
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: {{ $name }}
+      port:
+        name: http
+  tls:
+    - hosts:
+        - {{ $host | quote }}
+{{- end }}

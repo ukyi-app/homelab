@@ -1,0 +1,12 @@
+# expect: fail
+# match: repository는 ghcr.io/ukyi-app/app여야 한다
+# 다른 앱의 이미지를 가리키지 못한다.
+chartVersion: 1.0.0
+kind: web
+port: 8080
+resources: {cpu: 10m, memory: 32Mi}
+repository: ghcr.io/ukyi-app/files
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

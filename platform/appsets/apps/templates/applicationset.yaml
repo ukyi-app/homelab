@@ -1,0 +1,13 @@
+{{- /*
+ApplicationSet 본문은 files/applicationset.yaml에 그대로 둔다. Argo CD의 Go 템플릿({{ .values.app }} 등)을
+Helm이 렌더하지 않게 하려는 것이다. Helm은 클러스터 값 자리표시 하나만 바꾼다.
+운영 접두는 빈 문자열이라 required를 쓸 수 없다. 키가 있는지로 확인한다.
+*/}}
+{{- if not (hasKey (.Values.tailscale | default dict) "prefix") }}
+{{- fail "tailscale.prefix is required (root passes cluster.tailscale.prefix; prod \"\", vm \"vm-\")" }}
+{{- end }}
+{{- $prefix := .Values.tailscale.prefix | toString }}
+{{- if not (regexMatch "^[a-z0-9-]*$" $prefix) }}
+{{- fail (printf "tailscale.prefix %q는 소문자·숫자·-만" $prefix) }}
+{{- end }}
+{{ .Files.Get "files/applicationset.yaml" | replace "__TAILNET_PREFIX__" (quote $prefix) }}

@@ -1,0 +1,7 @@
+# 기본값. 앱이 반드시 정할 값(kind, resources, 이미지)에는 기본값을 두지 않는다. 빠지면 schema가 렌더를 막는다.
+# 키 설명은 values.schema.json의 description에 있다.
+secrets: []
+env: {}
+uses:
+  postgres: false
+  valkey: false

@@ -1,0 +1,13 @@
+# expect: fail
+# match: 'allOf' failed - at '': 'not' failed
+# worker에는 포트가 없어 공개할 수 없다.
+chartVersion: 1.0.0
+kind: worker
+resources: {cpu: 10m, memory: 32Mi}
+probes: {readiness: {command: [x]}}
+public: {host: x.ukyi.app}
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

@@ -1,0 +1,86 @@
+{{- $name := include "app.name" . }}
+{{- $web := eq .Values.kind "web" }}
+# 기본 거부 + 허용 목록(설계 C.4.5 네트워크 행). 봇에만 필요한 클러스터 안 허용은 이 차트가 아니라
+# platform의 봇 자리 Application이 더한다(설계 C.8). NetworkPolicy는 허용의 합집합이다.
+# ipBlock에 파드 대역을 쓰지 않는다. 파드끼리는 selector로만 연다(P19).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 같은 ns(앱과 캐시 Valkey, 마이그레이션 Job).
+    - from:
+        - podSelector: {}
+    {{- if and $web .Values.public }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: {{ .Values.port }}
+    {{- end }}
+    {{- if and $web .Values.internal }}
+    # Ingress 프록시는 앱 ns가 아니라 operator ns(tailscale)에서 돈다. 프록시 파드의 라벨은 operator가 정해
+    # ns 단위로 연다.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+      ports:
+        - protocol: TCP
+          port: {{ .Values.port }}
+    {{- end }}
+  egress:
+    - to:
+        - podSelector: {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if .Values.uses.postgres }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: database
+          podSelector:
+            matchLabels:
+              cnpg.io/cluster: pg
+      ports:
+        - protocol: TCP
+          port: 5432
+    {{- end }}
+    # 인터넷 443. 사설 대역과 tailnet(100.64.0.0/10)을 뺀다. 파드가 tailnet으로 나가면 출발 주소가 NUC의
+    # Tailscale 주소로 바뀐다(U28 확인). D-11 (c)로 NUC → 운영자 기기 길은 Tailscale ACL이 막지만, tag:nuc가 닿는
+    # 대상(내부 UI 프록시)은 남고 ACL 실수 한 번이면 다시 열린다. 그래서 차트에서도 뺀다(설계 C.4.5 "tailnet 차단").
+    # IPv6 허용 줄은 두지 않아 tailnet IPv6(fd7a:115c:a1e0::/48)도 막힌다. IPv6 허용을 더하면 except에 그 대역을 함께 넣는다.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - protocol: TCP
+          port: 443

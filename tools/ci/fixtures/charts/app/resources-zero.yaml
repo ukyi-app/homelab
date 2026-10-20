@@ -1,0 +1,12 @@
+# expect: fail
+# match: at '/resources/
+# 0 예약·0 상한은 L28을 우회한다.
+chartVersion: 1.0.0
+kind: web
+port: 8080
+resources: {cpu: "0", memory: 0Mi}
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

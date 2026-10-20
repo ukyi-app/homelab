@@ -1,0 +1,26 @@
+# 시험 values(설계 C.4.5): 선택 항목을 모두 켠 web 앱. ci가 렌더·정책·kubeconform을 돌린다.
+# 릴리스 이름 app, ns app-app으로 렌더한다(tools/ci/render.ts).
+chartVersion: 1.0.0
+kind: web
+port: 8080
+resources: { cpu: 50m, memory: 128Mi }
+probes:
+  readiness: { path: /healthz }
+  liveness: { path: /healthz, periodSeconds: 30 }
+public:
+  host: smoke.ukyi.app
+internal:
+  name: smoke
+secrets: [EXAMPLE_API_KEY, OTHER_KEY]
+env:
+  LOG_LEVEL: info
+uses:
+  postgres: true
+  valkey: true
+migration:
+  command: ["./migrate", "up"]
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: vm-

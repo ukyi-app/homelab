@@ -11,7 +11,7 @@
 // 4. 차트의 시험 values(platform/charts/<차트>/ci/*.yaml)로 렌더한다. 공유 차트 PR은 어느 앱에도 바로 적용되지 않으므로
 //    이것이 그 PR의 렌더 검사다(설계 C.4.5).
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { type Doc, type Violation, ROOT, effectiveSources, gitFiles, parseAll, run, sameRepo, tempDir, toolVersion } from "./lib";
 
 export type Rendered = { origin: string; text: string };
@@ -116,6 +116,45 @@ function plainDir(dir: string): { ok: boolean; out: string } {
 // ApplicationSet 이름 → 그 모양이 render.ts의 전개와 같은지 보는 함수(true 또는 어긋난 이유).
 // 같은 모양일 때만 아래 단계가 생성될 Application을 대신 렌더한 것이 된다.
 const APPSET_RENDERERS: Record<string, (set: any) => true | string> = {};
+// 클러스터 값 파일의 tailnet 접두(cluster.tailscale.prefix). ApplicationSet이 앱 values에 넣는 값과 같다.
+function clusterPrefixes(clusterFiles: string[]): [string, string][] {
+  return clusterFiles.map((vf) => {
+    const cluster = vf.replace(/^platform\/root\/values-/, "").replace(/\.yaml$/, "");
+    const v = Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) as any;
+    const prefix = v?.cluster?.tailscale?.prefix;
+    if (typeof prefix !== "string") throw new Error(`${vf}에 cluster.tailscale.prefix가 없다`);
+    return [cluster, prefix];
+  });
+}
+
+
+// ApplicationSet apps(platform/appsets/apps/files/applicationset.yaml). 아래 5.가 그 Application을 대신 렌더하므로
+// 생성기·템플릿·값 합치기가 그 전개와 같은지 본다. 하나를 바꾸면 이 함수와 5.를 함께 바꾼다.
+APPSET_RENDERERS.apps = (set) => {
+  const gens: any[] = set.spec?.generators?.[0]?.merge?.generators ?? [];
+  const files = gens.map((g) => (g.git?.files ?? []).map((f: any) => f.path).join(",")).join("|");
+  if (set.spec?.generators?.length !== 1 || files !== "apps/*/values.yaml|apps/*/image.yaml") {
+    return "생성기가 apps/*/values.yaml과 apps/*/image.yaml의 merge 하나가 아니다";
+  }
+  if (gens.some((g) => g.git?.values?.app !== "{{ .path.basename }}") || JSON.stringify(set.spec.generators[0].merge.mergeKeys) !== '["values"]') {
+    return "merge 짝 키가 values.app(디렉터리 이름)이 아니다";
+  }
+  const t = set.spec?.template ?? {};
+  const src = t.spec?.source ?? {};
+  if (
+    t.metadata?.name !== "{{ .values.app }}" ||
+    t.spec?.destination?.namespace !== "app-{{ .values.app }}" ||
+    src.path !== "platform/charts/app" ||
+    src.targetRevision !== "app-chart-v{{ .chartVersion }}" ||
+    t.spec?.sources !== undefined
+  ) {
+    return "템플릿 이름·ns·source가 render.ts의 앱 렌더(app-<앱>, platform/charts/app@app-chart-v<chartVersion>)와 다르다";
+  }
+  if (!String(set.spec?.templatePatch ?? "").includes('omit . "path" "values" "tailnetPrefix" | toYaml')) {
+    return "templatePatch의 값 합치기가 render.ts와 다르다";
+  }
+  return true;
+};
 
 export function renderAll(): RenderResult {
   const res: RenderResult = { targets: [], docs: [], violations: [], skipped: [] };
@@ -239,6 +278,7 @@ export function renderAll(): RenderResult {
   const rootFiles = gitFiles("platform/root/root-*.yaml");
   const valueFiles = new Set(gitFiles("platform/root/values-*.yaml"));
   if (rootFiles.length === 0) fail("platform/root", "root Application 파일(root-<클러스터>.yaml)이 0개다");
+  const clusterFiles: string[] = [];
   for (const rf of rootFiles) {
     const text = readFileSync(join(ROOT, rf), "utf8");
     // root 파일 자체도 검사 대상이다(revision, kubeconform). templates/ 밖이라 root가 렌더하지 않는다.
@@ -261,6 +301,7 @@ export function renderAll(): RenderResult {
       continue;
     }
     valueFiles.delete(`platform/root/${want}`);
+    clusterFiles.push(`platform/root/${want}`);
     const out = renderSource(roots[0], cluster, src);
     if (out === undefined) continue;
     // 2. root가 만든 Application의 자기 저장소 source. 렌더 결과에 다시 Application이 있으면(app-of-apps) 그것도 따라간다.
@@ -316,6 +357,38 @@ export function renderAll(): RenderResult {
       const r = helmTemplate(chart, dir, `app-${chart}`, [f]);
       if (!r.ok) fail(origin, r.out.trim());
       else add(origin, r.out);
+    }
+  }
+
+  // 5. 등록된 앱(apps/<앱>/values.yaml). ApplicationSet apps(platform/appsets/apps/files/applicationset.yaml)와
+  //    같게 values.yaml + image.yaml + 클러스터 tailnet 접두를 values로, 차트는 그 앱의 태그로 렌더한다.
+  //    앱이 0개인 것은 정상이라 세지 않는다.
+  for (const vf of gitFiles("apps/*/values.yaml")) {
+    const app = basename(dirname(vf));
+    for (const [cluster, prefix] of clusterPrefixes(clusterFiles)) {
+      const where = `app:${app}[${cluster}]`;
+      try {
+        // ApplicationSet은 path·values를 생성기 변수로 덮고 tailnetPrefix는 클러스터 값으로 덮는다. 사람이 적은 같은 키는
+        // 조용히 사라지므로(예: probe 경로를 최상위 path로 적음) 지우지 않고 실패로 둔다. 두 파일의 키도 서로 겹치지 않는다.
+        const human = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) ?? {}) as Record<string, any>;
+        const imageFile = join(ROOT, "apps", app, "image.yaml");
+        const image = (existsSync(imageFile) ? Bun.YAML.parse(readFileSync(imageFile, "utf8")) ?? {} : {}) as Record<string, any>;
+        const reserved = ["path", "values", "tailnetPrefix"];
+        const imageKeys = ["repository", "digest", "revision", "hold"];
+        const badHuman = Object.keys(human).filter((k) => reserved.includes(k) || imageKeys.includes(k));
+        const badImage = Object.keys(image).filter((k) => !imageKeys.includes(k));
+        if (badHuman.length > 0) throw new Error(`values.yaml에 둘 수 없는 키: ${badHuman.join(", ")}(생성기 변수·클러스터 값·image.yaml 키)`);
+        if (badImage.length > 0) throw new Error(`image.yaml에는 ${imageKeys.join(", ")}만 둔다: ${badImage.join(", ")}`);
+        const values: Record<string, any> = { ...human, ...image, tailnetPrefix: prefix };
+        const chartDir = pathAtRevision(`app-chart-v${values.chartVersion}`, "platform/charts/app", tmp);
+        const vfile = join(tmp, `app-${app}-${cluster}.json`);
+        writeFileSync(vfile, JSON.stringify(values));
+        const r = helmTemplate(app, chartDir, `app-${app}`, [vfile]);
+        if (!r.ok) fail(where, r.out.trim());
+        else add(where, r.out, `app-${app}`);
+      } catch (e) {
+        fail(where, (e as Error).message);
+      }
     }
   }
 

@@ -1,0 +1,10 @@
+# 시험 values: 필수 항목만 둔 web 앱(시나리오 1의 homelab-probe 모양. public 없이).
+chartVersion: 1.0.0
+kind: web
+port: 8080
+resources: { cpu: 50m, memory: 64Mi }
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

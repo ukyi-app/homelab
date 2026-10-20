@@ -1,0 +1,77 @@
+{{- $name := include "app.name" . }}
+{{- $web := eq .Values.kind "web" }}
+{{- $probes := .Values.probes | default dict }}
+{{- $readiness := $probes.readiness | default (dict "path" "/healthz") }}
+{{- if and (not $web) (or $readiness.path ($probes.liveness | default dict).path) }}
+{{- fail "worker에는 포트가 없어 HTTP probe(path)를 쓸 수 없다. probes.readiness.command를 쓴다" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  annotations:
+    # 마이그레이션 Job(wave 1)과 ExternalSecret(wave 0) 뒤다(D-22).
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  # 단일 노드다. 늘려도 고가용성이 아니고, 마이그레이션이 없는 앱의 self-migration이 겹친다(설계 C.5.4).
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "app.selector" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "app.labels" . | nindent 8 }}
+      annotations:
+        # 어느 앱 커밋이 돌고 있는지 파드에서 바로 보인다. digest가 같으면 값도 같다.
+        homelab.ukyi.app/revision: {{ .Values.revision | quote }}
+    spec:
+      {{- if .Values.serviceAccountName }}
+      # SA는 platform(봇 자리 Application)이 그 ns에만 만든다. 다른 앱이 이 값을 켜면 SA가 없어 파드가 생기지 않는다.
+      serviceAccountName: {{ .Values.serviceAccountName }}
+      automountServiceAccountToken: true
+      {{- else }}
+      automountServiceAccountToken: false
+      {{- end }}
+      enableServiceLinks: false
+      securityContext:
+        {{- include "app.podSecurity" . | nindent 8 }}
+      containers:
+        - name: app
+          image: {{ include "app.image" . }}
+          imagePullPolicy: IfNotPresent
+          {{- if $web }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+              protocol: TCP
+          {{- end }}
+          env:
+            {{- include "app.env" . | trim | nindent 12 }}
+          readinessProbe:
+            {{- include "app.probe" (dict "probe" $readiness) | trim | nindent 12 }}
+          {{- with $probes.liveness }}
+          livenessProbe:
+            {{- include "app.probe" (dict "probe" .) | trim | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- include "app.resources" . | nindent 12 }}
+          securityContext:
+            {{- include "app.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            # 루트 파일시스템이 읽기 전용이라 쓰기는 /tmp만.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
