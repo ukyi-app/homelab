@@ -118,6 +118,12 @@ export function checkWorkloads(docs: Doc[]): Violation[] {
     if (upstreamArgocdWorkload(d, containers.map((c: any) => String(c.image)))) continue;
     seen++;
     if (containers.length === 0) out.push({ rule: "workload", where: id(d), message: "컨테이너가 없다" });
+    // image volume(Kubernetes 1.36 stable)도 OCI 참조를 끌어온다. 컨테이너 이미지와 같은 digest 규칙이다.
+    for (const v of spec.volumes ?? []) {
+      if (v?.image !== undefined && !(typeof v.image.reference === "string" && DIGEST_IMAGE.test(v.image.reference))) {
+        out.push({ rule: "image-digest", where: `${id(d)} volume ${v.name}`, message: `image volume이 digest 고정이 아니다: ${v.image?.reference} (L27)` });
+      }
+    }
     for (const c of containers) {
       const where = `${id(d)} container ${c.name}`;
       if (typeof c.image !== "string" || !DIGEST_IMAGE.test(c.image)) {

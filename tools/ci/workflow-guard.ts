@@ -237,11 +237,17 @@ export function checkActionFile(file: WorkflowFile): Violation[] {
   } catch (e) {
     return [{ rule: "parse", where: file.path, message: `YAML을 읽지 못했다: ${(e as Error).message}` }];
   }
+  // docker action은 레지스트리 이미지를 digest로만. Dockerfile을 짓는 action은 FROM 태그가 움직여 쓰지 않는다.
+  const out: Violation[] = [];
+  if (a?.runs?.using === "docker") {
+    const img = String(a.runs.image ?? "");
+    if (!/^docker:\/\/.+@sha256:[0-9a-f]{64}$/.test(img)) out.push({ rule: "pin", where: file.path, message: `docker action 이미지는 docker://...@sha256으로 고정한다: ${img}` });
+  }
   const steps: any[] = Array.isArray(a?.runs?.steps) ? a.runs.steps : [];
   const uses = steps
     .map((st, i) => (st && typeof st === "object" && "uses" in st ? { where: `${file.path} runs.steps[${i}]`, ref: String(st.uses) } : undefined))
     .filter((x): x is { where: string; ref: string } => !!x);
-  return pins(file, uses);
+  return [...out, ...pins(file, uses)];
 }
 
 export function checkWorkflows(files: WorkflowFile[]): Violation[] {

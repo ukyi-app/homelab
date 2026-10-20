@@ -49,7 +49,8 @@ const steps: Step[] = [
     run: () => {
       const out: Violation[] = [];
       // kind: Secret 매니페스트 0건(설계 C.6.2). Helm 템플릿도 원문으로 본다. 음성 fixture만 뺀다(docs/도 본다).
-      for (const f of gitFiles("*.yaml", "*.yml", "*.tpl")) {
+      // JSON도 본다. plain 디렉터리 source는 .json 매니페스트도 배포한다.
+      for (const f of gitFiles("*.yaml", "*.yml", "*.tpl", "*.json")) {
         if (f.startsWith("tools/ci/fixtures/")) continue;
         const text = readText(f);
         let found = SECRET_KIND.test(text);

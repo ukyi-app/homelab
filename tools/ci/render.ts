@@ -116,6 +116,13 @@ export function renderAll(): RenderResult {
     }
     let r: { ok: boolean; out: string };
     if (isChart) {
+      // Argo CD는 대상 클러스터의 API 목록을 Helm에 넘긴다. CI는 그 목록을 재현하지 않으므로 그것에 기대는 분기를 막는다.
+      // 막지 않으면 CI에서 거짓인 조건 아래의 리소스가 검사 없이 배포된다.
+      const caps = gitFiles(`${path}/templates/*`).filter((f) => /\.Capabilities\.APIVersions/.test(readFileSync(join(ROOT, f), "utf8")));
+      if (caps.length > 0) {
+        fail(where, `로컬 차트가 .Capabilities.APIVersions에 기댄다(CI 렌더와 Argo CD 렌더가 달라진다): ${caps.join(", ")}`);
+        return undefined;
+      }
       const helm = src.helm ?? {};
       const unknown = Object.keys(helm).filter((k) => !HELM_KEYS.has(k));
       if (unknown.length > 0) {
@@ -177,18 +184,27 @@ export function renderAll(): RenderResult {
     valueFiles.delete(`platform/root/${want}`);
     const out = renderSource(roots[0], cluster, src);
     if (out === undefined) continue;
-    // 2. root가 만든 Application의 자기 저장소 source
-    for (const app of parseAll(out).filter((d) => d?.kind === "Application")) {
-      const sources: any[] = app.spec?.sources ?? (app.spec?.source ? [app.spec.source] : []);
-      for (const s2 of sources) {
-        const text = renderSource(app, cluster, s2);
-        // ApplicationSet이 만드는 Application도 검사해야 한다. 여기서 전개하는 ApplicationSet만 받는다(아래 5.).
-        for (const set of parseAll(text ?? "").filter((d) => d?.kind === "ApplicationSet")) {
-          const ok = APPSET_RENDERERS[set.metadata?.name]?.(set);
-          if (ok !== true) fail(`${app.metadata?.name}[${cluster}]`, `ApplicationSet ${set.metadata?.name}: ${ok ?? "render.ts가 전개하지 않는 ApplicationSet이다"}`);
+    // 2. root가 만든 Application의 자기 저장소 source. 렌더 결과에 다시 Application이 있으면(app-of-apps) 그것도 따라간다.
+    const visit = (text: string, depth: number) => {
+      for (const app of parseAll(text).filter((d) => d?.kind === "Application")) {
+        if (depth > 3) {
+          fail(`${app.metadata?.name}[${cluster}]`, "Application 중첩이 너무 깊다(3단계까지)");
+          continue;
+        }
+        const sources: any[] = app.spec?.sources ?? (app.spec?.source ? [app.spec.source] : []);
+        for (const s2 of sources) {
+          const t2 = renderSource(app, cluster, s2);
+          if (t2 === undefined) continue;
+          visit(t2, depth + 1);
+          // ApplicationSet이 만드는 Application도 검사해야 한다. 여기서 전개하는 ApplicationSet만 받는다(아래 5.).
+          for (const set of parseAll(t2).filter((d) => d?.kind === "ApplicationSet")) {
+            const ok = APPSET_RENDERERS[set.metadata?.name]?.(set);
+            if (ok !== true) fail(`${app.metadata?.name}[${cluster}]`, `ApplicationSet ${set.metadata?.name}: ${ok ?? "render.ts가 전개하지 않는 ApplicationSet이다"}`);
+          }
         }
       }
-    }
+    };
+    visit(out, 1);
   }
   for (const vf of valueFiles) fail(vf, "이 값 파일을 읽는 root-<클러스터>.yaml이 없다");
 
@@ -221,11 +237,12 @@ export function renderAll(): RenderResult {
 }
 
 // 렌더 결과를 파일로 써서 kubeconform에 넘긴다. 스키마는 커밋 SHA로 고정한 주소에서 받는다(태그·브랜치는 움직인다).
-// CRD 스키마가 없는 kind는 실패로 둔다. 빠뜨리면 CRD 오타가 초록으로 지나간다.
-// 예외는 CustomResourceDefinition 자체 하나다. 스키마 저장소가 그 kind를 싣지 않고, 렌더에 나오는 CRD는
-// 버전을 고정한 상류 매니페스트(Argo CD install.yaml)뿐이다.
+// CRD 스키마가 없는 kind는 실패로 둔다. 빠뜨리면 CRD 오타가 초록으로 지나간다. 건너뛰는 kind는 없다.
 const K8S_SCHEMAS =
   "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/93153a1458e24e93f386c50f9980d584fcba574b/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json";
+// standalone 묶음에 없는 kind(CustomResourceDefinition)만 $ref를 쓰는 묶음에서 찾는다. 같은 커밋이다.
+const K8S_SCHEMAS_REFS =
+  "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/93153a1458e24e93f386c50f9980d584fcba574b/{{.NormalizedKubernetesVersion}}/{{.ResourceKind}}{{.KindSuffix}}.json";
 const CRD_SCHEMAS =
   "https://raw.githubusercontent.com/datreeio/CRDs-catalog/501527ab9c40c827144c8f45945b25a023e344ce/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json";
 
@@ -243,12 +260,13 @@ export function kubeconform(targets: Rendered[]): Violation[] {
     kubeVersion(),
     "-cache",
     cacheDir,
-    "-skip",
-    "CustomResourceDefinition",
+
     "-schema-location",
     K8S_SCHEMAS,
     "-schema-location",
     CRD_SCHEMAS,
+    "-schema-location",
+    K8S_SCHEMAS_REFS,
     dir,
   ]);
   const out: Violation[] = [];
