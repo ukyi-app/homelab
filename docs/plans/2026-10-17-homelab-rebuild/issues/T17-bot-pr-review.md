@@ -28,7 +28,7 @@
 3. 모델 호출 전 작성자 확인을 D-16대로 만든다.
    - 통과: `author_association`이 OWNER·MEMBER·COLLABORATOR(설계 C.8)이거나, `pull_request.user.type`이 `Bot`이고 숫자 `user.id`가 허용 봇 작성자 목록에 있다.
    - 이유: App이 연 PR은 `NONE` 또는 `CONTRIBUTOR`로 찍혀 앞의 확인에 막혔다 [실측: T15, `gh api` GET].
-   - 목록에 넣지 않는 것: 배포 갱신 App(`homelab-deploy`), Codex Connector, 옛 writer App.
+   - 목록에 넣지 않는 것: 배포 갱신 App(`ukyi-homelab-deploy`), Codex Connector, 옛 writer App.
    - `CONTRIBUTOR`는 허용하지 않는다. fork PR은 제외한다.
    - 댓글 트리거는 `comment.author_association`을 보고, Bot이 쓴 댓글은 무시한다.
    - 허용 작성자의 PR 본문도 비신뢰 자료로 다룬다. Renovate PR 본문에는 상류 릴리스 노트가 그대로 들어간다 [실측: T15].

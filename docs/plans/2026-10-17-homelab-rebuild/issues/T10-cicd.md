@@ -10,7 +10,7 @@
 - 선행 결정: D-04 (확정(사용자 2026-10-18): 배포 키 OIDC, 병합 키 Secret Sync), D-07 (확정(사용자 2026-10-18, T05): 배포 digest PR만 자동 병합, 서버 강제), D-18 (확정(사용자 2026-10-18, T05): 호스팅형 Renovate App 저장소별 설치, 자동 병합 모두 끔), D-21 (확정(사용자 2026-10-18, T05): `homelab-app-template` 재사용, 내용 교체), D-23 (확정: public 유지), D-26 (확정(사용자 2026-10-18, T05): Codex Connector 유지 + 조건 넷), D-28 (확정(사용자 2026-10-18): GitHub 보호 설정 Terraform), D-29 (확정(사용자 2026-10-18): 앱 저장소 public만), D-30 (확정(사용자 2026-10-20): 내부 UI 짧은 주소 리다이렉터 `go`. 공유 차트의 `internal.name` 검사에서 `go`·`vm-go`를 예약어로 막는다)
 - 참조 결정: D-24 (봇 쓰기 신원. 확정(사용자 2026-10-18, T15): 봇 전용 쓰기 GitHub App. App 생성·설치는 T19). T10은 이 신원이 없어도 자동 병합 차단 조건을 설계하고, 시험용 다른 신원으로 검증한다. D-16 (봇 PR 리뷰. 확정(사용자 2026-10-18, T15): 기본안). Codex Connector 설치 범위 축소는 확정(사용자 2026-10-18, T15): 선택 저장소로 줄이고 `homelab-bot-ops`를 뺀다. 사람이 T15에서 `homelab-bot-ops`에 운영 산출물을 처음 올리기 전에 하기로 했고, 2026-10-18 17:45에 완료했다(spec §11, D-26, [../approvals.md](../approvals.md)).
 - 연결 AC: AC-P7, AC-P8, AC-P12
-- 수행: 에이전트 + 사람 (GitHub App 2개와 시험 App 생성·설치, Terraform github root apply(owner 로컬), Actions 허용 범위, Infisical Secret Sync와 App Connection용 PAT, GHCR 패키지 Public 전환, Renovate 설치, `homelab-probe` 저장소 생성, 템플릿 내용 교체 승인)
+- 수행: 에이전트 + 사람 (GitHub App 2개와 시험 App 2개 생성·설치, Terraform github root apply(owner 로컬), Actions 허용 범위, Infisical Secret Sync와 App Connection용 PAT, GHCR 패키지 Public 전환, Renovate 설치, `homelab-probe` 저장소 생성, 템플릿 내용 교체 승인)
 
 ## 목표
 
@@ -29,8 +29,8 @@
   - 지울 것: 옛 SealedSecrets 도구·인증서 사본, `.app-config.yml`, main 스키마 받기 CI.
   - 템플릿 main의 `app-main`은 결정 5 하드닝이 이미 걸었다. 그 `app-main`을 import한 뒤 교체도 PR로 한다. 템플릿 main은 모든 새 앱의 첫 main 내용이라서다(설계 C.4.7).
 - GitHub App 둘. 옛 reader/writer App은 재사용하지 않는다. 권한은 설계 C.4.7 서버 쪽 장치 표를 따른다.
-  - 저장소 간 쓰기용 `homelab-deploy` (최소 권한). 이 App이 배포 갱신 주체다. homelab에만 설치하고 contents write, pull_requests write, metadata read만 준다. workflows·actions·administration 권한은 없다.
-  - 병합용 `homelab-merge`. homelab에만 설치하고 contents write, pull_requests write, checks·actions read만 준다.
+  - 저장소 간 쓰기용 `ukyi-homelab-deploy` (최소 권한). 이 App이 배포 갱신 주체다. homelab에만 설치하고 contents write, pull_requests write, metadata read만 준다. workflows·actions·administration 권한은 없다.
+  - 병합용 `ukyi-homelab-merge`. homelab에만 설치하고 contents write, pull_requests write, checks·actions read만 준다.
 - 자동 병합 범위 (D-07, 확정(사용자 2026-10-18, T05)). 배포 App이 앱 기본 브랜치 빌드에서 만든, 한 앱의 `image.yaml` digest·revision만 바뀐 PR만 자동 병합한다. 조건에 작성 주체(배포 갱신 App), 브랜치, 내용(한 앱의 digest만)을 함께 넣는다. 조건은 설계 C.4.7의 9개이고 `.github/workflows/README.md`에 같은 목록을 공개한다. GitHub auto-merge 허용은 끈다. 나머지 PR은 사람이 검토 후 병합한다.
   - 서버 쪽 강제: ruleset A `main-checks`, B `main-review`, C `deploy-branches`, D1 `release-tags-lock`, D2 `release-tags-create`, 앱 저장소와 `homelab-app-template`의 `app-main`, `workflow_run` 병합 워크플로 `deploy-merge`, App 2개와 키별 Infisical 프로젝트(설계 C.4.7).
   - 배포 PR은 앱 저장소 기본 브랜치의 빌드에서만 만든다. PR과 비기본 브랜치의 CI에는 저장소 간 쓰기 키를 주지 않는다.
@@ -81,7 +81,7 @@
 - Renovate (D-18, 확정(사용자 2026-10-18, T05)). 호스팅형 Renovate App을 homelab과 앱 저장소에 저장소별로 설치한다. 자동 병합은 모두 끈다. Renovate PR은 자동 병합 조건 밖이라 code owner 승인 뒤 사람이 병합한다. ESO는 주 1회 묶음으로 받는다. 설치 전에 호스팅형 App의 이용 조건(U20)을 확인한다. 맞지 않으면 self-hosted Renovate를 homelab과 분리한 별도 저장소 Actions로 돌린다(설계 F D-18, 부록 1).
 - 시험 자산(설계 E5).
   - 손으로 등록하는 시험 앱 저장소 `ukyi-app/homelab-probe`. 템플릿에서 `gh repo create --public --template`로 만든다. T11·T12가 이어 쓰고, T12 끝에 등록과 데이터를 지운다. T13의 `homelab-smoke`는 T13이 CLI로 새로 만든다.
-  - 봇 신원 대신 쓸 시험 App. homelab과 `homelab-probe`에 설치한다. T13은 `homelab-smoke`에도 설치한다.
+  - 봇 신원 대신 쓸 시험 App `ukyi-homelab-bot-standin`. homelab과 `homelab-probe`에 설치한다. T13은 `homelab-smoke`에도 설치한다.
 - 외부 변경(App 생성·설치, Terraform github root apply, Actions 허용 범위, Secret Sync·App Connection, GHCR 패키지 Public 전환, Renovate 설치, `homelab-probe` 생성, 템플릿 내용 교체)은 사람 승인 뒤에 하고 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
 - T07에서 넘긴 주의(2026-10-19, T07 작성 중 발견):
   - AppProject `apps`는 T07이 `platform/root/templates/project-apps.yaml`로 미리 만들었고, 설계 C.3.3 표대로 cluster-scoped kind를 모두 막는다. ApplicationSet이 `CreateNamespace`·`managedNamespaceMetadata`로 `app-*` ns를 만들면 Argo CD의 sync 권한 검사가 그 Namespace를 거부할 수 있다(추측). 이 티켓에서 확인하고 정한다.
@@ -94,9 +94,9 @@
 - owner의 GitHub 토큰: `infra/github` plan·apply·verify와 저장소 설정·fork PR 정책 `gh api`에 쓴다. 기본 `gh auth token`, 또는 만료 있는 fine-grained PAT다. 환경변수로만 준다. 준비: 사람(owner).
 - R2 state 키(`homelab-tfstate`): Infisical `homelab-admin`의 `/terraform/state`에서만 받는다. 준비: T09.
 - Infisical 프로젝트 `homelab-ci-deploy`·`homelab-ci-merge`와 배포 키 OIDC identity `gha-homelab-deploy`: 준비 T09(OIDC Free 사용 확인 U05 포함). `homelab-ci-merge`에는 machine identity가 없다.
-- App `homelab-deploy`·`homelab-merge`의 키: 이 티켓에서 App을 만들고 키를 키별 Infisical 프로젝트에 등록한다(배포 키는 `homelab-ci-deploy`, 병합 키는 `homelab-ci-merge`).
+- App `ukyi-homelab-deploy`·`ukyi-homelab-merge`의 키: 이 티켓에서 App을 만들고 키를 키별 Infisical 프로젝트에 등록한다(배포 키는 `homelab-ci-deploy`, 병합 키는 `homelab-ci-merge`).
 - Infisical GitHub 연결용 fine-grained PAT(homelab만, Metadata read, Environments RW, Secrets RW, 만료 지정): 이 티켓의 사람 작업. org가 fine-grained PAT를 허용하는지 먼저 확인한다. 병합 키 sync는 1단계 apply로 environment가 생긴 뒤, 2단계 전에 만든다.
-- 시험 App의 키: 이 티켓에서 만든다.
+- 시험 App `ukyi-homelab-bot-standin`·`ukyi-homelab-review-probe`의 키: 이 티켓에서 쓰기 직전(`homelab-probe` 생성 때와 종단 시험 때)에 만들고, 시험이 끝나면 지운다. 키가 오래 살지 않게 하려는 것이다.
 - 시나리오 7 배포 흐름 부분의 장애 주입: `eso-homelab`의 시험용 두 번째 Universal Auth client secret. T09의 "시험용 client secret 장애 주입" 방법을 따라 시험 때 발급하고 폐기한다(승인 기록). 운영 client secret은 폐기하지 않는다. `homelab-probe`의 시험 키 값은 사람이 Infisical `homelab`/`prod`에 만든다.
 - 콘솔 작업: Renovate App 설치, org Package Creation의 Public 허용 확인(REST로 읽을 수 없어 화면에서).
 
@@ -118,7 +118,7 @@
 
 설계 E5 표 아래 "CLI 없는 동등 절차"를 따른다. CLI는 T12에서 생기므로 G의 명령에서 `homelab-smoke`를 `homelab-probe`로, `homelab github verify`를 `tools/tf-github.sh verify`로 바꾼다. CLI 경로 재확인은 T12, CLI와 공개 URL을 포함한 전체 실행은 T13이 맡는다.
 
-- `homelab-probe`로 시나리오 1을 실행한다: main 커밋 → `app-build` 요약이 "미등록"이고 homelab에 PR 없음 → 사람이 `apps/homelab-probe/values.yaml`(`public` 없이)과 `image.yaml`(그 빌드의 digest·revision, `hold: false`)을 손으로 써서 PR, 검토 후 관리자 bypass 병합 → G 시나리오 1의 Argo CD·imageID·tailnet 불통 확인 → 공개 URL 대신 `kubectl -n app-homelab-probe port-forward svc/homelab-probe 18080:<서비스 포트>` 뒤 `curl -sf http://127.0.0.1:18080/healthz` → 두 번째 커밋의 `deploy/homelab-probe` PR이 `homelab-merge`로 자동 병합되고 새 revision이 배포됨.
+- `homelab-probe`로 시나리오 1을 실행한다: main 커밋 → `app-build` 요약이 "미등록"이고 homelab에 PR 없음 → 사람이 `apps/homelab-probe/values.yaml`(`public` 없이)과 `image.yaml`(그 빌드의 digest·revision, `hold: false`)을 손으로 써서 PR, 검토 후 관리자 bypass 병합 → G 시나리오 1의 Argo CD·imageID·tailnet 불통 확인 → 공개 URL 대신 `kubectl -n app-homelab-probe port-forward svc/homelab-probe 18080:<서비스 포트>` 뒤 `curl -sf http://127.0.0.1:18080/healthz` → 두 번째 커밋의 `deploy/homelab-probe` PR이 `ukyi-homelab-merge`로 자동 병합되고 새 revision이 배포됨.
 - 시나리오 7의 배포 흐름 부분: `homelab-probe`에 시험 키 하나를 둔 상태에서 시험용 client secret 장애 주입으로 ESO 인증을 끊고 ExternalSecret Ready=False를 본 뒤, main 커밋 → `deploy/homelab-probe` PR 자동 병합 → 새 revision 파드 Ready, Application Healthy → 부트스트랩 Secret을 원래 client secret으로 되돌림 → Ready 복귀. 경보는 보지 않는다(T08b가 본다).
 - 빌드 두 개의 완료 순서를 바꿔 시나리오 11을 실행한다.
 - 공통 차트를 바꾸는 PR로 시나리오 15를 실행한다.
@@ -128,7 +128,7 @@
 - 래퍼가 `delete_repo` 범위가 있는 토큰, 범위 머리글이 빈 classic 토큰, 만료 없는 fine-grained PAT, `--allow-destroy` 없는 delete plan을 각각 거부하는지 확인한다. 작업 사본에 미추적 `zz_override.tf`를 둬도 래퍼가 그것을 읽지 않는지(임시 worktree 실행) 확인한다.
 - admin이 아닌 토큰이 래퍼의 사전 확인에서 멈추는지, 그리고 ruleset 변경이 예정된 상태에서 그 확인 없이 `terraform plan -lock=false`를 직접 돌려도 guard 1 오류로 멈추는지 확인한다.
 - 병합 키 회전 절차를 한 번 실행해 environment secret의 `updated_at`이 교체 시각 이후인지 확인한다.
-- `gh api orgs/ukyi-app/installations`로 App 설치 범위를 확인한다. 배포·병합 App은 homelab만, 봇 신원 대역 시험 App은 homelab과 `homelab-probe`, Renovate는 고른 저장소만이다. 리뷰 전용 App 구조는 설계 C.8 리뷰 전용 App 줄의 명령으로 본다(한 저장소에만 설치한 시험 App의 `repository_selection` → `selected`, 설치 토큰의 `GET /installation/repositories` → 그 저장소 하나).
+- `gh api orgs/ukyi-app/installations`로 App 설치 범위를 확인한다. 배포·병합 App은 homelab만, 봇 신원 대역 시험 App `ukyi-homelab-bot-standin`은 homelab과 `homelab-probe`, Renovate는 고른 저장소만이다. 리뷰 전용 App 구조는 설계 C.8 리뷰 전용 App 줄의 명령으로 본다(한 저장소에만 설치한 시험 App `ukyi-homelab-review-probe`의 `repository_selection` → `selected`, 설치 토큰의 `GET /installation/repositories` → 그 저장소 하나).
 - `homelab-probe` 첫 push 뒤 `gh api orgs/ukyi-app/packages/container/homelab-probe --jq .visibility`와 `curl -s -o /dev/null -w '%{http_code}' 'https://ghcr.io/token?scope=repository:ukyi-app/homelab-probe:pull'` → 200을 기록한다.
 - 이 단계에서 확인할 미검증 항목: U08의 나머지(bypass 병합 때 ruleset A 필수 검사 적용, App 승인이 code owner 승인을 대신하지 못함), U09, U20, U21, U25, U30, U35, U36, U37, U38, U39, 그리고 시나리오 15에서 U05를 다시 본다(설계 부록 1). 결과가 틀리면 부록 1의 "틀리면" 열대로 간다.
 

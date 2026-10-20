@@ -68,7 +68,7 @@ export function evaluate(f: Facts): Verdict {
   const app = appFromBranch(pr.headRef);
 
   // 1. 작성자: 로그인 문자열이 아니라 숫자 사용자 ID로 비교한다(GitHub login은 대소문자를 가리지 않는다).
-  if (!(f.deployBotId > 0 && pr.userId === f.deployBotId)) fail(1, `PR 작성자(${pr.userId})가 homelab-deploy[bot]이 아니다`);
+  if (!(f.deployBotId > 0 && pr.userId === f.deployBotId)) fail(1, `PR 작성자(${pr.userId})가 ukyi-homelab-deploy[bot]이 아니다`);
 
   // 2. head 저장소·브랜치와 등록 여부. workflow_run 소비자는 head를 확인해야 fork 실행에 조종되지 않는다(설계 B.8 E5).
   if (pr.headRepo !== "ukyi-app/homelab" || f.run.headRepo !== "ukyi-app/homelab") fail(2, "head 저장소가 ukyi-app/homelab이 아니다");

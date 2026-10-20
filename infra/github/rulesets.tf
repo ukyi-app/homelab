@@ -74,7 +74,7 @@ resource "github_repository_ruleset" "main_checks" {
 }
 
 # B. 사람 검토. owner가 만든 PR은 자기 승인이 안 돼 관리자 bypass(pull_request 모드)로 병합한다.
-# 그 bypass는 B에만 있어 A의 ci는 그대로 적용된다(U08). homelab-merge App은 자동 병합 조건을 통과한 PR만 병합한다.
+# 그 bypass는 B에만 있어 A의 ci는 그대로 적용된다(U08). ukyi-homelab-merge App은 자동 병합 조건을 통과한 PR만 병합한다.
 resource "github_repository_ruleset" "main_review" {
   repository  = local.homelab
   name        = "main-review"
@@ -118,7 +118,7 @@ resource "github_repository_ruleset" "main_review" {
   }
 }
 
-# C. deploy/** 브랜치는 homelab-deploy App만 만들고 바꾼다(키는 앱 main push의 태그 고정 app-build만 받는다).
+# C. deploy/** 브랜치는 ukyi-homelab-deploy App만 만들고 바꾼다(키는 앱 main push의 태그 고정 app-build만 받는다).
 # 삭제는 막지 않는다. 병합 뒤 브랜치 삭제 설정이 deploy 브랜치를 지운다.
 resource "github_repository_ruleset" "deploy_branches" {
   repository  = local.homelab
