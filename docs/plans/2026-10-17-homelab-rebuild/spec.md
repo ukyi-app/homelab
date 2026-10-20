@@ -318,7 +318,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | [T13](issues/T13-platform-integration.md) | 테스트 앱 통합 검증 | P2 | T08a, T08b, T10, T11, T12 | 대기 | 에이전트 + 사람 |
 | [T14](issues/T14-bot-docs-refresh.md) | 봇 문서 정비 | P3 | T05 | 완료 (2026-10-18) | 에이전트 + 사람 |
 | [T15](issues/T15-bot-discovery.md) | 봇 V1 DISCOVERY | P3 | T14 | 완료 (2026-10-18) | 에이전트 + 사람 |
-| [T16a](issues/T16a-bot-foundation-local.md) | 봇 FOUNDATION 로컬·mock | P4 | T15 | 대기 | 에이전트 + 사람 |
+| [T16a](issues/T16a-bot-foundation-local.md) | 봇 FOUNDATION 로컬·mock | P4 | T15 | 진행 중 (PR #5 병합 2026-10-20, DM·브리핑 결정 남음) | 에이전트 + 사람 |
 | [T16b](issues/T16b-bot-foundation-deploy.md) | 봇 FOUNDATION 실연동·첫 배포 | P4 | T13, T16a | 대기 | 에이전트 + 사람 |
 | [T17](issues/T17-bot-pr-review.md) | 봇 PR_REVIEW | P4 | T16a(착수), T16b(완료) | 대기 | 에이전트 + 사람 |
 | [T18](issues/T18-bot-codex-bridge.md) | 봇 CODEX_BRIDGE | P4 | T16a(착수), T16b(완료) | 대기 | 에이전트 + 사람 |
