@@ -228,7 +228,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 |---|---|---|
 | P0 정리·준비 | T01, T02 (완료) | 옛 코드 보존, 새 작업 사본 |
 | P1 플랫폼 설계 | T03, T02 → T04 → T05 (모두 완료) | 설계 문서 0·A~G, 결정 확정, P2 티켓 재분해 |
-| P2 플랫폼 구축 (재분해 T05 2026-10-18) | T06 → T07 → T09 → T08a → T10 → {T08b, T11} → T12 → T13. T10 착수는 T07 뒤 T09와 병행하고 완료는 T09 뒤다. `infra/github` 첫 apply만 T08a의 R2 잠금 시험(U02) 뒤다. 간선 전체는 §8.2 | 테스트 앱까지 검증된 새 플랫폼 |
+| P2 플랫폼 구축 (재분해 T05 2026-10-18) | T06 → T07 → T09 → T08a → T10 → {T08b, T11} → T12 → T13. 이 줄은 권장 순서이고 간선이 아니다: T08b는 T08a·T09만 기다리고(T10과 무관), T11이 T10을 기다린다. T10 착수는 T07 뒤 T09와 병행하고 완료는 T09 뒤다. `infra/github` 첫 apply만 T08a의 R2 잠금 시험(U02) 뒤다. 간선 전체는 §8.2 | 테스트 앱까지 검증된 새 플랫폼 |
 | P3 봇 준비 (P2와 병행) | T14 → T15 | 정비된 봇 문서, DISCOVERY 산출물 |
 | P4 봇 V1 | T16a → T16b → T17·T18·T20 → T19 → T21. T16a(로컬·mock)는 T15 뒤 P2와 병행하고, T16b(실연동·첫 배포)는 T13 뒤다. T17·T18·T20은 T16a 뒤 착수, T16b 뒤 완료다(V1 범위 조정 안 3, §5.1). 간선 전체는 §8.2 | V1 판정. STAGE별 제한 시범 운영(단계마다 사람 승인) |
 | P5 후속 | T22 (T13과 봇 첫 배포 T16b 뒤, 나머지 P4와 병행) | `files`의 새 흐름 배포, 옛 aiops 저장소·App과 `mac-uptime-guard` 삭제(장치 끄기와 옛 Telegram 봇 토큰 폐기 뒤), `aiops-autodeploy-canary` private 보관 |
@@ -408,7 +408,7 @@ T16b → T22
 | T01 · T02 | 지금 | T01: GitHub 태그·PR(`gh api`, 로컬 사본 불필요). T02: `/home/ukyi/homelab`의 git 설정·`rebuild` 브랜치(문서 내용은 수정하지 않음). 둘이 함께 쓰는 것은 [approvals.md](approvals.md)와 `rebuild` 커밋이다. T01의 기록 커밋은 T02 로컬 단계 뒤에 별도 커밋으로 한다 |
 | T09 · T10(착수) | T07 뒤 | 디렉터리는 T04 설계 구조로 나눈다. Argo CD 루트 앱 목록(`platform/root`)은 T07이 T08a·T08b·T09·T10·T11의 자리를 미리 만들어 둔다. T10 완료는 T09 뒤다 |
 | T08a · T10 | T09 뒤 | T08a: `infra/cloudflare`, `infra/tailscale`, `infra/tailscale-dns`, `platform/cloudflared`·`traefik`·`tailscale`·`adguard`·`cert-manager`. T10: `platform/charts/app`, `.github/workflows/`, `infra/github`, `tools/tf-github.sh`(설계 E5). R2 state를 처음 쓰는 것은 T08a이고, T10의 `infra/github` 첫 apply는 T08a의 U02 잠금 시험 뒤에 한다 |
-| T08b · T11 | T08a·T10 뒤 | T08b: `platform/observability`, `platform/sandbox`, `platform/bot-slot`. T11: `platform/cnpg`, `platform/charts/app-data` 등(설계 E6). T08b는 T11의 선행이 아니다 |
+| T08b · T11 | T08b는 T08a·T09 뒤, T11은 T08a·T09·T10 뒤 | T08b: `platform/observability`, `platform/sandbox`, `platform/bot-slot`. T11: `platform/cnpg`, `platform/charts/app-data` 등(설계 E6). T08b는 T11의 선행이 아니다 |
 | P3(T14·T15) · P2(T06~T13) | T05 뒤 | T14: 봇 문서(완료). T15: 봇 저장소 `homelab-bot`과 운영 산출물 저장소 `homelab-bot-ops`(D-13), 그리고 결정 기록 예외로 spec §5와 봇 저장소 `docs/ai-bot/prompts/`의 D-14~D-17·D-24 자리(봇 저장소 PR). P2: 플랫폼 디렉터리 |
 | T16a · P2(T06~T13) | T15 뒤 | T16a: 봇 저장소 `homelab-bot`의 로컬·mock 코드와 시험(변경은 봇 저장소 PR). 실제 Discord·GitHub·플랫폼·모델 연동, 계정 생성, 배포는 하지 않는다. P2: 플랫폼 디렉터리 |
 | T17 · T18 · T20 | T16a 뒤 착수, T16b 뒤 완료 | 공유 계약(event·job·outbox 스키마, 게시 서버)은 T16a 소유. 나머지는 추가 변경만. T13 실측으로 계약이 바뀌면 T16b가 고친다 |
