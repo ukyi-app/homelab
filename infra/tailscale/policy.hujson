@@ -4,7 +4,7 @@
     "tag:k8s": ["tag:k8s-operator"],
     "tag:k8s-go": ["tag:k8s-operator"],
     // NUC(D-11 (c)). 태그 기기는 사용자 소유가 아니라 self 규칙에 들지 않고, 키 만료가 기본으로 꺼진다.
-    "tag:nuc": ["autogroup:admin"]
+    "tag:nuc": ["autogroup:owner", "autogroup:admin"]
   },
   // NUC가 광고하는 공유기 관리 화면 경로. 태그 기준 자동 승인이라 재등록 뒤 콘솔 승인을 다시 하지 않는다.
   "autoApprovers": {
@@ -13,10 +13,11 @@
   "acls": [
     // 사람 기기끼리. 태그를 붙이기 전까지는 NUC 원격 접속과 AdGuard :53 경로도 이 규칙이다.
     { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self:*"] },
-    // 사람 기기 → NUC: SSH·kubectl은 관리자만, AdGuard DNS는 member. NUC → 사람 기기 규칙은 두지 않는다(U28: 파드가 NUC 주소로 나간다).
+    // 사람 기기 → NUC: SSH·kubectl은 운영자(Owner·Admin)만, AdGuard DNS는 member. NUC → 사람 기기 규칙은 두지 않는다(U28: 파드가 NUC 주소로 나간다).
+    // Owner는 autogroup:admin에 들지 않는다. 빠지면 태그를 붙이는 순간 유일한 운영자의 SSH·kubectl이 끊긴다.
     // 태그 대상은 self처럼 소유자로 좁혀지지 않아 member를 쓰면 member가 늘 때 호스트와 k3s가 함께 열린다.
     // NUC에 태그를 붙이기 전에 이 두 줄이 먼저 적용돼 있어야 원격 접속이 끊기지 않는다.
-    { "action": "accept", "src": ["autogroup:admin"], "dst": ["tag:nuc:22,6443"] },
+    { "action": "accept", "src": ["autogroup:owner", "autogroup:admin"], "dst": ["tag:nuc:22,6443"] },
     { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:nuc:53"] },
     { "action": "accept", "src": ["autogroup:member", "tag:nuc"], "dst": ["tag:k8s:443"] },
     // 짧은 주소 리다이렉터(D-30). 모든 프록시에 80을 열지 않으려고 태그를 나눈다.
@@ -28,8 +29,8 @@
   ],
   "ssh": [
     // root는 기존 비대화형 운영 경로다. 좁히려면 D-11 (b)를 먼저 정한다.
-    // self 대상은 태그 전환 중 끊기지 않게 남긴다. 태그 대상의 autogroup:nonroot는 src 전원에게 비root 사용자를 열므로 src를 관리자로 좁힌다.
+    // self 대상은 태그 전환 중 끊기지 않게 남긴다. 태그 대상의 autogroup:nonroot는 src 전원에게 비root 사용자를 열므로 src를 운영자(Owner·Admin)로 좁힌다.
     { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot", "root"] },
-    { "action": "accept", "src": ["autogroup:admin"], "dst": ["tag:nuc"], "users": ["autogroup:nonroot", "root"] }
+    { "action": "accept", "src": ["autogroup:owner", "autogroup:admin"], "dst": ["tag:nuc"], "users": ["autogroup:nonroot", "root"] }
   ]
 }
