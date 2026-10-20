@@ -84,6 +84,7 @@ tailnet에 이미 있으면 건너뛴다.
 
    전체 이름은 tailnet 이름을 담으므로 공개 저장소에 적지 않는다.
 4. Tailscale 콘솔에서 이 기기의 태그가 `tag:nuc` 하나이고 키 만료가 꺼져 있는지 확인한다(태그 기기는 기본으로 꺼진다). 공유기 경로가 승인됐는지도 본다.
+   이미 가입한 NUC(이 절을 건너뛴 경우)는 `tailscale debug prefs`의 `AdvertiseRoutes`에 `192.168.117.1/32`가 있는지 보고, 없으면 `sudo tailscale set --advertise-routes=192.168.117.1/32`로 광고한다. `autoApprovers`는 광고된 경로를 승인할 뿐 광고하지 않는다.
 5. Tailscale IP가 바뀌었으면 DNS Terraform(`infra/tailscale-dns`, T08a 이후)을 apply해 전역 nameserver의 NUC 주소를 갱신한다.
 
 ### 0.2 사람 확인
