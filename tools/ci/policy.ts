@@ -3,11 +3,30 @@
 // 세지 않는다.
 import { type Doc, type Violation, sameRepo } from "./lib";
 
-// 렌더에 나오는 상류 매니페스트의 예외. 출처(render.ts의 origin)의 path 부분으로 고른다.
-// Argo CD는 공식 install.yaml을 그대로 쓴다(설계 C.3.3). 이미지는 URL의 버전 태그로 고정되고(digest 아님),
-// 자원 상한이 없고, 빈 Secret 둘(argocd-secret, argocd-notifications-secret)을 낸다. 값은 저장소에 없다.
-// 이 예외를 넓히지 않는다. 다른 구성 요소는 digest·상한을 직접 적는다.
-const UPSTREAM_ARGOCD = /:platform\/argocd$/;
+// 렌더에 나오는 상류 매니페스트의 예외. Argo CD는 공식 install.yaml을 그대로 쓴다(설계 C.3.3).
+// 이미지는 URL의 버전 태그로 고정되고(digest 아님), 자원 상한이 없고, 빈 Secret 둘을 낸다. 값은 저장소에 없다.
+// 예외는 platform/argocd 렌더 안의 알려진 상류 리소스와 상류 이미지에만 건다. 같은 kustomization에 로컬 워크로드를
+// 더하거나 patch로 이미지를 바꾸면 예외가 적용되지 않는다.
+const UPSTREAM_ARGOCD_ORIGIN = /:platform\/argocd$/;
+const UPSTREAM_ARGOCD_WORKLOADS = new Set([
+  "Deployment/argocd-applicationset-controller",
+  "Deployment/argocd-dex-server",
+  "Deployment/argocd-notifications-controller",
+  "Deployment/argocd-redis",
+  "Deployment/argocd-repo-server",
+  "Deployment/argocd-server",
+  "StatefulSet/argocd-application-controller",
+]);
+const UPSTREAM_ARGOCD_IMAGES = /^(quay\.io\/argoproj\/argocd|ghcr\.io\/dexidp\/dex|public\.ecr\.aws\/docker\/library\/redis):[\w.-]+$/;
+const UPSTREAM_ARGOCD_SECRETS = new Set(["argocd-secret", "argocd-notifications-secret"]);
+
+function upstreamArgocdWorkload(d: Doc, images: string[]): boolean {
+  return (
+    UPSTREAM_ARGOCD_ORIGIN.test(d.origin) &&
+    UPSTREAM_ARGOCD_WORKLOADS.has(`${d.obj.kind}/${d.obj.metadata?.name}`) &&
+    images.every((i) => UPSTREAM_ARGOCD_IMAGES.test(i))
+  );
+}
 
 const WORKLOAD_KINDS = new Set(["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "Pod"]);
 const DIGEST_IMAGE = /^[a-z0-9][a-z0-9._\-/:]*@sha256:[0-9a-f]{64}$/;
@@ -34,6 +53,13 @@ const READONLY_FORBIDDEN_RESOURCES = new Set([
 // 봇 읽기 계정 SA. 이 SA를 묶는 바인딩은 읽기 전용 라벨이 붙은 역할만 가리켜야 한다(roleRef 우회, L30).
 const READONLY_SUBJECTS = new Set(["bot-reader"]);
 
+// kind: List의 items를 펼친다. kubectl·Argo CD는 List 안 리소스를 각각 적용한다.
+function expand(docs: Doc[]): Doc[] {
+  return docs.flatMap((d) =>
+    d.obj?.kind === "List" && Array.isArray(d.obj.items) ? expand(d.obj.items.map((obj: any) => ({ origin: d.origin, obj }))) : [d],
+  );
+}
+
 function podSpec(obj: any): any | undefined {
   switch (obj.kind) {
     case "Pod":
@@ -52,22 +78,24 @@ function id(d: Doc): string {
 
 // kind: Secret 0건(설계 C.6.2). 시크릿 값은 Infisical에만 있고 Kubernetes Secret은 ESO가 만든다.
 export function checkNoSecrets(docs: Doc[]): Violation[] {
+  docs = expand(docs);
   return docs
     .filter((d) => d.obj.kind === "Secret" && d.obj.apiVersion === "v1")
-    .filter((d) => !(UPSTREAM_ARGOCD.test(d.origin) && !d.obj.data && !d.obj.stringData))
+    .filter((d) => !(UPSTREAM_ARGOCD_ORIGIN.test(d.origin) && UPSTREAM_ARGOCD_SECRETS.has(d.obj.metadata?.name) && !d.obj.data && !d.obj.stringData))
     .map((d) => ({ rule: "no-secret", where: id(d), message: "kind: Secret을 렌더한다. 값은 Infisical, 사본은 ExternalSecret으로" }));
 }
 
 // L27 이미지는 digest로(sha256: + 64자. 접두만 재면 sha256:deadbeef가 통과한다), L28 requests와 memory limit.
 export function checkWorkloads(docs: Doc[]): Violation[] {
+  docs = expand(docs);
   const out: Violation[] = [];
   let seen = 0;
   for (const d of docs) {
     if (!WORKLOAD_KINDS.has(d.obj.kind)) continue;
-    if (UPSTREAM_ARGOCD.test(d.origin)) continue;
-    seen++;
     const spec = podSpec(d.obj) ?? {};
     const containers = [...(spec.initContainers ?? []), ...(spec.containers ?? [])];
+    if (upstreamArgocdWorkload(d, containers.map((c: any) => String(c.image)))) continue;
+    seen++;
     if (containers.length === 0) out.push({ rule: "workload", where: id(d), message: "컨테이너가 없다" });
     for (const c of containers) {
       const where = `${id(d)} container ${c.name}`;
@@ -95,8 +123,18 @@ const CHART_TAGS: Record<string, RegExp> = {
   "platform/charts/app-data": /^data-chart-v/,
 };
 
+// 외부 source는 움직이지 않는 revision만: Helm 차트는 정확한 semver, 그 밖(git)은 40자 커밋 SHA.
+// 외부 차트는 렌더하지 않으므로(외부 레지스트리 조회는 필수 검사 밖) 이 검사가 유일한 그물이다.
+const EXACT_SEMVER = /^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+
 function checkRevision(where: string, src: any, out: Violation[]): void {
-  if (!sameRepo(src?.repoURL)) return;
+  if (!src) return;
+  if (!sameRepo(src.repoURL)) {
+    const rev = src.targetRevision ?? src.revision;
+    const ok = src.chart ? typeof rev === "string" && EXACT_SEMVER.test(rev) : typeof rev === "string" && /^[0-9a-f]{40}$/.test(rev);
+    if (!ok) out.push({ rule: "revision", where, message: `외부 source의 revision이 고정값이 아니다(차트는 정확한 semver, git은 커밋 SHA): ${src.repoURL} ${rev}` });
+    return;
+  }
   const rev = src.targetRevision ?? src.revision;
   const tag = src.path ? CHART_TAGS[src.path] : undefined;
   if (tag) {
@@ -115,6 +153,7 @@ function walkGenerators(gens: any[] | undefined, where: string, out: Violation[]
 }
 
 export function checkRevisions(docs: Doc[]): Violation[] {
+  docs = expand(docs);
   const out: Violation[] = [];
   let seen = 0;
   for (const d of docs) {
@@ -135,20 +174,26 @@ export function checkRevisions(docs: Doc[]): Violation[] {
 }
 
 // L30 읽기 전용 역할의 verb·자원과 roleRef. 라벨을 떼면 첫 검사를 피하므로, bot-reader 바인딩과 이름 homelab-readonly도 본다.
-export function checkReadonlyRbac(docs: Doc[]): Violation[] {
-  const out: Violation[] = [];
-  // 키는 "ClusterRole/<name>" 또는 "Role/<ns>/<name>". 역할과 바인딩이 다른 Application에 있어도 찾는다.
-  const roles = new Map<string, Doc>();
-  for (const d of docs) {
-    const k = d.obj.kind;
-    if ((k === "ClusterRole" || k === "Role") && d.obj.apiVersion === "rbac.authorization.k8s.io/v1") {
-      const key = k === "ClusterRole" ? `ClusterRole/${d.obj.metadata?.name}` : `Role/${d.obj.metadata?.namespace}/${d.obj.metadata?.name}`;
-      roles.set(key, d);
-    }
-  }
-  const isReadonly = (d: Doc) => d.obj.metadata?.labels?.[READONLY_LABEL] !== undefined;
+// 렌더 맥락(클러스터). 역할과 바인딩은 같은 맥락 안에서만 잇는다. 클러스터마다 같은 이름의 역할이 렌더되므로
+// 하나의 맵에 넣으면 한쪽이 다른 쪽을 덮어 위반을 놓친다.
+function context(origin: string): string {
+  return origin.match(/\[([a-z0-9-]+)\]/)?.[1] ?? origin;
+}
 
-  for (const d of roles.values()) {
+export function checkReadonlyRbac(docs: Doc[]): Violation[] {
+  docs = expand(docs);
+  const out: Violation[] = [];
+  const roles: Doc[] = docs.filter(
+    (d) => (d.obj.kind === "ClusterRole" || d.obj.kind === "Role") && d.obj.apiVersion === "rbac.authorization.k8s.io/v1",
+  );
+  const isReadonly = (d: Doc) => d.obj.metadata?.labels?.[READONLY_LABEL] !== undefined;
+  const find = (ctx: string, kind: string, name: string, ns?: string) =>
+    roles.find(
+      (r) => context(r.origin) === ctx && r.obj.kind === kind && r.obj.metadata?.name === name && (kind === "ClusterRole" || r.obj.metadata?.namespace === ns),
+    );
+
+  // 역할 문서는 하나도 빼지 않고 모두 본다.
+  for (const d of roles) {
     if (d.obj.metadata?.name === "homelab-readonly" && !isReadonly(d)) {
       out.push({ rule: "readonly-rbac", where: id(d), message: `homelab-readonly에 라벨 ${READONLY_LABEL}이 없다` });
     }
@@ -173,15 +218,14 @@ export function checkReadonlyRbac(docs: Doc[]): Violation[] {
     if (k !== "ClusterRoleBinding" && k !== "RoleBinding") continue;
     const subjects: any[] = d.obj.subjects ?? [];
     const ref = d.obj.roleRef ?? {};
-    const refKey = ref.kind === "ClusterRole" ? `ClusterRole/${ref.name}` : `Role/${d.obj.metadata?.namespace}/${ref.name}`;
-    const target = roles.get(refKey);
+    const target = find(context(d.origin), ref.kind, ref.name, d.obj.metadata?.namespace);
+    const refDesc = `${ref.kind}/${ref.name}`;
     const bindsReader = subjects.some((s) => s.kind === "ServiceAccount" && READONLY_SUBJECTS.has(s.name));
-    const refsReadonly = ref.name === "homelab-readonly" || (target !== undefined && isReadonly(target));
     if (bindsReader && !(target && isReadonly(target))) {
-      out.push({ rule: "readonly-rbac", where: id(d), message: `bot-reader를 읽기 전용 라벨이 없는 역할(${refKey})에 묶는다` });
+      out.push({ rule: "readonly-rbac", where: id(d), message: `bot-reader를 같은 렌더의 읽기 전용 라벨 역할이 아닌 ${refDesc}에 묶는다` });
     }
-    if (refsReadonly && !target) {
-      out.push({ rule: "readonly-rbac", where: id(d), message: `읽기 전용 역할 ${refKey}가 같은 렌더에 없다` });
+    if (ref.name === "homelab-readonly" && !target) {
+      out.push({ rule: "readonly-rbac", where: id(d), message: `읽기 전용 역할 ${refDesc}가 같은 렌더에 없다` });
     }
   }
   return out;
@@ -189,6 +233,7 @@ export function checkReadonlyRbac(docs: Doc[]): Violation[] {
 
 // Ingress host(설계 C.3.4 공개 host 한 단계, C.3.5·D-30 tailnet 이름).
 export function checkIngress(docs: Doc[]): Violation[] {
+  docs = expand(docs);
   const out: Violation[] = [];
   for (const d of docs) {
     if (d.obj.kind !== "Ingress") continue;

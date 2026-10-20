@@ -1,0 +1,11 @@
+# path: .github/workflows/other.yaml
+# expect: self-hosted
+# runner group은 self-hosted runner로 라우팅될 수 있다. 이름에 self-hosted가 없어도 막는다.
+name: other
+on: push
+jobs:
+  run:
+    runs-on:
+      group: homelab-runners
+    steps:
+      - run: "true"

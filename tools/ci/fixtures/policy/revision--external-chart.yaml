@@ -1,0 +1,16 @@
+# check: revision
+# expect: fail
+# 외부 차트는 렌더하지 않으므로 움직이는 revision이 검토 없이 배포된다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: x
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://charts.example.invalid
+    chart: x
+    targetRevision: "1.*"
+  destination:
+    server: https://kubernetes.default.svc

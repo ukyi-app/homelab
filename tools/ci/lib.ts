@@ -85,7 +85,8 @@ export function sameRepo(url: unknown): boolean {
     .toLowerCase()
     .replace(/^git@github\.com:/, "https://github.com/")
     .replace(/^http:\/\//, "https://")
-    .replace(/\.git$/, "")
-    .replace(/\/+$/, "");
+    // 끝 슬래시를 먼저 떼야 homelab.git/도 같은 저장소로 본다.
+    .replace(/\/+$/, "")
+    .replace(/\.git$/, "");
   return norm === REPO_URL;
 }

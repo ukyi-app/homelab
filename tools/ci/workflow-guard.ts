@@ -33,7 +33,14 @@ const MERGE_ENV = "automerge";
 const MERGE_KEY = "HOMELAB_MERGE_KEY";
 // 공통 워크플로를 태그로 부르는 앱 저장소 호출만 SHA 대신 태그를 쓴다(설계 C.4.5). homelab 안에서는 쓰지 않는다.
 const SELF_TAG_CALL = /^ukyi-app\/homelab\/\.github\/workflows\/app-build\.yaml@app-build-v\d+\.\d+\.\d+$/;
-const SHA_PIN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/[^@\s]+)?@[0-9a-f]{40}$/;
+const SHA_PIN = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(\/[^@\s]+)?@[0-9a-f]{40}$/;
+// 액션 허용 목록(설계 C.4.10). 저장소 Actions 설정(selected: GitHub 소유, 검증된 제작자, Infisical/secrets-action)보다
+// 좁게 적는다. 검증된 제작자 표시는 바뀔 수 있어 쓰는 제작자만 적는다. 더할 때는 이 목록과 infra/github의
+// 허용 패턴을 같은 PR에서 바꾼다.
+const ALLOWED_OWNERS = new Set(["actions", "github", "docker"]);
+const ALLOWED_ACTIONS = new Set(["Infisical/secrets-action"]);
+// GitHub 호스트 runner 레이블 리터럴만. group·표현식·배열은 self-hosted로 라우팅될 수 있어 받지 않는다.
+const HOSTED_RUNNER = /^(ubuntu|windows|macos)-(latest|\d[\w.-]*)$/;
 
 function triggers(on: unknown): string[] {
   if (typeof on === "string") return [on];
@@ -89,9 +96,13 @@ function pins(file: WorkflowFile, parsedUses: number): Violation[] {
       return;
     }
     if (SELF_TAG_CALL.test(ref)) return;
-    if (!SHA_PIN.test(ref)) {
+    const pin = ref.match(SHA_PIN);
+    if (!pin) {
       out.push({ rule: "pin", where, message: `uses는 40자 커밋 SHA로 고정한다: ${ref} (L33)` });
       return;
+    }
+    if (!ALLOWED_OWNERS.has(pin[1]) && !ALLOWED_ACTIONS.has(`${pin[1]}/${pin[2]}`)) {
+      out.push({ rule: "pin", where, message: `허용 목록 밖 액션이다: ${pin[1]}/${pin[2]} (설계 C.4.10)` });
     }
     if (!m[3] || !/#\s*v?\d/.test(m[3])) out.push({ rule: "pin", where, message: `SHA 옆에 버전 주석(# vX.Y.Z)을 단다: ${ref}` });
   });
@@ -166,8 +177,13 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
     if (job.secrets === "inherit") add("reusable-call", where, "secrets: inherit를 쓰지 않는다");
     if (typeof job.uses === "string" && !job.uses.startsWith("./")) add("reusable-call", where, `로컬(./)이 아닌 reusable 워크플로를 부르지 않는다: ${job.uses}`);
 
-    const runsOn = JSON.stringify(job["runs-on"] ?? "");
-    if (/self-hosted/i.test(runsOn)) add("self-hosted", where, "self-hosted runner를 쓰지 않는다(설계 C.4.10)");
+    // reusable 호출 job(uses)에는 runs-on이 없다.
+    if (!("uses" in job)) {
+      const runsOn = job["runs-on"];
+      if (typeof runsOn !== "string" || !HOSTED_RUNNER.test(runsOn)) {
+        add("self-hosted", where, `runs-on은 GitHub 호스트 runner 리터럴 하나만(group·표현식·배열 금지, 설계 C.4.10): ${JSON.stringify(runsOn)}`);
+      }
+    }
   }
 
   walk(wf, (key, s, jobId) => {

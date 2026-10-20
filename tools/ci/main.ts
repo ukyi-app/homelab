@@ -25,7 +25,8 @@ function header(text: string, key: string): string | undefined {
   return text.match(new RegExp(`^# ${key}: (.+)$`, "m"))?.[1].trim();
 }
 
-const SECRET_KIND = /^kind:\s*["']?Secret["']?\s*$/m;
+// 들여쓴 kind(목록 항목 안, List 매니페스트 등)도 잡는다. 따옴표로 감싼 값도.
+const SECRET_KIND = /^\s*(-\s+)?kind:\s*["']?Secret["']?\s*(#.*)?$/m;
 
 const steps: Step[] = [
   {

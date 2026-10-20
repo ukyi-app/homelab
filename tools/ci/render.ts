@@ -1,9 +1,12 @@
 // 저장소가 Argo CD에 내는 매니페스트를 Argo CD와 같은 방식으로 렌더한다(설계 C.4.6 "렌더 + 스키마").
 //
 // 대상은 디렉터리 목록을 적지 않고 찾는다.
-// 1. root 차트를 클러스터 값 파일(platform/root/values-<클러스터>.yaml)마다 렌더한다.
+// 1. root Application 파일(platform/root/root-<클러스터>.yaml)마다 그 선언(path, helm.valueFiles, releaseName,
+//    destination)대로 root 차트를 렌더한다. root-<클러스터>는 values-<클러스터>.yaml 하나만 읽어야 하고,
+//    짝 없는 values-*.yaml도 실패다(VM이 운영 값을 읽는 실수, E8 VM 격리 1번).
 // 2. 그 렌더의 Application 중 이 저장소를 가리키는 source를 그 Application이 넘기는 값(valuesObject 등)으로 렌더한다.
 //    외부 Helm 저장소의 차트는 렌더하지 않는다. 외부 레지스트리 조회는 필수 검사에 넣지 않는다(설계 C.4.6, P27).
+//    Argo CD가 렌더에 쓰는 source 옵션 중 여기서 재현하지 않는 것(kustomize, directory, plugin 등)은 실패로 둔다.
 // 3. 위에서 안 다룬 추적 kustomization도 모두 build한다(꺼진 구성 요소도 깨지지 않게).
 // 4. 차트의 시험 values(platform/charts/<차트>/ci/*.yaml)로 렌더한다. 공유 차트 PR은 어느 앱에도 바로 적용되지 않으므로
 //    이것이 그 PR의 렌더 검사다(설계 C.4.5).
@@ -14,7 +17,11 @@ import { type Doc, type Violation, ROOT, gitFiles, parseAll, run, sameRepo, temp
 export type Rendered = { origin: string; text: string };
 export type RenderResult = { targets: Rendered[]; docs: Doc[]; violations: Violation[]; skipped: string[] };
 
+// 자기 저장소 source에서 받아들이는 키. 나머지는 Argo CD 렌더를 바꾸는데 여기서 재현하지 않으므로 실패로 둔다.
+const SOURCE_KEYS = new Set(["repoURL", "targetRevision", "path", "helm", "ref"]);
 const HELM_KEYS = new Set(["valuesObject", "valueFiles", "releaseName"]);
+// Kustomize가 찾는 파일 이름 셋(kustomize의 konfig.RecognizedKustomizationFileNames).
+const KUSTOMIZATION_FILES = ["kustomization.yaml", "kustomization.yml", "Kustomization"];
 
 export function kubeVersion(): string {
   return toolVersion("kubectl");
@@ -39,6 +46,10 @@ function kustomizeBuild(dir: string): { ok: boolean; out: string } {
     Bun.sleepSync(2000 * (i + 1));
   }
   return { ok: false, out: last };
+}
+
+function isKustomizeDir(dir: string): boolean {
+  return KUSTOMIZATION_FILES.some((f) => existsSync(join(ROOT, dir, f)));
 }
 
 function plainDir(dir: string): { ok: boolean; out: string } {
@@ -66,81 +77,108 @@ export function renderAll(): RenderResult {
   };
   const fail = (origin: string, message: string) => res.violations.push({ rule: "render", where: origin, message });
 
-  // 1. root, 클러스터마다
-  const clusterFiles = gitFiles("platform/root/values-*.yaml");
-  if (clusterFiles.length === 0) fail("platform/root", "클러스터 값 파일(values-<클러스터>.yaml)이 0개다");
-  for (const vf of clusterFiles) {
-    const cluster = vf.replace(/^platform\/root\/values-/, "").replace(/\.yaml$/, "");
-    const origin = `root[${cluster}]`;
-    const r = helmTemplate("root", "platform/root", undefined, [vf]);
+  // Application 하나의 자기 저장소 source를 렌더한다. 렌더한 텍스트를 돌려준다(실패·외부 source면 undefined).
+  const renderSource = (app: any, cluster: string, src: any): string | undefined => {
+    const name = app.metadata?.name;
+    if (!sameRepo(src.repoURL)) {
+      res.skipped.push(`${name}[${cluster}]: ${src.repoURL} ${src.chart ?? src.path ?? ""}@${src.targetRevision ?? ""}`);
+      return undefined;
+    }
+    if (src.ref && !src.path) return undefined; // 값 파일 참조용 source는 렌더 대상이 아니다
+    const path: string = src.path;
+    const where = `${name}[${cluster}]:${path}`;
+    const unknownKeys = Object.keys(src).filter((k) => !SOURCE_KEYS.has(k));
+    if (unknownKeys.length > 0) {
+      fail(where, `render.ts가 재현하지 않는 source 필드: ${unknownKeys.join(", ")}. Argo CD와 같게 렌더하도록 이 파일을 넓힌다`);
+      return undefined;
+    }
+    if (!path || !existsSync(join(ROOT, path))) {
+      fail(where, "source path가 저장소에 없다");
+      return undefined;
+    }
+    covered.add(path);
+    const ns = app.spec?.destination?.namespace;
+    const isChart = existsSync(join(ROOT, path, "Chart.yaml"));
+    if (src.helm && !isChart) {
+      fail(where, "helm 필드가 있는데 Chart.yaml이 없다");
+      return undefined;
+    }
+    let r: { ok: boolean; out: string };
+    if (isChart) {
+      const helm = src.helm ?? {};
+      const unknown = Object.keys(helm).filter((k) => !HELM_KEYS.has(k));
+      if (unknown.length > 0) {
+        fail(where, `render.ts가 재현하지 않는 helm 필드: ${unknown.join(", ")}`);
+        return undefined;
+      }
+      const files: string[] = [];
+      for (const f of helm.valueFiles ?? []) {
+        if (String(f).startsWith("$")) {
+          fail(where, `ref 값 파일(${f})은 렌더하지 않는다. 같은 저장소의 다른 revision 참조는 Argo CD가 거부한다`);
+          return undefined;
+        }
+        files.push(join(path, f));
+      }
+      if (helm.valuesObject) {
+        const vfile = join(tmp, `${name}-${cluster}-values.json`);
+        writeFileSync(vfile, JSON.stringify(helm.valuesObject));
+        files.push(vfile);
+      }
+      const release = helm.releaseName ?? name;
+      const key = JSON.stringify(["helm", path, ns, release, helm.valueFiles ?? [], helm.valuesObject ?? null]);
+      r = cache.get(key) ?? helmTemplate(release, path, ns, files);
+      cache.set(key, r);
+    } else if (isKustomizeDir(path)) {
+      const key = JSON.stringify(["kustomize", path]);
+      r = cache.get(key) ?? kustomizeBuild(path);
+      cache.set(key, r);
+    } else {
+      r = plainDir(path);
+    }
     if (!r.ok) {
-      fail(origin, r.out.trim());
+      fail(where, r.out.trim());
+      return undefined;
+    }
+    add(where, r.out);
+    return r.out;
+  };
+
+  // 1. root, 클러스터마다(root-<클러스터>.yaml의 선언대로)
+  const rootFiles = gitFiles("platform/root/root-*.yaml");
+  const valueFiles = new Set(gitFiles("platform/root/values-*.yaml"));
+  if (rootFiles.length === 0) fail("platform/root", "root Application 파일(root-<클러스터>.yaml)이 0개다");
+  for (const rf of rootFiles) {
+    const text = readFileSync(join(ROOT, rf), "utf8");
+    // root 파일 자체도 검사 대상이다(revision, kubeconform). templates/ 밖이라 root가 렌더하지 않는다.
+    add(rf, text);
+    const roots = parseAll(text).filter((d) => d?.kind === "Application");
+    const cluster = rf.replace(/^platform\/root\/root-/, "").replace(/\.yaml$/, "");
+    if (roots.length !== 1 || roots[0].metadata?.name !== `root-${cluster}`) {
+      fail(rf, `Application root-${cluster} 하나만 둔다`);
       continue;
     }
-    add(origin, r.out);
-
+    const src = roots[0].spec?.source ?? {};
+    const want = `values-${cluster}.yaml`;
+    if (src.path !== "platform/root" || JSON.stringify(src.helm?.valueFiles) !== JSON.stringify([want]) || src.helm?.valuesObject) {
+      fail(rf, `root-${cluster}는 platform/root를 helm.valueFiles [${want}] 하나로만 렌더한다`);
+      continue;
+    }
+    valueFiles.delete(`platform/root/${want}`);
+    const out = renderSource(roots[0], cluster, src);
+    if (out === undefined) continue;
     // 2. root가 만든 Application의 자기 저장소 source
-    for (const app of parseAll(r.out).filter((d) => d?.kind === "Application")) {
-      const name = app.metadata?.name;
+    for (const app of parseAll(out).filter((d) => d?.kind === "Application")) {
       const sources: any[] = app.spec?.sources ?? (app.spec?.source ? [app.spec.source] : []);
-      for (const src of sources) {
-        if (!sameRepo(src.repoURL)) {
-          res.skipped.push(`${name}[${cluster}]: ${src.repoURL} ${src.chart ?? src.path ?? ""}@${src.targetRevision ?? ""}`);
-          continue;
-        }
-        if (src.ref && !src.path) continue; // 값 파일 참조용 source는 렌더 대상이 아니다
-        const path: string = src.path;
-        const where = `${name}[${cluster}]:${path}`;
-        if (!path || !existsSync(join(ROOT, path))) {
-          fail(where, `source path가 저장소에 없다`);
-          continue;
-        }
-        covered.add(path);
-        const ns = app.spec?.destination?.namespace;
-        let r2: { ok: boolean; out: string };
-        if (existsSync(join(ROOT, path, "Chart.yaml"))) {
-          const helm = src.helm ?? {};
-          const unknown = Object.keys(helm).filter((k) => !HELM_KEYS.has(k));
-          if (unknown.length > 0) {
-            fail(where, `render.ts가 모르는 helm 필드: ${unknown.join(", ")}. Argo CD와 같게 렌더하도록 이 파일을 넓힌다`);
-            continue;
-          }
-          const files: string[] = [];
-          for (const f of helm.valueFiles ?? []) {
-            if (String(f).startsWith("$")) {
-              fail(where, `ref 값 파일(${f})은 렌더하지 않는다. 같은 저장소의 다른 revision 참조는 Argo CD가 거부한다`);
-              continue;
-            }
-            files.push(join(path, f));
-          }
-          if (helm.valuesObject) {
-            const vfile = join(tmp, `${name}-${cluster}-values.json`);
-            writeFileSync(vfile, JSON.stringify(helm.valuesObject));
-            files.push(vfile);
-          }
-          const key = JSON.stringify(["helm", path, ns, helm.releaseName ?? name, helm.valueFiles ?? [], helm.valuesObject ?? null]);
-          r2 = cache.get(key) ?? helmTemplate(helm.releaseName ?? name, path, ns, files);
-          cache.set(key, r2);
-        } else if (existsSync(join(ROOT, path, "kustomization.yaml"))) {
-          const key = JSON.stringify(["kustomize", path]);
-          r2 = cache.get(key) ?? kustomizeBuild(path);
-          cache.set(key, r2);
-        } else {
-          r2 = plainDir(path);
-        }
-        if (!r2.ok) fail(where, r2.out.trim());
-        else add(where, r2.out);
-      }
+      for (const s2 of sources) renderSource(app, cluster, s2);
     }
   }
-
-  // root Application 파일 자체(templates/ 밖이라 렌더되지 않는다). 사람이 kubectl apply하는 파일도 revision을 본다.
-  for (const f of gitFiles("platform/root/root-*.yaml")) add(f, readFileSync(join(ROOT, f), "utf8"));
+  for (const vf of valueFiles) fail(vf, "이 값 파일을 읽는 root-<클러스터>.yaml이 없다");
 
   // 3. 나머지 kustomization
-  for (const f of gitFiles(":(glob)platform/**/kustomization.yaml", ":(glob)platform/**/kustomization.yml")) {
+  for (const f of gitFiles(...KUSTOMIZATION_FILES.map((n) => `:(glob)platform/**/${n}`))) {
     const dir = dirname(f);
     if (covered.has(dir)) continue;
+    covered.add(dir);
     const r = kustomizeBuild(dir);
     if (!r.ok) fail(`kustomize:${dir}`, r.out.trim());
     else add(`kustomize:${dir}`, r.out);
