@@ -1,7 +1,0 @@
-# 시험 Application e3-probe(설계 E3 "E3의 동등 절차", T09). 시나리오 6·7의 E3 범위를 시험 ns에서 확인한다.
-# 클러스터 값이 없어 차트로 감싸지 않는다(_helpers.tpl 규칙). 시험이 끝나면 이 디렉터리와 root 템플릿을 함께 지운다.
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - namespace.yaml
-  - e3-probe.yaml
