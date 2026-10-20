@@ -8,7 +8,13 @@
 
 ## 1. 준비와 자격
 
-`mise install`로 `.tool-versions`의 Terraform 1.16.6을 설치한다.
+`mise install`로 `.tool-versions`의 Terraform 1.16.6과 Infisical CLI 0.44.2를 설치하고, `infisical login`으로 owner 계정에 로그인한다.
+브라우저가 없는 호스트(NUC)에서는 출력된 주소를 다른 기기에서 열고, 받은 토큰을 `Paste your browser token here:` 칸에 붙여 넣는다(Email 칸이 아니다. 그 칸은 입력이 화면에 보인다).
+
+**키링이 없는 호스트의 함정:** Secret Service가 없는 서버에서는 CLI가 `vaultBackendType: file`로 바꿔 로그인 세션 토큰을 `~/infisical-keyring/`에 저장한다.
+그 파일의 암호 문구는 `~/.infisical/infisical-config.json`에 함께 있어 디스크에서는 평문과 다를 바 없다(2026-10-20 NUC에서 확인).
+그래서 이 런북의 Terraform 작업이 끝나면 같은 날 `infisical reset`으로 로그인·보관소·설정을 지우고, 다음 작업 때 다시 로그인한다.
+OS 키링이 있는 운영자 기기에서 실행하면 이 문제가 없다.
 Provider는 Cloudflare 5.28.0, Tailscale 0.29.2와 root별 `.terraform.lock.hcl`로 고정한다.
 2026-10-20 확인한 최신 안정판이다:
 [Terraform 릴리스](https://github.com/hashicorp/terraform/releases/tag/v1.16.6),
@@ -58,6 +64,17 @@ unset TF_WORKSPACE
 export TF_IN_AUTOMATION=1
 # TF_INPUT=0은 넣지 않는다. -input=false와 같아서 apply가 승인 질문을 못 하고 변경을 거부한다.
 # 변수 누락 때 질문하지 않고 실패하도록 init·plan에만 -input=false를 붙인다.
+# 로그인 사용자로 infisical run을 하면 CLI 0.44.2가 가져온 값을 암호화해 ~/.infisical/secrets-backup/에 파일로 남긴다
+# (packages/util/secrets.go WriteBackupSecrets). 호출부가 그 오류를 무시하므로 폴더를 쓰기 불가로 두어 파일을 만들지 못하게 한다.
+mkdir -p ~/.infisical
+if [ -d ~/.infisical/secrets-backup ]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi
+mkdir -p ~/.infisical/secrets-backup && chmod 0500 ~/.infisical/secrets-backup
+# 권한을 지원하지 않는 파일시스템이거나 chmod가 실패하면 백업이 그대로 쓰인다. 실제로 쓰기 불가인지 확인하고 아니면 멈춘다.
+if touch ~/.infisical/secrets-backup/.probe 2>/dev/null; then
+  rm -f ~/.infisical/secrets-backup/.probe
+  echo '백업 폴더가 쓰기 가능하다. 여기서 멈춘다'; return 1 2>/dev/null || exit 1
+fi
+backup_files() { find ~/.infisical/secrets-backup -type f 2>/dev/null | wc -l; }
 read -r -p 'homelab-admin project ID: ' HOMELAB_ADMIN_PROJECT_ID
 read -r -p 'R2 S3 API endpoint (https://...r2.cloudflarestorage.com): ' R2_ENDPOINT
 
@@ -72,6 +89,14 @@ tf() {
   infisical run --silent --log-level=error --projectId="$HOMELAB_ADMIN_PROJECT_ID" --env=prod --path=/terraform/state -- \
     infisical run --silent --log-level=error --projectId="$HOMELAB_ADMIN_PROJECT_ID" --env=prod --path="$provider_path" -- \
     terraform -chdir="infra/$root" "$@"
+  local rc=$?
+  # 매 실행 뒤 백업 파일이 0개인지 본다. 생겼으면 지우고 실패로 끝낸다.
+  if [ "$(backup_files)" -ne 0 ]; then
+    find ~/.infisical/secrets-backup -type f -delete 2>/dev/null
+    printf '%s\n' 'Infisical 백업 파일이 생겼다. 지우고 중단한다' >&2
+    return 1
+  fi
+  return "$rc"
 }
 ```
 
