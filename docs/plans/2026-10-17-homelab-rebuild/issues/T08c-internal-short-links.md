@@ -55,7 +55,7 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 - tailnet 기기 목록에서 프록시 이름이 정확히 `go`다(접미 번호 없음).
 - VM: `values-vm.yaml`로 렌더한 Service hostname이 `vm-go`이고 리다이렉트 접두가 `vm-`다. VM 실접속(`vm-go/argocd` → `vm-argocd`)은 T13 시나리오 13에서 확인한다.
 - 저장소·이미지·로그에 tailnet 이름이 없다(gitleaks, D-23).
-- approvals.md에 ACL apply와 병합을 기록한다.
+- approvals.md에 Infisical 키 등록(프로젝트·환경·경로·키 이름과 승인·등록 결과, 값은 쓰지 않음. `homelab`/prod와 `homelab-dev`/dev 둘), ACL apply, 병합을 기록한다.
 
 ## 되돌리는 방법
 
