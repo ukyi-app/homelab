@@ -19,7 +19,7 @@ components:
 
   # T08a. cert-manager, wave -7
   certManager:
-    enabled: false
+    enabled: true
 
   # T11. cnpg-operator(CNPG operator와 Barman Cloud Plugin), wave -6
   cnpgOperator:
@@ -27,11 +27,11 @@ components:
 
   # T08a. traefik, cloudflared, tailscale, adguard, 모두 wave -5
   traefik:
-    enabled: false
+    enabled: true
   cloudflared:
     enabled: false
   tailscale:
-    enabled: false
+    enabled: true
   adguard:
     enabled: false
 

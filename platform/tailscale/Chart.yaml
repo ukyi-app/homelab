@@ -1,0 +1,8 @@
+# Tailscale operator 곁의 리소스: OAuth ExternalSecret, ProxyClass, Argo CD 내부 Ingress(설계 C.3.5, T08a).
+# operator 자체는 공식 차트이고 root의 tailscale Application이 이 차트와 함께 두 source로 묶는다.
+# 차트인 이유: Ingress 이름의 접두가 클러스터마다 달라 root가 valuesObject로 넘긴다(E8 VM 격리 1·4번).
+apiVersion: v2
+name: tailscale-extras
+description: Tailscale operator OAuth secret, ProxyClass and internal Ingresses for one homelab cluster
+type: application
+version: 0.1.0

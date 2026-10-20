@@ -1,0 +1,29 @@
+{{- /*
+Argo CD UI를 https://<접두>argocd.<tailnet>.ts.net 으로(설계 C.3.5). 짧은 이름은 TLS 연결 실패다. 전체 이름만 열린다.
+백엔드 포트 이름이 https면 프록시가 https+insecure로 붙는다(operator v1.104.1 cmd/k8s-operator/ingress.go).
+그래서 argocd-server를 insecure로 바꾸지 않고 자체 서명 TLS 그대로 둔다.
+operator Ingress reconcile은 메타데이터만 바뀐 변경을 무시한다. 이름·주석을 바꿀 때는 Ingress를 다시 만든다(설계 P21).
+*/}}
+{{- /* 운영 접두는 빈 문자열이라 required를 쓸 수 없다(빈 값을 누락으로 본다). 키가 있는지로 확인한다. */}}
+{{- if not (hasKey (.Values.tailscale | default dict) "prefix") }}
+{{- fail "tailscale.prefix is required (root passes cluster.tailscale.prefix; prod \"\", vm \"vm-\")" }}
+{{- end }}
+{{- $prefix := .Values.tailscale.prefix | toString }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-tailscale
+  namespace: argocd
+  annotations:
+    # wave 2: IngressClass(차트)와 ProxyClass(wave 1) 뒤.
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: argocd-server
+      port:
+        name: https
+  tls:
+    - hosts:
+        - {{ printf "%sargocd" $prefix }}

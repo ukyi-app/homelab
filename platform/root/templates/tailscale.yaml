@@ -1,9 +1,16 @@
 {{- /*
-자리: tailscale. 맡은 티켓 T08a, wave -5(설계 C.3.1). 내부 UI Ingress(*.ts.net)용 operator. 클러스터 값(cluster.tailscale)을 받는다.
-켜기: values.yaml의 components.tailscale.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
-source와 destination은 자리표시다. 맡은 티켓이 정한다(외부 Helm 차트면 chart와 고정 semver, _helpers.tpl).
+tailscale: 내부 UI Ingress(*.ts.net)용 operator. 맡은 티켓 T08a, wave -5(설계 C.3.1, C.3.5).
+source 둘을 한 Application으로 묶는다: 공식 operator 차트와 platform/tailscale(OAuth ExternalSecret, ProxyClass,
+Argo CD Ingress). 따로 두면 operator가 OAuth Secret을 기다리며 멈추고 root가 그 wave에서 교착한다.
+같은 Application 안에서는 ExternalSecret(wave -1) → operator(0) → ProxyClass(1) → Ingress(2) 순서다.
+켜기: values.yaml의 components.tailscale.enabled. 클러스터 값 cluster.tailscale.prefix를 받는다(운영 "", VM "vm-").
 */}}
 {{- if .Values.components.tailscale.enabled }}
+{{- $ts := .Values.cluster.tailscale | default dict }}
+{{- /* 운영 접두는 빈 문자열이라 required를 쓸 수 없다. 키가 있는지로 확인한다. */}}
+{{- if not (hasKey $ts "prefix") }}
+{{- fail "cluster.tailscale.prefix is missing in values-<cluster>.yaml (prod \"\", vm \"vm-\")" }}
+{{- end }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -13,10 +20,53 @@ metadata:
     argocd.argoproj.io/sync-wave: "-5"
 spec:
   project: platform
-  source:
-    repoURL: {{ include "homelab.repoURL" . }}
-    targetRevision: main
-    path: platform/tailscale
+  sources:
+    # 1.104.1은 2026-10-20 기준 최신(pkgs.tailscale.com/helmcharts, U14).
+    - repoURL: https://pkgs.tailscale.com/helmcharts
+      chart: tailscale-operator
+      targetRevision: 1.104.1
+      helm:
+        valuesObject:
+          # CRD를 차트 템플릿으로 설치한다(차트가 Helm crds/ 방식을 쓰지 않아 업그레이드 때 CRD도 바뀐다).
+          installCRDs: true
+          operatorConfig:
+            # tailnet 기기 이름. VM은 vm- 접두로 운영과 겹치지 않게 한다.
+            hostname: {{ printf "%stailscale-operator" $ts.prefix | quote }}
+            image:
+              # tailscale/k8s-operator:v1.104.1 멀티 아키텍처 index(2026-10-20 Docker Hub에서 확인).
+              digest: sha256:38351d6333edc490a832b27b244665d40f4a5fe1765ade76af2264c99dbbfe0e
+            resources:
+              requests:
+                cpu: 25m
+                memory: 64Mi
+              # 옛 실측 최대 35.3Mi의 약 2배(설계 P21).
+              limits:
+                memory: 80Mi
+            # ns는 프록시(NET_ADMIN) 때문에 privileged다. operator 자체는 권한이 필요 없어 줄인다.
+            # 이미지가 root 사용자로 돌아(User 미지정) runAsNonRoot는 걸지 않는다. 걸면 파드가 시작하지 않는다.
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              seccompProfile:
+                type: RuntimeDefault
+          proxyConfig:
+            image:
+              # tailscale/tailscale:v1.104.1 멀티 아키텍처 index(2026-10-20 Docker Hub에서 확인).
+              digest: sha256:87c55d6be56ad85b3d8bceca5f87f73de288c609131460dd1be1874c250cc41d
+            # 모든 프록시에 메모리 상한(platform/tailscale/templates/proxyclass.yaml).
+            defaultProxyClass: homelab-proxy
+          # kube-apiserver를 tailnet에 내지 않는다.
+          apiServerProxyConfig:
+            mode: "false"
+    - repoURL: {{ include "homelab.repoURL" . }}
+      targetRevision: main
+      path: platform/tailscale
+      helm:
+        valuesObject:
+          tailscale:
+            prefix: {{ $ts.prefix | quote }}
   destination:
     server: https://kubernetes.default.svc
     namespace: tailscale
@@ -24,6 +74,9 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      # CRD(ProxyClass 등)가 커서 client-side apply의 last-applied 주석 한도(256KB)를 넘을 수 있다.
+      - ServerSideApply=true
     retry:
       {{- include "homelab.retry" . | nindent 6 }}
 {{- end }}

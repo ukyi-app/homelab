@@ -1,7 +1,8 @@
 {{- /*
-자리: cert-manager. 맡은 티켓 T08a, wave -7(설계 C.3.1). 클러스터 안 인증서만(Barman plugin TLS).
-켜기: values.yaml의 components.certManager.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
-source와 destination은 자리표시다. 맡은 티켓이 정한다(외부 Helm 차트면 chart와 고정 semver, _helpers.tpl).
+cert-manager: 클러스터 안 인증서만(Barman plugin TLS, T11이 쓴다). 맡은 티켓 T08a, wave -7(설계 C.3.1).
+DNS-01용 Cloudflare 토큰과 ClusterIssuer는 두지 않는다(D-08). 공개 인증서는 Cloudflare가, 내부 UI는 Tailscale이 낸다.
+켜기: values.yaml의 components.certManager.enabled. 꺼져 있으면 아무것도 렌더하지 않는다.
+외부 차트 하나라 platform/cert-manager 디렉터리는 없다(external-secrets operator와 같은 방식).
 */}}
 {{- if .Values.components.certManager.enabled }}
 apiVersion: argoproj.io/v1alpha1
@@ -14,9 +15,39 @@ metadata:
 spec:
   project: platform
   source:
-    repoURL: {{ include "homelab.repoURL" . }}
-    targetRevision: main
-    path: platform/cert-manager
+    # v1.21.2는 2026-10-20 기준 최신 안정판(charts.jetstack.io index, U14).
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.21.2
+    helm:
+      valuesObject:
+        # CRD를 차트 템플릿으로 설치한다. crds.keep 기본값(true)이라 차트를 지워도 CRD와 인증서는 남는다.
+        crds:
+          enabled: true
+        # 설치 직후 API 확인 Job은 Helm post-install 훅이라 Argo CD에서는 PostSync 훅이 된다.
+        # webhook이 늦게 뜨면 sync를 실패로 남기므로 끄고, 준비 확인은 Deployment health와 시험 Certificate로 한다.
+        startupapicheck:
+          enabled: false
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+        webhook:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+        cainjector:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager
@@ -24,6 +55,9 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      # CRD가 커서 client-side apply의 last-applied 주석 한도(256KB)를 넘을 수 있다.
+      - ServerSideApply=true
     retry:
       {{- include "homelab.retry" . | nindent 6 }}
 {{- end }}

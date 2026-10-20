@@ -1,0 +1,19 @@
+# operator가 만드는 프록시 파드(ts-*)는 기본으로 메모리 제한이 없다. operator 값의 defaultProxyClass로 모든 프록시에 건다.
+# 값은 옛 실측(프록시 최대 59.4Mi의 약 2배, 설계 P21). 폭주가 노드 메모리 압박이 아니라 그 파드의 OOM으로 끝나게 한다.
+# wave 1: CRD와 operator(wave 0) 뒤.
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyClass
+metadata:
+  name: homelab-proxy
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  statefulSet:
+    pod:
+      tailscaleContainer:
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
