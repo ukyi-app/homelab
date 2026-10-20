@@ -1,7 +1,7 @@
 # T08a 네트워크·DNS·외부 공개
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-20 착수. Terraform root 셋 apply, cert-manager·Traefik·Tailscale operator·cloudflared·edge-probe·AdGuard 켬(PR #773~#780), Tailscale DNS adopt 뒤 목표 전환 PR. 남은 것: 목표 전환 apply, 시나리오 14, U28, GitHub 시험 webhook, cert-manager 시험 Certificate. 사람: tailnet HTTPS 켜짐 확인, ACL·DNS 현재 값 저장소 밖 보관, operator OAuth 발급·등록)
+- 상태: 진행 중 (2026-10-20 착수. Terraform root 셋 apply, cert-manager·Traefik·Tailscale operator·cloudflared·edge-probe·AdGuard 켬(PR #773~#780), Tailscale DNS 목표 전환 적용(2026-10-20 17:59, PR #781). 남은 것: 시나리오 14, U28, GitHub 시험 webhook, cert-manager 시험 Certificate. 사람: tailnet HTTPS 켜짐 확인, ACL·DNS 현재 값 저장소 밖 보관, operator OAuth 발급·등록)
 - 명세: [../spec.md](../spec.md) §4.5
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4a, E.3, C.3.4~C.3.6, C.3.8, C.3.9, C.8
 - Blocked by: T07, T09

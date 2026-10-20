@@ -3,8 +3,8 @@
 - 단계: P2 플랫폼 구축 (플랫폼 통합 검증 담당, 재분해 T05 2026-10-18)
 - 상태: 대기
 - 명세: [../spec.md](../spec.md) §9
-- Blocked by: T08a, T08b, T10, T11, T12
-- 선행 결정: D-12 (확정(사용자 2026-10-18, T05): 빈 NUC 검증은 VM, 설계 E8 VM 격리 조건 여섯, VM 호스트는 tailnet 밖), D-08 (확정(사용자 2026-10-18): 시나리오 14 추가 확인), D-29 (확정(사용자 2026-10-18): 시험 앱 저장소도 public)
+- Blocked by: T08a, T08b, T08c, T10, T11, T12
+- 선행 결정: D-12 (확정(사용자 2026-10-18, T05): 빈 NUC 검증은 VM, 설계 E8 VM 격리 조건 여섯, VM 호스트는 tailnet 밖), D-08 (확정(사용자 2026-10-18): 시나리오 14 추가 확인), D-29 (확정(사용자 2026-10-18): 시험 앱 저장소도 public), D-30 (확정(사용자 2026-10-20): 내부 UI 짧은 주소 리다이렉터 `go`, VM은 `vm-go`)
 - 연결 AC: AC-P5~AC-P13
 - 수행: 에이전트 + 사람
 
@@ -23,6 +23,7 @@
    - (2) Infisical: VM의 ESO는 프로젝트 `homelab-dev`(환경 `dev`)를 VM 전용 identity `eso-homelab-dev`으로만 읽는다. 운영 ExternalSecret 키 목록을 운영 클러스터에서 뽑아 `homelab-dev`의 같은 경로에 시험 값을 채우고, 키 이름만 `comm -23`으로 대조해 빠진 키 0을 확인한다. 운영 값을 복사하지 않는다.
    - (3) 백업 버킷과 serverName: VM 전용 R2 버킷(예: `homelab-backups-vm`)과 serverName `pg-vm-<YYYYMMDD>`로만 아카이브한다. 운영 아카이브는 복구 원본으로만 쓰고, 그 자격은 복구 자산의 R2 읽기 전용 토큰으로 VM에 손으로 넣는 Secret 하나다(Infisical 밖). 복구 PR을 VM root apply 전에 병합하고, 시험 뒤 정리 PR로 values-vm의 복구 원본을 지운다(설계 C.6.4와 같은 순서).
    - (4) Tailscale 이름: VM operator Ingress와 operator 자신의 기기 이름에 `vm-` 접두를 쓰고, VM operator OAuth client를 따로 발급한다. VM 호스트는 tailnet에 넣지 않는다(`vm.env`의 `TAILNET_JOIN=false`). 접근은 LAN 주소나 콘솔로 한다. C.6.4 복구 순서의 "옛 클러스터 operator·프록시 기기 삭제" 단계는 건너뛰고, 시험 뒤 `vm-*` 기기만 지운다. VM은 운영 Tailscale 기기를 건드리지 않는다.
+     - D-30 리다이렉터: 운영자 기기에서 `vm-go/argocd`가 `vm-argocd`의 tailnet 주소로 넘어가는지 본다(T08c는 렌더만 확인했다). VM의 tailnet 도메인 키는 `homelab-dev`에서 온다.
    - (5) 공개 터널·감시·알림: 시험 터널(별도 토큰), 시험 healthchecks 체크, 시험 Telegram 수신자(시험 봇 토큰)를 쓴다. VM은 운영 공개 URL을 쓰지 않는다. 공개 경로는 VM cloudflared `/ready` 200과 `cloudflared_tunnel_ha_connections` 1 이상, Traefik port-forward에 `Host: smoke.ukyi.app` 헤더로 `/healthz` 200과 없는 host 404로 확인한다. 운영 DNS 레코드를 VM용으로 바꾸지 않는다.
    - (6) kubeconfig: context를 `homelab-vm`으로 각인한다.
    - 이 시나리오에서 U27(읽기 전용 토큰으로 plugin 복구)을 보고, U40(클러스터 유실과 Infisical 장애가 겹친 복구)은 VM에서 Infisical 접근을 막고 시나리오 13을 한 번 더 해서 본다(설계 부록 1).

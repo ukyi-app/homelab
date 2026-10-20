@@ -93,7 +93,7 @@ NUC k3s ── Argo CD(main 60초 폴링)
 
 ### A.3 결정 게이트에 대한 이 문서의 권장과 확정
 
-자세한 선택지와 이유는 F절이다. "관계" 열은 처음에 spec §5.3 추천과 비교한 것이었고, 지금은 확정 상태를 적는다. D-04, D-08과 새 결정 D-28·D-29는 사용자가 2026-10-18에 따로 확정했다. 나머지 결정과 시크릿 전달 계층은 같은 날 사용자가 T05 질문에 답해 이 문서의 권장대로 확정했다(확정(사용자 2026-10-18, T05)). spec 추천과의 관계(일치·구체화·제안·조정)는 F절 각 결정의 "spec 대비"에 남겼다. F절에 결정·이유·대가·검토 후 제외한 안이 있다.
+자세한 선택지와 이유는 F절이다. "관계" 열은 처음에 spec §5.3 추천과 비교한 것이었고, 지금은 확정 상태를 적는다. D-04, D-08과 새 결정 D-28·D-29는 사용자가 2026-10-18에 따로 확정했다. 새 결정 D-30은 2026-10-20에 따로 확정했다. 나머지 결정과 시크릿 전달 계층은 같은 날 사용자가 T05 질문에 답해 이 문서의 권장대로 확정했다(확정(사용자 2026-10-18, T05)). spec 추천과의 관계(일치·구체화·제안·조정)는 F절 각 결정의 "spec 대비"에 남겼다. F절에 결정·이유·대가·검토 후 제외한 안이 있다.
 
 | ID | spec §5.3 추천 | 이 문서의 권장 기본값 (요지) | 관계 |
 |---|---|---|---|
@@ -115,6 +115,7 @@ NUC k3s ── Argo CD(main 60초 폴링)
 | D-27 | T06 목록 작성에 읽기 전용으로 쓰고 값은 옮기지 않음, T04는 읽지 않음 | 같음. 로컬 자료 없이 판정 못 한 곳은 B.9 | **확정(사용자 2026-10-18, T05)** |
 | D-28 | 없음(2026-10-18 새 결정) | GitHub 보호 설정을 Terraform root `infra/github`로 관리(T1). 리소스는 ruleset, environment(+ 배포 정책), Actions 권한 둘만이고 저장소·시크릿 리소스는 없다. 저장소 설정과 fork PR 승인 정책은 `gh api`로 맞추고 guard(`github_rest_api` 데이터 소스 postcondition)가 확인한다. 실행은 owner 로컬 래퍼만(fetch한 `origin/main`의 임시 worktree에서만, 토큰 종류별 확인, apply 실패 뒤 재import), CI는 plan 없이 fmt·validate·mock test. state는 R2 `v2/github/terraform.tfstate` + `use_lockfile` | **확정(사용자 2026-10-18)** |
 | D-29 | 없음(2026-10-18 새 결정) | 앱 저장소는 public만 허용한다. private 앱 경로(`app new --private`, attest 건너뛰기, 사람 병합 분기, GHCR pull 자격)를 두지 않고 조건 9는 fail-safe로 남긴다. public 앱 저장소 기본 설정(fork PR 승인 `all_external_contributors`, secret scanning·push protection, private vulnerability reporting)을 켜고 guard가 확인한다. 봇 코드 저장소 `ukyi-app/homelab-bot`도 public(운영 산출물은 봇 저장소에 두지 않음, D-13). `aiops`·`mac-uptime-guard`는 삭제(`mac-uptime-guard`는 장치를 끄고 옛 Telegram 봇 토큰을 폐기한 뒤), `aiops-autodeploy-canary`는 private 보관(T22). `page`·`trip-mate-api`는 저장소·패키지 삭제(2026-10-18 실행). `files`·`homelab-app-template` 하드닝을 E5보다 먼저 한다(결정 5, 2026-10-18 실행) | **확정(사용자 2026-10-18)** |
+| D-30 | 없음(2026-10-20 새 결정) | 내부 UI 짧은 주소는 tailnet 전용 리다이렉터 `go`(`go/<이름>` → `https://<이름>.<tailnet>.ts.net`, HTTP 80만, 인증서·DNS 쓰기 자격·공개 DNS 없음). D-08의 `*.ts.net`은 그대로. `*.lab.ukyi.app` 등은 검토 후 제외 | **확정(사용자 2026-10-20)** |
 | 전달 계층 | ESO 우선 검토(C-07) | ESO v2.13.x 유지. Infisical Operator는 문서상 Kubernetes 1.33까지라 맞지 않음(단일 근거). ESO 선택은 소스로 확인한 기존 Secret 유지 동작으로도 선다 | **확정(사용자 2026-10-18, T05)** |
 
 ### A.4 조사 후 조정한 권고
@@ -887,18 +888,21 @@ kubectl apply -f platform/root/root-prod.yaml                               # 3.
 - **내부 UI:** Argo CD, Grafana, AdGuard 관리 화면을 Tailscale operator Ingress(`ingressClassName: tailscale`)로 낸다. 이름은 `<서비스>.<tailnet>.ts.net`이고 operator가 유효 TLS 인증서를 붙인다[S114][S115]. Ingress는 기본으로 인터넷에 공개되지 않는다[S114]. UI마다 단독 프록시다(Ingress마다 operator가 프록시 기기 하나). `*.home.ukyi.app` 내부 이름, AdGuard rewrite, 내부 와일드카드 인증서, cert-manager DNS-01용 Cloudflare 토큰, traefik-ts L4 프록시는 두지 않는다(D-08, 확정(사용자 2026-10-18)).
 - **사람 작업(E4):** tailnet에서 HTTPS 인증서를 켠다(MagicDNS는 이미 켜져 있음). 켜면 기기 이름과 tailnet DNS 이름이 공개 CT 로그에 실린다[S120]. 그래서 공개해도 되는 일반 이름(`argocd`, `grafana`, `adguard`)만 쓴다.
 - **이름과 인증서 장애:** 전체 이름(`https://argocd.<tailnet>.ts.net`)만 열린다. 짧은 이름 `https://argocd`는 인증서 경고가 아니라 TLS 연결 실패다. 프록시는 정확한 이름과 포트(FQDN:443)에만 인증서를 낸다. operator의 http-redirect 어노테이션은 `http://<전체 이름>`을 칠 때만 도움이 되고, `http://argocd`는 `https://argocd`로 넘어가 같은 실패가 난다[S211]. 프록시는 인증서를 새로 받지 못하면 만료된 인증서를 내지 않고 핸드셰이크를 실패시키므로, 옛 `*.home.ukyi.app`(`.app` HSTS preload[S210])처럼 넘어갈 수 없다. 갱신은 수명의 2/3에서 시작하므로 실패가 이어져도 만료까지 약 30일 여유가 있다(cert-manager도 같다[S212]). 그 사이 알아채는 것이 관건이고, 막혔을 때의 비상 경로는 `kubectl -n argocd port-forward svc/argocd-server 8080:80` 같은 port-forward다(Tailscale까지 끊기면 kubectl도 LAN 주소로 붙는다).
+- **짧은 주소(D-30, 확정(사용자 2026-10-20)):** tailnet 전용 리다이렉터 `go`가 `go/<이름>/<경로>`를 `https://<이름>.<tailnet>.ts.net/<경로>`로 302 보낸다. operator LoadBalancer Service(`loadBalancerClass: tailscale`, `tailscale.com/hostname: go`, `tailscale.com/tags: tag:k8s-go`)로 HTTP 80만 낸다[S229]. Ingress로 내지 않는 것은 위 문단대로 operator Ingress가 FQDN:443 인증서만 다뤄 `go/`가 TLS 실패하기 때문이다. 짧은 이름 `go`는 MagicDNS가 더하는 검색 도메인으로 풀린다[S222]. 443은 열지 않아 브라우저가 `https://go`를 먼저 시도해도 인증서 오류가 아니라 연결 거부로 끝난다(브라우저별 동작은 T08c 수용 시험). 첫 구간은 평문 HTTP지만 WireGuard 안이고 담기는 것은 링크 이름뿐이다. 인증서를 받지 않아 CT에 새 이름이 실리지 않고, `go`가 멈춰도 전체 주소는 그대로 열린다. 대상 호스트는 DNS 라벨(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, 접두 포함 63자 이하) 하나에 tailnet 도메인을 붙인 것뿐이라 열린 리다이렉트가 아니고, 영구 캐시되는 301은 쓰지 않는다. tailnet 도메인 값은 저장소에 두지 않는다(D-23). 이름은 HSTS preload 최상위 도메인(`app`, `dev` 등)과 겹치면 안 된다. 브라우저가 `http://`를 HTTPS로 바꿔 실패한다[S210].
 - **operator:** chart 1.104.1, OAuth client(Services·Devices Core·Auth Keys write, 태그 `tag:k8s-operator`. Services는 2026-10-20 공식 설치 문서 기준으로 더함)는 Infisical `/platform/tailscale`에서 ESO로[S116]. ns `tailscale`은 privileged(옛 실측, `2d2054a:platform/namespaces/prod/namespaces.yaml:116-131`). ProxyClass로 프록시 메모리 상한을 둔다.
 - **ACL**(`infra/tailscale`, owner 로컬 apply, 목표 예시의 요지):
 
 ```hujson
 // infra/tailscale/policy.hujson  (목표 예시)
 {
-  "tagOwners": { "tag:k8s-operator": ["autogroup:admin"], "tag:k8s": ["tag:k8s-operator"] },
+  "tagOwners": { "tag:k8s-operator": ["autogroup:admin"], "tag:k8s": ["tag:k8s-operator"], "tag:k8s-go": ["tag:k8s-operator"] },
   "acls": [
     // 운영자 자기 기기 전체(노트북 → NUC SSH·kubectl). 빠지면 default-deny가 원격 경로를 끊는다
     { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self:*"] },
     // 내부 UI 프록시(operator Ingress)는 443만
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s:443"] }
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s:443"] },
+    // 짧은 주소 리다이렉터(D-30)는 80만. 모든 프록시에 80을 열지 않으려고 태그를 나눈다
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s-go:80"] }
   ],
   "ssh": [
     // 옛 규칙 그대로. root는 옛 구성에서 비대화형 검증 경로였다. 좁히는 안은 F D-11
@@ -1204,7 +1208,7 @@ hold: false
 | 캐시 Valkey | `cache:`가 있으면 공식 Valkey 차트(subchart)로 렌더. 영속 Valkey는 데이터 차트 쪽(C.5.6) | 캐시는 데이터가 아니라 앱과 수명을 같이한다 |
 | 마이그레이션 | `migration.command` 있으면 Sync hook Job | C.5.4 |
 | 공개 | `public.host` 있으면 Ingress(class `traefik`) | C.3.4 |
-| 내부 | `internal.name` 있으면 Tailscale Ingress | C.3.5 |
+| 내부 | `internal.name` 있으면 Tailscale Ingress(DNS 라벨 `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, `<접두><이름>` 63자 이하, `go`·`vm-go`는 리다이렉터 이름이라 모든 클러스터에서 예약, D-30) | C.3.5 |
 | 네트워크 | 기본 거부 + 허용(같은 ns, Traefik ns에서 앱 포트(공개 시), Tailscale operator ns(`tailscale`)의 Ingress 프록시 파드에서 앱 포트(내부 노출 `internal.name` 시. 프록시는 앱이 아니라 operator ns에서 돈다[S115]), DNS, `database` ns 5432(DB 시), 인터넷 443). 인터넷 443은 ipBlock `0.0.0.0/0`에 except `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`(tailnet)을 명시한다. IPv6 허용 줄은 두지 않아 tailnet IPv6 `fd7a:115c:a1e0::/48`도 막힌다. IPv6 허용을 더할 때는 except에 `fd7a:115c:a1e0::/48`을 함께 넣는다. 봇에만 필요한 클러스터 안 허용(작업자 Service, Grafana·Argo CD API, Alertmanager에서 오는 수신)은 이 차트가 아니라 platform 쪽 봇 자리 Application이 더한다(C.8) | P19, ipBlock에 pod CIDR 금지. tailnet 제외는 아래 "tailnet 차단" |
 | 이미지 pull | 없음(`imagePullSecrets`를 내지 않는다). 앱 패키지는 public만이라 익명 pull이 된다(D-29) | P16, C.4.10 |
 
@@ -1883,11 +1887,12 @@ design-prompt §10-E의 순서다: §1 미완료 항목(옛 클러스터 철거 
 T05 결정 ─▶ E1 철거·정리 ─▶ E2 main 교체·호스트·k3s·Argo CD ─▶ E3 시크릿 체계
 E3 ─▶ E4a 네트워크·DNS·공개
 E3, E4a ─▶ E4b 관측·알림·봇 자리
+E4a ─▶ E4c 내부 UI 짧은 주소(T08c, D-30. 2026-10-20 추가)
 E2 ─▶ E5 CI/CD 착수,  E3 ─▶ E5 완료
 E4a 첫 Terraform apply(U02 잠금 시험) ─▶ E5 `infra/github` 첫 apply
 E3, E4a, E5 ─▶ E6 데이터
 E5, E6 ─▶ E7 CLI (읽기 명령은 E5 뒤 먼저 착수 가능)
-E4a, E4b, E5, E6, E7 ─▶ E8 테스트 앱 통합 검증
+E4a, E4b, E4c, E5, E6, E7 ─▶ E8 테스트 앱 통합 검증
 E8, T14·T15 결정 ─▶ E9 봇 첫 배포(T16b)
 E8 ─▶ E10 준비,  E9 ─▶ E10 기존 앱 재연결 배포
 ```
@@ -1961,6 +1966,16 @@ T15 결정(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15))으로 T16�
 | 검증 방법 | G 시나리오 16·17 명령. 시나리오 6·7 경보 부분: 시험 ns에 없는 키를 가리키는 ExternalSecret을 두고, 또 E3의 시험용 client secret 장애 주입으로 ESO 인증을 잠시 끊어(승인 기록. 운영 client secret은 폐기하지 않는다) ExternalSecretNotReady 경보가 Telegram에 도착하는지 보고 복구 뒤 resolved와 시험 ns 삭제를 확인한다. C.8 표의 명령. `vmalert-tool unittest`(형식 미검증). **이탈 경보 발화 시험:** 감시 방식(E4a의 U32 결과)에 맞춰 tailnet 경로만 끊는다. NUC를 `tag:nuc`로 태그해 `tag:nuc:53` 규칙이 따로 있으면(D-11) 정책 사본을 남기고 그 규칙을 뺀 정책을 apply한다(승인 기록). 태그하지 않아 `autogroup:self:*`가 모든 포트를 열고 있으면 사람이 sudo로 `iptables -t raw -I PREROUTING -i tailscale0 -p udp --dport 53 -j DROP`(tcp도 같이)를 임시로 넣고 시험 뒤 지운다. raw PREROUTING은 hostPort DNAT보다 먼저라 svclb 경로까지 끊긴다(형식 미검증). 그 동안 Tailscale 기기는 공용 서버로 해석한다(C.3.6). 1시간 무질의 뒤 다음 평가 주기 안에 Telegram 수신을 확인하고, 정책을 되돌린 뒤 resolved를 확인한다. 룰 논리는 단위 시험으로 따로 본다 |
 | 되돌리는 방법 | revert PR. healthchecks 체크는 일시 정지 |
 
+#### E4c 내부 UI 짧은 주소 (T08c, 2026-10-20 추가)
+
+| 항목 | 내용 |
+|---|---|
+| 만들 것 | tailnet 전용 리다이렉터 `go`(상태 없는 웹 서버 Deployment, operator LoadBalancer Service HTTP 80, NetworkPolicy, tailnet 도메인 ExternalSecret), ACL `tag:k8s-go`·`autogroup:member → tag:k8s-go:80`(C.3.5, F D-30) |
+| 선행 조건 | E4a(Tailscale operator·ProxyClass, ACL root). D-30. **사람 작업:** Infisical `homelab`/prod와 `homelab-dev`/dev에 tailnet 도메인 키 등록, ACL apply(owner 로컬), 맥·아이폰 셀룰러 확인 |
+| 완료 기준 | T08c 완료 조건. 아이폰 Safari의 스킴 없는 `go/argocd`가 필수다. VM은 렌더만 보고 실접속은 E8 시나리오 13에서 본다 |
+| 검증 방법 | T08c 완료 조건의 명령 |
+| 되돌리는 방법 | Application이 살아 있을 때 `go` 매니페스트를 지우는 PR로 prune 완료(Service·프록시 기기 사라짐)를 확인한 뒤 ACL 두 줄을 지운다 |
+
 #### E5 CI/CD (T10)
 
 | 항목 | 내용 |
@@ -2016,7 +2031,7 @@ T15 결정(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15))으로 T16�
 |---|---|
 | 만들 것 | E7의 CLI로 새로 만드는 시험 앱 `homelab-smoke`(시나리오 1의 `homelab app new`)로 CLI를 쓰는 시나리오를 포함해 1~17 전체 실행(시나리오 1의 공개 URL 확인 포함), VM 재구축과 DB 복구(시나리오 13), 결과표 `platform/verification.md`(이 문서 옆, PR로 main) |
 | 옛 저장소에서 가져올 것 | L23의 복구 순서, L45·L46의 확인 항목 |
-| 선행 조건 | E4a, E4b, E5, E6, E7. D-12(VM 방식). **사람 작업:** VM 준비(`vm-` 접두 노드 이름, 운영자 기기가 LAN으로 닿는 노드 IP. VM 호스트는 tailnet에 넣지 않는다, C.3.2의 0), VM 격리 설정(아래: VM 값 파일 `host/clusters/vm.env`(노드 이름 `vm-` 접두)·`platform/root/values-vm.yaml` PR(`root-vm.yaml`은 E2가 만들어 둠), VM 전용 R2 버킷·토큰, VM operator OAuth client, 시험 터널·체크·수신자를 `homelab-dev`에, 운영 ExternalSecret 키 목록에 맞춘 나머지 `homelab-dev` 시험 값 채우기와 빠진 키 0 확인(2번), `eso-homelab-dev` client secret 발급과 VM 준비 자산 보관(2번), 복구 자산의 R2 읽기 전용 토큰을 시험 동안만 VM에), 시험 App을 `homelab-smoke`에도 설치(시나리오 15), NUC 재부팅·네트워크 차단 시험 승인 |
+| 선행 조건 | E4a, E4b, E4c, E5, E6, E7. D-12(VM 방식), D-30(VM의 `vm-go` 실접속은 시나리오 13에서 본다). **사람 작업:** VM 준비(`vm-` 접두 노드 이름, 운영자 기기가 LAN으로 닿는 노드 IP. VM 호스트는 tailnet에 넣지 않는다, C.3.2의 0), VM 격리 설정(아래: VM 값 파일 `host/clusters/vm.env`(노드 이름 `vm-` 접두)·`platform/root/values-vm.yaml` PR(`root-vm.yaml`은 E2가 만들어 둠), VM 전용 R2 버킷·토큰, VM operator OAuth client, 시험 터널·체크·수신자를 `homelab-dev`에, 운영 ExternalSecret 키 목록에 맞춘 나머지 `homelab-dev` 시험 값 채우기와 빠진 키 0 확인(2번), `eso-homelab-dev` client secret 발급과 VM 준비 자산 보관(2번), 복구 자산의 R2 읽기 전용 토큰을 시험 동안만 VM에), 시험 App을 `homelab-smoke`에도 설치(시나리오 15), NUC 재부팅·네트워크 차단 시험 승인 |
 | 완료 기준 | 시나리오 1~17이 모두 "실제 검증 완료"이거나 사용자가 승인한 한계로 기록. AC-P12 다섯 자리와 AC-P11·AC-P8 자리 확인 |
 | 검증 방법 | G절 전체. 시나리오 7·13 뒤 복구 자산의 운영 ESO client ID·secret으로 Infisical Universal Auth 로그인 → 성공(토큰은 출력하지 않고 응답 코드만. 시나리오 7의 장애 주입이 운영 secret을 폐기하지 않았음을 확인) |
 | 되돌리는 방법 | 시험 앱은 `homelab app remove` 뒤 `homelab data purge`. VM은 폐기하고 VM 전용 R2 버킷과 tailnet의 `vm-*` 기기(VM operator·프록시)를 지우며, `eso-homelab-dev` client secret을 폐기하고, values-vm의 복구 원본은 정리 PR로 지운다 |
@@ -2064,14 +2079,15 @@ T15 결정(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15))으로 T16�
 | E2 | T07 | 그대로. 재분해 전 할 일 7(Argo CD 읽기 전용 계정)은 E4b(T08b)로 옮기고, 최소 `ci.yaml`과 main 교체 뒤 `ci` 필수 검사를 넣는다 | 읽기 전용 계정 셋을 한 단계에서 함께 확인한다. main 교체 직후부터 시크릿 유출 검사가 돌고 병합 조건이 된다 |
 | E3 | T09 | 그대로. 첫 작업으로 배포 키 OIDC 확인을 넣는다. identity는 4개다(D-04). 완료 기준의 시나리오 6·7은 E3 범위(E3 표 아래 동등 절차, 시험 Application `e3-probe`)로 좁히고, 경보·Telegram은 T08b, 배포 PR 자동 병합 흐름은 T10, `homelab status`는 T13으로 보낸다 | C.4.8의 방식 결정이 E5를 좌우한다. T09 완료가 T08b·T10·T12를 기다리지 않게 한다 |
 | E4a, E4b | T08 | **T08을 둘로 나눈다**: T08a 네트워크·DNS·외부 공개, T08b 관측·알림·봇 자리. T08b 완료 기준에 시나리오 6·7의 경보 부분과 T06 표의 옛 healthchecks ping URL 줄(`보류(D-10, T08b)`) 닫기를 넣고, C.8 읽기 전용 접근의 CI 검사(L30) 줄은 전체 `ci`를 만드는 T10에서 본다 | 결정이 다르고(D-08·D-11 대 D-09·D-10·D-15 입력), 완료 시나리오가 다르며(14 대 16·17), T08b는 T08a의 일부 경로만 기다린다 |
+| E4c | 없음(2026-10-20 추가) | T08c를 새로 둔다(D-30). 선행은 T08a, T13이 기다린다 | `go` 리다이렉터는 T08a의 operator·ACL 경로 위에 얹는 작은 단계다. VM의 `vm-go` 실접속은 E8 시나리오 13에서 본다 |
 | E5 | T10 | 그대로. 손 등록용 시험 앱 저장소(`homelab-probe`) 생성과 `infra/github` Terraform root와 CLI와 독립된 래퍼 `tools/tf-github.sh`, 병합 키 Secret Sync, ci의 workflow-guard를 넣는다(D-04, D-28). 결정 5 하드닝이 건 `app-main` import, 앱 저장소 보안 설정, GHCR 패키지 가시성 시험(U39)도 넣는다(D-29). 완료 기준은 CLI 없는 동등 절차(E5 표 아래, 시나리오 7의 배포 흐름 부분 포함)이고 공개 URL 확인은 T13으로 보낸다. 간선 T09 → T10은 "완료" 간선으로 두고 착수는 T07 뒤 병행한다(C.4.8) | C.4.8의 답. T10 완료가 T12(CLI)나 T08a(공개 경로)를 기다리지 않게 한다 |
 | E6 | T11 | 선행을 T08a·T09·T10으로 바꾼다(재분해 전에는 T08·T09). 완료 기준은 CLI 없는 동등 절차(E6 표 아래) | cert-manager·R2 버킷은 T08a, 연결 배선과 배포 흐름은 T10. 관측(T08b)은 선행이 아니다. T11 완료가 T12를 기다리지 않게 한다 |
 | E7 | T12 | 그대로. 읽기 명령은 T10 뒤 먼저 착수 가능. 완료 기준에 CLI 경로 재확인(`homelab-probe`)을 넣는다 | E5·E6이 CLI 없이 확인한 것을 CLI로 다시 본다 |
-| E8 | T13 | 그대로. 선행에 T08a·T08b. CLI로 새로 만든 `homelab-smoke`로 시나리오 1~17 전체(공개 URL 포함) | |
+| E8 | T13 | 그대로. 선행에 T08a·T08b(2026-10-20부터 T08c도). CLI로 새로 만든 `homelab-smoke`로 시나리오 1~17 전체(공개 URL 포함) | |
 | E9 | T16 | T16 할 일에 플랫폼 쪽 준비(E9 표)를 명시. 봇 자리 Application의 `target` 변경 PR(봇 등록 PR보다 먼저)과 콜드스타트 순서 확인을 넣는다. T15 결정(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15))으로 T16은 T16a(FOUNDATION 로컬·mock, T15 뒤 바로 착수)와 T16b(실연동·첫 배포, T13 뒤)로 나뉘고, E9는 T16b다 | 봇 ns는 앱 Application이 만들므로 그보다 뒤 wave의 봇 자리가 콜드스타트에 수렴하는지 운영에서 본다(C.8) |
 | E10 | T22 | 그대로. 할 일에 `mac-uptime-guard` 장치 끄기 뒤 옛 Telegram 봇 토큰 폐기와 옛 봇 삭제를 더한다(T06 자격 폐기 표의 `보류(D-10, T22)` 행을 닫음). 비앱 저장소 처리(D-29: `aiops` 저장소·App과 `mac-uptime-guard` 저장소 삭제, `aiops-autodeploy-canary` private 보관. `mac-uptime-guard`는 2026-10-18 17:46 사용자 결정으로 private 보관에서 제거로 바뀌었다)를 넣고, `page`·`trip-mate-api` 재연결은 지운다(2026-10-18 삭제, 0절 7항). 완료 기준은 재연결한 앱마다 시나리오 1 전체다(앱 저장소는 public만이라 private 앱 기준은 없다) | D-10, D-20, D-29. E1과 E3은 이 행을 닫지 않는다. D-10이 새 봇으로 확정(사용자 2026-10-18, T05)돼 E3이 닫는 대안 분기(옛 봇 재사용)는 쓰이지 않는다 |
 
-P2 의존성(T05가 2026-10-18에 spec §8.2에 적용): `T06 → T07`, `T07 → T09`, `T07 → T10`(착수), `T09 → T10`(완료), `T08a → T10`(`infra/github` 첫 apply만, R2 잠금 시험 U02 뒤), `T07 → T08a`, `T09 → T08a`, `T08a → T08b`, `T09 → T08b`, `T08a → T11`, `T09 → T11`, `T10 → T11`, `T10 → T12`, `T11 → T12`, `T08a → T13`, `T08b → T13`, `T10 → T13`, `T11 → T13`, `T12 → T13`. 순환은 없다(T06 → T07 → T09 → T08a → T10 → {T08b, T11} → T12 → T13의 위상 순서가 있다. T10 착수는 T07 뒤 병행하고, `infra/github` 첫 apply는 T08a 뒤다).
+P2 의존성(T05가 2026-10-18에 spec §8.2에 적용): `T06 → T07`, `T07 → T09`, `T07 → T10`(착수), `T09 → T10`(완료), `T08a → T10`(`infra/github` 첫 apply만, R2 잠금 시험 U02 뒤), `T07 → T08a`, `T09 → T08a`, `T08a → T08b`, `T09 → T08b`, `T08a → T11`, `T09 → T11`, `T10 → T11`, `T10 → T12`, `T11 → T12`, `T08a → T13`, `T08b → T13`, `T10 → T13`, `T11 → T13`, `T12 → T13`. 2026-10-20 D-30으로 `T08a → T08c`, `T08c → T13`을 더했다. 순환은 없다(T06 → T07 → T09 → T08a → T10 → {T08b, T11} → T12 → T13의 위상 순서가 있다. T10 착수는 T07 뒤 병행하고, `infra/github` 첫 apply는 T08a 뒤다).
 
 완료 기준이 쓰는 산출물도 같은 방향만 가리킨다(간선마다 "완료 기준이 쓰는 것 ← 만드는 단계"):
 
@@ -2088,6 +2104,7 @@ P2 의존성(T05가 2026-10-18에 spec §8.2에 적용): `T06 → T07`, `T07 →
 | T08b | Telegram 토큰·healthchecks URL의 ESO 전달, 시나리오 6·7 경보 부분의 ExternalSecret·ESO | T09 | `T09 → T08b` |
 | T08b | T06 표의 옛 healthchecks ping URL 줄 `보류(D-10, T08b)`(새 체크 초록 확인 뒤 옛 체크 삭제로 닫음) | T08b 자신(새 체크. T06의 표는 T07·T09를 거쳐 앞) | 없음 |
 | T08b | 봇 자리 Application(시험 ns `bot-slot-probe`, C.4.5 네트워크 행을 손으로 옮긴 정책, SA `bot-reader`) | T08b 자신(T10의 공유 차트는 쓰지 않음, C.8) | 없음 |
+| T08c | Tailscale operator·ProxyClass, ACL root(`infra/tailscale`) | T08a | `T08a → T08c` |
 | T10 | Infisical 프로젝트·배포 OIDC identity, R2 state 자격(`homelab-admin`), 시나리오 7 배포 흐름 부분의 ESO | T09 | `T09 → T10`(완료) |
 | T10 | R2 state 첫 사용과 잠금 시험(U02) | T08a | `T08a → T10`(`infra/github` 첫 apply만, E.0) |
 | T10 | 손 등록 PR, `infra/github` Terraform root와 래퍼, 병합 키 sync, `homelab-probe`, 전체 `ci`(C.8 읽기 전용 접근 줄의 CI 검사 L30 포함) | T10 자신 | 없음 |
@@ -2095,7 +2112,7 @@ P2 의존성(T05가 2026-10-18에 spec §8.2에 적용): `T06 → T07`, `T07 →
 | T11 | 앱 차트 연결 배선, `homelab-probe` 등록 | T10 | `T10 → T11` |
 | T11 | 플랫폼 시크릿 전달 | T09 | `T09 → T11` |
 | T12 | E5·E6 동등 절차의 확인 대상 | T10, T11 | `T10 → T12`, `T11 → T12` |
-| T13 | 공개 URL(시나리오 1), 관측·경보(16·17), CLI | T08a, T08b, T12 | `T08a → T13`, `T08b → T13`, `T12 → T13` |
+| T13 | 공개 URL(시나리오 1), 관측·경보(16·17), CLI, `go` 리다이렉터(시나리오 13의 `vm-go`) | T08a, T08b, T08c, T12 | `T08a → T13`, `T08b → T13`, `T08c → T13`, `T12 → T13` |
 
 위 표는 T06~T13의 모든 단계를 다시 나열한 것이다. 각 행의 "만드는 단계"는 그 단계 자신이거나 위 P2 의존성의 앞 단계다. T09의 완료 기준은 경보(T08b), 배포 PR 흐름(T10), `homelab status`(T12)를 쓰지 않는다(E3 표 아래 동등 절차). T08b는 T10의 전체 `ci`도 공유 차트도 쓰지 않는다(L30 줄은 T10이 보고, 봇 자리 시험 ns의 정책은 손으로 옮긴 것이다). T10·T11의 완료 기준은 T12의 CLI도, T08a의 공개 경로(T10)도, T13의 산출물도 쓰지 않는다. 그래서 뒤 단계로 향하는 완료 의존은 없다.
 
@@ -2120,7 +2137,7 @@ P2 의존성(T05가 2026-10-18에 spec §8.2에 적용): `T06 → T07`, `T07 →
 
 ## F. 결정이 필요한 사항
 
-design-prompt §10-F 목록 전부다. 각 결정에 선택지, 권장 기본값, 이유를 적고, spec §5.3 추천과 다르면 **조정 권고**로 표시했다. 끝의 "추가 확인"은 T05가 확인할 설계 기본값이었다. D-04·D-08·D-28·D-29는 사용자가 2026-10-18에 따로 확정했다. 나머지 결정과 "추가 확인"은 같은 날 사용자가 T05 질문에 답해 모두 이 문서의 권장대로 확정했다(확정(사용자 2026-10-18, T05)). 확정한 결정은 "권장"을 "결정"으로 바꾸고 이유·대가·검토 후 제외한 안은 남겼다. 봇 결정 게이트 D-14~D-17·D-24는 T15에서 확정했고(확정(사용자 2026-10-18, T15)), 이 설계에 주는 변경만 끝의 "봇 결정(T15)"에 둔다.
+design-prompt §10-F 목록 전부다. 각 결정에 선택지, 권장 기본값, 이유를 적고, spec §5.3 추천과 다르면 **조정 권고**로 표시했다. 끝의 "추가 확인"은 T05가 확인할 설계 기본값이었다. D-04·D-08·D-28·D-29는 사용자가 2026-10-18에 따로 확정했다. D-30은 2026-10-20에 따로 확정했다. 나머지 결정과 "추가 확인"은 같은 날 사용자가 T05 질문에 답해 모두 이 문서의 권장대로 확정했다(확정(사용자 2026-10-18, T05)). 확정한 결정은 "권장"을 "결정"으로 바꾸고 이유·대가·검토 후 제외한 안은 남겼다. 봇 결정 게이트 D-14~D-17·D-24는 T15에서 확정했고(확정(사용자 2026-10-18, T15)), 이 설계에 주는 변경만 끝의 "봇 결정(T15)"에 둔다.
 
 ### D-04 Infisical 요금제와 머신 계정
 
@@ -2448,6 +2465,35 @@ Free 안에서 키 전달과 identity 배분:
 - **spec 대비:** 해당 없음(새 결정).
 - **미검증:** 패키지 가시성 상속(U39), Codex 외부 호출(U38), U08 셋째 조건의 실제 bypass 병합(하드닝의 `current_user_can_bypass`는 `pull_requests_only`).
 
+### D-30 내부 UI 짧은 주소
+
+**확정(사용자 2026-10-20).** D-08의 `*.ts.net`은 그대로 두고 tailnet 전용 리다이렉터 `go`를 더한다. 사용자 요구는 "주소를 짧게, 그러나 장애·보안 위험은 늘리지 않기"였다. 세 에이전트(Claude Opus 5.5, Codex gpt-6-astra, DeepSeek V4.1 Flash)가 같은 과제를 따로 검토했고, 셋 모두 `*.lab.ukyi.app`에 반대했다. 둘은 기기 즐겨찾기, 하나는 리다이렉터를 추천했고 사용자는 리다이렉터를 골랐다(즐겨찾기는 두지 않음).
+
+| 선택지 | 주소 예 | 판정 |
+|---|---|---|
+| D-08 그대로 | `argocd.<tailnet>.ts.net` | 짧은 입력 없음 |
+| **`go` 리다이렉터** | `go/argocd` | **확정** |
+| 기기 즐겨찾기·홈 화면·텍스트 대체만 | 입력만 줄고 주소는 같음 | 검토 후 제외(사용자 선택) |
+| `*.lab.ukyi.app`(공개 A 레코드 + `_acme-challenge` 위임 + 내부 Traefik) | `argocd.lab.ukyi.app` | 검토 후 제외 |
+| 사설 CA + 짧은 이름 | `argocd.internal` | 검토 후 제외 |
+| Cloudflare Access로 공개 | `argocd.ukyi.app` | 검토 후 제외 |
+| Cloudflare WARP private hostname | `argocd.<내부 이름>` | 검토 후 제외 |
+| tailnet 이름을 fun name으로 | `argocd.<생성된 이름>.ts.net` | 검토 후 제외 |
+
+- **결정:** C.3.5 "짧은 주소"대로다. 리다이렉터는 상태 없는 웹 서버 파드 하나와 operator LoadBalancer 프록시 기기 하나다. 규칙이 패턴이라 Grafana(T08b)와 앱 내부 노출(T10 `internal.name`)이 등록 없이 따라온다. VM은 `vm-go`가 `vm-<이름>`으로 보낸다. ACL은 `tag:k8s-go`를 새로 두고 `autogroup:member → tag:k8s-go:80`만 연다. `go`와 `vm-go`는 모든 클러스터에서 앱 내부 이름으로 쓸 수 없게 예약한다. 실행은 T08c이고, VM 실접속은 T13 시나리오 13에서 본다.
+- **이유:** 새 자격이 없다(인증서·DNS 쓰기·ACME 계정 없음). 공개 DNS와 CT에 새로 실리는 것이 없다. 이름 풀이는 D-08처럼 기기 안의 MagicDNS라 AdGuard·공개 DNS·집 인터넷과 무관하다. `go`가 죽어도 전체 주소가 그대로라 장애가 짧은 입력에서 멈춘다.
+- **대가:** 첫 구간은 평문 HTTP다(WireGuard 안, 링크 이름만 담김). 주소창의 최종 주소는 여전히 길다. 파드·tailnet 기기·ACL 규칙이 하나씩 늘고, tailnet 도메인을 실행 때 넣는 경로가 생긴다. 이름 `go`를 예약한다. 단일 라벨 입력을 브라우저가 검색어로 보내는지(특히 아이폰 Safari)는 미검증이다.
+- **검토 후 제외한 안과 이유:**
+  - `*.lab.ukyi.app`: (1) 관리 화면과 공개 앱이 같은 등록 도메인 `ukyi.app` 아래라 브라우저에서 같은 사이트가 된다[S226]. 공개 앱이 침해되면 `Domain=ukyi.app` 쿠키를 심을 수 있고 SameSite 쿠키가 CSRF 방어가 되지 못한다. `ts.net`은 Public Suffix List 항목이라 tailnet마다 다른 사이트다[S225]. (2) 이름 풀이가 기기 안 MagicDNS에서 공개 DNS로 옮겨간다. TTL Auto가 300초라[S227] 집 인터넷이 끊기면 약 5분 뒤 이름이 안 풀린다. 평문 공용 DNS 경로에서 답이 위조되면 남는 방어는 TLS뿐인데, 그 인증서를 낼 수 있는 위임 zone 토큰이 클러스터 안에 있다. (3) 공개 A 레코드가 입구 기기의 Tailscale IP를 담는다. 그 IP가 공개 DNS에 실리고(D-23 취지와 충돌), 재등록·IP 변경 때마다 사람이 apply해야 한다(2026-10-20에 실제로 IPv4를 바꿨다). (4) Cloudflare 하위 zone은 Enterprise 전용이라[S228] 도전용 별도 등록 도메인이 필요하고, 그 갱신·결제가 새 장애점이다. CAA `accounturi`로 좁히면 재구축으로 ACME 계정 키를 잃을 때 갱신이 조용히 막힌다. (5) 내부 Traefik 하나가 모든 내부 UI의 공통 장애점이 되고, 비상구로 남길 `*.ts.net` 인증서가 계속 CT에 실려 CT를 줄이는 효과도 작다.
+  - 기기 즐겨찾기만: 새 부품이 없어 가장 안전하지만 기기마다 등록해야 한다. 사용자가 리다이렉터를 고르며 함께 두지 않기로 했다.
+  - 사설 CA: 가장 짧지만 기기마다 루트 신뢰를 설치·회수해야 하고, CA 키가 새 경계가 된다(이름 제약이 없으면 신뢰한 기기에서 모든 사이트를 위조할 수 있다).
+  - Cloudflare Access: 관리 화면을 인터넷에 낸다. Access 설정 하나가 경계이고, Cloudflare 장애 때 공개·관리 경로가 함께 멈춘다.
+  - WARP private hostname: iOS·Android는 VPN을 하나만 켤 수 있어[S223] Tailscale과 함께 쓸 수 없다.
+  - fun name: 생성된 후보에서만 고르고 길이 차이가 작다. HTTPS에 쓴 뒤에는 다시 뽑을 수 없고 기존 링크가 깨질 수 있다[S221].
+  - golink: 자체 `TS_AUTHKEY`·SQLite·영속 볼륨이 필요하다[S224]. 규칙이 패턴이라 링크를 손으로 관리할 일이 없어 정적 리다이렉터로 충분하다.
+- **spec 대비:** 없음(2026-10-20 새 결정).
+- **미검증:** 브라우저별 단일 라벨 입력(맥 Safari·Chrome, 아이폰 Safari 셀룰러)과 443 거부 때의 동작, 프록시 기기 이름이 정확히 `go`로 붙는지(이름이 겹치면 접미 번호), k3s servicelb가 `loadBalancerClass`가 있는 Service를 건너뛰는지. T08c 수용 시험이다.
+
 ### 봇 결정(T15)
 
 **확정(사용자 2026-10-18, T15).** 봇 결정 게이트 D-14~D-17·D-24와 V1 범위 조정이다. 결정 본문과 근거는 spec §5.1이고, 여기에는 이 설계에 주는 변경과 쓰는 곳만 둔다. D-14는 권장안(OpenAI API 프로젝트 키)이 아니라 사용자가 고른 안이다. D-15는 사용자가 D-14 구독 인증 파일의 유출 경로 설명(GitHub를 열면 남의 토큰으로 gist·push 유출 가능)을 듣고 골랐다.
@@ -2719,6 +2765,11 @@ design-prompt §9의 시나리오 1~17이다. **상태는 모두 "설계상 기�
 - S187 Terraform Tailscale provider(v0.29.2, 2026-05-26. `tailscale_dns_configuration`은 tailnet DNS 설정 전체를 관리하고 `tailscale_dns_nameservers` 등 다른 DNS 리소스와 함께 쓰지 말 것, 기본값 `override_local_dns=false`·`magic_dns=true`·`use_with_exit_node=false`, `use_with_exit_node`는 클라이언트 1.88.1 이상. v0.24.0(2025-10-30)에서 alpha 표시 해제. 데이터 소스 `tailscale_device`는 hostname이 여럿 맞으면 첫 기기를 고르고 없으면 오류(`tailscale/data_source_device.go:105-118`), `addresses`의 순서는 문서에 없음, `tailscale_devices`는 목록을 돌려줌) https://registry.terraform.io/providers/tailscale/tailscale/0.29.2/docs , https://github.com/tailscale/terraform-provider-tailscale , 2026-10-18 확인
 - S188 `tailscale/github-action`(v4.2.0. workload identity federation: `oauth-client-id`·`audience`와 `id-token: write`로 저장한 시크릿 없이 tailnet에 붙음, Tailscale 1.90.1 이상, 태그 필수) https://github.com/tailscale/github-action , 2026-10-18 확인
 - S211 Tailscale v1.104.1 소스(`ipn/ipnlocal/serve.go`: 정확한 host:port 설정에만 인증서를 내고 발급이 실패하면 핸드셰이크 실패. `feature/acme/cert.go`: 유효한 캐시 인증서만 쓰고 수명의 2/3에서 갱신. `cmd/k8s-operator/ingress.go`: http-redirect는 `301:https://${HOST}${REQUEST_URI}`) https://github.com/tailscale/tailscale/blob/v1.104.1/ipn/ipnlocal/serve.go , https://github.com/tailscale/tailscale/blob/v1.104.1/feature/acme/cert.go , https://github.com/tailscale/tailscale/blob/v1.104.1/cmd/k8s-operator/ingress.go , 2026-10-18 확인
+- S221 tailnet DNS 이름(fun name은 생성된 후보에서만 고름, HTTPS 인증서에 쓴 뒤에는 다시 생성할 수 없음, 바꾸면 기존 링크가 깨질 수 있음) https://tailscale.com/kb/1217/tailnet-name , 2026-10-20 확인
+- S222 MagicDNS(Tailscale이 검색 도메인을 더해 기기 이름만으로 접근) https://tailscale.com/kb/1081/magicdns , 2026-10-20 확인
+- S223 다른 VPN과 함께 쓰기("iOS and Android enforce a limit of running only one VPN at a time") https://tailscale.com/docs/reference/faq/other-vpns , 2026-10-20 확인
+- S224 golink(노드 이름 `go`, `TS_AUTHKEY`·SQLite·영속 볼륨) https://github.com/tailscale/golink , 2026-10-20 확인
+- S229 operator L3 노출(`loadBalancerClass: tailscale`, `tailscale.com/hostname`) https://tailscale.com/docs/kubernetes-operator/ingress/expose-workload-to-tailnet-l3 , v1.104.1 소스의 `tailscale.com/tags` 어노테이션(`cmd/k8s-operator/sts.go`, Service에도 적용 `svc.go`) https://github.com/tailscale/tailscale/blob/v1.104.1/cmd/k8s-operator/sts.go , 2026-10-20 확인
 
 **Cloudflare, HSTS**
 
@@ -2737,6 +2788,10 @@ design-prompt §9의 시나리오 1~17이다. **상태는 모두 "설계상 기�
 - S177 터널 메트릭(`cloudflared_tunnel_ha_connections`: 활성 HA 연결 수) https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/monitor-tunnels/metrics/ , 2026-10-18 확인
 - S210 HSTS preload 목록 조회(`app` 최상위 도메인이 `preloaded`, `ukyi.app`은 `app`으로 preload됨) https://hstspreload.org/api/v2/status?domain=app , https://hstspreload.org/api/v2/status?domain=ukyi.app , 2026-10-18 확인
 - S212 cert-manager Certificate(기본으로 인증서 수명의 2/3 시점에 갱신) https://cert-manager.io/docs/usage/certificate/ , 2026-10-18 확인
+- S225 Public Suffix List의 `ts.net`(Tailscale Inc. 항목) https://publicsuffix.org/list/public_suffix_list.dat , 2026-10-20 확인
+- S226 MDN Site(등록 도메인이 같으면 하위 도메인끼리 같은 사이트), Set-Cookie(하위 도메인이 상위 도메인 쿠키를 설정할 수 있음, SameSite는 사이트 기준) https://developer.mozilla.org/en-US/docs/Glossary/Site , https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie
+- S227 Cloudflare DNS TTL("A TTL of Auto is set to 300 seconds") https://developers.cloudflare.com/dns/manage-dns-records/reference/ttl/ , 2026-10-20 확인
+- S228 Cloudflare 하위 도메인 zone(subdomain setup)은 Enterprise만 https://developers.cloudflare.com/dns/zone-setups/subdomain-setup/ , 2026-10-20 확인
 
 **AdGuard, 관측·알림, 빌드**
 
