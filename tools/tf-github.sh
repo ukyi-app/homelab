@@ -11,7 +11,10 @@
 #   fine-grained PAT는 만료가 있어야 한다. 그 경로에는 저장소 삭제 방어가 없다(ruleset에 필요한 Administration
 #   write가 삭제 권한도 준다). 리소스 소유자 ukyi-app, 대상 저장소만 선택, 만료 지정, 저장소 Administration RW·
 #   Environments RW·Secrets R·Actions R, org Administration R·Secrets R은 사람이 지킨다(래퍼가 머리글로 볼 수 없다).
-# - R2 state 키는 Infisical homelab-admin /terraform/state에서만 infisical run으로 받는다. 이 경로에는 R2 키만 둔다.
+# - R2 state 키는 Infisical homelab-admin /terraform/state에서 이름 둘(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)만
+#   infisical secrets get으로 받는다. infisical run은 쓰지 않는다(경로의 다른 이름이 환경으로 들어가지 않게).
+# - terraform은 허용 목록 환경으로만 돈다(PATH, HOME, LC_ALL, TMPDIR, GITHUB_TOKEN, AWS 키 둘, TF_IN_AUTOMATION,
+#   TF_CLI_CONFIG_FILE).
 #
 # 작업 사본에서 돌지 않는다. github.com의 main을 임시 디렉터리에 새로 clone해 그 사본만 실행한다. plan도 HCL과 provider를 실행하고,
 # .gitignore가 숨기는 *override.tf·*.tfvars는 git status에도 안 보인다. 같은 작업 사본을 AI 에이전트도 편집한다.
@@ -37,16 +40,13 @@ done
 for t in git gh jq terraform infisical; do
   command -v "$t" >/dev/null || die "$t가 없다(mise install)"
 done
-# Infisical이 넣은 환경으로 띄울 두 프로그램은 절대 경로로 정한다(주입된 PATH로 찾지 않는다).
-bash_bin=$(command -v bash)
-[[ $bash_bin == /* && -x /usr/bin/env ]] || die "bash 절대 경로나 /usr/bin/env가 없다"
 
 # 실행 결과를 바꾸는 환경을 지운다.
 # - GITHUB_APP_* 셋이 모두 있으면 provider가 토큰보다 App 인증을 먼저 쓴다.
 # - TF_CLI_ARGS*는 숨은 인수(-var, -target 등)를, TF_VAR_*는 App ID 같은 변수를 바꾼다.
 # - TF_LOG*는 요청 내용을 로그로 남긴다.
-# - AWS 키 둘은 Infisical이 다시 넣어야만 있다. 호출 셸의 값이 남으면 /terraform/state에 키가 없거나 이름이 틀려도
-#   주변 자격(낡거나 권한이 넓은 키)으로 backend를 연다.
+# - 이 목록은 아래 terraform 실행 환경(허용 목록)과 별개로, 래퍼 자신이 부르는 gh·git·infisical에 닿는 것을 줄인다.
+#   AWS 키는 Infisical에서 받은 값만 쓴다(호출 셸의 주변 자격으로 backend를 열지 않는다).
 unset GITHUB_APP_ID GITHUB_APP_INSTALLATION_ID GITHUB_APP_PEM_FILE GITHUB_OWNER GITHUB_ORGANIZATION GITHUB_BASE_URL
 unset AWS_PROFILE AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_WORKSPACE TF_DATA_DIR TF_PLUGIN_CACHE_DIR
 for name in $(compgen -e); do
@@ -119,16 +119,20 @@ esac
 admin=$(GH_TOKEN=$GITHUB_TOKEN gh api repos/ukyi-app/homelab --jq .permissions.admin 2>/dev/null) || die "repos/ukyi-app/homelab을 읽지 못했다"
 [[ $admin == true ]] || die "토큰이 ukyi-app/homelab의 admin이 아니다"
 
-# ~/.terraformrc의 dev_overrides·암묵 로컬 미러가 provider 바이너리를 바꾸지 못하게 한다. unset하면 ~/.terraformrc로
-# 돌아가므로 지우지 않고 이 파일을 가리킨다. registry에서 받은 provider는 .terraform.lock.hcl 해시로 확인한다.
+# ~/.terraformrc의 dev_overrides·암묵 로컬 미러가 provider 바이너리를 바꾸지 못하게 한다. TF_CLI_CONFIG_FILE이 없으면
+# ~/.terraformrc를 읽으므로 terraform 환경(아래 tf)에서 늘 이 파일을 가리킨다. registry에서 받은 provider는 .terraform.lock.hcl 해시로 확인한다.
 cat >"$work/terraformrc" <<'EOF'
 provider_installation {
   direct {}
 }
 EOF
-export TF_CLI_CONFIG_FILE="$work/terraformrc"
 
-# 3. R2 자격(Infisical). infra/README.md 2절과 같다: 로그인 사용자의 infisical run이 값을 백업 폴더에 쓰지 못하게 한다.
+# 3. R2 자격(Infisical). /terraform/state에서 정확한 이름 둘만 값으로 받아 래퍼의 셸 변수(export 안 함)에 둔다.
+#    infisical run은 그 경로의 모든 키를 환경으로 넣어, 거기에 LD_PRELOAD·BASH_ENV·PATH 같은 이름이 실수나 변조로
+#    들어가면 자식 프로세스가 뜨는 순간(동적 링커, 셸 시작) GITHUB_TOKEN을 읽을 수 있다. 이름 조회는 그 길이 없다.
+#    값은 파일·argv·로그에 남기지 않는다(명령 치환으로 받고, terraform에는 export 뒤 exec로 넘긴다).
+#    로그인 사용자의 CLI 0.44.2 조회는 값을 ~/.infisical/secrets-backup/에 남길 수 있다(infra/README.md 2절).
+#    폴더를 쓰기 불가로 두고, 조회마다 백업 파일이 0개인지 본다.
 mkdir -p ~/.infisical
 if [[ -d ~/.infisical/secrets-backup ]]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi
 mkdir -p ~/.infisical/secrets-backup && chmod 0500 ~/.infisical/secrets-backup
@@ -136,41 +140,46 @@ if touch ~/.infisical/secrets-backup/.probe 2>/dev/null; then
   rm -f ~/.infisical/secrets-backup/.probe
   die "Infisical 백업 폴더가 쓰기 가능하다"
 fi
+no_backup() {
+  if [[ $(find ~/.infisical/secrets-backup -type f 2>/dev/null | wc -l) -ne 0 ]]; then
+    find ~/.infisical/secrets-backup -type f -delete 2>/dev/null
+    die "Infisical 백업 파일이 생겼다. 지우고 중단한다"
+  fi
+}
 : "${HOMELAB_ADMIN_PROJECT_ID:=}"
 : "${R2_ENDPOINT:=}"
 [[ -n $HOMELAB_ADMIN_PROJECT_ID ]] || read -r -p 'homelab-admin project ID: ' HOMELAB_ADMIN_PROJECT_ID
 [[ -n $R2_ENDPOINT ]] || read -r -p 'R2 S3 API endpoint (https://...r2.cloudflarestorage.com): ' R2_ENDPOINT
 [[ $R2_ENDPOINT =~ ^https://[a-z0-9]+\.r2\.cloudflarestorage\.com$ ]] || die "R2 endpoint 형식이 아니다"
-# 비교용 해시는 인수로 넘긴다. 환경으로 넘기면 Infisical이 GITHUB_TOKEN과 함께 덮을 수 있다.
-token_sum=$(printf '%s' "$GITHUB_TOKEN" | sha256sum | cut -d' ' -f1)
+# 한 번에 하나씩 묻는다(여러 이름의 --plain 출력 순서에 기대지 않는다). 없는 이름의 출력 모양은 확인하지 못해
+# 빈 값, 여러 줄, 공백, "*not found*"를 모두 거부한다.
+r2_secret() {
+  local v
+  v=$(infisical secrets get "$1" --plain --silent --log-level=error --projectId="$HOMELAB_ADMIN_PROJECT_ID" --env=prod --path=/terraform/state) ||
+    { no_backup; die "Infisical에서 $1를 읽지 못했다"; }
+  no_backup
+  [[ -n $v && $v != *[[:space:]]* && $v != '*not found*' ]] || die "/terraform/state에 $1가 없거나 값 모양이 아니다"
+  printf '%s' "$v"
+}
+r2_id=$(r2_secret AWS_ACCESS_KEY_ID)
+r2_key=$(r2_secret AWS_SECRET_ACCESS_KEY)
 
-# terraform을 R2 자격과 함께 돈다. /terraform/state에 같은 이름의 키가 있어 GITHUB_TOKEN을 덮으면 멈춘다(값은 비교만).
-# Infisical은 그 경로의 모든 키를 환경으로 넣는다. 거기에 실수나 변조로 실행 환경 변수가 들어가도 terraform까지 닿지 않게:
-# - 셸 시작 경계: BASH_ENV·ENV는 bash가 -c 본문보다 먼저 읽어 실행한다. env -u로 지우고, -p는 그 둘과 함수 가져오기
-#   (BASH_FUNC_*, 예: printf를 덮음)·SHELLOPTS(xtrace + PS4의 명령 치환)를 무시한다. bash와 env는 절대 경로다.
-# - 본문 첫 줄에서 허용 목록 밖 변수를 모두 지우고 PATH·HOME은 Infisical 실행 전의 값(인수)으로 되돌린다. 그 뒤에야
-#   외부 명령(sha256sum, terraform)을 찾는다. 값을 env의 argv로 넘기지 않으려고(프로세스 목록에 보인다) 지우는 방식이다.
-# - 남는 것: LD_PRELOAD 같은 동적 링커 변수는 env·bash가 뜰 때 이미 적용된다(본문에서 지워 terraform에는 안 닿음).
-#   BASH_FUNC_*는 -p가 가져오지 않지만 compgen에 안 보여 자식 환경에 남는다(terraform은 Go라 읽지 않는다).
+# terraform은 허용 목록 환경으로만 돈다(env -i에 가깝게). 호출 셸과 래퍼의 다른 변수(TF_*, GITHUB_APP_*, LD_*,
+# BASH_ENV 등)는 하나도 넘기지 않는다. 값이 argv에 보이지 않게 env -i VAR=값 대신 하위 셸에서 모두 지우고 export한다.
+# PATH·HOME·TMPDIR은 래퍼를 부른 사람의 값이다(Infisical과 무관).
+gh_token=$GITHUB_TOKEN
+run_path=$PATH run_home=$HOME run_tmpdir=${TMPDIR:-}
 tf() {
-  local rc=0 tmpdir=${TMPDIR:-}
-  # 안쪽 스크립트는 infisical이 넣은 환경에서 펼쳐야 해서 작은따옴표다.
-  # shellcheck disable=SC2016
-  infisical run --silent --log-level=error --projectId="$HOMELAB_ADMIN_PROJECT_ID" --env=prod --path=/terraform/state -- \
-    /usr/bin/env -u BASH_ENV -u ENV "$bash_bin" --noprofile --norc -p -c '
-      for n in $(compgen -e); do
-        case $n in GITHUB_TOKEN | AWS_ACCESS_KEY_ID | AWS_SECRET_ACCESS_KEY) ;; *) unset "$n" ;; esac
-      done
-      export PATH="$3" HOME="$4" LC_ALL=C TF_IN_AUTOMATION=1 TF_CLI_CONFIG_FILE="$2"
-      [[ -z $5 ]] || export TMPDIR="$5"
-      [[ "$(printf "%s" "$GITHUB_TOKEN" | sha256sum | cut -d" " -f1)" == "$6" ]] || { echo "tf-github: Infisical이 GITHUB_TOKEN을 덮었다" >&2; exit 1; }
-      [[ -n ${AWS_ACCESS_KEY_ID:-} && -n ${AWS_SECRET_ACCESS_KEY:-} ]] || { echo "tf-github: R2 자격이 없다(/terraform/state에서 주입되지 않음)" >&2; exit 1; }
-      exec terraform -chdir="$1" "${@:7}"' tf-github "$root" "$work/terraformrc" "$PATH" "$HOME" "$tmpdir" "$token_sum" "$@" || rc=$?
-  if [[ $(find ~/.infisical/secrets-backup -type f 2>/dev/null | wc -l) -ne 0 ]]; then
-    find ~/.infisical/secrets-backup -type f -delete 2>/dev/null
-    die "Infisical 백업 파일이 생겼다. 지우고 중단한다"
-  fi
-  return "$rc"
+  (
+    # readonly(SHELLOPTS 등 bash 내부)는 지울 수 없어 남는다. 호출 셸이 export한 함수(BASH_FUNC_*)도 내보내지 않는다.
+    for n in $(compgen -e); do unset "$n" 2>/dev/null || true; done
+    # shellcheck disable=SC2163
+    while read -r _ _ f; do export -fn "$f"; done < <(declare -Fx)
+    export PATH="$run_path" HOME="$run_home" LC_ALL=C GITHUB_TOKEN="$gh_token" \
+      AWS_ACCESS_KEY_ID="$r2_id" AWS_SECRET_ACCESS_KEY="$r2_key" TF_IN_AUTOMATION=1 TF_CLI_CONFIG_FILE="$work/terraformrc"
+    [[ -z $run_tmpdir ]] || export TMPDIR="$run_tmpdir"
+    exec terraform -chdir="$root" "$@"
+  )
 }
 
 tf init -input=false -reconfigure -lockfile=readonly "-backend-config=endpoints={s3=\"$R2_ENDPOINT\"}" >/dev/null

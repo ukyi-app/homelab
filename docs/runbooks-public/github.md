@@ -8,7 +8,7 @@ GitHub 보호 설정(ruleset, environment `automerge`, Actions 권한)은 Terraf
 
 ## 0. 준비
 
-[infra/README.md](../../infra/README.md) 1·2절과 같다(mise, `infisical login`, 백업 폴더). 래퍼가 백업 폴더 검사를 스스로 한 번 더 한다.
+[infra/README.md](../../infra/README.md) 1·2절과 같다(mise, `infisical login`, 백업 폴더). 래퍼가 백업 폴더 검사를 스스로 한 번 더 한다. 다만 래퍼는 `infisical run`이 아니라 `infisical secrets get`으로 `/terraform/state`의 `AWS_ACCESS_KEY_ID`·`AWS_SECRET_ACCESS_KEY` 두 이름만 읽고, terraform은 허용 목록 환경으로만 띄운다. 그 경로의 다른 이름은 래퍼에 닿지 않는다.
 
 ```bash
 export HOMELAB_ADMIN_PROJECT_ID=<homelab-admin project ID>   # 없으면 래퍼가 묻는다
