@@ -259,9 +259,10 @@ tf tailscale-dns plan -input=false -lock-timeout=0s
 HCL의 import 블록이 기존 singleton 설정을 읽는다.
 Import ID `dns_configuration`은 tailnet 이름이 아니라
 [provider가 허용하는 임의 ID](https://registry.terraform.io/providers/tailscale/tailscale/0.29.2/docs/resources/dns_configuration)다.
-**첫 계획은 `1 to import, 0 to add, 0 to change, 0 to destroy`여야 한다.**
-변경이 하나라도 있으면 apply하지 않고 콘솔과 입력 JSON을 다시 대조한다.
-값이 sensitive라 세부 차이가 가려지더라도 변경 건수가 0인지 확인할 수 있다.
+**첫 계획은 `1 to import, 0 to add, 0 to change, 0 to destroy` 또는 sensitive 표시만 바뀌는 `1 to change`여야 한다.**
+입력이 sensitive 변수라 값이 같아도 provider가 속성마다 sensitive 표시를 새로 붙여 `1 to change`가 나올 수 있다
+(2026-10-20 실제 첫 계획: `1 to import, 0 to add, 1 to change`).
+이때는 바뀌는 속성마다 `The value is unchanged.` 주석이 붙어 있는지 모두 확인한다. 하나라도 없으면 apply하지 않고 콘솔과 입력 JSON을 다시 대조한다.
 처음 import가 있다는 이유로 `-detailed-exitcode`가 2일 수 있으므로 이것을 무변경 판정에 쓰지 않는다.
 
 ```bash
@@ -269,7 +270,7 @@ tf tailscale-dns apply -lock-timeout=0s
 tf tailscale-dns plan -input=false -detailed-exitcode -lock-timeout=0s
 ```
 
-Apply가 다시 보여 주는 계획도 **import만** 있는지 보고 승인한다.
+Apply가 다시 보여 주는 계획도 **import와 값이 그대로인 표시 변경만** 있는지 보고 승인한다.
 이어지는 plan이 exit 0이어야 인수가 끝난다. import 블록은 state에 같은 주소가 있으면 재실행되지 않아 남겨 둔다.
 원래 JSON 사본과 이 무변경 결과는 비공개 복구 기록으로 보존한다.
 
@@ -293,7 +294,12 @@ tailscale dns status --all
 ```
 
 Plan이 `0 to add, 1 to change, 0 to destroy`이고 의도한 전환인지 검토한다.
-적용 후 exit 0, 전역 서버 셋과 Cloudflare 부재를 확인한다.
+값이 sensitive라 plan에서 nameserver 주소가 가려질 수 있다. 그래서 적용 후 exit 0과 함께
+`tailscale dns status --all`로 전역 서버 셋(NUC의 현재 Tailscale IPv4, AdGuard 공용 둘)과 Cloudflare 부재를 확인한다.
+
+**NUC 주소가 바뀌면 다시 apply한다.** 콘솔에서 NUC IPv4를 바꾸거나 NUC를 재등록하면
+전역 nameserver가 옛 주소를 가리킨다. 공용 서버가 답해 이름은 계속 풀리지만 tailnet 기기의 AdGuard Home 경로만 끊긴다.
+NUC에서 `tailscale ip -4`의 주소가 `tailscale dns status --all`의 전역 서버에 있는지 보고, 없으면 이 root를 plan·apply한다.
 시나리오 14의 집 Wi-Fi·셀룰러·NUC 장애 시험까지 통과해야 DNS 실환경 검증 U34를 완료로 기록한다.
 NUC 자신은 `accept-dns=false`를 유지한다.
 

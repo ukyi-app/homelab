@@ -1,6 +1,7 @@
 locals {
-  # 첫 import와 무변경 plan 확인 뒤 별도 PR에서 target으로 바꾼다. 환경변수로 건너뛰지 않는다.
-  dns_phase = "adopt"
+  # adopt(현재 값 import, 2026-10-20 무변경 확인)를 거쳐 target으로 바꿨다. 환경변수로 건너뛰지 않는다.
+  # target도 split DNS·검색 도메인은 첫 사본에서 읽으므로 TF_VAR_dns_adoption_snapshot은 계속 필요하다.
+  dns_phase = "target"
 }
 
 data "tailscale_devices" "nuc" {
@@ -22,6 +23,8 @@ locals {
     override_local_dns = true
     magic_dns          = true
     nameservers = [
+      # NUC 주소는 apply 때 읽는다. 콘솔에서 NUC IPv4를 바꾸거나 재등록하면 이 root를 다시 apply해야 한다.
+      # 옛 주소가 남아도 공용 서버가 답해 증상이 없고, tailnet 기기의 AdGuard Home 경로만 조용히 끊긴다.
       { address = try(local.nuc_ipv4[0], ""), use_with_exit_node = false },
       { address = "94.140.14.14", use_with_exit_node = false },
       { address = "94.140.15.15", use_with_exit_node = false }
