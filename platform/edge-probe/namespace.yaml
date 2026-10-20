@@ -1,0 +1,10 @@
+# app-* 이름이라 ClusterSecretStore infisical-apps의 conditions에 맞는다. 이 Application이 소유해 정리 PR이
+# Application을 지우면 ns째 지워진다(root 템플릿의 finalizer, e3-probe와 같음). PSA는 앱 ns와 같은 restricted.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-edge-probe
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

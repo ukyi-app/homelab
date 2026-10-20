@@ -17,6 +17,11 @@ components:
   externalSecrets:
     enabled: true
 
+  # T08a. edge-probe(공개 경로 시험 앱, wave 0). edge-probe.ukyi.app 200과 hooks.ukyi.app/github HMAC 수신기.
+  # 사람이 Infisical에 /apps/edge-probe/GITHUB_WEBHOOK_SECRET을 만들고 cloudflared를 켠 뒤 켠다. 봇 배포(T16b) 때 템플릿째 지운다.
+  edgeProbe:
+    enabled: false
+
   # T08a. cert-manager, wave -7
   certManager:
     enabled: false
