@@ -1,7 +1,7 @@
 # T08a 네트워크·DNS·외부 공개
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-20 착수. Terraform root 셋 apply, cert-manager·Traefik·Tailscale operator·cloudflared·edge-probe·AdGuard 켬(PR #773~#780), Tailscale DNS 목표 전환 적용(2026-10-20 17:59, PR #781). 남은 것: 시나리오 14, U28, GitHub 시험 webhook, cert-manager 시험 Certificate. 사람: tailnet HTTPS 켜짐 확인, ACL·DNS 현재 값 저장소 밖 보관, operator OAuth 발급·등록)
+- 상태: 진행 중 (2026-10-20 착수. 완료 조건 중 남은 것: 집 Wi-Fi 사용자 규칙 적용률 20회와 시험 규칙 삭제(사람), U32 출처 확인(AdGuard 질의 로그). 나머지는 아래 "결과". AC-P6 LAN 불합격은 사용자 한계 승인. 사람: tailnet HTTPS 켜짐 확인, ACL·DNS 현재 값 저장소 밖 보관, operator OAuth 발급·등록)
 - 명세: [../spec.md](../spec.md) §4.5
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4a, E.3, C.3.4~C.3.6, C.3.8, C.3.9, C.8
 - Blocked by: T07, T09
@@ -147,6 +147,28 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - 노드 DNS: `resolvectl status`에 `1.1.1.1 9.9.9.9`, `tailscale dns status` → "Tailscale DNS: disabled".
 - cert-manager: `kubectl -n cert-manager get deploy` Ready, 시험 Certificate Ready.
 - R2: `homelab-backups`의 lifecycle 규칙에 prefix `valkey/`가 적혀 있다.
+
+## 결과 (2026-10-20)
+
+실제 IP·tailnet 이름은 적지 않는다(D-23). 시각과 명령의 세부는 [../approvals.md](../approvals.md).
+
+- 공개 경로: `edge-probe.ukyi.app` 200, 없는 host 404, cloudflared 커넥터 4개, HSTS 헤더. **U01 통과**(원격 관리 터널이 와일드카드 hostname을 받음).
+- 공개 webhook 경로: `hooks.ukyi.app/github` GET 403, 다른 경로 POST 403, 틀린 서명 401, `ukyi-app/homelab` 시험 webhook ping 200(생성 뒤 바로 삭제). **AC-P12 이 자리 통과.**
+- 내부 UI: Argo CD·AdGuard가 tailnet 주소로 유효 인증서와 함께 열림. Tailscale IPv4를 바꾼 뒤에도 그대로 열림.
+- ACL: 새 정책 import·적용, 원격 기기에서 `tailscale ssh`로 NUC 접속(사람 확인).
+- Tailscale DNS: adopt import 무변경 → (b′) 목표 전환 apply, 직후 plan 무변경. 전역 nameserver = NUC 현재 IPv4 + `94.140.14.14` + `94.140.15.15`, Cloudflare 없음. **U34 통과**(provider는 Alpha Resource 경고).
+- AdGuard: LAN·tailnet 주소 모두 응답, 기본 목록 차단(`doubleclick.net` → `0.0.0.0`).
+- 시나리오 14:
+  - LAN(공유기 경유, 10초 간격 30회): 26회 시간 초과, 복구 뒤 4회 정상. **AC-P6 LAN 불합격, 사용자 한계 승인.** NUC 무응답 시험(nft DROP 150초)에서도 11회 모두 시간 초과라 공유기가 보조 DNS로 넘어가지 않는다(**U19**). 이 공유기는 DHCP DNS 지정과 DNS 프록시 끄기가 없다. 완화: 런북 `docs/runbooks-public/nuc-dns-outage.md`, T08b AdGuard 정지 경보.
+  - 셀룰러 Tailscale 기기(NUC AdGuard 무응답 중): `doubleclick.net` → `0.0.0.0`, `example.com` 정상. **U33 통과.**
+  - 노드: `resolvectl query example.com` 정상(AdGuard 정지 중), 이미지 받기 성공(복구 뒤 재시도, 노드 DNS는 AdGuard와 무관).
+  - 내부 UI: AdGuard 정지 중 NUC에서 Argo CD HTTPS 200.
+  - 사용자 규칙 적용률: 셀룰러 19/20. 집 Wi-Fi 20회는 남음.
+- U02: 같은 root 동시 plan에서 하나가 `Error acquiring the state lock`(통과).
+- U28: NetworkPolicy 없는 시험 ns 파드가 운영자 맥의 Tailscale 주소 시험 포트에 연결 성공. 받은 쪽 출발 주소는 `nc -k`가 출력하지 않아 직접 보지 못했지만, 연결이 된 것은 출발 주소가 NUC의 Tailscale 주소라는 뜻이다(다른 주소면 Tailscale이 버린다). D-11 (c) 재검토의 입력이고 결정은 사용자 대기.
+- 노드 DNS: `resolvectl` 전역 `1.1.1.1 9.9.9.9`, `tailscale dns status` "Tailscale DNS: disabled."
+- cert-manager: 세 Deployment Ready, 시험 ns의 selfSigned Certificate Ready(ns 삭제).
+- R2: `homelab-backups` lifecycle prefix `valkey/`, 14일, 켜짐. Cloudflare plan 드리프트 없음.
 
 ## 되돌리는 방법
 

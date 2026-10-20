@@ -59,6 +59,7 @@
 - AdGuard Home이 tailnet에서 조용히 빠져도 공용 서버가 답해 증상이 없다. 관측 스택에 "tailnet 출처 질의가 1시간 0건이면 경보"를 둔다. 이 경보가 이탈을 잡는 유일한 장치라 실제 발화 시험을 완료 조건에 둔다.
 - 질의 로그를 세는 방식은 이 티켓에서 T08a의 U32 결과로 정한다(설계 C.3.7 제안: 작은 CronJob이 AdGuard API를 읽어 지표를 내거나 healthchecks 체크를 ping). servicelb MASQUERADE로 모든 질의가 svclb 파드 IP 하나로 보이면 출처로 가를 수 없으므로, hostNetwork로 바꾸거나(T08a의 AdGuard 변경) 다른 방식(예: tailnet 쪽 기기의 주기 시험 질의)을 쓴다.
 - 경보는 1시간 무질의가 지난 뒤 다음 평가 주기에 울린다.
+- **AdGuard 정지 경보(AC-P6 한계 승인의 완화, T08a 2026-10-20):** 공유기가 보조 DNS로 넘어가지 않아 AdGuard Home이 멈추면 Tailscale 없는 LAN 기기의 DNS가 전부 끊긴다. 그래서 AdGuard Home 파드가 1분 넘게 Ready가 아니면 경보하고, 경보 문구에 런북 `docs/runbooks-public/nuc-dns-outage.md`를 넣는다. 핵심 룰의 KubePodNotReady(15분)로는 늦다. NUC 전체 정지는 외부 생존 감시가 잡는다. 발화 시험을 완료 조건에 둔다.
 
 ### 읽기 전용 접근 셋 (AC-P12, 설계 C.8)
 
@@ -129,6 +130,7 @@
 - 시나리오 16(비AI 경보), 17(외부 감시)을 통과한다.
 - 시나리오 6·7의 경보 부분(T09가 넘긴 것)을 통과한다.
 - "tailnet 출처 질의 1시간 0건" 경보의 실제 발화 시험을 통과했다(아래 검증).
+- AdGuard 정지 경보(AdGuard Home 파드 1분 넘게 Ready 아님, 경보 문구에 런북 `docs/runbooks-public/nuc-dns-outage.md`)의 발화 시험을 통과했다. 정지는 LAN DNS 전체 장애라 시험 창을 짧게 잡는다(AC-P6 한계 승인, T08a 2026-10-20).
 - 설계 C.8의 읽기 전용 접근(CI 검사 L30은 T10)·경보 외부 수신자·격리 작업 공간 준비 확인을 통과한다(D-14 영속 공간 유지와 상주 작업자 모양, D-15 허용 목록 확인 포함. 설계 E4b).
 - 핵심 룰 단위 시험을 통과한다.
 - 새 체크가 초록이 된 뒤 옛 healthchecks 체크를 지웠고, T06 자격 폐기 표의 그 줄(옛 ping URL, `보류(D-10, T08b)`)이 닫혔고, approvals에 기록돼 있다. (2026-10-19 T06 중 사용자가 먼저 지웠다. 이 항목은 그 approvals 기록과 콘솔에 옛 체크가 없음을 보는 것으로 닫는다)
