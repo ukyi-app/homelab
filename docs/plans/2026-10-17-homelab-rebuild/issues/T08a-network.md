@@ -52,10 +52,10 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 ### Tailscale ACL (D-11 (c), `infra/tailscale`)
 
 - 2026-10-20 16:30에 (a) 정책(태그 없는 NUC, self 규칙)을 적용했다. 같은 날 U28 결과로 D-11이 (c)로 바뀌었다(사용자). 남은 일은 (c) 적용이다.
-- **ACL PR 하나에 넣을 것(설계 C.3.5 예시):** tagOwners `tag:nuc`·`tag:k8s-go`, 공유기 경로 `autoApprovers`, `autogroup:member → tag:nuc:22,53,6443`(mosh를 쓰면 그 UDP 범위도), `autogroup:member`·`tag:nuc` → `tag:k8s:443`, `autogroup:member → tag:k8s-go:80`(T08c), 공유기 관리 화면 grant(사용자가 콘솔에 넣은 것을 옮김. 지금 `infra/tailscale` plan은 이 grant를 지우는 드리프트라 그 전에는 apply하지 않는다), ssh `autogroup:member → tag:nuc`(`accept`, nonroot + root). NUC → 사람 기기 규칙은 두지 않는다. self 규칙은 사람 기기끼리 쓰려고 남긴다.
-- **같은 PR:** `infra/tailscale-dns`의 precondition을 "기대 소유자의 태그 없는 기기"에서 "태그가 `tag:nuc` 하나"로 바꾸고 `nuc_expected_owner` 변수와 Infisical 키를 정리한다. `docs/runbooks-public/bootstrap.md`의 NUC 등록을 `--advertise-tags=tag:nuc`로 바꾸고 키 만료 해제 단계를 뺀다.
-- **적용 순서(집에서, LAN으로 NUC에 닿을 수 있을 때):** (1) 정책 사본을 저장소 밖에 둔다 → (2) ACL plan·apply. 새 규칙이 먼저 생기고 NUC는 아직 사용자 기기라 기존 경로가 그대로다 → (3) 콘솔에서 NUC에 `tag:nuc`를 붙인다 → (4) 원격 기기에서 `tailscale ssh`, kubectl, AdGuard DNS(`dig @<NUC tailnet 주소>`), 공유기 관리 화면, 내부 UI를 확인한다 → (5) `infra/tailscale-dns` plan·apply(값 무변경, precondition 통과) → (6) U28 재시험: 같은 시험 파드가 운영자 기기에 닿지 않아야 한다.
-- **되돌리기:** 정책 사본으로 ACL을 되돌리고, NUC를 사용자 기기로 다시 로그인한 뒤(`sudo tailscale up --force-reauth`) 키 만료를 끈다.
+- **ACL PR 하나에 넣을 것(설계 C.3.5 예시):** tagOwners `tag:nuc`·`tag:k8s-go`, 공유기 경로 `autoApprovers`, `autogroup:admin → tag:nuc:22,6443`(mosh를 쓰면 그 UDP 범위도), `autogroup:member → tag:nuc:53`, `autogroup:member`·`tag:nuc` → `tag:k8s:443`, `autogroup:member → tag:k8s-go:80`(T08c), 공유기 관리 화면 grant(사용자가 콘솔에 넣은 것을 옮김. 지금 `infra/tailscale` plan은 이 grant를 지우는 드리프트라 그 전에는 apply하지 않는다), ssh `autogroup:admin → tag:nuc`(`accept`, nonroot + root. 태그 대상은 self처럼 소유자로 좁혀지지 않아 src를 관리자로 둔다). NUC → 사람 기기 규칙은 두지 않는다. self 규칙은 사람 기기끼리 쓰려고 남긴다.
+- **같은 PR:** `infra/tailscale-dns`의 precondition을 "기대 소유자의 태그 없는 기기"에서 "태그가 `tag:nuc` 하나"로 바꾸고 `nuc_expected_owner` 변수와 Infisical 키를 정리한다. `docs/runbooks-public/bootstrap.md`의 NUC 등록에 `--advertise-tags=tag:nuc`와 `--advertise-routes=192.168.117.1/32`를 넣고 키 만료 해제 단계를 확인으로 바꾼다(`autoApprovers`는 광고된 경로를 승인할 뿐 광고하지 않는다).
+- **적용 순서(집에서, LAN으로 NUC에 닿을 수 있을 때):** (0) NUC가 공유기 경로를 광고하는지 본다(`tailscale debug prefs`의 `AdvertiseRoutes`. 2026-10-20에는 광고 중). 없으면 `sudo tailscale set --advertise-routes=192.168.117.1/32` → (1) 정책 사본을 저장소 밖에 둔다 → (2) ACL plan·apply. 새 규칙이 먼저 생기고 NUC는 아직 사용자 기기라 기존 경로가 그대로다 → (3) 콘솔에서 NUC에 `tag:nuc`를 붙인다 → (4) 원격 기기에서 `tailscale ssh`, kubectl, AdGuard DNS(`dig @<NUC tailnet 주소>`), 공유기 관리 화면, 내부 UI를 확인한다 → (5) `infra/tailscale-dns` plan·apply(값 무변경, precondition 통과) → (6) U28 재시험: 같은 시험 파드가 운영자 기기에 닿지 않아야 한다.
+- **되돌리기:** 정책 사본으로 ACL을 되돌리고, NUC를 사용자 기기로 다시 로그인한 뒤 키 만료를 끈다. `tailscale up`은 실행마다 바꾼 플래그를 모두 다시 줘야 하므로 전체로 적는다: `sudo tailscale up --force-reauth --hostname=<NODE_NAME> --accept-dns=false --ssh --advertise-routes=192.168.117.1/32 --advertise-tags=`(빈 값이 태그 제거). 브라우저 로그인이 필요하다.
 - D-08 (b′)에서 운영자 기기가 NUC의 AdGuard Home(`:53`)에 닿는 길은 `autogroup:member → tag:nuc:53`이다. 빠뜨려도 공용 서버가 답해 증상이 없으므로 적용 뒤 AdGuard 질의 로그로 본다.
 - 남는 위험: 사람 기기를 잃으면 비밀번호 없는 root SSH까지 열린다((b)를 고르지 않음).
 
@@ -158,7 +158,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - 공개 webhook 경로: `hooks.ukyi.app/github` GET 403, 다른 경로 POST 403, 틀린 서명 401, `ukyi-app/homelab` 시험 webhook ping 200(생성 뒤 바로 삭제). **AC-P12 이 자리 통과.**
 - 내부 UI: Argo CD·AdGuard가 tailnet 주소로 유효 인증서와 함께 열림. Tailscale IPv4를 바꾼 뒤에도 그대로 열림.
 - ACL: 새 정책 import·적용, 원격 기기에서 `tailscale ssh`로 NUC 접속(사람 확인).
-- Tailscale DNS: adopt import 무변경 → (b′) 목표 전환 apply, 직후 plan 무변경. 전역 nameserver = NUC 현재 IPv4 + `94.140.14.14` + `94.140.15.15`, Cloudflare 없음. **U34 통과**(provider는 Alpha Resource 경고).
+- Tailscale DNS: adopt import 무변경 → (b′) 목표 전환 apply, 직후 plan 무변경. 전역 nameserver = NUC 현재 IPv4 + `94.140.14.14` + `94.140.15.15`, Cloudflare 없음. **U34의 import·DNS 동작 통과**(provider는 Alpha Resource 경고. (a)의 소유자 precondition으로 실행했고, `tag:nuc` precondition은 (c) 적용 때 검증).
 - AdGuard: LAN·tailnet 주소 모두 응답, 기본 목록 차단(`doubleclick.net` → `0.0.0.0`).
 - 시나리오 14:
   - LAN(공유기 경유, 10초 간격 30회): 26회 시간 초과, 복구 뒤 4회 정상. **AC-P6 LAN 불합격, 사용자 한계 승인.** NUC 무응답 시험(nft DROP 150초)에서도 11회 모두 시간 초과라 공유기가 보조 DNS로 넘어가지 않는다(**U19**). 이 공유기는 DHCP DNS 지정과 DNS 프록시 끄기가 없다. 완화: 런북 `docs/runbooks-public/nuc-dns-outage.md`, T08b AdGuard 정지 경보.
