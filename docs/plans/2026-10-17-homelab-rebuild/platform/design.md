@@ -699,7 +699,7 @@ homelab/                          (목표 예시)
 ├── tools/tf-github.sh            GitHub root 래퍼(E5. E7부터 `homelab github`가 같은 규칙으로 감싼다)
 ├── cli/                          Bun·TypeScript CLI
 ├── .github/workflows/            ci.yaml, app-build.yaml(공통 reusable), deploy-merge.yaml, README.md
-└── docs/                         plans/, runbooks-public/(bootstrap.md, restore.md, rotate.md)
+└── docs/                         plans/, runbooks-public/(bootstrap.md, restore.md, rotate.md, recovery-assets.md)
 ```
 
 - 사람이 편집하는 원본과 자동 생성 결과물을 파일 단위로 나눈다. 자동 생성 파일은 `apps/<app>/image.yaml` 하나뿐이다.
