@@ -11,6 +11,7 @@
 
 - 네 단계는 원자적이지 않다: Infisical 원본 변경 → Kubernetes Secret 갱신 → 실제 자격 적용 → 쓰는 쪽이 새 자격 사용. 환경변수는 파드를 다시 만들어야 바뀐다.
 - Infisical Free에는 버전 이력이 없다. 덮어쓸 값은 `<KEY>_PREVIOUS`로 남겼다가 새 값을 확인한 뒤 지운다.
+  예외: Secret Sync가 내보내는 프로젝트(`homelab-ci-merge`)에는 `_PREVIOUS`를 만들지 않는다. Sync가 프로젝트의 키를 그대로 GitHub environment에 복제해, 옛 키가 두 번째 environment secret이 되고 T10 guard(secret 이름 집합 `[]` 또는 `[HOMELAB_MERGE_KEY]`)가 실패한다. 옛 App 키는 GitHub App 쪽에 남아 있어 Infisical 사본이 필요 없다.
 - 즉시 동기화는 annotation으로 한다. `refreshInterval`(1h)을 기다리지 않는다.
 
   ```bash
@@ -27,25 +28,30 @@
 1. Infisical에서 identity의 Universal Auth에 새 client secret을 만든다. TTL 0, 사용 횟수 0(무제한). ESO는 동기화마다 새로 로그인하므로 사용 횟수를 1로 두면 두 번째 동기화부터 실패한다. 옛 secret은 아직 둔다.
 2. 복구 자산 두 곳을 새 값으로 갱신한다.
 3. [bootstrap.md](bootstrap.md) 2.2의 명령으로 부트스트랩 Secret `external-secrets/infisical-universal-auth`를 바꾼다. 같은 명령이고 값만 새것이다.
-4. 확인한다. ESO를 재시작하지 않아도 된다. ESO가 5분마다 Store를 다시 검증한다(시나리오 7에서는 교체 약 1분 20초 뒤 Ready).
+4. 새 값으로 동기화되는지 확인한다. 이미 Ready·`SecretSynced`인 상태에서 교체하므로 상태만 보면 옛 결과를 새 값의 성공으로 오인한다. ExternalSecret 하나를 즉시 동기화하고 `refreshTime`이 교체 시각 뒤인지 본다. ESO는 동기화마다 부트스트랩 Secret으로 새로 로그인하므로(시나리오 7에서 폐기 직후 즉시 동기화가 바로 실패했다), 이 동기화가 성공이면 새 값이 맞다. ESO를 재시작하지 않아도 된다.
 
    ```bash
-   kubectl get clustersecretstore            # 둘 다 READY True
-   kubectl get externalsecret -A             # 모두 SecretSynced. 하나를 즉시 동기화해 바로 볼 수 있다
+   date -u +%Y-%m-%dT%H:%M:%SZ               # 교체 시각(3단계 직후)
+   kubectl -n argocd annotate externalsecret argocd-owner force-sync="$(date +%s)" --overwrite
+   kubectl -n argocd get externalsecret argocd-owner \
+     -o jsonpath='{.status.refreshTime} {.status.conditions[0].reason}{"\n"}'   # 교체 시각 뒤, SecretSynced
+   kubectl get clustersecretstore            # 둘 다 READY True. Store는 5분마다 다시 검증한다
    ```
 
-5. 새 값으로 Ready를 본 뒤에만 Infisical에서 옛 client secret을 폐기한다. 순서를 바꾸면 그 사이 동기화가 실패한다(기존 Secret과 서비스는 유지된다, 시나리오 7).
+   새 값이 틀렸으면 이 동기화가 `SecretSyncedError`가 된다. 기존 Secret은 그대로이니 3단계를 맞는 값으로 다시 한다.
+5. 4단계가 새 값으로 성공한 뒤에만 Infisical에서 옛 client secret을 폐기한다. 순서를 바꾸면 그 사이 동기화가 실패한다(기존 Secret과 서비스는 유지된다, 시나리오 7).
 
 ## 2. Argo CD `owner` 비밀번호
 
 ExternalSecret `argocd/argocd-owner`가 Infisical `/platform/argocd`의 두 키를 `argocd-secret`에 합친다(`platform/external-secrets/templates/argocd-owner.yaml`). Argo CD는 bcrypt 해시만 받는다.
 
-1. 새 비밀번호를 정하고 bcrypt 해시를 만든다. 비밀번호는 `getpass`로만 받아 화면·인자에 남기지 않는다. 8자 이상, 72바이트 이하다(bcrypt는 72바이트 뒤를 버린다).
+1. 새 비밀번호를 정하고 bcrypt 해시를 만든다. 비밀번호는 `getpass`로만 받아 화면·인자에 남기지 않는다. 8자 이상, 72바이트 이하다(bcrypt는 72바이트 뒤를 버린다). 해시는 비밀번호를 오프라인으로 추측할 수 있는 자료라 값처럼 다룬다: 에이전트가 읽는 터미널이나 기록이 남는 세션에서 돌리지 않고, Infisical에 붙여 넣은 뒤 화면과 스크롤백을 지운다. 파일로 저장하지 않는다.
 
    ```bash
    uv run --no-project --with 'bcrypt==5.0.0' python -I -c \
      'import bcrypt, getpass; print(bcrypt.hashpw(getpass.getpass().encode(), bcrypt.gensalt(12)).decode())'
    date -u +%Y-%m-%dT%H:%M:%SZ               # 새 OWNER_PASSWORD_MTIME
+   read -r -p "Infisical에 넣었으면 Enter" _; clear; printf '\033[3J'
    ```
 
 2. Infisical `/platform/argocd`의 `OWNER_PASSWORD_BCRYPT`와 `OWNER_PASSWORD_MTIME`을 함께 바꾼다. MTIME을 바꾸면 그 전에 발급된 세션 토큰이 무효가 된다. 원문은 비밀번호 관리자에 둔다.
