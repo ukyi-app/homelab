@@ -25,6 +25,15 @@ spec:
     name: argocd-secret
     creationPolicy: Merge
     deletionPolicy: Retain
+    # 함정: template이 없으면 ESO가 이 ExternalSecret의 라벨·주석(Argo CD tracking-id 포함)을 대상 Secret에 복사한다
+    # (v2.13.0 setMetadata). argocd-secret의 tracking-id가 이 Application 것으로 바뀌자 argocd Application이 되돌렸고,
+    # 두 컨트롤러가 몇 초마다 그 Secret을 번갈아 덮어썼다(2026-10-20 실측). template을 두면 template의 metadata만
+    # 쓴다. creationPolicy Merge라 서버가 넣은 키도 남는다.
+    # mergePolicy Merge: 아래 data[] 값을 Secret에 넣는다. v2.13.0은 data template이 없으면 Replace여도 넣지만
+    # (ApplyTemplate의 noTemplate), 문서는 Replace를 "조회 결과를 쓰지 않음"으로 설명해 명시한다.
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
   data:
     # Argo CD는 bcrypt 해시만 받는다. 비밀번호를 바꾸면 MTIME도 함께 바꾼다. 그 시각 전에 발급된 세션 토큰이 무효가 된다.
     - secretKey: accounts.owner.password
