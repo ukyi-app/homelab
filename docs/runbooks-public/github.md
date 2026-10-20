@@ -13,7 +13,8 @@ GitHub 보호 설정(ruleset, environment `automerge`, Actions 권한)은 Terraf
 ```bash
 export HOMELAB_ADMIN_PROJECT_ID=<homelab-admin project ID>   # 없으면 래퍼가 묻는다
 export R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com  # 없으면 래퍼가 묻는다
-# GITHUB_TOKEN이 없으면 gh auth token을 쓴다. classic·OAuth 토큰은 delete_repo 범위가 없어야 한다.
+# GITHUB_TOKEN이 없으면 gh auth token을 쓴다. classic·OAuth 토큰은 repo·admin:org가 있고 delete_repo가 없어야 한다.
+# gh 기본 로그인 범위(repo, read:org, gist)에는 admin:org가 없다: gh auth refresh -h github.com -s admin:org
 tools/tf-github.sh verify
 ```
 

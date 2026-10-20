@@ -7,9 +7,10 @@
 #   tools/tf-github.sh apply [--allow-destroy] state 백업 → 잠금 잡은 plan → 확인 → apply → verify
 #
 # 자격:
-# - GITHUB_TOKEN 환경변수(없으면 gh auth token). classic·OAuth 토큰은 범위가 있고 delete_repo가 없어야 한다.
+# - GITHUB_TOKEN 환경변수(없으면 gh auth token). classic·OAuth 토큰은 repo·admin:org가 있고 delete_repo가 없어야 한다.
 #   fine-grained PAT는 만료가 있어야 한다. 그 경로에는 저장소 삭제 방어가 없다(ruleset에 필요한 Administration
-#   write가 삭제 권한도 준다). 리소스 소유자 ukyi-app, 대상 저장소만 선택, 만료 지정은 사람이 지킨다.
+#   write가 삭제 권한도 준다). 리소스 소유자 ukyi-app, 대상 저장소만 선택, 만료 지정, 저장소 Administration RW·
+#   Environments RW·Secrets R·Actions R, org Administration R·Secrets R은 사람이 지킨다(래퍼가 머리글로 볼 수 없다).
 # - R2 state 키는 Infisical homelab-admin /terraform/state에서만 infisical run으로 받는다. 이 경로에는 R2 키만 둔다.
 #
 # 작업 사본에서 돌지 않는다. origin/main을 임시 worktree로 꺼내 그 사본만 실행한다. plan도 HCL과 provider를 실행하고,
@@ -67,6 +68,9 @@ case $GITHUB_TOKEN in
     scopes=${scopes// /}
     [[ -n $scopes ]] || die "토큰 범위가 비어 있다(익명과 같은 권한). 거부한다"
     [[ ,$scopes, != *,delete_repo,* ]] || die "토큰에 delete_repo 범위가 있다. 그 범위 없는 토큰을 쓴다(gh auth refresh -r delete_repo 반대로)"
+    # guard 7(org fork PR 정책)과 guard 9(org secret)는 org 조회라 admin:org가 있어야 한다. 없으면 plan이 403으로 멈춘다.
+    [[ ,$scopes, == *,repo,* ]] || die "토큰에 repo 범위가 없다"
+    [[ ,$scopes, == *,admin:org,* ]] || die "토큰에 admin:org 범위가 없다(org Actions 권한·secret 조회). gh auth refresh -h github.com -s admin:org"
     say "토큰: classic/OAuth, 범위 ${scopes}"
     ;;
   github_pat_*)

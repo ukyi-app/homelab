@@ -58,7 +58,8 @@ esac
 EOF
 chmod +x "$t/bin/"*
 
-printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo, read:org\r\n\r\n{}\n' >"$t/h-ok"
+printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: admin:org, repo, workflow\r\n\r\n{}\n' >"$t/h-ok"
+printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo\r\n\r\n{}\n' >"$t/h-noadminorg"
 printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo, delete_repo\r\n\r\n{}\n' >"$t/h-delete"
 printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: \r\n\r\n{}\n' >"$t/h-empty"
 printf 'HTTP/2.0 200 OK\r\nGitHub-Authentication-Token-Expiration: 2026-12-01 00:00:00 UTC\r\n\r\n{}\n' >"$t/h-pat"
@@ -94,6 +95,7 @@ expect "classic 토큰, 정상 범위, 변경 없음" 0 -- verify
 expect "verify 차이는 exit 2" 2 STUB_PLAN_EXIT=2 -- verify
 expect "guard 실패(plan exit 1)는 exit 1" 1 STUB_PLAN_EXIT=1 -- verify
 expect "delete_repo 범위 토큰 거부" nonzero STUB_HEADERS="$t/h-delete" -- verify
+expect "admin:org 없는 gh 기본 범위 토큰 거부" nonzero STUB_HEADERS="$t/h-noadminorg" -- verify
 expect "범위 머리글이 빈 classic 토큰 거부" nonzero STUB_HEADERS="$t/h-empty" -- verify
 expect "만료 없는 fine-grained PAT 거부" nonzero STUB_TOKEN=github_pat_stub STUB_HEADERS="$t/h-pat-noexp" -- verify
 expect "만료 있는 fine-grained PAT 허용" 0 STUB_TOKEN=github_pat_stub STUB_HEADERS="$t/h-pat" -- verify
