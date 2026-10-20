@@ -10,7 +10,7 @@
 // 3. 위에서 안 다룬 추적 kustomization도 모두 build한다(꺼진 구성 요소도 깨지지 않게).
 // 4. 차트의 시험 values(platform/charts/<차트>/ci/*.yaml)로 렌더한다. 공유 차트 PR은 어느 앱에도 바로 적용되지 않으므로
 //    이것이 그 PR의 렌더 검사다(설계 C.4.5).
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { type Doc, type Violation, ROOT, gitFiles, parseAll, run, sameRepo, tempDir, toolVersion } from "./lib";
 
@@ -51,6 +51,45 @@ function kustomizeBuild(dir: string): { ok: boolean; out: string } {
 
 function isKustomizeDir(dir: string): boolean {
   return KUSTOMIZATION_FILES.some((f) => existsSync(join(ROOT, dir, f)));
+}
+
+// 차트 디렉터리의 templates/ 아래 파일(작업 트리면 추적 파일만, 태그 트리면 꺼낸 파일 전부).
+function templateFiles(dir: string): string[] {
+  if (!dir.startsWith("/")) return gitFiles(`${dir}/templates/`).map((f) => join(ROOT, f));
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else out.push(p);
+    }
+  };
+  if (existsSync(join(dir, "templates"))) walk(join(dir, "templates"));
+  return out;
+}
+
+// 공유 차트를 태그 시점 내용으로 꺼낸다. 태그가 로컬에 없으면(얕은 checkout) origin에서 그 태그만 받는다.
+// 차트 태그(<이름>-v<semver>)만 받는다. 브랜치 이름은 움직이므로 렌더 근거가 못 된다.
+const revCache = new Map<string, string>();
+export function pathAtRevision(tag: string, path: string, tmp: string): string {
+  const key = `${tag}:${path}`;
+  const hit = revCache.get(key);
+  if (hit) return hit;
+  if (!/^[a-z-]+-v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`차트 태그 형식이 아니다: ${tag}`);
+  if (run(["git", "rev-parse", "--verify", "--quiet", `refs/tags/${tag}`]).code !== 0) {
+    const f = run(["git", "fetch", "--depth=1", "--no-tags", "origin", `refs/tags/${tag}:refs/tags/${tag}`]);
+    if (f.code !== 0) throw new Error(`태그 ${tag}가 없다: ${f.stderr.trim()}`);
+  }
+  const dst = join(tmp, "rev", tag);
+  mkdirSync(dst, { recursive: true });
+  // tar는 바이너리라 문자열로 받지 않는다.
+  const archive = Bun.spawnSync(["git", "archive", "--format=tar", tag, path], { cwd: ROOT, stdout: "pipe", stderr: "pipe" });
+  if (archive.exitCode !== 0) throw new Error(`git archive ${tag} ${path} 실패: ${archive.stderr.toString()}`);
+  const x = Bun.spawnSync(["tar", "-x", "-C", dst], { stdin: archive.stdout, stderr: "pipe" });
+  if (x.exitCode !== 0) throw new Error(`tar 실패: ${x.stderr.toString()}`);
+  const out = join(dst, path);
+  revCache.set(key, out);
+  return out;
 }
 
 function plainDir(dir: string): { ok: boolean; out: string } {
@@ -109,18 +148,29 @@ export function renderAll(): RenderResult {
     }
     covered.add(path);
     const ns = app.spec?.destination?.namespace;
-    const isChart = existsSync(join(ROOT, path, "Chart.yaml"));
+    // main이 아닌 revision(공유 차트 태그, 정책이 그것만 허용)은 그 태그의 트리로 렌더한다. 작업 트리로 렌더하면
+    // 태그 뒤에 바뀐 차트를 검사해 Argo CD가 실제로 쓰는 옛 차트를 놓친다.
+    let srcDir = path;
+    if (src.targetRevision !== "main") {
+      try {
+        srcDir = pathAtRevision(String(src.targetRevision), path, tmp);
+      } catch (e) {
+        fail(where, (e as Error).message);
+        return undefined;
+      }
+    }
+    const isChart = existsSync(join(srcDir.startsWith("/") ? srcDir : join(ROOT, srcDir), "Chart.yaml"));
     if (src.helm && !isChart) {
       fail(where, "helm 필드가 있는데 Chart.yaml이 없다");
       return undefined;
     }
     let r: { ok: boolean; out: string };
     if (isChart) {
-      // Argo CD는 대상 클러스터의 API 목록을 Helm에 넘긴다. CI는 그 목록을 재현하지 않으므로 그것에 기대는 분기를 막는다.
-      // 막지 않으면 CI에서 거짓인 조건 아래의 리소스가 검사 없이 배포된다.
-      const caps = gitFiles(`${path}/templates/*`).filter((f) => /\.Capabilities\.APIVersions/.test(readFileSync(join(ROOT, f), "utf8")));
+      // Argo CD는 대상 클러스터의 API 목록·버전을 Helm에 넘긴다. CI는 그것을 재현하지 않으므로 Capabilities 자체를 막는다.
+      // 별칭($c := .Capabilities)이나 index로 돌아가도 이름은 남으므로 토큰으로 찾는다. 지금 쓰는 차트는 없다.
+      const caps = templateFiles(srcDir).filter((f) => /\bCapabilities\b/.test(readFileSync(f, "utf8")));
       if (caps.length > 0) {
-        fail(where, `로컬 차트가 .Capabilities.APIVersions에 기댄다(CI 렌더와 Argo CD 렌더가 달라진다): ${caps.join(", ")}`);
+        fail(where, `로컬 차트가 Capabilities를 쓴다(CI 렌더와 Argo CD 렌더가 달라진다): ${caps.map((f) => relative(ROOT, f)).join(", ")}`);
         return undefined;
       }
       const helm = src.helm ?? {};
@@ -135,7 +185,7 @@ export function renderAll(): RenderResult {
           fail(where, `ref 값 파일(${f})은 렌더하지 않는다. 같은 저장소의 다른 revision 참조는 Argo CD가 거부한다`);
           return undefined;
         }
-        files.push(join(path, f));
+        files.push(join(srcDir, f));
       }
       if (helm.valuesObject) {
         const vfile = join(tmp, `${name}-${cluster}-values.json`);
@@ -143,9 +193,12 @@ export function renderAll(): RenderResult {
         files.push(vfile);
       }
       const release = helm.releaseName ?? name;
-      const key = JSON.stringify(["helm", path, ns, release, helm.valueFiles ?? [], helm.valuesObject ?? null]);
-      r = cache.get(key) ?? helmTemplate(release, path, ns, files);
+      const key = JSON.stringify(["helm", srcDir, ns, release, helm.valueFiles ?? [], helm.valuesObject ?? null]);
+      r = cache.get(key) ?? helmTemplate(release, srcDir, ns, files);
       cache.set(key, r);
+    } else if (srcDir !== path) {
+      fail(where, "main이 아닌 revision은 공유 차트만 받는다");
+      return undefined;
     } else if (isKustomizeDir(path)) {
       const key = JSON.stringify(["kustomize", path]);
       r = cache.get(key) ?? kustomizeBuild(path);
