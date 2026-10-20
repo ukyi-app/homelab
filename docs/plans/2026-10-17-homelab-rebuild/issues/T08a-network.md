@@ -1,7 +1,7 @@
 # T08a 네트워크·DNS·외부 공개
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-20 착수. 완료 조건 중 남은 것: 집 Wi-Fi 사용자 규칙 적용률 20회와 시험 규칙 삭제(사람), U32 출처 확인(AdGuard 질의 로그), U28 출발 주소 측정, 노드의 AdGuard 경로를 끊은 상태에서 캐시 안 된 이미지 받기. 나머지는 아래 "결과". AC-P6 LAN 불합격은 사용자 한계 승인. 사람: tailnet HTTPS 켜짐 확인, ACL·DNS 현재 값 저장소 밖 보관, operator OAuth 발급·등록)
+- 상태: 진행 중 (2026-10-20 착수. 완료 조건 중 남은 것: 집 Wi-Fi 사용자 규칙 적용률 20회와 시험 규칙 삭제(사람), U32 출처 확인(AdGuard 질의 로그), D-11 (c) 적용(집에서 ACL 한 번, 아래 순서)과 U28 재시험. 나머지는 아래 "결과". AC-P6 LAN 불합격은 사용자 한계 승인. 사람: tailnet HTTPS 켜짐 확인, ACL·DNS 현재 값 저장소 밖 보관, operator OAuth 발급·등록)
 - 명세: [../spec.md](../spec.md) §4.5
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4a, E.3, C.3.4~C.3.6, C.3.8, C.3.9, C.8
 - Blocked by: T07, T09
@@ -49,13 +49,15 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - operator: chart 1.104.1. OAuth client(Services·Devices Core·Auth Keys write, 태그 `tag:k8s-operator`. Services는 2026-10-20 공식 설치 문서 기준으로 더함)는 Infisical `homelab`의 `/platform/tailscale`에서 ESO로 받는다. ns `tailscale`은 privileged다. ProxyClass로 프록시 메모리 상한을 둔다. operator Ingress reconcile은 메타데이터만 바뀐 변경을 무시하므로, 바꿀 때는 Ingress를 다시 만든다.
 - 전체 이름(`https://argocd.<tailnet>.ts.net`)만 열린다. 짧은 이름은 TLS 연결 실패다. 프록시는 인증서를 새로 받지 못하면 핸드셰이크를 실패시키고, 갱신 실패가 이어져도 만료까지 약 30일 여유가 있다. 막혔을 때 비상 경로는 `kubectl -n argocd port-forward svc/argocd-server 8080:80` 같은 port-forward다(설계 C.3.5).
 
-### Tailscale ACL (D-11 (a), `infra/tailscale`)
+### Tailscale ACL (D-11 (c), `infra/tailscale`)
 
-- 새 ACL은 `autogroup:self` 허용과 ssh 규칙을 유지한다. 빠지면 운영자의 NUC 원격 접속이 끊긴다.
-- D-11 (a) 확정(사용자 2026-10-18, T05): NUC는 태그 없는 사용자 기기다. 규칙은 설계 C.3.5 예시다: `autogroup:member → autogroup:self:*` accept, `autogroup:member → tag:k8s:443` accept(내부 UI 프록시), ssh는 `autogroup:member → autogroup:self` accept에 `autogroup:nonroot`·`root`. tagOwners는 `tag:k8s-operator`: `autogroup:admin`, `tag:k8s`: `tag:k8s-operator`.
-- D-08 (b′)에서 운영자 기기가 NUC의 AdGuard Home(`:53`)에 닿는 길도 이 self 규칙이다. NUC를 `tag:nuc`로 태그하면(D-11 (c)) `autogroup:member → tag:nuc:53` ACL 규칙이 필요하다. 빠뜨려도 공용 서버가 답해 증상이 없다.
-- (c)로 바꿀 조건은 이 티켓에서 U28 결과로 다시 본다: U28 시험에서 파드가 NUC 주소로 운영자 기기에 닿는 것이 확인되고, egress 정책이 없는 플랫폼 파드를 모두 막기 어렵다고 판단될 때다. 이때 (b)의 `check`를 함께 고를 수 있다. 조건에 맞으면 사용자에게 (c) 전환을 묻고, 바꾸면 설계 C.3.5 예시와 이 티켓의 검증을 함께 고친다.
-- 남는 위험: self 규칙은 NUC에서 운영자의 다른 기기로 가는 모든 포트도 연다. 대응은 공유 차트 egress의 tailnet 대역 제외(T10)와 작업자 공간의 init 규칙(T08b)이다. 그 밖의 플랫폼 파드는 각 구성 요소의 egress 정책에 같은 대역 제외를 두고, egress 정책이 없는 파드에는 이 위험이 남는다. 노트북을 잃으면 비밀번호 없는 root 접속까지 열린다(D-11 (a)의 대가).
+- 2026-10-20 16:30에 (a) 정책(태그 없는 NUC, self 규칙)을 적용했다. 같은 날 U28 결과로 D-11이 (c)로 바뀌었다(사용자). 남은 일은 (c) 적용이다.
+- **ACL PR 하나에 넣을 것(설계 C.3.5 예시):** tagOwners `tag:nuc`·`tag:k8s-go`, 공유기 경로 `autoApprovers`, `autogroup:member → tag:nuc:22,53,6443`(mosh를 쓰면 그 UDP 범위도), `autogroup:member`·`tag:nuc` → `tag:k8s:443`, `autogroup:member → tag:k8s-go:80`(T08c), 공유기 관리 화면 grant(사용자가 콘솔에 넣은 것을 옮김. 지금 `infra/tailscale` plan은 이 grant를 지우는 드리프트라 그 전에는 apply하지 않는다), ssh `autogroup:member → tag:nuc`(`accept`, nonroot + root). NUC → 사람 기기 규칙은 두지 않는다. self 규칙은 사람 기기끼리 쓰려고 남긴다.
+- **같은 PR:** `infra/tailscale-dns`의 precondition을 "기대 소유자의 태그 없는 기기"에서 "태그가 `tag:nuc` 하나"로 바꾸고 `nuc_expected_owner` 변수와 Infisical 키를 정리한다. `docs/runbooks-public/bootstrap.md`의 NUC 등록을 `--advertise-tags=tag:nuc`로 바꾸고 키 만료 해제 단계를 뺀다.
+- **적용 순서(집에서, LAN으로 NUC에 닿을 수 있을 때):** (1) 정책 사본을 저장소 밖에 둔다 → (2) ACL plan·apply. 새 규칙이 먼저 생기고 NUC는 아직 사용자 기기라 기존 경로가 그대로다 → (3) 콘솔에서 NUC에 `tag:nuc`를 붙인다 → (4) 원격 기기에서 `tailscale ssh`, kubectl, AdGuard DNS(`dig @<NUC tailnet 주소>`), 공유기 관리 화면, 내부 UI를 확인한다 → (5) `infra/tailscale-dns` plan·apply(값 무변경, precondition 통과) → (6) U28 재시험: 같은 시험 파드가 운영자 기기에 닿지 않아야 한다.
+- **되돌리기:** 정책 사본으로 ACL을 되돌리고, NUC를 사용자 기기로 다시 로그인한 뒤(`sudo tailscale up --force-reauth`) 키 만료를 끈다.
+- D-08 (b′)에서 운영자 기기가 NUC의 AdGuard Home(`:53`)에 닿는 길은 `autogroup:member → tag:nuc:53`이다. 빠뜨려도 공용 서버가 답해 증상이 없으므로 적용 뒤 AdGuard 질의 로그로 본다.
+- 남는 위험: 사람 기기를 잃으면 비밀번호 없는 root SSH까지 열린다((b)를 고르지 않음).
 
 ### Tailscale DNS (D-08, `infra/tailscale-dns`)
 
@@ -123,7 +125,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - Tailscale DNS가 (b′)이고 DNS plan이 무변경이다.
 - 공개 시험 URL이 200, 없는 host가 404, cloudflared `/ready`가 200이다.
 - 내부 UI가 `*.ts.net`으로 열린다.
-- 새 ACL 적용 뒤 원격에서 NUC로 Tailscale SSH가 된다.
+- (c) ACL과 NUC 태그를 적용한 뒤 원격에서 NUC로 Tailscale SSH·kubectl·AdGuard DNS·공유기 관리 화면이 되고, U28 재시험에서 시험 파드가 운영자 기기에 닿지 않는다.
 - 설계 C.8의 공개 webhook 경로 준비 확인을 통과한다.
 - R2 잠금 동시 실행 시험(U02)을 한 번 했고 결과가 기록돼 있다. T10의 `infra/github` 첫 apply가 이것을 기다린다.
 
@@ -161,11 +163,11 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - 시나리오 14:
   - LAN(공유기 경유, 10초 간격 30회): 26회 시간 초과, 복구 뒤 4회 정상. **AC-P6 LAN 불합격, 사용자 한계 승인.** NUC 무응답 시험(nft DROP 150초)에서도 11회 모두 시간 초과라 공유기가 보조 DNS로 넘어가지 않는다(**U19**). 이 공유기는 DHCP DNS 지정과 DNS 프록시 끄기가 없다. 완화: 런북 `docs/runbooks-public/nuc-dns-outage.md`, T08b AdGuard 정지 경보.
   - 셀룰러 Tailscale 기기(NUC AdGuard 무응답 중): `doubleclick.net` → `0.0.0.0`, `example.com` 정상. **U33 통과.**
-  - 노드: `resolvectl query example.com` 정상(AdGuard 정지 중). 이미지 받기는 정지 중 sudo 시간 초과로 못 했고 복구 뒤에만 성공해서 **남음**이다. 노드와 파드에서 NUC AdGuard(`192.168.117.15:53`)로 가는 길만 끊은 상태(LAN 기기 영향 없음)에서 캐시 안 된 이미지로 다시 본다.
+  - 노드: `resolvectl query example.com` 정상(AdGuard 정지 중). 이미지 받기는 정지 중 sudo 시간 초과로 못 해서, 19:25에 노드와 파드에서 NUC AdGuard(LAN·tailnet 주소 `:53`)로 가는 길만 막은 상태(LAN·tailnet 기기 영향 없음)에서 캐시 안 된 `busybox:1.36`을 받았다(성공). 노드는 AdGuard 없이 동작한다.
   - 내부 UI: AdGuard 정지 중 NUC에서 Argo CD HTTPS 200.
   - 사용자 규칙 적용률: 셀룰러 19/20. 집 Wi-Fi 20회는 남음.
 - U02: 같은 root 동시 plan에서 하나가 `Error acquiring the state lock`(통과).
-- U28: NetworkPolicy 없는 시험 ns 파드가 운영자 맥의 Tailscale 주소 시험 포트에 연결 성공. 받은 쪽 출발 주소는 macOS `nc -k`가 출력하지 않아 **아직 측정하지 못했다**(남음). NUC `tailscale0`의 `tcpdump`나 주소를 출력하는 리스너로 SNAT 뒤 출발 주소를 잰다. D-11 (c) 재검토의 입력이고 결정은 사용자 대기.
+- U28: NetworkPolicy 없는 시험 ns 파드가 운영자 맥의 Tailscale 주소 시험 포트에 연결 성공. 19:25 NUC `tailscale0` tcpdump에서 그 SYN의 출발 주소가 NUC의 Tailscale 주소였다(SNAT). 이 결과로 D-11을 (c)로 바꿨고(사용자), (c) 적용 뒤 재시험한다.
 - 노드 DNS: `resolvectl` 전역 `1.1.1.1 9.9.9.9`, `tailscale dns status` "Tailscale DNS: disabled."
 - cert-manager: 세 Deployment Ready, 시험 ns의 selfSigned Certificate Ready(ns 삭제).
 - R2: `homelab-backups` lifecycle prefix `valkey/`, 14일, 켜짐. Cloudflare plan 드리프트 없음.

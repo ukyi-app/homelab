@@ -104,7 +104,7 @@ NUC k3s ── Argo CD(main 60초 폴링)
 | D-08 | (a)(b)(c) 비교 | 내부 UI는 Tailscale operator Ingress의 `*.ts.net`(UI마다 단독 프록시. `*.home.ukyi.app` 내부 이름, AdGuard rewrite, 내부 와일드카드 인증서, cert-manager DNS-01 Cloudflare 토큰, traefik-ts 없음). Tailscale DNS는 (b′): Override 켬, 전역 nameserver = [NUC Tailscale IP(AdGuard Home), `94.140.14.14`, `94.140.15.15`](AdGuard 공용 DNS), C-05의 Cloudflare 4개 삭제, MagicDNS·HTTPS 켬. Tailscale을 켠 기기는 집 안팎에서 차단되고 NUC 장애 때도 공용 서버가 차단하며 답한다. 대가(AdGuard Home 전용 규칙은 일부 질의에만, 공용 경로 평문 UDP, 조용한 이탈 감시 필요, 로컬 전용 이름 안 풀림, 같은 도메인 광고는 못 막음)는 F D-08. 설정은 Terraform `tailscale_dns_configuration` | **확정(사용자 2026-10-18)** |
 | D-09 | 옛 VictoriaMetrics·VictoriaLogs·Alertmanager·Grafana 최소 구성 | 같은 계열. vmagent와 보조 수집기 4개를 빼고, 룰은 핵심 15개 안팎을 단위 시험과 함께 | **확정(사용자 2026-10-18, T05)** |
 | D-10 | 봇과 독립 채널, 옛 Telegram 봇·healthchecks.io 재사용 가능 | homelab 알림용 Telegram 봇을 새로 만든다. 옛 봇과 토큰은 그것을 쓰는 `mac-uptime-guard`를 T22에서 처리할 때까지 그대로 둔다(재발급하면 그 알림이 조용히 끊긴다). healthchecks.io 계정은 재사용하고 체크는 새로 만든다. Watchdog → healthchecks를 relay 없이 직접 연결 시도(미검증) | **확정(사용자 2026-10-18, T05)** |
-| D-11 | zone·tailnet·state 버킷만 이어 쓰고 나머지 새로 정의 | 같음. 터널 새로 만듦, DNS는 와일드카드 + apex, zone 설정 9개는 새 코드로 가져옴, state 키 접두 `v2/`. Tailscale ACL은 (a): 옛 self·ssh 규칙(`accept`, nonroot + root) 그대로. ssh를 `check`로 좁히는 (b)와 NUC를 `tag:nuc`로 태그하는 (c)는 고르지 않았고, (c)로 바꿀 조건은 E4a에서 U28 결과로 다시 본다 | **확정(사용자 2026-10-18, T05)** |
+| D-11 | zone·tailnet·state 버킷만 이어 쓰고 나머지 새로 정의 | 같음. 터널 새로 만듦, DNS는 와일드카드 + apex, zone 설정 9개는 새 코드로 가져옴, state 키 접두 `v2/`. Tailscale ACL은 (c)(2026-10-20 U28 결과로 (a)에서 바꿈): NUC를 `tag:nuc`로 태그하고 사람 기기 → NUC는 포트별, NUC → 사람 기기는 없음. ssh는 `accept`(nonroot + root) 그대로, `check`로 좁히는 (b)는 고르지 않았다 | **확정(사용자 2026-10-18, T05). ACL은 2026-10-20 (c)로 변경(사용자)** |
 | D-12 | k3s 제거 + 호스트 정리, OS 유지, 옛 데이터 경로 삭제, 빈 NUC 검증은 VM | 같음. B.4의 H1·H2·H3·H7·H8·H9를 철거한다. 노드 DNS drop-in(H5)과 sshd·journald·tmpfiles drop-in(H4)은 남기고 E2가 같은 이름으로 덮어쓴다. `/mnt/bulk`는 비우고 fstab 항목을 지운다. 검증 VM은 클러스터별 값 파일(호스트 `host/clusters/vm.env`, 클러스터 `values-vm.yaml`)로 운영과 다른 노드 값·Infisical 프로젝트·R2 버킷·serverName·Tailscale 이름 접두·터널·체크를 쓰고, 운영 공개 URL과 운영 Tailscale 기기는 건드리지 않는다. VM 호스트는 tailnet에 넣지 않는다(E8) | **확정(사용자 2026-10-18, T05)** |
 | D-18 | 설계 결과를 따름 | 호스팅형 Renovate App(저장소별 설치, 자동 병합 금지). homelab Actions와 분리 | **확정(사용자 2026-10-18, T05)** |
 | D-20 | 재사용 안 함, 새로 발급 | 같음. SOPS age 개인 키는 T06 자격 폐기 완료 확인 뒤 지운다(새 구조는 SOPS를 쓰지 않음) | **확정(사용자 2026-10-18, T05)** |
@@ -532,7 +532,7 @@ spec·design-prompt가 깔고 있던 전제와 다르게 가는 것이다. 각 �
 | AdGuard는 setcap 바이너리라 `allowPrivilegeEscalation: true` + `NET_BIND_SERVICE`만, 빈 PVC에 파일을 만드는 컨테이너는 소비자와 같은 uid | `platform/adguard/prod/deployment.yaml:13-24`, `:111-115` | 그대로 가져온다 |
 | 공유기가 LAN의 유일한 DNS 클라이언트라 기본 ratelimit 20이 집 전체를 조인다. 사설 PTR이 로그를 오염. liveness 재시작이 유일 리졸버를 끊는다. 질의 로그 30일은 약 1.7GB | `platform/adguard/prod/adguardhome.yaml:19-45`, `:68-75`, `deployment.yaml:96-101` | ratelimit 100 + 공유기 예외, `local_ptr_upstreams`, liveness 없음, 로그 보존 7일 |
 | servicelb(klipper) SNAT 때문에 NetworkPolicy로 :53 ingress를 출처 제한할 수 없다 | `platform/adguard/prod/networkpolicy.yaml:9` | 수용(LAN과 tailnet 서비스, D-08). 관리 UI는 Tailscale Ingress로만. tailnet 질의도 svclb 출처 하나로 보여 ratelimit 버킷을 함께 쓸 수 있다(U32, E4a에서 확인. 필요하면 `ratelimit_whitelist` 또는 hostNetwork) |
-| Tailscale `autogroup:self` 규칙이 빠지면 운영자 SSH가 끊긴다. `autogroup:self`는 태그 기기에 적용되지 않는다 | `infra/tailscale/acl.tf:8-10`, [S117] | NUC는 사용자 소유 기기로 등록(태그 없음), self·ssh 규칙 유지(F D-11 (a), 확정(사용자 2026-10-18, T05). `tag:nuc`로 태그하면 규칙을 태그 기준으로 다시 써야 한다, F D-11 (c)) |
+| Tailscale `autogroup:self` 규칙이 빠지면 운영자 SSH가 끊긴다. `autogroup:self`는 태그 기기에 적용되지 않는다 | `infra/tailscale/acl.tf:8-10`, [S117] | 2026-10-20 F D-11 (c)로 NUC를 `tag:nuc`로 태그한다. 태그를 붙이기 전에 `autogroup:member → tag:nuc:22,53,6443`과 `tag:nuc` 대상 ssh 규칙을 먼저 적용해야 원격 접속이 끊기지 않는다(E4a 적용 순서) |
 | NUC를 재등록하면 키 만료가 기본값(켜짐, 180일)으로 돌아온다 | `infra/tailscale/acl.tf:61-74`, [S119] | E2 사람 작업: 옛 NUC 기기 삭제 → 재등록 → MagicDNS 이름의 첫 라벨이 `NODE_NAME`과 같은지 확인 → Disable key expiry(C.3.2의 0). 재등록으로 Tailscale IP가 바뀌면 전역 nameserver도 바뀌어야 한다: DNS Terraform이 `data.tailscale_devices`로 IP를 다시 읽고 precondition이 만료 해제를 확인한다(C.3.6) |
 | Tailscale은 전역 nameserver에 동시에 묻고 처음 온 정상 응답을 쓴다. 차단하지 않는 서버를 하나라도 섞으면 그 서버가 먼저 답한 질의는 차단이 빠진다(C-05의 Cloudflare가 그렇다). 평문 UDP로 가는 공용 서버는 53번을 가로채는 망에서 그 망의 답에 진다. Override를 켜면 ACL이 막은 nameserver는 쓰이지 않는다 | [S110][S111][S186] | D-08 확정안(b′)은 전역 nameserver를 모두 같은 기본 목록의 차단 리졸버(NUC AdGuard Home, AdGuard 공용 2개)로 두고 비차단 리졸버를 더하지 않는다. NUC를 `tag:nuc`로 태그하면(F D-11 (c)) `tag:nuc:53` 규칙을 함께 연다. 빠뜨려도 공용 서버가 답해 E4a에서 드러나지 않으므로 시나리오 14의 사용자 규칙 적용률과 이탈 경보(C.3.7)로 본다 |
 | AdGuard Home이 tailnet에서 조용히 빠져도(NUC 재등록으로 IP가 바뀜, ACL 실수, svclb 경로 문제, ratelimit 드롭) 공용 서버가 모두 답해 증상도 기기 경고도 없다. 사용자 규칙과 통계만 계속 빠진다 | [S186] (처음 온 정상 응답 채택), 추측 | "tailnet 출처 질의가 1시간 0건이면 경보"(C.3.7) |
@@ -893,26 +893,39 @@ kubectl apply -f platform/root/root-prod.yaml                               # 3.
 - **ACL**(`infra/tailscale`, owner 로컬 apply, 목표 예시의 요지):
 
 ```hujson
-// infra/tailscale/policy.hujson  (목표 예시)
+// infra/tailscale/policy.hujson  (목표 예시. D-11 (c), 2026-10-20)
 {
-  "tagOwners": { "tag:k8s-operator": ["autogroup:admin"], "tag:k8s": ["tag:k8s-operator"], "tag:k8s-go": ["tag:k8s-operator"] },
+  "tagOwners": {
+    "tag:k8s-operator": ["autogroup:admin"],
+    "tag:k8s": ["tag:k8s-operator"],
+    "tag:k8s-go": ["tag:k8s-operator"],
+    "tag:nuc": ["autogroup:admin"]
+  },
+  // NUC가 광고하는 공유기 경로를 태그 기준으로 자동 승인한다(재등록 뒤에도 유지)
+  "autoApprovers": { "routes": { "192.168.117.1/32": ["tag:nuc"] } },
   "acls": [
-    // 운영자 자기 기기 전체(노트북 → NUC SSH·kubectl). 빠지면 default-deny가 원격 경로를 끊는다
+    // 사람 기기끼리. NUC는 tag:nuc라 여기에 들지 않는다
     { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self:*"] },
-    // 내부 UI 프록시(operator Ingress)는 443만
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s:443"] },
+    // 사람 기기 → NUC: SSH, AdGuard DNS, kubectl만. NUC → 사람 기기 규칙은 두지 않는다(U28)
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:nuc:22,53,6443"] },
+    // 내부 UI 프록시(operator Ingress)는 443만. NUC 쪽 확인 명령도 같은 길을 쓴다
+    { "action": "accept", "src": ["autogroup:member", "tag:nuc"], "dst": ["tag:k8s:443"] },
     // 짧은 주소 리다이렉터(D-30)는 80만. 모든 프록시에 80을 열지 않으려고 태그를 나눈다
     { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s-go:80"] }
   ],
+  "grants": [
+    // 공유기 관리 화면. NUC가 192.168.117.1/32 서브넷 경로를 광고한다
+    { "src": ["autogroup:member"], "dst": ["192.168.117.1/32"], "ip": ["tcp:80", "tcp:443"] }
+  ],
   "ssh": [
-    // 옛 규칙 그대로. root는 옛 구성에서 비대화형 검증 경로였다. 좁히는 안은 F D-11
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot", "root"] }
+    // root는 기존 비대화형 운영 경로다. 태그 대상이라 autogroup:nonroot는 src 전원에게 비root 사용자를 연다(지금 사람 1명)
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:nuc"], "users": ["autogroup:nonroot", "root"] }
   ]
 }
 ```
 
-- NUC는 태그 없는 사용자 소유 기기로 두고 ACL의 self 규칙과 ssh 규칙을 옛 것 그대로 둔다(F D-11 (a), 확정(사용자 2026-10-18, T05). spec §10 12항). 태그 기기에는 `autogroup:self`가 적용되지 않는다[S117]. 대신 재등록 때마다 키 만료를 손으로 끈다[S119]. D-08 (b′)에서 운영자 기기가 NUC의 AdGuard Home(`:53`)에 닿는 길도 이 self 규칙이다. NUC를 `tag:nuc`로 태그하면(F D-11 (c)) `autogroup:member → tag:nuc:53` 규칙이 따로 필요하고, 빠뜨려도 공용 서버가 답해 증상이 없다(C.3.6). ssh 규칙은 `accept`에 `autogroup:nonroot`와 `root`다(`2d2054a:infra/tailscale/acl.tf:37-40`). 옛 주석은 비밀번호 없는 root SSH가 옛 클러스터 검증 스크립트의 비대화형 경로였고, 이 줄을 좁히면 그 경로가 사라진다고 적는다(`2d2054a:infra/tailscale/acl.tf:33-36`). `check` + nonroot로 좁히는 안(F D-11 (b))과 NUC를 `tag:nuc`로 태그하는 안(F D-11 (c))은 T05에서 고르지 않았다. (c)로 바꿀 조건은 E4a에서 U28 결과로 다시 본다(F D-11).
-- **남는 위험:** self 규칙은 NUC에서 운영자의 다른 기기로 가는 모든 포트도 연다. 파드 egress가 NUC의 Tailscale 주소로 바뀌어 나가면(추측, U28) 파드가 운영자 기기에 닿을 수 있다. 대응은 공유 차트 egress의 tailnet 대역 제외(C.4.5)와 작업자 공간의 init 규칙(C.8)이다. 그 밖의 플랫폼 파드는 각 구성 요소의 egress 정책에 같은 대역 제외를 두고, egress 정책이 없는 파드에는 이 위험이 남는다. NUC에서 운영자 기기로 가는 길 자체를 없애려면 F D-11 (c)안이다.
+- **NUC 신원(F D-11 (c), 확정(사용자 2026-10-20)):** NUC는 `tag:nuc` 태그 기기다. 2026-10-18~2026-10-20에는 (a)(태그 없는 사용자 기기, self 규칙)였고, E4a의 U28에서 파드가 NUC의 Tailscale 주소로 바뀌어(SNAT) 운영자 기기에 닿는 것이 확인돼 바꿨다. 태그 기기에는 `autogroup:self`가 적용되지 않으므로[S117] 사람 기기 → NUC 경로를 위 예시처럼 포트별로 연다(SSH 22, AdGuard DNS 53, kubectl 6443. mosh를 쓰면 그 UDP 범위도). NUC → 사람 기기 규칙은 두지 않아 NUC와 파드가 운영자 기기에 닿지 못한다. 태그 기기는 키 만료가 기본으로 꺼져 재등록 때 손 작업이 없다[S119]. ssh 규칙은 `accept`에 `autogroup:nonroot`와 `root` 그대로다(`check`로 좁히는 F D-11 (b)는 고르지 않았다). 태그 대상이라 `autogroup:nonroot`는 src 전원에게 모든 비root 사용자를 연다는 공식 경고가 있다(지금 사람 1명)[S121]. 적용 순서와 되돌리기는 E4a(T08a)다.
+- **남는 위험:** (c)로 NUC → 운영자 기기 길은 Tailscale에서 막힌다. 파드에서 다른 tailnet 대상(내부 UI 프록시 `tag:k8s:443`)으로 가는 길은 `tag:nuc` 규칙대로 남으므로, 공유 차트 egress의 tailnet 대역 제외(C.4.5)와 작업자 공간의 init 규칙(C.8)은 그대로 둔다. 사람 기기를 잃으면 비밀번호 없는 root SSH까지 열리는 위험도 그대로다(F D-11 (b)를 고르지 않음).
 - **PostgreSQL GUI 접속:** 옛 tailnet LB(`pg-rw`)는 두지 않고 `kubectl port-forward -n database svc/pg-rw 5432`로 한다. tailnet 기기·Pooler 혼선 함정(`2d2054a:platform/cnpg/prod/pg-rw-tailscale-service.yaml:6-12`)이 없다.
 - **준비 확인:** tailnet 기기에서 `curl -sI https://argocd.<tailnet>.ts.net` → 200 또는 로그인 리다이렉트, tailnet 밖에서는 이름이 풀리지 않음, 노트북에서 `tailscale ssh <NUC>` 성공.
 
@@ -1230,7 +1243,7 @@ migration:
   command: ["./migrate", "up"]
 ```
 
-- **tailnet 차단:** NUC는 태그 없는 사용자 기기이고 ACL `autogroup:member → autogroup:self:*`가 NUC에서 운영자의 다른 기기로 가는 모든 포트를 허용한다(C.3.5, F D-11 (a)). 파드가 tailnet 주소로 보낸 패킷은 노드의 `tailscale0`으로 나가며 출발 주소가 NUC의 Tailscale 주소로 바뀔 수 있다(추측, U28). 그러면 공개 요청을 받는 앱 파드(봇 게시 서버 포함)가 운영자 노트북에 닿을 수 있다. 그래서 위 except가 tailnet 대역을 사설 대역과 함께 명시해 뺀다. NetworkPolicy는 파드에서 나가는(FORWARD) 경로의 목적지로 평가되므로 이 대역을 막는다. 노드 자신의 주소로 가는 노드 로컬(INPUT) 경로는 못 막는다(TD:270-274, B.8 E4). **확인:** 시나리오 1에서 앱 라벨을 단 시험 파드로 운영자 기기의 tailnet 주소 연결이 실패하는지 본다.
+- **tailnet 차단:** 파드가 tailnet 주소로 보낸 패킷은 노드의 `tailscale0`으로 나가며 출발 주소가 NUC의 Tailscale 주소로 바뀐다(U28, 2026-10-20 확인). D-11 (c)(2026-10-20)로 NUC → 운영자 기기 길은 Tailscale에서 막히지만, `tag:nuc`가 닿는 tailnet 대상(내부 UI 프록시)은 남고 ACL 실수 한 번이면 다시 열린다(C.3.5, F D-11). 그래서 위 except가 tailnet 대역을 사설 대역과 함께 명시해 뺀다. NetworkPolicy는 파드에서 나가는(FORWARD) 경로의 목적지로 평가되므로 이 대역을 막는다. 노드 자신의 주소로 가는 노드 로컬(INPUT) 경로는 못 막는다(TD:270-274, B.8 E4). **확인:** 시나리오 1에서 앱 라벨을 단 시험 파드로 운영자 기기의 tailnet 주소 연결이 실패하는지 본다.
 
 #### C.4.6 검사 범위
 
@@ -2244,7 +2257,7 @@ Free 안에서 키 전달과 identity 배분:
   - AdGuard Home은 같은 LAN IP `:53`(servicelb). Git 시드가 원본이고 라이브 UI 변경 중 남길 것은 시드로 옮긴다. 필터는 AdGuard DNS filter 하나, 사용자 규칙은 최소(C.3.6).
   - Tailscale DNS (b′): Override local DNS 켬, 전역 nameserver = [NUC Tailscale IP(AdGuard Home), `94.140.14.14`, `94.140.15.15`](AdGuard 공용 DNS. AdGuard Home 기본값과 같은 AdGuard DNS filter[S189][S190]), C-05 임시 Cloudflare 4개 삭제, MagicDNS 켬, HTTPS 켬, `use_with_exit_node`는 기본 끔. NUC는 `accept-dns=false` 유지. C-05 임시 항목은 E4a에서 이 값으로 대체한다.
   - 관리: Terraform `tailscale_dns_configuration`(provider v0.29.2, 정식[S187]). `data.tailscale_devices`로 hostname 일치 기기를 받아 precondition(정확히 1대, 소유자·태그 기대값, `key_expiry_disabled`)을 걸고, IPv4는 `100.` 대역으로 골라낸다. `tailscale_dns_nameservers`와 함께 쓰지 않는다. 이 자원은 DNS 설정 전체를 소유하므로 첫 apply 전에 콘솔 값을 그대로 옮긴 HCL로 새 state에 import하고 plan 무변경을 확인한 뒤 바꾼다[S217]. NUC가 없을 때 ACL apply까지 막히지 않게 DNS는 별도 root `infra/tailscale-dns`에 두고 `prevent_destroy`를 건다. 조건부(`count`)는 NUC가 없는 동안 DNS 설정 전체 삭제를 계획하므로 쓰지 않는다(C.3.6). Override가 켜진 상태에서 AdGuard가 죽어도 공용 서버가 답하므로 Terraform을 돌리는 기기의 DNS 문제는 작다(C.3.6).
-  - NUC를 `tag:nuc`로 태그하면(D-11 (c). D-11은 (a)로 확정(사용자 2026-10-18, T05)됐고 (c)는 E4a에서 U28 결과로 다시 본다) `tag:nuc:53` ACL 규칙이 필요하다. AdGuard 노출은 설계대로 servicelb이고, svclb 출처 MASQUERADE로 ratelimit 버킷을 함께 쓰는지 E4a에서 확인한다. 필요하면 `ratelimit_whitelist`나 hostNetwork로 간다(hostNetwork는 노드 네임스페이스 공격면이 는다, U32).
+  - NUC는 `tag:nuc`로 태그한다(D-11 (c), 확정(사용자 2026-10-20). 그 전에는 (a)). 그래서 `autogroup:member → tag:nuc:53` ACL 규칙이 필요하다. AdGuard 노출은 설계대로 servicelb이고, svclb 출처 MASQUERADE로 ratelimit 버킷을 함께 쓰는지 E4a에서 확인한다. 필요하면 `ratelimit_whitelist`나 hostNetwork로 간다(hostNetwork는 노드 네임스페이스 공격면이 는다, U32).
   - 시나리오 14에 셀룰러 Tailscale 기기 확인(AdGuard 정지 중 광고 도메인 차단, 일반 도메인 정상)과 사용자 규칙 적용률 측정(AdGuard Home 전용 시험 차단 규칙을 집 Wi-Fi·셀룰러에서 20회씩)을 넣는다(G).
 - **목적·이유:** Tailscale을 켠 기기는 집 안팎 어디서든 차단되고, NUC 장애 때도 공용 서버가 차단하며 답한다. Tailscale은 전역 nameserver에 동시에 묻고 처음 온 정상 응답을 쓰므로[S110][S186] 모든 nameserver가 같은 기본 목록으로 차단하면 병렬이어도 기본 차단이 유지된다. 옛 구성의 가장 비싼 실패(NUC·AdGuard·키 만료·재등록 IP 변경·ACL 실수 하나가 Tailscale 기기 전체의 DNS 장애)가 "사용자 규칙만 잠시 빠짐"으로 줄고, 새 장치나 자격이 들지 않는다. 내부 UI를 `*.ts.net`으로 옮기면 내부 이름이 AdGuard·nameserver와 무관해지고, 인증서가 깨질 원인 사슬(Cloudflare DNS 편집 토큰, cert-manager DNS-01, Traefik 내부 TLS, AdGuard rewrite·리컨실러)이 짧아진다(A.4 1번). 인증서를 못 받으면 막히는 것은 두 방식이 같다: `*.home.ukyi.app`은 `.app` 최상위 도메인의 HSTS preload로[S210], ts.net은 프록시가 핸드셰이크를 실패시켜[S211] 넘어갈 수 없다. 두 방식 모두 갱신 실패 뒤 약 30일 여유가 있고 비상 경로는 `kubectl port-forward`다(C.3.5). 단일 서버에서 제공할 수 없는 가용성을 전제로 두지 않는다(design-prompt §2).
 - **대가:**
@@ -2296,7 +2309,7 @@ Free 안에서 키 전달과 identity 배분:
 
 ### D-11 옛 외부 자원: import 또는 삭제
 
-**확정(사용자 2026-10-18, T05).** 아래 표 그대로다. zone·tailnet·R2 state 버킷만 이어 쓰고 나머지는 새로 정의하거나 지운다. state 키 접두는 `v2/`, zone 설정 9개는 새 Terraform으로 가져온다. Tailscale ACL은 (a)다.
+**확정(사용자 2026-10-18, T05).** 아래 표 그대로다. zone·tailnet·R2 state 버킷만 이어 쓰고 나머지는 새로 정의하거나 지운다. state 키 접두는 `v2/`, zone 설정 9개는 새 Terraform으로 가져온다. Tailscale ACL은 처음 (a)였고 2026-10-20 U28 결과로 (c)로 바꿨다(사용자).
 
 | 자원 | 결정 | 이유 |
 |---|---|---|
@@ -2318,14 +2331,14 @@ Free 안에서 키 전달과 identity 배분:
 
 | 선택지 | 장점 | 단점 |
 |---|---|---|
-| **(a) 확정: NUC는 태그 없는 사용자 기기, 옛 규칙 유지.** `autogroup:member → autogroup:self:*`, ssh `accept` + `autogroup:nonroot`·`root`(C.3.5 예시) | spec §10 12항 그대로다. 운영자의 SSH·mosh·kubectl 경로와 root 비대화형 경로가 옛 구성과 같아 E4a에서 원격 접속이 끊길 일이 없다 | self 규칙이 NUC에서 운영자 기기로 가는 모든 포트도 연다. 파드 egress가 NUC 주소로 바뀌어 나가면(U28) 파드가 운영자 기기에 닿을 수 있어, 공유 차트의 tailnet 대역 제외(C.4.5)와 작업자 init 규칙(C.8)에 기댄다. egress 정책이 없는 플랫폼 파드에는 위험이 남는다. 재등록마다 키 만료를 손으로 끈다[S119]. 노트북을 잃으면 비밀번호 없는 root 접속까지 열린다 |
+| (a) 처음 결정(2026-10-18~2026-10-20): NUC는 태그 없는 사용자 기기, 옛 규칙 유지. `autogroup:member → autogroup:self:*`, ssh `accept` + `autogroup:nonroot`·`root`(C.3.5 예시) | spec §10 12항 그대로다. 운영자의 SSH·mosh·kubectl 경로와 root 비대화형 경로가 옛 구성과 같아 E4a에서 원격 접속이 끊길 일이 없다 | self 규칙이 NUC에서 운영자 기기로 가는 모든 포트도 연다. 파드 egress가 NUC 주소로 바뀌어 나가면(U28) 파드가 운영자 기기에 닿을 수 있어, 공유 차트의 tailnet 대역 제외(C.4.5)와 작업자 init 규칙(C.8)에 기댄다. egress 정책이 없는 플랫폼 파드에는 위험이 남는다. 재등록마다 키 만료를 손으로 끈다[S119]. 노트북을 잃으면 비밀번호 없는 root 접속까지 열린다 |
 | (b) (a)에서 ssh만 좁힘: `check` + `autogroup:nonroot` | 노트북 탈취 때 재인증 없는 접속과 root 직행을 막는다 | `check`는 checkPeriod(기본 12시간, 1분~168시간)가 지나면 SSH 연결을 맺기 전에 브라우저 재인증을 요구한다[S121]. 휴대 기기에서 원격 작업 세션을 새로 열거나 다시 붙을 때 재인증 화면을 거쳐야 하고, 사람 없이 도는 SSH(스크립트, 에이전트의 원격 명령)는 기간이 지나면 실패한다. root 비대화형 경로가 사라져 sudo가 필요한 확인은 대화형으로 한다(`2d2054a:infra/tailscale/acl.tf:33-36`). spec의 "ssh 규칙 유지"보다 좁아 조정 권고가 된다 |
-| (c) NUC를 `tag:nuc`로 태그 | 태그 기기는 키 만료가 기본으로 꺼져[S119] 재등록 때 손 작업이 없다. ACL을 `autogroup:member → tag:nuc:22,6443`(mosh를 쓰면 그 UDP 범위도)과 `tag:nuc` 대상 ssh 규칙으로 바꾸고 `tag:nuc`에서 사람 기기로 가는 규칙을 두지 않으면, NUC와 거기서 주소가 바뀌어 나가는 파드가 운영자 기기에 닿지 못한다. U28의 결과와 무관하게 막힌다 | spec §10 12항의 "autogroup:self 유지"와 달라 조정 권고다. `autogroup:self`가 태그 기기에 적용되지 않아[S117] 규칙을 태그 기준으로 다시 써야 하고, 빠뜨리면 원격 경로가 끊긴다(B.8 E4. 적용 전 정책 사본으로 되돌림, E4a). 옛 self 규칙이 모든 포트를 열어 쓰던 경로(SSH·mosh, `acl.tf:8-9`. 원격 kubectl, `acl.tf:16-19`)를 하나씩 다시 열어야 한다. ssh 규칙 dst가 태그면 `autogroup:nonroot`가 src 전원에게 모든 비root 사용자를 연다는 공식 경고가 있다(지금은 사람 1명)[S121]. 태그 등록에는 tagOwners 선언과 기기 태그 지정(콘솔 또는 `--advertise-tags`)이 필요하다. D-08 (b′)에서도 `tag:nuc:53`을 연다(빠뜨려도 공용 서버가 답해 E4a에서 드러나지 않으므로 시나리오 14의 적용률과 이탈 경보로 본다) |
+| **(c) 확정(사용자 2026-10-20): NUC를 `tag:nuc`로 태그** | 태그 기기는 키 만료가 기본으로 꺼져[S119] 재등록 때 손 작업이 없다. ACL을 `autogroup:member → tag:nuc:22,6443`(mosh를 쓰면 그 UDP 범위도)과 `tag:nuc` 대상 ssh 규칙으로 바꾸고 `tag:nuc`에서 사람 기기로 가는 규칙을 두지 않으면, NUC와 거기서 주소가 바뀌어 나가는 파드가 운영자 기기에 닿지 못한다. U28의 결과와 무관하게 막힌다 | spec §10 12항의 "autogroup:self 유지"와 달라 조정 권고다. `autogroup:self`가 태그 기기에 적용되지 않아[S117] 규칙을 태그 기준으로 다시 써야 하고, 빠뜨리면 원격 경로가 끊긴다(B.8 E4. 적용 전 정책 사본으로 되돌림, E4a). 옛 self 규칙이 모든 포트를 열어 쓰던 경로(SSH·mosh, `acl.tf:8-9`. 원격 kubectl, `acl.tf:16-19`)를 하나씩 다시 열어야 한다. ssh 규칙 dst가 태그면 `autogroup:nonroot`가 src 전원에게 모든 비root 사용자를 연다는 공식 경고가 있다(지금은 사람 1명)[S121]. 태그 등록에는 tagOwners 선언과 기기 태그 지정(콘솔 또는 `--advertise-tags`)이 필요하다. D-08 (b′)에서도 `tag:nuc:53`을 연다(빠뜨려도 공용 서버가 답해 E4a에서 드러나지 않으므로 시나리오 14의 적용률과 이탈 경보로 본다) |
 
-- **결정:** (a). spec 추천과 같고 E4a에서 원격 접속을 잃을 위험이 가장 작다. 파드 쪽 위험은 NetworkPolicy와 init 규칙으로 줄인다. (b)·(c)는 지금 고르지 않았다.
-- **(c)로 바꿀 조건(E4a에서 다시 봄):** U28 시험에서 파드가 NUC 주소로 운영자 기기에 닿는 것이 확인되고, egress 정책이 없는 플랫폼 파드를 모두 막기 어렵다고 판단될 때. 이때 (b)의 `check`를 함께 고를 수 있다. 바꾸면 C.3.5 예시와 E4a 검증을 함께 고친다.
-- **spec 대비:** (a)는 일치. (b)·(c)는 조정 권고였고 고르지 않았다.
-- **미검증:** U28(파드 egress의 출발 주소 변환).
+- **결정:** (c)(사용자 2026-10-20: "없어 c가 나을거같네", NUC에서 사람 기기로 먼저 접속할 일이 없다는 답과 함께). 처음 결정은 (a)였다(spec 추천과 같고 E4a에서 원격 접속을 잃을 위험이 가장 작아서). 아래 바꿀 조건이 E4a에서 충족됐다: U28에서 파드가 NUC 주소로 운영자 기기에 닿았고, egress 정책이 없는 플랫폼 파드를 모두 막는 것보다 Tailscale에서 길을 끊는 편이 단순하다. 곧 클러스터에서 봇 작업자가 코드를 실행하므로(T16b 이후) 그 전에 적용한다. (b)는 고르지 않았다. 적용 순서(규칙 먼저, 태그 나중)와 되돌리기는 E4a(T08a)다.
+- **(c)로 바꿀 조건(E4a에서 다시 봄, 2026-10-20 충족):** U28 시험에서 파드가 NUC 주소로 운영자 기기에 닿는 것이 확인되고, egress 정책이 없는 플랫폼 파드를 모두 막기 어렵다고 판단될 때. 이때 (b)의 `check`를 함께 고를 수 있다. 바꾸면 C.3.5 예시와 E4a 검증을 함께 고친다.
+- **spec 대비:** (c)는 spec §10 12항의 "autogroup:self 유지"와 달라 조정이다. self 규칙은 사람 기기끼리 쓰려고 남고, NUC만 태그 규칙으로 옮긴다.
+- **미검증:** (c) 적용 뒤 원격 접속 경로(SSH·kubectl·DNS·공유기 관리 화면)와 U28 재시험(실패해야 함). E4a에서 본다.
 
 ### D-12 철거 방식과 빈 NUC 검증 방식
 
@@ -2597,7 +2610,7 @@ design-prompt §9의 시나리오 1~17이다. **상태는 모두 "설계상 기�
 | U25 | `deploy-merge`가 homelab 쪽 토큰(`GITHUB_TOKEN` 또는 `homelab-merge` 설치 토큰)으로 public 앱 저장소의 `GET /repos/ukyi-app/<app>`과 `GET /repos/ukyi-app/<app>/rules/branches/main`, `GET /repos/ukyi-app/<app>/codeowners/errors`를 읽을 수 있다(공식 문서에 토큰 권한 표시가 없음[S85][S178]. owner 로그인으로는 응답 형식을 실측함) | 앱 저장소에 metadata read만(`codeowners/errors`가 더 요구하면 contents read도) 가진 읽기 전용 App을 따로 설치해 그 토큰으로 읽는다(App 하나 증가). 그때까지 조건 9를 만족할 수 없어 자동 병합은 멈춘다 | E5, 시나리오 15 | C.4.7 |
 | U26 | CNPG 1.30.1에서 떠 있는 Cluster의 `spec.bootstrap`을 `recovery`에서 `initdb`로 바꾸는 변경을 webhook이 거부하지 않고, 떠 있는 클러스터에는 영향이 없다(옛 버전 실측만, `2d2054a:platform/cnpg/prod/cluster.yaml:50-53`) | 정리 PR을 하지 않고 recovery를 남긴다. 낡은 복구본이 새 serverName prefix에 아카이브하려 하면 빈 아카이브 검사로 멈추는 것[S32]과 CNPGClusterNotHealthy 경보에 기댄다 | E6(복구 시험), 시나리오 13 | C.6.4 |
 | U27 | 운영 버킷에만 한정한 R2 Object Read only 토큰으로 Barman Cloud Plugin 복구(base backup·WAL 읽기)가 된다(R2 Object 토큰은 ListBuckets·HeadBucket이 안 된다, B.8 E4) | 그 읽기 전용 토큰으로 운영 아카이브를 VM 전용 버킷에 `rclone`(`no_check_bucket=true`)으로 복사한 뒤 그 사본에서 복구 | E8, 시나리오 13 | E8 VM 격리 |
-| U28 | 파드가 tailnet 주소(`100.64.0.0/10`)로 보낸 패킷은 노드의 `tailscale0`으로 나가며 출발 주소가 NUC의 Tailscale 주소로 바뀌고(flannel 마스커레이드, 추측), 받는 기기의 ACL은 NUC를 출발지로 본다. 그래서 NUC가 태그 없는 사용자 기기이면 `autogroup:member → autogroup:self:*` 아래에서 파드가 운영자 기기에 닿는다 | 바뀌지 않으면 패킷이 tailnet에서 버려져 위험이 작아진다. 공유 차트의 tailnet 대역 제외는 해가 없으니 그대로 둔다. 닿는 것이 확인되면 egress 정책이 없는 플랫폼 파드를 찾아 같은 제외를 넣거나 F D-11 (c)를 다시 본다 | E4a(새 ACL 적용 뒤, NetworkPolicy가 없는 시험 ns의 파드에서 운영자 기기의 시험 포트로 연결해 성공 여부와 받은 쪽의 출발 주소만 기록), 시나리오 1(앱 라벨 시험 파드는 실패) | C.3.5, C.4.5, F D-11 |
+| U28 | 파드가 tailnet 주소(`100.64.0.0/10`)로 보낸 패킷은 노드의 `tailscale0`으로 나가며 출발 주소가 NUC의 Tailscale 주소로 바뀌고(flannel 마스커레이드, 추측), 받는 기기의 ACL은 NUC를 출발지로 본다. 그래서 NUC가 태그 없는 사용자 기기이면 `autogroup:member → autogroup:self:*` 아래에서 파드가 운영자 기기에 닿는다 **결과(2026-10-20, T08a):** 맞다. NetworkPolicy 없는 시험 ns 파드가 운영자 맥의 시험 포트에 연결됐고, `tailscale0` tcpdump에서 출발 주소가 NUC의 Tailscale 주소였다. 그래서 D-11을 (c)로 바꿨다(사용자 2026-10-20). (c) 적용 뒤 같은 시험이 실패해야 한다 | 바뀌지 않으면 패킷이 tailnet에서 버려져 위험이 작아진다. 공유 차트의 tailnet 대역 제외는 해가 없으니 그대로 둔다. 닿는 것이 확인되면 egress 정책이 없는 플랫폼 파드를 찾아 같은 제외를 넣거나 F D-11 (c)를 다시 본다 | E4a(새 ACL 적용 뒤, NetworkPolicy가 없는 시험 ns의 파드에서 운영자 기기의 시험 포트로 연결해 성공 여부와 받은 쪽의 출발 주소만 기록), 시나리오 1(앱 라벨 시험 파드는 실패) | C.3.5, C.4.5, F D-11 |
 | U29 | 작업자 쪽 도구(모델 CLI, git, 패키지 관리자)가 `HTTPS_PROXY`를 따라 목적지 이름 해석을 프록시에 맡기므로, 작업자 파드에 DNS가 없어도 동작한다 | 그 도구만 프록시 설정을 따로 준다. 안 되면 DNS를 열되 CoreDNS가 아니라 `egress` ns에 허용 목록 도메인만 푸는 전용 DNS를 두고 작업자는 그것만 쓴다 | E4b(시험 파드), E9(실제 Codex. T15 조사로는 확인하지 못함) | C.8 |
 | U30 | 조건 5의 출처 확인이 이 구성에서 동작한다. (1) Free org의 public 앱 저장소에서 reusable `app-build`(태그 호출)의 deploy-pr job이 `actions/attest`로 GHCR digest의 build provenance attestation을 만든다(문서는 Free·Pro·Team에서 public 저장소만 가능하다고 적음[S174], 실동작 미확인). (2) 그 attestation의 서명 인증서 SAN이 `https://github.com/ukyi-app/homelab/.github/workflows/app-build.yaml@refs/tags/app-build-v<버전>`이고, 원본 저장소·ref·커밋이 호출한 앱 저장소의 `refs/heads/main`과 그 커밋이라 `--cert-identity-regex`·`--source-ref`·`--source-digest`로 가를 수 있다(문서는 reusable 워크플로가 서명자라고만 적음[S175]). (3) `deploy-merge`가 homelab 쪽 토큰(`GITHUB_TOKEN` 또는 `homelab-merge` 설치 토큰)으로 앱 저장소의 attestation(`GET /repos/{owner}/{repo}/attestations/{subject_digest}`, "저장소 읽기 권한" 필요[S176])과 public GHCR manifest를 읽을 수 있다(App 토큰의 다른 저장소 읽기는 문서에 없음, U25와 같은 질문). 옛 (4)(private 앱에서 attest를 건너뛰고 배포 PR을 만드는 분기)는 D-29로 private 앱이 없어져 지웠다 | (3)만 안 되면 attestation을 `push-to-registry: true`로 GHCR에도 올리고(그 job에 `packages: write` 추가) `--bundle-from-oci`로 읽거나[S175], U25의 읽기 전용 App 토큰으로 읽는다. (1)·(2)가 안 되면 조건 5는 라벨만 남고, C.4.7 남는 위험 2번을 감수하거나 자동 병합을 끈다(F D-07). | (1)~(3): E5 첫 배포 PR, 시나리오 15 | C.4.1, C.4.7 |
 | U31 | U08 셋째 조건이 틀릴 때 쓸 bypass 행위자가 Free org에서 owner에게 적용된다. 순서대로 시험한다: (1) owner 계정을 `actor_type` `User`로(`pull_request` 모드). 2026-05-07부터 저장소 수준 ruleset에 개인 사용자를 bypass 행위자로 넣을 수 있고[S205], REST `actor_type`에 `User`가 있다[S85]. 공지에 요금제 조건이 없어 Free 동작은 미확인이다. (2) `OrganizationAdmin`. (3) owner만 든 팀(secret 아님. 문서는 팀을 bypass 행위자로 들고 요금제 제한을 적지 않는다[S85]) | 셋 다 안 되면 owner PR을 병합할 bypass 행위자가 없다. 그때는 F D-07을 다시 열어 사용자가 정한다 | E1(임시 ruleset에서 `current_user_can_bypass`) | F D-07 |

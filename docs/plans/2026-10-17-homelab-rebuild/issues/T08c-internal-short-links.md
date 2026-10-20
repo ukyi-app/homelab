@@ -35,7 +35,7 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 ### ACL (`infra/tailscale`, owner 로컬 apply)
 
 - tagOwners에 `"tag:k8s-go": ["tag:k8s-operator"]`, acls에 `autogroup:member → tag:k8s-go:80`을 더한다. 모든 프록시에 80을 여는 `tag:k8s:80`으로 넓히지 않는다.
-- apply 전 정책 사본을 저장소 밖에 두고, plan이 이 두 줄만 바꾸는지 본다.
+- 이 두 줄은 T08a의 D-11 (c) ACL PR에 함께 넣어 한 번에 적용한다(ACL 적용을 집에서 한 번으로 줄이려고). T08c 착수 때 이미 적용돼 있으면 확인만 한다. 따로 적용해야 하면 apply 전 정책 사본을 저장소 밖에 두고, plan이 이 두 줄만 바꾸는지 본다.
 
 ### 이름 예약
 
