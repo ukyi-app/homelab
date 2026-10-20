@@ -71,6 +71,19 @@ limits:
 */}}
 {{- define "app.env" -}}
 {{- $name := include "app.name" . -}}
+{{- /* env 이름이 겹치면 컨테이너가 어느 값을 쓸지 분명하지 않다(예: env.PORT가 서비스·probe 포트와 다름). 렌더를 막는다. */ -}}
+{{- $seen := dict -}}
+{{- $names := list -}}
+{{- if eq .Values.kind "web" }}{{- $names = append $names "PORT" -}}{{- end -}}
+{{- if .Values.uses.postgres }}{{- $names = append $names "DATABASE_URL" -}}{{- end -}}
+{{- if .Values.uses.valkey }}{{- $names = append $names "VALKEY_URL" -}}{{- end -}}
+{{- $names = concat $names (keys .Values.env) .Values.secrets -}}
+{{- range $names -}}
+{{- if hasKey $seen . -}}
+{{- fail (printf "env 이름 %s가 두 번 나온다(PORT·DATABASE_URL·VALKEY_URL은 차트가 넣고, env와 secrets는 서로 겹치지 않는다)" .) -}}
+{{- end -}}
+{{- $_ := set $seen . true -}}
+{{- end -}}
 {{- if eq .Values.kind "web" }}
 - name: PORT
   value: {{ .Values.port | quote }}

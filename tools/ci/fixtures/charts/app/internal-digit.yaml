@@ -1,0 +1,12 @@
+# expect: fail
+# Tailscale 기기 이름은 문자로 시작하고 끝난다(1api, api1 거부).
+chartVersion: 1.0.0
+kind: web
+port: 8080
+resources: {cpu: 10m, memory: 32Mi}
+internal: {name: api1}
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

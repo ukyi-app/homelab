@@ -368,12 +368,18 @@ export function renderAll(): RenderResult {
     for (const [cluster, prefix] of clusterPrefixes(clusterFiles)) {
       const where = `app:${app}[${cluster}]`;
       try {
-        const values = { ...(Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) ?? {}) } as Record<string, any>;
+        // ApplicationSet은 path·values를 생성기 변수로 덮고 tailnetPrefix는 클러스터 값으로 덮는다. 사람이 적은 같은 키는
+        // 조용히 사라지므로(예: probe 경로를 최상위 path로 적음) 지우지 않고 실패로 둔다. 두 파일의 키도 서로 겹치지 않는다.
+        const human = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) ?? {}) as Record<string, any>;
         const imageFile = join(ROOT, "apps", app, "image.yaml");
-        if (existsSync(imageFile)) Object.assign(values, Bun.YAML.parse(readFileSync(imageFile, "utf8")) ?? {});
-        delete values.path;
-        delete values.values;
-        values.tailnetPrefix = prefix;
+        const image = (existsSync(imageFile) ? Bun.YAML.parse(readFileSync(imageFile, "utf8")) ?? {} : {}) as Record<string, any>;
+        const reserved = ["path", "values", "tailnetPrefix"];
+        const imageKeys = ["repository", "digest", "revision", "hold"];
+        const badHuman = Object.keys(human).filter((k) => reserved.includes(k) || imageKeys.includes(k));
+        const badImage = Object.keys(image).filter((k) => !imageKeys.includes(k));
+        if (badHuman.length > 0) throw new Error(`values.yaml에 둘 수 없는 키: ${badHuman.join(", ")}(생성기 변수·클러스터 값·image.yaml 키)`);
+        if (badImage.length > 0) throw new Error(`image.yaml에는 ${imageKeys.join(", ")}만 둔다: ${badImage.join(", ")}`);
+        const values: Record<string, any> = { ...human, ...image, tailnetPrefix: prefix };
         const chartDir = pathAtRevision(`app-chart-v${values.chartVersion}`, "platform/charts/app", tmp);
         const vfile = join(tmp, `app-${app}-${cluster}.json`);
         writeFileSync(vfile, JSON.stringify(values));

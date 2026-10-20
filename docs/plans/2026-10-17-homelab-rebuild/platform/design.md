@@ -1226,7 +1226,7 @@ hold: false
 | 캐시 Valkey | `cache:`가 있으면 공식 Valkey 차트(subchart)로 렌더. 영속 Valkey는 데이터 차트 쪽(C.5.6). `app-chart-v1.0.0`에는 아직 없다. Valkey 차트 벤더링과 함께 T11이 minor 버전으로 더한다(T10 결정 2026-10-20). 연결은 Service `<앱>-valkey:6379` 약속으로 v1.0.0의 `uses.valkey`가 이미 배선한다 | 캐시는 데이터가 아니라 앱과 수명을 같이한다 |
 | 마이그레이션 | `migration.command` 있으면 Sync hook Job | C.5.4 |
 | 공개 | `public.host` 있으면 Ingress(class `traefik`) | C.3.4 |
-| 내부 | `internal.name` 있으면 Tailscale Ingress(DNS 라벨 `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, `<접두><이름>` 63자 이하, `go`·`vm-go`는 리다이렉터 이름이라 모든 클러스터에서 예약, D-30) | C.3.5 |
+| 내부 | `internal.name` 있으면 Tailscale Ingress(DNS 라벨 `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, `<접두><이름>` 63자 이하, `go`·`vm-go`는 리다이렉터 이름이라 모든 클러스터에서 예약, D-30). T10(2026-10-20): Tailscale 기기 이름은 문자로 시작하고 끝나야 해서 차트 schema는 `^[a-z]([a-z0-9-]{0,61}[a-z])?$`로 좁혔다. ci는 같은 클러스터 안 내부·공개 host 중복을 거부한다 | C.3.5 |
 | 네트워크 | 기본 거부 + 허용(같은 ns, Traefik ns에서 앱 포트(공개 시), Tailscale operator ns(`tailscale`)의 Ingress 프록시 파드에서 앱 포트(내부 노출 `internal.name` 시. 프록시는 앱이 아니라 operator ns에서 돈다[S115]), DNS, `database` ns 5432(DB 시), 인터넷 443). 인터넷 443은 ipBlock `0.0.0.0/0`에 except `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`(tailnet)을 명시한다. IPv6 허용 줄은 두지 않아 tailnet IPv6 `fd7a:115c:a1e0::/48`도 막힌다. IPv6 허용을 더할 때는 except에 `fd7a:115c:a1e0::/48`을 함께 넣는다. 봇에만 필요한 클러스터 안 허용(작업자 Service, Grafana·Argo CD API, Alertmanager에서 오는 수신)은 이 차트가 아니라 platform 쪽 봇 자리 Application이 더한다(C.8) | P19, ipBlock에 pod CIDR 금지. tailnet 제외는 아래 "tailnet 차단" |
 | 이미지 pull | 없음(`imagePullSecrets`를 내지 않는다). 앱 패키지는 public만이라 익명 pull이 된다(D-29) | P16, C.4.10 |
 
