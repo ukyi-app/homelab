@@ -186,6 +186,11 @@ export function renderAll(): RenderResult {
     if (out === undefined) continue;
     // 2. root가 만든 Application의 자기 저장소 source. 렌더 결과에 다시 Application이 있으면(app-of-apps) 그것도 따라간다.
     const visit = (text: string, depth: number) => {
+      // ApplicationSet이 만드는 Application도 검사해야 한다. 어느 단계에서 나오든 여기서 전개하는 것만 받는다(아래 5.).
+      for (const set of parseAll(text).filter((d) => d?.kind === "ApplicationSet")) {
+        const ok = APPSET_RENDERERS[set.metadata?.name]?.(set);
+        if (ok !== true) fail(`${set.metadata?.name}[${cluster}]`, `ApplicationSet ${set.metadata?.name}: ${ok ?? "render.ts가 전개하지 않는 ApplicationSet이다"}`);
+      }
       for (const app of parseAll(text).filter((d) => d?.kind === "Application")) {
         if (depth > 3) {
           fail(`${app.metadata?.name}[${cluster}]`, "Application 중첩이 너무 깊다(3단계까지)");
@@ -196,11 +201,6 @@ export function renderAll(): RenderResult {
           const t2 = renderSource(app, cluster, s2);
           if (t2 === undefined) continue;
           visit(t2, depth + 1);
-          // ApplicationSet이 만드는 Application도 검사해야 한다. 여기서 전개하는 ApplicationSet만 받는다(아래 5.).
-          for (const set of parseAll(t2).filter((d) => d?.kind === "ApplicationSet")) {
-            const ok = APPSET_RENDERERS[set.metadata?.name]?.(set);
-            if (ok !== true) fail(`${app.metadata?.name}[${cluster}]`, `ApplicationSet ${set.metadata?.name}: ${ok ?? "render.ts가 전개하지 않는 ApplicationSet이다"}`);
-          }
         }
       }
     };
@@ -218,18 +218,23 @@ export function renderAll(): RenderResult {
     else add(`kustomize:${dir}`, r.out);
   }
 
-  // 4. 차트 시험 values. 차트마다 하나 이상 있어야 한다. 아직 어느 Application도 쓰지 않는 새 차트는 이것이 유일한 렌더다.
-  for (const c of gitFiles(":(glob)platform/charts/*/Chart.yaml")) {
+  // 4. 로컬 차트의 시험 values(<차트>/ci/*.yaml). 공유 차트(platform/charts/*)는 늘 하나 이상 있어야 한다.
+  //    root가 아직 렌더하지 않는 로컬 차트(꺼진 구성 요소)도 시험 values가 있어야 한다. 켜기 전에 틀린 템플릿이 들어오지 않게.
+  for (const c of gitFiles(":(glob)platform/**/Chart.yaml")) {
     const dir = dirname(c);
-    if (gitFiles(`${dir}/ci/*.yaml`).length === 0) fail(dir, "차트 시험 values(ci/*.yaml)가 없다");
-  }
-  for (const f of gitFiles(":(glob)platform/charts/*/ci/*.yaml")) {
-    const chartDir = dirname(dirname(f));
-    const chart = relative("platform/charts", chartDir);
-    const origin = `chart:${chart}/${relative(chartDir, f)}`;
-    const r = helmTemplate(chart, chartDir, `app-${chart}-ci`, [f]);
-    if (!r.ok) fail(origin, r.out.trim());
-    else add(origin, r.out);
+    if (dir === "platform/root") continue;
+    const ciFiles = gitFiles(`${dir}/ci/*.yaml`);
+    if (ciFiles.length === 0) {
+      if (dir.startsWith("platform/charts/") || !covered.has(dir)) fail(dir, "차트 시험 values(ci/*.yaml)가 없다(공유 차트이거나 root가 아직 렌더하지 않는 차트)");
+      continue;
+    }
+    const chart = relative(dirname(dir), dir);
+    for (const f of ciFiles) {
+      const origin = `chart:${relative("platform", dir)}/${relative(dir, f)}`;
+      const r = helmTemplate(chart, dir, `app-${chart}`, [f]);
+      if (!r.ok) fail(origin, r.out.trim());
+      else add(origin, r.out);
+    }
   }
 
   if (res.targets.length === 0) fail("render", "렌더 대상이 0개다(찾는 식이 깨졌을 수 있다, L40)");

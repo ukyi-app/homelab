@@ -27,6 +27,8 @@ function header(text: string, key: string): string | undefined {
 
 // YAML로 읽히는 파일은 구조로(흐름 매핑 {kind: Secret} 포함), Helm 템플릿처럼 읽히지 않는 파일은 원문으로 본다.
 const SECRET_KIND = /^\s*(-\s+)?["']?kind["']?\s*:\s*["']?Secret["']?\s*(#.*)?$/m;
+// 흐름 매핑 안의 kind: Secret({apiVersion: v1, kind: Secret, ...}). 파싱되지 않는 템플릿에서 쓴다.
+const SECRET_KIND_FLOW = /[{,]\s*["']?kind["']?\s*:\s*["']?Secret["']?\s*[,}]/;
 function hasSecret(v: unknown): boolean {
   if (Array.isArray(v)) return v.some(hasSecret);
   if (v && typeof v === "object") {
@@ -53,7 +55,7 @@ const steps: Step[] = [
       for (const f of gitFiles("*.yaml", "*.yml", "*.tpl", "*.json")) {
         if (f.startsWith("tools/ci/fixtures/")) continue;
         const text = readText(f);
-        let found = SECRET_KIND.test(text);
+        let found = SECRET_KIND.test(text) || SECRET_KIND_FLOW.test(text);
         if (!found) {
           try {
             found = hasSecret(parseAll(text));

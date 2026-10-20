@@ -188,6 +188,14 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
     if (job.secrets === "inherit") add("reusable-call", where, "secrets: inherit를 쓰지 않는다");
     if (typeof job.uses === "string" && !job.uses.startsWith("./")) add("reusable-call", where, `로컬(./)이 아닌 reusable 워크플로를 부르지 않는다: ${job.uses}`);
 
+    // job container와 service 이미지는 실제로 실행된다. digest로만(태그가 움직이면 검토 안 한 코드가 돈다).
+    const images: [string, unknown][] = [];
+    if (job.container !== undefined) images.push(["container", typeof job.container === "string" ? job.container : job.container?.image]);
+    for (const [svc, def] of Object.entries((job.services ?? {}) as Record<string, any>)) images.push([`services.${svc}`, def?.image]);
+    for (const [what, img] of images) {
+      if (typeof img !== "string" || !/^[a-z0-9][a-z0-9._\-/:]*@sha256:[0-9a-f]{64}$/.test(img)) add("pin", `${where} ${what}`, `컨테이너 이미지는 digest로 고정한다: ${String(img)}`);
+    }
+
     // reusable 호출 job(uses)에는 runs-on이 없다.
     if (!("uses" in job)) {
       const runsOn = job["runs-on"];

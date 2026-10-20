@@ -1,0 +1,13 @@
+# path: .github/workflows/other.yaml
+# expect: pin
+# service 컨테이너도 실제로 실행된다.
+name: other
+on: push
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    services:
+      redis:
+        image: redis:latest
+    steps:
+      - run: "true"

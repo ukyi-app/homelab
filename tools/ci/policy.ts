@@ -115,15 +115,15 @@ export function checkWorkloads(docs: Doc[]): Violation[] {
     if (!WORKLOAD_KINDS.has(d.obj.kind)) continue;
     const spec = podSpec(d.obj) ?? {};
     const containers = [...(spec.initContainers ?? []), ...(spec.containers ?? [])];
-    if (upstreamArgocdWorkload(d, containers.map((c: any) => String(c.image)))) continue;
-    seen++;
-    if (containers.length === 0) out.push({ rule: "workload", where: id(d), message: "컨테이너가 없다" });
-    // image volume(Kubernetes 1.36 stable)도 OCI 참조를 끌어온다. 컨테이너 이미지와 같은 digest 규칙이다.
+    // image volume(Kubernetes 1.36 stable)도 OCI 참조를 끌어온다. 상류 예외보다 먼저, 모든 워크로드에 본다.
     for (const v of spec.volumes ?? []) {
       if (v?.image !== undefined && !(typeof v.image.reference === "string" && DIGEST_IMAGE.test(v.image.reference))) {
         out.push({ rule: "image-digest", where: `${id(d)} volume ${v.name}`, message: `image volume이 digest 고정이 아니다: ${v.image?.reference} (L27)` });
       }
     }
+    if (upstreamArgocdWorkload(d, containers.map((c: any) => String(c.image)))) continue;
+    seen++;
+    if (containers.length === 0) out.push({ rule: "workload", where: id(d), message: "컨테이너가 없다" });
     for (const c of containers) {
       const where = `${id(d)} container ${c.name}`;
       if (typeof c.image !== "string" || !DIGEST_IMAGE.test(c.image)) {
@@ -220,6 +220,15 @@ export function checkReadonlyRbac(docs: Doc[]): Violation[] {
     roles.find(
       (r) => context(r.origin) === ctx && r.obj.kind === kind && r.obj.metadata?.name === name && (kind === "ClusterRole" || r.obj.metadata?.namespace === ns),
     );
+
+  // 같은 맥락에 같은 역할이 둘이면 어느 쪽이 적용될지 렌더만으로 알 수 없다(Argo CD 다중 source는 뒤가 이긴다).
+  // roleRef 판정이 앞의 것을 보고 통과하지 않게 중복 자체를 막는다.
+  const seenRoles = new Set<string>();
+  for (const d of roles) {
+    const key = `${context(d.origin)}|${d.obj.kind}|${d.obj.metadata?.namespace ?? ""}|${d.obj.metadata?.name}`;
+    if (seenRoles.has(key)) out.push({ rule: "readonly-rbac", where: id(d), message: "같은 렌더 맥락에 같은 kind·이름의 역할이 둘 있다" });
+    seenRoles.add(key);
+  }
 
   // 역할 문서는 하나도 빼지 않고 모두 본다.
   for (const d of roles) {

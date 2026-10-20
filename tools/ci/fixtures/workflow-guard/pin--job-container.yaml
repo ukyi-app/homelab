@@ -1,0 +1,11 @@
+# path: .github/workflows/other.yaml
+# expect: pin
+# job의 모든 step이 이 컨테이너 안에서 돈다.
+name: other
+on: push
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    container: node:latest
+    steps:
+      - run: "true"
