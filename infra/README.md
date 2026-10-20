@@ -8,7 +8,13 @@
 
 ## 1. 준비와 자격
 
-`mise install`로 `.tool-versions`의 Terraform 1.16.6과 Infisical CLI 0.44.2를 설치하고, `infisical login`으로 owner 계정에 로그인한다(브라우저 인증, 토큰은 OS 키링).
+`mise install`로 `.tool-versions`의 Terraform 1.16.6과 Infisical CLI 0.44.2를 설치하고, `infisical login`으로 owner 계정에 로그인한다.
+브라우저가 없는 호스트(NUC)에서는 출력된 주소를 다른 기기에서 열고, 받은 토큰을 `Paste your browser token here:` 칸에 붙여 넣는다(Email 칸이 아니다. 그 칸은 입력이 화면에 보인다).
+
+**키링이 없는 호스트의 함정:** Secret Service가 없는 서버에서는 CLI가 `vaultBackendType: file`로 바꿔 로그인 세션 토큰을 `~/infisical-keyring/`에 저장한다.
+그 파일의 암호 문구는 `~/.infisical/infisical-config.json`에 함께 있어 디스크에서는 평문과 다를 바 없다(2026-10-20 NUC에서 확인).
+그래서 이 런북의 Terraform 작업이 끝나면 같은 날 `infisical reset`으로 로그인·보관소·설정을 지우고, 다음 작업 때 다시 로그인한다.
+OS 키링이 있는 운영자 기기에서 실행하면 이 문제가 없다.
 Provider는 Cloudflare 5.28.0, Tailscale 0.29.2와 root별 `.terraform.lock.hcl`로 고정한다.
 2026-10-20 확인한 최신 안정판이다:
 [Terraform 릴리스](https://github.com/hashicorp/terraform/releases/tag/v1.16.6),
