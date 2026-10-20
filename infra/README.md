@@ -8,7 +8,7 @@
 
 ## 1. 준비와 자격
 
-`mise install`로 `.tool-versions`의 Terraform 1.16.6을 설치한다.
+`mise install`로 `.tool-versions`의 Terraform 1.16.6과 Infisical CLI 0.44.2를 설치하고, `infisical login`으로 owner 계정에 로그인한다(브라우저 인증, 토큰은 OS 키링).
 Provider는 Cloudflare 5.28.0, Tailscale 0.29.2와 root별 `.terraform.lock.hcl`로 고정한다.
 2026-10-20 확인한 최신 안정판이다:
 [Terraform 릴리스](https://github.com/hashicorp/terraform/releases/tag/v1.16.6),
