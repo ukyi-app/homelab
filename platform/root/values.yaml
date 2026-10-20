@@ -34,7 +34,7 @@ components:
   traefik:
     enabled: true
   cloudflared:
-    enabled: false
+    enabled: true
   tailscale:
     enabled: true
   adguard:
