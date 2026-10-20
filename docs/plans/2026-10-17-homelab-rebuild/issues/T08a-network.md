@@ -66,7 +66,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - 이 자원은 DNS 설정 전체를 소유한다. 첫 apply 전에 콘솔의 현재 값을 기록하고, 그 값을 그대로 옮긴 HCL로 새 state에 import한 뒤(import 블록, provider가 지원) plan 무변경을 확인하고 목표 값으로 바꾼다. import 없이 새 state로 plan하면 생성 계획이 나온다. 선언하지 않은 콘솔 값(nameserver, split DNS, search path)은 첫 apply에서 지워지고, `override_local_dns`를 빠뜨리면 기본 false라 기기가 로컬 DNS를 계속 쓴다(plan은 정상).
 - DNS는 ACL과 나눈 별도 root `infra/tailscale-dns`(state 키 `v2/tailscale-dns/terraform.tfstate`)에 두고 리소스에 `prevent_destroy`를 건다. NUC가 없을 때 precondition 오류가 ACL apply까지 막지 않게 하려는 것이다. 조건부(`count`)는 쓰지 않는다. NUC가 없는 동안 apply가 DNS 설정 전체의 삭제를 계획해 공용 폴백과 Override까지 사라지기 때문이다. NUC가 tailnet에 없는 동안은 이 root를 apply하지 않는다. Override를 켠 상태에서 AdGuard가 죽어도 공용 서버가 답하므로 Terraform 실행 기기의 DNS 문제는 작다.
 - NUC를 Tailscale에 다시 등록하면 키 만료가 기본값(켜짐)으로 돌아오고 Tailscale IP가 바뀔 수 있다. 키 만료를 해제한 뒤 apply하면 data source가 새 IP를 쓴다. 만료가 켜진 채면 precondition이 apply를 멈춘다.
-- 이 HCL과 import는 [미검증] U34다(문서·소스로만 맞춰 썼다). 안 되면 콘솔에서 한 번 설정하고 `bootstrap.md`에 값의 출처와 확인 명령(`tailscale dns status --all`)을 적는 방식으로 돌아간다(IaC 밖, 드리프트는 사람 확인).
+- 이 HCL과 import는 U34로 확인했다(2026-10-20~21: import 무변경, 목표 apply, `tag:nuc` precondition. 결과 절). 이후 provider 버전에서 안 되면 콘솔에서 한 번 설정하고 `bootstrap.md`에 값의 출처와 확인 명령(`tailscale dns status --all`)을 적는 방식으로 돌아간다(IaC 밖, 드리프트는 사람 확인).
 
 ### AdGuard와 노드 DNS (`platform/adguard`)
 
