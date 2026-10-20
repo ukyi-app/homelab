@@ -144,7 +144,7 @@ T09 전(2026-10-19 운영 최초 설치)에는 건너뛴다. 평상시 사람이
 
 **먼저 Infisical 쪽을 확인한다.** 클러스터가 읽는 프로젝트·환경(운영 `homelab`/`prod`, VM `homelab-dev`/`dev`)에 폴더 `/platform`과 `/apps`가 있어야 한다. ClusterSecretStore는 Ready 판정 때 그 폴더 목록을 읽어, 폴더가 없으면 404로 Ready=False가 되고 root가 wave -7에서 멈춘다. Git의 ExternalSecret이 읽는 키도 모두 있어야 한다(지금은 `/platform/argocd`의 `OWNER_PASSWORD_BCRYPT`·`OWNER_PASSWORD_MTIME`). 하나라도 빠지면 그 Application이 Degraded가 되고 root가 뒤 wave로 넘어가지 않는다.
 
-ESO 자격 값은 복구 자산에서 오고(VM은 VM 준비 자산의 `eso-homelab-dev` 값), 출력하지 않는다. 변수는 `export`해야 아래 bash가 받는다. 비었으면 Secret을 만들지 않고 멈춘다.
+ESO 자격 값은 복구 자산([recovery-assets.md](recovery-assets.md))에서 오고(VM은 VM 준비 자산의 `eso-homelab-dev` 값), 출력하지 않는다. 변수는 `export`해야 아래 bash가 받는다. 비었으면 Secret을 만들지 않고 멈춘다.
 
 ```bash
 bash -euo pipefail <<'EOF'

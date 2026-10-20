@@ -1,7 +1,7 @@
 # T09 시크릿 체계
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-19 착수. 끝난 것: Infisical 가입·프로젝트 5개·identity 4개(사람 포함), U05(배포 키 OIDC 확정), ESO v2.13.0과 ClusterSecretStore 2개(PR #757), 부트스트랩 Secret과 읽기 경계(`homelab`만 200), 시나리오 6(PR #759·#760)·7(PR #761·#762·#764. 시험용 client secret 장애 주입, 운영 자격 로그인 200으로 복구, 자동 재동기화)의 E3 동등 절차, e3-probe 정리(PR #765)와 Infisical 시험 키 삭제, Argo CD `owner` 비밀번호(PR #766·#767, 로그인 200), 회전 런북 초안·`bootstrap.md` 2.2 선행 조건. 남은 것: Grafana·AdGuard 관리자 자격, 새 Telegram 봇, Terraform 자격 3종(`homelab-admin`), 복구 자산 목록과 두 곳 보관)
+- 상태: 진행 중 (2026-10-19 착수. 끝난 것: Infisical 가입·프로젝트 5개·identity 4개(사람 포함), U05(배포 키 OIDC 확정), ESO v2.13.0과 ClusterSecretStore 2개(PR #757), 부트스트랩 Secret과 읽기 경계(`homelab`만 200), 시나리오 6(PR #759·#760)·7(PR #761·#762·#764. 시험용 client secret 장애 주입, 운영 자격 로그인 200으로 복구, 자동 재동기화)의 E3 동등 절차, e3-probe 정리(PR #765)와 Infisical 시험 키 삭제, Argo CD `owner` 비밀번호(PR #766·#767, 로그인 200), 회전 런북 초안·`bootstrap.md` 2.2 선행 조건(PR #768), 플랫폼 시크릿 등록(`homelab`: Grafana·AdGuard 관리자, 새 Telegram 봇 토큰·chat ID), Terraform 자격 3종(`homelab-admin`: R2 state 키, Cloudflare 토큰, Tailscale OAuth), 복구 자산 문서(`docs/runbooks-public/recovery-assets.md`, 위치·항목 이름만). 남은 것: 사람이 복구 자산을 두 곳(1Password, 오프라인 암호화 USB)에 보관했다고 확인하면 완료)
 - 명세: [../spec.md](../spec.md)
 - 설계: [../platform/design.md](../platform/design.md) E.1 E3과 "E3의 동등 절차", E.2 E3 행, C.4.8, C.6, B.8 "E3 시크릿", F D-04·D-10·D-20
 - Blocked by: T07
