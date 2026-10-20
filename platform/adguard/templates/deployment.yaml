@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adguard
+  namespace: adguard
+spec:
+  replicas: 1
+  # RWO 설정 파일에 두 프로세스가 동시에 쓰지 않게 한다. 갱신 중 DNS가 잠시 끊긴다.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: adguard
+  template:
+    metadata:
+      labels:
+        app: adguard
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # 필터 다운로드도 시스템 DNS를 쓸 수 있다. CoreDNS·공유기·AdGuard 자신을 경유하지 않는다.
+      dnsPolicy: None
+      dnsConfig:
+        nameservers: ["1.1.1.1", "9.9.9.9"]
+      initContainers:
+        - name: prepare-config
+          # 4.54.1, Docker Hub 멀티 아키텍처 index 확인: 2026-10-20.
+          image: mikefarah/yq:4.54.1@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              umask 077
+              test -n "$ADGUARD_ADMIN_USER"
+              test "${#ADGUARD_ADMIN_PASSWORD_BCRYPT}" -eq 60
+              printf '%s' "$ADGUARD_ADMIN_PASSWORD_BCRYPT" |
+                grep -Eq '^[$]2[aby][$](0[4-9]|[12][0-9]|3[01])[$][./A-Za-z0-9]{53}$'
+              mkdir -p /data/conf /data/work
+              cp -n /seed/AdGuardHome.yaml /data/conf/AdGuardHome.yaml
+              yq -i '.users = [{"name": strenv(ADGUARD_ADMIN_USER), "password": strenv(ADGUARD_ADMIN_PASSWORD_BCRYPT)}]' /data/conf/AdGuardHome.yaml
+              chmod 600 /data/conf/AdGuardHome.yaml
+          env:
+            - name: ADGUARD_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: adguard-auth
+                  key: ADGUARD_ADMIN_USER
+            - name: ADGUARD_ADMIN_PASSWORD_BCRYPT
+              valueFrom:
+                secretKeyRef:
+                  name: adguard-auth
+                  key: ADGUARD_ADMIN_PASSWORD_BCRYPT
+          # hostPath 백엔드에는 fsGroup 소유권 변경이 적용되지 않는다.
+          # 빈 PVC의 디렉터리·파일도 본 프로세스와 같은 uid 65532가 만들어야 한다.
+          # 자격은 매 파드 시작에 덮어쓴다. ESO 갱신만으로 재시작하지 않아 DNS 단절을 자동 유발하지 않는다.
+          # 비밀번호 회전은 Secret 갱신을 확인한 뒤 승인된 재배포로 적용한다. UI의 자격 변경은 재시작 때 사라진다.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /data
+            # yq -i가 임시파일을 쓰므로 읽기 전용 루트와 별개로 둔다.
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+      containers:
+        - name: adguard
+          # v0.107.79, Docker Hub 멀티 아키텍처 index 확인: 2026-10-20.
+          image: adguard/adguardhome:v0.107.79@sha256:aba9e3bf0613be3ba3755e1fc311b126e2c24bec25e18b6483894a88283074f0
+          ports:
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          # liveness 재시작은 LAN 유일 리졸버를 끊는다. readiness도 업스트림 장애에 연동하지 않는다.
+          # TCP 연결 확인은 실제 질의 성공을 보장하지 않는다. 시나리오 14와 외부 감시가 별도로 필요하다.
+          readinessProbe:
+            tcpSocket:
+              port: 53
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            # 바이너리의 setcap 때문에 false이면 exec EPERM이 난다. :53 권한만 허용한다.
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
+          volumeMounts:
+            - name: data
+              mountPath: /opt/adguardhome/conf
+              subPath: conf
+            - name: data
+              mountPath: /opt/adguardhome/work
+              subPath: work
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            # 옛 30초 해상도 실측 peak 124.4Mi의 약 두 배. CPU 제한은 필터 갱신 때 DNS 지연을 늘린다.
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: seed
+          configMap:
+            name: adguard-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: adguard-data
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi

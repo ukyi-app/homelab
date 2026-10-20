@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: adguard
+  namespace: adguard
+  labels:
+    tailscale.com/proxy-class: homelab-proxy
+spec:
+  ingressClassName: tailscale
+  tls:
+    - hosts:
+        - {{ printf "%sadguard" .Values.tailscale.prefix | quote }}
+  rules:
+    - host: {{ printf "%sadguard" .Values.tailscale.prefix | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: adguard-ui
+                port:
+                  name: http
