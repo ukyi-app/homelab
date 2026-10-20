@@ -1887,11 +1887,12 @@ design-prompt §10-E의 순서다: §1 미완료 항목(옛 클러스터 철거 
 T05 결정 ─▶ E1 철거·정리 ─▶ E2 main 교체·호스트·k3s·Argo CD ─▶ E3 시크릿 체계
 E3 ─▶ E4a 네트워크·DNS·공개
 E3, E4a ─▶ E4b 관측·알림·봇 자리
+E4a ─▶ E4c 내부 UI 짧은 주소(T08c, D-30. 2026-10-20 추가)
 E2 ─▶ E5 CI/CD 착수,  E3 ─▶ E5 완료
 E4a 첫 Terraform apply(U02 잠금 시험) ─▶ E5 `infra/github` 첫 apply
 E3, E4a, E5 ─▶ E6 데이터
 E5, E6 ─▶ E7 CLI (읽기 명령은 E5 뒤 먼저 착수 가능)
-E4a, E4b, E5, E6, E7 ─▶ E8 테스트 앱 통합 검증
+E4a, E4b, E4c, E5, E6, E7 ─▶ E8 테스트 앱 통합 검증
 E8, T14·T15 결정 ─▶ E9 봇 첫 배포(T16b)
 E8 ─▶ E10 준비,  E9 ─▶ E10 기존 앱 재연결 배포
 ```
@@ -1965,6 +1966,16 @@ T15 결정(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15))으로 T16�
 | 검증 방법 | G 시나리오 16·17 명령. 시나리오 6·7 경보 부분: 시험 ns에 없는 키를 가리키는 ExternalSecret을 두고, 또 E3의 시험용 client secret 장애 주입으로 ESO 인증을 잠시 끊어(승인 기록. 운영 client secret은 폐기하지 않는다) ExternalSecretNotReady 경보가 Telegram에 도착하는지 보고 복구 뒤 resolved와 시험 ns 삭제를 확인한다. C.8 표의 명령. `vmalert-tool unittest`(형식 미검증). **이탈 경보 발화 시험:** 감시 방식(E4a의 U32 결과)에 맞춰 tailnet 경로만 끊는다. NUC를 `tag:nuc`로 태그해 `tag:nuc:53` 규칙이 따로 있으면(D-11) 정책 사본을 남기고 그 규칙을 뺀 정책을 apply한다(승인 기록). 태그하지 않아 `autogroup:self:*`가 모든 포트를 열고 있으면 사람이 sudo로 `iptables -t raw -I PREROUTING -i tailscale0 -p udp --dport 53 -j DROP`(tcp도 같이)를 임시로 넣고 시험 뒤 지운다. raw PREROUTING은 hostPort DNAT보다 먼저라 svclb 경로까지 끊긴다(형식 미검증). 그 동안 Tailscale 기기는 공용 서버로 해석한다(C.3.6). 1시간 무질의 뒤 다음 평가 주기 안에 Telegram 수신을 확인하고, 정책을 되돌린 뒤 resolved를 확인한다. 룰 논리는 단위 시험으로 따로 본다 |
 | 되돌리는 방법 | revert PR. healthchecks 체크는 일시 정지 |
 
+#### E4c 내부 UI 짧은 주소 (T08c, 2026-10-20 추가)
+
+| 항목 | 내용 |
+|---|---|
+| 만들 것 | tailnet 전용 리다이렉터 `go`(상태 없는 웹 서버 Deployment, operator LoadBalancer Service HTTP 80, NetworkPolicy, tailnet 도메인 ExternalSecret), ACL `tag:k8s-go`·`autogroup:member → tag:k8s-go:80`(C.3.5, F D-30) |
+| 선행 조건 | E4a(Tailscale operator·ProxyClass, ACL root). D-30. **사람 작업:** Infisical `homelab`/prod와 `homelab-dev`/dev에 tailnet 도메인 키 등록, ACL apply(owner 로컬), 맥·아이폰 셀룰러 확인 |
+| 완료 기준 | T08c 완료 조건. 아이폰 Safari의 스킴 없는 `go/argocd`가 필수다. VM은 렌더만 보고 실접속은 E8 시나리오 13에서 본다 |
+| 검증 방법 | T08c 완료 조건의 명령 |
+| 되돌리는 방법 | Application이 살아 있을 때 `go` 매니페스트를 지우는 PR로 prune 완료(Service·프록시 기기 사라짐)를 확인한 뒤 ACL 두 줄을 지운다 |
+
 #### E5 CI/CD (T10)
 
 | 항목 | 내용 |
@@ -2020,7 +2031,7 @@ T15 결정(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15))으로 T16�
 |---|---|
 | 만들 것 | E7의 CLI로 새로 만드는 시험 앱 `homelab-smoke`(시나리오 1의 `homelab app new`)로 CLI를 쓰는 시나리오를 포함해 1~17 전체 실행(시나리오 1의 공개 URL 확인 포함), VM 재구축과 DB 복구(시나리오 13), 결과표 `platform/verification.md`(이 문서 옆, PR로 main) |
 | 옛 저장소에서 가져올 것 | L23의 복구 순서, L45·L46의 확인 항목 |
-| 선행 조건 | E4a, E4b, E5, E6, E7. D-12(VM 방식). **사람 작업:** VM 준비(`vm-` 접두 노드 이름, 운영자 기기가 LAN으로 닿는 노드 IP. VM 호스트는 tailnet에 넣지 않는다, C.3.2의 0), VM 격리 설정(아래: VM 값 파일 `host/clusters/vm.env`(노드 이름 `vm-` 접두)·`platform/root/values-vm.yaml` PR(`root-vm.yaml`은 E2가 만들어 둠), VM 전용 R2 버킷·토큰, VM operator OAuth client, 시험 터널·체크·수신자를 `homelab-dev`에, 운영 ExternalSecret 키 목록에 맞춘 나머지 `homelab-dev` 시험 값 채우기와 빠진 키 0 확인(2번), `eso-homelab-dev` client secret 발급과 VM 준비 자산 보관(2번), 복구 자산의 R2 읽기 전용 토큰을 시험 동안만 VM에), 시험 App을 `homelab-smoke`에도 설치(시나리오 15), NUC 재부팅·네트워크 차단 시험 승인 |
+| 선행 조건 | E4a, E4b, E4c, E5, E6, E7. D-12(VM 방식), D-30(VM의 `vm-go` 실접속은 시나리오 13에서 본다). **사람 작업:** VM 준비(`vm-` 접두 노드 이름, 운영자 기기가 LAN으로 닿는 노드 IP. VM 호스트는 tailnet에 넣지 않는다, C.3.2의 0), VM 격리 설정(아래: VM 값 파일 `host/clusters/vm.env`(노드 이름 `vm-` 접두)·`platform/root/values-vm.yaml` PR(`root-vm.yaml`은 E2가 만들어 둠), VM 전용 R2 버킷·토큰, VM operator OAuth client, 시험 터널·체크·수신자를 `homelab-dev`에, 운영 ExternalSecret 키 목록에 맞춘 나머지 `homelab-dev` 시험 값 채우기와 빠진 키 0 확인(2번), `eso-homelab-dev` client secret 발급과 VM 준비 자산 보관(2번), 복구 자산의 R2 읽기 전용 토큰을 시험 동안만 VM에), 시험 App을 `homelab-smoke`에도 설치(시나리오 15), NUC 재부팅·네트워크 차단 시험 승인 |
 | 완료 기준 | 시나리오 1~17이 모두 "실제 검증 완료"이거나 사용자가 승인한 한계로 기록. AC-P12 다섯 자리와 AC-P11·AC-P8 자리 확인 |
 | 검증 방법 | G절 전체. 시나리오 7·13 뒤 복구 자산의 운영 ESO client ID·secret으로 Infisical Universal Auth 로그인 → 성공(토큰은 출력하지 않고 응답 코드만. 시나리오 7의 장애 주입이 운영 secret을 폐기하지 않았음을 확인) |
 | 되돌리는 방법 | 시험 앱은 `homelab app remove` 뒤 `homelab data purge`. VM은 폐기하고 VM 전용 R2 버킷과 tailnet의 `vm-*` 기기(VM operator·프록시)를 지우며, `eso-homelab-dev` client secret을 폐기하고, values-vm의 복구 원본은 정리 PR로 지운다 |
@@ -2068,14 +2079,15 @@ T15 결정(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15))으로 T16�
 | E2 | T07 | 그대로. 재분해 전 할 일 7(Argo CD 읽기 전용 계정)은 E4b(T08b)로 옮기고, 최소 `ci.yaml`과 main 교체 뒤 `ci` 필수 검사를 넣는다 | 읽기 전용 계정 셋을 한 단계에서 함께 확인한다. main 교체 직후부터 시크릿 유출 검사가 돌고 병합 조건이 된다 |
 | E3 | T09 | 그대로. 첫 작업으로 배포 키 OIDC 확인을 넣는다. identity는 4개다(D-04). 완료 기준의 시나리오 6·7은 E3 범위(E3 표 아래 동등 절차, 시험 Application `e3-probe`)로 좁히고, 경보·Telegram은 T08b, 배포 PR 자동 병합 흐름은 T10, `homelab status`는 T13으로 보낸다 | C.4.8의 방식 결정이 E5를 좌우한다. T09 완료가 T08b·T10·T12를 기다리지 않게 한다 |
 | E4a, E4b | T08 | **T08을 둘로 나눈다**: T08a 네트워크·DNS·외부 공개, T08b 관측·알림·봇 자리. T08b 완료 기준에 시나리오 6·7의 경보 부분과 T06 표의 옛 healthchecks ping URL 줄(`보류(D-10, T08b)`) 닫기를 넣고, C.8 읽기 전용 접근의 CI 검사(L30) 줄은 전체 `ci`를 만드는 T10에서 본다 | 결정이 다르고(D-08·D-11 대 D-09·D-10·D-15 입력), 완료 시나리오가 다르며(14 대 16·17), T08b는 T08a의 일부 경로만 기다린다 |
+| E4c | 없음(2026-10-20 추가) | T08c를 새로 둔다(D-30). 선행은 T08a, T13이 기다린다 | `go` 리다이렉터는 T08a의 operator·ACL 경로 위에 얹는 작은 단계다. VM의 `vm-go` 실접속은 E8 시나리오 13에서 본다 |
 | E5 | T10 | 그대로. 손 등록용 시험 앱 저장소(`homelab-probe`) 생성과 `infra/github` Terraform root와 CLI와 독립된 래퍼 `tools/tf-github.sh`, 병합 키 Secret Sync, ci의 workflow-guard를 넣는다(D-04, D-28). 결정 5 하드닝이 건 `app-main` import, 앱 저장소 보안 설정, GHCR 패키지 가시성 시험(U39)도 넣는다(D-29). 완료 기준은 CLI 없는 동등 절차(E5 표 아래, 시나리오 7의 배포 흐름 부분 포함)이고 공개 URL 확인은 T13으로 보낸다. 간선 T09 → T10은 "완료" 간선으로 두고 착수는 T07 뒤 병행한다(C.4.8) | C.4.8의 답. T10 완료가 T12(CLI)나 T08a(공개 경로)를 기다리지 않게 한다 |
 | E6 | T11 | 선행을 T08a·T09·T10으로 바꾼다(재분해 전에는 T08·T09). 완료 기준은 CLI 없는 동등 절차(E6 표 아래) | cert-manager·R2 버킷은 T08a, 연결 배선과 배포 흐름은 T10. 관측(T08b)은 선행이 아니다. T11 완료가 T12를 기다리지 않게 한다 |
 | E7 | T12 | 그대로. 읽기 명령은 T10 뒤 먼저 착수 가능. 완료 기준에 CLI 경로 재확인(`homelab-probe`)을 넣는다 | E5·E6이 CLI 없이 확인한 것을 CLI로 다시 본다 |
-| E8 | T13 | 그대로. 선행에 T08a·T08b. CLI로 새로 만든 `homelab-smoke`로 시나리오 1~17 전체(공개 URL 포함) | |
+| E8 | T13 | 그대로. 선행에 T08a·T08b(2026-10-20부터 T08c도). CLI로 새로 만든 `homelab-smoke`로 시나리오 1~17 전체(공개 URL 포함) | |
 | E9 | T16 | T16 할 일에 플랫폼 쪽 준비(E9 표)를 명시. 봇 자리 Application의 `target` 변경 PR(봇 등록 PR보다 먼저)과 콜드스타트 순서 확인을 넣는다. T15 결정(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15))으로 T16은 T16a(FOUNDATION 로컬·mock, T15 뒤 바로 착수)와 T16b(실연동·첫 배포, T13 뒤)로 나뉘고, E9는 T16b다 | 봇 ns는 앱 Application이 만들므로 그보다 뒤 wave의 봇 자리가 콜드스타트에 수렴하는지 운영에서 본다(C.8) |
 | E10 | T22 | 그대로. 할 일에 `mac-uptime-guard` 장치 끄기 뒤 옛 Telegram 봇 토큰 폐기와 옛 봇 삭제를 더한다(T06 자격 폐기 표의 `보류(D-10, T22)` 행을 닫음). 비앱 저장소 처리(D-29: `aiops` 저장소·App과 `mac-uptime-guard` 저장소 삭제, `aiops-autodeploy-canary` private 보관. `mac-uptime-guard`는 2026-10-18 17:46 사용자 결정으로 private 보관에서 제거로 바뀌었다)를 넣고, `page`·`trip-mate-api` 재연결은 지운다(2026-10-18 삭제, 0절 7항). 완료 기준은 재연결한 앱마다 시나리오 1 전체다(앱 저장소는 public만이라 private 앱 기준은 없다) | D-10, D-20, D-29. E1과 E3은 이 행을 닫지 않는다. D-10이 새 봇으로 확정(사용자 2026-10-18, T05)돼 E3이 닫는 대안 분기(옛 봇 재사용)는 쓰이지 않는다 |
 
-P2 의존성(T05가 2026-10-18에 spec §8.2에 적용): `T06 → T07`, `T07 → T09`, `T07 → T10`(착수), `T09 → T10`(완료), `T08a → T10`(`infra/github` 첫 apply만, R2 잠금 시험 U02 뒤), `T07 → T08a`, `T09 → T08a`, `T08a → T08b`, `T09 → T08b`, `T08a → T11`, `T09 → T11`, `T10 → T11`, `T10 → T12`, `T11 → T12`, `T08a → T13`, `T08b → T13`, `T10 → T13`, `T11 → T13`, `T12 → T13`. 순환은 없다(T06 → T07 → T09 → T08a → T10 → {T08b, T11} → T12 → T13의 위상 순서가 있다. T10 착수는 T07 뒤 병행하고, `infra/github` 첫 apply는 T08a 뒤다).
+P2 의존성(T05가 2026-10-18에 spec §8.2에 적용): `T06 → T07`, `T07 → T09`, `T07 → T10`(착수), `T09 → T10`(완료), `T08a → T10`(`infra/github` 첫 apply만, R2 잠금 시험 U02 뒤), `T07 → T08a`, `T09 → T08a`, `T08a → T08b`, `T09 → T08b`, `T08a → T11`, `T09 → T11`, `T10 → T11`, `T10 → T12`, `T11 → T12`, `T08a → T13`, `T08b → T13`, `T10 → T13`, `T11 → T13`, `T12 → T13`. 2026-10-20 D-30으로 `T08a → T08c`, `T08c → T13`을 더했다. 순환은 없다(T06 → T07 → T09 → T08a → T10 → {T08b, T11} → T12 → T13의 위상 순서가 있다. T10 착수는 T07 뒤 병행하고, `infra/github` 첫 apply는 T08a 뒤다).
 
 완료 기준이 쓰는 산출물도 같은 방향만 가리킨다(간선마다 "완료 기준이 쓰는 것 ← 만드는 단계"):
 
@@ -2092,6 +2104,7 @@ P2 의존성(T05가 2026-10-18에 spec §8.2에 적용): `T06 → T07`, `T07 →
 | T08b | Telegram 토큰·healthchecks URL의 ESO 전달, 시나리오 6·7 경보 부분의 ExternalSecret·ESO | T09 | `T09 → T08b` |
 | T08b | T06 표의 옛 healthchecks ping URL 줄 `보류(D-10, T08b)`(새 체크 초록 확인 뒤 옛 체크 삭제로 닫음) | T08b 자신(새 체크. T06의 표는 T07·T09를 거쳐 앞) | 없음 |
 | T08b | 봇 자리 Application(시험 ns `bot-slot-probe`, C.4.5 네트워크 행을 손으로 옮긴 정책, SA `bot-reader`) | T08b 자신(T10의 공유 차트는 쓰지 않음, C.8) | 없음 |
+| T08c | Tailscale operator·ProxyClass, ACL root(`infra/tailscale`) | T08a | `T08a → T08c` |
 | T10 | Infisical 프로젝트·배포 OIDC identity, R2 state 자격(`homelab-admin`), 시나리오 7 배포 흐름 부분의 ESO | T09 | `T09 → T10`(완료) |
 | T10 | R2 state 첫 사용과 잠금 시험(U02) | T08a | `T08a → T10`(`infra/github` 첫 apply만, E.0) |
 | T10 | 손 등록 PR, `infra/github` Terraform root와 래퍼, 병합 키 sync, `homelab-probe`, 전체 `ci`(C.8 읽기 전용 접근 줄의 CI 검사 L30 포함) | T10 자신 | 없음 |
@@ -2099,7 +2112,7 @@ P2 의존성(T05가 2026-10-18에 spec §8.2에 적용): `T06 → T07`, `T07 →
 | T11 | 앱 차트 연결 배선, `homelab-probe` 등록 | T10 | `T10 → T11` |
 | T11 | 플랫폼 시크릿 전달 | T09 | `T09 → T11` |
 | T12 | E5·E6 동등 절차의 확인 대상 | T10, T11 | `T10 → T12`, `T11 → T12` |
-| T13 | 공개 URL(시나리오 1), 관측·경보(16·17), CLI | T08a, T08b, T12 | `T08a → T13`, `T08b → T13`, `T12 → T13` |
+| T13 | 공개 URL(시나리오 1), 관측·경보(16·17), CLI, `go` 리다이렉터(시나리오 13의 `vm-go`) | T08a, T08b, T08c, T12 | `T08a → T13`, `T08b → T13`, `T08c → T13`, `T12 → T13` |
 
 위 표는 T06~T13의 모든 단계를 다시 나열한 것이다. 각 행의 "만드는 단계"는 그 단계 자신이거나 위 P2 의존성의 앞 단계다. T09의 완료 기준은 경보(T08b), 배포 PR 흐름(T10), `homelab status`(T12)를 쓰지 않는다(E3 표 아래 동등 절차). T08b는 T10의 전체 `ci`도 공유 차트도 쓰지 않는다(L30 줄은 T10이 보고, 봇 자리 시험 ns의 정책은 손으로 옮긴 것이다). T10·T11의 완료 기준은 T12의 CLI도, T08a의 공개 경로(T10)도, T13의 산출물도 쓰지 않는다. 그래서 뒤 단계로 향하는 완료 의존은 없다.
 

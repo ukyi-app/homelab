@@ -29,7 +29,8 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 - Service `type: LoadBalancer`, `loadBalancerClass: tailscale`, 어노테이션 `tailscale.com/hostname: <접두>go`, `tailscale.com/tags: tag:k8s-go`. 포트는 80 하나다. **443은 열지 않는다.** 브라우저가 `https://go`를 먼저 시도하면 인증서 오류가 아니라 연결 거부로 끝나야 한다. Ingress로 내지 않는다(operator Ingress는 443과 전체 이름 인증서만 다뤄 `go/`가 TLS 실패, 설계 C.3.5).
 - NetworkPolicy: egress는 없다. ingress 출처는 실제 경로를 관찰해 정한다. 고정한 v1.104.1의 L3 프록시는 프록시의 tailnet 주소를 Service ClusterIP로 DNAT할 뿐 새 연결을 만들지 않으므로, 백엔드가 보는 출처는 `tailscale` ns 프록시 파드가 아니라 원래 tailnet 주소나 노드가 SNAT한 주소일 수 있다(Ingress 프록시와 다르다). `namespaceSelector`로 프록시 파드만 허용하면 정상 요청이 막힐 수 있다. 관찰한 출처만 허용하고, 허용 출처(tailnet 기기)와 비허용 출처(다른 ns의 시험 파드)를 모두 시험한다.
 - k3s servicelb가 이 Service를 건너뛰는지 확인한다. svclb DaemonSet이 생기면 노드 LAN에 80이 열린다(PR #779의 교훈).
-- 함정은 설정 옆 주석으로 남긴다: 443을 열지 않는 이유, 301을 쓰지 않는 이유, 이름이 HSTS preload 최상위 도메인(`app`, `dev` 등)과 겹치면 안 되는 이유.
+- 접근 로그에 경로·쿼리를 남기지 않는다. 남은 경로·쿼리에 토큰이나 인증 코드가 들어갈 수 있고, 파드 로그는 T08b의 수집기가 14일 보관한다. 접근 로그를 끄거나 경로·쿼리를 뺀 형식으로만 남긴다.
+- 함정은 설정 옆 주석으로 남긴다: 443을 열지 않는 이유, 301을 쓰지 않는 이유, 접근 로그에서 경로·쿼리를 빼는 이유, 이름이 HSTS preload 최상위 도메인(`app`, `dev` 등)과 겹치면 안 되는 이유.
 
 ### ACL (`infra/tailscale`, owner 로컬 apply)
 
@@ -48,7 +49,7 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 
 - 맥(Safari, Chrome)에서 `go/argocd` → Argo CD 로그인 화면, `go/adguard` → AdGuard 로그인 화면.
 - 아이폰 Safari(셀룰러, Tailscale 켬)에서 스킴 없이 친 `go/argocd`가 열린다. 이것이 D-30의 사용자 목표라 필수다. 검색어로 가거나 HTTPS로 바뀌어 실패하면 완료로 치지 않고, 원인과 `http://go/argocd` 결과를 기록한 뒤 구현이나 D-30을 사용자와 다시 정한다.
-- 경로·쿼리 유지: `go/argocd/applications?x=1` → 같은 경로·쿼리.
+- 경로·쿼리 유지: `go/argocd/applications?x=1` → 같은 경로·쿼리. 그 시험 쿼리 문자열이 파드 로그에 없다(T08b 뒤라면 로그 저장소에도 없다).
 - 거부: `go/evil.com`·`go/a.b`는 404, `https://go/`는 연결 실패(인증서 경고가 아님).
 - `go` 파드를 0으로 줄여도 전체 주소 `https://argocd.<tailnet>.ts.net`은 그대로 열리고, 되돌리면 `go/`가 돌아온다.
 - Tailscale을 끈 기기에서는 `go`가 풀리지 않는다. 노드 LAN `192.168.117.15`에 80이 새로 열리지 않는다(svclb 없음).
@@ -59,7 +60,7 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 
 ## 되돌리는 방법
 
-- Application을 끄면 Service와 프록시 기기가 사라진다. ACL 두 줄을 지우는 PR과 apply를 한다. 전체 주소는 그대로라 사용자에게 남는 영향은 짧은 입력이 없어지는 것뿐이다.
+- root의 자식 Application은 기본으로 `resources-finalizer`를 붙이지 않아서(`platform/root/templates/_helpers.tpl`, 명시한 `edge-probe`만 예외) Application만 끄거나 지우면 Deployment·Service가 남고, Service가 있는 동안 프록시 기기도 남는다. 그래서 Application이 살아 있을 때 `go` 매니페스트를 지우는 PR을 병합해 prune으로 Service·프록시 기기가 사라졌는지 확인하고, 그다음 Application과 ACL 두 줄을 지우는 PR과 apply를 한다. 전체 주소는 그대로라 사용자에게 남는 영향은 짧은 입력이 없어지는 것뿐이다.
 
 ## 범위 밖
 

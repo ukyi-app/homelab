@@ -498,8 +498,8 @@ AC-X1·AC-X2는 모든 티켓에 적용된다. 티켓 머리말의 연결 AC에 
 | GitHub | `files`·`homelab-app-template`의 private vulnerability reporting 켜기(D-29 기본 설정. 설계 C.3.9는 결정 5 하드닝이 켰다고 적지만 2026-10-18 실측은 둘 다 `false`, §5.1 결정 5) | T10 (guard 첫 실행 전) |
 | Codex 설정 | 봇이 리뷰하는 저장소의 Codex 자동 리뷰를 저장소별 Codex 설정에서 끄기(수동 `@codex review`는 남김, D-16) | T17 (그 저장소에서 봇 리뷰를 켜기 전) |
 | Cloudflare | R2 옛 버킷 삭제, 옛 state 객체 이동·삭제, 옛 터널·DNS·WAF·캐시 규칙 삭제(zone과 zone 설정은 남김, D-11), 옛 API 토큰 폐기, 새 토큰 발급, 새 터널·와일드카드 DNS·버킷 `homelab-backups`, zone 설정 9개를 새 Terraform으로 가져오기(D-11) | T06, T08a, T09 |
-| Tailscale | tagged 기기와 OAuth 클라이언트 정리, 노드 키 만료 설정, ACL·DNS 설정(D-08: 첫 Terraform apply 전 콘솔 값을 옮겨 새 state에 import, Override 켬, 전역 nameserver를 NUC + AdGuard 공용 DNS 2개로, C-05 Cloudflare 4개 삭제, MagicDNS·HTTPS 켬), 새 OAuth 발급 | T06, T08a, T09 |
-| Infisical | 가입, 요금제(Free, D-04), identity 4개, 병합 키 Secret Sync·App Connection 설정, 봇 시크릿 등록(runtime-policies·허용 목록 실제 값 포함, `/apps/homelab-bot/`, D-13) | T09, T10, T16b, T17, T18, T19 |
+| Tailscale | tagged 기기와 OAuth 클라이언트 정리, 노드 키 만료 설정, ACL·DNS 설정(D-08: 첫 Terraform apply 전 콘솔 값을 옮겨 새 state에 import, Override 켬, 전역 nameserver를 NUC + AdGuard 공용 DNS 2개로, C-05 Cloudflare 4개 삭제, MagicDNS·HTTPS 켬), 새 OAuth 발급, ACL에 `tag:k8s-go`와 `autogroup:member → tag:k8s-go:80` apply(D-30) | T06, T08a, T08c, T09 |
+| Infisical | 가입, 요금제(Free, D-04), identity 4개, 병합 키 Secret Sync·App Connection 설정, 봇 시크릿 등록(runtime-policies·허용 목록 실제 값 포함, `/apps/homelab-bot/`, D-13), `go` 리다이렉터의 tailnet 도메인 키 등록(`homelab`/prod와 `homelab-dev`/dev의 `/platform/go`, D-30) | T08c, T09, T10, T16b, T17, T18, T19 |
 | 외부 감시·알림 | healthchecks.io 옛 체크 일시 정지, 같은 계정에 새 체크 생성, 새 체크 확인 뒤 옛 체크 삭제(D-10), homelab 알림용 Telegram 새 봇 생성(D-10), 옛 Telegram 봇·토큰은 `mac-uptime-guard` 장치를 끈 뒤 삭제 | T06, T08b, T09, T22 |
 | NUC | 로컬 자료 보존, 돌아갈 수 없는 지점 확인, k3s 제거·설치, 호스트 정리와 데이터 경로 삭제(OS 유지, `/mnt/bulk`는 비우고 fstab 항목 삭제, D-12) (sudo) | T06, T07 |
 | 검증 VM | 시나리오 13용 VM 준비와 VM 전용 자격·R2 버킷(NUC가 아닌 기기 우선, VM 호스트는 tailnet 밖, D-12) | T13 |
