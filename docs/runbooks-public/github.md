@@ -22,11 +22,16 @@ tools/tf-github.sh verify
 
 ```bash
 # env -i: 환경 기반 git 설정(GIT_CONFIG_COUNT/KEY/VALUE의 insteadOf 등)까지 끊는다. https만 연다.
-d=$(mktemp -d) && mkdir -p "$d/home" && \
-  env -i PATH="$PATH" HOME="$d/home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
-    git -c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always \
-    clone -q --depth 1 --branch main https://github.com/ukyi-app/homelab.git "$d/h" && \
-  (cd "$d/h" && tools/tf-github.sh verify); rm -rf "$d"
+# 정리는 하위 셸의 trap이 한다. 끝에 "; rm -rf"를 두면 그 성공이 verify의 1(guard 실패)·2(차이)를 0으로 덮는다.
+# 아래 $?가 verify의 종료 코드다(bash·zsh 확인). 병합 키 Sync 전의 "verify exit 0" 확인은 이 값으로 한다.
+(
+  d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && mkdir -p "$d/home" &&
+    env -i PATH="$PATH" HOME="$d/home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+      git -c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always \
+      clone -q --depth 1 --branch main https://github.com/ukyi-app/homelab.git "$d/h" &&
+    cd "$d/h" && tools/tf-github.sh verify
+)
+echo "verify exit $?"
 ```
 
 종료 코드: 0 선언과 같음, 2 차이, 1 guard 실패나 오류. guard 메시지 앞의 번호가 설계 C.3.9 guard 번호다.
@@ -56,6 +61,7 @@ gh api repos/ukyi-app/homelab/rules/branches/main --jq '[.[] | .type] | sort'   
 
 ## 2. 평소 운영
 
+- **남이 만든 PR(fork, 외부 기여자, 봇)의 검토:** GitHub의 diff와 CI 결과로만 본다. 그 브랜치를 로컬에 체크아웃해 `mise install`, `pre-commit run`, `bun run ci`, `tools/*.sh`를 돌리지 않는다. `.pre-commit-config.yaml`의 훅(`repo: local`의 `bun tools/ci/main.ts` 포함), `tools/ci/`, `.tool-versions`가 모두 그 PR의 트리에서 와서, 병합 전 코드가 owner의 자격(`gh` 인증, Infisical 로그인, SSH 키)으로 돈다. 훅 쪽에서 막는 장치는 두지 않는다: 그 장치도 같은 PR이 고칠 수 있는 파일에 있어 경계가 되지 못한다. 로컬 실행이 꼭 필요하면 자격이 없는 일회용 컨테이너에서 한다. 직접 만든 브랜치와 병합된 main에서는 평소대로 돌린다.
 - 보호를 바꿀 때: HCL PR(CI의 fmt·validate·mock 시험) → 검토 → 관리자 bypass 병합(`gh pr merge <n> --squash --admin --match-head-commit <검토한 SHA>`) → `tools/tf-github.sh plan`으로 diff 확인 → 예상과 같으면 `apply`, 다르면 고치는 PR.
 - 월 1회와 콘솔에서 무언가를 바꾼 뒤 `tools/tf-github.sh verify`.
 - 월 1회 bypass 기록을 PR 작성자와 대조한다. 기본값 `day`로 부르면 놓친다.

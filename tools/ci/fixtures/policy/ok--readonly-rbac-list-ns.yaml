@@ -1,0 +1,30 @@
+# check: readonly-rbac
+# expect: pass
+# ns: bot-slot-probe
+# kind: List로 묶은 Role·RoleBinding이 namespace를 생략하면 Application의 destination ns(# ns)에 적용된다.
+# List를 펼친 항목도 그 ns를 물려받아야 올바른 bot-reader 바인딩을 위반으로 보지 않는다. 대조군이다.
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: homelab-readonly
+      labels:
+        homelab.ukyi.app/readonly: "true"
+    rules:
+      - apiGroups: [""]
+        resources: [pods, services, events]
+        verbs: [get, list, watch]
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: bot-reader
+    subjects:
+      - kind: ServiceAccount
+        name: bot-reader
+        namespace: bot-slot-probe
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: Role
+      name: homelab-readonly

@@ -1,0 +1,15 @@
+# path: .github/workflows/other.yaml
+# expect: pin
+# 실제 액션은 흐름 매핑으로 주석 없이 쓰고, run 블록 안에 같은 "uses: <ref> # <버전>" 줄을 넣는다.
+# 주석 줄은 파싱한 uses 위치여야 한다(block scalar 안 줄은 세지 않는다).
+name: other
+on: push
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    steps:
+      - {name: checkout, uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1}
+      - run: |
+          cat <<'X'
+          uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          X

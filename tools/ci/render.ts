@@ -12,7 +12,7 @@
 //    이것이 그 PR의 렌더 검사다(설계 C.4.5).
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { type Doc, type Violation, ROOT, effectiveSources, gitFiles, parseAll, run, sameRepo, tempDir, toolVersion } from "./lib";
+import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, effectiveSources, gitFiles, parseAll, run, sameRepo, tempDir, toolVersion } from "./lib";
 
 export type Rendered = { origin: string; text: string };
 export type RenderResult = { targets: Rendered[]; docs: Doc[]; violations: Violation[]; skipped: string[] };
@@ -102,6 +102,9 @@ export function pathAtRevision(tag: string, path: string, tmp: string): string {
   const x = Bun.spawnSync(["tar", "-x", "-C", dst], { stdin: archive.stdout, stderr: "pipe" });
   if (x.exitCode !== 0) throw new Error(`tar 실패: ${x.stderr.toString()}`);
   const out = join(dst, path);
+  // 태그 트리의 source override도 막는다. 태그는 main을 지난 커밋에 달지만, 그 커밋이 이 검사 전의 것일 수 있다.
+  const override = (readdirSync(out, { recursive: true }) as string[]).filter((f) => ARGOCD_SOURCE_OVERRIDE.test(basename(f)));
+  if (override.length > 0) throw new Error(`${tag}의 ${path}에 .argocd-source 파일이 있다: ${override.join(", ")}`);
   revCache.set(key, out);
   return out;
 }
@@ -166,7 +169,7 @@ export function renderAll(): RenderResult {
     res.targets.push({ origin, text });
     try {
       for (const obj of parseAll(text)) {
-        if (typeof obj === "object" && !Array.isArray(obj)) res.docs.push({ origin, obj, ns: obj.metadata?.namespace ?? ns });
+        if (typeof obj === "object" && !Array.isArray(obj)) res.docs.push({ origin, obj, ns });
       }
     } catch (e) {
       res.violations.push({ rule: "render", where: origin, message: `YAML 파싱 실패: ${(e as Error).message}` });

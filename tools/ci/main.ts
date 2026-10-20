@@ -6,7 +6,7 @@
 // 로컬에서 일부만: bun run ci --only workflows,render
 import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { type Doc, type Violation, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
+import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
 import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkWorkloads } from "./policy";
 import { kubeconform, renderAll } from "./render";
 import { RULES, checkActionFile, checkWorkflow, checkWorkflows } from "./workflow-guard";
@@ -97,6 +97,7 @@ const steps: Step[] = [
       for (const f of gitFiles()) {
         const b = basename(f);
         if (/override\.tf/.test(b) || /\.tfvars/.test(b)) out.push({ rule: "terraform-files", where: f, message: "*override.tf*·*.tfvars* 파일을 커밋하지 않는다" });
+        if (ARGOCD_SOURCE_OVERRIDE.test(b)) out.push({ rule: "argocd-source", where: f, message: ".argocd-source*.yaml을 두지 않는다(Argo CD가 source 매개변수를 덮어 ci 렌더와 실제 배포가 달라진다)" });
       }
       return out;
     },
@@ -262,7 +263,9 @@ const steps: Step[] = [
           out.push({ rule: "fixture", where: f, message: `머리 주석 # check:(${Object.keys(checks).join("|")}), # expect:(pass|fail), 음성이면 # rule:과 # match:(메시지 일부)가 필요하다` });
           continue;
         }
-        const docs = parseAll(text).map((obj) => ({ origin: `fixture:${basename(f)}`, obj }));
+        // # ns: 렌더한 Application의 destination namespace(render.ts가 Doc.ns로 넘기는 값)를 흉내 낸다.
+        const ns = header(text, "ns");
+        const docs = parseAll(text).map((obj) => ({ origin: `fixture:${basename(f)}`, obj, ns }));
         const got = fn(docs);
         if (expect === "pass" && got.length > 0) out.push({ rule: "fixture", where: f, message: `대조군이 걸렸다: ${got.map(fmt).join("; ")}` });
         if (expect === "fail") {
