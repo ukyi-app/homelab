@@ -294,8 +294,12 @@ export function checkIngress(docs: Doc[]): Violation[] {
   // 같은 클러스터 안에서 host는 하나의 Ingress만 갖는다. tailnet은 같은 이름의 기기가 있으면 새 기기 이름을 바꿔
   // 선언한 주소(와 go/<이름>)로 닿지 않고, 공개 host는 Traefik이 두 Ingress를 섞는다.
   const owners = new Map<string, string>();
+  // tailnet은 운영과 VM이 함께 쓴다(접두 ""와 "vm-"). 그래서 클러스터 렌더의 tailscale 이름은 클러스터를 넘어 비교한다
+  // (앱 A의 foo가 VM에서 vm-foo, 앱 B의 vm-foo가 운영에서 vm-foo). 차트 시험 values 같은 비배포 렌더는 제 맥락 안에서만.
   const claim = (d: Doc, cls: string, host: string, where: string) => {
-    const key = `${context(d.origin)}|${cls}|${host}`;
+    const ctx = context(d.origin);
+    const scope = cls === "tailscale" && ctx !== d.origin ? "tailnet" : ctx;
+    const key = `${scope}|${cls}|${host}`;
     const prev = owners.get(key);
     if (prev && prev !== where) out.push({ rule: "ingress", where, message: `${cls} host ${host}를 ${prev}도 쓴다` });
     else owners.set(key, where);
