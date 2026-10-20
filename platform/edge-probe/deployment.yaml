@@ -28,6 +28,8 @@ spec:
           env:
             - name: PROBE_HOST
               value: edge-probe.ukyi.app
+            - name: HOOKS_HOST
+              value: hooks.ukyi.app
             # secretKeyRef, optional 없음: 키가 없으면 파드가 시작하지 않는다(빈 비밀로 서명을 통과시키지 않게).
             - name: GITHUB_WEBHOOK_SECRET
               valueFrom:

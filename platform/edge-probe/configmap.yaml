@@ -9,16 +9,34 @@ data:
     import hashlib
     import hmac
     import os
+    import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     SECRET = os.environb[b"GITHUB_WEBHOOK_SECRET"]
     PROBE_HOST = os.environ["PROBE_HOST"]
-    MAX_BODY = 1 << 20  # GitHub webhook 본문 상한은 25MB지만 ping·시험에는 1MB면 넉넉하다
+    HOOKS_HOST = os.environ["HOOKS_HOST"]
+    MAX_BODY = 256 << 10  # ping·시험 본문은 수 KB다. 서명 검사 전에 읽으므로 작게 둔다
+    # 공개 경로라 서명을 모르는 클라이언트도 연결을 열 수 있다. 동시 처리 수와 소켓 읽기 시간을 묶어
+    # 느린 본문 전송으로 스레드·메모리가 쌓여 유일한 파드가 멈추지 않게 한다.
+    SLOTS = threading.BoundedSemaphore(8)
 
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "edge-probe"
         sys_version = ""
+        timeout = 5  # 소켓 읽기 제한(초). 넘으면 연결을 끊는다
+
+        def handle(self):
+            if not SLOTS.acquire(blocking=False):
+                try:
+                    self.wfile.write(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                except OSError:
+                    pass
+                return
+            try:
+                super().handle()
+            finally:
+                SLOTS.release()
 
         def reply(self, code, body=b""):
             self.send_response(code)
@@ -41,7 +59,8 @@ data:
         do_HEAD = do_GET
 
         def do_POST(self):
-            if self.path != "/github":
+            # 수신 경로는 hooks host 하나다. edge-probe host의 / Prefix로 들어온 /github는 WAF 규칙 1을 거치지 않는다.
+            if self.host() != HOOKS_HOST or self.path != "/github":
                 return self.reply(404)
             try:
                 length = int(self.headers.get("Content-Length") or "0")
