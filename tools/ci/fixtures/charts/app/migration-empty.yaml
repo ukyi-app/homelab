@@ -1,0 +1,12 @@
+# expect: fail
+# 빈 실행 파일은 Job을 시작하지 못하고 wave 2 Deployment까지 막는다.
+chartVersion: 1.0.0
+kind: web
+port: 8080
+resources: {cpu: 10m, memory: 32Mi}
+migration: {command: [""]}
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

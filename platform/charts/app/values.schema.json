@@ -27,8 +27,8 @@
       "additionalProperties": false,
       "required": ["cpu", "memory"],
       "properties": {
-        "cpu": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?m?$" },
-        "memory": { "type": "string", "pattern": "^[0-9]+(Mi|Gi)$" }
+        "cpu": { "description": "0보다 커야 한다(예: 50m, 0.5, 1).", "type": "string", "pattern": "^(0*[1-9][0-9]*m|0*[1-9][0-9]*(\\.[0-9]+)?|0*\\.[0-9]*[1-9][0-9]*)$" },
+        "memory": { "description": "0보다 커야 한다(예: 128Mi, 1Gi).", "type": "string", "pattern": "^0*[1-9][0-9]*(Mi|Gi)$" }
       }
     },
     "probes": {
@@ -50,7 +50,7 @@
       }
     },
     "internal": {
-      "description": "tailnet 내부 Ingress(class tailscale). 이름은 <클러스터 접두><name>.<tailnet>.ts.net. Tailscale 기기 이름 규칙대로 문자로 시작하고 끝난다. go·vm-go는 짧은 주소 리다이렉터 이름이라 예약(D-30).",
+      "description": "tailnet 내부 Ingress(class tailscale). 이름은 <클러스터 접두><name>.<tailnet>.ts.net. Tailscale 기기 이름 규칙대로 문자로 시작하고 끝난다. go·vm-go는 짧은 주소 리다이렉터(D-30), tailscale-operator는 operator 기기 이름이라 예약.",
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
@@ -58,7 +58,7 @@
         "name": {
           "type": "string",
           "pattern": "^[a-z]([a-z0-9-]{0,61}[a-z])?$",
-          "not": { "enum": ["go", "vm-go"] }
+          "not": { "enum": ["go", "vm-go", "tailscale-operator", "vm-tailscale-operator"] }
         }
       }
     },
@@ -88,7 +88,7 @@
       "additionalProperties": false,
       "required": ["command"],
       "properties": {
-        "command": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
       }
     },
     "serviceAccountName": {

@@ -1,7 +1,7 @@
 // 렌더 결과 정책 검사(설계 C.4.6 "렌더 결과 정책"). 입력은 render.ts의 Doc 목록이고, 위반 목록을 돌려준다.
 // 규칙마다 "대상 0건이면 실패"는 main.ts가 아니라 여기서 센다(L40). 앱이 없는 저장소처럼 대상이 0일 수 있는 규칙은
 // 세지 않는다.
-import { type Doc, type Violation, effectiveSources, sameRepo } from "./lib";
+import { type Doc, type Violation, effectiveSources, gitFiles, readText, sameRepo } from "./lib";
 
 // 렌더에 나오는 상류 매니페스트의 예외. Argo CD는 공식 install.yaml을 그대로 쓴다(설계 C.3.3).
 // 이미지는 URL의 버전 태그로 고정되고(digest 아님), 자원 상한이 없고, 빈 Secret 둘을 낸다. 값은 저장소에 없다.
@@ -44,8 +44,19 @@ const DIGEST_IMAGE = /^[a-z0-9][a-z0-9._\-/:]*@sha256:[0-9a-f]{64}$/;
 const PUBLIC_HOST = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.ukyi\.app$/;
 // Tailscale 기기 이름: 문자로 시작하고 끝나는 DNS 라벨(tailscale.com custom-machine-names).
 const TAILNET_NAME = /^[a-z]([a-z0-9-]{0,61}[a-z])?$/;
-// D-30 리다이렉터의 tailnet 이름. 다른 것이 이 이름을 가져가면 go/ 짧은 주소가 깨진다.
-const RESERVED_TAILNET_NAMES = new Set(["go", "vm-go"]);
+// Ingress가 아닌 tailnet 기기 이름. 같은 이름의 Ingress 프록시가 생기면 뒤에 붙은 쪽 이름이 바뀐다.
+// go·vm-go는 D-30 리다이렉터, tailscale-operator는 operator(platform/root/templates/tailscale.yaml),
+// 노드 이름은 host/clusters/*.env의 NODE_NAME이다(NUC는 tailnet 기기).
+const RESERVED_TAILNET_NAMES = new Set(["go", "vm-go", "tailscale-operator", "vm-tailscale-operator", ...nodeNames()]);
+
+function nodeNames(): string[] {
+  return gitFiles("host/clusters/*.env").flatMap((f) =>
+    readText(f)
+      .split("\n")
+      .map((l) => l.match(/^NODE_NAME=["']?([a-z0-9-]+)["']?\s*$/)?.[1])
+      .filter((x): x is string => !!x),
+  );
+}
 
 export const READONLY_LABEL = "homelab.ukyi.app/readonly";
 const READONLY_VERBS = new Set(["get", "list", "watch"]);
@@ -307,7 +318,7 @@ export function checkIngress(docs: Doc[]): Violation[] {
       if (tlsHosts.length === 0) out.push({ rule: "ingress", where, message: "tailscale Ingress에 tls.hosts가 없다" });
       for (const h of tlsHosts) {
         if (typeof h !== "string" || !TAILNET_NAME.test(h)) out.push({ rule: "ingress", where, message: `tailnet 이름은 문자로 시작·끝나는 DNS 라벨 하나: ${h}` });
-        else if (RESERVED_TAILNET_NAMES.has(h)) out.push({ rule: "ingress", where, message: `${h}는 짧은 주소 리다이렉터 이름이라 예약돼 있다(D-30)` });
+        else if (RESERVED_TAILNET_NAMES.has(h)) out.push({ rule: "ingress", where, message: `${h}는 Ingress가 아닌 tailnet 기기(리다이렉터 D-30, operator, 노드)의 이름이라 예약돼 있다` });
         else claim(d, "tailscale", h, where);
       }
       for (const r of d.obj.spec?.rules ?? []) {

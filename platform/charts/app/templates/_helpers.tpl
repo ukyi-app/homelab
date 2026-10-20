@@ -5,8 +5,10 @@ Argo CD는 releaseName이 없으면 Application 이름을 릴리스 이름으로
 */}}
 {{- define "app.name" -}}
 {{- $name := .Release.Name -}}
-{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]{0,57}[a-z0-9])?$" $name) -}}
-{{- fail (printf "앱 이름 %q는 DNS 라벨이고 ns app-<이름>이 63자를 넘지 않게 59자 이하여야 한다" $name) -}}
+{{- /* 53자: Helm 릴리스 이름 상한이다(Argo CD도 helm template에 앱 이름을 릴리스로 넘긴다). 그 안에서
+       ns app-<이름>, Job <이름>-migrate 같은 파생 이름도 63자를 넘지 않는다. */ -}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$" $name) -}}
+{{- fail (printf "앱 이름 %q는 DNS 라벨이고 53자 이하여야 한다(Helm 릴리스 이름 상한)" $name) -}}
 {{- end -}}
 {{- if ne .Release.Namespace (printf "app-%s" $name) -}}
 {{- fail (printf "ns는 app-%s여야 한다: %s" $name .Release.Namespace) -}}
