@@ -18,6 +18,14 @@ export R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com  # 없으면 래�
 tools/tf-github.sh verify
 ```
 
+래퍼는 자격을 읽기 전에 github.com의 main을 새로 clone하고 그 사본의 래퍼로 다시 실행한다. 다만 처음 실행되는 것은 지금 작업 사본의 래퍼다. 작업 사본을 AI·자동화도 편집하므로, 그 부분까지 믿지 않으려면 새 clone에서 시작한다:
+
+```bash
+d=$(mktemp -d) && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  git -c core.hooksPath=/dev/null clone -q --depth 1 https://github.com/ukyi-app/homelab.git "$d/h" && \
+  (cd "$d/h" && tools/tf-github.sh verify); rm -rf "$d"
+```
+
 종료 코드: 0 선언과 같음, 2 차이, 1 guard 실패나 오류. guard 메시지 앞의 번호가 설계 C.3.9 guard 번호다.
 
 ## 1. 첫 apply (E5, 두 단계)
@@ -50,7 +58,8 @@ gh api repos/ukyi-app/homelab/rules/branches/main --jq '[.[] | .type] | sort'   
 - 월 1회 bypass 기록을 PR 작성자와 대조한다. 기본값 `day`로 부르면 놓친다.
 
   ```bash
-  gh api 'repos/ukyi-app/homelab/rulesets/rule-suites?time_period=month&per_page=100' \
+  # --paginate: per_page 상한이 100이라 한 달 기록이 100건을 넘으면 첫 페이지만 나온다.
+  gh api --paginate 'repos/ukyi-app/homelab/rulesets/rule-suites?time_period=month&per_page=100' \
     --jq '.[] | select(.result == "bypass") | [.pushed_at, .actor_name, .ref, .after_sha[0:12]] | @tsv'
   ```
 
@@ -60,6 +69,8 @@ gh api repos/ukyi-app/homelab/rules/branches/main --jq '[.[] | .type] | sort'   
 ## 3. apply가 실패했을 때
 
 provider 6.13.0은 갱신 apply가 한 번 실패하면 그 ruleset의 드리프트가 영구히 안 보인다(#3519). 래퍼가 그 plan의 ruleset을 `state rm` 뒤 다시 import한다. 그다음 원인을 고치고 `plan`부터 다시 한다. state가 꼬였으면 래퍼가 남긴 백업(`TF_STATE_BACKUP_DIR`)과 비교한다.
+
+**재편입 실패**(같은 장애로 import가 실패): 래퍼는 state를 되돌리지 않고 남은 `terraform import '<주소>' '<저장소>:<id>'` 목록을 출력하고 멈춘다. 되돌릴 state가 바로 #3519로 낡은 계획값을 담은 것이기 때문이다. 이 상태에서 plan하면 기존 ruleset을 새로 만들려 한다(같은 이름 둘은 guard 3이 잡는다). 장애가 끝나면 그 import부터 마치고(래퍼 사본과 같은 준비로) `verify`가 exit 0인지 본 뒤에만 다른 작업을 한다.
 
 ## 4. 비상 경로: guard 하나가 모든 apply를 막을 때
 

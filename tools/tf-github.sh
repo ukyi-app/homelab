@@ -51,7 +51,35 @@ for name in $(compgen -e); do
 done
 export TF_IN_AUTOMATION=1
 
-# 1. 토큰 종류와 범위. 머리글은 응답 전체를 변수로 받은 뒤 본다. grep -q로 파이프를 끊으면 pipefail 아래 SIGPIPE로
+# 1. main의 깨끗한 사본. 자격을 읽기 전에 만든다. 작업 사본의 .git(설정, remote URL, URL rewrite, hook)을 쓰지 않는다.
+#    같은 작업 사본을 AI 에이전트도 편집하므로 .git/config의 origin을 바꾸거나 hook을 심으면 다른 코드가 돈다.
+#    그래서 고정 URL에서 새로 clone한다. git은 env -i로 띄워 환경 기반 설정(GIT_CONFIG_COUNT/KEY/VALUE, insteadOf)과
+#    전역·시스템 설정, hook을 모두 끊는다. git에는 토큰을 넘기지 않는다(public 저장소라 익명 clone).
+#    그다음 그 사본의 이 래퍼로 다시 실행한다(exec). 작업 사본의 래퍼는 사본을 만들기까지만 돈다. 그 부분까지 못 믿으면
+#    런북 0절처럼 래퍼 자체를 새 clone에서 실행한다.
+repo_root=$(git rev-parse --show-toplevel)
+if [[ -n ${TF_GITHUB_CLONE:-} && $(cd "$(dirname "$0")/.." && pwd) == "$TF_GITHUB_CLONE/tree" && -d $TF_GITHUB_CLONE/tree/.git ]]; then
+  work=$TF_GITHUB_CLONE
+else
+  work=$(mktemp -d "${TMPDIR:-/tmp}/tf-github.XXXXXX")
+  mkdir -p "$work/nohooks" "$work/home"
+  env -i PATH="$PATH" HOME="$work/home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+    git -c core.hooksPath="$work/nohooks" -c protocol.allow=never -c protocol.https.allow=always \
+    clone -q --depth 1 --branch main --no-tags https://github.com/ukyi-app/homelab.git "$work/tree" ||
+    { rm -rf "$work"; die "main을 clone하지 못했다"; }
+  [[ -f $work/tree/tools/tf-github.sh ]] || { rm -rf "$work"; die "main에 tools/tf-github.sh가 없다"; }
+  TF_GITHUB_CLONE=$work exec bash "$work/tree/tools/tf-github.sh" "$cmd" "$@"
+fi
+trap 'rm -rf "$work"' EXIT
+unset TF_GITHUB_CLONE
+sha=$(git -C "$work/tree" rev-parse HEAD)
+say "실행 사본: github.com/ukyi-app/homelab main ${sha}"
+bad=$(find "$work/tree" -path "$work/tree/.git" -prune -o \( -name '*override.tf*' -o -name '*.tfvars*' \) -print)
+[[ -z $bad ]] || die "사본에 override·tfvars 파일이 있다: ${bad}"
+root="$work/tree/infra/github"
+[[ -d $root ]] || die "main에 infra/github가 없다"
+
+# 2. 토큰 종류와 범위. 머리글은 응답 전체를 변수로 받은 뒤 본다. grep -q로 파이프를 끊으면 pipefail 아래 SIGPIPE로
 #    범위가 있는데도 놓친다(2026-10-18 실측: 15회 중 1회).
 if [[ -z ${GITHUB_TOKEN:-} ]]; then
   GITHUB_TOKEN=$(gh auth token) || die "GITHUB_TOKEN이 없고 gh auth token도 실패했다"
@@ -83,24 +111,6 @@ esac
 # guard 1과 같은 확인을 plan 전에 한 번 더 한다.
 admin=$(GH_TOKEN=$GITHUB_TOKEN gh api repos/ukyi-app/homelab --jq .permissions.admin 2>/dev/null) || die "repos/ukyi-app/homelab을 읽지 못했다"
 [[ $admin == true ]] || die "토큰이 ukyi-app/homelab의 admin이 아니다"
-
-# 2. main의 깨끗한 사본. 작업 사본의 .git(설정, remote URL, URL rewrite, hook)을 쓰지 않는다. 같은 작업 사본을
-#    AI 에이전트도 편집하므로 .git/config의 origin을 바꾸거나 post-checkout hook을 심으면 관리자 토큰을 가진 채
-#    다른 코드가 돈다. 그래서 고정 URL에서 새로 clone하고, 전역·시스템 git 설정과 hook을 끈다.
-#    git에는 토큰을 넘기지 않는다(public 저장소라 익명 clone).
-repo_root=$(git rev-parse --show-toplevel)
-work=$(mktemp -d "${TMPDIR:-/tmp}/tf-github.XXXXXX")
-trap 'rm -rf "$work"' EXIT
-mkdir -p "$work/nohooks"
-env -u GITHUB_TOKEN -u GH_TOKEN GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
-  git -c core.hooksPath="$work/nohooks" -c protocol.allow=never -c protocol.https.allow=always \
-  clone -q --depth 1 --branch main --no-tags https://github.com/ukyi-app/homelab.git "$work/tree"
-sha=$(git -C "$work/tree" rev-parse HEAD)
-say "실행 사본: github.com/ukyi-app/homelab main ${sha}"
-bad=$(find "$work/tree" -path "$work/tree/.git" -prune -o \( -name '*override.tf*' -o -name '*.tfvars*' \) -print)
-[[ -z $bad ]] || die "사본에 override·tfvars 파일이 있다: ${bad}"
-root="$work/tree/infra/github"
-[[ -d $root ]] || die "main에 infra/github가 없다"
 
 # ~/.terraformrc의 dev_overrides·암묵 로컬 미러가 provider 바이너리를 바꾸지 못하게 한다. unset하면 ~/.terraformrc로
 # 돌아가므로 지우지 않고 이 파일을 가리킨다. registry에서 받은 provider는 .terraform.lock.hcl 해시로 확인한다.
@@ -135,12 +145,14 @@ tf() {
   infisical run --silent --log-level=error --projectId="$HOMELAB_ADMIN_PROJECT_ID" --env=prod --path=/terraform/state -- \
     bash -c '[[ "$(printf "%s" "$GITHUB_TOKEN" | sha256sum | cut -d" " -f1)" == "$TOKEN_SUM" ]] || { echo "tf-github: Infisical이 GITHUB_TOKEN을 덮었다" >&2; exit 1; }
              [[ -n ${AWS_ACCESS_KEY_ID:-} && -n ${AWS_SECRET_ACCESS_KEY:-} ]] || { echo "tf-github: R2 자격이 없다" >&2; exit 1; }
-             # /terraform/state에 실수로 든 제어 변수(숨은 -target·변수·로그·App 인증)를 terraform 직전에 다시 지운다.
+             # Infisical이 넣은 값 중 R2 키만 넘긴다. 그 밖의 이름(TF_CLI_ARGS*, TF_VAR_*, TF_LOG*, TF_CLI_CONFIG_FILE,
+             # GITHUB_APP_* 등)은 terraform에 닿지 않는다. CLI 설정 파일은 래퍼가 만든 것으로 다시 고정한다.
+             # 값을 env의 argv로 넘기지 않으려고(프로세스 목록에 보인다) 허용 목록 밖 변수를 지운다.
              for n in $(compgen -e); do
-               case $n in TF_CLI_ARGS | TF_CLI_ARGS_* | TF_LOG | TF_LOG_* | TF_VAR_* | GITHUB_APP_* | GH_TOKEN | TF_WORKSPACE | TF_DATA_DIR) unset "$n" ;; esac
+               case $n in PATH | HOME | LANG | LC_ALL | TMPDIR | GITHUB_TOKEN | AWS_ACCESS_KEY_ID | AWS_SECRET_ACCESS_KEY) ;; *) unset "$n" ;; esac
              done
-             unset TOKEN_SUM
-             exec terraform -chdir="$0" "$@"' "$root" "$@" || rc=$?
+             export TF_IN_AUTOMATION=1 TF_CLI_CONFIG_FILE="$1"
+             exec terraform -chdir="$0" "${@:2}"' "$root" "$work/terraformrc" "$@" || rc=$?
   if [[ $(find ~/.infisical/secrets-backup -type f 2>/dev/null | wc -l) -ne 0 ]]; then
     find ~/.infisical/secrets-backup -type f -delete 2>/dev/null
     die "Infisical 백업 파일이 생겼다. 지우고 중단한다"
@@ -224,18 +236,20 @@ case $cmd in
       if [[ -n $rulesets ]]; then
         # rm은 됐는데 import가 실패하면(같은 장애) 주소만 state에서 사라져 다음 plan이 기존 ruleset을 새로 만들려 한다.
         # 그래서 rm 직전 state를 받아 두고, import가 하나라도 실패하면 그 state로 되돌린 뒤 멈춘다.
-        snapshot="$work/pre-reimport.tfstate"
-        (umask 077 && tf state pull >"$snapshot") || die "재편입 전 state pull이 실패했다. state 백업: ${backup:-없음}"
         while IFS=$'\t' read -r addr id; do
           [[ -n $addr ]] || continue
           if tf state rm "$addr" >/dev/null && tf import -input=false "$addr" "$id" >/dev/null; then
             say "재편입: ${addr} (${id})"
           else
-            tf state push -force "$snapshot" || die "재편입 실패 뒤 state 복구도 실패했다. 손으로 복구한다: ${snapshot}, 백업 ${backup:-없음}"
-            die "재편입(${addr})이 실패해 state를 재편입 전으로 되돌렸다. 장애가 끝나면 다시 apply한다"
+            # 실패 뒤 state를 되돌리지 않는다. 되돌릴 state가 바로 #3519로 낡은 계획값을 담은 것이다.
+            # 남은 주소를 import로 마치기 전에는 plan·apply하지 않는다(그 주소를 새로 만들려 한다).
+            say "재편입 실패: ${addr}. 장애가 끝나면 아래를 마친 뒤에만 다시 plan한다(런북 3절):"
+            say "  terraform import '${addr}' '${id}'  (이 줄과 남은 줄 모두)"
+            remaining=1
           fi
         done <<<"$rulesets"
       fi
+      [[ -z ${remaining:-} ]] || die "재편입을 다 마치지 못했다. 위 import를 먼저 끝낸다. state 백업: ${backup:-없음}"
       die "apply가 실패했다. 원인을 고친 뒤 다시 plan한다. state 백업: ${backup:-없음}"
     fi
     # 미뤄진 guard는 plan 출력에 없었다. 적용한 상태를 다시 본다. postcondition은 적용한 변경을 되돌리지 않는다.

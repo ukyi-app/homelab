@@ -16,6 +16,9 @@ git init -q --bare -b main "$t/origin.git"
 git init -q -b main "$t/seed"
 mkdir -p "$t/seed/infra/github"
 echo 'terraform {}' >"$t/seed/infra/github/main.tf"
+# 래퍼는 clone한 사본의 자기 자신으로 다시 실행한다. 사본에도 같은 래퍼를 둔다.
+mkdir -p "$t/seed/tools"
+cp "$wrapper" "$t/seed/tools/tf-github.sh"
 git -C "$t/seed" add -A
 git -C "$t/seed" -c user.name=t -c user.email=t@example.invalid commit -q -m seed
 git -C "$t/seed" push -q "$t/origin.git" main
@@ -30,7 +33,7 @@ cat >"$t/bin/git" <<EOF
 args=("\$@")
 for i in "\${!args[@]}"; do
   if [[ \${args[\$i]} == https://github.com/ukyi-app/homelab.git ]]; then
-    [[ \${GIT_CONFIG_GLOBAL:-} == /dev/null && -n \${GIT_CONFIG_NOSYSTEM:-} && -z \${GITHUB_TOKEN:-} ]] || { echo "git stub: clone 환경이 격리되지 않았다" >&2; exit 9; }
+    [[ \${GIT_CONFIG_GLOBAL:-} == /dev/null && -n \${GIT_CONFIG_NOSYSTEM:-} && -z \${GITHUB_TOKEN:-} && -z \${GIT_CONFIG_COUNT:-} ]] || { echo "git stub: clone 환경이 격리되지 않았다" >&2; exit 9; }
     printf '%s\\n' "\$*" | grep -q 'core.hooksPath=' || { echo "git stub: hook을 끄지 않았다" >&2; exit 9; }
     args[\$i]="file://$t/origin.git"
     # 래퍼는 https만 허용한다. 시험의 로컬 원격만 file을 연다.
@@ -55,11 +58,12 @@ while [[ $# -gt 0 && $1 != -- ]]; do shift; done
 shift
 export AWS_ACCESS_KEY_ID=stub AWS_SECRET_ACCESS_KEY=stub
 # /terraform/state에 제어 변수가 실수로 들어간 경우를 흉내 낸다. 래퍼가 terraform 직전에 지워야 한다.
-if [[ -n ${STUB_INJECT:-} ]]; then export TF_VAR_homelab_merge_app_id=9 TF_CLI_ARGS_plan=-target=x GITHUB_APP_ID=1 TF_LOG=DEBUG; fi
+if [[ -n ${STUB_INJECT:-} ]]; then export TF_VAR_homelab_merge_app_id=9 TF_CLI_ARGS_plan=-target=x GITHUB_APP_ID=1 TF_LOG=DEBUG TF_CLI_CONFIG_FILE=/tmp/evil.tfrc; fi
 exec "$@"
 EOF
-cat >"$t/bin/terraform" <<'EOF'
-#!/usr/bin/env bash
+# 래퍼가 terraform 앞에서 환경을 허용 목록으로 줄이므로, 가짜 terraform은 시험 값을 파일에서 읽는다.
+printf '#!/usr/bin/env bash\nsource %q\n' "$t/stub.env" >"$t/bin/terraform"
+cat >>"$t/bin/terraform" <<'EOF'
 dir=${1#-chdir=}
 shift
 echo "$*" >>"$STUB_LOG"
@@ -96,6 +100,11 @@ expect() {
   while [[ $1 != -- ]]; do envs+=("$1"); shift; done
   shift
   local rc=0 out
+  # 가짜 terraform이 읽는 시험 값(기본값 뒤에 이 시험의 값).
+  {
+    printf 'STUB_LOG=%q\nSTUB_PLAN_EXIT=0\nSTUB_PLAN_JSON=%q\n' "$t/log" "$t/p-none"
+    for e in "${envs[@]}"; do [[ $e == STUB_PLAN_* ]] && printf '%s=%q\n' "${e%%=*}" "${e#*=}"; done
+  } >"$t/stub.env"
   out=$(cd "$t/work" && env -i PATH="$t/bin:$PATH" HOME="$t/home" STUB_LOG="$t/log" \
     STUB_TOKEN=ghp_stub STUB_HEADERS="$t/h-ok" STUB_ADMIN=true STUB_PLAN_EXIT=0 STUB_PLAN_JSON="$t/p-none" \
     HOMELAB_ADMIN_PROJECT_ID=stub R2_ENDPOINT=https://abc123.r2.cloudflarestorage.com \
@@ -131,6 +140,7 @@ printf '#!/bin/sh\ntouch "%s/hook-ran"\n' "$t" >"$t/work/.git/hooks/post-checkou
 chmod +x "$t/work/.git/hooks/post-checkout"
 "$real_git" -C "$t/work" remote set-url origin "$t/nowhere.git"
 expect "작업 사본의 remote 변경·hook을 쓰지 않음" 0 -- verify
+expect "환경 기반 git 설정(insteadOf)을 clone에 넘기지 않음" 0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://attacker.invalid/.insteadOf GIT_CONFIG_VALUE_0=https://github.com/ukyi-app/ -- verify
 [[ ! -e $t/hook-ran ]] || { echo "FAIL: 작업 사본의 hook이 돌았다"; fails=$((fails + 1)); }
 
 # 작업 사본의 미추적 override는 새 clone에 없다. 가짜 terraform이 override를 보면 exit 9다.
