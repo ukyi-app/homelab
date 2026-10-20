@@ -1,6 +1,8 @@
 # Terraform 운영
 
 세 root는 owner가 로컬에서 실행한다. CI와 Argo CD는 apply하지 않는다.
+GitHub 보호 설정 root `infra/github`는 이 문서의 `tf` 함수가 아니라 래퍼 `tools/tf-github.sh`로만 실행한다
+([docs/runbooks-public/github.md](../docs/runbooks-public/github.md)). 2절의 자격·백업 폴더 규칙은 같다.
 외부 변경은 사람이 승인하고
 [`approvals.md`](../docs/plans/2026-10-17-homelab-rebuild/approvals.md)에 기록한다.
 이 문서는 공개 절차다. 실제 계정 식별자·정책 사본·DNS 사본·state 백업과 실행 기록은 저장소 밖에 둔다.

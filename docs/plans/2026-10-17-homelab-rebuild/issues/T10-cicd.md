@@ -1,7 +1,7 @@
 # T10 CI/CD
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 대기
+- 상태: 진행 중(2026-10-20 착수. 작성 작업 PR #788 전체 ci, #789 공유 차트·ApplicationSet, #790 워크플로, #791 `infra/github`·래퍼. 사람 작업과 종단 시험 남음)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T07(착수), T09(완료), T08a(`infra/github` 첫 apply만. R2 잠금 시험 U02 뒤)
   - 착수: T07 뒤 바로 시작한다. 차트, 워크플로, `infra/github` HCL 같은 작성 작업은 T09와 병행한다.
@@ -141,3 +141,23 @@
 - 워크플로는 revert PR로 되돌린다.
 - 템플릿 저장소의 이전 내용은 git 히스토리에 남는다.
 - ruleset은 지우지 않고 `disabled`로만 끈다. 정답은 git의 HCL이다(설계 C.4.7 남는 위험).
+
+## 진행 기록 (2026-10-20, 작성 작업)
+
+**T07에서 넘긴 주의 네 가지의 결정**
+
+- AppProject `apps`와 `CreateNamespace`: Argo CD v3.5.5 소스를 확인했다. `autoCreateNamespace`가 만든 Namespace 작업도 프로젝트 권한 검사를 받아, 허용이 없으면 `managedNamespaceMetadata`가 있는 앱은 매 sync가 "Namespace is not permitted"로 실패한다. `clusterResourceWhitelist`에 Namespace `app-*`(v3.5.5의 name glob)만 더했다.
+- ReplicaSet·Pod: 넣었다. 목록에 없으면 리소스 트리에서 Deployment 아래가 빠지고 Argo CD의 파드 로그도 못 본다(v3.5.5 `appcontroller.go`의 트리 필터). 차트는 둘을 만들지 않는다.
+- AppProject 위치: T07이 둔 `platform/root/templates/project-apps.yaml`(wave -11)에 남긴다. ApplicationSet은 클러스터 tailnet 접두를 받으려고 작은 Helm 차트 `platform/appsets/apps`로 두었다.
+- Argo CD install.yaml 벤더링: 하지 않는다. ci의 `kustomize build`를 3회 재시도한다. Argo CD repo-server도 같은 URL을 받으므로 벤더링하려면 `platform/argocd` 변경이 따로 필요하다.
+
+**설계와 다르게 한 것(설계 문서에 기록)**
+
+- 차트(태그)와 values(main)를 source 둘(`ref: values`)로 나누는 모양은 Argo CD v3.5.5가 거부한다("cannot reference a different revision of the same repository"). ApplicationSet merge 생성기로 `values.yaml`·`image.yaml`을 `helm.valuesObject`에 넣는다(설계 C.3.3). Argo CD 소스의 템플릿 렌더 함수로 실제 렌더해 확인했다.
+- 캐시 Valkey subchart(`cache:`)는 `app-chart-v1.0.0`에 없다. T11이 minor로 더한다(설계 C.4.5 표).
+- `internal.name`은 Tailscale 기기 이름 규칙대로 문자로 시작·끝난다. 앱 이름은 53자 이하다(Helm 릴리스 이름 상한).
+- `terraform test`는 plan 때 평가되는 guard를 `command = plan`으로, 미뤄지는 guard를 run마다 `state_key`를 달리한 `apply`로 본다(설계 C.3.9).
+- 자동 병합 조건 9와 guard 5에 CODEOWNERS 규칙 내용 확인(`* @<owner>` 한 줄)을 더했다(설계 C.4.7의 [제안]).
+
+**사람 작업 순서**는 런북 `docs/runbooks-public/github.md`와 이 티켓의 "수행"을 따른다. App ID·client ID·봇 사용자 ID는 App 생성 뒤 채우는 PR이 따로 필요하다(그 전에는 deploy-pr이 입력 확인에서 멈추고 조건 1이 늘 거짓, `infra/github` plan은 validation에서 멈춘다).
+

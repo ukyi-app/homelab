@@ -103,6 +103,20 @@ const steps: Step[] = [
   },
   { name: "actionlint", run: () => tool("actionlint", ["actionlint"]) },
   {
+    name: "shellcheck",
+    // 추적한 셸 스크립트 전부. -x로 source하는 파일까지 따라간다(host/lib.sh 등).
+    run: () => {
+      const files = gitFiles("*.sh");
+      if (files.length === 0) return [{ rule: "shellcheck", where: ".", message: "셸 스크립트가 0개다(L40)" }];
+      return tool("shellcheck", ["shellcheck", "-x", "-P", "SCRIPTDIR", ...files]);
+    },
+  },
+  {
+    name: "tf-github wrapper",
+    // tools/tf-github.sh의 거부 규칙을 가짜 gh·infisical·terraform으로 시험한다(자격 없음).
+    run: () => tool("tf-github", ["bash", "tools/tf-github.test.sh"]),
+  },
+  {
     name: "workflows",
     run: () => {
       const files = gitFiles(".github/workflows/*.yaml", ".github/workflows/*.yml").map((path) => ({ path, text: readText(path) }));
