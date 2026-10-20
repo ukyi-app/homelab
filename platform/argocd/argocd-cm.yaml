@@ -13,8 +13,7 @@ data:
   timeout.reconciliation.jitter: "0"
 
   # 내장 admin을 끈다. 사람은 로컬 계정 owner(login만), 봇 계정 bot-reader(apiKey만)는 T08b가 더한다.
-  # owner 비밀번호는 argocd-secret에 들어가야 하는데, 넣는 티켓이 아직 없다(T09 티켓 76행 [미검증]).
-  # 그 전까지 UI·API 로그인 수단이 없고 kubectl(또는 argocd --core)만 쓴다.
+  # owner 비밀번호는 ESO가 Infisical의 bcrypt 해시를 argocd-secret에 합친다(platform/external-secrets/templates/argocd-owner.yaml).
   admin.enabled: "false"
   accounts.owner: login
 
@@ -95,7 +94,8 @@ data:
     end
     return hs
 
-  # ExternalSecret health 덮어쓰기(설계 C.3.3 표, T09가 시험한다. [미검증] E3·시나리오 6·7에서 확인).
+  # ExternalSecret health 덮어쓰기(설계 C.3.3 표). T09 시나리오 6·7(E3 동등 절차, 2026-10-20)에서
+  # Ready=True, 이력 있는 실패(Healthy), 이력 없는 실패(Degraded)를 확인했다.
   # 내장 health는 Ready=False를 바로 Degraded로 본다. 그러면 Infisical 장애 때 이미지만 바꾸는 배포까지
   # 뒤 wave에서 멈출 수 있다. 장애는 ExternalSecretNotReady 경보가 따로 알린다.
   # - status·conditions가 아직 없다(ESO가 처음 reconcile하기 전): Progressing
