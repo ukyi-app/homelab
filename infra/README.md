@@ -34,8 +34,9 @@ Cloudflare account ID와 zone ID는 HCL에 저장하지 않는다.
 Backend 초기화는 provider 조회보다 먼저이므로 R2 콘솔의 S3 API endpoint를 실행 시 입력한다.
 Endpoint에는 자격이 없지만 account ID가 포함되며 `.terraform` 캐시에 남는다. Git에는 넣지 않는다(D-23).
 
-Terraform용 Tailscale OAuth에는 `policy_file`·`dns` 쓰기, `devices:core:read`가 필요하다.
-ACL root는 `policy_file`만, DNS root는 `dns`와 `devices:core:read`만 요청한다.
+Terraform용 Tailscale OAuth에는 `policy_file`·`dns` 쓰기, `devices:posture_attributes`(쓰기), `devices:core:read`가 필요하다.
+`policy_file` 쓰기는 `devices:posture_attributes`와 `devices:core:read`를 함께 요구한다([trust credentials 문서](https://tailscale.com/docs/reference/trust-credentials#scopes)).
+ACL root는 이 셋을, DNS root는 `dns`와 `devices:core:read`만 요청한다. OAuth client에 하나라도 빠지면 그 root가 권한 오류로 멈춘다.
 Tailnet은 OAuth 자격의 소유자로 추론하므로 `TAILSCALE_TAILNET`은 필요 없다.
 Operator용 OAuth는 별개이며, `tag:k8s-operator`가 tagOwners에 있어야 사람이 발급할 수 있다(2026-10-20 현재 ACL에 이미 있다).
 Operator용 값은 플랫폼 담당자가 `homelab` `/platform/tailscale`에 등록한다.
@@ -145,8 +146,11 @@ Free 플랜의 WAF·zone 설정 거절은 validate로 검출되지 않을 수 �
 `homelab-backups`는 삭제 방지가 있고, lifecycle은 `valkey/`에만 1,209,600초(14일)를 적용한다.
 PostgreSQL 14일 보존은 T11의 CNPG ObjectStore가 맡는다.
 
-ACL 적용 후 원격 SSH 성공과 `tag:k8s-operator` 선언을 확인하고,
-사람이 operator OAuth client를 발급한다. 이후 플랫폼 담당자가 operator·AdGuard를 준비한다.
+ACL root는 기존 정책을 import 블록으로 먼저 state에 가져온다. 빈 state에서 Create하면 provider가 `ts-default` ETag를 보내
+기존 정책에 412(`Overwrite Protected`)로 실패하기 때문이다. 그래서 첫 plan은 **`1 to import, 0 to add, 1 to change, 0 to destroy`**이고,
+change의 diff가 저장소 밖 사본(현재 정책)에서 `policy.hujson`으로 바뀌는 내용이다. diff를 읽고 apply한다.
+`overwrite_existing_content`는 diff 없이 덮어써 쓰지 않는다.
+ACL 적용 후 원격 SSH 성공과 `tag:k8s-operator` 선언을 확인한다. operator OAuth client는 이 태그가 tagOwners에 있으면 발급할 수 있다.
 DNS 목표 전환은 AdGuard가 NUC의 tailnet 주소에서 TCP/UDP 53으로 응답하는 것을 확인한 뒤 한다.
 
 ### U02: R2 잠금 동시 실행
