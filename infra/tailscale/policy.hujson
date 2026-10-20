@@ -1,15 +1,33 @@
 {
   "tagOwners": {
     "tag:k8s-operator": ["autogroup:admin"],
-    "tag:k8s": ["tag:k8s-operator"]
+    "tag:k8s": ["tag:k8s-operator"],
+    "tag:k8s-go": ["tag:k8s-operator"],
+    // NUC(D-11 (c)). 태그 기기는 사용자 소유가 아니라 self 규칙에 들지 않고, 키 만료가 기본으로 꺼진다.
+    "tag:nuc": ["autogroup:admin"]
+  },
+  // NUC가 광고하는 공유기 관리 화면 경로. 태그 기준 자동 승인이라 재등록 뒤 콘솔 승인을 다시 하지 않는다.
+  "autoApprovers": {
+    "routes": { "192.168.117.1/32": ["tag:nuc"] }
   },
   "acls": [
-    // 이 규칙이 빠지면 운영자의 NUC 원격 접속과 AdGuard :53 경로가 끊긴다.
+    // 사람 기기끼리. 태그를 붙이기 전까지는 NUC 원격 접속과 AdGuard :53 경로도 이 규칙이다.
     { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self:*"] },
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s:443"] }
+    // 사람 기기 → NUC는 SSH, AdGuard DNS, kubectl만. NUC → 사람 기기 규칙은 두지 않는다(U28: 파드가 NUC 주소로 나간다).
+    // NUC에 태그를 붙이기 전에 이 줄이 먼저 적용돼 있어야 원격 접속이 끊기지 않는다.
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:nuc:22,53,6443"] },
+    { "action": "accept", "src": ["autogroup:member", "tag:nuc"], "dst": ["tag:k8s:443"] },
+    // 짧은 주소 리다이렉터(D-30). 모든 프록시에 80을 열지 않으려고 태그를 나눈다.
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s-go:80"] }
+  ],
+  "grants": [
+    // 공유기 관리 화면. 사용자가 2026-10-20 콘솔에 넣은 것을 옮겼다. 콘솔에서 직접 고치면 다음 apply가 지운다.
+    { "src": ["autogroup:member"], "dst": ["192.168.117.1/32"], "ip": ["tcp:80", "tcp:443"] }
   ],
   "ssh": [
-    // root는 기존 비대화형 운영 경로다. 좁히려면 D-11 결정을 먼저 바꾼다.
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot", "root"] }
+    // root는 기존 비대화형 운영 경로다. 좁히려면 D-11 (b)를 먼저 정한다.
+    // self 대상은 태그 전환 중 끊기지 않게 남긴다. 태그 대상의 autogroup:nonroot는 src 전원에게 비root 사용자를 연다(지금 사람 1명).
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot", "root"] },
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:nuc"], "users": ["autogroup:nonroot", "root"] }
   ]
 }

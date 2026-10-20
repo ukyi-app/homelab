@@ -29,7 +29,6 @@ Infisical에 로그인한 owner가 다음 키를 준비한다. 모두 `prod` 환
 | `homelab-admin` `/terraform/state` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | T09에서 만든 R2 `homelab-tfstate` Object Read & Write 자격 |
 | `homelab-admin` `/terraform/cloudflare` | `CLOUDFLARE_API_TOKEN` | T09 Cloudflare Terraform용 토큰 |
 | `homelab-admin` `/terraform/tailscale` | `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET` | T09 Terraform용 OAuth client |
-| `homelab-admin` `/terraform/tailscale` | **새 키** `TF_VAR_nuc_expected_owner` | Tailscale Machines의 `nuc-15-pro` 소유자, provider device `user`와 일치하는 로그인 식별자 |
 | `homelab-admin` `/terraform/tailscale` | **새 키** `TF_VAR_dns_adoption_snapshot` | 4절에서 확인한 현재 DNS 전체 설정의 JSON. 되돌리기용 최초 사본으로 보존 |
 | `homelab` `/platform/cloudflared` | **터널 생성 후** `TUNNEL_TOKEN` | 5절의 sensitive Terraform output. ESO가 이 키를 읽도록 플랫폼 담당자와 맞춘다 |
 
@@ -197,7 +196,7 @@ Lock ID와 성공/오류·종료 코드만 비공개 실행 기록에 남기고,
 ## 4. Tailscale DNS: 현재 값 인수 후 목표 전환
 
 이 root는 DNS 전체를 소유한다. 다른 `tailscale_dns_*` 자원과 함께 관리하지 않는다.
-NUC가 없거나 재등록 중이면 실행하지 않는다. 재등록 후에는 키 만료를 다시 해제하고 소유자·태그를 확인한다.
+NUC가 없거나 재등록 중이면 실행하지 않는다. 재등록 후에는 태그가 `tag:nuc` 하나이고 키 만료가 꺼져 있는지 확인한다(D-11 (c)).
 `prevent_destroy`는 선언이 남아 있을 때의 삭제를 막는다. root/리소스 선언을 지우는 방식으로 우회하지 않는다.
 
 ### (a) 현재 설정 그대로 import
@@ -248,8 +247,8 @@ CLI만으로 Override 상태를 확정하지 않는다. 콘솔에서 다음을 �
 ```
 
 사용자 split DNS와 search path가 **실제로 없으면** 각각 `[]`다.
-`TF_VAR_nuc_expected_owner`도 Machines의 소유자로 채운다.
-NUC는 정확히 1대, 태그 없음, 키 만료 해제, `100.`으로 시작하는 IPv4 1개여야 한다.
+NUC는 정확히 1대, 태그 `tag:nuc` 하나, 키 만료 꺼짐, `100.`으로 시작하는 IPv4 1개여야 한다(D-11 (c)).
+2026-10-20 adopt 때는 (a)라 기대 소유자 변수 `TF_VAR_nuc_expected_owner`를 썼다. (c) 적용 뒤 그 키는 Infisical에서 지운다.
 IPv6가 주소 목록 첫 항목이어도 HCL은 IPv4만 고른다.
 
 ```bash

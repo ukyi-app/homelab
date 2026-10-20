@@ -68,7 +68,10 @@ tailnet에 이미 있으면 건너뛴다.
    # 검증된 설치가 끝난 뒤에만 등록한다. 블록 밖에 두면 설치가 실패해도 남아 있던 옛 바이너리로 등록된다
    # --accept-dns=false: 등록 순간부터 노드 DNS를 tailnet(AdGuard)과 떼어 둔다(H5)
    # --ssh: 원격 접속은 Tailscale SSH다(sshd는 LAN 키 인증만). 2026-10-19 운영 NUC 설정(RunSSH=true)과 같다
-   sudo tailscale up --hostname=<prod.env의 NODE_NAME> --accept-dns=false --ssh
+   # --advertise-tags: NUC는 tag:nuc다(D-11 (c)). 태그 규칙이 ACL에 먼저 있어야 등록 뒤 원격 접속이 된다
+   # --advertise-routes: 공유기 관리 화면(ACL grant와 autoApprovers가 짝이다)
+   sudo tailscale up --hostname=<prod.env의 NODE_NAME> --accept-dns=false --ssh \
+     --advertise-tags=tag:nuc --advertise-routes=192.168.117.1/32
    EOF
    ```
 
@@ -80,7 +83,7 @@ tailnet에 이미 있으면 건너뛴다.
    ```
 
    전체 이름은 tailnet 이름을 담으므로 공개 저장소에 적지 않는다.
-4. Tailscale 콘솔에서 이 기기의 키 만료를 해제한다.
+4. Tailscale 콘솔에서 이 기기의 태그가 `tag:nuc` 하나이고 키 만료가 꺼져 있는지 확인한다(태그 기기는 기본으로 꺼진다). 공유기 경로가 승인됐는지도 본다.
 5. Tailscale IP가 바뀌었으면 DNS Terraform(`infra/tailscale-dns`, T08a 이후)을 apply해 전역 nameserver의 NUC 주소를 갱신한다.
 
 ### 0.2 사람 확인

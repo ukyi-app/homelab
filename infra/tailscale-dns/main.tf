@@ -82,12 +82,14 @@ resource "tailscale_dns_configuration" "homelab" {
       error_message = "hostname nuc-15-pro는 정확히 1대여야 한다. DNS 적용을 중단한다."
     }
     precondition {
-      condition     = try(local.nuc.user == var.nuc_expected_owner && length(local.nuc.tags) == 0, false)
-      error_message = "NUC는 기대 소유자의 태그 없는 기기여야 한다."
+      # D-11 (c): 태그 기기는 사용자 소유가 아니라 소유자로 가리지 않는다. 태그가 tag:nuc 하나인지로 본다.
+      condition     = try(length(local.nuc.tags) == 1 && contains(local.nuc.tags, "tag:nuc"), false)
+      error_message = "NUC는 태그가 tag:nuc 하나인 기기여야 한다(D-11 (c))."
     }
     precondition {
+      # 태그 기기는 키 만료가 기본으로 꺼진다. 켜져 있으면 만료 때 tailnet 전역 DNS가 죽은 주소를 가리킨다.
       condition     = try(local.nuc.key_expiry_disabled == true, false)
-      error_message = "콘솔에서 NUC 키 만료를 해제한 뒤 실행한다."
+      error_message = "NUC 키 만료가 꺼져 있어야 한다."
     }
     precondition {
       condition     = length(local.nuc_ipv4) == 1
