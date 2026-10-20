@@ -3,7 +3,8 @@ kind: Ingress
 metadata:
   name: adguard
   namespace: adguard
-  labels:
+  annotations:
+    # operator는 Ingress의 ProxyClass를 annotation에서 읽는다(label이 아니다). operator의 defaultProxyClass와 같은 값이다.
     tailscale.com/proxy-class: homelab-proxy
 spec:
   ingressClassName: tailscale
