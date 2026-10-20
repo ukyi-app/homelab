@@ -921,6 +921,8 @@ kubectl apply -f platform/root/root-prod.yaml                               # 3.
     { "src": ["autogroup:member"], "dst": ["192.168.117.1/32"], "ip": ["tcp:80", "tcp:443"] }
   ],
   "ssh": [
+    // self 대상은 태그 전환 중(ACL apply 뒤 태그를 붙이기 전) NUC SSH가 끊기지 않게 남긴다. 사람 기기끼리도 쓴다
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot", "root"] },
     // root는 기존 비대화형 운영 경로다. 태그 대상의 autogroup:nonroot는 src 전원에게 비root 사용자를 열므로 src를 운영자(Owner·Admin)로 좁힌다
     { "action": "accept", "src": ["autogroup:owner", "autogroup:admin"], "dst": ["tag:nuc"], "users": ["autogroup:nonroot", "root"] }
   ]
