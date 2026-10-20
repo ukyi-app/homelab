@@ -1,4 +1,5 @@
 # expect: fail
+# match: at '/digest': 'sha256:deadbeef' does not match pattern
 # 접두만 맞는 digest(L27).
 chartVersion: 1.0.0
 kind: web

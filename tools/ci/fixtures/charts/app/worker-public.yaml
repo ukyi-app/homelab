@@ -1,4 +1,5 @@
 # expect: fail
+# match: 'allOf' failed - at '': 'not' failed
 # worker에는 포트가 없어 공개할 수 없다.
 chartVersion: 1.0.0
 kind: worker

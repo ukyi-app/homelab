@@ -385,7 +385,7 @@ export function renderAll(): RenderResult {
         writeFileSync(vfile, JSON.stringify(values));
         const r = helmTemplate(app, chartDir, `app-${app}`, [vfile]);
         if (!r.ok) fail(where, r.out.trim());
-        else add(where, r.out);
+        else add(where, r.out, `app-${app}`);
       } catch (e) {
         fail(where, (e as Error).message);
       }

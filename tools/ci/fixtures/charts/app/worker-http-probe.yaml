@@ -1,4 +1,5 @@
 # expect: fail
+# match: worker에는 포트가 없어 HTTP probe
 # worker의 HTTP probe는 포트가 없어 영원히 실패한다.
 chartVersion: 1.0.0
 kind: worker

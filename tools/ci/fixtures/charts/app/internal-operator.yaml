@@ -1,4 +1,5 @@
 # expect: fail
+# match: at '/internal/name': 'not' failed
 # operator 기기 이름과 겹친다.
 chartVersion: 1.0.0
 kind: web

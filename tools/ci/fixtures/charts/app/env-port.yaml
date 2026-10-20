@@ -1,4 +1,5 @@
 # expect: fail
+# match: env 이름 PORT가 두 번
 # env.PORT가 차트의 PORT(서비스·probe 포트)와 겹친다.
 chartVersion: 1.0.0
 kind: web

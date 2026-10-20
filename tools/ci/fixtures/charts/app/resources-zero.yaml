@@ -1,4 +1,5 @@
 # expect: fail
+# match: at '/resources/
 # 0 예약·0 상한은 L28을 우회한다.
 chartVersion: 1.0.0
 kind: web

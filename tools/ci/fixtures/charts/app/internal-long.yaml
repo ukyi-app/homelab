@@ -1,4 +1,5 @@
 # expect: fail
+# match: 가 63자를 넘는다
 # 접두를 붙인 이름이 63자를 넘는다(VM 접두 vm-).
 chartVersion: 1.0.0
 kind: web

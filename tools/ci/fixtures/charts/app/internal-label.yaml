@@ -1,4 +1,5 @@
 # expect: fail
+# match: at '/internal/name': 'Foo.bar' does not match pattern
 # DNS 라벨이 아니다.
 chartVersion: 1.0.0
 kind: web

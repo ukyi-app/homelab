@@ -25,6 +25,19 @@ function header(text: string, key: string): string | undefined {
   return text.match(new RegExp(`^# ${key}: (.+)$`, "m"))?.[1].trim();
 }
 
+// helm template 실패 출력을 오류 단위로 나눈다. schema 위반은 최상위 "- at ..." 항목마다(들여쓴 하위 줄 포함),
+// 템플릿 fail은 "Error:" 줄 하나다. schema 위반은 한 번에 모두 나오므로 섞인 위반도 보인다.
+function helmErrors(stderr: string): string[] {
+  const lines = stderr.split("\n");
+  if (!stderr.includes("don't meet the specifications of the schema")) return lines.filter((l) => l.startsWith("Error:"));
+  const errs: string[] = [];
+  for (const l of lines) {
+    if (l.startsWith("- at ")) errs.push(l);
+    else if (l.startsWith("  ") && errs.length > 0) errs[errs.length - 1] += ` ${l.trim()}`;
+  }
+  return errs;
+}
+
 // YAML로 읽히는 파일은 구조로(흐름 매핑 {kind: Secret} 포함), Helm 템플릿처럼 읽히지 않는 파일은 원문으로 본다.
 const SECRET_KIND = /^\s*(-\s+)?["']?kind["']?\s*:\s*["']?Secret["']?\s*(#.*)?$/m;
 // 흐름 매핑 안의 kind: Secret({apiVersion: v1, kind: Secret, ...}). 파싱되지 않는 템플릿에서 쓴다.
@@ -138,12 +151,22 @@ const steps: Step[] = [
           out.push({ rule: "fixture", where: f, message: `${chartDir}가 없다` });
           continue;
         }
-        if (header(readText(f), "expect") !== "fail") {
-          out.push({ rule: "fixture", where: f, message: "머리 주석 # expect: fail이 필요하다(정상 values는 차트의 ci/에 둔다)" });
+        const text = readText(f);
+        const match = header(text, "match");
+        if (header(text, "expect") !== "fail" || !match) {
+          out.push({ rule: "fixture", where: f, message: "머리 주석 # expect: fail과 # match:(기대 오류 문구 일부)가 필요하다(정상 values는 차트의 ci/에 둔다)" });
           continue;
         }
         const r = run(["helm", "template", chart, chartDir, "--namespace", `app-${chart}`, "-f", f]);
-        if (r.code === 0) out.push({ rule: "fixture", where: f, message: "렌더가 성공했다. 막아야 할 values다" });
+        if (r.code === 0) {
+          out.push({ rule: "fixture", where: f, message: "렌더가 성공했다. 막아야 할 values다" });
+          continue;
+        }
+        // 오류가 모두 기대한 것이어야 한다. 다른 오류가 섞이면 대상 검사가 사라져도 fixture가 실패로 남는다.
+        const errs = helmErrors(r.stderr);
+        if (!errs.some((e) => e.includes(match))) out.push({ rule: "fixture", where: f, message: `기대한 오류(${match})가 없다: ${errs.join(" / ")}` });
+        const other = errs.filter((e) => !e.includes(match));
+        if (other.length > 0) out.push({ rule: "fixture", where: f, message: `기대하지 않은 오류: ${other.join(" / ")}` });
       }
       for (const c of gitFiles(":(glob)platform/charts/*/Chart.yaml").map((p) => basename(dirname(p)))) {
         if (!files.some((f) => basename(dirname(f)) === c)) out.push({ rule: "fixture", where: `platform/charts/${c}`, message: "음성 values fixture가 없다(tools/ci/fixtures/charts/<차트>/)" });

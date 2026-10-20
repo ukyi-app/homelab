@@ -1,4 +1,5 @@
 # expect: fail
+# match: at '/public/host': 'api-.ukyi.app' does not match pattern
 # 첫 라벨이 -로 끝나면 DNS 이름이 아니라 API가 거부한다.
 chartVersion: 1.0.0
 kind: web

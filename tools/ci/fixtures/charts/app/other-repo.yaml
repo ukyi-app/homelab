@@ -1,4 +1,5 @@
 # expect: fail
+# match: repository는 ghcr.io/ukyi-app/app여야 한다
 # 다른 앱의 이미지를 가리키지 못한다.
 chartVersion: 1.0.0
 kind: web

@@ -1,5 +1,7 @@
 # check: ingress
 # expect: fail
+# rule: ingress
+# match: 도 쓴다
 # 두 앱이 같은 tailnet 이름을 쓰면 뒤에 붙은 기기 이름이 바뀌어 선언한 주소로 닿지 않는다.
 apiVersion: networking.k8s.io/v1
 kind: Ingress

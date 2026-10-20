@@ -1,4 +1,5 @@
 # expect: fail
+# match: additional properties 'secret' not allowed
 # 닫힌 schema. 오타 키는 렌더를 막는다(L04).
 chartVersion: 1.0.0
 kind: web

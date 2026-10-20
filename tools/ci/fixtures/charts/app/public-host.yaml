@@ -1,4 +1,5 @@
 # expect: fail
+# match: at '/public/host': 'a.b.ukyi.app' does not match pattern
 # Universal SSL은 첫 단계 하위 도메인만 덮는다(설계 C.3.4).
 chartVersion: 1.0.0
 kind: web

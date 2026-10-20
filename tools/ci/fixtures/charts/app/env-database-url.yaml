@@ -1,4 +1,5 @@
 # expect: fail
+# match: env 이름 DATABASE_URL가 두 번
 # uses.postgres가 넣는 DATABASE_URL을 secrets로 또 넣는다.
 chartVersion: 1.0.0
 kind: web

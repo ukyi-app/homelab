@@ -1,4 +1,5 @@
 # expect: fail
+# match: at '/probes/readiness/command/0': minLength
 # 빈 실행 파일은 kubelet이 실행하지 못해 파드가 Ready가 되지 않는다.
 chartVersion: 1.0.0
 kind: worker

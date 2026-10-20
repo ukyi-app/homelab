@@ -1,4 +1,5 @@
 # expect: fail
+# match: missing property 'resources'
 # resources는 필수다(L28).
 chartVersion: 1.0.0
 kind: web

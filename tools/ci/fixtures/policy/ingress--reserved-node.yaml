@@ -1,5 +1,7 @@
 # check: ingress
 # expect: fail
+# rule: ingress
+# match: 노드)의 이름이라 예약돼 있다
 # 노드(NUC)의 tailnet 기기 이름과 겹친다(host/clusters/prod.env NODE_NAME).
 apiVersion: networking.k8s.io/v1
 kind: Ingress

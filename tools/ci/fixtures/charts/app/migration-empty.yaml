@@ -1,4 +1,5 @@
 # expect: fail
+# match: at '/migration/command/0': minLength
 # 빈 실행 파일은 Job을 시작하지 못하고 wave 2 Deployment까지 막는다.
 chartVersion: 1.0.0
 kind: web
