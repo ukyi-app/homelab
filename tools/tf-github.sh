@@ -13,7 +13,7 @@
 #   Environments RW·Secrets R·Actions R, org Administration R·Secrets R은 사람이 지킨다(래퍼가 머리글로 볼 수 없다).
 # - R2 state 키는 Infisical homelab-admin /terraform/state에서만 infisical run으로 받는다. 이 경로에는 R2 키만 둔다.
 #
-# 작업 사본에서 돌지 않는다. origin/main을 임시 worktree로 꺼내 그 사본만 실행한다. plan도 HCL과 provider를 실행하고,
+# 작업 사본에서 돌지 않는다. github.com의 main을 임시 디렉터리에 새로 clone해 그 사본만 실행한다. plan도 HCL과 provider를 실행하고,
 # .gitignore가 숨기는 *override.tf·*.tfvars는 git status에도 안 보인다. 같은 작업 사본을 AI 에이전트도 편집한다.
 set -euo pipefail
 export LC_ALL=C
@@ -84,22 +84,23 @@ esac
 admin=$(GH_TOKEN=$GITHUB_TOKEN gh api repos/ukyi-app/homelab --jq .permissions.admin 2>/dev/null) || die "repos/ukyi-app/homelab을 읽지 못했다"
 [[ $admin == true ]] || die "토큰이 ukyi-app/homelab의 admin이 아니다"
 
-# 2. origin/main의 깨끗한 사본.
+# 2. main의 깨끗한 사본. 작업 사본의 .git(설정, remote URL, URL rewrite, hook)을 쓰지 않는다. 같은 작업 사본을
+#    AI 에이전트도 편집하므로 .git/config의 origin을 바꾸거나 post-checkout hook을 심으면 관리자 토큰을 가진 채
+#    다른 코드가 돈다. 그래서 고정 URL에서 새로 clone하고, 전역·시스템 git 설정과 hook을 끈다.
+#    git에는 토큰을 넘기지 않는다(public 저장소라 익명 clone).
 repo_root=$(git rev-parse --show-toplevel)
-git -C "$repo_root" fetch -q origin main
 work=$(mktemp -d "${TMPDIR:-/tmp}/tf-github.XXXXXX")
-cleanup() {
-  git -C "$repo_root" worktree remove --force "$work/tree" >/dev/null 2>&1 || true
-  rm -rf "$work"
-}
-trap cleanup EXIT
-git -C "$repo_root" worktree add -q --detach "$work/tree" origin/main
+trap 'rm -rf "$work"' EXIT
+mkdir -p "$work/nohooks"
+env -u GITHUB_TOKEN -u GH_TOKEN GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+  git -c core.hooksPath="$work/nohooks" -c protocol.allow=never -c protocol.https.allow=always \
+  clone -q --depth 1 --branch main --no-tags https://github.com/ukyi-app/homelab.git "$work/tree"
 sha=$(git -C "$work/tree" rev-parse HEAD)
-say "실행 사본: origin/main ${sha}"
+say "실행 사본: github.com/ukyi-app/homelab main ${sha}"
 bad=$(find "$work/tree" -path "$work/tree/.git" -prune -o \( -name '*override.tf*' -o -name '*.tfvars*' \) -print)
 [[ -z $bad ]] || die "사본에 override·tfvars 파일이 있다: ${bad}"
 root="$work/tree/infra/github"
-[[ -d $root ]] || die "origin/main에 infra/github가 없다"
+[[ -d $root ]] || die "main에 infra/github가 없다"
 
 # ~/.terraformrc의 dev_overrides·암묵 로컬 미러가 provider 바이너리를 바꾸지 못하게 한다. unset하면 ~/.terraformrc로
 # 돌아가므로 지우지 않고 이 파일을 가리킨다. registry에서 받은 provider는 .terraform.lock.hcl 해시로 확인한다.
@@ -134,6 +135,11 @@ tf() {
   infisical run --silent --log-level=error --projectId="$HOMELAB_ADMIN_PROJECT_ID" --env=prod --path=/terraform/state -- \
     bash -c '[[ "$(printf "%s" "$GITHUB_TOKEN" | sha256sum | cut -d" " -f1)" == "$TOKEN_SUM" ]] || { echo "tf-github: Infisical이 GITHUB_TOKEN을 덮었다" >&2; exit 1; }
              [[ -n ${AWS_ACCESS_KEY_ID:-} && -n ${AWS_SECRET_ACCESS_KEY:-} ]] || { echo "tf-github: R2 자격이 없다" >&2; exit 1; }
+             # /terraform/state에 실수로 든 제어 변수(숨은 -target·변수·로그·App 인증)를 terraform 직전에 다시 지운다.
+             for n in $(compgen -e); do
+               case $n in TF_CLI_ARGS | TF_CLI_ARGS_* | TF_LOG | TF_LOG_* | TF_VAR_* | GITHUB_APP_* | GH_TOKEN | TF_WORKSPACE | TF_DATA_DIR) unset "$n" ;; esac
+             done
+             unset TOKEN_SUM
              exec terraform -chdir="$0" "$@"' "$root" "$@" || rc=$?
   if [[ $(find ~/.infisical/secrets-backup -type f 2>/dev/null | wc -l) -ne 0 ]]; then
     find ~/.infisical/secrets-backup -type f -delete 2>/dev/null
@@ -172,7 +178,7 @@ case $cmd in
     # 잠금을 쓰지 않는다(AC-P13: plan은 읽기 전용). 미뤄진 guard(3·4·9)도 변경이 없으면 plan 때 평가된다.
     rc=0
     plan -lock=false || rc=$?
-    say "verify: origin/main ${sha}, exit ${rc}"
+    say "verify: main ${sha}, exit ${rc}"
     exit "$rc"
     ;;
   plan)
@@ -180,7 +186,7 @@ case $cmd in
     plan -lock=false || rc=$?
     [[ $rc == 0 || $rc == 2 ]] || exit 1
     check_deletes
-    say "plan: origin/main ${sha}, exit ${rc}. 미뤄진 guard 결과는 plan에 없어 apply 뒤 verify가 본다"
+    say "plan: main ${sha}, exit ${rc}. 미뤄진 guard 결과는 plan에 없어 apply 뒤 verify가 본다"
     exit "$rc"
     ;;
   apply)
@@ -190,16 +196,23 @@ case $cmd in
     case $(realpath -m "$TF_STATE_BACKUP_DIR") in "$repo_root" | "$repo_root"/*) die "백업은 저장소 밖에 둔다" ;; esac
     mkdir -p "$TF_STATE_BACKUP_DIR" && chmod 700 "$TF_STATE_BACKUP_DIR"
     backup="$TF_STATE_BACKUP_DIR/github-$(date -u +%Y%m%dT%H%M%SZ)-${sha:0:12}.tfstate"
-    (umask 077 && tf state pull >"$backup")
-    say "state 백업: ${backup}"
+    (umask 077 && tf state pull >"$backup") || die "state pull이 실패했다"
+    if [[ -s $backup ]]; then
+      say "state 백업: ${backup}"
+    else
+      # 새 backend 키에 아직 state가 없다(첫 apply). 빈 파일은 유효한 사본이 아니라 지운다.
+      rm -f "$backup"
+      backup=""
+      say "원격 state가 아직 없다(첫 apply). 백업을 건너뛴다"
+    fi
 
     rc=0
     plan || rc=$?
     [[ $rc == 0 || $rc == 2 ]] || exit 1
-    if [[ $rc == 0 ]]; then say "변경 없음: origin/main ${sha}"; exit 0; fi
+    if [[ $rc == 0 ]]; then say "변경 없음: main ${sha}"; exit 0; fi
     check_deletes
     tf show -no-color tfplan
-    read -r -p "origin/main ${sha}의 위 plan을 적용한다. 계속하려면 yes: " answer
+    read -r -p "main ${sha}의 위 plan을 적용한다. 계속하려면 yes: " answer
     [[ $answer == yes ]] || die "멈췄다"
 
     # 갱신이 실패한 ruleset은 state에 계획값이 남고 etag가 그대로라 드리프트가 영구히 안 보인다(#3519).
@@ -207,17 +220,28 @@ case $cmd in
     rulesets=$(tf show -json tfplan | jq -r '.resource_changes[]? | select(.type == "github_repository_ruleset") |
       select(.change.actions | index("update")) | "\(.address)\t\(.change.before.repository):\(.change.before.ruleset_id)"')
     if ! tf apply -input=false tfplan; then
-      say "apply 실패. 이 plan의 ruleset을 state rm 뒤 다시 import한다(#3519)"
-      while IFS=$'\t' read -r addr id; do
-        [[ -n $addr ]] || continue
-        tf state rm "$addr" >/dev/null && tf import -input=false "$addr" "$id" >/dev/null && say "재편입: ${addr} (${id})"
-      done <<<"$rulesets"
-      die "apply가 실패했다. 원인을 고친 뒤 다시 plan한다. state 백업: ${backup}"
+      say "apply 실패. 이 plan의 갱신 ruleset을 state rm 뒤 다시 import한다(#3519)"
+      if [[ -n $rulesets ]]; then
+        # rm은 됐는데 import가 실패하면(같은 장애) 주소만 state에서 사라져 다음 plan이 기존 ruleset을 새로 만들려 한다.
+        # 그래서 rm 직전 state를 받아 두고, import가 하나라도 실패하면 그 state로 되돌린 뒤 멈춘다.
+        snapshot="$work/pre-reimport.tfstate"
+        (umask 077 && tf state pull >"$snapshot") || die "재편입 전 state pull이 실패했다. state 백업: ${backup:-없음}"
+        while IFS=$'\t' read -r addr id; do
+          [[ -n $addr ]] || continue
+          if tf state rm "$addr" >/dev/null && tf import -input=false "$addr" "$id" >/dev/null; then
+            say "재편입: ${addr} (${id})"
+          else
+            tf state push -force "$snapshot" || die "재편입 실패 뒤 state 복구도 실패했다. 손으로 복구한다: ${snapshot}, 백업 ${backup:-없음}"
+            die "재편입(${addr})이 실패해 state를 재편입 전으로 되돌렸다. 장애가 끝나면 다시 apply한다"
+          fi
+        done <<<"$rulesets"
+      fi
+      die "apply가 실패했다. 원인을 고친 뒤 다시 plan한다. state 백업: ${backup:-없음}"
     fi
     # 미뤄진 guard는 plan 출력에 없었다. 적용한 상태를 다시 본다. postcondition은 적용한 변경을 되돌리지 않는다.
     rc=0
     plan -lock=false || rc=$?
-    say "apply 뒤 verify: origin/main ${sha}, exit ${rc}"
+    say "apply 뒤 verify: main ${sha}, exit ${rc}"
     exit "$rc"
     ;;
 esac

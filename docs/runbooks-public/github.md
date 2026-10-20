@@ -3,7 +3,7 @@
 GitHub 보호 설정(ruleset, environment `automerge`, Actions 권한)은 Terraform root `infra/github`가 선언하고, owner가 로컬에서 래퍼 `tools/tf-github.sh`로만 적용한다(설계 C.3.9, D-28). T12부터 `homelab github plan·apply·verify`가 같은 규칙으로 감싼다. CI는 자격 없이 `terraform test`(mock)만 하고 plan하지 않는다.
 
 - 외부 변경(apply, `gh api` 쓰기)은 사람 승인 뒤에 하고 [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 남긴다.
-- 래퍼는 작업 사본이 아니라 `origin/main`의 임시 사본으로 돈다. 그래서 바꾼 HCL은 PR 병합 뒤에야 plan에 나온다. PR 단계의 미리보기는 CI의 mock 시험뿐이다.
+- 래퍼는 작업 사본이 아니라 github.com에서 새로 clone한 main으로 돈다(작업 사본의 git 설정·remote·hook을 쓰지 않는다). 그래서 바꾼 HCL은 PR 병합 뒤에야 plan에 나온다. PR 단계의 미리보기는 CI의 mock 시험뿐이다.
 - 값(토큰, R2 키)은 출력하지 않는다. 계정 식별자·endpoint는 저장소 밖 작업 기록에 둔다(D-23).
 
 ## 0. 준비

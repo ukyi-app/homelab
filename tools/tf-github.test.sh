@@ -22,6 +22,24 @@ git -C "$t/seed" push -q "$t/origin.git" main
 git clone -q -b main "$t/origin.git" "$t/work"
 
 mkdir -p "$t/bin" "$t/home"
+# 래퍼는 github.com에서 새로 clone한다. 시험에서는 그 clone만 로컬 bare 저장소로 돌린다(그 밖의 git 호출은 진짜 git).
+# 가짜 git은 래퍼가 넘긴 환경(전역 설정 끔, hook 끔)을 그대로 확인한다.
+real_git=$(command -v git)
+cat >"$t/bin/git" <<EOF
+#!/usr/bin/env bash
+args=("\$@")
+for i in "\${!args[@]}"; do
+  if [[ \${args[\$i]} == https://github.com/ukyi-app/homelab.git ]]; then
+    [[ \${GIT_CONFIG_GLOBAL:-} == /dev/null && -n \${GIT_CONFIG_NOSYSTEM:-} && -z \${GITHUB_TOKEN:-} ]] || { echo "git stub: clone 환경이 격리되지 않았다" >&2; exit 9; }
+    printf '%s\\n' "\$*" | grep -q 'core.hooksPath=' || { echo "git stub: hook을 끄지 않았다" >&2; exit 9; }
+    args[\$i]="file://$t/origin.git"
+    # 래퍼는 https만 허용한다. 시험의 로컬 원격만 file을 연다.
+    args=(-c protocol.file.allow=always "\${args[@]}")
+    break
+  fi
+done
+exec "$real_git" "\${args[@]}"
+EOF
 cat >"$t/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
@@ -36,6 +54,8 @@ cat >"$t/bin/infisical" <<'EOF'
 while [[ $# -gt 0 && $1 != -- ]]; do shift; done
 shift
 export AWS_ACCESS_KEY_ID=stub AWS_SECRET_ACCESS_KEY=stub
+# /terraform/state에 제어 변수가 실수로 들어간 경우를 흉내 낸다. 래퍼가 terraform 직전에 지워야 한다.
+if [[ -n ${STUB_INJECT:-} ]]; then export TF_VAR_homelab_merge_app_id=9 TF_CLI_ARGS_plan=-target=x GITHUB_APP_ID=1 TF_LOG=DEBUG; fi
 exec "$@"
 EOF
 cat >"$t/bin/terraform" <<'EOF'
@@ -101,20 +121,29 @@ expect "만료 없는 fine-grained PAT 거부" nonzero STUB_TOKEN=github_pat_stu
 expect "만료 있는 fine-grained PAT 허용" 0 STUB_TOKEN=github_pat_stub STUB_HEADERS="$t/h-pat" -- verify
 expect "모르는 토큰 종류 거부" nonzero STUB_TOKEN=ghs_stub -- verify
 expect "admin이 아닌 토큰 거부" nonzero STUB_ADMIN=false -- verify
+expect "Infisical이 주입한 제어 변수를 terraform 전에 지움" 0 STUB_INJECT=1 -- verify
 expect "delete plan은 --allow-destroy 없이 멈춤" nonzero STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan
 expect "delete plan은 --allow-destroy로 통과" 2 STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan --allow-destroy
 
-# 작업 사본의 미추적 override는 임시 worktree에 없다. 가짜 terraform이 override를 보면 exit 9다.
+# 작업 사본의 hook과 remote URL은 쓰지 않는다. 심어 둔 hook이 돌면 표식 파일이 생긴다.
+mkdir -p "$t/work/.git/hooks"
+printf '#!/bin/sh\ntouch "%s/hook-ran"\n' "$t" >"$t/work/.git/hooks/post-checkout"
+chmod +x "$t/work/.git/hooks/post-checkout"
+"$real_git" -C "$t/work" remote set-url origin "$t/nowhere.git"
+expect "작업 사본의 remote 변경·hook을 쓰지 않음" 0 -- verify
+[[ ! -e $t/hook-ran ]] || { echo "FAIL: 작업 사본의 hook이 돌았다"; fails=$((fails + 1)); }
+
+# 작업 사본의 미추적 override는 새 clone에 없다. 가짜 terraform이 override를 보면 exit 9다.
 echo 'resource "x" "y" {}' >"$t/work/infra/github/zz_override.tf"
 expect "작업 사본의 미추적 zz_override.tf를 읽지 않음" 0 -- verify
 rm "$t/work/infra/github/zz_override.tf"
 
-# origin/main에 커밋된 override는 사본 검사에서 거부한다.
+# main에 커밋된 override는 사본 검사에서 거부한다.
 echo '# x' >"$t/seed/infra/github/zz_override.tf"
 git -C "$t/seed" add -A
 git -C "$t/seed" -c user.name=t -c user.email=t@example.invalid commit -q -m override
 git -C "$t/seed" push -q "$t/origin.git" main
-expect "origin/main의 override 파일 거부" nonzero -- verify
+expect "main에 커밋된 override 파일 거부" nonzero -- verify
 
 grep -q -- '-lock=false' "$t/log" || { echo "FAIL: verify가 -lock=false로 돌지 않았다"; fails=$((fails + 1)); }
 
