@@ -10,8 +10,9 @@ cluster:
     projectSlug: ukyi-homelab-dev
     environmentSlug: dev
 
-  # T13 전에 채움. 접두 vm-(예: vm-argocd, operator 기기 이름 vm-tailscale-operator, E8 VM 격리 4번).
-  tailscale: {}
+  # 접두 vm-(예: vm-argocd, operator 기기 이름 vm-tailscale-operator, E8 VM 격리 4번). T08a가 키를 만들며 채웠다.
+  tailscale:
+    prefix: vm-
 
   # T13 전에 채움. VM 전용 버킷(예: homelab-backups-vm), serverName pg-vm-<YYYYMMDD>,
   # 복구 원본은 운영 serverName(시나리오 13, E8 VM 격리 3번).

@@ -1,7 +1,9 @@
 {{- /*
-자리: traefik. 맡은 티켓 T08a, wave -5(설계 C.3.1). 공개 HTTP 라우팅, Service는 ClusterIP.
-켜기: values.yaml의 components.traefik.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
-source와 destination은 자리표시다. 맡은 티켓이 정한다(외부 Helm 차트면 chart와 고정 semver, _helpers.tpl).
+traefik: 공개 HTTP 라우팅. 맡은 티켓 T08a, wave -5(설계 C.3.1, C.3.4).
+cloudflared가 http://traefik.traefik.svc:80 으로 보낸 요청을 Ingress host로 나눈다. 모르는 host는 404다.
+Service는 ClusterIP라 LAN·tailnet에서 직접 닿지 않는다. Ingress class traefik 하나, 엔트리포인트 web 하나.
+Gateway API·내부 TLS 리스너·IngressRoute CRD는 쓰지 않는다(설계 A.4 8번).
+켜기: values.yaml의 components.traefik.enabled. 꺼져 있으면 아무것도 렌더하지 않는다.
 */}}
 {{- if .Values.components.traefik.enabled }}
 apiVersion: argoproj.io/v1alpha1
@@ -14,9 +16,102 @@ metadata:
 spec:
   project: platform
   source:
-    repoURL: {{ include "homelab.repoURL" . }}
-    targetRevision: main
-    path: platform/traefik
+    # 차트 42.0.0(Traefik v3.7.14)은 2026-10-20 기준 최신(U14). 42의 깨지는 변경(Kubernetes 1.30 이상,
+    # Traefik Hub Secret 권한, 투명성 로그)은 이 구성에 해당하지 않는다.
+    repoURL: https://traefik.github.io/charts
+    chart: traefik
+    targetRevision: 42.0.0
+    helm:
+      # Traefik CRD(IngressRoute 등)는 쓰지 않으므로 설치하지 않는다. 아래 kubernetesCRD provider도 끈다.
+      skipCrds: true
+      valuesObject:
+        image:
+          # traefik:v3.7.14 멀티 아키텍처 index(2026-10-20 Docker Hub에서 확인). 차트는 tag와 digest를 함께 렌더한다.
+          digest: sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c
+        deployment:
+          replicas: 1
+        service:
+          type: ClusterIP
+        ports:
+          # TLS는 Cloudflare 가장자리에서 끝난다. 터널 안쪽은 평문 HTTP 하나다.
+          # 라우터가 기본으로 web에만 붙게 한다. 차트의 websecure 엔트리포인트를 없애려면 값에 null을 넣어야 하는데,
+          # Application valuesObject의 null은 root sync에서 지워져(merge patch의 null은 키 삭제) selfHeal이 계속 다시 넣는다.
+          # 그래서 websecure는 Service에 내지 않고 라우터도 붙지 않게만 둔다.
+          web:
+            asDefault: true
+            # cloudflared가 Cloudflare에서 받은 X-Forwarded-Proto·For를 넘긴다. 신뢰하지 않으면 Traefik이 지워
+            # 앱이 HTTPS 요청을 HTTP로 보고 리다이렉트를 반복하거나 방문자 주소가 cloudflared 하나로 합쳐진다.
+            # 파드 대역 전체를 믿는 대신 아래 extraObjects의 NetworkPolicy가 8000으로 들어오는 출처를 cloudflared로 묶는다.
+            forwardedHeaders:
+              trustedIPs:
+                - 10.42.0.0/16
+          websecure:
+            expose:
+              default: false
+        providers:
+          kubernetesCRD:
+            enabled: false
+          kubernetesIngress:
+            # class 없는 Ingress도 provider가 잡는다(Traefik은 설정 class와 Ingress class가 둘 다 비면 같다고 본다,
+            # v3.7.14 ingress/kubernetes.go). 공개 경로에 올라타지 않게 traefik class만 보게 한다.
+            ingressClass: traefik
+            # Argo CD는 status.loadBalancer.ingress가 빈 Ingress를 Progressing으로 본다. publishedService는 ClusterIP
+            # Service에서 externalIPs만 복사해 비어 있다(v3.7.14 소스). cloudflared가 실제로 붙는 주소를 적는다.
+            publishedService:
+              enabled: false
+            ingressEndpoint:
+              hostname: traefik.traefik.svc.cluster.local
+        # 차트 기본값은 Gateway·GatewayClass를 만든다. Gateway API CRD가 없고 쓰지도 않는다.
+        # 옛 구성은 Gateway CRD wave 순서로 17시간 교착했다(설계 P22).
+        gateway:
+          enabled: false
+        gatewayClass:
+          enabled: false
+        ingressClass:
+          enabled: true
+          # 기본 class가 되면 class를 안 적은 Ingress까지 공개 경로에 올라탄다. 공유 차트가 늘 class를 적는다.
+          isDefaultClass: false
+          name: traefik
+        log:
+          format: json
+          level: INFO
+        # JSON 접근 로그를 stdout으로. 수집은 T08b(관측).
+        accessLog:
+          enabled: true
+          format: json
+        # 공개 web(8000)에는 cloudflared만 들어온다. 지표(9100)·ping(8080)은 열지 않는다(수집은 T08b가 연다).
+        # kubelet 프로브는 노드에서 오므로 이 정책과 상관없다.
+        extraObjects:
+          - apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: traefik-web-from-cloudflared
+              namespace: traefik
+            spec:
+              podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: traefik
+              policyTypes:
+                - Ingress
+              ingress:
+                - from:
+                    - namespaceSelector:
+                        matchLabels:
+                          kubernetes.io/metadata.name: cloudflared
+                      podSelector:
+                        matchLabels:
+                          app: cloudflared
+                  ports:
+                    - protocol: TCP
+                      port: 8000
+        # serviceAccount.name을 지정하면 차트가 SA를 만들지 않는다(설계 P22 함정). 기본 이름을 쓴다.
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          # 옛 실측 최대 25Mi의 약 4배(설계 P22). GOMEMLIMIT은 차트가 limits.memory에서 만든다.
+          limits:
+            memory: 96Mi
   destination:
     server: https://kubernetes.default.svc
     namespace: traefik

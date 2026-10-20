@@ -20,7 +20,9 @@ cluster:
     environmentSlug: prod
 
   # T08a. Tailscale operator Ingress hostname과 operator 기기 이름의 접두. 운영은 접두 없음.
-  tailscale: {}
+  # 같은 tailnet에 VM이 붙으므로 이름이 겹치면 뒤에 붙은 쪽에 -1이 붙고 되돌아가지 않는다(설계 C.6.4).
+  tailscale:
+    prefix: ""
 
   # T11. CNPG 백업 버킷·serverName·복구 원본. 운영 버킷은 homelab-backups.
   cnpg: {}

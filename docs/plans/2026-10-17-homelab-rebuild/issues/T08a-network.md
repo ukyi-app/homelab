@@ -1,7 +1,7 @@
 # T08a 네트워크·DNS·외부 공개
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 대기
+- 상태: 진행 중 (2026-10-20 착수. Terraform root 셋 PR #772, cert-manager·Traefik·Tailscale operator PR, AdGuard 작업 중. 사람: tailnet HTTPS 켜짐 확인, ACL·DNS 현재 값 저장소 밖 보관, operator OAuth 발급·등록)
 - 명세: [../spec.md](../spec.md) §4.5
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4a, E.3, C.3.4~C.3.6, C.3.8, C.3.9, C.8
 - Blocked by: T07, T09
@@ -46,7 +46,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 
 - 내부 UI (D-08). Tailscale operator Ingress의 `<서비스>.<tailnet>.ts.net`으로 띄운다(UI마다 단독 프록시). `*.home.ukyi.app` 내부 이름, AdGuard rewrite, 내부 와일드카드 인증서, cert-manager DNS-01 Cloudflare 토큰, traefik-ts는 두지 않는다. tailnet HTTPS 인증서를 켜면 기기 이름과 tailnet DNS 이름이 공개 CT 로그에 실리므로, 공개해도 되는 기기 이름만 쓴다.
 - 이 티켓이 내는 내부 Ingress는 Argo CD와 AdGuard 관리 화면이다. Grafana는 T08b가 같은 operator로 낸다. 이름은 `argocd`, `grafana`, `adguard`다.
-- operator: chart 1.104.1. OAuth client(Devices Core, Auth Keys write, 태그 `tag:k8s-operator`)는 Infisical `homelab`의 `/platform/tailscale`에서 ESO로 받는다. ns `tailscale`은 privileged다. ProxyClass로 프록시 메모리 상한을 둔다. operator Ingress reconcile은 메타데이터만 바뀐 변경을 무시하므로, 바꿀 때는 Ingress를 다시 만든다.
+- operator: chart 1.104.1. OAuth client(Services·Devices Core·Auth Keys write, 태그 `tag:k8s-operator`. Services는 2026-10-20 공식 설치 문서 기준으로 더함)는 Infisical `homelab`의 `/platform/tailscale`에서 ESO로 받는다. ns `tailscale`은 privileged다. ProxyClass로 프록시 메모리 상한을 둔다. operator Ingress reconcile은 메타데이터만 바뀐 변경을 무시하므로, 바꿀 때는 Ingress를 다시 만든다.
 - 전체 이름(`https://argocd.<tailnet>.ts.net`)만 열린다. 짧은 이름은 TLS 연결 실패다. 프록시는 인증서를 새로 받지 못하면 핸드셰이크를 실패시키고, 갱신 실패가 이어져도 만료까지 약 30일 여유가 있다. 막혔을 때 비상 경로는 `kubectl -n argocd port-forward svc/argocd-server 8080:80` 같은 port-forward다(설계 C.3.5).
 
 ### Tailscale ACL (D-11 (a), `infra/tailscale`)
@@ -101,7 +101,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 | R2 state 버킷 키 | Infisical `homelab-admin` `/terraform/state` | 세 root의 backend | T09 |
 | Cloudflare Terraform용 토큰 | `homelab-admin` `/terraform/cloudflare` | `infra/cloudflare` | T09 |
 | Tailscale Terraform용 OAuth(ACL과 DNS 쓰기, 기기 읽기)와 기대 소유자 변수 | `homelab-admin` `/terraform/tailscale` | `infra/tailscale`, `infra/tailscale-dns` | OAuth는 T09. 기대 소유자 변수의 등록 담당은 설계에 없다 [미검증] |
-| Tailscale operator OAuth client(Devices Core, Auth Keys write, `tag:k8s-operator`) | Infisical `homelab` `/platform/tailscale` → ESO | `platform/tailscale` | 이 티켓(사람 발급) |
+| Tailscale operator OAuth client(Services·Devices Core·Auth Keys write, `tag:k8s-operator`) | Infisical `homelab` `/platform/tailscale` → ESO | `platform/tailscale` | 이 티켓(사람 발급) |
 | 터널 토큰 | `homelab`의 플랫폼 경로(설계 C.2 `/platform/<구성 요소>`) → ESO | `platform/cloudflared` | 이 티켓(Terraform이 만든 터널의 토큰을 사람이 등록) |
 | AdGuard 관리자 자격 | `homelab` → ESO(init이 해시 주입) | `platform/adguard` | T09 |
 
