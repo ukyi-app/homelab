@@ -94,7 +94,7 @@ ExternalSecret `argocd/argocd-owner`가 Infisical `/platform/argocd`의 두 키�
 
    ```bash
    read -r -p 'homelab-ci-merge project ID: ' MERGE_PROJECT_ID
-   read -r -p 'homelab-merge App client ID: ' APP_CLIENT_ID
+   read -r -p 'ukyi-homelab-merge App client ID: ' APP_CLIENT_ID
    export APP_CLIENT_ID
    infisical run --silent --log-level=error --projectId="$MERGE_PROJECT_ID" --env=prod --path=/ -- bash -c '
      set -euo pipefail

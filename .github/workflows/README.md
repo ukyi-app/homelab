@@ -8,13 +8,13 @@
 |---|---|---|
 | `ci.yaml` | `pull_request`, main push | 필수 검사 `ci`. 로컬과 같은 `bun run ci`(검사 내용은 `tools/ci/`) |
 | `app-build.yaml` | `workflow_call`(앱 저장소가 태그 `app-build-vX.Y.Z`로 호출) | 앱 시험 → 기본 브랜치 push면 GHCR push → attestation → 배포 PR `deploy/<앱>` |
-| `deploy-merge.yaml` | `workflow_run`(ci 완료)만 | 아래 조건 9개를 main의 코드로 검사하고, 모두 참이면 `homelab-merge` App이 squash 병합 |
+| `deploy-merge.yaml` | `workflow_run`(ci 완료)만 | 아래 조건 9개를 main의 코드로 검사하고, 모두 참이면 `ukyi-homelab-merge` App이 squash 병합 |
 
 ## 사람 승인 없이 병합되는 PR의 조건
 
 아래가 **모두** 참일 때만 병합한다. 하나라도 거짓이면 PR은 열린 채 남고 사람이 판단한다. 검사 코드는 `tools/deploy-merge/conditions.ts`, 조건마다 음성 시험은 `tools/deploy-merge/fixtures/`다.
 
-1. PR 작성자가 `homelab-deploy[bot]`이다(로그인 문자열이 아니라 숫자 사용자 ID로 비교).
+1. PR 작성자가 `ukyi-homelab-deploy[bot]`이다(로그인 문자열이 아니라 숫자 사용자 ID로 비교).
 2. head 저장소가 `ukyi-app/homelab`이고 head 브랜치가 `deploy/<앱>`이며 `apps/<앱>/`가 main에 있다.
 3. 바뀐 파일이 정확히 `apps/<앱>/image.yaml` 하나다.
 4. 바뀐 키가 `digest`와 `revision`뿐이다(`repository` 그대로, `hold: false`).
@@ -33,8 +33,8 @@
 워크플로 코드는 바뀔 수 있으므로 위 조건은 서버 쪽 장치와 함께 선다. 선언은 `infra/github`(Terraform)이다.
 
 - ruleset A `main-checks`: main에 필수 검사 `ci`. bypass 없음.
-- ruleset B `main-review`: main은 PR로만, 승인 1, code owner 리뷰, 새 push 때 승인 무효화, 마지막 push 승인. bypass는 저장소 관리자(`pull_request` 모드)와 `homelab-merge` App뿐.
-- ruleset C `deploy-branches`: `deploy/**`를 만들고 바꾸는 것은 `homelab-deploy` App뿐.
+- ruleset B `main-review`: main은 PR로만, 승인 1, code owner 리뷰, 새 push 때 승인 무효화, 마지막 push 승인. bypass는 저장소 관리자(`pull_request` 모드)와 `ukyi-homelab-merge` App뿐.
+- ruleset C `deploy-branches`: `deploy/**`를 만들고 바꾸는 것은 `ukyi-homelab-deploy` App뿐.
 - ruleset D1·D2: 버전 태그(`app-chart-v*`, `data-chart-v*`, `app-build-v*`)는 관리자만 만들고 아무도 옮기거나 지우지 못한다.
 - 앱 저장소와 `homelab-app-template`의 `app-main`.
 - 병합 키 `HOMELAB_MERGE_KEY`는 environment `automerge`(배포 브랜치 main)의 secret이고 `deploy-merge`의 merge job만 쓴다. 배포 키는 Infisical OIDC identity가 앱 main push의 태그 고정 `app-build`에만 준다.

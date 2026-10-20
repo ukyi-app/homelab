@@ -32,7 +32,7 @@
    - AC-P12: 공개 HTTPS webhook 수신 경로(T08a), 읽기 전용 접근 Kubernetes·관측·Argo CD(T08b), 경보 외부 수신자(T08b), 격리 작업 실행 공간(T08b), 리뷰 전용 App 저장소별 설치 구조(T10).
    - AC-P8: 병합 조건 공개(T10), 봇 변경 PR의 자동 병합 차단(T10, 시험 신원. 실제 신원은 T19).
    - AC-P11: 비AI 알림 경로(T08b), 외부 생존 감시(T08b).
-5. 배포 갱신 주체가 아닌 신원의 digest PR이 자동 병합되지 않는지 확인한다 (AC-P8). T10의 시험 App을 `homelab-smoke`에도 설치해 시나리오 15로 본다.
+5. 배포 갱신 주체가 아닌 신원의 digest PR이 자동 병합되지 않는지 확인한다 (AC-P8). T10의 시험 App `ukyi-homelab-bot-standin`을 `homelab-smoke`에도 설치해 시나리오 15로 본다.
 6. 시나리오 14에 D-08 추가 확인을 넣는다: 셀룰러 Tailscale 기기(AdGuard 정지 중 광고 도메인 차단, 일반 도메인 정상), 사용자 규칙 적용률(AdGuard Home 전용 시험 차단 규칙을 집 Wi-Fi·셀룰러에서 20회씩. 공용 DNS에서 정상 주소가 나오는 시험 이름을 쓰고 `0.0.0.0` 응답만 센다, 설계 G 시나리오 14). 측정값을 결과표에 남긴다.
 7. 시나리오 7·13 뒤 복구 자산의 운영 ESO client ID·secret으로 Infisical Universal Auth에 로그인해 성공을 확인한다. 토큰은 출력하지 않고 응답 코드만 본다. 시나리오 7의 장애 주입이 운영 client secret을 폐기하지 않았음을 확인하는 것이다(설계 E8).
 8. T07에서 넘긴 일(2026-10-19, PR #755 Codex 리뷰): `platform/root/values-vm.yaml`은 키 모양만 있고 값이 비어 있으며 빈 값을 막는 검사가 없다. VM 값을 채울 때 `templates/cluster-check.yaml`에 VM 격리 값(Infisical 프로젝트·환경, CNPG 버킷·serverName, Tailscale 이름 접두)이 비면 렌더가 실패하는 검사를 더한다. 그 전에는 `root-vm.yaml`을 apply하지 않는다(`bootstrap.md` 0절).
@@ -47,7 +47,7 @@
 - 그 밖의 `homelab-dev` 시험 값(Grafana·AdGuard·Argo CD 관리자 자격, `homelab-smoke`의 앱 키·DB·Valkey 비밀번호 등): 이 티켓에서 새 시험 값으로 채운다.
 - 복구 자산의 R2 읽기 전용 토큰(운영 백업 버킷만): 시나리오 13 동안만 VM에 손으로 넣는다. 복구 자산 목록은 T09가 만든다. 이 토큰을 발급하는 티켓은 설계에 정해져 있지 않다 [미검증].
 - 복구 자산의 운영 ESO client ID·secret: 준비 T09. 할 일 7의 로그인 확인에 쓴다.
-- T10이 만든 시험 App: `homelab-smoke`에도 설치한다(시나리오 15).
+- T10이 만든 시험 App `ukyi-homelab-bot-standin`: `homelab-smoke`에도 설치한다(시나리오 15).
 - CLI가 쓰는 사람의 `gh` 로그인, `infisical login`, kubeconfig(운영 context와 `homelab-vm`).
 - NUC 재부팅·네트워크 차단 시험(시나리오 12·17)은 사람 승인 뒤에 한다.
 

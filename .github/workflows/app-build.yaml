@@ -124,7 +124,7 @@ jobs:
       # identity gha-homelab-deploy는 claim으로 이 파일의 태그 ref·main push·ukyi-app에 묶여 있다(approvals 2026-10-19).
       INFISICAL_IDENTITY_ID: 44ba77ec-d301-4226-8a9d-3e1321579416
       INFISICAL_PROJECT_SLUG: ukyi-homelab-ci-deploy
-      # App homelab-deploy의 client ID. App을 만든 뒤 사람이 채운다(HUMAN-STEPS). 채우기 전에는 아래 확인에서 멈춘다.
+      # App ukyi-homelab-deploy의 client ID. App을 만든 뒤 사람이 채운다(HUMAN-STEPS). 채우기 전에는 아래 확인에서 멈춘다.
       DEPLOY_APP_CLIENT_ID: REPLACE_WITH_HOMELAB_DEPLOY_CLIENT_ID
     steps:
       - name: build provenance attestation
@@ -143,7 +143,7 @@ jobs:
           [[ $GITHUB_REPOSITORY_OWNER == ukyi-app ]] || { echo "::error::ukyi-app 저장소만"; exit 1; }
           [[ $APP =~ ^[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$ ]] || { echo "::error::앱 이름(저장소 이름)이 DNS 라벨 53자 이하가 아니다(Helm 릴리스 이름 상한): $APP"; exit 1; }
           [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::push job의 digest가 없다"; exit 1; }
-          [[ $DEPLOY_APP_CLIENT_ID != REPLACE_* ]] || { echo "::error::app-build.yaml의 DEPLOY_APP_CLIENT_ID가 아직 비어 있다(App homelab-deploy 생성 뒤 채운다)"; exit 1; }
+          [[ $DEPLOY_APP_CLIENT_ID != REPLACE_* ]] || { echo "::error::app-build.yaml의 DEPLOY_APP_CLIENT_ID가 아직 비어 있다(App ukyi-homelab-deploy 생성 뒤 채운다)"; exit 1; }
 
       - name: 배포 App 키(Infisical OIDC)
         uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
@@ -181,6 +181,8 @@ jobs:
           HOMELAB_TOKEN: ${{ steps.token.outputs.token }}
           APP_REPO_TOKEN: ${{ github.token }}
           NEW_REV: ${{ github.sha }}
+          # 봇 이름을 박지 않고 토큰을 발급한 App에서 얻는다. 옛 이름 homelab-deploy는 남의 App이다(설계 B.8 E5).
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
         run: |
           set -euo pipefail
           image="ghcr.io/ukyi-app/${APP}"
@@ -219,7 +221,9 @@ jobs:
           export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${basic}"
           # 커밋 작성자 표기용. job 환경에 GH_TOKEN이 없으니 토큰을 명시한다.
-          bot_id=$(GH_TOKEN=$HOMELAB_TOKEN gh api '/users/homelab-deploy%5Bbot%5D' --jq .id)
+          [[ $APP_SLUG =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "::error::설치 토큰 단계가 app-slug를 내지 않았다"; exit 1; }
+          bot="${APP_SLUG}[bot]"
+          bot_id=$(GH_TOKEN=$HOMELAB_TOKEN gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
 
           for attempt in 1 2; do
             if ! read_image main; then
@@ -253,7 +257,7 @@ jobs:
             mkdir -p "$work/apps/${APP}"
             printf 'repository: %s\ndigest: %s\nrevision: %s\nhold: false\n' "$image" "$DIGEST" "$NEW_REV" > "$work/apps/${APP}/image.yaml"
             git -C "$work" add "apps/${APP}/image.yaml"
-            git -C "$work" -c user.name='homelab-deploy[bot]' -c user.email="${bot_id}+homelab-deploy[bot]@users.noreply.github.com" \
+            git -C "$work" -c user.name="$bot" -c user.email="${bot_id}+${bot}@users.noreply.github.com" \
               commit -q -m "deploy(${APP}): ${NEW_REV:0:12}" -m "digest ${DIGEST}" -m "source https://github.com/${GITHUB_REPOSITORY}/commit/${NEW_REV}"
             # 읽은 브랜치 SHA를 lease로. 그 사이 다른 빌드가 브랜치를 바꿨으면 거부되고, 한 번 다시 읽어 규칙을 재평가한다.
             if git -C "$work" push -q --force-with-lease="refs/heads/${branch}:${lease}" origin "HEAD:refs/heads/${branch}"; then
@@ -264,8 +268,8 @@ jobs:
           done
 
           title="deploy(${APP}): ${NEW_REV:0:12}"
-          body=$(printf 'App homelab-deploy가 만든 배포 PR이다. 자동 병합 조건은 .github/workflows/README.md.\n\n- image: %s@%s\n- revision: https://github.com/%s/commit/%s\n- run: %s/%s/actions/runs/%s' \
-            "$image" "$DIGEST" "$GITHUB_REPOSITORY" "$NEW_REV" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          body=$(printf '배포 App(%s)이 만든 PR이다. 자동 병합 조건은 .github/workflows/README.md.\n\n- image: %s@%s\n- revision: https://github.com/%s/commit/%s\n- run: %s/%s/actions/runs/%s' \
+            "$APP_SLUG" "$image" "$DIGEST" "$GITHUB_REPOSITORY" "$NEW_REV" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
           pr=$(GH_TOKEN=$HOMELAB_TOKEN gh api "repos/ukyi-app/homelab/pulls?head=ukyi-app:${branch}&state=open" --jq '.[0].number // empty')
           if [[ -n $pr ]]; then
             GH_TOKEN=$HOMELAB_TOKEN gh api -X PATCH "repos/ukyi-app/homelab/pulls/${pr}" -f title="$title" -f body="$body" >/dev/null

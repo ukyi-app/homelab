@@ -3,7 +3,7 @@
 //
 // 입력 env: GH_TOKEN(이 job의 GITHUB_TOKEN), GITHUB_EVENT_PATH, GITHUB_OUTPUT, HOMELAB_DEPLOY_BOT_ID.
 // 출력: ok=true|false, pr, sha. ok일 때만 merge job이 병합 키를 받는다.
-// 이유 댓글은 homelab-deploy가 작성한 PR에만 단다. 다른 PR(모든 PR의 ci 완료마다 돈다)은 로그에만 남긴다.
+// 이유 댓글은 ukyi-homelab-deploy가 작성한 PR에만 단다. 다른 PR(모든 PR의 ci 완료마다 돈다)은 로그에만 남긴다.
 import { appendFileSync, readFileSync } from "node:fs";
 import { type Facts, appFromBranch, evaluate } from "./conditions";
 
