@@ -63,6 +63,8 @@ jobs:
           # homelab-deploy[bot]의 숫자 사용자 ID(조건 1). App을 만든 뒤 사람이 채운다(HUMAN-STEPS).
           # 0이면 어떤 PR도 조건 1을 통과하지 못한다(fail-safe).
           HOMELAB_DEPLOY_BOT_ID: "0"
+          # 앱 저장소 CODEOWNERS의 유일한 규칙 "* @<이 계정>"(조건 9). 템플릿이 심는 값과 같다.
+          HOMELAB_CODEOWNER: ukkiee
         run: bun tools/deploy-merge/main.ts
 
   merge:

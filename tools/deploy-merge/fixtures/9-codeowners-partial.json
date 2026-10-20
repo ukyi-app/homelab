@@ -1,0 +1,1 @@
+{"expect": 9, "why": "오류 없는 CODEOWNERS지만 일부 경로만 소유", "patch": {"appRepo": {"codeownersText": "/docs/ @ukkiee\n"}}}

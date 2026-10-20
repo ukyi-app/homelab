@@ -104,6 +104,7 @@ export async function gather(event: any): Promise<Facts> {
   const run = event.workflow_run ?? {};
   const facts: Facts = {
     deployBotId: Number(process.env.HOMELAB_DEPLOY_BOT_ID ?? "0"),
+    codeOwner: process.env.HOMELAB_CODEOWNER,
     run: {
       event: run.event,
       conclusion: run.conclusion,
@@ -155,11 +156,17 @@ export async function gather(event: any): Promise<Facts> {
 
   const rules = await gh(`repos/${appRepo}/rules/branches/main`);
   const owners = await gh(`repos/${appRepo}/codeowners/errors?ref=main`);
+  let codeownersText: string | null = null;
+  for (const path of [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]) {
+    codeownersText = await raw(appRepo, path, "main");
+    if (codeownersText !== null) break;
+  }
   facts.appRepo = {
     visibility: repo.status === 200 ? repo.body?.visibility : undefined,
     rules: Array.isArray(rules.body) ? rules.body : [],
     codeownersStatus: owners.status,
     codeownersErrors: owners.body?.errors,
+    codeownersText,
   };
   return facts;
 }

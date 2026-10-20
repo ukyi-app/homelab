@@ -218,7 +218,8 @@ jobs:
           echo "::add-mask::${basic}"
           export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${basic}"
-          bot_id=$(gh api '/users/homelab-deploy%5Bbot%5D' --jq .id)
+          # 커밋 작성자 표기용. job 환경에 GH_TOKEN이 없으니 토큰을 명시한다.
+          bot_id=$(GH_TOKEN=$HOMELAB_TOKEN gh api '/users/homelab-deploy%5Bbot%5D' --jq .id)
 
           for attempt in 1 2; do
             if ! read_image main; then

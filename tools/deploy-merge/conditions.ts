@@ -34,7 +34,11 @@ export type Facts = {
     rules?: { type: string; parameters?: Record<string, any> }[];
     codeownersStatus?: number;
     codeownersErrors?: unknown[];
+    // main의 CODEOWNERS 원문(.github/, 루트, docs/ 순서로 GitHub이 고르는 첫 파일).
+    codeownersText?: string | null;
   };
+  // 앱 저장소 전체를 소유해야 하는 code owner 로그인(템플릿 계약 "* @<owner>").
+  codeOwner?: string;
 };
 
 export type Failure = { cond: number; message: string };
@@ -130,6 +134,15 @@ export function evaluate(f: Facts): Verdict {
   for (const t of ["non_fast_forward", "deletion"]) if (!rules.some((r) => r.type === t)) fail(9, `앱 main에 ${t} 규칙이 없다`);
   if (!(repo.codeownersStatus === 200 && Array.isArray(repo.codeownersErrors) && repo.codeownersErrors.length === 0)) {
     fail(9, `앱 main의 CODEOWNERS가 없거나 오류가 있다(codeowners/errors ${repo.codeownersStatus ?? "읽지 못함"})`);
+  }
+  // 오류가 없다는 것은 문법만 보장한다. 주석뿐이거나 일부 경로만 소유하면 소유자 없는 경로는 쓰기 권한이 있는
+  // 아무 신원(리뷰 App 등)의 승인으로 병합된다. 규칙 줄이 정확히 "* @<owner>" 하나여야 한다(뒤 줄이 앞 줄을 덮는다).
+  const rules9 = (repo.codeownersText ?? "")
+    .split("\n")
+    .map((l) => l.replace(/#.*$/, "").trim().replace(/\s+/g, " "))
+    .filter((l) => l !== "");
+  if (!(f.codeOwner && rules9.length === 1 && rules9[0] === `* @${f.codeOwner}`)) {
+    fail(9, `앱 main의 CODEOWNERS 규칙이 "* @${f.codeOwner ?? "<owner>"}" 한 줄이 아니다`);
   }
 
   return { app, failures };

@@ -22,7 +22,7 @@
 6. `revision`이 앱 저장소 기본 브랜치에 있고 main의 배포 revision 대비 compare `ahead`다.
 7. 그 head SHA의 `ci`(`.github/workflows/ci.yaml`)가 성공했다.
 8. PR이 Draft가 아니고 `hold` 라벨이 없다.
-9. 앱 저장소 `ukyi-app/<앱>`이 public이고, 그 main에 `app-main` 규칙(PR 필수, 승인 1 이상, code owner 리뷰, 새 push 때 승인 무효화, force push·삭제 금지)이 active로 보이며, main에 유효한 `CODEOWNERS`가 있다(`codeowners/errors`가 빈 배열).
+9. 앱 저장소 `ukyi-app/<앱>`이 public이고, 그 main에 `app-main` 규칙(PR 필수, 승인 1 이상, code owner 리뷰, 새 push 때 승인 무효화, force push·삭제 금지)이 active로 보이며, main에 유효한 `CODEOWNERS`가 있다(`codeowners/errors`가 빈 배열이고 규칙이 `* @<owner 계정>` 한 줄).
 
 병합은 검사한 head SHA를 고정해 `PUT /repos/ukyi-app/homelab/pulls/{n}/merge`(squash)로 한다. 검사와 병합 사이에 새 커밋이 들어오면 GitHub이 거부한다. GitHub auto-merge(`allow_auto_merge`)는 꺼져 있다.
 

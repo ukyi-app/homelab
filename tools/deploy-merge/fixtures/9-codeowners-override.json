@@ -1,0 +1,1 @@
+{"expect": 9, "why": "뒤 줄이 src를 다른 소유자로 덮는다", "patch": {"appRepo": {"codeownersText": "* @ukkiee\n/src/ @someone\n"}}}

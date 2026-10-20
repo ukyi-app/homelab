@@ -1,24 +1,67 @@
 {
   "deployBotId": 1000001,
-  "run": { "event": "pull_request", "conclusion": "success", "headSha": "dddddddddddddddddddddddddddddddddddddddd", "path": ".github/workflows/ci.yaml", "headRepo": "ukyi-app/homelab", "headBranch": "deploy/homelab-probe" },
-  "pr": { "number": 7, "userId": 1000001, "headRepo": "ukyi-app/homelab", "headRef": "deploy/homelab-probe", "headSha": "dddddddddddddddddddddddddddddddddddddddd", "baseRef": "main", "draft": false, "labels": [] },
+  "run": {
+    "event": "pull_request",
+    "conclusion": "success",
+    "headSha": "dddddddddddddddddddddddddddddddddddddddd",
+    "path": ".github/workflows/ci.yaml",
+    "headRepo": "ukyi-app/homelab",
+    "headBranch": "deploy/homelab-probe"
+  },
+  "pr": {
+    "number": 7,
+    "userId": 1000001,
+    "headRepo": "ukyi-app/homelab",
+    "headRef": "deploy/homelab-probe",
+    "headSha": "dddddddddddddddddddddddddddddddddddddddd",
+    "baseRef": "main",
+    "draft": false,
+    "labels": []
+  },
   "appDirOnMain": true,
-  "files": [{ "filename": "apps/homelab-probe/image.yaml", "status": "modified" }],
+  "files": [
+    {
+      "filename": "apps/homelab-probe/image.yaml",
+      "status": "modified"
+    }
+  ],
   "mainImage": "repository: ghcr.io/ukyi-app/homelab-probe\ndigest: sha256:0000000000000000000000000000000000000000000000000000000000000000\nrevision: cccccccccccccccccccccccccccccccccccccccc\nhold: false\n",
   "headImage": "repository: ghcr.io/ukyi-app/homelab-probe\ndigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nrevision: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nhold: false\n",
-  "imageLabels": { "org.opencontainers.image.revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "org.opencontainers.image.source": "https://github.com/ukyi-app/homelab-probe" },
+  "imageLabels": {
+    "org.opencontainers.image.revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "org.opencontainers.image.source": "https://github.com/ukyi-app/homelab-probe"
+  },
   "attestationVerified": true,
   "compareDeployedToNew": "ahead",
   "compareNewToDefault": "identical",
-  "ciChecks": [{ "name": "ci", "conclusion": "success", "app": "github-actions" }],
+  "ciChecks": [
+    {
+      "name": "ci",
+      "conclusion": "success",
+      "app": "github-actions"
+    }
+  ],
   "appRepo": {
     "visibility": "public",
     "rules": [
-      { "type": "pull_request", "parameters": { "required_approving_review_count": 1, "require_code_owner_review": true, "dismiss_stale_reviews_on_push": true } },
-      { "type": "non_fast_forward" },
-      { "type": "deletion" }
+      {
+        "type": "pull_request",
+        "parameters": {
+          "required_approving_review_count": 1,
+          "require_code_owner_review": true,
+          "dismiss_stale_reviews_on_push": true
+        }
+      },
+      {
+        "type": "non_fast_forward"
+      },
+      {
+        "type": "deletion"
+      }
     ],
     "codeownersStatus": 200,
-    "codeownersErrors": []
-  }
+    "codeownersErrors": [],
+    "codeownersText": "# main의 code owner 리뷰(app-main)가 이 파일을 쓴다.\n* @ukkiee\n"
+  },
+  "codeOwner": "ukkiee"
 }
