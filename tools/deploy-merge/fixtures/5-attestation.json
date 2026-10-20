@@ -1,0 +1,1 @@
+{"expect": 5, "why": "main 밖에서 빌드한 이미지(라벨은 맞음, attestation 없음)", "patch": {"attestationVerified": false}}

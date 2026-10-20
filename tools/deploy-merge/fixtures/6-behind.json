@@ -1,0 +1,1 @@
+{"expect": 6, "why": "늦게 끝난 옛 빌드(시나리오 11)", "patch": {"compareDeployedToNew": "behind"}}

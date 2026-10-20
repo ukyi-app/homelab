@@ -1,0 +1,1 @@
+{"expect": 5, "why": "라벨의 revision이 다르다", "patch": {"imageLabels": {"org.opencontainers.image.revision": "cccccccccccccccccccccccccccccccccccccccc"}}}

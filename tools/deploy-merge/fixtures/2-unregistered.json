@@ -1,0 +1,1 @@
+{"expect": 2, "why": "main에 apps/<앱>/이 없다", "patch": {"appDirOnMain": false}}

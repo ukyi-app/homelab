@@ -1,0 +1,104 @@
+# 배포 digest PR의 자동 병합(설계 C.4.7, D-07). 조건 9개는 .github/workflows/README.md에 공개한다.
+#
+# 트리거는 workflow_run(ci 완료) 하나다. workflow_run은 기본 브랜치의 이 파일과 main 코드로 돈다. 같은 저장소 PR이
+# pull_request 워크플로를 바꿔 검사를 무력화해도 여기 판단은 바뀌지 않는다. pull_request_target은 쓰지 않는다.
+# 다른 트리거(workflow_dispatch, repository_dispatch 등)를 더하지 않는다. 그런 이벤트는 GITHUB_REF가 기본 브랜치라
+# environment의 배포 브랜치 정책을 통과한다(F D-26 조건 (2)). ci의 workflow-guard가 이 규칙을 확인한다.
+name: deploy-merge
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions: {}
+
+env:
+  LC_ALL: C
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    # 모든 PR의 ci 완료마다 돈다. 조건 불일치 이유는 homelab-deploy가 연 PR에만 댓글로 남긴다.
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      # 조건 불일치 댓글(PR 댓글은 issues API다).
+      issues: write
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+      pr: ${{ steps.check.outputs.pr }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # PR head가 아니라 main의 검사 코드를 돌린다.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install bun
+        # ci.yaml과 같은 방식: 버전은 .tool-versions, 받은 파일은 sha256과 대조한다.
+        env:
+          BUN_SHA256: "3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18" # 1.4.3 linux-x64
+        run: |
+          v=$(awk '$1 == "bun" { print $2 }' .tool-versions)
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/bun.zip" "https://github.com/oven-sh/bun/releases/download/bun-v${v}/bun-linux-x64.zip"
+          echo "$BUN_SHA256  $RUNNER_TEMP/bun.zip" | sha256sum -c --quiet -
+          unzip -q -j "$RUNNER_TEMP/bun.zip" bun-linux-x64/bun -d "$bin"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: 조건 9개
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # homelab-deploy[bot]의 숫자 사용자 ID(조건 1). App을 만든 뒤 사람이 채운다(HUMAN-STEPS).
+          # 0이면 어떤 PR도 조건 1을 통과하지 못한다(fail-safe).
+          HOMELAB_DEPLOY_BOT_ID: "0"
+          # 앱 저장소 CODEOWNERS의 유일한 규칙 "* @<이 계정>"(조건 9). 템플릿이 심는 값과 같다.
+          HOMELAB_CODEOWNER: ukkiee
+        run: bun tools/deploy-merge/main.ts
+
+  merge:
+    needs: check
+    if: needs.check.outputs.ok == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # 병합 키는 이 job만 쓴다. environment automerge의 배포 브랜치 정책(main)이 브랜치 실행을 거부한다.
+    # deployment: false는 배포 기록 없이 secret만 쓴다. environment 이름은 대소문자를 가리지 않는다.
+    environment:
+      name: automerge
+      deployment: false
+    permissions: {}
+    env:
+      # App homelab-merge의 client ID. App을 만든 뒤 사람이 채운다(HUMAN-STEPS). 채우기 전에는 토큰 발급이 실패한다.
+      MERGE_APP_CLIENT_ID: REPLACE_WITH_HOMELAB_MERGE_CLIENT_ID
+    steps:
+      - name: 병합 App 토큰
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ env.MERGE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HOMELAB_MERGE_KEY }}
+          owner: ukyi-app
+          repositories: homelab
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: squash 병합(검사한 head SHA)
+        # sha를 주면 검사와 병합 사이에 새 커밋이 들어온 경우 GitHub이 거부한다. GitHub auto-merge는 쓰지 않는다.
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR: ${{ needs.check.outputs.pr }}
+          SHA: ${{ needs.check.outputs.sha }}
+        run: |
+          [[ $PR =~ ^[0-9]+$ && $SHA =~ ^[0-9a-f]{40}$ ]] || { echo "::error::check 출력이 틀렸다"; exit 1; }
+          gh api -X PUT "repos/ukyi-app/homelab/pulls/${PR}/merge" -f merge_method=squash -f sha="$SHA" --jq .message

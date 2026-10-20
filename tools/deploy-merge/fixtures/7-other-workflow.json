@@ -1,0 +1,1 @@
+{"expect": 7, "why": "PR이 더한 같은 이름 ci 워크플로", "patch": {"run": {"path": ".github/workflows/fake.yaml"}}}

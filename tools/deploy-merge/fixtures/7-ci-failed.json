@@ -1,0 +1,1 @@
+{"expect": 7, "why": "ci 실패", "patch": {"run": {"conclusion": "failure"}}}

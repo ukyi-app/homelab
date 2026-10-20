@@ -1,0 +1,1 @@
+{"expect": 2, "why": "deploy/<앱> 밖 브랜치", "patch": {"run": {"headBranch": "feature/x"}, "pr": {"headRef": "feature/x"}}}

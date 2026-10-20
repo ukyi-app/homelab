@@ -1,0 +1,1 @@
+{"expect": 9, "why": "CODEOWNERS 없음(404)", "patch": {"appRepo": {"codeownersStatus": 404, "codeownersErrors": null}}}
