@@ -25,8 +25,18 @@
 
 `eso-homelab`(VM은 `eso-homelab-dev`)의 Universal Auth client secret이다. T09 시나리오 7(2026-10-20)의 장애 주입과 복구가 이 순서였다.
 
-1. Infisical에서 identity의 Universal Auth에 새 client secret을 만든다. TTL 0, 사용 횟수 0(무제한). ESO는 동기화마다 새로 로그인하므로 사용 횟수를 1로 두면 두 번째 동기화부터 실패한다. 옛 secret은 아직 둔다.
-2. 복구 자산 두 곳을 새 값으로 갱신한다.
+1. Infisical에서 identity의 Universal Auth에 새 client secret을 만든다. TTL 0, 사용 횟수 0(무제한). ESO는 동기화마다 새로 로그인하므로 사용 횟수를 1로 두면 두 번째 동기화부터 실패한다. 옛 secret과 복구 자산의 옛 사본은 5단계까지 그대로 둔다. 새 값을 잘못 옮겨 적었을 때 돌아갈 값이 남아야 한다.
+2. 새 값으로 직접 로그인해 본다. 응답 코드만 보고 토큰은 버린다. 값은 `export`한 환경변수로만 넘긴다(bootstrap.md 2.2와 같은 변수).
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   : "${ESO_CLIENT_ID:?}" "${ESO_CLIENT_SECRET:?}"
+   jq -n '{clientId: env.ESO_CLIENT_ID, clientSecret: env.ESO_CLIENT_SECRET}' \
+     | curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://app.infisical.com/api/v1/auth/universal-auth/login \
+         -H 'Content-Type: application/json' --data @-     # 200이어야 한다
+   EOF
+   ```
+
 3. [bootstrap.md](bootstrap.md) 2.2의 명령으로 부트스트랩 Secret `external-secrets/infisical-universal-auth`를 바꾼다. 같은 명령이고 값만 새것이다.
 4. 새 값으로 동기화되는지 확인한다. 이미 Ready·`SecretSynced`인 상태에서 교체하므로 상태만 보면 옛 결과를 새 값의 성공으로 오인한다. ExternalSecret 하나를 즉시 동기화하고 `refreshTime`이 교체 시각 뒤인지 본다. ESO는 동기화마다 부트스트랩 Secret으로 새로 로그인하므로(시나리오 7에서 폐기 직후 즉시 동기화가 바로 실패했다), 이 동기화가 성공이면 새 값이 맞다. ESO를 재시작하지 않아도 된다.
 
@@ -38,8 +48,9 @@
    kubectl get clustersecretstore            # 둘 다 READY True. Store는 5분마다 다시 검증한다
    ```
 
-   새 값이 틀렸으면 이 동기화가 `SecretSyncedError`가 된다. 기존 Secret은 그대로이니 3단계를 맞는 값으로 다시 한다.
-5. 4단계가 새 값으로 성공한 뒤에만 Infisical에서 옛 client secret을 폐기한다. 순서를 바꾸면 그 사이 동기화가 실패한다(기존 Secret과 서비스는 유지된다, 시나리오 7).
+   새 값이 틀렸으면 이 동기화가 `SecretSyncedError`가 된다. 기존 Secret은 그대로이니 3단계를 맞는 값(또는 옛 값)으로 다시 한다.
+5. 4단계가 새 값으로 성공한 뒤에 복구 자산 두 곳의 사본을 새 값으로 바꾼다.
+6. 그다음에만 Infisical에서 옛 client secret을 폐기한다. 순서를 바꾸면 그 사이 동기화가 실패한다(기존 Secret과 서비스는 유지된다, 시나리오 7).
 
 ## 2. Argo CD `owner` 비밀번호
 
@@ -48,6 +59,7 @@ ExternalSecret `argocd/argocd-owner`가 Infisical `/platform/argocd`의 두 키�
 1. 새 비밀번호를 정하고 bcrypt 해시를 만든다. 비밀번호는 `getpass`로만 받아 화면·인자에 남기지 않는다. 8자 이상, 72바이트 이하다(bcrypt는 72바이트 뒤를 버린다). 해시는 비밀번호를 오프라인으로 추측할 수 있는 자료라 값처럼 다룬다: 에이전트가 읽는 터미널이나 기록이 남는 세션에서 돌리지 않고, Infisical에 붙여 넣은 뒤 화면과 스크롤백을 지운다. 파일로 저장하지 않는다.
 
    ```bash
+   # uv는 .tool-versions에 고정돼 있다(mise install). bcrypt는 실행 때 정확한 버전으로 받는다
    uv run --no-project --with 'bcrypt==5.0.0' python -I -c \
      'import bcrypt, getpass; print(bcrypt.hashpw(getpass.getpass().encode(), bcrypt.gensalt(12)).decode())'
    date -u +%Y-%m-%dT%H:%M:%SZ               # 새 OWNER_PASSWORD_MTIME
@@ -77,7 +89,8 @@ ExternalSecret `argocd/argocd-owner`가 Infisical `/platform/argocd`의 두 키�
    gh api repos/ukyi-app/homelab/environments/automerge/secrets/HOMELAB_MERGE_KEY --jq .updated_at
    ```
 
-5. 그다음에만 옛 키를 지운다. App 키는 만료가 없고 25개까지 동시에 유효해, `deploy-merge`가 성공해도 옛 키로 성공했을 수 있다. 옛 키를 지운 뒤에야 401이 나고, 그때 배포 PR은 열린 채 남는다(안전한 쪽 실패).
+5. 새 키 자체로 인증되는지 본다. `updated_at`은 다시 쓰였다는 사실만 보여 주고, 그 키가 병합 App의 키인지는 보여 주지 않는다. 새 키로 App JWT를 만들어 `GET /app`이 200이고 `id`가 병합 App ID인지 본다. 키는 `infisical run`으로 환경변수로만 받고 파일로 쓰지 않는다. 명령은 T10이 채운다(병합 App과 `homelab github verify`가 T10에서 생긴다).
+6. 그다음에만 옛 키를 지운다. App 키는 만료가 없고 25개까지 동시에 유효해, `deploy-merge`가 성공해도 옛 키로 성공했을 수 있다. 옛 키를 지운 뒤에야 401이 나고, 그때 배포 PR은 열린 채 남는다(안전한 쪽 실패).
 
 ## 4. 아직 채우지 않은 절
 
