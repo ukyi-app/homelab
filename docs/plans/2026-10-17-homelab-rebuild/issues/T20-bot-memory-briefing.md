@@ -1,12 +1,12 @@
 # T20 봇 MEMORY_BRIEFING
 
 - 단계: P4 봇 V1
-- 상태: 대기
+- 상태: 착수 가능 (선행 T16a 완료 2026-10-20. 로컬·mock 구현부터, 완료는 T16b 뒤)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T16a(착수), T16b(완료)
   - 착수: [T16a](T16a-bot-foundation-local.md) 뒤. 이 티켓을 실제로 막는 FOUNDATION의 예약 기능을 T16a가 로컬·mock으로 만든다(V1 범위 조정 안 3).
   - 완료: [T16b](T16b-bot-foundation-deploy.md) 뒤. 브리핑을 실제 D-17 브리핑 채널로 보내는 시험(BRIEF-01 `authorized_external`)은 배포된 봇이 필요하다.
-- 선행 결정: D-17 (확정(사용자 2026-10-18, T15): 브리핑은 알림·리뷰·브리핑 채널. 브리핑 시각은 T16a에서 정한다)
+- 선행 결정: D-17 (확정(사용자 2026-10-18, T15): 브리핑은 알림·리뷰·브리핑 채널. 브리핑 시각은 매일 08:50 Asia/Seoul(확정(사용자 2026-10-20, T16a)))
 - 연결 AC: AC-B7
 - 수행: 개발 에이전트 (`STAGE=MEMORY_BRIEFING`)
 
