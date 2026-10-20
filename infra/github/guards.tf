@@ -160,6 +160,35 @@ data "github_rest_api" "codeowners" {
   }
 }
 
+# 5(내용). 오류가 없다는 것은 문법만 보장한다. 주석뿐이거나 일부 경로만 소유하면 소유자 없는 경로는 쓰기 권한이 있는
+#    아무 신원(리뷰 App 등)의 승인으로 병합된다. 규칙 줄이 정확히 "* @<owner>" 하나여야 한다(뒤 줄이 앞 줄을 덮는다).
+#    파일 위치는 저장소마다 고정한다(homelab은 루트, 나머지는 결정 5 하드닝과 템플릿이 쓰는 .github/).
+locals {
+  code_owner = "ukkiee"
+  codeowners_path = {
+    for r in local.public_repos : r => (r == local.homelab ? "CODEOWNERS" : ".github/CODEOWNERS")
+  }
+}
+
+data "github_rest_api" "codeowners_content" {
+  for_each = local.public_repos
+  endpoint = "repos/ukyi-app/${each.key}/contents/${local.codeowners_path[each.key]}?ref=main"
+
+  lifecycle {
+    postcondition {
+      condition = try(
+        jsonencode([
+          for l in split("\n", base64decode(replace(jsondecode(self.body).content, "\n", ""))) :
+          join(" ", compact(split(" ", replace(trimspace(replace(l, "/#.*$/", "")), "\t", " "))))
+          if trimspace(replace(l, "/#.*$/", "")) != ""
+        ]) == jsonencode(["* @${local.code_owner}"]),
+        false
+      )
+      error_message = "guard 5: main의 CODEOWNERS 규칙이 \"* @ukkiee\" 한 줄이 아니다(주석뿐, 일부 경로만, 다른 소유자)."
+    }
+  }
+}
+
 # 6. 옛 브랜치 보호가 없다(E1에서 지움). ruleset과 둘이 겹치면 어느 쪽이 막는지 흐려진다.
 data "github_rest_api" "branch_protection" {
   for_each = local.public_repos

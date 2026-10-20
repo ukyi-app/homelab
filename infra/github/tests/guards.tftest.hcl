@@ -104,6 +104,11 @@ override_data {
 }
 
 override_data {
+  target = data.github_rest_api.codeowners_content
+  values = { code = 200, body = "{\"content\":\"IyDsvZTrk5wg7IaM7Jyg7J6QCiogQHVra2llZQo=\"}" }
+}
+
+override_data {
   target = data.github_rest_api.branch_protection
   values = { code = 404, body = "{\"message\":\"Branch not protected\"}" }
 }
@@ -425,4 +430,24 @@ run "app_id_placeholder" {
     homelab_deploy_app_id = 0
   }
   expect_failures = [var.homelab_deploy_app_id]
+}
+
+run "g5_codeowners_partial" {
+  # 오류 없는 파일이지만 /docs/만 소유한다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.codeowners_content["files"]
+    values = { code = 200, body = "{\"content\":\"L2RvY3MvIEB1a2tpZWUK\"}" }
+  }
+  expect_failures = [data.github_rest_api.codeowners_content]
+}
+
+run "g5_codeowners_override" {
+  # 뒤 줄이 /src/를 다른 소유자로 덮는다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.codeowners_content["homelab"]
+    values = { code = 200, body = "{\"content\":\"KiBAdWtraWVlCi9zcmMvIEBzb21lb25lCg==\"}" }
+  }
+  expect_failures = [data.github_rest_api.codeowners_content]
 }
