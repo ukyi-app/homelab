@@ -69,7 +69,12 @@ export TF_IN_AUTOMATION=1
 mkdir -p ~/.infisical
 if [ -d ~/.infisical/secrets-backup ]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi
 mkdir -p ~/.infisical/secrets-backup && chmod 0500 ~/.infisical/secrets-backup
-backup_files() { find ~/.infisical/secrets-backup -type f 2>/dev/null | wc -l; }  # 실행마다 0이어야 한다
+# 권한을 지원하지 않는 파일시스템이거나 chmod가 실패하면 백업이 그대로 쓰인다. 실제로 쓰기 불가인지 확인하고 아니면 멈춘다.
+if touch ~/.infisical/secrets-backup/.probe 2>/dev/null; then
+  rm -f ~/.infisical/secrets-backup/.probe
+  echo '백업 폴더가 쓰기 가능하다. 여기서 멈춘다'; return 1 2>/dev/null || exit 1
+fi
+backup_files() { find ~/.infisical/secrets-backup -type f 2>/dev/null | wc -l; }
 read -r -p 'homelab-admin project ID: ' HOMELAB_ADMIN_PROJECT_ID
 read -r -p 'R2 S3 API endpoint (https://...r2.cloudflarestorage.com): ' R2_ENDPOINT
 
@@ -84,6 +89,14 @@ tf() {
   infisical run --silent --log-level=error --projectId="$HOMELAB_ADMIN_PROJECT_ID" --env=prod --path=/terraform/state -- \
     infisical run --silent --log-level=error --projectId="$HOMELAB_ADMIN_PROJECT_ID" --env=prod --path="$provider_path" -- \
     terraform -chdir="infra/$root" "$@"
+  local rc=$?
+  # 매 실행 뒤 백업 파일이 0개인지 본다. 생겼으면 지우고 실패로 끝낸다.
+  if [ "$(backup_files)" -ne 0 ]; then
+    find ~/.infisical/secrets-backup -type f -delete 2>/dev/null
+    printf '%s\n' 'Infisical 백업 파일이 생겼다. 지우고 중단한다' >&2
+    return 1
+  fi
+  return "$rc"
 }
 ```
 
