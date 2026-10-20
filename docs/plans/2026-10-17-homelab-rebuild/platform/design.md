@@ -532,7 +532,7 @@ spec·design-prompt가 깔고 있던 전제와 다르게 가는 것이다. 각 �
 | AdGuard는 setcap 바이너리라 `allowPrivilegeEscalation: true` + `NET_BIND_SERVICE`만, 빈 PVC에 파일을 만드는 컨테이너는 소비자와 같은 uid | `platform/adguard/prod/deployment.yaml:13-24`, `:111-115` | 그대로 가져온다 |
 | 공유기가 LAN의 유일한 DNS 클라이언트라 기본 ratelimit 20이 집 전체를 조인다. 사설 PTR이 로그를 오염. liveness 재시작이 유일 리졸버를 끊는다. 질의 로그 30일은 약 1.7GB | `platform/adguard/prod/adguardhome.yaml:19-45`, `:68-75`, `deployment.yaml:96-101` | ratelimit 100 + 공유기 예외, `local_ptr_upstreams`, liveness 없음, 로그 보존 7일 |
 | servicelb(klipper) SNAT 때문에 NetworkPolicy로 :53 ingress를 출처 제한할 수 없다 | `platform/adguard/prod/networkpolicy.yaml:9` | 수용(LAN과 tailnet 서비스, D-08). 관리 UI는 Tailscale Ingress로만. tailnet 질의도 svclb 출처 하나로 보여 ratelimit 버킷을 함께 쓸 수 있다(U32, E4a에서 확인. 필요하면 `ratelimit_whitelist` 또는 hostNetwork) |
-| Tailscale `autogroup:self` 규칙이 빠지면 운영자 SSH가 끊긴다. `autogroup:self`는 태그 기기에 적용되지 않는다 | `infra/tailscale/acl.tf:8-10`, [S117] | 2026-10-20 F D-11 (c)로 NUC를 `tag:nuc`로 태그한다. 태그를 붙이기 전에 `autogroup:admin → tag:nuc:22,6443`, `autogroup:member → tag:nuc:53`과 `tag:nuc` 대상 ssh 규칙을 먼저 적용해야 원격 접속이 끊기지 않는다(E4a 적용 순서) |
+| Tailscale `autogroup:self` 규칙이 빠지면 운영자 SSH가 끊긴다. `autogroup:self`는 태그 기기에 적용되지 않는다 | `infra/tailscale/acl.tf:8-10`, [S117] | 2026-10-20 F D-11 (c)로 NUC를 `tag:nuc`로 태그한다. 태그를 붙이기 전에 `autogroup:owner`·`autogroup:admin` → `tag:nuc:22,6443`, `autogroup:member → tag:nuc:53`과 `tag:nuc` 대상 ssh 규칙을 먼저 적용해야 원격 접속이 끊기지 않는다(E4a 적용 순서) |
 | NUC를 재등록하면 키 만료가 기본값(켜짐, 180일)으로 돌아온다 | `infra/tailscale/acl.tf:61-74`, [S119] | E2 사람 작업: 옛 NUC 기기 삭제 → 재등록 → MagicDNS 이름의 첫 라벨이 `NODE_NAME`과 같은지 확인 → Disable key expiry(C.3.2의 0). 재등록으로 Tailscale IP가 바뀌면 전역 nameserver도 바뀌어야 한다: DNS Terraform이 `data.tailscale_devices`로 IP를 다시 읽고 precondition이 만료 해제를 확인한다(C.3.6) |
 | Tailscale은 전역 nameserver에 동시에 묻고 처음 온 정상 응답을 쓴다. 차단하지 않는 서버를 하나라도 섞으면 그 서버가 먼저 답한 질의는 차단이 빠진다(C-05의 Cloudflare가 그렇다). 평문 UDP로 가는 공용 서버는 53번을 가로채는 망에서 그 망의 답에 진다. Override를 켜면 ACL이 막은 nameserver는 쓰이지 않는다 | [S110][S111][S186] | D-08 확정안(b′)은 전역 nameserver를 모두 같은 기본 목록의 차단 리졸버(NUC AdGuard Home, AdGuard 공용 2개)로 두고 비차단 리졸버를 더하지 않는다. NUC를 `tag:nuc`로 태그하면(F D-11 (c)) `tag:nuc:53` 규칙을 함께 연다. 빠뜨려도 공용 서버가 답해 E4a에서 드러나지 않으므로 시나리오 14의 사용자 규칙 적용률과 이탈 경보(C.3.7)로 본다 |
 | AdGuard Home이 tailnet에서 조용히 빠져도(NUC 재등록으로 IP가 바뀜, ACL 실수, svclb 경로 문제, ratelimit 드롭) 공용 서버가 모두 답해 증상도 기기 경고도 없다. 사용자 규칙과 통계만 계속 빠진다 | [S186] (처음 온 정상 응답 채택), 추측 | "tailnet 출처 질의가 1시간 0건이면 경보"(C.3.7) |
@@ -899,16 +899,17 @@ kubectl apply -f platform/root/root-prod.yaml                               # 3.
     "tag:k8s-operator": ["autogroup:admin"],
     "tag:k8s": ["tag:k8s-operator"],
     "tag:k8s-go": ["tag:k8s-operator"],
-    "tag:nuc": ["autogroup:admin"]
+    "tag:nuc": ["autogroup:owner", "autogroup:admin"]
   },
   // NUC가 광고하는 공유기 경로를 태그 기준으로 자동 승인한다(재등록 뒤에도 유지)
   "autoApprovers": { "routes": { "192.168.117.1/32": ["tag:nuc"] } },
   "acls": [
     // 사람 기기끼리. NUC는 tag:nuc라 여기에 들지 않는다
     { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self:*"] },
-    // 사람 기기 → NUC: SSH·kubectl은 관리자만(태그 대상이라 self처럼 소유자로 좁혀지지 않는다), AdGuard DNS는 member
+    // 사람 기기 → NUC: SSH·kubectl은 운영자(Owner·Admin)만(태그 대상이라 self처럼 소유자로 좁혀지지 않는다), AdGuard DNS는 member
+    // Owner는 autogroup:admin에 들지 않는다. 빠지면 태그를 붙이는 순간 유일한 운영자의 SSH·kubectl이 끊긴다
     // NUC → 사람 기기 규칙은 두지 않는다(U28)
-    { "action": "accept", "src": ["autogroup:admin"], "dst": ["tag:nuc:22,6443"] },
+    { "action": "accept", "src": ["autogroup:owner", "autogroup:admin"], "dst": ["tag:nuc:22,6443"] },
     { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:nuc:53"] },
     // 내부 UI 프록시(operator Ingress)는 443만. NUC 쪽 확인 명령도 같은 길을 쓴다
     { "action": "accept", "src": ["autogroup:member", "tag:nuc"], "dst": ["tag:k8s:443"] },
@@ -920,13 +921,13 @@ kubectl apply -f platform/root/root-prod.yaml                               # 3.
     { "src": ["autogroup:member"], "dst": ["192.168.117.1/32"], "ip": ["tcp:80", "tcp:443"] }
   ],
   "ssh": [
-    // root는 기존 비대화형 운영 경로다. 태그 대상의 autogroup:nonroot는 src 전원에게 비root 사용자를 열므로 src를 관리자로 좁힌다
-    { "action": "accept", "src": ["autogroup:admin"], "dst": ["tag:nuc"], "users": ["autogroup:nonroot", "root"] }
+    // root는 기존 비대화형 운영 경로다. 태그 대상의 autogroup:nonroot는 src 전원에게 비root 사용자를 열므로 src를 운영자(Owner·Admin)로 좁힌다
+    { "action": "accept", "src": ["autogroup:owner", "autogroup:admin"], "dst": ["tag:nuc"], "users": ["autogroup:nonroot", "root"] }
   ]
 }
 ```
 
-- **NUC 신원(F D-11 (c), 확정(사용자 2026-10-20)):** NUC는 `tag:nuc` 태그 기기다. 2026-10-18~2026-10-20에는 (a)(태그 없는 사용자 기기, self 규칙)였고, E4a의 U28에서 파드가 NUC의 Tailscale 주소로 바뀌어(SNAT) 운영자 기기에 닿는 것이 확인돼 바꿨다. 태그 기기에는 `autogroup:self`가 적용되지 않으므로[S117] 사람 기기 → NUC 경로를 위 예시처럼 포트별로 연다. SSH 22·kubectl 6443(mosh를 쓰면 그 UDP 범위도)과 ssh 규칙은 관리자(`autogroup:admin`)만이다. (a)의 self 대상은 NUC 소유자에게만 열렸는데, 태그 대상은 그렇게 좁혀지지 않아 member를 쓰면 나중에 member가 늘 때 호스트와 k3s가 함께 열린다. AdGuard DNS 53은 member다. NUC → 사람 기기 규칙은 두지 않아 NUC와 파드가 운영자 기기에 닿지 못한다. 태그 기기는 키 만료가 기본으로 꺼져 재등록 때 손 작업이 없다[S119]. ssh 규칙은 `accept`에 `autogroup:nonroot`와 `root` 그대로다(`check`로 좁히는 F D-11 (b)는 고르지 않았다). 태그 대상의 `autogroup:nonroot`는 src 전원에게 모든 비root 사용자를 연다는 공식 경고가 있어 src를 관리자로 좁혔다[S121]. 적용 순서와 되돌리기는 E4a(T08a)다.
+- **NUC 신원(F D-11 (c), 확정(사용자 2026-10-20)):** NUC는 `tag:nuc` 태그 기기다. 2026-10-18~2026-10-20에는 (a)(태그 없는 사용자 기기, self 규칙)였고, E4a의 U28에서 파드가 NUC의 Tailscale 주소로 바뀌어(SNAT) 운영자 기기에 닿는 것이 확인돼 바꿨다. 태그 기기에는 `autogroup:self`가 적용되지 않으므로[S117] 사람 기기 → NUC 경로를 위 예시처럼 포트별로 연다. SSH 22·kubectl 6443(mosh를 쓰면 그 UDP 범위도)과 ssh 규칙은 운영자(`autogroup:owner`·`autogroup:admin`)만이다. Owner는 `autogroup:admin`에 들지 않으므로 둘 다 적는다[S230]. (a)의 self 대상은 NUC 소유자에게만 열렸는데, 태그 대상은 그렇게 좁혀지지 않아 member를 쓰면 나중에 member가 늘 때 호스트와 k3s가 함께 열린다. AdGuard DNS 53은 member다. NUC → 사람 기기 규칙은 두지 않아 NUC와 파드가 운영자 기기에 닿지 못한다. 태그 기기는 키 만료가 기본으로 꺼져 재등록 때 손 작업이 없다[S119]. ssh 규칙은 `accept`에 `autogroup:nonroot`와 `root` 그대로다(`check`로 좁히는 F D-11 (b)는 고르지 않았다). 태그 대상의 `autogroup:nonroot`는 src 전원에게 모든 비root 사용자를 연다는 공식 경고가 있어 src를 운영자로 좁혔다[S121]. 적용 순서와 되돌리기는 E4a(T08a)다.
 - **남는 위험:** (c)로 NUC → 운영자 기기 길은 Tailscale에서 막힌다. 파드에서 다른 tailnet 대상(내부 UI 프록시 `tag:k8s:443`)으로 가는 길은 `tag:nuc` 규칙대로 남으므로, 공유 차트 egress의 tailnet 대역 제외(C.4.5)와 작업자 공간의 init 규칙(C.8)은 그대로 둔다. 사람 기기를 잃으면 비밀번호 없는 root SSH까지 열리는 위험도 그대로다(F D-11 (b)를 고르지 않음).
 - **PostgreSQL GUI 접속:** 옛 tailnet LB(`pg-rw`)는 두지 않고 `kubectl port-forward -n database svc/pg-rw 5432`로 한다. tailnet 기기·Pooler 혼선 함정(`2d2054a:platform/cnpg/prod/pg-rw-tailscale-service.yaml:6-12`)이 없다.
 - **준비 확인:** tailnet 기기에서 `curl -sI https://argocd.<tailnet>.ts.net` → 200 또는 로그인 리다이렉트, tailnet 밖에서는 이름이 풀리지 않음, 노트북에서 `tailscale ssh <NUC>` 성공.
@@ -2335,7 +2336,7 @@ Free 안에서 키 전달과 identity 배분:
 |---|---|---|
 | (a) 처음 결정(2026-10-18~2026-10-20): NUC는 태그 없는 사용자 기기, 옛 규칙 유지. `autogroup:member → autogroup:self:*`, ssh `accept` + `autogroup:nonroot`·`root`(C.3.5 예시) | spec §10 12항 그대로다. 운영자의 SSH·mosh·kubectl 경로와 root 비대화형 경로가 옛 구성과 같아 E4a에서 원격 접속이 끊길 일이 없다 | self 규칙이 NUC에서 운영자 기기로 가는 모든 포트도 연다. 파드 egress가 NUC 주소로 바뀌어 나가면(U28) 파드가 운영자 기기에 닿을 수 있어, 공유 차트의 tailnet 대역 제외(C.4.5)와 작업자 init 규칙(C.8)에 기댄다. egress 정책이 없는 플랫폼 파드에는 위험이 남는다. 재등록마다 키 만료를 손으로 끈다[S119]. 노트북을 잃으면 비밀번호 없는 root 접속까지 열린다 |
 | (b) (a)에서 ssh만 좁힘: `check` + `autogroup:nonroot` | 노트북 탈취 때 재인증 없는 접속과 root 직행을 막는다 | `check`는 checkPeriod(기본 12시간, 1분~168시간)가 지나면 SSH 연결을 맺기 전에 브라우저 재인증을 요구한다[S121]. 휴대 기기에서 원격 작업 세션을 새로 열거나 다시 붙을 때 재인증 화면을 거쳐야 하고, 사람 없이 도는 SSH(스크립트, 에이전트의 원격 명령)는 기간이 지나면 실패한다. root 비대화형 경로가 사라져 sudo가 필요한 확인은 대화형으로 한다(`2d2054a:infra/tailscale/acl.tf:33-36`). spec의 "ssh 규칙 유지"보다 좁아 조정 권고가 된다 |
-| **(c) 확정(사용자 2026-10-20): NUC를 `tag:nuc`로 태그** | 태그 기기는 키 만료가 기본으로 꺼져[S119] 재등록 때 손 작업이 없다. ACL을 `autogroup:admin → tag:nuc:22,6443`(mosh를 쓰면 그 UDP 범위도)과 `tag:nuc` 대상 ssh 규칙으로 바꾸고 `tag:nuc`에서 사람 기기로 가는 규칙을 두지 않으면, NUC와 거기서 주소가 바뀌어 나가는 파드가 운영자 기기에 닿지 못한다. U28의 결과와 무관하게 막힌다 | spec §10 12항의 "autogroup:self 유지"와 달라 조정 권고다. `autogroup:self`가 태그 기기에 적용되지 않아[S117] 규칙을 태그 기준으로 다시 써야 하고, 빠뜨리면 원격 경로가 끊긴다(B.8 E4. 적용 전 정책 사본으로 되돌림, E4a). 옛 self 규칙이 모든 포트를 열어 쓰던 경로(SSH·mosh, `acl.tf:8-9`. 원격 kubectl, `acl.tf:16-19`)를 하나씩 다시 열어야 한다. ssh 규칙 dst가 태그면 `autogroup:nonroot`가 src 전원에게 모든 비root 사용자를 연다는 공식 경고가 있다(지금은 사람 1명)[S121]. 태그 등록에는 tagOwners 선언과 기기 태그 지정(콘솔 또는 `--advertise-tags`)이 필요하다. D-08 (b′)에서도 `tag:nuc:53`을 연다(빠뜨려도 공용 서버가 답해 E4a에서 드러나지 않으므로 시나리오 14의 적용률과 이탈 경보로 본다) |
+| **(c) 확정(사용자 2026-10-20): NUC를 `tag:nuc`로 태그** | 태그 기기는 키 만료가 기본으로 꺼져[S119] 재등록 때 손 작업이 없다. ACL을 `autogroup:owner`·`autogroup:admin` → `tag:nuc:22,6443`(mosh를 쓰면 그 UDP 범위도)과 `tag:nuc` 대상 ssh 규칙으로 바꾸고 `tag:nuc`에서 사람 기기로 가는 규칙을 두지 않으면, NUC와 거기서 주소가 바뀌어 나가는 파드가 운영자 기기에 닿지 못한다. U28의 결과와 무관하게 막힌다 | spec §10 12항의 "autogroup:self 유지"와 달라 조정 권고다. `autogroup:self`가 태그 기기에 적용되지 않아[S117] 규칙을 태그 기준으로 다시 써야 하고, 빠뜨리면 원격 경로가 끊긴다(B.8 E4. 적용 전 정책 사본으로 되돌림, E4a). 옛 self 규칙이 모든 포트를 열어 쓰던 경로(SSH·mosh, `acl.tf:8-9`. 원격 kubectl, `acl.tf:16-19`)를 하나씩 다시 열어야 한다. ssh 규칙 dst가 태그면 `autogroup:nonroot`가 src 전원에게 모든 비root 사용자를 연다는 공식 경고가 있다(지금은 사람 1명)[S121]. 태그 등록에는 tagOwners 선언과 기기 태그 지정(콘솔 또는 `--advertise-tags`)이 필요하다. D-08 (b′)에서도 `tag:nuc:53`을 연다(빠뜨려도 공용 서버가 답해 E4a에서 드러나지 않으므로 시나리오 14의 적용률과 이탈 경보로 본다) |
 
 - **결정:** (c)(사용자 2026-10-20: "없어 c가 나을거같네", NUC에서 사람 기기로 먼저 접속할 일이 없다는 답과 함께). 처음 결정은 (a)였다(spec 추천과 같고 E4a에서 원격 접속을 잃을 위험이 가장 작아서). 아래 바꿀 조건이 E4a에서 충족됐다: U28에서 파드가 NUC 주소로 운영자 기기에 닿았고, egress 정책이 없는 플랫폼 파드를 모두 막는 것보다 Tailscale에서 길을 끊는 편이 단순하다. 곧 클러스터에서 봇 작업자가 코드를 실행하므로(T16b 이후) 그 전에 적용한다. (b)는 고르지 않았다. 적용 순서(규칙 먼저, 태그 나중)와 되돌리기는 E4a(T08a)다.
 - **(c)로 바꿀 조건(E4a에서 다시 봄, 2026-10-20 충족):** U28 시험에서 파드가 NUC 주소로 운영자 기기에 닿는 것이 확인되고, egress 정책이 없는 플랫폼 파드를 모두 막기 어렵다고 판단될 때. 이때 (b)의 `check`를 함께 고를 수 있다. 바꾸면 C.3.5 예시와 E4a 검증을 함께 고친다.
@@ -2785,6 +2786,7 @@ design-prompt §9의 시나리오 1~17이다. **상태는 모두 "설계상 기�
 - S223 다른 VPN과 함께 쓰기("iOS and Android enforce a limit of running only one VPN at a time") https://tailscale.com/docs/reference/faq/other-vpns , 2026-10-20 확인
 - S224 golink(노드 이름 `go`, `TS_AUTHKEY`·SQLite·영속 볼륨) https://github.com/tailscale/golink , 2026-10-20 확인
 - S229 operator L3 노출(`loadBalancerClass: tailscale`, `tailscale.com/hostname`) https://tailscale.com/docs/kubernetes-operator/ingress/expose-workload-to-tailnet-l3 , v1.104.1 소스의 `tailscale.com/tags` 어노테이션(`cmd/k8s-operator/sts.go`, Service에도 적용 `svc.go`) https://github.com/tailscale/tailscale/blob/v1.104.1/cmd/k8s-operator/sts.go , 2026-10-20 확인
+- S230 Tailscale 대상과 선택자(`autogroup:admin`은 Admin 역할, `autogroup:owner`는 Owner 역할로 따로 정의) https://tailscale.com/docs/reference/targets-and-selectors , 2026-10-20 확인
 
 **Cloudflare, HSTS**
 

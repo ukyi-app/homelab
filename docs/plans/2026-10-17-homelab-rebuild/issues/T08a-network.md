@@ -5,7 +5,7 @@
 - 명세: [../spec.md](../spec.md) §4.5
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4a, E.3, C.3.4~C.3.6, C.3.8, C.3.9, C.8
 - Blocked by: T07, T09
-- 선행 결정: D-08 (확정(사용자 2026-10-18): 내부 UI `*.ts.net`, Tailscale DNS (b′)), D-11 (확정(사용자 2026-10-18, T05): 설계 F D-11 표 그대로, Tailscale ACL (a)), D-12 (확정(사용자 2026-10-18, T05): 노드 DNS drop-in은 T06이 남기고 T07이 덮어씀), D-28 (확정(사용자 2026-10-18): Terraform state 잠금 시험), 공개 DNS 방식·Argo CD 공개 webhook·백업 보존 (확정(사용자 2026-10-18, T05): 설계 F "추가 확인")
+- 선행 결정: D-08 (확정(사용자 2026-10-18): 내부 UI `*.ts.net`, Tailscale DNS (b′)), D-11 (확정(사용자 2026-10-18, T05): 설계 F D-11 표 그대로. Tailscale ACL은 2026-10-20 U28 결과로 (c)(NUC `tag:nuc`, NUC → 사람 기기 규칙 없음)로 바뀜(사용자))), D-12 (확정(사용자 2026-10-18, T05): 노드 DNS drop-in은 T06이 남기고 T07이 덮어씀), D-28 (확정(사용자 2026-10-18): Terraform state 잠금 시험), 공개 DNS 방식·Argo CD 공개 webhook·백업 보존 (확정(사용자 2026-10-18, T05): 설계 F "추가 확인")
 - 연결 AC: AC-P6, AC-P12
 - 수행: 에이전트 + 사람 (Cloudflare·Tailscale 콘솔, Terraform apply(owner 로컬), Tailscale operator OAuth 발급, 집 Wi-Fi·셀룰러 기기 확인. 명세 §11)
 
@@ -52,7 +52,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 ### Tailscale ACL (D-11 (c), `infra/tailscale`)
 
 - 2026-10-20 16:30에 (a) 정책(태그 없는 NUC, self 규칙)을 적용했다. 같은 날 U28 결과로 D-11이 (c)로 바뀌었다(사용자). 남은 일은 (c) 적용이다.
-- **ACL PR 하나에 넣을 것(설계 C.3.5 예시):** tagOwners `tag:nuc`·`tag:k8s-go`, 공유기 경로 `autoApprovers`, `autogroup:admin → tag:nuc:22,6443`(mosh를 쓰면 그 UDP 범위도), `autogroup:member → tag:nuc:53`, `autogroup:member`·`tag:nuc` → `tag:k8s:443`, `autogroup:member → tag:k8s-go:80`(T08c), 공유기 관리 화면 grant(사용자가 콘솔에 넣은 것을 옮김. 지금 `infra/tailscale` plan은 이 grant를 지우는 드리프트라 그 전에는 apply하지 않는다), ssh `autogroup:admin → tag:nuc`(`accept`, nonroot + root. 태그 대상은 self처럼 소유자로 좁혀지지 않아 src를 관리자로 둔다). NUC → 사람 기기 규칙은 두지 않는다. self 규칙은 사람 기기끼리 쓰려고 남긴다.
+- **ACL PR 하나에 넣을 것(설계 C.3.5 예시):** tagOwners `tag:nuc`·`tag:k8s-go`, 공유기 경로 `autoApprovers`, `autogroup:owner`·`autogroup:admin` → `tag:nuc:22,6443`(mosh를 쓰면 그 UDP 범위도), `autogroup:member → tag:nuc:53`, `autogroup:member`·`tag:nuc` → `tag:k8s:443`, `autogroup:member → tag:k8s-go:80`(T08c), 공유기 관리 화면 grant(사용자가 콘솔에 넣은 것을 옮김. 지금 `infra/tailscale` plan은 이 grant를 지우는 드리프트라 그 전에는 apply하지 않는다), ssh `autogroup:owner`·`autogroup:admin` → `tag:nuc`(`accept`, nonroot + root. 태그 대상은 self처럼 소유자로 좁혀지지 않아 src를 운영자로 둔다. Owner는 `autogroup:admin`에 들지 않으므로 둘 다 적는다). ACL apply가 정책 오류로 거부되면 태그를 붙이지 않고 멈춘다. NUC → 사람 기기 규칙은 두지 않는다. self 규칙은 사람 기기끼리 쓰려고 남긴다.
 - **같은 PR:** `infra/tailscale-dns`의 precondition을 "기대 소유자의 태그 없는 기기"에서 "태그가 `tag:nuc` 하나"로 바꾸고 `nuc_expected_owner` 변수와 Infisical 키를 정리한다. `docs/runbooks-public/bootstrap.md`의 NUC 등록에 `--advertise-tags=tag:nuc`와 `--advertise-routes=192.168.117.1/32`를 넣고 키 만료 해제 단계를 확인으로 바꾼다(`autoApprovers`는 광고된 경로를 승인할 뿐 광고하지 않는다).
 - **적용 순서(집에서, LAN으로 NUC에 닿을 수 있을 때):** (0) NUC가 공유기 경로를 광고하는지 본다(`tailscale debug prefs`의 `AdvertiseRoutes`. 2026-10-20에는 광고 중). 없으면 `sudo tailscale set --advertise-routes=192.168.117.1/32` → (1) 정책 사본을 저장소 밖에 둔다 → (2) ACL plan·apply. 새 규칙이 먼저 생기고 NUC는 아직 사용자 기기라 기존 경로가 그대로다 → (3) 콘솔에서 NUC에 `tag:nuc`를 붙인다 → (4) 원격 기기에서 `tailscale ssh`, kubectl, AdGuard DNS(`dig @<NUC tailnet 주소>`), 공유기 관리 화면, 내부 UI를 확인한다 → (5) `infra/tailscale-dns` plan·apply(값 무변경, precondition 통과) → (6) U28 재시험: 같은 시험 파드가 운영자 기기에 닿지 않아야 한다.
 - **되돌리기:** 정책 사본으로 ACL을 되돌리고, NUC를 사용자 기기로 다시 로그인한 뒤 키 만료를 끈다. `tailscale up`은 실행마다 바꾼 플래그를 모두 다시 줘야 하므로 전체로 적는다: `sudo tailscale up --force-reauth --hostname=<NODE_NAME> --accept-dns=false --ssh --advertise-routes=192.168.117.1/32 --advertise-tags=`(빈 값이 태그 제거). 브라우저 로그인이 필요하다.
@@ -145,7 +145,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - svclb를 거친 질의의 출처 주소와 ratelimit 버킷 공유 여부를 확인한다(U32).
 - 같은 state로 Terraform을 동시에 두 번 실행해 하나가 잠금으로 멈추는지 확인한다(U02: 같은 root를 두 터미널에서 동시에 plan).
 - 공개 webhook 경로(설계 C.8): `curl -s -o /dev/null -w '%{http_code}' https://hooks.ukyi.app/github`(GET) → 403, 다른 경로 POST → 403(또는 404), 서명이 틀린 POST → 401, 한 저장소에 시험 webhook을 걸고 ping 전송 → Recent Deliveries 200.
-- U28: 새 ACL 적용 뒤 NetworkPolicy가 없는 시험 ns의 파드에서 운영자 노트북의 시험 포트로 연결해 성공 여부와 받은 쪽의 출발 주소만 기록한다. 결과는 D-11 (c) 재검토의 입력이다.
+- U28: NetworkPolicy가 없는 시험 ns의 파드에서 운영자 기기의 시험 포트로 연결해 성공 여부와 출발 주소를 기록한다. (a)에서는 2026-10-20에 성공했고 출발 주소가 NUC의 Tailscale 주소였다(그래서 (c)). **(c) 적용 뒤 재시험의 기대 결과는 연결 실패다.** 성공하면 (c) 규칙을 다시 본다.
 - 노드 DNS: `resolvectl status`에 `1.1.1.1 9.9.9.9`, `tailscale dns status` → "Tailscale DNS: disabled".
 - cert-manager: `kubectl -n cert-manager get deploy` Ready, 시험 Certificate Ready.
 - R2: `homelab-backups`의 lifecycle 규칙에 prefix `valkey/`가 적혀 있다.
