@@ -79,18 +79,56 @@ ExternalSecret `argocd/argocd-owner`가 Infisical `/platform/argocd`의 두 키�
 ## 3. GitHub App 병합 키 (T10 뒤)
 
 병합 키 원본은 `homelab-ci-merge`이고, GitHub environment `automerge`의 secret `HOMELAB_MERGE_KEY`는 Infisical Secret Sync의 사본이다.
+아래 `infisical run`은 [infra/README.md](../../infra/README.md) 2절의 백업 폴더 준비(쓰기 불가 확인)를 한 셸에서 한다.
 
-1. `homelab github verify`가 exit 0인지 본다.
-2. GitHub에서 병합 App의 새 개인 키를 발급한다.
-3. `homelab-ci-merge`의 값을 새 키로 바꾼다.
+1. `tools/tf-github.sh verify`(T12 뒤 `homelab github verify`)가 exit 0인지 본다. environment가 지워졌다 정책 없이 다시 생겼으면 여기서 guard 9가 멈춘다. 그 상태로 Sync가 돌면 키가 보호 없는 environment에 들어간다.
+2. GitHub에서 병합 App의 새 개인 키를 발급한다. 내려받은 파일은 Infisical에 넣은 뒤 바로 지운다.
+3. `homelab-ci-merge`의 `HOMELAB_MERGE_KEY` 값을 새 키로 바꾼다. 교체 시각을 적어 둔다.
 4. environment secret이 교체 뒤에 갱신됐는지 본다. 시각이 교체보다 이전이거나 Infisical의 sync 실패 메일이 왔으면 Sync를 다시 실행한다.
 
    ```bash
    gh api repos/ukyi-app/homelab/environments/automerge/secrets/HOMELAB_MERGE_KEY --jq .updated_at
    ```
 
-5. 새 키 자체로 인증되는지 본다. `updated_at`은 다시 쓰였다는 사실만 보여 주고, 그 키가 병합 App의 키인지는 보여 주지 않는다. 새 키로 App JWT를 만들어 `GET /app`이 200이고 `id`가 병합 App ID인지 본다. 키는 `infisical run`으로 환경변수로만 받고 파일로 쓰지 않는다. 명령은 T10이 채운다(병합 App과 `homelab github verify`가 T10에서 생긴다).
+5. 새 키 자체로 인증되는지 본다. `updated_at`은 다시 쓰였다는 사실만 보여 주고, 그 키가 병합 App의 키인지는 보여 주지 않는다. 새 키로 App JWT를 만들어 `GET /app`의 `id`가 병합 App ID인지 본다. 키는 환경변수로만 받고 파일로 쓰지 않는다(서명은 프로세스 치환 파이프, 토큰은 curl 설정을 표준 입력으로).
+
+   ```bash
+   read -r -p 'homelab-ci-merge project ID: ' MERGE_PROJECT_ID
+   read -r -p 'homelab-merge App client ID: ' APP_CLIENT_ID
+   export APP_CLIENT_ID
+   infisical run --silent --log-level=error --projectId="$MERGE_PROJECT_ID" --env=prod --path=/ -- bash -c '
+     set -euo pipefail
+     b64() { openssl base64 -A | tr "+/" "-_" | tr -d "="; }
+     now=$(date +%s)
+     h=$(printf "{\"alg\":\"RS256\",\"typ\":\"JWT\"}" | b64)
+     p=$(printf "{\"iat\":%d,\"exp\":%d,\"iss\":\"%s\"}" $((now - 60)) $((now + 540)) "$APP_CLIENT_ID" | b64)
+     s=$(printf "%s.%s" "$h" "$p" | openssl dgst -sha256 -sign <(printf "%s\n" "$HOMELAB_MERGE_KEY") | b64)
+     printf "header = \"Authorization: Bearer %s.%s.%s\"\n" "$h" "$p" "$s" |
+       curl -sS -K - -H "Accept: application/vnd.github+json" https://api.github.com/app | jq -r .id'
+   ```
+
+   출력이 `infra/github/variables.tf`의 `homelab_merge_app_id`와 같아야 한다.
 6. 그다음에만 옛 키를 지운다. App 키는 만료가 없고 25개까지 동시에 유효해, `deploy-merge`가 성공해도 옛 키로 성공했을 수 있다. 옛 키를 지운 뒤에야 401이 나고, 그때 배포 PR은 열린 채 남는다(안전한 쪽 실패).
+
+## 3a. GitHub App 배포 키 (T10 뒤)
+
+배포 키 원본은 `homelab-ci-deploy`의 `HOMELAB_DEPLOY_KEY`이고 GitHub에 사본이 없다. 앱 main push의 `app-build` deploy-pr job이 OIDC identity `gha-homelab-deploy`로 실행 중에만 받는다.
+
+1. GitHub에서 배포 App의 새 개인 키를 발급한다.
+2. `homelab-ci-deploy`의 `HOMELAB_DEPLOY_KEY` 값을 새 키로 바꾼다. `_PREVIOUS`를 만들지 않는다. 옛 키는 App 쪽에 남아 있다.
+3. 3절 5번과 같은 방법으로 새 키의 `GET /app` `id`가 `homelab_deploy_app_id`인지 본다(프로젝트 ID, client ID, 키 이름만 바꾼다).
+4. 앱 저장소 하나의 main 빌드가 배포 PR을 만들거나 갱신하는지 본다(`app-build` 요약).
+5. 옛 키를 지운다.
+
+## 3b. Infisical GitHub 연결 PAT (병합 키 Sync용, T10 뒤)
+
+App Connection은 owner 계정의 fine-grained PAT다(리소스 소유자 `ukyi-app`, 저장소 `homelab`만, Metadata read, Environments RW, Secrets RW, 만료 지정). 만료 전에 바꾼다. 만료되면 Sync가 실패하고 프로젝트 Admin에게 메일이 온다.
+
+1. `tools/tf-github.sh verify` exit 0을 먼저 본다(3절 1번과 같은 이유).
+2. 같은 범위로 새 PAT를 발급한다. 다른 저장소나 권한을 더하지 않는다. 더하면 그 PAT가 새는 순간 다른 저장소의 secret도 바뀐다.
+3. Infisical App Connection의 토큰을 새 PAT로 바꾸고 Sync를 한 번 다시 실행한다.
+4. 3절 4번의 `updated_at`이 Sync 재실행 뒤인지 본다.
+5. 옛 PAT를 폐기한다. 폐기 뒤에도 4번이 그대로면 끝이다.
 
 ## 4. 아직 채우지 않은 절
 
@@ -100,5 +138,4 @@ ExternalSecret `argocd/argocd-owner`가 Infisical `/platform/argocd`의 두 키�
 |---|---|
 | 플랫폼 토큰(터널, Tailscale operator OAuth, Telegram 봇, healthchecks ping URL), Grafana·AdGuard 관리자 | T08a, T08b |
 | Terraform 자격(`homelab-admin`의 R2 state 키, Cloudflare 토큰, Tailscale OAuth) | T08a |
-| GitHub App 배포 키, Infisical GitHub 연결 PAT | T10 |
 | DB·Valkey 비밀번호 | T11 |

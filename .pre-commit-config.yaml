@@ -26,12 +26,12 @@ repos:
         language: system
         files: ^\.github/workflows/.+\.ya?ml$
       - id: shellcheck
-        name: shellcheck (host scripts)
+        name: shellcheck (host·tools scripts)
         # -x: host 스크립트가 source하는 env 파일까지 따라가 본다.
         entry: shellcheck -x -P SCRIPTDIR
         language: system
         types: [shell]
-        files: ^host/
+        files: ^(host|tools)/
       - id: workflow-guard
         name: workflow-guard (bun run ci의 워크플로 단계)
         # 전체 bun run ci는 렌더·Terraform까지 돌아 느리다. 커밋 때는 워크플로 검사만, 나머지는 PR의 ci가 본다.
