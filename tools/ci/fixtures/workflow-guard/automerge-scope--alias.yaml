@@ -1,0 +1,20 @@
+# path: .github/workflows/other.yaml
+# expect: automerge-scope
+# YAML 별칭과 병합 키로 숨긴 environment. 원문 검색으로는 job 안에 automerge가 보이지 않는다.
+name: other
+on: workflow_run
+x-defaults: &defaults
+  runs-on: ubuntu-24.04
+  environment: &env
+    name: automerge
+    deployment: false
+jobs:
+  build:
+    <<: *defaults
+    steps:
+      - run: "true"
+  again:
+    runs-on: ubuntu-24.04
+    environment: *env
+    steps:
+      - run: "true"

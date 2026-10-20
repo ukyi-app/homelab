@@ -1,4 +1,5 @@
-# 필수 검사 ci(ruleset A, 설계 C.4.6·C.4.7). T07의 최소판이고 T10이 전체 ci로 넓힌다.
+# 필수 검사 ci(ruleset A, 설계 C.4.6·C.4.7). 검사 내용은 tools/ci/main.ts에 있고, 여기서는 도구를 깔고
+# 로컬과 같은 명령 bun run ci 하나를 부른다(L42). 검사를 더할 때는 이 파일이 아니라 tools/ci/를 고친다.
 # 필수 검사 이름은 job id ci에서 나온다. job id를 바꾸거나 job에 name을 붙이면
 # ruleset이 오지 않는 검사를 영원히 기다려 모든 PR이 멈춘다(설계 B.8 E5).
 name: ci
@@ -31,7 +32,7 @@ jobs:
     # NUC와 같은 amd64라 로컬 mise와 같은 linux x64 바이너리를 쓴다.
     runs-on: ubuntu-24.04
     # 기본 상한은 6시간이다. 멈춘 job이 필수 검사를 그만큼 붙잡지 않게 한다.
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,6 +48,10 @@ jobs:
           GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb" # 8.30.1 linux_x64
           KUSTOMIZE_SHA256: "029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d" # 5.8.1 linux_amd64
           SHELLCHECK_SHA256: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198" # 0.11.0 linux.x86_64
+          BUN_SHA256: "3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18" # 1.4.3 linux-x64
+          HELM_SHA256: "479dca836e5b45e8bd222400c5591b0e3a647378f03ff96597180db97c17fdae" # 4.2.1 linux-amd64
+          KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883" # 0.8.0 linux-amd64
+          TERRAFORM_SHA256: "38034b38d03096399a7a1264a14561a8029b2b496fd1f169452656e53968f1b7" # 1.16.6 linux_amd64
         run: |
           bin="$RUNNER_TEMP/bin"
           dl="$RUNNER_TEMP/dl"
@@ -87,36 +92,33 @@ jobs:
           fetch "https://github.com/koalaman/shellcheck/releases/download/v${v}/shellcheck-v${v}.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256" "$dl/shellcheck.tar.xz"
           tar -xJf "$dl/shellcheck.tar.xz" -C "$bin" --strip-components=1 "shellcheck-v${v}/shellcheck"
 
+          ver bun
+          fetch "https://github.com/oven-sh/bun/releases/download/bun-v${v}/bun-linux-x64.zip" "$BUN_SHA256" "$dl/bun.zip"
+          unzip -q -j "$dl/bun.zip" bun-linux-x64/bun -d "$bin"
+
+          ver helm
+          fetch "https://get.helm.sh/helm-v${v}-linux-amd64.tar.gz" "$HELM_SHA256" "$dl/helm.tar.gz"
+          tar -xzf "$dl/helm.tar.gz" -C "$bin" --strip-components=1 linux-amd64/helm
+
+          ver kubeconform
+          fetch "https://github.com/yannh/kubeconform/releases/download/v${v}/kubeconform-linux-amd64.tar.gz" "$KUBECONFORM_SHA256" "$dl/kubeconform.tar.gz"
+          tar -xzf "$dl/kubeconform.tar.gz" -C "$bin" kubeconform
+
+          ver terraform
+          fetch "https://releases.hashicorp.com/terraform/${v}/terraform_${v}_linux_amd64.zip" "$TERRAFORM_SHA256" "$dl/terraform.zip"
+          unzip -q "$dl/terraform.zip" terraform -d "$bin"
+
           "$bin/actionlint" -version
           "$bin/gitleaks" version
           "$bin/kustomize" version
           "$bin/shellcheck" --version
+          "$bin/bun" --version
+          "$bin/helm" version --short
+          "$bin/kubeconform" -v
+          "$bin/terraform" version
           echo "$bin" >> "$GITHUB_PATH"
 
-      - name: gitleaks
-        # 작업 트리만 본다. 히스토리 전체를 보면 옛 커밋의 오탐이나 이미 폐기한 옛 값 하나가 모든 PR을 막는다.
-        # push된 커밋은 저장소의 secret scanning·push protection이 먼저 본다.
-        run: gitleaks dir --config .gitleaks.toml --redact --no-banner --exit-code 1 .
-
-      - name: actionlint
-        run: actionlint
-
-      - name: kustomize build
-        # 디렉터리 목록을 적지 않고 추적 파일에서 찾는다. 구성 요소가 늘거나 빠져도 이 파일은 그대로다.
-        # 찾은 대상이 0개면 실패한다. 찾는 식이 깨졌을 때 초록으로 지나가지 않게 하려는 것이다(옛 L40).
-        # platform/root 같은 Helm 차트의 helm template 렌더와 kubeconform은 T10의 전체 ci가 더한다.
-        run: |
-          files=$(git ls-files -- ':(glob)platform/**/kustomization.yaml' ':(glob)platform/**/kustomization.yml' ':(glob)platform/**/Kustomization')
-          if [[ -z $files ]]; then
-            echo "::error::platform/ 아래 추적된 kustomization 파일이 0개다"
-            exit 1
-          fi
-          n=0
-          while IFS= read -r f; do
-            d=$(dirname "$f")
-            echo "::group::kustomize build $d"
-            kustomize build "$d" >/dev/null
-            echo "::endgroup::"
-            n=$((n + 1))
-          done <<<"$files"
-          echo "kustomize build ${n}개 통과"
+      - name: bun run ci
+        # 의존 패키지가 없어 bun install을 하지 않는다(package.json에 dependencies 없음).
+        # provider는 Terraform registry에서 받고 .terraform.lock.hcl 해시로 확인한다(-lockfile=readonly).
+        run: bun run ci

@@ -1,0 +1,19 @@
+# path: .github/workflows/deploy-merge.yaml
+# expect: automerge-scope
+# deploy-merge 안이라도 merge job 밖은 안 된다.
+name: deploy-merge
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    environment: {name: automerge, deployment: false}
+    steps:
+      - run: "true"
+  merge:
+    runs-on: ubuntu-24.04
+    environment: {name: automerge, deployment: false}
+    steps:
+      - run: "true"

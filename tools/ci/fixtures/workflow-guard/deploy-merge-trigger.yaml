@@ -1,0 +1,14 @@
+# path: .github/workflows/deploy-merge.yaml
+# expect: deploy-merge-trigger
+name: deploy-merge
+# 트리거는 workflow_run 하나지만 ci가 아닌 워크플로를 따른다.
+on:
+  workflow_run:
+    workflows: [other]
+    types: [completed]
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    environment: {name: automerge, deployment: false}
+    steps:
+      - run: "true"

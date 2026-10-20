@@ -1,0 +1,7 @@
+# path: .github/workflows/other.yaml
+# expect: reusable-call
+name: other
+on: push
+jobs:
+  call:
+    uses: some-org/some-repo/.github/workflows/build.yaml@3d3c42e5aac5ba805825da76410c181273ba90b1 # v1.0.0

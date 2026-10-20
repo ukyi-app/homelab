@@ -1,0 +1,18 @@
+# check: revision
+# expect: fail
+# rule: revision
+# match: main이 아니다: feat/x
+# homelab.git/ 표기도 자기 저장소다(정규화).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: x
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/ukyi-app/homelab.git/
+    targetRevision: feat/x
+    path: platform/x
+  destination:
+    server: https://kubernetes.default.svc

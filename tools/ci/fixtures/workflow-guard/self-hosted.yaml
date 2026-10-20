@@ -1,0 +1,9 @@
+# path: .github/workflows/other.yaml
+# expect: self-hosted
+name: other
+on: push
+jobs:
+  run:
+    runs-on: [self-hosted, linux]
+    steps:
+      - run: "true"

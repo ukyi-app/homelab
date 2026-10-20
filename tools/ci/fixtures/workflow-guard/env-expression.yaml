@@ -1,0 +1,10 @@
+# path: .github/workflows/release.yaml
+# expect: env-expression
+name: release
+on: workflow_run
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - run: "true"

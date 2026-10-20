@@ -1,0 +1,13 @@
+# check: readonly-rbac
+# expect: fail
+# rule: readonly-rbac
+# match: 라벨 homelab.ukyi.app/readonly이 없다
+# 라벨을 떼면 verb 검사를 피한다. 이름 homelab-readonly에는 라벨이 있어야 한다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab-readonly
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]

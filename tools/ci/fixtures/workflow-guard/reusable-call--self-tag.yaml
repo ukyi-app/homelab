@@ -1,0 +1,8 @@
+# path: .github/workflows/other.yaml
+# expect: reusable-call
+# 태그 호출은 앱 저장소용이다. 이 저장소의 워크플로는 다른 저장소 reusable을 부르지 않는다(태그 self 호출 예외 없음).
+name: other
+on: push
+jobs:
+  build:
+    uses: ukyi-app/homelab/.github/workflows/app-build.yaml@app-build-v1.0.0

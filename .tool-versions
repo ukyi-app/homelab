@@ -1,8 +1,11 @@
 # 도구 버전은 이 파일 한 곳에 둔다(설계 C.4.6, 옛 R29·R37: 버전 선언이 여러 곳이면 어긋났다).
 # 로컬은 mise install, CI는 .github/workflows/ci.yaml이 이 값을 읽는다.
-# CI가 받는 도구(actionlint, gitleaks, kustomize, shellcheck)의 버전을 바꾸면 ci.yaml의 sha256도 같은 커밋에서 바꾼다.
+# CI가 받는 도구(actionlint, bun, gitleaks, helm, kubeconform, kustomize, shellcheck, terraform)의 버전을 바꾸면
+# ci.yaml의 sha256도 같은 커밋에서 바꾼다.
 # 안 바꾸면 ci의 설치 단계가 sha256 불일치로 실패한다.
 actionlint 1.7.12
+# bun: ci 검사 실행기(bun run ci, tools/ci/). 외부 패키지 없이 내장 YAML 파서만 쓴다. T12 CLI도 같은 bun을 쓴다.
+bun 1.4.3
 gitleaks 8.30.1
 # helm·kustomize는 Argo CD v3.5.5에 들어 있는 버전과 맞춘다(argo-cd hack/tool-versions.sh).
 # 로컬·CI 렌더가 Argo CD 렌더와 같아야 하므로 Argo CD를 올릴 때 함께 옮긴다.
@@ -10,11 +13,13 @@ helm 4.2.1
 kustomize 5.8.1
 # k3s(host/versions.env)와 같은 minor. kubectl은 서버와 한 minor 차이까지만 지원한다.
 kubectl 1.36.5
+# kubeconform: 렌더 결과 스키마 검사. 대상 Kubernetes 버전은 위 kubectl 값을 쓴다(tools/ci/render.ts).
+kubeconform 0.8.0
 shellcheck 0.11.0
 # uv: 로그인 비밀번호의 bcrypt 해시(docs/runbooks-public/rotate.md 2절, bcrypt는 실행 때 정확한 버전으로 받는다).
 # CI는 받지 않으므로 ci.yaml에 sha256이 없다.
 uv 0.13.3
-# Terraform은 owner 로컬에서만 실행하며 CI는 아직 받지 않아 ci.yaml sha256 대상이 아니다.
+# Terraform: apply·plan은 owner 로컬에서만. CI는 자격 없이 fmt·validate·test만 한다(설계 C.3.9).
 terraform 1.16.6
 # Infisical CLI: Terraform 자격을 infisical run으로 환경변수에만 넣는다(infra/README.md). 0.44.3은 나온 지 하루라
 # mise minimum_release_age가 숨긴다. CI는 받지 않아 ci.yaml sha256 대상이 아니다.

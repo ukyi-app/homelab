@@ -1,0 +1,14 @@
+# path: .github/workflows/deploy-merge.yaml
+# expect: deploy-merge-env
+# deployment: false가 없으면 merge job이 실행마다 배포 기록을 만든다.
+name: deploy-merge
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    environment: automerge
+    steps:
+      - run: "true"

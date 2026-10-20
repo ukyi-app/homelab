@@ -1,0 +1,19 @@
+# check: revision
+# expect: fail
+# rule: revision
+# match: main이 아니다: feat/y
+# sources가 빈 배열이면 Argo CD는 단수 source로 돌아간다. 그 source의 revision을 본다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: x
+  namespace: argocd
+spec:
+  project: platform
+  sources: []
+  source:
+    repoURL: https://github.com/ukyi-app/homelab
+    targetRevision: feat/y
+    path: platform/x
+  destination:
+    server: https://kubernetes.default.svc

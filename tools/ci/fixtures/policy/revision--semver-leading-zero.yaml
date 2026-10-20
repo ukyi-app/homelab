@@ -1,0 +1,18 @@
+# check: revision
+# expect: fail
+# rule: revision
+# match: 01.2.3
+# SemVer가 아니다(선행 0). 외부 차트는 렌더하지 않아 Argo CD sync 때에야 드러난다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: x
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://charts.example.invalid
+    chart: x
+    targetRevision: "01.2.3"
+  destination:
+    server: https://kubernetes.default.svc

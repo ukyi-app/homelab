@@ -1,0 +1,9 @@
+# path: .github/workflows/other.yaml
+# expect: pull-request-target
+name: other
+on: pull_request_target
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: "true"

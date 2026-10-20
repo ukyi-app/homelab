@@ -1,0 +1,14 @@
+# path: .github/workflows/other.yaml
+# expect: pin
+# run 블록 안의 "uses:" 글자로 개수를 맞춰도, 흐름 매핑으로 쓴 실제 액션은 따로 검사된다.
+name: other
+on: push
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    steps:
+      - {name: checkout, uses: actions/checkout@main}
+      - run: |
+          cat <<'X'
+          uses: ./dummy
+          X

@@ -1,0 +1,14 @@
+# path: .github/workflows/other.yaml
+# expect: pin
+# 같은 SHA를 두 번 쓰고 한 줄에만 버전 주석을 단다. occurrence마다 주석이 있어야 한다.
+name: other
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  b:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

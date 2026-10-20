@@ -1,0 +1,21 @@
+# check: workload
+# expect: fail
+# rule: image-digest
+# match: digest 고정이 아니다
+# 접두만 재면 sha256:deadbeef가 핀으로 통과한다(L27).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: x
+  namespace: app-x
+spec:
+  selector: {matchLabels: {app: x}}
+  template:
+    metadata: {labels: {app: x}}
+    spec:
+      containers:
+        - name: x
+          image: ghcr.io/ukyi-app/x@sha256:deadbeef
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 32Mi}

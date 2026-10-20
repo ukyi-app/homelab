@@ -1,0 +1,21 @@
+# check: workload
+# expect: fail
+# rule: image-digest
+# match: image volume이 digest
+# image volume의 태그 참조는 파드를 다시 만들 때 다른 내용이 될 수 있다.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: x
+  namespace: app-x
+spec:
+  containers:
+    - name: x
+      image: ghcr.io/ukyi-app/x@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {memory: 32Mi}
+  volumes:
+    - name: data
+      image:
+        reference: registry.example.invalid/artifact:latest
