@@ -21,8 +21,11 @@ tools/tf-github.sh verify
 래퍼는 자격을 읽기 전에 github.com의 main을 새로 clone하고 그 사본의 래퍼로 다시 실행한다. 다만 처음 실행되는 것은 지금 작업 사본의 래퍼다. 작업 사본을 AI·자동화도 편집하므로, 그 부분까지 믿지 않으려면 새 clone에서 시작한다:
 
 ```bash
-d=$(mktemp -d) && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-  git -c core.hooksPath=/dev/null clone -q --depth 1 https://github.com/ukyi-app/homelab.git "$d/h" && \
+# env -i: 환경 기반 git 설정(GIT_CONFIG_COUNT/KEY/VALUE의 insteadOf 등)까지 끊는다. https만 연다.
+d=$(mktemp -d) && mkdir -p "$d/home" && \
+  env -i PATH="$PATH" HOME="$d/home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+    git -c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always \
+    clone -q --depth 1 --branch main https://github.com/ukyi-app/homelab.git "$d/h" && \
   (cd "$d/h" && tools/tf-github.sh verify); rm -rf "$d"
 ```
 

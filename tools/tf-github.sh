@@ -68,10 +68,12 @@ else
     clone -q --depth 1 --branch main --no-tags https://github.com/ukyi-app/homelab.git "$work/tree" ||
     { rm -rf "$work"; die "main을 clone하지 못했다"; }
   [[ -f $work/tree/tools/tf-github.sh ]] || { rm -rf "$work"; die "main에 tools/tf-github.sh가 없다"; }
-  TF_GITHUB_CLONE=$work exec bash "$work/tree/tools/tf-github.sh" "$cmd" "$@"
+  # 처음 호출한 작업 사본의 루트도 넘긴다. state 백업이 그 안에 생기지 않게 둘 다 거부한다.
+  TF_GITHUB_CLONE=$work TF_GITHUB_ORIGIN_ROOT=$repo_root exec bash "$work/tree/tools/tf-github.sh" "$cmd" "$@"
 fi
 trap 'rm -rf "$work"' EXIT
-unset TF_GITHUB_CLONE
+origin_root=${TF_GITHUB_ORIGIN_ROOT:-$repo_root}
+unset TF_GITHUB_CLONE TF_GITHUB_ORIGIN_ROOT
 sha=$(git -C "$work/tree" rev-parse HEAD)
 say "실행 사본: github.com/ukyi-app/homelab main ${sha}"
 bad=$(find "$work/tree" -path "$work/tree/.git" -prune -o \( -name '*override.tf*' -o -name '*.tfvars*' \) -print)
@@ -205,7 +207,9 @@ case $cmd in
     # R2는 versioning이 없다. apply 전 state를 저장소 밖에 남긴다.
     : "${TF_STATE_BACKUP_DIR:=}"
     [[ -n $TF_STATE_BACKUP_DIR ]] || read -r -p '저장소 밖 state 백업 디렉터리: ' TF_STATE_BACKUP_DIR
-    case $(realpath -m "$TF_STATE_BACKUP_DIR") in "$repo_root" | "$repo_root"/*) die "백업은 저장소 밖에 둔다" ;; esac
+    for r in "$repo_root" "$origin_root" "$work"; do
+      case $(realpath -m "$TF_STATE_BACKUP_DIR") in "$r" | "$r"/*) die "백업은 저장소(작업 사본·실행 사본) 밖에 둔다" ;; esac
+    done
     mkdir -p "$TF_STATE_BACKUP_DIR" && chmod 700 "$TF_STATE_BACKUP_DIR"
     backup="$TF_STATE_BACKUP_DIR/github-$(date -u +%Y%m%dT%H%M%SZ)-${sha:0:12}.tfstate"
     (umask 077 && tf state pull >"$backup") || die "state pull이 실패했다"

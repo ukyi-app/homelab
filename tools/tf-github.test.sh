@@ -5,6 +5,13 @@
 set -euo pipefail
 export LC_ALL=C
 
+# 래퍼는 Infisical 백업 폴더를 쓰기 불가(0500)로 두고 실제로 못 쓰는지 확인한다. root는 그 모드를 무시해 래퍼가
+# 늘 멈춘다(의도). 그래서 이 시험은 비특권 사용자로만 돈다. CI 러너와 owner 기기는 비특권이다.
+if [[ $(id -u) == 0 ]]; then
+  echo "tf-github.test.sh: root에서는 돌릴 수 없다. 비특권 사용자로 실행한다" >&2
+  exit 1
+fi
+
 here=$(cd "$(dirname "$0")" && pwd)
 wrapper="$here/tf-github.sh"
 t=$(mktemp -d)
