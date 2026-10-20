@@ -8,17 +8,17 @@ import { type Doc, type Violation, sameRepo } from "./lib";
 // 예외는 platform/argocd 렌더 안의 알려진 상류 리소스와 상류 이미지에만 건다. 같은 kustomization에 로컬 워크로드를
 // 더하거나 patch로 이미지를 바꾸면 예외가 적용되지 않는다.
 const UPSTREAM_ARGOCD_ORIGIN = /:platform\/argocd$/;
-const UPSTREAM_ARGOCD_WORKLOADS = new Set([
-  "Deployment/argocd-applicationset-controller",
-  "Deployment/argocd-dex-server",
-  "Deployment/argocd-notifications-controller",
-  "Deployment/argocd-redis",
-  "Deployment/argocd-repo-server",
-  "Deployment/argocd-server",
-  "StatefulSet/argocd-application-controller",
-]);
-// install.yaml v3.5.5에 든 이미지 문자열 그대로. 같은 저장소의 다른 태그(:latest 등)로 patch하면 예외에서 빠진다.
-// Argo CD를 올리는 PR에서 platform/argocd/kustomization.yaml의 URL과 함께 바꾼다(안 바꾸면 이 검사가 실패한다).
+// 상류 워크로드와 그 컨테이너(initContainers / containers 이름, 순서 그대로). 예외는 이 집합과 정확히 같을 때만이다.
+// patch로 sidecar·initContainer를 더하면(허용된 상류 이미지를 써도) 예외가 사라지고 일반 검사를 받는다.
+const UPSTREAM_ARGOCD_WORKLOADS: Record<string, { init: string[]; containers: string[] }> = {
+  "Deployment/argocd-applicationset-controller": { init: [], containers: ["argocd-applicationset-controller"] },
+  "Deployment/argocd-dex-server": { init: ["copyutil"], containers: ["dex"] },
+  "Deployment/argocd-notifications-controller": { init: [], containers: ["argocd-notifications-controller"] },
+  "Deployment/argocd-redis": { init: ["secret-init"], containers: ["redis"] },
+  "Deployment/argocd-repo-server": { init: ["copyutil"], containers: ["argocd-repo-server"] },
+  "Deployment/argocd-server": { init: [], containers: ["argocd-server"] },
+  "StatefulSet/argocd-application-controller": { init: [], containers: ["argocd-application-controller"] },
+};
 const UPSTREAM_ARGOCD_IMAGES = new Set([
   "quay.io/argoproj/argocd:v3.5.5",
   "ghcr.io/dexidp/dex:v2.45.1",
@@ -26,11 +26,16 @@ const UPSTREAM_ARGOCD_IMAGES = new Set([
 ]);
 const UPSTREAM_ARGOCD_SECRETS = new Set(["argocd-secret", "argocd-notifications-secret"]);
 
-function upstreamArgocdWorkload(d: Doc, images: string[]): boolean {
+function upstreamArgocdWorkload(d: Doc, spec: any): boolean {
+  const want = UPSTREAM_ARGOCD_WORKLOADS[`${d.obj.kind}/${d.obj.metadata?.name}`];
+  if (!UPSTREAM_ARGOCD_ORIGIN.test(d.origin) || !want) return false;
+  const init: any[] = spec.initContainers ?? [];
+  const main: any[] = spec.containers ?? [];
+  const names = (cs: any[]) => JSON.stringify(cs.map((c) => c.name));
   return (
-    UPSTREAM_ARGOCD_ORIGIN.test(d.origin) &&
-    UPSTREAM_ARGOCD_WORKLOADS.has(`${d.obj.kind}/${d.obj.metadata?.name}`) &&
-    images.every((i) => UPSTREAM_ARGOCD_IMAGES.has(i))
+    names(init) === JSON.stringify(want.init) &&
+    names(main) === JSON.stringify(want.containers) &&
+    [...init, ...main].every((c) => UPSTREAM_ARGOCD_IMAGES.has(String(c.image)))
   );
 }
 
@@ -121,7 +126,7 @@ export function checkWorkloads(docs: Doc[]): Violation[] {
         out.push({ rule: "image-digest", where: `${id(d)} volume ${v.name}`, message: `image volume이 digest 고정이 아니다: ${v.image?.reference} (L27)` });
       }
     }
-    if (upstreamArgocdWorkload(d, containers.map((c: any) => String(c.image)))) continue;
+    if (upstreamArgocdWorkload(d, spec)) continue;
     seen++;
     if (containers.length === 0) out.push({ rule: "workload", where: id(d), message: "컨테이너가 없다" });
     for (const c of containers) {
@@ -154,7 +159,9 @@ const CHART_TAGS: Record<string, RegExp> = {
 
 // 외부 source는 움직이지 않는 revision만: Helm 차트는 정확한 semver, 그 밖(git)은 40자 커밋 SHA.
 // 외부 차트는 렌더하지 않으므로(외부 레지스트리 조회는 필수 검사 밖) 이 검사가 유일한 그물이다.
-const EXACT_SEMVER = /^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+// semver.org의 권장 정규식(선행 0·빈 식별자 거부)에 v 접두만 더했다. build 메타데이터(+...)는 받지 않는다.
+const EXACT_SEMVER =
+  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-((0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?$/;
 
 function checkRevision(where: string, src: any, out: Violation[]): void {
   if (!src) return;

@@ -53,18 +53,32 @@ function isKustomizeDir(dir: string): boolean {
   return KUSTOMIZATION_FILES.some((f) => existsSync(join(ROOT, dir, f)));
 }
 
-// 차트 디렉터리의 templates/ 아래 파일(작업 트리면 추적 파일만, 태그 트리면 꺼낸 파일 전부).
-function templateFiles(dir: string): string[] {
-  if (!dir.startsWith("/")) return gitFiles(`${dir}/templates/`).map((f) => join(ROOT, f));
+// 차트 트리 전체에서 Helm이 템플릿으로 읽는 파일: 루트와 의존 차트(charts/<dep>/...)의 templates/ 아래 전부.
+// 묶음 의존 차트(charts/*.tgz)는 풀어서 같은 규칙으로 본다. 작업 트리면 추적 파일만, 태그 트리면 꺼낸 파일 전부.
+function templateFiles(dir: string, tmp: string): string[] {
+  const abs = dir.startsWith("/") ? dir : join(ROOT, dir);
+  const files = dir.startsWith("/")
+    ? walkFiles(abs)
+    : gitFiles(`${dir}/`).map((f) => join(ROOT, f));
+  const out = files.filter((f) => /(^|\/)templates\//.test(relative(abs, f)));
+  for (const tgz of files.filter((f) => /(^|\/)charts\/[^/]+\.tgz$/.test(relative(abs, f)))) {
+    const dst = join(tmp, "deps", relative(ROOT, tgz).replaceAll("/", "_"));
+    mkdirSync(dst, { recursive: true });
+    const x = Bun.spawnSync(["tar", "-xzf", tgz, "-C", dst], { stderr: "pipe" });
+    if (x.exitCode !== 0) throw new Error(`의존 차트를 풀지 못했다: ${relative(ROOT, tgz)}`);
+    out.push(...templateFiles(dst, tmp));
+  }
+  return [...new Set(out)];
+}
+
+function walkFiles(d: string): string[] {
   const out: string[] = [];
-  const walk = (d: string) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else out.push(p);
-    }
-  };
-  if (existsSync(join(dir, "templates"))) walk(join(dir, "templates"));
+  if (!existsSync(d)) return out;
+  for (const e of readdirSync(d, { withFileTypes: true })) {
+    const p = join(d, e.name);
+    if (e.isDirectory()) out.push(...walkFiles(p));
+    else out.push(p);
+  }
   return out;
 }
 
@@ -167,10 +181,11 @@ export function renderAll(): RenderResult {
     let r: { ok: boolean; out: string };
     if (isChart) {
       // Argo CD는 대상 클러스터의 API 목록·버전을 Helm에 넘긴다. CI는 그것을 재현하지 않으므로 Capabilities 자체를 막는다.
-      // 별칭($c := .Capabilities)이나 index로 돌아가도 이름은 남으므로 토큰으로 찾는다. 지금 쓰는 차트는 없다.
-      const caps = templateFiles(srcDir).filter((f) => /\bCapabilities\b/.test(readFileSync(f, "utf8")));
+      // 별칭($c := .Capabilities)이나 index로 돌아가도 이름은 남으므로 토큰으로 찾는다. 의존 차트(charts/)도 본다.
+      // 지금 쓰는 차트는 없다.
+      const caps = templateFiles(srcDir, tmp).filter((f) => /\bCapabilities\b/.test(readFileSync(f, "utf8")));
       if (caps.length > 0) {
-        fail(where, `로컬 차트가 Capabilities를 쓴다(CI 렌더와 Argo CD 렌더가 달라진다): ${caps.map((f) => relative(ROOT, f)).join(", ")}`);
+        fail(where, `로컬 차트가 Capabilities를 쓴다(CI 렌더와 Argo CD 렌더가 달라진다): ${caps.map((f) => (f.startsWith(tmp) ? `(묶음 의존 차트) ${relative(join(tmp, "deps"), f)}` : relative(ROOT, f))).join(", ")}`);
         return undefined;
       }
       const helm = src.helm ?? {};
@@ -228,6 +243,11 @@ export function renderAll(): RenderResult {
       fail(rf, `Application root-${cluster} 하나만 둔다`);
       continue;
     }
+    // spec.sources가 있으면 Argo CD는 단수 source를 무시한다. root는 source 하나로만 둔다.
+    if (roots[0].spec?.sources !== undefined) {
+      fail(rf, `root-${cluster}에 spec.sources를 두지 않는다(있으면 Argo CD가 spec.source를 무시한다)`);
+      continue;
+    }
     const src = roots[0].spec?.source ?? {};
     const want = `values-${cluster}.yaml`;
     if (src.path !== "platform/root" || JSON.stringify(src.helm?.valueFiles) !== JSON.stringify([want]) || src.helm?.valuesObject) {
@@ -276,6 +296,8 @@ export function renderAll(): RenderResult {
   for (const c of gitFiles(":(glob)platform/**/Chart.yaml")) {
     const dir = dirname(c);
     if (dir === "platform/root") continue;
+    // 다른 차트의 의존 차트(<차트>/charts/<dep>)는 부모 차트 렌더에 들어간다. 따로 시험 values를 요구하지 않는다.
+    if (dirname(dir).endsWith("/charts") && existsSync(join(ROOT, dirname(dirname(dir)), "Chart.yaml"))) continue;
     const ciFiles = gitFiles(`${dir}/ci/*.yaml`);
     if (ciFiles.length === 0) {
       if (dir.startsWith("platform/charts/") || !covered.has(dir)) fail(dir, "차트 시험 values(ci/*.yaml)가 없다(공유 차트이거나 root가 아직 렌더하지 않는 차트)");

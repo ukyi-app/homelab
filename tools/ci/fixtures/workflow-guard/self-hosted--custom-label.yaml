@@ -1,0 +1,10 @@
+# path: .github/workflows/other.yaml
+# expect: self-hosted
+# 호스트 runner처럼 보이는 사설 레이블. 맞는 runner가 없어 대기하거나 같은 레이블의 self-hosted로 간다.
+name: other
+on: push
+jobs:
+  run:
+    runs-on: ubuntu-24-private
+    steps:
+      - run: "true"

@@ -38,8 +38,16 @@ const SHA_PIN = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(\/[^@\s]+)?@[0-9a-f]{40}$
 // 허용 패턴을 같은 PR에서 바꾼다.
 const ALLOWED_OWNERS = new Set(["actions", "github", "docker"]);
 const ALLOWED_ACTIONS = new Set(["Infisical/secrets-action"]);
-// GitHub 호스트 runner 레이블 리터럴만. group·표현식·배열은 self-hosted로 라우팅될 수 있어 받지 않는다.
-const HOSTED_RUNNER = /^(ubuntu|windows|macos)-(latest|\d[\w.-]*)$/;
+// runs-on: 아래 호스트 runner 레이블 리터럴 하나만. group·표현식·배열은 self-hosted로 라우팅될 수 있어 받지 않는다.
+// GitHub 문서의 표준 호스트 runner 레이블(github/docs data/reusables/actions/supported-github-runners.md,
+// 2026-10-16 커밋 eb5a6158a3fb). 오타·사설 레이블은 대기하거나 같은 레이블의 self-hosted runner로 갈 수 있다.
+// 새 이미지가 나오면 이 목록에 더한다.
+const HOSTED_RUNNERS = new Set([
+  "ubuntu-latest", "ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04",
+  "ubuntu-26.04-arm", "ubuntu-24.04-arm", "ubuntu-22.04-arm",
+  "windows-latest", "windows-2025", "windows-2025-vs2026", "windows-2022", "windows-11-arm", "windows-11-vs2026-arm",
+  "macos-latest", "macos-26", "macos-15", "macos-14", "macos-26-intel", "macos-15-intel", "xcode-27",
+]);
 
 function triggers(on: unknown): string[] {
   if (typeof on === "string") return [on];
@@ -199,7 +207,7 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
     // reusable 호출 job(uses)에는 runs-on이 없다.
     if (!("uses" in job)) {
       const runsOn = job["runs-on"];
-      if (typeof runsOn !== "string" || !HOSTED_RUNNER.test(runsOn)) {
+      if (typeof runsOn !== "string" || !HOSTED_RUNNERS.has(runsOn)) {
         add("self-hosted", where, `runs-on은 GitHub 호스트 runner 리터럴 하나만(group·표현식·배열 금지, 설계 C.4.10): ${JSON.stringify(runsOn)}`);
       }
     }
