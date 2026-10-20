@@ -23,11 +23,11 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 
 - 위치는 `platform/go`(새 Application) 또는 `platform/tailscale` 로컬 차트 중 하나로 정한다. 새 ns를 쓰면 restricted PSA로 두고, ESO를 쓰면 `infisical-platform` 스토어의 ns 허용 목록에 더한다.
 - Deployment 1개. 작은 정적 웹 서버(예: nginx unprivileged), 이미지 digest 고정, 상태·PVC·Tailscale 자격 없음.
-- 규칙: 경로 `^/([a-z0-9-]{1,63})(/.*)?$` → `302 https://<접두><이름>.<tailnet 도메인><나머지 경로>`, 쿼리 유지. 그 밖의 경로는 404, `/`는 사용법 한 줄. 대상 호스트는 늘 한 라벨 + tailnet 도메인이라 열린 리다이렉트가 아니다(`go/evil.com`은 점 때문에 404). 영구 캐시되는 301은 쓰지 않는다.
+- 규칙: 첫 경로 조각이 DNS 라벨 `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`이고 `<접두><이름>`이 63자 이하면 `302 https://<접두><이름>.<tailnet 도메인><나머지 경로>`, 쿼리 유지. 그 밖의 경로는 404, `/`는 사용법 한 줄. 대상 호스트는 늘 한 라벨 + tailnet 도메인이라 열린 리다이렉트가 아니다(`go/evil.com`은 점 때문에 404). 영구 캐시되는 301은 쓰지 않는다.
 - 접두는 `cluster.tailscale.prefix`다. 운영은 `""`, VM은 `vm-`라 VM의 `vm-go/argocd`는 `vm-argocd`로 보낸다.
-- tailnet 도메인은 저장소에 두지 않고(D-23) 실행 때 넣는다. 기본안은 Infisical `homelab` `/platform/go`의 키(예: `TAILNET_DOMAIN`)를 ESO로 env에 넣는 것이다. 자기 Service의 `status.loadBalancer.ingress[].hostname`에서 읽는 안(그 Service 하나의 `get` 권한)과 비교해 고른다. 값이 비었거나 `<이름>.ts.net` 꼴이 아니면 파드가 시작하지 않게 한다.
+- tailnet 도메인은 저장소에 두지 않고(D-23) 실행 때 넣는다. Infisical `homelab`(prod) `/platform/go`의 키(예: `TAILNET_DOMAIN`)를 ESO로 env에 넣는다. VM용 `homelab-dev`(dev)의 같은 경로에도 같은 키를 둔다(시나리오 13의 키 대조). 값이 비었거나 `<이름>.ts.net` 꼴이 아니면 파드가 시작하지 않게 한다. 자기 Service 상태에서 읽는 안은 API 서버 egress와 RBAC가 늘어 쓰지 않는다.
 - Service `type: LoadBalancer`, `loadBalancerClass: tailscale`, 어노테이션 `tailscale.com/hostname: <접두>go`, `tailscale.com/tags: tag:k8s-go`. 포트는 80 하나다. **443은 열지 않는다.** 브라우저가 `https://go`를 먼저 시도하면 인증서 오류가 아니라 연결 거부로 끝나야 한다. Ingress로 내지 않는다(operator Ingress는 443과 전체 이름 인증서만 다뤄 `go/`가 TLS 실패, 설계 C.3.5).
-- NetworkPolicy: ingress는 `tailscale` ns의 프록시 파드에서 웹 서버 포트만, egress 없음.
+- NetworkPolicy: egress는 없다. ingress 출처는 실제 경로를 관찰해 정한다. 고정한 v1.104.1의 L3 프록시는 프록시의 tailnet 주소를 Service ClusterIP로 DNAT할 뿐 새 연결을 만들지 않으므로, 백엔드가 보는 출처는 `tailscale` ns 프록시 파드가 아니라 원래 tailnet 주소나 노드가 SNAT한 주소일 수 있다(Ingress 프록시와 다르다). `namespaceSelector`로 프록시 파드만 허용하면 정상 요청이 막힐 수 있다. 관찰한 출처만 허용하고, 허용 출처(tailnet 기기)와 비허용 출처(다른 ns의 시험 파드)를 모두 시험한다.
 - k3s servicelb가 이 Service를 건너뛰는지 확인한다. svclb DaemonSet이 생기면 노드 LAN에 80이 열린다(PR #779의 교훈).
 - 함정은 설정 옆 주석으로 남긴다: 443을 열지 않는 이유, 301을 쓰지 않는 이유, 이름이 HSTS preload 최상위 도메인(`app`, `dev` 등)과 겹치면 안 되는 이유.
 
@@ -38,7 +38,7 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 
 ### 이름 예약
 
-- `go`(VM은 `vm-go`)는 앱 내부 이름(`internal.name`)과 다른 tailnet 기기 이름으로 쓰지 않는다. T10 공유 차트의 이름 검사에 예약어로 넣는다(T10 범위에 적어 둠).
+- `go`와 `vm-go`는 두 클러스터 모두에서 앱 내부 이름(`internal.name`)과 다른 tailnet 기기 이름으로 쓰지 않는다. 운영 앱이 `vm-go`를 먼저 쓰면 VM 리다이렉터가 그 이름을 못 받는다. T10 공유 차트의 이름 검사에 예약어로 넣는다(T10 범위에 적어 둠).
 
 ### 문서
 
@@ -47,12 +47,13 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 ## 완료 조건
 
 - 맥(Safari, Chrome)에서 `go/argocd` → Argo CD 로그인 화면, `go/adguard` → AdGuard 로그인 화면.
-- 아이폰 Safari(셀룰러, Tailscale 켬)에서 `go/argocd`가 열린다. 안 되면 `http://go/argocd`가 열리는지와 그 차이를 기록한다.
+- 아이폰 Safari(셀룰러, Tailscale 켬)에서 스킴 없이 친 `go/argocd`가 열린다. 이것이 D-30의 사용자 목표라 필수다. 검색어로 가거나 HTTPS로 바뀌어 실패하면 완료로 치지 않고, 원인과 `http://go/argocd` 결과를 기록한 뒤 구현이나 D-30을 사용자와 다시 정한다.
 - 경로·쿼리 유지: `go/argocd/applications?x=1` → 같은 경로·쿼리.
 - 거부: `go/evil.com`·`go/a.b`는 404, `https://go/`는 연결 실패(인증서 경고가 아님).
 - `go` 파드를 0으로 줄여도 전체 주소 `https://argocd.<tailnet>.ts.net`은 그대로 열리고, 되돌리면 `go/`가 돌아온다.
 - Tailscale을 끈 기기에서는 `go`가 풀리지 않는다. 노드 LAN `192.168.117.15`에 80이 새로 열리지 않는다(svclb 없음).
 - tailnet 기기 목록에서 프록시 이름이 정확히 `go`다(접미 번호 없음).
+- VM: `values-vm.yaml`로 렌더한 Service hostname이 `vm-go`이고 리다이렉트 접두가 `vm-`다. VM 실접속(`vm-go/argocd` → `vm-argocd`)은 T13 시나리오 13에서 확인한다.
 - 저장소·이미지·로그에 tailnet 이름이 없다(gitleaks, D-23).
 - approvals.md에 ACL apply와 병합을 기록한다.
 
