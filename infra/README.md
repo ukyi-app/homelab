@@ -58,6 +58,12 @@ unset TF_WORKSPACE
 export TF_IN_AUTOMATION=1
 # TF_INPUT=0은 넣지 않는다. -input=false와 같아서 apply가 승인 질문을 못 하고 변경을 거부한다.
 # 변수 누락 때 질문하지 않고 실패하도록 init·plan에만 -input=false를 붙인다.
+# 로그인 사용자로 infisical run을 하면 CLI 0.44.2가 가져온 값을 암호화해 ~/.infisical/secrets-backup/에 파일로 남긴다
+# (packages/util/secrets.go WriteBackupSecrets). 호출부가 그 오류를 무시하므로 폴더를 쓰기 불가로 두어 파일을 만들지 못하게 한다.
+mkdir -p ~/.infisical
+if [ -d ~/.infisical/secrets-backup ]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi
+mkdir -p ~/.infisical/secrets-backup && chmod 0500 ~/.infisical/secrets-backup
+backup_files() { find ~/.infisical/secrets-backup -type f 2>/dev/null | wc -l; }  # 실행마다 0이어야 한다
 read -r -p 'homelab-admin project ID: ' HOMELAB_ADMIN_PROJECT_ID
 read -r -p 'R2 S3 API endpoint (https://...r2.cloudflarestorage.com): ' R2_ENDPOINT
 
