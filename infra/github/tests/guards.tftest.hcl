@@ -40,12 +40,12 @@ override_data {
 
 override_data {
   target = data.github_rest_api.repo_homelab
-  values = { code = 200, body = "{\"visibility\":\"public\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
+  values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
 }
 
 override_data {
   target = data.github_rest_api.repo_app
-  values = { code = 200, body = "{\"visibility\":\"public\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
+  values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
 }
 
 override_data {
@@ -184,7 +184,7 @@ run "g2_auto_merge_on" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_homelab
-    values = { code = 200, body = "{\"visibility\":\"public\",\"allow_auto_merge\":true,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":true,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
   }
   expect_failures = [data.github_rest_api.repo_homelab]
 }
@@ -193,16 +193,34 @@ run "g2_merge_commit_on" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_homelab
-    values = { code = 200, body = "{\"visibility\":\"public\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":true,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":true,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
   }
   expect_failures = [data.github_rest_api.repo_homelab]
+}
+
+run "g2_default_branch_homelab" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.repo_homelab
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"develop\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
+  }
+  expect_failures = [data.github_rest_api.repo_homelab]
+}
+
+run "g2_default_branch_app" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.repo_app["files"]
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"master\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
+  }
+  expect_failures = [data.github_rest_api.repo_app]
 }
 
 run "g2_app_push_protection_off" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_app["files"]
-    values = { code = 200, body = "{\"visibility\":\"public\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"disabled\"}}}" }
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"disabled\"}}}" }
   }
   expect_failures = [data.github_rest_api.repo_app]
 }
@@ -211,7 +229,7 @@ run "g2_app_private" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_app["homelab-bot"]
-    values = { code = 200, body = "{\"visibility\":\"private\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
+    values = { code = 200, body = "{\"visibility\":\"private\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
   }
   expect_failures = [data.github_rest_api.repo_app]
 }

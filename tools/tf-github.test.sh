@@ -59,15 +59,31 @@ case "$*" in
   *) echo "gh stub: $*" >&2; exit 2 ;;
 esac
 EOF
-cat >"$t/bin/infisical" <<'EOF'
-#!/usr/bin/env bash
+printf '#!/usr/bin/env bash\nt=%q\n' "$t" >"$t/bin/infisical"
+cat >>"$t/bin/infisical" <<'EOF'
 while [[ $# -gt 0 && $1 != -- ]]; do shift; done
 shift
-export AWS_ACCESS_KEY_ID=stub AWS_SECRET_ACCESS_KEY=stub
+# 래퍼가 호출 셸의 AWS 키를 지웠는지는 STUB_NO_AWS(Infisical에 키 없음)로 본다.
+[[ -n ${STUB_NO_AWS:-} ]] || export AWS_ACCESS_KEY_ID=stub AWS_SECRET_ACCESS_KEY=stub
 # /terraform/state에 제어 변수가 실수로 들어간 경우를 흉내 낸다. 래퍼가 terraform 직전에 지워야 한다.
 if [[ -n ${STUB_INJECT:-} ]]; then export TF_VAR_homelab_merge_app_id=9 TF_CLI_ARGS_plan=-target=x GITHUB_APP_ID=1 TF_LOG=DEBUG TF_CLI_CONFIG_FILE=/tmp/evil.tfrc; fi
+[[ -z ${STUB_INJECT_TOKEN:-} ]] || export GITHUB_TOKEN=ghp_other
+# 주입된 PATH 앞의 가짜 명령. 래퍼가 PATH를 되돌리기 전에 외부 명령을 찾으면 표식이 생긴다.
+[[ -z ${STUB_INJECT_PATH:-} ]] || export PATH="$t/evil:$PATH"
+if [[ -n ${STUB_INJECT_SHELL:-} ]]; then
+  # bash가 -c 본문 전에 실행하는 것들: BASH_ENV·ENV 파일, 환경의 함수, SHELLOPTS xtrace + PS4 명령 치환.
+  export BASH_ENV="$t/evil.sh" ENV="$t/evil.sh"
+  sha256sum() { touch "$t/evil-ran"; echo x; }
+  cut() { touch "$t/evil-ran"; echo x; }
+  export -f sha256sum cut
+  exec env SHELLOPTS=xtrace PS4="\$(touch $t/evil-ran)" "$@"
+fi
 exec "$@"
 EOF
+mkdir -p "$t/evil"
+for c in bash env sha256sum cut terraform; do printf '#!/bin/sh\ntouch %q\nexit 1\n' "$t/evil-ran" >"$t/evil/$c"; done
+printf 'touch %q\n' "$t/evil-ran" >"$t/evil.sh"
+chmod +x "$t/evil/"*
 # 래퍼가 terraform 앞에서 환경을 허용 목록으로 줄이므로, 가짜 terraform은 시험 값을 파일에서 읽는다.
 printf '#!/usr/bin/env bash\nsource %q\n' "$t/stub.env" >"$t/bin/terraform"
 cat >>"$t/bin/terraform" <<'EOF'
@@ -138,6 +154,13 @@ expect "만료 있는 fine-grained PAT 허용" 0 STUB_TOKEN=github_pat_stub STUB
 expect "모르는 토큰 종류 거부" nonzero STUB_TOKEN=ghs_stub -- verify
 expect "admin이 아닌 토큰 거부" nonzero STUB_ADMIN=false -- verify
 expect "Infisical이 주입한 제어 변수를 terraform 전에 지움" 0 STUB_INJECT=1 -- verify
+expect "Infisical이 GITHUB_TOKEN을 덮으면 멈춤" nonzero STUB_INJECT_TOKEN=1 -- verify
+expect "Infisical이 주입한 PATH를 외부 명령 전에 되돌림" 0 STUB_INJECT_PATH=1 -- verify
+[[ ! -e $t/evil-ran ]] || { echo "FAIL: 주입된 PATH의 명령이 돌았다"; fails=$((fails + 1)); rm -f "$t/evil-ran"; }
+expect "BASH_ENV·ENV·함수·SHELLOPTS 주입이 셸 시작 때 돌지 않음" 0 STUB_INJECT_SHELL=1 -- verify
+[[ ! -e $t/evil-ran ]] || { echo "FAIL: 셸 시작 환경 주입이 돌았다"; fails=$((fails + 1)); rm -f "$t/evil-ran"; }
+expect "호출 셸의 AWS 키로 진행하지 않음(Infisical 미주입)" nonzero STUB_NO_AWS=1 AWS_ACCESS_KEY_ID=ambient AWS_SECRET_ACCESS_KEY=ambient -- verify
+expect "Infisical이 AWS 키를 넣으면 호출 셸 값이 있어도 진행" 0 AWS_ACCESS_KEY_ID=ambient AWS_SECRET_ACCESS_KEY=ambient -- verify
 expect "delete plan은 --allow-destroy 없이 멈춤" nonzero STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan
 expect "delete plan은 --allow-destroy로 통과" 2 STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan --allow-destroy
 

@@ -22,6 +22,8 @@ data "github_rest_api" "token_admin" {
 }
 
 # 2. 저장소 설정. 리소스가 아니라 gh api로 맞추고 여기서 확인만 한다(github_repository를 두지 않아 destroy로 지울 길이 없다).
+#    기본 브랜치도 main이어야 한다. 바뀌면 PR이 보호 안 된 브랜치로 열리고, Argo CD·ruleset·CODEOWNERS·자동 병합 조건은
+#    계속 main을 본다(앱 저장소의 app-main은 ~DEFAULT_BRANCH라 새 기본 브랜치를 보호해 배포 갱신이 어긋난다).
 data "github_rest_api" "repo_homelab" {
   endpoint = "repos/ukyi-app/homelab"
 
@@ -29,6 +31,7 @@ data "github_rest_api" "repo_homelab" {
     postcondition {
       condition = try(
         jsondecode(self.body).visibility == "public" &&
+        jsondecode(self.body).default_branch == "main" &&
         jsondecode(self.body).allow_auto_merge == false &&
         jsondecode(self.body).allow_squash_merge == true &&
         jsondecode(self.body).allow_merge_commit == false &&
@@ -36,7 +39,7 @@ data "github_rest_api" "repo_homelab" {
         jsondecode(self.body).delete_branch_on_merge == true,
         false
       )
-      error_message = "guard 2: homelab 설정이 public, allow_auto_merge=false, squash만, 병합 뒤 브랜치 삭제가 아니다. gh api -X PATCH로 맞춘다."
+      error_message = "guard 2: homelab 설정이 public, 기본 브랜치 main, allow_auto_merge=false, squash만, 병합 뒤 브랜치 삭제가 아니다. gh api -X PATCH로 맞춘다."
     }
   }
 }
@@ -49,11 +52,12 @@ data "github_rest_api" "repo_app" {
     postcondition {
       condition = try(
         jsondecode(self.body).visibility == "public" &&
+        jsondecode(self.body).default_branch == "main" &&
         jsondecode(self.body).security_and_analysis.secret_scanning.status == "enabled" &&
         jsondecode(self.body).security_and_analysis.secret_scanning_push_protection.status == "enabled",
         false
       )
-      error_message = "guard 2: 앱 저장소·템플릿이 public이 아니거나 secret scanning·push protection이 꺼져 있다(D-29)."
+      error_message = "guard 2: 앱 저장소·템플릿이 public이 아니거나 기본 브랜치가 main이 아니거나 secret scanning·push protection이 꺼져 있다(D-29)."
     }
   }
 }

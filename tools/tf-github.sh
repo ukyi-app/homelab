@@ -37,13 +37,18 @@ done
 for t in git gh jq terraform infisical; do
   command -v "$t" >/dev/null || die "$t가 없다(mise install)"
 done
+# Infisical이 넣은 환경으로 띄울 두 프로그램은 절대 경로로 정한다(주입된 PATH로 찾지 않는다).
+bash_bin=$(command -v bash)
+[[ $bash_bin == /* && -x /usr/bin/env ]] || die "bash 절대 경로나 /usr/bin/env가 없다"
 
 # 실행 결과를 바꾸는 환경을 지운다.
 # - GITHUB_APP_* 셋이 모두 있으면 provider가 토큰보다 App 인증을 먼저 쓴다.
 # - TF_CLI_ARGS*는 숨은 인수(-var, -target 등)를, TF_VAR_*는 App ID 같은 변수를 바꾼다.
 # - TF_LOG*는 요청 내용을 로그로 남긴다.
+# - AWS 키 둘은 Infisical이 다시 넣어야만 있다. 호출 셸의 값이 남으면 /terraform/state에 키가 없거나 이름이 틀려도
+#   주변 자격(낡거나 권한이 넓은 키)으로 backend를 연다.
 unset GITHUB_APP_ID GITHUB_APP_INSTALLATION_ID GITHUB_APP_PEM_FILE GITHUB_OWNER GITHUB_ORGANIZATION GITHUB_BASE_URL
-unset AWS_PROFILE AWS_SESSION_TOKEN TF_WORKSPACE TF_DATA_DIR TF_PLUGIN_CACHE_DIR
+unset AWS_PROFILE AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_WORKSPACE TF_DATA_DIR TF_PLUGIN_CACHE_DIR
 for name in $(compgen -e); do
   case $name in
     TF_CLI_ARGS | TF_CLI_ARGS_* | TF_LOG | TF_LOG_* | TF_VAR_*) unset "$name" ;;
@@ -136,25 +141,31 @@ fi
 [[ -n $HOMELAB_ADMIN_PROJECT_ID ]] || read -r -p 'homelab-admin project ID: ' HOMELAB_ADMIN_PROJECT_ID
 [[ -n $R2_ENDPOINT ]] || read -r -p 'R2 S3 API endpoint (https://...r2.cloudflarestorage.com): ' R2_ENDPOINT
 [[ $R2_ENDPOINT =~ ^https://[a-z0-9]+\.r2\.cloudflarestorage\.com$ ]] || die "R2 endpoint 형식이 아니다"
+# 비교용 해시는 인수로 넘긴다. 환경으로 넘기면 Infisical이 GITHUB_TOKEN과 함께 덮을 수 있다.
 token_sum=$(printf '%s' "$GITHUB_TOKEN" | sha256sum | cut -d' ' -f1)
-export TOKEN_SUM=$token_sum
 
 # terraform을 R2 자격과 함께 돈다. /terraform/state에 같은 이름의 키가 있어 GITHUB_TOKEN을 덮으면 멈춘다(값은 비교만).
+# Infisical은 그 경로의 모든 키를 환경으로 넣는다. 거기에 실수나 변조로 실행 환경 변수가 들어가도 terraform까지 닿지 않게:
+# - 셸 시작 경계: BASH_ENV·ENV는 bash가 -c 본문보다 먼저 읽어 실행한다. env -u로 지우고, -p는 그 둘과 함수 가져오기
+#   (BASH_FUNC_*, 예: printf를 덮음)·SHELLOPTS(xtrace + PS4의 명령 치환)를 무시한다. bash와 env는 절대 경로다.
+# - 본문 첫 줄에서 허용 목록 밖 변수를 모두 지우고 PATH·HOME은 Infisical 실행 전의 값(인수)으로 되돌린다. 그 뒤에야
+#   외부 명령(sha256sum, terraform)을 찾는다. 값을 env의 argv로 넘기지 않으려고(프로세스 목록에 보인다) 지우는 방식이다.
+# - 남는 것: LD_PRELOAD 같은 동적 링커 변수는 env·bash가 뜰 때 이미 적용된다(본문에서 지워 terraform에는 안 닿음).
+#   BASH_FUNC_*는 -p가 가져오지 않지만 compgen에 안 보여 자식 환경에 남는다(terraform은 Go라 읽지 않는다).
 tf() {
-  local rc=0
+  local rc=0 tmpdir=${TMPDIR:-}
   # 안쪽 스크립트는 infisical이 넣은 환경에서 펼쳐야 해서 작은따옴표다.
   # shellcheck disable=SC2016
   infisical run --silent --log-level=error --projectId="$HOMELAB_ADMIN_PROJECT_ID" --env=prod --path=/terraform/state -- \
-    bash -c '[[ "$(printf "%s" "$GITHUB_TOKEN" | sha256sum | cut -d" " -f1)" == "$TOKEN_SUM" ]] || { echo "tf-github: Infisical이 GITHUB_TOKEN을 덮었다" >&2; exit 1; }
-             [[ -n ${AWS_ACCESS_KEY_ID:-} && -n ${AWS_SECRET_ACCESS_KEY:-} ]] || { echo "tf-github: R2 자격이 없다" >&2; exit 1; }
-             # Infisical이 넣은 값 중 R2 키만 넘긴다. 그 밖의 이름(TF_CLI_ARGS*, TF_VAR_*, TF_LOG*, TF_CLI_CONFIG_FILE,
-             # GITHUB_APP_* 등)은 terraform에 닿지 않는다. CLI 설정 파일은 래퍼가 만든 것으로 다시 고정한다.
-             # 값을 env의 argv로 넘기지 않으려고(프로세스 목록에 보인다) 허용 목록 밖 변수를 지운다.
-             for n in $(compgen -e); do
-               case $n in PATH | HOME | LANG | LC_ALL | TMPDIR | GITHUB_TOKEN | AWS_ACCESS_KEY_ID | AWS_SECRET_ACCESS_KEY) ;; *) unset "$n" ;; esac
-             done
-             export TF_IN_AUTOMATION=1 TF_CLI_CONFIG_FILE="$1"
-             exec terraform -chdir="$0" "${@:2}"' "$root" "$work/terraformrc" "$@" || rc=$?
+    /usr/bin/env -u BASH_ENV -u ENV "$bash_bin" --noprofile --norc -p -c '
+      for n in $(compgen -e); do
+        case $n in GITHUB_TOKEN | AWS_ACCESS_KEY_ID | AWS_SECRET_ACCESS_KEY) ;; *) unset "$n" ;; esac
+      done
+      export PATH="$3" HOME="$4" LC_ALL=C TF_IN_AUTOMATION=1 TF_CLI_CONFIG_FILE="$2"
+      [[ -z $5 ]] || export TMPDIR="$5"
+      [[ "$(printf "%s" "$GITHUB_TOKEN" | sha256sum | cut -d" " -f1)" == "$6" ]] || { echo "tf-github: Infisical이 GITHUB_TOKEN을 덮었다" >&2; exit 1; }
+      [[ -n ${AWS_ACCESS_KEY_ID:-} && -n ${AWS_SECRET_ACCESS_KEY:-} ]] || { echo "tf-github: R2 자격이 없다(/terraform/state에서 주입되지 않음)" >&2; exit 1; }
+      exec terraform -chdir="$1" "${@:7}"' tf-github "$root" "$work/terraformrc" "$PATH" "$HOME" "$tmpdir" "$token_sum" "$@" || rc=$?
   if [[ $(find ~/.infisical/secrets-backup -type f 2>/dev/null | wc -l) -ne 0 ]]; then
     find ~/.infisical/secrets-backup -type f -delete 2>/dev/null
     die "Infisical 백업 파일이 생겼다. 지우고 중단한다"

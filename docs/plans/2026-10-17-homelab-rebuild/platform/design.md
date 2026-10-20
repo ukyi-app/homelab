@@ -1053,7 +1053,7 @@ receivers:
 - **provider:** `integrations/github` 6.13.0 정확 핀, legacy 클라이언트 기본값[S191]. #3519(갱신 apply가 한 번 실패하면 그 ruleset 드리프트가 영구히 안 보임. 수정 #3637 미출시[S192]) 때문에 래퍼가 apply 실패 뒤 재import한다(아래). `.terraform.lock.hcl` 변경은 사람이 확인한다. #3637이 들어간 릴리스가 나오면 올린다.
 - **guard**는 `check` 블록이 아니라 `github_rest_api` 데이터 소스의 postcondition이다. check는 실패해도 경고만 내고 plan이 초록으로 끝나지만, postcondition은 plan을 오류로 멈춘다[S193]. `github_rest_api`는 provider 인증을 다시 써서 토큰이 state에 남지 않는다[S191]. 보는 것은 아홉이다.
   1. 토큰이 admin인지(`GET repos/ukyi-app/homelab`의 `permissions.admin`. 익명 폴백과 권한 부족을 드리프트가 아니라 오류로 바꾼다)
-  2. 저장소 설정(homelab: `visibility` public, `allow_auto_merge=false`, squash만, 병합 뒤 삭제. 템플릿과 `app-repos.json`의 앱 저장소: `visibility` public, secret scanning·push protection·private vulnerability reporting 켬, D-29)
+  2. 저장소 설정(homelab: `visibility` public, 기본 브랜치 `main`, `allow_auto_merge=false`, squash만, 병합 뒤 삭제. 템플릿과 `app-repos.json`의 앱 저장소: `visibility` public, 기본 브랜치 `main`(`app-main`은 `~DEFAULT_BRANCH`를 보호하지만 CODEOWNERS·자동 병합 조건·Argo CD는 `main`을 본다), secret scanning·push protection·private vulnerability reporting 켬, D-29)
   3. 저장소별 ruleset 이름 집합과 개수(`rulesets?includes_parents=false`. 같은 이름 중복을 잡으려고 개수도 본다)
   4. ruleset별 bypass가 허용 목록 안에만 있는지, `exempt` 금지, 응답에 `bypass_actors`가 없으면 실패(provider state를 거치지 않는 GET이라 #3519 상태에서도 bypass는 잡는다)
   5. `codeowners/errors?ref=main`이 200이고 `errors`가 빈 배열(404는 `CODEOWNERS` 없음, C.4.7 조건 9)
