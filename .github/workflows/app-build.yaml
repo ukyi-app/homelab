@@ -141,7 +141,7 @@ jobs:
       - name: 입력 확인
         run: |
           [[ $GITHUB_REPOSITORY_OWNER == ukyi-app ]] || { echo "::error::ukyi-app 저장소만"; exit 1; }
-          [[ $APP =~ ^[a-z0-9]([a-z0-9-]{0,57}[a-z0-9])?$ ]] || { echo "::error::앱 이름(저장소 이름)이 DNS 라벨 59자 이하가 아니다: $APP"; exit 1; }
+          [[ $APP =~ ^[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$ ]] || { echo "::error::앱 이름(저장소 이름)이 DNS 라벨 53자 이하가 아니다(Helm 릴리스 이름 상한): $APP"; exit 1; }
           [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::push job의 digest가 없다"; exit 1; }
           [[ $DEPLOY_APP_CLIENT_ID != REPLACE_* ]] || { echo "::error::app-build.yaml의 DEPLOY_APP_CLIENT_ID가 아직 비어 있다(App homelab-deploy 생성 뒤 채운다)"; exit 1; }
 

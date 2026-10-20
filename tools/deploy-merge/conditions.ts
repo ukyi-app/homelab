@@ -57,7 +57,7 @@ function parseImage(text: string | null | undefined): Record<string, unknown> | 
 }
 
 export function appFromBranch(ref: string | undefined): string | undefined {
-  return ref?.match(/^deploy\/([a-z0-9]([a-z0-9-]{0,57}[a-z0-9])?)$/)?.[1];
+  return ref?.match(/^deploy\/([a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?)$/)?.[1];
 }
 
 export function evaluate(f: Facts): Verdict {
