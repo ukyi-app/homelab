@@ -4,8 +4,7 @@ metadata:
   name: adguard
   namespace: adguard
 spec:
-  # 시나리오 14(T08a): AdGuard 정지 시험. 측정이 끝나면 되돌림 PR로 1로 돌린다.
-  replicas: 0
+  replicas: 1
   # RWO 설정 파일에 두 프로세스가 동시에 쓰지 않게 한다. 갱신 중 DNS가 잠시 끊긴다.
   strategy:
     type: Recreate
