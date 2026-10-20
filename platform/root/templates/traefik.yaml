@@ -30,8 +30,11 @@ spec:
           digest: sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c
         deployment:
           replicas: 1
+        # 차트 42는 Service 종류를 service.spec.type에서 읽는다. service.type은 무시되고 기본값 LoadBalancer가 되어
+        # k3s servicelb가 노드 LAN 주소 :80에 Traefik을 열었다(2026-10-20 실측). LAN에서 WAF를 거치지 않는 길을 막는다.
         service:
-          type: ClusterIP
+          spec:
+            type: ClusterIP
         ports:
           # TLS는 Cloudflare 가장자리에서 끝난다. 터널 안쪽은 평문 HTTP 하나다.
           # 라우터가 기본으로 web에만 붙게 한다. 차트의 websecure 엔트리포인트를 없애려면 값에 null을 넣어야 하는데,
