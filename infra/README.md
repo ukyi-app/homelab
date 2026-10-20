@@ -163,7 +163,7 @@ tf cloudflare plan -input=false -detailed-exitcode -lock-timeout=0s
 tf tailscale plan -input=false -lock-timeout=0s
 tf tailscale apply -lock-timeout=0s
 tf tailscale plan -input=false -detailed-exitcode -lock-timeout=0s
-tailscale ssh nuc-15-pro
+ssh nuc-15-pro  # tailnet 경로의 sshd. NUC는 Tailscale SSH를 켜지 않는다
 ```
 
 Apply 후 plan의 exit 0이 무변경이다. Exit 1은 오류, 2는 변경이 남았다는 뜻이다.

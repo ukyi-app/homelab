@@ -70,10 +70,11 @@ tailnet에 이미 있으면 건너뛴다.
    sudo sysctl -p /etc/sysctl.d/99-tailscale-subnet.conf
    # 검증된 설치가 끝난 뒤에만 등록한다. 블록 밖에 두면 설치가 실패해도 남아 있던 옛 바이너리로 등록된다
    # --accept-dns=false: 등록 순간부터 노드 DNS를 tailnet(AdGuard)과 떼어 둔다(H5)
-   # --ssh: 원격 접속은 Tailscale SSH다(sshd는 LAN 키 인증만). 2026-10-19 운영 NUC 설정(RunSSH=true)과 같다
+   # --ssh는 주지 않는다: 원격 접속은 tailnet 주소의 sshd(키 인증, root 로그인 금지, H4)다(D-11, 사용자 2026-10-21).
+   # 켜면 tailnet 22번을 Tailscale SSH가 가로채 ACL의 ssh 규칙만으로(키 없이 root까지) 들어온다
    # --advertise-tags: NUC는 tag:nuc다(D-11 (c)). 태그 규칙이 ACL에 먼저 있어야 등록 뒤 원격 접속이 된다
    # --advertise-routes: 공유기 관리 화면(ACL grant와 autoApprovers가 짝이다)
-   sudo tailscale up --hostname=<prod.env의 NODE_NAME> --accept-dns=false --ssh \
+   sudo tailscale up --hostname=<prod.env의 NODE_NAME> --accept-dns=false \
      --advertise-tags=tag:nuc --advertise-routes=192.168.117.1/32
    EOF
    ```
