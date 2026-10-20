@@ -1,0 +1,85 @@
+# 회전: 자격과 비밀번호 바꾸기 (초안)
+
+자격·비밀번호를 바꾸는 순서다. 근거는 설계 [C.6.5](../plans/2026-10-17-homelab-rebuild/platform/design.md)(값 변경과 비밀번호 회전)다. T09가 초안을 만들었고, 각 자격을 만드는 티켓이 자기 절을 채운다(4절).
+
+- 값은 출력하지 않는다. 확인은 응답 코드, 키 이름, 해시 앞부분으로만 한다.
+- 외부 변경(발급, 폐기, Infisical 값 교체)은 [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄로 남긴다.
+- 발급 화면의 경로나 범위 같은 세부는 저장소 밖 작업 기록에 둔다(D-23).
+- 실행하다 이 문서와 다르게 한 것이 있으면 이 문서를 먼저 고친다.
+
+## 0. 공통 규칙
+
+- 네 단계는 원자적이지 않다: Infisical 원본 변경 → Kubernetes Secret 갱신 → 실제 자격 적용 → 쓰는 쪽이 새 자격 사용. 환경변수는 파드를 다시 만들어야 바뀐다.
+- Infisical Free에는 버전 이력이 없다. 덮어쓸 값은 `<KEY>_PREVIOUS`로 남겼다가 새 값을 확인한 뒤 지운다.
+- 즉시 동기화는 annotation으로 한다. `refreshInterval`(1h)을 기다리지 않는다.
+
+  ```bash
+  kubectl -n <ns> annotate externalsecret <이름> force-sync="$(date +%s)" --overwrite
+  ```
+
+- 자동 재시작 컨트롤러는 두지 않는다. 재시작은 순서의 한 단계로 명시한다.
+- 필수 키가 빠지면 ExternalSecret이 `SecretSyncedError`로 멈추고 Secret은 바뀌지 않는다. 잘못된 값이 적용되지 않는다(시나리오 6).
+
+## 1. ESO 부트스트랩 자격 (연 1회)
+
+`eso-homelab`(VM은 `eso-homelab-dev`)의 Universal Auth client secret이다. T09 시나리오 7(2026-10-20)의 장애 주입과 복구가 이 순서였다.
+
+1. Infisical에서 identity의 Universal Auth에 새 client secret을 만든다. TTL 0, 사용 횟수 0(무제한). ESO는 동기화마다 새로 로그인하므로 사용 횟수를 1로 두면 두 번째 동기화부터 실패한다. 옛 secret은 아직 둔다.
+2. 복구 자산 두 곳을 새 값으로 갱신한다.
+3. [bootstrap.md](bootstrap.md) 2.2의 명령으로 부트스트랩 Secret `external-secrets/infisical-universal-auth`를 바꾼다. 같은 명령이고 값만 새것이다.
+4. 확인한다. ESO를 재시작하지 않아도 된다. ESO가 5분마다 Store를 다시 검증한다(시나리오 7에서는 교체 약 1분 20초 뒤 Ready).
+
+   ```bash
+   kubectl get clustersecretstore            # 둘 다 READY True
+   kubectl get externalsecret -A             # 모두 SecretSynced. 하나를 즉시 동기화해 바로 볼 수 있다
+   ```
+
+5. 새 값으로 Ready를 본 뒤에만 Infisical에서 옛 client secret을 폐기한다. 순서를 바꾸면 그 사이 동기화가 실패한다(기존 Secret과 서비스는 유지된다, 시나리오 7).
+
+## 2. Argo CD `owner` 비밀번호
+
+ExternalSecret `argocd/argocd-owner`가 Infisical `/platform/argocd`의 두 키를 `argocd-secret`에 합친다(`platform/external-secrets/templates/argocd-owner.yaml`). Argo CD는 bcrypt 해시만 받는다.
+
+1. 새 비밀번호를 정하고 bcrypt 해시를 만든다. 비밀번호는 `getpass`로만 받아 화면·인자에 남기지 않는다. 8자 이상, 72바이트 이하다(bcrypt는 72바이트 뒤를 버린다).
+
+   ```bash
+   uv run --no-project --with 'bcrypt==5.0.0' python -I -c \
+     'import bcrypt, getpass; print(bcrypt.hashpw(getpass.getpass().encode(), bcrypt.gensalt(12)).decode())'
+   date -u +%Y-%m-%dT%H:%M:%SZ               # 새 OWNER_PASSWORD_MTIME
+   ```
+
+2. Infisical `/platform/argocd`의 `OWNER_PASSWORD_BCRYPT`와 `OWNER_PASSWORD_MTIME`을 함께 바꾼다. MTIME을 바꾸면 그 전에 발급된 세션 토큰이 무효가 된다. 원문은 비밀번호 관리자에 둔다.
+3. 즉시 동기화한다. Argo CD는 `argocd-secret`을 지켜보므로 재시작하지 않는다.
+
+   ```bash
+   kubectl -n argocd annotate externalsecret argocd-owner force-sync="$(date +%s)" --overwrite
+   kubectl -n argocd get externalsecret argocd-owner   # SecretSynced
+   ```
+
+4. 새 비밀번호로 로그인해 본다. UI 경로가 생기기 전(T08a)에는 `argocd-server` Service로 port-forward해 `POST /api/v1/session`이 200인지 본다. 응답 본문(토큰)은 버린다.
+
+## 3. GitHub App 병합 키 (T10 뒤)
+
+병합 키 원본은 `homelab-ci-merge`이고, GitHub environment `automerge`의 secret `HOMELAB_MERGE_KEY`는 Infisical Secret Sync의 사본이다.
+
+1. `homelab github verify`가 exit 0인지 본다.
+2. GitHub에서 병합 App의 새 개인 키를 발급한다.
+3. `homelab-ci-merge`의 값을 새 키로 바꾼다.
+4. environment secret이 교체 뒤에 갱신됐는지 본다. 시각이 교체보다 이전이거나 Infisical의 sync 실패 메일이 왔으면 Sync를 다시 실행한다.
+
+   ```bash
+   gh api repos/ukyi-app/homelab/environments/automerge/secrets/HOMELAB_MERGE_KEY --jq .updated_at
+   ```
+
+5. 그다음에만 옛 키를 지운다. App 키는 만료가 없고 25개까지 동시에 유효해, `deploy-merge`가 성공해도 옛 키로 성공했을 수 있다. 옛 키를 지운 뒤에야 401이 나고, 그때 배포 PR은 열린 채 남는다(안전한 쪽 실패).
+
+## 4. 아직 채우지 않은 절
+
+설계 C.6.5 표의 순서를 따른다. 자격을 만드는 티켓이 이 문서에 절을 더한다.
+
+| 자격 | 채우는 티켓 |
+|---|---|
+| 플랫폼 토큰(터널, Tailscale operator OAuth, Telegram 봇, healthchecks ping URL), Grafana·AdGuard 관리자 | T08a, T08b |
+| Terraform 자격(`homelab-admin`의 R2 state 키, Cloudflare 토큰, Tailscale OAuth) | T08a |
+| GitHub App 배포 키, Infisical GitHub 연결 PAT | T10 |
+| DB·Valkey 비밀번호 | T11 |
