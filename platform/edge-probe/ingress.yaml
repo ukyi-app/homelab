@@ -1,0 +1,30 @@
+# 공개 host 규칙(설계 C.3.4): ukyi.app 아래 한 단계 이름만. Cloudflare Universal SSL이 그 단계까지만 덮는다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: edge-probe
+  namespace: app-edge-probe
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: edge-probe.ukyi.app
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge-probe
+                port:
+                  name: http
+    # 봇 webhook 자리(설계 C.8). Cloudflare WAF 규칙 1이 이 host의 /github POST 밖을 먼저 막는다.
+    - host: hooks.ukyi.app
+      http:
+        paths:
+          - path: /github
+            pathType: Exact
+            backend:
+              service:
+                name: edge-probe
+                port:
+                  name: http

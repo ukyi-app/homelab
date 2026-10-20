@@ -1,0 +1,24 @@
+# Traefik 파드에서 8080으로만 들어오고, 밖으로는 나가지 않는다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edge-probe
+  namespace: app-edge-probe
+spec:
+  podSelector:
+    matchLabels:
+      app: edge-probe
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8080

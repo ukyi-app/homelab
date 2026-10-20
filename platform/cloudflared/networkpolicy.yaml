@@ -1,0 +1,53 @@
+# cloudflared가 나가는 곳은 셋뿐이다: 클러스터 DNS, Cloudflare 에지(7844 QUIC·HTTP2, 443), Traefik 파드(8000).
+# 사설·tailnet 대역은 에지 규칙에서 뺀다. 빼지 않으면 터널로 들어온 요청 경로가 NUC 너머 LAN·tailnet 기기에
+# 닿는 길을 연다(T08a "남는 위험", 설계 C.3.5). 들어오는 연결은 받지 않는다(지표 수집은 T08b가 연다).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+spec:
+  podSelector:
+    matchLabels:
+      app: cloudflared
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8000
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - protocol: TCP
+          port: 7844
+        - protocol: UDP
+          port: 7844
+        - protocol: TCP
+          port: 443

@@ -1,0 +1,33 @@
+{{- /*
+edge-probe: 공개 경로 시험 앱(T08a 검증, 설계 C.3.4 준비 확인·C.8 webhook 경로). wave 0, 원본 platform/edge-probe.
+켜기: values.yaml의 components.edgeProbe.enabled. 정리 PR은 이 파일, platform/edge-probe, values.yaml의 edgeProbe 블록을
+함께 지운다.
+*/}}
+{{- if .Values.components.edgeProbe.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: edge-probe
+  namespace: argocd
+  annotations:
+    # 앱 자리와 같은 wave. Traefik(-5)과 infisical-apps store(-7)가 Healthy가 된 뒤에 만든다.
+    argocd.argoproj.io/sync-wave: "0"
+  # _helpers.tpl 규칙의 예외: 시험 앱이라 Application을 지우면 ns(platform/edge-probe/namespace.yaml)까지 지워지게 한다.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/edge-probe
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-edge-probe
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}

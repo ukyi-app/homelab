@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+spec:
+  # 커넥터 하나. 단일 노드라 늘려도 고가용성은 아니다(설계 C.3.4). 같은 토큰으로 다른 클러스터의 커넥터가
+  # 붙으면 공개 요청이 두 클러스터에 비결정적으로 나뉜다. 옛 터널을 쓰지 않는 이유다(설계 P12).
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # 새 커넥터가 붙은 뒤 옛 것을 내려 갱신 중에도 공개 경로가 끊기지 않게 한다.
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      # 쿠버네티스 API를 쓰지 않는다.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cloudflared
+          # 2026.10.1 멀티 아키텍처 index(2026-10-20 Docker Hub에서 확인). 2026.8.0·8.1은 쓰지 않는다(T08a).
+          image: cloudflare/cloudflared:2026.10.1@sha256:a15a3b50b8dabd57ac2090e9484c0247dba9dfa1f0df4d298d4317f9d69eb2d5
+          # ingress 규칙은 원격 설정(Terraform)에서 받는다. 로컬 config 파일을 두면 규칙이 두 곳이 된다(설계 P12).
+          args: ["tunnel", "--no-autoupdate", "--metrics", "0.0.0.0:9090", "run"]
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-tunnel
+                  key: token
+          ports:
+            - name: metrics
+              containerPort: 9090
+          # /ready는 에지 연결이 하나 이상일 때 200이다. 준비 확인(curl 대신)도 이 끝점이다.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: metrics
+            periodSeconds: 10
+          # 에지 연결을 잃고 스스로 못 돌아오면 재시작한다. 짧게 끊기는 것까지 재시작하지 않게 1분을 둔다.
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
