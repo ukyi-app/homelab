@@ -158,7 +158,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - 공개 webhook 경로: `hooks.ukyi.app/github` GET 403, 다른 경로 POST 403, 틀린 서명 401, `ukyi-app/homelab` 시험 webhook ping 200(생성 뒤 바로 삭제). **AC-P12 이 자리 통과.**
 - 내부 UI: Argo CD·AdGuard가 tailnet 주소로 유효 인증서와 함께 열림. Tailscale IPv4를 바꾼 뒤에도 그대로 열림.
 - ACL: 새 정책 import·적용, 원격 기기에서 `tailscale ssh`로 NUC 접속(사람 확인).
-- Tailscale DNS: adopt import 무변경 → (b′) 목표 전환 apply, 직후 plan 무변경. 전역 nameserver = NUC 현재 IPv4 + `94.140.14.14` + `94.140.15.15`, Cloudflare 없음. **U34의 import·DNS 동작 통과**(provider는 Alpha Resource 경고. (a)의 소유자 precondition으로 실행했다). 2026-10-21 (c) 적용 뒤 `tag:nuc` precondition으로 plan 무변경(**U34 통과**, 값이 같아 apply는 하지 않음. precondition 실패 쪽은 실행하지 않음).
+- Tailscale DNS: adopt import 무변경 → (b′) 목표 전환 apply, 직후 plan 무변경. 전역 nameserver = NUC 현재 IPv4 + `94.140.14.14` + `94.140.15.15`, Cloudflare 없음. **U34의 import·DNS 동작 통과**(provider는 Alpha Resource 경고. (a)의 소유자 precondition으로 실행했다). 2026-10-21 (c) 적용 뒤 `tag:nuc` precondition으로 plan 무변경(**U34 통과**, 값이 같아 apply는 하지 않음). 실패 쪽은 로컬 backend 사본의 plan으로 확인했다: 0대, 2대(기기 목록을 이어 붙인 흉내), 태그 다름(기대 태그를 바꾼 흉내)이 각각 해당 precondition에서 중단했고, 대조 사본은 통과했다.
 - AdGuard: LAN·tailnet 주소 모두 응답, 기본 목록 차단(`doubleclick.net` → `0.0.0.0`).
 - 시나리오 14:
   - LAN(공유기 경유, 10초 간격 30회): 26회 시간 초과, 복구 뒤 4회 정상. **AC-P6 LAN 불합격, 사용자 한계 승인.** NUC 무응답 시험(nft DROP 150초)에서도 11회 모두 시간 초과라 공유기가 보조 DNS로 넘어가지 않는다(**U19**). 이 공유기는 DHCP DNS 지정과 DNS 프록시 끄기가 없다. 완화: 런북 `docs/runbooks-public/nuc-dns-outage.md`, T08b AdGuard 정지 경보.

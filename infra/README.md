@@ -306,7 +306,7 @@ NUC 자신은 `accept-dns=false`를 유지한다.
 
 **Provider 주의:** 설계는 v0.29.2를 정식이라고 적었지만,
 [고정 버전 소스의 Read](https://github.com/tailscale/terraform-provider-tailscale/blob/v0.29.2/tailscale/resource_dns_configuration.go)는
-아직 `Alpha Resource` 경고를 낸다. 2026-10-20~21 T08a에서 import·무변경 plan·목표 apply·`tag:nuc` precondition 통과를 확인했다(U34 통과. precondition 실패 쪽은 실행하지 않음).
+아직 `Alpha Resource` 경고를 낸다. 2026-10-20~21 T08a에서 import·무변경 plan·목표 apply·`tag:nuc` precondition 통과와 실패 쪽 중단(7절 끝)을 확인했다(U34 통과).
 이후 버전에서 실패하면 목표 apply를 멈춘다. 설계의 대안대로 사람이 콘솔에서 한 번 설정하고,
 플랫폼 담당자가 `bootstrap.md`에 값의 출처·확인 명령과 IaC 밖 관리임을 기록한다.
 이때 선언을 그냥 삭제하거나 destroy하지 말고 state 소유권 전환을 별도로 검토한다.
@@ -371,5 +371,7 @@ pre-commit run --files .tool-versions infra/README.md \
 현재 gitleaks pre-commit 훅은 파일 인수를 무시하고 staged diff만 검사한다.
 아직 stage하지 않은 작업은 별도로 `gitleaks dir infra --redact --config .gitleaks.toml`로 검사한다.
 Mock 시험은 v0.29.2의 `devices` 중첩 블록이 `override_data`로 채워지지 않아 채택하지 않았다.
-실제 NUC에서는 precondition 통과 쪽만 확인했다(U34, 2026-10-20 (a) 소유자, 2026-10-21 `tag:nuc`).
-실패 쪽(0대·2대·태그 다름)은 실행하지 않았다.
+실제 NUC로 precondition 통과를 확인했다(U34, 2026-10-20 (a) 소유자, 2026-10-21 `tag:nuc`).
+실패 쪽은 2026-10-21 `backend.tf`를 뺀 사본에서 plan만 해 확인했다(R2 state·잠금을 쓰지 않음).
+hostname을 없는 이름으로(0대), 기기 목록을 두 번 이어 붙여(2대), 기대 태그를 바꿔(태그 다름) 돌리면
+각각 해당 precondition 오류로 중단하고, 바꾸지 않은 대조 사본은 통과한다. 2대와 태그 다름은 식을 바꾼 흉내다.
