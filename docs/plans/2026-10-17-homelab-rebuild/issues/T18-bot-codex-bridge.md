@@ -1,7 +1,7 @@
 # T18 봇 CODEX_BRIDGE
 
 - 단계: P4 봇 V1
-- 상태: 대기
+- 상태: 착수 가능 (선행 T16a 완료 2026-10-20. 로컬·mock 구현부터, 완료는 T16b 뒤. 공개 저장소 내용으로 구독 모델을 부르는 작업은 D-14 차단 조건 뒤)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T16a(착수), T16b(완료)
   - 착수: [T16a](T16a-bot-foundation-local.md) 뒤. 작업자 계약(T16a)에 Codex 어댑터를 붙이는 로컬·mock 구현을 시작한다(V1 범위 조정 안 3).

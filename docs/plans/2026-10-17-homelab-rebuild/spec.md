@@ -11,7 +11,7 @@
 
 - **무엇을:** 옛 홈랩을 걷어내고 같은 이름의 새 홈랩 플랫폼을 짓는다. 그 위에 첫 실제 앱으로 Discord AI 운영 봇 V1을 올린다.
 - **순서:** 정리(P0) → 플랫폼 설계(P1) → 플랫폼 구축(P2), 봇 문서 정비와 DISCOVERY(P3)는 P2와 병행 → 봇 V1 구현(P4) → 기존 앱 재연결(P5). 이 순서는 확정이다(D-01, 2026-10-17). P4의 첫 티켓 T16a(FOUNDATION 로컬·mock)는 플랫폼을 쓰지 않아 T15 뒤 P2와 병행하고, 실연동·첫 배포(T16b)는 T13 뒤다(V1 범위 조정, §5.1).
-- **지금 바로 할 수 있는 것(2026-10-20):** T08a(네트워크·DNS·외부 공개)와 T10(CI/CD)을 시작할 수 있다(T09 2026-10-20 완료). T16a는 봇 저장소 PR #5가 병합됐고 DM 허용 여부와 브리핑 시각 결정이 남았다. 전체 상태는 §8.3이다. D-14 차단 조건 때문에 공개 저장소 내용으로 구독 모델을 부르는 T17·T18 작업은 OpenAI 허용 확인이나 공식 지원 인증 전환 뒤에만 한다(§5.1).
+- **지금 바로 할 수 있는 것(2026-10-20):** T08a(네트워크·DNS·외부 공개)와 T10(CI/CD)을 시작할 수 있다(T09 2026-10-20 완료). T16a도 끝나(2026-10-20) T17·T18·T20의 로컬·mock 착수가 가능하다. 전체 상태는 §8.3이다. D-14 차단 조건 때문에 공개 저장소 내용으로 구독 모델을 부르는 T17·T18 작업은 OpenAI 허용 확인이나 공식 지원 인증 전환 뒤에만 한다(§5.1).
 - **가장 큰 위험(T07 전 기준. 2026-10-19 T06 철거와 T07 main 교체로 해소):** 옛 Argo CD가 아직 main을 `prune`·`selfHeal` 자동 동기화로 따라간다. 옛 클러스터를 내리기 전에는 main을 바꾸지 않고, 새 작업은 `rebuild` 브랜치에 둔다. 브랜치 보호가 관리자를 막지 않으므로(`enforce_admins=false`) push는 항상 명시적 refspec으로 한다.
 
 ### 현재 상태 (2026-10-17 실측, 2026-10-18 결정 반영)
@@ -184,7 +184,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | D-14 | 봇 모델 계정과 인증은 봇 전용 ChatGPT 구독 계정 + 작업자 전용 CODEX_HOME이다. 함께 지킬 조건은 다섯이다. (1) 개인 CODEX_HOME(`~/.codex*`)을 쓰거나 복사하지 않는다. (2) 한도 도달·인증 만료 때 다른 계정이나 다른 인증으로 자동 전환하지 않고 waiting으로 둔다. (3) 작업은 직렬 1개(동시성 1)다. (4) Codex가 갱신한 인증 파일을 되쓰도록 작업자 전용 영속 쓰기 공간을 둔다. 설계 C.8은 작업자 자격을 Infisical `/apps/homelab-bot/worker`에서 ESO로만 받으므로 이 공간은 설계 C.8 변경이고, T08b·T16b가 반영한다. (5) 옛 AIOps의 구독 OAuth 프록시와 다계정 순회는 재사용하지 않는다. 남는 위험(공식 문서의 public 저장소 문구, 되쓰기, 직렬 1개, 한도 예측)은 §10 7번이다 차단 조건(확정(사용자 2026-10-18, PR #3 리뷰)): OpenAI가 이 사용을 허용한다고 확인하거나 API 키 같은 공식 지원 인증으로 바꾸기 전에는 공개 저장소 PR 내용이나 코드로 구독 모델을 부르지 않는다. T17(평가셋·실연동·시범 P-2)과 T18 작업이 여기에 걸리고, 모델을 부르지 않는 로컬·mock 구현은 T16a 뒤 착수할 수 있다. T19는 T17 뒤라 함께 기다린다. 인증 전환은 D-14 변경이라 사용자 결정이 따로 필요하다(§10 7번). | 사용자 2026-10-18, T15 질문 응답. 권장안(OpenAI API 전용 프로젝트 + 서비스 계정 키)이 아니라 봇 전용 ChatGPT 구독 계정을 골랐다 |
 | D-15 | 봇은 NUC k3s 클러스터 안에서 돈다. 게시 서버는 ns `app-homelab-bot`, 작업자는 ns `sandbox`의 상주 파드이고 동시성 1이다(D-14). 봇 자리 값은 앱 라벨 `homelab-bot`, 게시 서버 앱 포트 8080, 작업자 포트 8080, 경보 수신 포트 8081이다. 작업자의 코드 읽기는 `codeload.github.com` 압축본만이다. 작업자 egress에서 `github.com`·`api.github.com`·gist를 빼고, 작업자에는 GitHub 자격이 없다. 받은 코드는 작업자가 `git init`으로 한 번 커밋해 `codex exec`의 Git 저장소 요구를 맞추고, diff는 base·head 압축본으로 만든다. push와 PR 생성은 게시 서버가 D-24 App으로 한다. 파드 방화벽(U13)이 안 되면 호스트 전용 UID + nft로 물러난다. 격리 작업 공간의 기본 방식(설계 C.8 기본값, T05)은 그대로다 | 사용자 2026-10-18, T15 질문 응답. 코드 읽기 축소는 에이전트 설명(작업자에 D-14 구독 인증 파일이 있어 GitHub 호스트를 허용하면 작업 입력에 심긴 남의 토큰으로 gist·push를 만들어 유출할 수 있다)을 듣고 골랐다("좋아 그렇게해"). 나머지는 권장안 수락 |
 | D-16 | PR 리뷰는 기본안이다: 전용 리뷰 App + 격리 리뷰어 + 제한 게시 서버(`01` §5). 봇이 리뷰하는 저장소는 저장소별 Codex 설정에서 Codex 자동 리뷰를 끈다(사람 작업. 수동 `@codex review`는 남긴다). Codex Connector 설치 범위는 선택 저장소로 줄이고 private 운영 저장소 `homelab-bot-ops`는 뺀다(사람 작업, D-26의 설치 범위 축소). 축소는 `homelab-bot-ops`에 운영 산출물을 처음 올리기 전에 사람이 하기로 했고, 2026-10-18 17:45에 완료했다(T15, §11, [approvals.md](approvals.md)). `repository_selection` = `selected`는 API로 확인했다. 남긴 저장소는 사용자 보고로 public 저장소(`homelab`, `homelab-app-template`, `files`, `homelab-bot`)이고, `homelab-bot-ops`와 private 저장소(제거 예정 `aiops`·`mac-uptime-guard`, 보관 `aiops-autodeploy-canary`)는 뺐다. 저장소 목록은 `read:user` 권한이 없어 API로 확인하지 못했다. T17은 축소가 됐는지 확인만 한다. **하위 결정(작성자 확인의 App 예외, 새 결정 ID 없음):** 모델 호출 전 작성자 확인(OWNER·MEMBER·COLLABORATOR, 설계 C.8)에 허용 봇 작성자 목록을 더한다. `pull_request.user.type`이 `Bot`이고 숫자 `user.id`가 목록에 있으면 통과한다. 초기 목록은 호스팅형 Renovate 봇과 D-24 App의 봇 사용자(생성 뒤)다. 배포 갱신 App(`homelab-deploy`), Codex Connector, 옛 writer는 넣지 않는다. fork PR은 제외한다. 댓글 트리거는 `comment.author_association`을 보고 Bot 댓글은 무시한다. `CONTRIBUTOR`는 허용하지 않는다. 실제 ID는 Infisical runtime policy(키 이름 예: `review.allowed_bot_author_ids`)에만 둔다. 허용 작성자의 PR 본문도 비신뢰 자료로 다룬다 | 사용자 2026-10-18, T15 질문 응답 (권장안 수락). Connector 축소 시점과 남길 저장소 후보: 사용자 2026-10-18(T15 마무리). 축소 실행: 사람 2026-10-18 17:45(approvals.md). 하위 결정의 실측 근거: App이 연 PR의 `author_association`은 `NONE`이나 `CONTRIBUTOR`였다(T15 GitHub 조사, `gh api` GET) |
-| D-17 | 봇 전용 개인 Discord 서버를 새로 만든다. 함께 정한 기본값: `MESSAGE_CONTENT` 특권 intent 켬. 허용 채널에서 멘션이나 `/` 명령으로 공개 스레드를 시작하고, 스레드 안은 멘션 없이 처리한다. 허용 사용자는 owner 1명이다. 채널은 2개(대화, 알림·리뷰·브리핑)다. `auto_archive_duration`은 1440분이다. 관리자·MANAGE_THREADS·MENTION_EVERYONE 권한은 주지 않고, 권한은 허용 채널 overwrite로 준다. Public Bot 끔, 서버 설치만, Interactions Endpoint URL 비움(Gateway로 받음). 모든 봇 메시지는 `allowed_mentions`의 parse를 빈 목록으로 둔다. 실제 서버·채널·사용자 ID는 Infisical `/apps/homelab-bot/`에만 둔다. DM 허용 여부와 브리핑 시각은 미정이고 T16a에서 정한다 | 사용자 2026-10-18, T15 질문 응답 (권장안 수락) |
+| D-17 | 봇 전용 개인 Discord 서버를 새로 만든다. 함께 정한 기본값: `MESSAGE_CONTENT` 특권 intent 켬. 허용 채널에서 멘션이나 `/` 명령으로 공개 스레드를 시작하고, 스레드 안은 멘션 없이 처리한다. 허용 사용자는 owner 1명이다. 채널은 2개(대화, 알림·리뷰·브리핑)다. `auto_archive_duration`은 1440분이다. 관리자·MANAGE_THREADS·MENTION_EVERYONE 권한은 주지 않고, 권한은 허용 채널 overwrite로 준다. Public Bot 끔, 서버 설치만, Interactions Endpoint URL 비움(Gateway로 받음). 모든 봇 메시지는 `allowed_mentions`의 parse를 빈 목록으로 둔다. 실제 서버·채널·사용자 ID는 Infisical `/apps/homelab-bot/`에만 둔다. DM 허용 여부와 브리핑 시각은 T16a에서 정했다(확정(사용자 2026-10-20): DM 끔, 브리핑 매일 08:50 Asia/Seoul) | 사용자 2026-10-18, T15 질문 응답 (권장안 수락) |
 | D-18 | 호스팅형 Renovate App을 homelab과 앱 저장소에 저장소별로 설치하고 homelab Actions와 분리한다. 자동 병합은 모두 끈다. Renovate PR은 자동 병합 조건 밖이라 사람이 병합하고, 봇 V1 기능 7의 리뷰 대상이 된다(설계 F D-18) | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
 | D-19 | `02`·`03`도 T14 정비에 넣는다. 두 문서 머리의 "다시 검토할 문장" 표에 모인 옛 홈랩 전제 문장을 `00`·`01`·`04`와 같은 방식으로 정비하고, 복사용 프롬프트(`02` §0, `03` §0)도 고친다 | 사용자 2026-10-18, T14 질문 응답. 권장안(넣지 않음)이 아니라 "넣음"을 골랐다 |
 | D-20 | 시크릿 값은 모두 새로 발급해 Infisical에 등록하고 옛 값은 쓰지 않는다. 옛 자격은 E1(T06)에서 폐기한다. 예외는 둘이다: 옛 Telegram 봇 토큰은 `보류(D-10, T22)`, 옛 healthchecks ping URL은 `보류(D-10, T08b)`다. SOPS age 개인 키는 T06 자격 폐기 완료를 확인한 뒤 지운다. NUC 노드 키(`ts-node-key-nuc`)는 자격이 아니라 기기 등록이라 D-12대로 유지한다(T06 실측 2026-10-18). 새 구조에 대응 자격이 없는 옛 자격(cert-manager DNS-01용 Cloudflare 토큰은 D-08, GHCR pull PAT는 D-29)은 새로 발급하지 않는다 | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
@@ -216,7 +216,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 
 확정된 결정 안에 미정으로 남긴 세부는 새 결정 ID 없이 담당 티켓에서 정한다.
 
-- D-17: DM 허용 여부, 브리핑 시각 → T16a.
+- D-17: DM 허용 여부, 브리핑 시각 → T16a. 확정(사용자 2026-10-20): DM 끔, 브리핑 매일 08:50 Asia/Seoul.
 - D-24: 토큰 분리, ruleset E 여부, App 이름과 설치 저장소, 허용 파일 경로(설정 키 `github.change_writer_allow_paths`) → T19.
 - R08: 연결 방식 → T18.
 
@@ -318,12 +318,12 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | [T13](issues/T13-platform-integration.md) | 테스트 앱 통합 검증 | P2 | T08a, T08b, T10, T11, T12 | 대기 | 에이전트 + 사람 |
 | [T14](issues/T14-bot-docs-refresh.md) | 봇 문서 정비 | P3 | T05 | 완료 (2026-10-18) | 에이전트 + 사람 |
 | [T15](issues/T15-bot-discovery.md) | 봇 V1 DISCOVERY | P3 | T14 | 완료 (2026-10-18) | 에이전트 + 사람 |
-| [T16a](issues/T16a-bot-foundation-local.md) | 봇 FOUNDATION 로컬·mock | P4 | T15 | 진행 중 (PR #5 병합 2026-10-20, DM·브리핑 결정 남음) | 에이전트 + 사람 |
+| [T16a](issues/T16a-bot-foundation-local.md) | 봇 FOUNDATION 로컬·mock | P4 | T15 | 완료 (2026-10-20. 봇 저장소 PR #5·#6, DM 끔·브리핑 08:50) | 에이전트 + 사람 |
 | [T16b](issues/T16b-bot-foundation-deploy.md) | 봇 FOUNDATION 실연동·첫 배포 | P4 | T13, T16a | 대기 | 에이전트 + 사람 |
-| [T17](issues/T17-bot-pr-review.md) | 봇 PR_REVIEW | P4 | T16a(착수), T16b(완료) | 대기 | 에이전트 + 사람 |
-| [T18](issues/T18-bot-codex-bridge.md) | 봇 CODEX_BRIDGE | P4 | T16a(착수), T16b(완료) | 대기 | 에이전트 + 사람 |
+| [T17](issues/T17-bot-pr-review.md) | 봇 PR_REVIEW | P4 | T16a(착수), T16b(완료) | 착수 가능 (T16a 완료 2026-10-20) | 에이전트 + 사람 |
+| [T18](issues/T18-bot-codex-bridge.md) | 봇 CODEX_BRIDGE | P4 | T16a(착수), T16b(완료) | 착수 가능 (T16a 완료 2026-10-20) | 에이전트 + 사람 |
 | [T19](issues/T19-bot-change-pr.md) | 봇 CHANGE_PR | P4 | T17, T18 | 대기 | 에이전트 + 사람 |
-| [T20](issues/T20-bot-memory-briefing.md) | 봇 MEMORY_BRIEFING | P4 | T16a(착수), T16b(완료) | 대기 | 에이전트 |
+| [T20](issues/T20-bot-memory-briefing.md) | 봇 MEMORY_BRIEFING | P4 | T16a(착수), T16b(완료) | 착수 가능 (T16a 완료 2026-10-20) | 에이전트 |
 | [T21](issues/T21-bot-release-audit.md) | 봇 V1 RELEASE_AUDIT | P4 | T17, T18, T19, T20 | 대기 | 독립 감사 에이전트 + 사람 |
 | [T22](issues/T22-reconnect-apps.md) | 기존 앱 저장소 재연결·옛 저장소 정리 | P5 | T13, T16b | 대기 | 에이전트 + 사람 |
 
@@ -390,10 +390,9 @@ T16b → T22
 
 ### 8.3 실행 상태
 
-- **완료:** T01, T02, T03 (2026-10-17), T04 (2026-10-18, push 2026-10-18), T05 (2026-10-18, push 2026-10-18), T14 (2026-10-18. 봇 문서는 봇 저장소로 옮김, D-13), T15 (2026-10-18. 공개 산출물은 봇 저장소 PR #3 `2e84c5f`, 운영 산출물은 `homelab-bot-ops`), T06 (2026-10-19), T07 (2026-10-19), T09 (2026-10-20).
-- **진행 중:** T16a(봇 저장소 PR #5 병합 2026-10-20. DM 허용 여부와 브리핑 시각 결정 남음).
-- **지금 실행 가능:** T08a(선행 T07·T09 완료), T10(선행 T07·T09 완료. `infra/github` 첫 apply만 T08a 뒤).
-- **선행 대기:** T08b, T11~T13, T16b, T17~T22.
+- **완료:** T01, T02, T03 (2026-10-17), T04 (2026-10-18, push 2026-10-18), T05 (2026-10-18, push 2026-10-18), T14 (2026-10-18. 봇 문서는 봇 저장소로 옮김, D-13), T15 (2026-10-18. 공개 산출물은 봇 저장소 PR #3 `2e84c5f`, 운영 산출물은 `homelab-bot-ops`), T06 (2026-10-19), T07 (2026-10-19), T09 (2026-10-20), T16a (2026-10-20. 봇 저장소 PR #5·#6, HANDOFF는 `homelab-bot-ops`).
+- **지금 실행 가능:** T08a(선행 T07·T09 완료), T10(선행 T07·T09 완료. `infra/github` 첫 apply만 T08a 뒤), T17·T18·T20 착수(선행 T16a 완료. 로컬·mock 구현까지, 완료는 T16b 뒤. T17·T18은 D-14 차단 조건, §5.1).
+- **선행 대기:** T08b, T11~T13, T16b, T19, T21, T22.
 - **통합 검증 담당:** T13은 플랫폼 전체(플랫폼 프롬프트 §9 시나리오 1~17), T21은 봇 V1 전체(`04` §4 시험 30개).
 
 ### 8.4 병렬 후보와 소유 범위
