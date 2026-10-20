@@ -250,7 +250,7 @@ CLI만으로 Override 상태를 확정하지 않는다. 콘솔에서 다음을 �
 
 사용자 split DNS와 search path가 **실제로 없으면** 각각 `[]`다.
 NUC는 정확히 1대, 태그 `tag:nuc` 하나, 키 만료 꺼짐, `100.`으로 시작하는 IPv4 1개여야 한다(D-11 (c)).
-2026-10-20 adopt 때는 (a)라 기대 소유자 변수 `TF_VAR_nuc_expected_owner`를 썼다. (c) 적용 뒤 그 키는 Infisical에서 지운다.
+2026-10-20 adopt 때는 (a)라 기대 소유자 변수 `TF_VAR_nuc_expected_owner`를 썼다. (c) 적용 뒤 2026-10-21에 그 키를 Infisical에서 지웠다.
 IPv6가 주소 목록 첫 항목이어도 HCL은 IPv4만 고른다.
 
 ```bash
