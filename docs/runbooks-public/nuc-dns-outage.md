@@ -27,5 +27,6 @@ Tailscale을 켠 기기는 AdGuard 공용 DNS가 답해 영향이 없다(D-08 (b
 
 1. AdGuard가 Ready이고 NUC에서 `dig @192.168.117.15 example.com +short`가 답하는지 확인한다.
 2. 공유기 DNS를 주 `192.168.117.15`, 보조 `1.1.1.1`(C-04 값)로 되돌린다.
-3. `dig @192.168.117.1 doubleclick.net +short`가 `0.0.0.0`이면 공유기를 거친 차단이 돌아온 것이다.
+3. NUC에서 처음 묻는 이름 하나를 공유기로 묻는다(`dig @192.168.117.1 "rbk-$(date +%s).example.com"`). AdGuard 관리 화면의 쿼리 로그에 그 이름이 보이면 공유기가 로컬 AdGuard로 돌아온 것이다.
+   `doubleclick.net` 차단은 확인으로 쓰지 않는다. 임시로 넣은 AdGuard 공용 DNS도 같은 답(`0.0.0.0`)을 줘서, 되돌리기가 실패해도 통과처럼 보인다.
 4. 승인 기록에 되돌린 시각을 남긴다.

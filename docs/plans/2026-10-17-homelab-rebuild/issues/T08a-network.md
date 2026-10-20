@@ -1,7 +1,7 @@
 # T08a 네트워크·DNS·외부 공개
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-20 착수. 완료 조건 중 남은 것: 집 Wi-Fi 사용자 규칙 적용률 20회와 시험 규칙 삭제(사람), U32 출처 확인(AdGuard 질의 로그). 나머지는 아래 "결과". AC-P6 LAN 불합격은 사용자 한계 승인. 사람: tailnet HTTPS 켜짐 확인, ACL·DNS 현재 값 저장소 밖 보관, operator OAuth 발급·등록)
+- 상태: 진행 중 (2026-10-20 착수. 완료 조건 중 남은 것: 집 Wi-Fi 사용자 규칙 적용률 20회와 시험 규칙 삭제(사람), U32 출처 확인(AdGuard 질의 로그), U28 출발 주소 측정, 노드의 AdGuard 경로를 끊은 상태에서 캐시 안 된 이미지 받기. 나머지는 아래 "결과". AC-P6 LAN 불합격은 사용자 한계 승인. 사람: tailnet HTTPS 켜짐 확인, ACL·DNS 현재 값 저장소 밖 보관, operator OAuth 발급·등록)
 - 명세: [../spec.md](../spec.md) §4.5
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4a, E.3, C.3.4~C.3.6, C.3.8, C.3.9, C.8
 - Blocked by: T07, T09
@@ -161,14 +161,98 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - 시나리오 14:
   - LAN(공유기 경유, 10초 간격 30회): 26회 시간 초과, 복구 뒤 4회 정상. **AC-P6 LAN 불합격, 사용자 한계 승인.** NUC 무응답 시험(nft DROP 150초)에서도 11회 모두 시간 초과라 공유기가 보조 DNS로 넘어가지 않는다(**U19**). 이 공유기는 DHCP DNS 지정과 DNS 프록시 끄기가 없다. 완화: 런북 `docs/runbooks-public/nuc-dns-outage.md`, T08b AdGuard 정지 경보.
   - 셀룰러 Tailscale 기기(NUC AdGuard 무응답 중): `doubleclick.net` → `0.0.0.0`, `example.com` 정상. **U33 통과.**
-  - 노드: `resolvectl query example.com` 정상(AdGuard 정지 중), 이미지 받기 성공(복구 뒤 재시도, 노드 DNS는 AdGuard와 무관).
+  - 노드: `resolvectl query example.com` 정상(AdGuard 정지 중). 이미지 받기는 정지 중 sudo 시간 초과로 못 했고 복구 뒤에만 성공해서 **남음**이다. 노드와 파드에서 NUC AdGuard(`192.168.117.15:53`)로 가는 길만 끊은 상태(LAN 기기 영향 없음)에서 캐시 안 된 이미지로 다시 본다.
   - 내부 UI: AdGuard 정지 중 NUC에서 Argo CD HTTPS 200.
   - 사용자 규칙 적용률: 셀룰러 19/20. 집 Wi-Fi 20회는 남음.
 - U02: 같은 root 동시 plan에서 하나가 `Error acquiring the state lock`(통과).
-- U28: NetworkPolicy 없는 시험 ns 파드가 운영자 맥의 Tailscale 주소 시험 포트에 연결 성공. 받은 쪽 출발 주소는 `nc -k`가 출력하지 않아 직접 보지 못했지만, 연결이 된 것은 출발 주소가 NUC의 Tailscale 주소라는 뜻이다(다른 주소면 Tailscale이 버린다). D-11 (c) 재검토의 입력이고 결정은 사용자 대기.
+- U28: NetworkPolicy 없는 시험 ns 파드가 운영자 맥의 Tailscale 주소 시험 포트에 연결 성공. 받은 쪽 출발 주소는 macOS `nc -k`가 출력하지 않아 **아직 측정하지 못했다**(남음). NUC `tailscale0`의 `tcpdump`나 주소를 출력하는 리스너로 SNAT 뒤 출발 주소를 잰다. D-11 (c) 재검토의 입력이고 결정은 사용자 대기.
 - 노드 DNS: `resolvectl` 전역 `1.1.1.1 9.9.9.9`, `tailscale dns status` "Tailscale DNS: disabled."
 - cert-manager: 세 Deployment Ready, 시험 ns의 selfSigned Certificate Ready(ns 삭제).
 - R2: `homelab-backups` lifecycle prefix `valkey/`, 14일, 켜짐. Cloudflare plan 드리프트 없음.
+
+### 부록: 시나리오 14 원자료
+
+NUC에서 공유기(LAN 기기가 쓰는 DNS)로 물었다. 매번 처음 묻는 이름, `dig +tries=1 +time=5`, 질의 사이 10초 대기다(시간 초과 때 실제 간격은 15초). 줄 형식은 `시각 회차 이름 상태 응답시간`이다. AdGuard 정지는 18:13:12~18:19:47이라 27~30회는 복구 뒤다.
+
+```text
+# start 2026-10-20 18:13:26 router=192.168.117.1
+18:13:31 1 am1792487606-1.example.com TIMEOUT -ms
+18:13:46 2 am1792487621-2.example.com TIMEOUT -ms
+18:14:01 3 am1792487636-3.example.com TIMEOUT -ms
+18:14:16 4 am1792487651-4.example.com TIMEOUT -ms
+18:14:31 5 am1792487666-5.example.com TIMEOUT -ms
+18:14:46 6 am1792487681-6.example.com TIMEOUT -ms
+18:15:01 7 am1792487696-7.example.com TIMEOUT -ms
+18:15:16 8 am1792487711-8.example.com TIMEOUT -ms
+18:15:31 9 am1792487726-9.example.com TIMEOUT -ms
+18:15:46 10 am1792487741-10.example.com TIMEOUT -ms
+18:16:01 11 am1792487756-11.example.com TIMEOUT -ms
+18:16:16 12 am1792487771-12.example.com TIMEOUT -ms
+18:16:31 13 am1792487786-13.example.com TIMEOUT -ms
+18:16:46 14 am1792487801-14.example.com TIMEOUT -ms
+18:17:01 15 am1792487816-15.example.com TIMEOUT -ms
+18:17:16 16 am1792487831-16.example.com TIMEOUT -ms
+18:17:31 17 am1792487846-17.example.com TIMEOUT -ms
+18:17:46 18 am1792487861-18.example.com TIMEOUT -ms
+18:18:01 19 am1792487876-19.example.com TIMEOUT -ms
+18:18:17 20 am1792487891-20.example.com TIMEOUT -ms
+18:18:32 21 am1792487907-21.example.com TIMEOUT -ms
+18:18:47 22 am1792487922-22.example.com TIMEOUT -ms
+18:19:02 23 am1792487937-23.example.com TIMEOUT -ms
+18:19:17 24 am1792487952-24.example.com TIMEOUT -ms
+18:19:32 25 am1792487967-25.example.com TIMEOUT -ms
+18:19:47 26 am1792487982-26.example.com TIMEOUT -ms
+18:19:57 27 am1792487997-27.example.com NOERROR 46ms
+18:20:07 28 am1792488007-28.example.com NOERROR 14ms
+18:20:17 29 am1792488017-29.example.com NOERROR 13ms
+18:20:27 30 am1792488027-30.example.com NOERROR 46ms
+# end 2026-10-20 18:20:27 fail=26 slow_over_5s=0
+```
+
+NUC 무응답 시험(nft DROP 18:52:39~18:55:09). 이 측정은 이름을 기록하지 않았다(이름 꼴 `ad<epoch>-<회차>.example.com`).
+
+```text
+# start 2026-10-20 18:52:39 router=192.168.117.1 mode=nuc-silent
+18:52:44 1 TIMEOUT -ms
+18:52:59 2 TIMEOUT -ms
+18:53:14 3 TIMEOUT -ms
+18:53:29 4 TIMEOUT -ms
+18:53:44 5 TIMEOUT -ms
+18:53:59 6 TIMEOUT -ms
+18:54:15 7 TIMEOUT -ms
+18:54:30 8 TIMEOUT -ms
+18:54:45 9 TIMEOUT -ms
+18:55:00 10 TIMEOUT -ms
+18:55:15 11 TIMEOUT -ms
+18:55:25 12 NOERROR 12ms
+# end 2026-10-20 18:55:25 fail=11
+```
+
+셀룰러 사용자 규칙 적용률(맥 핫스팟 + Tailscale, `@100.100.100.100`, 이름 `adg-20261020-c<회차>.ukyi.app`, 사용자 실행 결과).
+
+```text
+c01 0.0.0.0
+c02 0.0.0.0
+c03 0.0.0.0
+c04 0.0.0.0
+c05 0.0.0.0
+c06 0.0.0.0
+c07 0.0.0.0
+c08 0.0.0.0
+c09 0.0.0.0
+c10 0.0.0.0
+c11 0.0.0.0
+c12 0.0.0.0
+c13 0.0.0.0
+c14 0.0.0.0
+c15 104.21.55.203
+c16 0.0.0.0
+c17 0.0.0.0
+c18 0.0.0.0
+c19 0.0.0.0
+c20 0.0.0.0
+CELL_BLOCKED=19/20
+```
 
 ## 되돌리는 방법
 
