@@ -521,6 +521,7 @@ spec·design-prompt가 깔고 있던 전제와 다르게 가는 것이다. 각 �
 | Claude Code PreToolUse 훅은 exit 2만 차단, 그 밖은 fail-open | TD:809 | 훅을 다시 만들면 exit 2 |
 | ESO `v1beta1`은 served가 아니다. Infisical provider는 stability alpha, ESO는 최신 minor 하나만 지원(2~3주마다 새 minor). `recursive`·`find`에 열린 버그(#6876, #6230). `deletionPolicy` Delete·Merge는 누락 키를 조용히 건너뛴다 | [S20][S22][S23][S24] | `external-secrets.io/v1`, 키는 `data[]`로 명시, `deletionPolicy: Retain`(기본), D-18 갱신 대상 |
 | Universal Auth client secret의 사용 횟수를 1로 두면 ESO는 동기화마다 로그인하므로 두 번째 동기화부터 실패한다 | [S05][S24] (ESO v2.13.0 `providers/v1/infisical/provider.go`의 NewClient·Close), 추측 | ESO용 client secret은 사용 횟수 0(무제한), TTL은 복구 자산 점검 주기에 맞춤 |
+| `target.template`이 없는 ExternalSecret은 자기 라벨·주석(Argo CD `tracking-id` 포함)을 대상 Secret에 복사한다. 다른 Application이 소유한 Secret에 `creationPolicy: Merge`로 합치면 그 Secret의 `tracking-id`가 바뀌어 원래 Application이 되돌리고, 두 컨트롤러가 번갈아 덮어쓴다 | ESO v2.13.0 `externalsecret_controller_template.go` `setMetadata`, T09 실측(2026-10-20, PR #766·#767) | Merge로 합치는 ExternalSecret에는 `target.template`(`engineVersion: v2`, `mergePolicy: Merge`)을 둔다. template이 있으면 template의 metadata만 쓴다. 공유 차트(C.4.5)의 ExternalSecret도 같은 이유로 template을 둘지 T10이 정한다 |
 
 **E4 네트워크·DNS·관측**
 

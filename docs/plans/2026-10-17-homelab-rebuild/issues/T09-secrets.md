@@ -1,7 +1,7 @@
 # T09 시크릿 체계
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중 (2026-10-19 착수. Infisical 가입·프로젝트 5개·identity 3개 완료(사용자). 첫 작업 U05 완료: Free에서 OIDC Auth 사용 가능, 개별 claim(`repository_owner_id`, `event_name`, glob이 든 `job_workflow_ref`)으로 묶임, claim 불일치 401, 다른 프로젝트 403. 그래서 배포 키는 OIDC로 확정(Secret Sync 전환 없음). 다음: ESO·ClusterSecretStore)
+- 상태: 진행 중 (2026-10-19 착수. 끝난 것: Infisical 가입·프로젝트 5개·identity 4개(사람 포함), U05(배포 키 OIDC 확정), ESO v2.13.0과 ClusterSecretStore 2개(PR #757), 부트스트랩 Secret과 읽기 경계(`homelab`만 200), 시나리오 6(PR #759·#760)·7(PR #761·#762·#764. 시험용 client secret 장애 주입, 운영 자격 로그인 200으로 복구, 자동 재동기화)의 E3 동등 절차, e3-probe 정리(PR #765)와 Infisical 시험 키 삭제, Argo CD `owner` 비밀번호(PR #766·#767, 로그인 200), 회전 런북 초안·`bootstrap.md` 2.2 선행 조건. 남은 것: Grafana·AdGuard 관리자 자격, 새 Telegram 봇, Terraform 자격 3종(`homelab-admin`), 복구 자산 목록과 두 곳 보관)
 - 명세: [../spec.md](../spec.md)
 - 설계: [../platform/design.md](../platform/design.md) E.1 E3과 "E3의 동등 절차", E.2 E3 행, C.4.8, C.6, B.8 "E3 시크릿", F D-04·D-10·D-20
 - Blocked by: T07

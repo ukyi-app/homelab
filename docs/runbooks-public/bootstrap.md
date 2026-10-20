@@ -140,7 +140,11 @@ EOF
 
 ### 2.2 root보다 먼저 손으로 넣는 Secret (T09 이후)
 
-T09 전(2026-10-19 운영 최초 설치)에는 건너뛴다. 평상시 사람이 손으로 넣는 Secret은 ESO 부트스트랩 Secret 하나다. 값은 복구 자산에서 오고(VM은 VM 준비 자산의 `eso-homelab-dev` 값), 출력하지 않는다. 변수는 `export`해야 아래 bash가 받는다. 비었으면 Secret을 만들지 않고 멈춘다.
+T09 전(2026-10-19 운영 최초 설치)에는 건너뛴다. 평상시 사람이 손으로 넣는 Secret은 ESO 부트스트랩 Secret 하나다.
+
+**먼저 Infisical 쪽을 확인한다.** 클러스터가 읽는 프로젝트·환경(운영 `homelab`/`prod`, VM `homelab-dev`/`dev`)에 폴더 `/platform`과 `/apps`가 있어야 한다. ClusterSecretStore는 Ready 판정 때 그 폴더 목록을 읽어, 폴더가 없으면 404로 Ready=False가 되고 root가 wave -7에서 멈춘다. Git의 ExternalSecret이 읽는 키도 모두 있어야 한다(지금은 `/platform/argocd`의 `OWNER_PASSWORD_BCRYPT`·`OWNER_PASSWORD_MTIME`). 하나라도 빠지면 그 Application이 Degraded가 되고 root가 뒤 wave로 넘어가지 않는다.
+
+ESO 자격 값은 복구 자산에서 오고(VM은 VM 준비 자산의 `eso-homelab-dev` 값), 출력하지 않는다. 변수는 `export`해야 아래 bash가 받는다. 비었으면 Secret을 만들지 않고 멈춘다.
 
 ```bash
 bash -euo pipefail <<'EOF'
@@ -154,7 +158,7 @@ jq -n '{apiVersion: "v1", kind: "Secret", type: "Opaque",
 EOF
 ```
 
-다시 실행해도 같은 Secret을 덮어쓸 뿐 멈추지 않는다. 값은 `kubectl`의 명령행 인자에 들어가지 않고(`--from-literal`은 `ps`·`/proc`로 보인다), `--server-side`로 적용해 client-side apply가 남기는 `last-applied-configuration` 주석에 값이 한 벌 더 복사되지도 않는다. T09가 이 단계를 확정하면 이 절을 고친다.
+다시 실행해도 같은 Secret을 덮어쓸 뿐 멈추지 않는다. 값은 `kubectl`의 명령행 인자에 들어가지 않고(`--from-literal`은 `ps`·`/proc`로 보인다), `--server-side`로 적용해 client-side apply가 남기는 `last-applied-configuration` 주석에 값이 한 벌 더 복사되지도 않는다. T09가 2026-10-20에 이 방식을 확정했다(시나리오 7의 장애 주입과 복구가 같은 방식이었다. ESO를 재시작하지 않아도 Secret 교체 약 1분 20초 뒤 Store가 Ready였다). 자격을 바꾸는 순서는 [rotate.md](rotate.md) 1절이다.
 
 **vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). T11·T13이 명령을 채운다.
 
