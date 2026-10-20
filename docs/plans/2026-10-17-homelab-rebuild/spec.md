@@ -196,6 +196,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | D-27 | NUC 로컬 전용 자료(옛 런북, `~/workspace/homelab-infra/`)는 T06 목록 작성에만 읽기 전용으로 쓰고, 값과 절차 원문은 저장소 문서에 옮기지 않는다. T04는 읽지 않았다(2026-06-11 로컬 전용 결정 존중. 로컬 자료 없이 판정하지 못한 곳은 설계 B.9) | 사용자 2026-10-18, T05 질문 응답 (설계 권장안 수락) |
 | D-28 | GitHub 보호 설정은 Terraform으로 관리한다(개선안 T1). root `infra/github`. 리소스는 `github_repository_ruleset`, `github_repository_environment`(+ deployment policy), `github_actions_repository_permissions`, `github_workflow_repository_permissions`만 쓴다. `github_repository`와 시크릿 리소스는 두지 않는다. 저장소 설정(`allow_auto_merge=false`, squash만, 병합 뒤 삭제 등)은 guard로 확인만 하고 값은 `gh api`로 맞춘다. fork PR 승인 정책은 provider가 지원하지 않아 `gh api` PUT + guard. 실행은 owner 로컬만이고 래퍼(T10의 `tools/tf-github.sh`, T12부터 `homelab github plan·apply·verify`)로 한다. guard는 `check` 블록이 아니라 `github_rest_api` 데이터 소스 postcondition(실패 시 plan 오류)이다. App ID는 숫자 리터럴로 쓴다(private App의 ID는 익명 조회가 안 되는 값이라 공개 HCL에 처음 노출된다. 자격은 아니다). provider 6.13.0 정확 핀(legacy client). state는 R2 `homelab-tfstate`의 `v2/github/terraform.tfstate`, `use_lockfile = true`. 잠금(U02)은 R2 PutObject의 If-None-Match 원자성과 S3 backend lockfile 구현으로 문서·소스상 확인됐고, 동시 실행 시험 1회만 T08a(설계 E4a)에 남았다. R2는 versioning이 없어 래퍼가 백업한다. CI는 fmt -check, init -backend=false, validate, `terraform test`만 하고 plan은 하지 않는다. T06(설계 E1)의 `main-interim`과 옛 브랜치 보호 DELETE, T07(설계 E2)의 `ci` ruleset은 `gh api`로 하고 T10(설계 E5)에서 import한다(`ci` → `main-checks` 제자리 이름 변경). 무인 부분 감시(기본 `GITHUB_TOKEN`으로 ruleset 목록·rules·`updated_at` 비교)는 선택지로만 둔다. JSON + `gh api` 원안과 저장소까지 관리하는 T2는 검토 후 제외(T2는 Free에서 fork가 하나라도 생기면 삭제 복원이 안 돼 방어가 얇다). 래퍼·guard 세부는 T10 | 사용자 2026-10-18: "추천대로" (추천안 수락) |
 | D-29 | 앱 저장소는 public만 허용한다. 설계의 private 앱 경로를 모두 지운다: `homelab app new --private` 없음, `homelab app add`는 private 저장소와 익명 GHCR pull이 안 되는 패키지를 거부, deploy-pr의 visibility 분기 없이 attestation 항상, GHCR pull 자격(ghcr-pull classic PAT, imagePullSecrets, ExternalSecret) 없음. 자동 병합 조건 9(public + `app-main` active + `CODEOWNERS` 유효, 설계 C.4.7)는 fail-safe로 유지한다. GHCR 패키지: `GITHUB_TOKEN`으로 만든 패키지가 저장소 가시성을 물려받는지 문서끼리 어긋나므로, T10에서 org Package Creation의 Public 허용을 확인한 뒤 `homelab-probe` 첫 push로 시험한다. 안 되면 앱마다 첫 push 뒤 UI에서 Public으로 바꾼다(비가역. public 패키지는 다시 private이 안 된다). public 앱 저장소 기본 설정: org와 저장소의 fork PR 승인 `all_external_contributors`, secret scanning·push protection 켬, private vulnerability reporting 켬, 로그 보존 단축 검토. interaction limits `collaborators_only`(6개월마다 갱신)와 PR 생성 Collaborators only는 Codex 외부 호출 시험 결과에 따라 정한다. 배포 이미지 빌드(push job)는 캐시 없이 한다. 봇은 모델 호출 전에 `author_association`을 확인한다. D-23 금지 항목(tailnet 이름, Tailscale IP 등)을 앱 저장소 코드·로그·이미지까지 넓히고 템플릿 CI에 금지 패턴 검사를 둔다. 비앱 저장소: `aiops`와 `mac-uptime-guard`는 쓰지 않으며 제거(삭제)한다. `aiops-autodeploy-canary`는 공개하지 않고 private로 보관한다(삭제도 가능). 실행은 T22다. `mac-uptime-guard`는 장치를 끄고 옛 Telegram 봇 토큰을 폐기한 뒤(D-10) 저장소를 지운다. 앱이 아닌 저장소를 공개하는 일은 없다. `page`와 `trip-mate-api`는 쓰지 않으므로 저장소와 GHCR 패키지를 삭제한다(2026-10-18 실행). 남는 앱 저장소는 `files`와 `homelab-app-template`이다. 두 앱의 옛 자격은 T06 자격 폐기 표에서 폐기한다 | 사용자 2026-10-18: "추천대로" (추천안 수락), "page, trip-mate-api는 제거예정이야. 제거해버리자." `mac-uptime-guard` 제거: 사용자 2026-10-18 17:46 "aiops와 mac-uptime-guard는 제거예정"(그 전에는 private 보관이었다, approvals.md) |
+| D-30 | 내부 UI 짧은 주소: D-08의 `<서비스>.<tailnet>.ts.net`은 그대로 두고 tailnet 전용 리다이렉터 `go`를 둔다. `go/<이름>/<경로>`를 `https://<이름>.<tailnet>.ts.net/<경로>`로 302 보낸다(쿼리 유지. 대상 호스트는 늘 한 라벨 + tailnet 도메인이라 열린 리다이렉트가 아니다). 노출은 operator LoadBalancer Service(`loadBalancerClass: tailscale`, hostname `go`, 태그 `tag:k8s-go`)의 HTTP 80 하나이고 443은 열지 않는다. VM은 `vm-go`가 `vm-<이름>`으로 보낸다. 인증서·DNS 쓰기 자격·PVC가 없고 CT 로그에 새 이름이 실리지 않는다. 이름 풀이는 MagicDNS 짧은 이름이라 AdGuard·공개 DNS와 무관하다. tailnet 도메인 값은 저장소에 두지 않고 실행 때 넣는다(D-23). ACL은 `autogroup:member → tag:k8s-go:80`만 더한다. `go`가 멈춰도 전체 주소는 그대로 열린다. `go`는 앱 내부 이름(`internal.name`)으로 쓸 수 없게 예약한다(T10). 기기 즐겨찾기·홈 화면 등록은 두지 않는다. `*.lab.ukyi.app`(공개 A 레코드 + `_acme-challenge` 위임 + 내부 Traefik), 즐겨찾기만, 사설 CA, Cloudflare Access, WARP private hostname, tailnet fun name, golink는 검토 후 제외(설계 문서 F D-30). 실행은 T08c | 사용자 2026-10-20: 세 에이전트(Claude·Codex·DeepSeek)의 독립 검토를 비교한 뒤 "2번으로 하고싶고 2번하면 즐겨찾기는 안해도 될거같아", 이름은 "1번"(`go`) |
 
 **결정 5 (지금 열린 구멍 막기, 사용자 2026-10-18 "추천대로", 2026-10-18 실행):** 설계의 `app-main`을 T10보다 먼저 건다. `files`와 `homelab-app-template`에 `.github/CODEOWNERS`(`* @ukkiee`)와 `app-main` ruleset(PR 필수, 승인 1, code owner 리뷰, 새 push 때 승인 무효화, force push·삭제 금지, bypass는 저장소 관리자 역할 `pull_request` 모드)을 걸고, secret scanning·push protection을 켜고, 저장소와 org의 fork PR 승인을 `all_external_contributors`로 올린다. 자동 권한 검사가 에이전트의 org·저장소 설정 변경을 막아 사람이 스크립트로 실행했다(§11, [approvals.md](approvals.md)). U08 셋째 조건(관리자 역할 bypass가 org owner에게 적용되는지, 설계 문서 부록 1)의 첫 실측인 `current_user_can_bypass`는 두 저장소 모두 `pull_requests_only`였다. 이 값은 API가 알려 주는 우회 가능 여부이고, 실제 bypass 병합은 E1에서 시험한다. 결정 5 목록에는 private vulnerability reporting이 없었다. 설계 C.3.9는 `files`·템플릿에서 결정 5 하드닝이 이것을 먼저 켰다고 적지만, 2026-10-18 실측(`gh api` GET `repos/ukyi-app/<저장소>/private-vulnerability-reporting`)은 `files`·`homelab-app-template` 모두 `enabled:false`이고 `homelab-bot`만 `true`다. D-29 기본 설정(켬)에 맞추는 일은 §11에 있다.
 
@@ -208,7 +209,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 
 ### 5.2 추천, 확인 대기 (지금 정할 것)
 
-없음. D-01~D-03은 2026-10-17에 확정돼 §5.1로 옮겼고, D-23도 같은 날 확정돼 §5.1로 옮겼다. D-04·D-08, 새 결정 D-28·D-29, D-13의 일부(봇 저장소 가시성, 옛 aiops 처리)는 2026-10-18에 확정돼 §5.1로 옮겼다. T05 결정 게이트의 D-05~D-07, D-09~D-12, D-18, D-20~D-22, D-25~D-27과 설계 "추가 확인" 기본값도 2026-10-18 12:32에 사용자가 T05 질문에 답해 확정했고(전부 설계 권장안) §5.1로 옮겼다. T14 결정 게이트의 D-13 나머지와 D-19도 2026-10-18 13:51에 사용자가 T14 질문에 답해 확정했고 §5.1로 옮겼다. T15 결정 게이트의 D-14~D-17, D-24와 R08 보류, V1 범위 조정도 2026-10-18 16:29에 사용자가 T15 질문에 답해 확정했고 §5.1로 옮겼다(D-14는 권장안이 아닌 선택, D-15의 코드 읽기 축소는 설명을 듣고 고름, 나머지는 권장안).
+없음. D-01~D-03은 2026-10-17에 확정돼 §5.1로 옮겼고, D-23도 같은 날 확정돼 §5.1로 옮겼다. D-04·D-08, 새 결정 D-28·D-29, D-13의 일부(봇 저장소 가시성, 옛 aiops 처리)는 2026-10-18에 확정돼 §5.1로 옮겼다. T05 결정 게이트의 D-05~D-07, D-09~D-12, D-18, D-20~D-22, D-25~D-27과 설계 "추가 확인" 기본값도 2026-10-18 12:32에 사용자가 T05 질문에 답해 확정했고(전부 설계 권장안) §5.1로 옮겼다. T14 결정 게이트의 D-13 나머지와 D-19도 2026-10-18 13:51에 사용자가 T14 질문에 답해 확정했고 §5.1로 옮겼다. T15 결정 게이트의 D-14~D-17, D-24와 R08 보류, V1 범위 조정도 2026-10-18 16:29에 사용자가 T15 질문에 답해 확정했고 §5.1로 옮겼다(D-14는 권장안이 아닌 선택, D-15의 코드 읽기 축소는 설명을 듣고 고름, 나머지는 권장안). 새 결정 D-30은 2026-10-20 T08a 진행 중 티켓 밖 대화에서 확정해 §5.1에 넣었다.
 
 ### 5.3 단계 결정 게이트
 
@@ -310,6 +311,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | [T07](issues/T07-bootstrap.md) | 부트스트랩: main 교체·k3s·Argo CD | P2 | T01, T02, T06 | 완료 (2026-10-19, main `eaf7bb5`, 재부팅 뒤 확인 통과) | 에이전트 + 사람 |
 | [T08a](issues/T08a-network.md) | 네트워크·DNS·외부 공개 | P2 | T07, T09 | 진행 중 (2026-10-20 착수) | 에이전트 + 사람 |
 | [T08b](issues/T08b-observability.md) | 관측·알림·봇 자리 | P2 | T08a, T09 | 대기 | 에이전트 + 사람 |
+| [T08c](issues/T08c-internal-short-links.md) | 내부 UI 짧은 주소 `go/` | P2 | T08a | 대기 | 에이전트 + 사람 |
 | [T09](issues/T09-secrets.md) | 시크릿 체계 | P2 | T07 | 완료 (2026-10-20. 시나리오 6·7 E3 범위 통과, 플랫폼·Terraform 자격 등록, 복구 자산 두 곳 보관) | 에이전트 + 사람 |
 | [T10](issues/T10-cicd.md) | CI/CD | P2 | T07(착수), T09(완료), T08a(`infra/github` 첫 apply만) | 대기 | 에이전트 + 사람 |
 | [T11](issues/T11-data-services.md) | 데이터 서비스 | P2 | T08a, T09, T10 | 대기 | 에이전트 + 사람 |
@@ -347,6 +349,7 @@ T07 → T08a
 T09 → T08a
 T08a → T08b
 T09 → T08b
+T08a → T08c
 T08a → T11
 T09 → T11
 T10 → T11
@@ -379,6 +382,8 @@ T16b → T22
 
 검사(2026-10-18 T16 분할 뒤, 스크립트): 24개 티켓이 모두 그래프에 있고, 모든 선행 ID가 존재하며, 모든 티켓 머리말의 Blocked by와 §8.1 표가 이 간선과 같고, 순환이 없다. T01·T02·T03은 선행이 없다. 위상 순서 하나: T01, T02, T03, T04, T05, T06, T14, T07, T15, T16a, T09, T08a, T10, T08b, T11, T12, T13, T16b, T17, T18, T20, T19, T21, T22. P2 간선은 설계 E.2 끝 문단과 같고, P4 간선은 T15 산출물 `V1_PLAN.md` §1 초안(봇 저장소 `docs/ai-bot/`에 PR 예정)과 같다.
 
+다시 검사(2026-10-20 T08c 추가 뒤, 스크립트): 25개 티켓이 모두 그래프에 있고, 모든 선행 ID가 존재하며, 티켓 머리말의 Blocked by와 §8.1 표가 이 간선과 같고, 순환이 없다. T08c는 T08a만 기다리고 다른 티켓을 막지 않는다. T10의 `go` 이름 예약은 문서 규칙이라 간선으로 두지 않는다.
+
 **착수·완료 간선 (재분해 T05 2026-10-18):** T07 → T10은 착수, T09 → T10은 완료 간선이다(설계 C.4.8 "T09 → T10 간선의 답", E.2). T10의 작성 작업(차트, 워크플로, `infra/github` HCL)은 T07 뒤 T09와 병행한다. T09가 먼저 있어야 하는 것은 T10의 종단 시험(CLI 없는 동등 절차)뿐이다. Infisical 프로젝트와 배포 키 OIDC identity가 있어야 배포 PR이 생기기 때문이다. App 키 전달 방식은 D-04(확정(사용자 2026-10-18))대로 배포 키는 Infisical OIDC, 병합 키는 Secret Sync → environment `automerge`다.
 
 **착수·완료 간선 (T16 분할, 2026-10-18):** T16a → T17·T18·T20은 착수, T16b → T17·T18·T20은 완료 간선이다(V1 범위 조정 안 3, §5.1). T16a 뒤에는 T16a 소유 공유 계약에 자기 경로를 더하는 로컬·mock 구현을 시작한다. 실연동(`authorized_external`)과 완료 판정은 봇이 배포된 T16b 뒤다(각 티켓 머리말).
@@ -392,7 +397,7 @@ T16b → T22
 - **완료:** T01, T02, T03 (2026-10-17), T04 (2026-10-18, push 2026-10-18), T05 (2026-10-18, push 2026-10-18), T14 (2026-10-18. 봇 문서는 봇 저장소로 옮김, D-13), T15 (2026-10-18. 공개 산출물은 봇 저장소 PR #3 `2e84c5f`, 운영 산출물은 `homelab-bot-ops`), T06 (2026-10-19), T07 (2026-10-19), T09 (2026-10-20), T16a (2026-10-20. 봇 저장소 PR #5·#6, HANDOFF는 `homelab-bot-ops`).
 - **진행 중:** T08a(2026-10-20 착수).
 - **지금 실행 가능:** T10(선행 T07·T09 완료. `infra/github` 첫 apply만 T08a 뒤), T17·T18·T20 착수(선행 T16a 완료. 로컬·mock 구현까지, 완료는 T16b 뒤. T17·T18은 D-14 차단 조건, §5.1).
-- **선행 대기:** T08b, T11~T13, T16b, T19, T21, T22.
+- **선행 대기:** T08b, T08c, T11~T13, T16b, T19, T21, T22.
 - **통합 검증 담당:** T13은 플랫폼 전체(플랫폼 프롬프트 §9 시나리오 1~17), T21은 봇 V1 전체(`04` §4 시험 30개).
 
 ### 8.4 병렬 후보와 소유 범위
