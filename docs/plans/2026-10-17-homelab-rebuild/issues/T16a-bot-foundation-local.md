@@ -1,7 +1,7 @@
 # T16a 봇 FOUNDATION 로컬·mock
 
 - 단계: P4 봇 V1 (T15 뒤 바로 착수, P2와 병행)
-- 상태: 대기
+- 상태: 진행 중 (봇 저장소 PR #5 squash 병합 2026-10-20 10:21, main `7f649c9`. Codex 리뷰 지적을 여러 차례 반영한 뒤 마지막 재리뷰(head `1a639db`) P1 0개·보안 지적 0개, 남은 P2 6개는 T16b 할 일 6으로 이월. 로컬 `npm run check` 통과, `npm test` 276/276. 남은 완료 조건: DM 허용 여부와 브리핑 시각 결정(사람, 지금 설정은 `null`))
 - 명세: [../spec.md](../spec.md)
 - 설계: [../platform/design.md](../platform/design.md) C.8 (봇 쪽 자리와 경계). 플랫폼 쪽 준비와 첫 배포(E.1 E9)는 [T16b](T16b-bot-foundation-deploy.md)다
 - Blocked by: T15

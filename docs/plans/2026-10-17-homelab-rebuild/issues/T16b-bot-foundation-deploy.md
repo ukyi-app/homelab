@@ -40,6 +40,13 @@
    - 못 하면 `blocked`와 사유를 HANDOFF에 적는다.
    - 승인은 [../approvals.md](../approvals.md)에 남긴다 (AC-X2).
 5. 봇 중단 경보(OPS-02)를 실제로 확인한다. Gateway만 끊겼을 때 봇이 Ready를 유지해 webhook(8080)·경보 수신(8081)이 계속 되는지와 Gateway 연결 지표 경보가 오는지를 함께 본다. T16a가 만든 readiness 연동과 하트비트를 쓰려면 사람이 봇 전용 healthchecks.io 체크를 만들고 ping URL을 `/apps/homelab-bot/`에 등록한다(봇 저장소 `ARCHITECTURE.md` §8 제안). Bun 위 Discord Gateway의 네트워크 차단·복구 시험(discord.js 이슈 #10840, not planned 종료)을 여기서 한다. 실패하면 Node 24 전환을 검토한다 [가정: `ARCHITECTURE.md` §3].
+6. T16a PR #5(`ukyi-app/homelab-bot`, 병합 `7f649c9`)에서 이월한 Codex 리뷰 P2 6개를 봇 저장소 PR로 고친다. 마지막 재리뷰(head `1a639db`)에 P1이 없으면 병합하고 남은 P2는 이 티켓으로 옮긴다는 멈춤 규칙에 따른 것이다(사용자 2026-10-20). 스레드마다 처리 방향을 답글로 남겼다.
+   - **capability nonce 정규화(`src/worker.ts`, 보안 성격):** 서명에 `=`·`!` 같은 문자를 덧붙인 비정규 base64url이 같은 바이트로 검증되지만 nonce는 새 값으로 소비돼, 30초 안에 같은 작업을 다시 실행할 수 있다. canonical base64url만 받거나 검증된 payload와 서명 바이트로 nonce 키를 만든다. 첫 배포(할 일 4) 전에 고친다 [제안].
+   - **JSON 페이지 밖 marker(`src/discord.ts`):** 긴 `/list` 게시물의 각 페이지 뒤에 붙는 `[ref:...]`가 JSON 파싱을 깬다. marker를 JSON 필드나 별도 메타데이터로 옮긴다.
+   - **모델 응답 생략 표시(`src/runtime.ts`):** 섹션 350자 `slice()`가 항목을 조용히 버린다. 완결 항목 단위로 줄이고 생략 건수를 표시한다(`summaryItems()`와 같은 방식).
+   - **marker 검색 실패 backoff(`src/discord.ts`):** `external_id`가 없는 unknown 행이 매 `reconcile()`마다 최대 10페이지 history를 다시 조회한다. 검색 실패 때도 다음 대조 시각을 저장하고 조회 조건에 쓴다.
+   - **`/retry` 큐 상한(`src/store.ts`):** 재시도 전이가 queued 개수를 보지 않아 `DEFAULTS.maxQueue`(100)를 넘을 수 있다. scheduler 행 잠금 아래에서 개수를 확인한 뒤 전이한다.
+   - **read 타임아웃 중단(`src/read.ts`):** 5초 `Promise.race()`가 실제 요청을 멈추지 않아 반복 timeout에서 요청이 직렬성 밖에 쌓인다. `ReadTransport`에 `AbortSignal`을 넘겨 abort한다.
 
 ### 봇 자리 `target` 변경 (설계 E9, C.8)
 
