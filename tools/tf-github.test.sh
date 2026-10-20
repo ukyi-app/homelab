@@ -11,14 +11,15 @@ t=$(mktemp -d)
 trap 'chmod -R u+w "$t" 2>/dev/null; rm -rf "$t"' EXIT
 
 # origin(main에 infra/github)과 작업 사본.
-git init -q --bare "$t/origin.git"
+# 러너의 git 기본 브랜치는 master일 수 있다. main을 명시한다.
+git init -q --bare -b main "$t/origin.git"
 git init -q -b main "$t/seed"
 mkdir -p "$t/seed/infra/github"
 echo 'terraform {}' >"$t/seed/infra/github/main.tf"
 git -C "$t/seed" add -A
 git -C "$t/seed" -c user.name=t -c user.email=t@example.invalid commit -q -m seed
 git -C "$t/seed" push -q "$t/origin.git" main
-git clone -q "$t/origin.git" "$t/work"
+git clone -q -b main "$t/origin.git" "$t/work"
 
 mkdir -p "$t/bin" "$t/home"
 cat >"$t/bin/gh" <<'EOF'
