@@ -1,0 +1,20 @@
+{{- if eq .Values.kind "web" }}
+{{- $name := include "app.name" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "app.selector" . | nindent 4 }}
+  ports:
+    # 서비스 포트를 컨테이너 포트와 같게 둔다. port-forward와 Ingress가 같은 숫자를 쓴다.
+    - name: http
+      port: {{ .Values.port }}
+      targetPort: http
+      protocol: TCP
+{{- end }}

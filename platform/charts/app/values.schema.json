@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "homelab app chart values (apps/<app>/values.yaml + apps/<app>/image.yaml)",
+  "description": "닫힌 schema다(L04). 모르는 키는 렌더를 막는다. 앱 저장소가 homelab main에서 이 파일을 받아 오지 않는다(설계 C.4.5).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["chartVersion", "kind", "resources", "repository", "digest", "revision", "hold", "tailnetPrefix"],
+  "properties": {
+    "chartVersion": {
+      "description": "이 앱이 쓰는 차트 태그 app-chart-v<chartVersion>. ApplicationSet apps가 읽는다.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "kind": {
+      "description": "web은 Service와 포트가 있는 Deployment, worker는 포트 없는 Deployment.",
+      "enum": ["web", "worker"]
+    },
+    "port": {
+      "description": "컨테이너가 듣는 포트(web만). 비root라 1024 이상. 컨테이너 env PORT로도 넣는다.",
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535
+    },
+    "resources": {
+      "description": "requests.cpu, requests.memory. memory는 limit에도 같은 값으로 넣는다(L28).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "memory"],
+      "properties": {
+        "cpu": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?m?$" },
+        "memory": { "type": "string", "pattern": "^[0-9]+(Mi|Gi)$" }
+      }
+    },
+    "probes": {
+      "description": "readiness는 늘 렌더한다(web 기본 HTTP GET /healthz). liveness는 적을 때만.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readiness": { "$ref": "#/definitions/probe" },
+        "liveness": { "$ref": "#/definitions/probe" }
+      }
+    },
+    "public": {
+      "description": "공개 Ingress(class traefik). host는 <이름>.ukyi.app 한 단계만(Universal SSL, 설계 C.3.4).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host"],
+      "properties": {
+        "host": { "type": "string", "pattern": "^[a-z0-9-]+\\.ukyi\\.app$" }
+      }
+    },
+    "internal": {
+      "description": "tailnet 내부 Ingress(class tailscale). 이름은 <클러스터 접두><name>.<tailnet>.ts.net. go·vm-go는 짧은 주소 리다이렉터 이름이라 예약(D-30).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+          "not": { "enum": ["go", "vm-go"] }
+        }
+      }
+    },
+    "secrets": {
+      "description": "Infisical /apps/<app>/<KEY>의 키 이름. 키마다 ExternalSecret data와 env secretKeyRef가 생긴다.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/envName" }
+    },
+    "env": {
+      "description": "비밀이 아닌 설정 env. 값은 문자열만.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/definitions/envName" },
+      "additionalProperties": { "type": "string" }
+    },
+    "uses": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "postgres": { "description": "true면 env DATABASE_URL(공유 PostgreSQL pg-rw, 역할·DB 이름 = 앱 이름)과 database ns 5432 egress.", "type": "boolean" },
+        "valkey": { "description": "true면 env VALKEY_URL(같은 ns의 Service <app>-valkey:6379).", "type": "boolean" }
+      }
+    },
+    "migration": {
+      "description": "있으면 Argo CD Sync hook Job으로 매 sync마다 실행한다(D-22). 멱등이어야 한다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    },
+    "serviceAccountName": {
+      "description": "봇의 bot-reader처럼 platform이 그 ns에 만든 SA로 돌 때만. 차트는 SA·바인딩을 만들지 않는다(설계 C.8).",
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "repository": {
+      "description": "image.yaml. ghcr.io/ukyi-app/<앱 이름>이어야 한다(템플릿이 앱 이름과 대조).",
+      "type": "string",
+      "pattern": "^ghcr\\.io/ukyi-app/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "digest": {
+      "description": "image.yaml. 배포는 태그가 아니라 repository@digest로만 한다(설계 C.4.3).",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "revision": {
+      "description": "image.yaml. 앱 저장소 커밋 40자.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "hold": {
+      "description": "image.yaml. true면 배포 PR을 만들지 않는다(롤백). 렌더에는 쓰지 않는다.",
+      "type": "boolean"
+    },
+    "tailnetPrefix": {
+      "description": "ApplicationSet apps가 클러스터 값에서 넣는다(운영 \"\", VM \"vm-\"). 사람이 적지 않는다.",
+      "type": "string",
+      "pattern": "^([a-z0-9-]*)$"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "web" } } },
+      "then": { "required": ["port"] },
+      "else": {
+        "not": {
+          "anyOf": [{ "required": ["port"] }, { "required": ["public"] }, { "required": ["internal"] }]
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "worker" } } },
+      "then": {
+        "required": ["probes"],
+        "properties": { "probes": { "required": ["readiness"] } }
+      }
+    }
+  ],
+  "definitions": {
+    "envName": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+    "probe": {
+      "description": "path(HTTP GET, web만) 또는 command(exec) 하나.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "pattern": "^/[^\\s]*$" },
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "periodSeconds": { "type": "integer", "minimum": 1, "maximum": 300 },
+        "failureThreshold": { "type": "integer", "minimum": 1, "maximum": 30 }
+      },
+      "oneOf": [{ "required": ["path"] }, { "required": ["command"] }]
+    }
+  }
+}

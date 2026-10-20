@@ -1,0 +1,10 @@
+# expect: fail
+# resources는 필수다(L28).
+chartVersion: 1.0.0
+kind: web
+port: 8080
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

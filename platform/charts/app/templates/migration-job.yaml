@@ -1,0 +1,49 @@
+{{- with .Values.migration }}
+{{- $name := include "app.name" $ }}
+# 마이그레이션(D-22). Sync 단계 hook이라 ExternalSecret(wave 0) 뒤, 새 Deployment(wave 2) 앞에 돈다.
+# PreSync는 쓰지 않는다. Sync 단계의 ExternalSecret보다 먼저 돌아 첫 배포에서 실패한다(설계 C.5.4).
+# hook은 selective sync에서 돌지 않는다. 운영에서 부분 sync를 쓰지 않는다.
+# 이전 버전 호환(expand/contract)이 필수다. 이 Job이 끝난 뒤 새 파드가 뜨기 전까지 옛 파드가 새 스키마로 돈다.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-migrate
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "app.labels" $ | nindent 8 }}
+        homelab.ukyi.app/role: migration
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "app.podSecurity" $ | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "app.image" $ }}
+          command: {{ toJson .command }}
+          env:
+            {{- include "app.env" $ | trim | nindent 12 }}
+          resources:
+            {{- include "app.resources" $ | nindent 12 }}
+          securityContext:
+            {{- include "app.containerSecurity" $ | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+{{- end }}

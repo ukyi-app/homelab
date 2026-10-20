@@ -1,0 +1,2 @@
+# root가 cluster.tailscale.prefix를 넘긴다(platform/root/templates/appset-apps.yaml). 여기 기본값을 두지 않는다.
+tailscale: {}

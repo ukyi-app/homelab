@@ -54,7 +54,7 @@ components:
 
   # T10. appset-apps(ApplicationSet apps), wave 0
   appsetApps:
-    enabled: false
+    enabled: true
 
   # T11. appset-data(ApplicationSet data), wave 0
   appsetData:

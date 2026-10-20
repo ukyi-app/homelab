@@ -858,7 +858,7 @@ kubectl apply -f platform/root/root-prod.yaml                               # 3.
 | 프로젝트 | 대상 ns | 허용 kind | 비고 |
 |---|---|---|---|
 | `platform` | 전부 | 전부 | 플랫폼 구성 요소. root Application 자신은 `default` 프로젝트다(사용자 결정 2026-10-19, T07): root가 이 프로젝트를 만들므로, root가 여기 속하면 프로젝트가 생기기 전에 Argo CD v3.5.5가 `InvalidSpecError`로 멈춘다. 옛 구성도 `default`였고 `platform`이 전부 허용이라 권한 차이는 없다 |
-| `apps` | `app-*` | Deployment, Service, Ingress, NetworkPolicy, ExternalSecret, Job, ServiceAccount, ConfigMap, PodDisruptionBudget. cluster-scoped 금지, Secret 금지 | 옛 허용 목록 방식(`2d2054a:platform/argocd/root/projects.yaml:20-36`). ApplicationSet 템플릿의 `project`는 고정값[S66] |
+| `apps` | `app-*` | Deployment, Service, Ingress, NetworkPolicy, ExternalSecret, Job, ServiceAccount, ConfigMap, PodDisruptionBudget, ReplicaSet, Pod. cluster-scoped는 Namespace `app-*`만(이름 glob), Secret 금지 | 옛 허용 목록 방식(`2d2054a:platform/argocd/root/projects.yaml:20-36`). ApplicationSet 템플릿의 `project`는 고정값[S66]. T10(2026-10-20): ApplicationSet의 `CreateNamespace`가 만드는 Namespace도 프로젝트 허용을 검사해 Namespace `app-*`를 더했다(v3.5.5 `gitops-engine/pkg/sync/sync_context.go` autoCreateNamespace가 권한 검사 앞). ReplicaSet·Pod는 UI 트리와 파드 로그용이다(차트는 만들지 않는다) |
 | `data` | `database`, `app-*` | Database, DatabaseRole, ExternalSecret, Deployment, Service, PersistentVolumeClaim, ConfigMap, CronJob, NetworkPolicy, ServiceAccount. cluster-scoped 금지 | 데이터 수명 분리. 복원용 Job·임시 Cluster는 여기에 없다. CLI가 `kubectl`로 만드는 GitOps 밖 일회성 객체다(C.5.7) |
 
 **root 아래 wave와 규칙**
@@ -866,7 +866,7 @@ kubectl apply -f platform/root/root-prod.yaml                               # 3.
 - wave 표는 C.3.1의 "순서" 열이다. 모든 Application에 `retry`(limit 10, backoff 30s → 최대 5m)를 둔다. 봇 자리 Application만 `limit: -1`(무제한[S182])과 `refresh: true`(재시도마다 최신 revision[S185])다. 봇 ns가 생길 때까지 기다려야 해서다(C.8). `refresh`가 없으면 무제한 재시도가 처음 실패한 revision을 계속 쓰고, operation이 Running으로 남아 고치는 PR이 반영되지 않는다.
 - Application 안의 wave 규칙(옛 원장에서 남긴 한 줄, `2d2054a:platform/argocd/root/SYNC-WAVES.md:17-22`): **음수 wave를 붙인 리소스를 Healthy로 만드는 주체가 더 앞 wave에 있는가.** 아니면 교착이다.
 - sync-wave는 Application 사이 순서를 보장하지 않는다(health 사용자 정의로 root가 기다리게 할 뿐이다). 그래서 G절의 완료 조건은 실제 준비 상태와 접속 확인이다.
-- ApplicationSet `apps`·`data`는 git files 생성기(`apps/*/values.yaml`, `data/*/values.yaml`)와 `requeueAfterSeconds: 60`을 쓴다. 공개 webhook이 없어서다.
+- ApplicationSet `apps`·`data`는 git files 생성기(`apps/*/values.yaml`, `data/*/values.yaml`)와 `requeueAfterSeconds: 60`을 쓴다. 공개 webhook이 없어서다. T10(2026-10-20): `apps`는 `apps/*/values.yaml`과 `apps/*/image.yaml` 두 git files 생성기를 merge 생성기(짝 키 `values.app` = 디렉터리 이름)로 묶고, 두 파일의 키를 `templatePatch`로 `helm.valuesObject`에 넣는다. 차트(태그)와 values(main)를 source 둘(`ref: values`)로 나누면 같은 저장소의 다른 revision이라 Argo CD v3.5.5가 거부한다("cannot reference a different revision of the same repository", `reposerver/repository/repository.go`). `missingkey=error`는 두지 않는다. 한 앱의 파일이 깨지면 ApplicationSet 전체 생성이 멈춰 모든 앱의 배포가 서기 때문이다. 빠진 키는 ci의 같은 렌더와 차트 schema가 막는다. ApplicationSet은 클러스터 tailnet 접두를 받으려고 작은 Helm 차트 `platform/appsets/apps`에 두고, AppProject `apps`는 T07이 둔 자리(`platform/root/templates/project-apps.yaml`, wave -11)에 남긴다.
 
 #### C.3.4 외부 공개
 
@@ -1207,7 +1207,7 @@ hold: false
 #### C.4.5 공통 차트·워크플로의 버전과 영향 범위
 
 - **버전 방식:** git 태그다. `app-chart-vX.Y.Z`, `data-chart-vX.Y.Z`, `app-build-vX.Y.Z`. 태그 ruleset D1이 갱신·삭제를 bypass 없이 막아 관리자도 태그를 옮기거나 지우지 못한다(C.4.7).
-- **영향 범위:** 앱 Application은 `apps/<app>/values.yaml`의 `chartVersion` 태그로 차트를 렌더한다. 차트를 바꾸는 PR은 어느 앱에도 바로 적용되지 않는다. 시험 앱이 먼저 새 버전으로 올리고, 다른 앱은 각자 PR로 따라간다. 차트 PR의 CI는 차트 안의 시험 values(`platform/charts/app/ci/*.yaml`)로 렌더한다.
+- **영향 범위:** 앱 Application은 `apps/<app>/values.yaml`의 `chartVersion` 태그로 차트를 렌더한다. 차트를 바꾸는 PR은 어느 앱에도 바로 적용되지 않는다. 시험 앱이 먼저 새 버전으로 올리고, 다른 앱은 각자 PR로 따라간다. 차트 PR의 CI는 차트 안의 시험 values(`platform/charts/app/ci/*.yaml`)로 렌더한다. 막아야 할 values는 `tools/ci/fixtures/charts/app/`의 음성 fixture로 렌더 실패를 확인한다. 등록된 앱은 ci가 ApplicationSet과 같게(values.yaml + image.yaml + 클러스터 접두, 그 앱의 차트 태그) 클러스터마다 렌더한다(T10).
 - **semver 뜻:** patch는 렌더 결과가 같거나 버그 수정, minor는 선택 항목 추가, major는 values 형식 변경(CLI가 이전 안내를 출력).
 - **공통 워크플로:** 앱 저장소는 `@app-build-vX.Y.Z` 태그로 호출한다. reusable 워크플로 ref는 SHA·태그·브랜치를 받고, 태그와 같은 이름의 브랜치가 있으면 태그가 우선한다[S81]. homelab main이 바뀌어도 앱 빌드가 깨지지 않는다(옛 `@main` 의존 4개 저장소 문제 재발 방지).
 - **스키마:** 앱 설정 스키마는 차트의 `values.schema.json`(닫힌 schema)이다. 앱 저장소가 homelab main에서 스키마를 받아 오지 않는다(L04).
@@ -1223,7 +1223,7 @@ hold: false
 | 전략 | PVC가 있으면 Recreate | RWO 교착 |
 | 시크릿 | `secrets: [KEY, ...]`를 ExternalSecret `data[]`로(키마다 명시). 컨테이너 env도 키마다 `valueFrom.secretKeyRef`(`optional` 없음, 기본 false)로 넣고 `envFrom`은 쓰지 않는다. Secret에 그 키가 없으면 새 파드가 `CreateContainerConfigError`로 시작하지 않는다[S46]. `envFrom`은 Secret에 있는 키만 넣어 빠진 키를 알리지 않고 파드를 띄운다 | C.6.2, 시나리오 6 |
 | DB·캐시 연결 | `uses.postgres: true`면 `DATABASE_URL`, `uses.valkey: true`면 `VALKEY_URL`을 env로 | 손 배선 제거(L03) |
-| 캐시 Valkey | `cache:`가 있으면 공식 Valkey 차트(subchart)로 렌더. 영속 Valkey는 데이터 차트 쪽(C.5.6) | 캐시는 데이터가 아니라 앱과 수명을 같이한다 |
+| 캐시 Valkey | `cache:`가 있으면 공식 Valkey 차트(subchart)로 렌더. 영속 Valkey는 데이터 차트 쪽(C.5.6). `app-chart-v1.0.0`에는 아직 없다. Valkey 차트 벤더링과 함께 T11이 minor 버전으로 더한다(T10 결정 2026-10-20). 연결은 Service `<앱>-valkey:6379` 약속으로 v1.0.0의 `uses.valkey`가 이미 배선한다 | 캐시는 데이터가 아니라 앱과 수명을 같이한다 |
 | 마이그레이션 | `migration.command` 있으면 Sync hook Job | C.5.4 |
 | 공개 | `public.host` 있으면 Ingress(class `traefik`) | C.3.4 |
 | 내부 | `internal.name` 있으면 Tailscale Ingress(DNS 라벨 `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, `<접두><이름>` 63자 이하, `go`·`vm-go`는 리다이렉터 이름이라 모든 클러스터에서 예약, D-30) | C.3.5 |

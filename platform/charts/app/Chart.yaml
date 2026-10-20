@@ -1,0 +1,11 @@
+# 공유 차트 app(설계 C.4.5). 앱마다 apps/<앱>/values.yaml(사람)과 image.yaml(배포 App)로 렌더한다.
+#
+# 버전은 git 태그 app-chart-v<version>이다. 앱은 values.yaml의 chartVersion으로 태그를 고르고,
+# 차트를 바꾸는 PR은 어느 앱에도 바로 적용되지 않는다. 시험 앱이 먼저 올리고 다른 앱은 각자 PR로 따라간다.
+# 태그는 관리자만 만들고(ruleset D2) 아무도 옮기거나 지우지 못한다(D1). 이 파일의 version과 태그를 같게 둔다.
+# semver: patch는 렌더가 같거나 버그 수정, minor는 선택 항목 추가, major는 values 형식 변경.
+apiVersion: v2
+name: app
+description: Shared chart for homelab apps
+type: application
+version: 1.0.0

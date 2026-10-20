@@ -1,0 +1,11 @@
+# expect: fail
+# worker의 HTTP probe는 포트가 없어 영원히 실패한다.
+chartVersion: 1.0.0
+kind: worker
+resources: {cpu: 10m, memory: 32Mi}
+probes: {readiness: {path: /healthz}}
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

@@ -1,0 +1,14 @@
+# 시험 values: 포트 없는 worker. readiness는 exec로만 쓴다.
+chartVersion: 1.0.0
+kind: worker
+resources: { cpu: 20m, memory: 64Mi }
+probes:
+  readiness: { command: ["/app/healthcheck"] }
+serviceAccountName: bot-reader
+uses:
+  valkey: true
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""
