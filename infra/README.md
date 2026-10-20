@@ -306,8 +306,8 @@ NUC 자신은 `accept-dns=false`를 유지한다.
 
 **Provider 주의:** 설계는 v0.29.2를 정식이라고 적었지만,
 [고정 버전 소스의 Read](https://github.com/tailscale/terraform-provider-tailscale/blob/v0.29.2/tailscale/resource_dns_configuration.go)는
-아직 `Alpha Resource` 경고를 낸다. 실제 import·무변경 plan은 미검증(U34)이다.
-실패하면 목표 apply를 멈춘다. 설계의 대안대로 사람이 콘솔에서 한 번 설정하고,
+아직 `Alpha Resource` 경고를 낸다. 2026-10-20~21 T08a에서 import·무변경 plan·목표 apply·`tag:nuc` precondition을 확인했다(U34 통과).
+이후 버전에서 실패하면 목표 apply를 멈춘다. 설계의 대안대로 사람이 콘솔에서 한 번 설정하고,
 플랫폼 담당자가 `bootstrap.md`에 값의 출처·확인 명령과 IaC 밖 관리임을 기록한다.
 이때 선언을 그냥 삭제하거나 destroy하지 말고 state 소유권 전환을 별도로 검토한다.
 
