@@ -1,0 +1,50 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: adguard
+  namespace: adguard
+spec:
+  podSelector:
+    matchLabels:
+      app: adguard
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # servicelb의 SNAT로 출처가 바뀔 수 있어 DNS는 출처를 좁히지 않는다(U32).
+    - ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    # DoH와 HTTPS 필터 다운로드. 사설망·tailnet을 빼 측면 접근을 막는다.
+    # NetworkPolicy는 노드 자체로 가는 트래픽을 완전히 막지 못한다(설계 B.8).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    # bootstrap_dns와 파드 resolv.conf를 같은 두 공용 리졸버에 한정한다. TCP 폴백도 허용한다.
+    - to:
+        - ipBlock:
+            cidr: 1.1.1.1/32
+        - ipBlock:
+            cidr: 9.9.9.9/32
+      ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53

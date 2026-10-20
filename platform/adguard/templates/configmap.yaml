@@ -1,0 +1,50 @@
+# 시드는 빈 PVC에만 cp -n으로 복사한다. 이후 설정의 원본은 AdGuard가 쓰는 PVC 파일이다.
+# UI에서 바꾼 설정 중 재구축에도 남길 값은 이 시드에 반영한다. 시드 변경은 라이브 설정을 바꾸지 않는다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adguard-config
+  namespace: adguard
+data:
+  AdGuardHome.yaml: |
+    http:
+      address: 0.0.0.0:3000
+    dns:
+      bind_hosts: ["0.0.0.0"]
+      port: 53
+      upstream_dns:
+        - https://dns.cloudflare.com/dns-query
+        - https://dns.quad9.net/dns-query
+      bootstrap_dns: ["1.1.1.1", "9.9.9.9"]
+      upstream_mode: load_balance
+      # 빈 PTR 목록만 두면 기본값 true가 /etc/resolv.conf(CoreDNS)로 보내 오류를 쌓는다.
+      # 공유기를 지정하면 모르는 PTR이 AdGuard로 돌아올 수 있다. 전달을 끄고 NXDOMAIN으로 답한다.
+      # 대가: 사설 클라이언트는 이름 대신 IP로 보인다. VM도 운영 공유기에 질의하지 않는다.
+      local_ptr_upstreams: []
+      use_private_ptr_resolvers: false
+      ratelimit: 100
+      # LAN 전체가 공유기 한 주소로 들어와 기본 20/s에서 질의가 유실됐으므로 예외로 둔다.
+      # 주소는 목적지가 아니라 출처 예외다. VM에서는 일치할 때만 적용되며 DNS 경로는 바뀌지 않는다.
+      # svclb가 출처를 바꾸면 이 예외가 안 맞는다. 켤 때 U32로 실제 출처와 버킷 공유를 확인한다.
+      ratelimit_whitelist:
+        - 192.168.117.1
+    filtering:
+      protection_enabled: true
+      filtering_enabled: true
+    filters:
+      - enabled: true
+        url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
+        name: AdGuard DNS filter
+        id: 1
+    user_rules: []
+    # 옛 실측 28.5 MB/일 × 7일 × 2(현재 파일 + 회전본) = 약 399 MB, 381 MiB(1Gi의 37.2%).
+    # 나머지 약 643 MiB는 필터·통계·성장 여유다. 크기 상한이 아니므로 실제 점유는 계속 확인한다.
+    querylog:
+      enabled: true
+      file_enabled: true
+      interval: 7d
+      size_memory: 1000
+    statistics:
+      enabled: true
+      interval: 1d
+    schema_version: 34

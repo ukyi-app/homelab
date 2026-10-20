@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: adguard
+  namespace: adguard
+  annotations:
+    # operator는 Ingress의 ProxyClass를 annotation에서 읽는다(label이 아니다). operator의 defaultProxyClass와 같은 값이다.
+    tailscale.com/proxy-class: homelab-proxy
+spec:
+  ingressClassName: tailscale
+  tls:
+    - hosts:
+        - {{ printf "%sadguard" .Values.tailscale.prefix | quote }}
+  rules:
+    - host: {{ printf "%sadguard" .Values.tailscale.prefix | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: adguard-ui
+                port:
+                  name: http
