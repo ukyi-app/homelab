@@ -17,14 +17,20 @@ const UPSTREAM_ARGOCD_WORKLOADS = new Set([
   "Deployment/argocd-server",
   "StatefulSet/argocd-application-controller",
 ]);
-const UPSTREAM_ARGOCD_IMAGES = /^(quay\.io\/argoproj\/argocd|ghcr\.io\/dexidp\/dex|public\.ecr\.aws\/docker\/library\/redis):[\w.-]+$/;
+// install.yaml v3.5.5에 든 이미지 문자열 그대로. 같은 저장소의 다른 태그(:latest 등)로 patch하면 예외에서 빠진다.
+// Argo CD를 올리는 PR에서 platform/argocd/kustomization.yaml의 URL과 함께 바꾼다(안 바꾸면 이 검사가 실패한다).
+const UPSTREAM_ARGOCD_IMAGES = new Set([
+  "quay.io/argoproj/argocd:v3.5.5",
+  "ghcr.io/dexidp/dex:v2.45.1",
+  "public.ecr.aws/docker/library/redis:8.2.3-alpine",
+]);
 const UPSTREAM_ARGOCD_SECRETS = new Set(["argocd-secret", "argocd-notifications-secret"]);
 
 function upstreamArgocdWorkload(d: Doc, images: string[]): boolean {
   return (
     UPSTREAM_ARGOCD_ORIGIN.test(d.origin) &&
     UPSTREAM_ARGOCD_WORKLOADS.has(`${d.obj.kind}/${d.obj.metadata?.name}`) &&
-    images.every((i) => UPSTREAM_ARGOCD_IMAGES.test(i))
+    images.every((i) => UPSTREAM_ARGOCD_IMAGES.has(i))
   );
 }
 
@@ -88,7 +94,15 @@ export function checkNoSecrets(docs: Doc[]): Violation[] {
   docs = expand(docs);
   return docs
     .filter((d) => d.obj.kind === "Secret" && d.obj.apiVersion === "v1")
-    .filter((d) => !(UPSTREAM_ARGOCD_ORIGIN.test(d.origin) && UPSTREAM_ARGOCD_SECRETS.has(d.obj.metadata?.name) && !d.obj.data && !d.obj.stringData))
+    // 값 필드(data, stringData, binaryData 등)가 하나도 없는 상류 Secret만 예외다. 허용 키 밖이 있으면 걸린다.
+    .filter(
+      (d) =>
+        !(
+          UPSTREAM_ARGOCD_ORIGIN.test(d.origin) &&
+          UPSTREAM_ARGOCD_SECRETS.has(d.obj.metadata?.name) &&
+          Object.keys(d.obj).every((k) => ["apiVersion", "kind", "metadata", "type"].includes(k))
+        ),
+    )
     .map((d) => ({ rule: "no-secret", where: id(d), message: "kind: Secret을 렌더한다. 값은 Infisical, 사본은 ExternalSecret으로" }));
 }
 

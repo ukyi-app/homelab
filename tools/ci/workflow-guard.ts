@@ -24,6 +24,7 @@ export const RULES = [
   "pull-request-target",
   "self-hosted",
   "pin",
+  "permissions",
 ] as const;
 export type Rule = (typeof RULES)[number];
 
@@ -132,6 +133,15 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
 
   if (on.includes("pull_request_target")) add("pull-request-target", file.path, "pull_request_target를 쓰지 않는다(설계 C.4.10)");
 
+  // 최소 권한(AGENTS.md): write-all 금지, 쓰기 권한은 워크플로 전체가 아니라 필요한 job에만.
+  const perms = (p: unknown, where: string, top: boolean) => {
+    if (p === "write-all") add("permissions", where, "permissions: write-all을 쓰지 않는다");
+    if (top && p && typeof p === "object" && Object.values(p as Record<string, unknown>).some((v) => v === "write")) {
+      add("permissions", where, "쓰기 권한은 워크플로 최상위가 아니라 job마다 준다");
+    }
+  };
+  perms(wf.permissions, file.path, true);
+
   if (isMergeFile) {
     const wr = wf.on?.workflow_run;
     const ok =
@@ -145,6 +155,7 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
   for (const [jobId, job] of Object.entries(jobs)) {
     const where = `${file.path} jobs.${jobId}`;
     if (!job || typeof job !== "object") continue;
+    perms(job.permissions, where, false);
     if (Array.isArray(job.steps)) {
       job.steps.forEach((st: any, i: number) => {
         if (st && typeof st === "object" && "uses" in st) uses.push({ where: `${where} steps[${i}]`, ref: String(st.uses) });
@@ -216,6 +227,21 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
 
   out.push(...pins(file, uses));
   return out;
+}
+
+// 로컬 composite action 파일(action.yml). runs.steps의 uses를 워크플로 step과 같은 규칙으로 본다.
+export function checkActionFile(file: WorkflowFile): Violation[] {
+  let a: any;
+  try {
+    a = parseAll(file.text)[0];
+  } catch (e) {
+    return [{ rule: "parse", where: file.path, message: `YAML을 읽지 못했다: ${(e as Error).message}` }];
+  }
+  const steps: any[] = Array.isArray(a?.runs?.steps) ? a.runs.steps : [];
+  const uses = steps
+    .map((st, i) => (st && typeof st === "object" && "uses" in st ? { where: `${file.path} runs.steps[${i}]`, ref: String(st.uses) } : undefined))
+    .filter((x): x is { where: string; ref: string } => !!x);
+  return pins(file, uses);
 }
 
 export function checkWorkflows(files: WorkflowFile[]): Violation[] {

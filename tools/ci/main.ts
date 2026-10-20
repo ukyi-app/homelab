@@ -9,7 +9,7 @@ import { basename, dirname, join } from "node:path";
 import { type Doc, type Violation, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
 import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkWorkloads } from "./policy";
 import { kubeconform, renderAll } from "./render";
-import { RULES, checkWorkflow, checkWorkflows } from "./workflow-guard";
+import { RULES, checkActionFile, checkWorkflow, checkWorkflows } from "./workflow-guard";
 
 type Step = { name: string; run: () => Violation[] };
 
@@ -48,9 +48,9 @@ const steps: Step[] = [
     name: "tracked files",
     run: () => {
       const out: Violation[] = [];
-      // kind: Secret 매니페스트 0건(설계 C.6.2). Helm 템플릿도 원문으로 본다. 음성 fixture는 뺀다.
+      // kind: Secret 매니페스트 0건(설계 C.6.2). Helm 템플릿도 원문으로 본다. 음성 fixture만 뺀다(docs/도 본다).
       for (const f of gitFiles("*.yaml", "*.yml", "*.tpl")) {
-        if (f.startsWith("tools/ci/fixtures/") || f.startsWith("docs/")) continue;
+        if (f.startsWith("tools/ci/fixtures/")) continue;
         const text = readText(f);
         let found = SECRET_KIND.test(text);
         if (!found) {
@@ -75,8 +75,10 @@ const steps: Step[] = [
     name: "workflows",
     run: () => {
       const files = gitFiles(".github/workflows/*.yaml", ".github/workflows/*.yml").map((path) => ({ path, text: readText(path) }));
-      console.log(`워크플로 ${files.length}개`);
-      return checkWorkflows(files);
+      // 로컬 composite action(action.yml)의 step uses도 같은 고정·허용 목록 규칙을 받는다. actionlint는 그 step을 보지 않는다.
+      const actions = gitFiles("**/action.yml", "**/action.yaml", "action.yml", "action.yaml").map((path) => ({ path, text: readText(path) }));
+      console.log(`워크플로 ${files.length}개, 로컬 action ${actions.length}개`);
+      return [...checkWorkflows(files), ...actions.flatMap(checkActionFile)];
     },
   },
   {

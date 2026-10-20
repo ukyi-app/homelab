@@ -1,0 +1,12 @@
+# path: .github/workflows/other.yaml
+# expect: permissions
+# 쓰기 권한을 최상위에 두면 모든 job이 받는다.
+name: other
+on: push
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: "true"

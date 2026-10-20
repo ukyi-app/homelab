@@ -1,0 +1,10 @@
+# path: .github/workflows/other.yaml
+# expect: permissions
+name: other
+on: push
+permissions: write-all
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: "true"

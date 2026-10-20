@@ -28,7 +28,8 @@ export function kubeVersion(): string {
 }
 
 function helmTemplate(release: string, chartDir: string, namespace: string | undefined, valueFiles: string[]): { ok: boolean; out: string } {
-  const args = ["helm", "template", release, chartDir, "--kube-version", kubeVersion()];
+  // --include-crds: Argo CD는 skipCrds 기본값이 false라 차트의 crds/도 적용한다.
+  const args = ["helm", "template", release, chartDir, "--include-crds", "--kube-version", kubeVersion()];
   if (namespace) args.push("--namespace", namespace);
   for (const f of valueFiles) args.push("-f", f);
   const r = run(args);
@@ -58,6 +59,10 @@ function plainDir(dir: string): { ok: boolean; out: string } {
   if (files.length === 0) return { ok: false, out: `${dir}에 매니페스트가 없다` };
   return { ok: true, out: files.map((f) => readFileSync(join(ROOT, f), "utf8")).join("\n---\n") };
 }
+
+// ApplicationSet 이름 → 그 모양이 render.ts의 전개와 같은지 보는 함수(true 또는 어긋난 이유).
+// 같은 모양일 때만 아래 단계가 생성될 Application을 대신 렌더한 것이 된다.
+const APPSET_RENDERERS: Record<string, (set: any) => true | string> = {};
 
 export function renderAll(): RenderResult {
   const res: RenderResult = { targets: [], docs: [], violations: [], skipped: [] };
@@ -175,7 +180,14 @@ export function renderAll(): RenderResult {
     // 2. root가 만든 Application의 자기 저장소 source
     for (const app of parseAll(out).filter((d) => d?.kind === "Application")) {
       const sources: any[] = app.spec?.sources ?? (app.spec?.source ? [app.spec.source] : []);
-      for (const s2 of sources) renderSource(app, cluster, s2);
+      for (const s2 of sources) {
+        const text = renderSource(app, cluster, s2);
+        // ApplicationSet이 만드는 Application도 검사해야 한다. 여기서 전개하는 ApplicationSet만 받는다(아래 5.).
+        for (const set of parseAll(text ?? "").filter((d) => d?.kind === "ApplicationSet")) {
+          const ok = APPSET_RENDERERS[set.metadata?.name]?.(set);
+          if (ok !== true) fail(`${app.metadata?.name}[${cluster}]`, `ApplicationSet ${set.metadata?.name}: ${ok ?? "render.ts가 전개하지 않는 ApplicationSet이다"}`);
+        }
+      }
     }
   }
   for (const vf of valueFiles) fail(vf, "이 값 파일을 읽는 root-<클러스터>.yaml이 없다");
