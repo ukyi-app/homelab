@@ -1,0 +1,26 @@
+# check: revision
+# expect: fail
+# ApplicationSet git 생성기의 키는 targetRevision이 아니라 revision이라 빠뜨리기 쉽다(L31).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: x
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/ukyi-app/homelab
+        revision: rebuild
+        files:
+          - path: apps/*/values.yaml
+  template:
+    metadata:
+      name: x
+    spec:
+      project: apps
+      source:
+        repoURL: https://github.com/ukyi-app/homelab
+        targetRevision: app-chart-v1.0.0
+        path: platform/charts/app
+      destination:
+        server: https://kubernetes.default.svc

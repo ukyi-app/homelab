@@ -1,0 +1,24 @@
+# path: .github/workflows/deploy-merge.yaml
+# expect: pass
+# 규칙을 지킨 deploy-merge 모양. 음성 fixture가 아닌 대조군이다(규칙이 정상 파일을 막지 않는지).
+name: deploy-merge
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+permissions: {}
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  merge:
+    needs: check
+    runs-on: ubuntu-24.04
+    environment:
+      name: automerge
+      deployment: false
+    steps:
+      - uses: actions/create-github-app-token@3d3c42e5aac5ba805825da76410c181273ba90b1 # v3.3.0
+        with:
+          private-key: ${{ secrets.HOMELAB_MERGE_KEY }}

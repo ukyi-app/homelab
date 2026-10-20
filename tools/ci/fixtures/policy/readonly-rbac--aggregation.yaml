@@ -1,0 +1,14 @@
+# check: readonly-rbac
+# expect: fail
+# aggregationRule은 라벨이 맞는 다른 역할의 권한을 끌어온다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab-readonly
+  labels:
+    homelab.ukyi.app/readonly: "true"
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules: []

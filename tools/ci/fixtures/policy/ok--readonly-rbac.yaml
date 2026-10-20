@@ -1,0 +1,32 @@
+# check: readonly-rbac
+# expect: pass
+# 설계 C.8 읽기 전용 접근 (a)의 모양. 대조군이다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab-readonly
+  labels:
+    homelab.ukyi.app/readonly: "true"
+rules:
+  - apiGroups: ["", "apps", "batch"]
+    resources: [pods, services, deployments, replicasets, jobs, events]
+    verbs: [get, list, watch]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bot-reader
+  namespace: bot-slot-probe
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bot-reader
+subjects:
+  - kind: ServiceAccount
+    name: bot-reader
+    namespace: bot-slot-probe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: homelab-readonly

@@ -1,0 +1,15 @@
+# path: .github/workflows/other.yaml
+# expect: env-trigger
+# environment를 선언한 워크플로가 push로도 돈다. environment secret은 workflow_run에서만 쓴다(D-26 조건 (2)).
+name: other
+on:
+  push:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: staging
+    steps:
+      - run: "true"

@@ -1,0 +1,16 @@
+# check: revision
+# expect: fail
+# 브랜치 이름이 남은 채 병합하면 Argo CD가 지워진 브랜치를 따라간다(L31).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: x
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/ukyi-app/homelab.git
+    targetRevision: feat/t10-ci
+    path: platform/x
+  destination:
+    server: https://kubernetes.default.svc

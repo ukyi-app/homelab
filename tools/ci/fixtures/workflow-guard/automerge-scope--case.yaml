@@ -1,0 +1,11 @@
+# path: .github/workflows/other.yaml
+# expect: automerge-scope
+# environment 이름은 대소문자를 가리지 않는다. AutoMerge는 automerge와 같다.
+name: other
+on: workflow_run
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    environment: AutoMerge
+    steps:
+      - run: "true"

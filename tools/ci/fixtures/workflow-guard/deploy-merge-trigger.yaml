@@ -1,0 +1,14 @@
+# path: .github/workflows/deploy-merge.yaml
+# expect: deploy-merge-trigger
+name: deploy-merge
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+  workflow_dispatch:
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    environment: {name: automerge, deployment: false}
+    steps:
+      - run: "true"

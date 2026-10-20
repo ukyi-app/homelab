@@ -1,0 +1,11 @@
+# path: .github/workflows/other.yaml
+# expect: merge-key-scope
+# secret 이름도 대소문자를 가리지 않는다.
+name: other
+on: workflow_run
+jobs:
+  steal:
+    runs-on: ubuntu-24.04
+    if: secrets.homelab_merge_key != ''
+    steps:
+      - run: "true"

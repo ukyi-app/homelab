@@ -1,0 +1,12 @@
+# check: ingress
+# expect: fail
+# go는 짧은 주소 리다이렉터의 tailnet 이름이다(D-30).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: x
+  namespace: app-x
+spec:
+  ingressClassName: tailscale
+  tls:
+    - hosts: [go]

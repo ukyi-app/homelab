@@ -9,8 +9,8 @@ repos:
       - id: check-yaml
         # Kubernetes 매니페스트는 한 파일에 문서 여러 개를 둔다.
         args: [--allow-multiple-documents]
-        # Helm 템플릿은 렌더 전에는 YAML이 아니다.
-        exclude: /templates/
+        # Helm 템플릿은 렌더 전에는 YAML이 아니다. parse 음성 fixture는 일부러 깨진 YAML이다(tools/ci/).
+        exclude: (/templates/|^tools/ci/fixtures/workflow-guard/parse\.yaml$)
       - id: check-merge-conflict
 
   - repo: local
@@ -32,3 +32,10 @@ repos:
         language: system
         types: [shell]
         files: ^host/
+      - id: workflow-guard
+        name: workflow-guard (bun run ci의 워크플로 단계)
+        # 전체 bun run ci는 렌더·Terraform까지 돌아 느리다. 커밋 때는 워크플로 검사만, 나머지는 PR의 ci가 본다.
+        entry: bun tools/ci/main.ts --only workflows,workflow-guard
+        language: system
+        pass_filenames: false
+        files: ^(\.github/workflows/|tools/ci/)

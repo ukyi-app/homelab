@@ -1,0 +1,8 @@
+# path: .github/workflows/other.yaml
+# expect: reusable-call
+name: other
+on: push
+jobs:
+  call:
+    uses: ./.github/workflows/build.yaml
+    secrets: inherit

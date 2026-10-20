@@ -1,0 +1,20 @@
+# check: workload
+# expect: fail
+# 단일 노드라 한 파드의 무제한 메모리는 전체 장애다(L28).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: x
+  namespace: app-x
+spec:
+  schedule: "0 0 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: x
+              image: ghcr.io/ukyi-app/x@sha256:0000000000000000000000000000000000000000000000000000000000000000
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}

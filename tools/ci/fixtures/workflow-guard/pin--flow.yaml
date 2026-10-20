@@ -1,0 +1,10 @@
+# path: .github/workflows/other.yaml
+# expect: pin
+# 흐름 매핑으로 쓴 uses는 줄 단위 검사를 피한다. 개수 대조가 잡는다.
+name: other
+on: push
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    steps:
+      - {name: checkout, uses: actions/checkout@main}

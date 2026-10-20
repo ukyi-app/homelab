@@ -1,0 +1,8 @@
+{
+  "name": "homelab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ci": "bun tools/ci/main.ts"
+  }
+}
