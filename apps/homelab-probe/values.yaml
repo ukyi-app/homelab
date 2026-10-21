@@ -4,6 +4,3 @@ chartVersion: 1.0.0
 kind: web
 port: 8080
 resources: { cpu: 50m, memory: 64Mi }
-# 시나리오 7(배포 흐름 부분) 시험 키. 원본은 Infisical homelab/prod /apps/homelab-probe/PROBE_TEST(사람이 만든 시험 값).
-# ESO 인증이 끊긴 동안에도 기존 Secret으로 새 파드가 뜨는지 본다. 시험이 끝나면 키와 이 줄을 지운다.
-secrets: [PROBE_TEST]
