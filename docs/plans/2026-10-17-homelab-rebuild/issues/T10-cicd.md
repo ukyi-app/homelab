@@ -1,7 +1,7 @@
 # T10 CI/CD
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중(2026-10-20 착수. 2026-10-21까지 끝: 작성 PR #788~#791과 후속, 배포·병합 App 생성·설치, 태그 `app-chart-v1.0.0`·`app-build-v1.0.0`·`app-build-v1.0.1`, `infra/github` 1·2단계 apply와 병합 키 Secret Sync, 템플릿 교체, `homelab-probe` 생성·하드닝, 시나리오 1(통과, 승인된 한계: 앱 파드 시작 직후 약 1초 egress 공백), 시나리오 11, 시나리오 15(15-11 제외). 남은 것: 시나리오 7, Renovate 설치, 리뷰 전용 App 구조 확인, 병합 키 회전 1회, U21·U37·U38. T13으로 넘김: 15-11(main 밖 빌드의 조건 5 거부), egress 공백 완화)
+- 상태: 진행 중(2026-10-20 착수. 2026-10-21까지 끝: 작성 PR #788~#791과 후속, 배포·병합 App 생성·설치, 태그 `app-chart-v1.0.0`·`app-build-v1.0.0`·`app-build-v1.0.1`, `infra/github` 1·2단계 apply와 병합 키 Secret Sync, 템플릿 교체, `homelab-probe` 생성·하드닝, 시나리오 1(통과, 승인된 한계: 앱 파드 시작 직후 약 1초 egress 공백), 시나리오 11, 시나리오 15(15-11 제외). 남은 것: 시나리오 7, Renovate 설치, 리뷰 전용 App 구조 확인, 병합 키 회전 1회, 미검증 U08 나머지(병합 App bypass 병합 때 필수 검사, App 승인의 code owner 대체)·U20(Renovate 이용 조건)·U21·U35(guard 동작)·U37·U38. T13으로 넘김: 15-11(main 밖 빌드의 조건 5 거부), egress 공백 완화)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T07(착수), T09(완료), T08a(`infra/github` 첫 apply만. R2 잠금 시험 U02 뒤)
   - 착수: T07 뒤 바로 시작한다. 차트, 워크플로, `infra/github` HCL 같은 작성 작업은 T09와 병행한다.
