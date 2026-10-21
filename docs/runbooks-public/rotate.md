@@ -122,7 +122,8 @@ ExternalSecret `argocd/argocd-owner`가 Infisical `/platform/argocd`의 두 키�
 
 ## 3b. Infisical GitHub 연결 PAT (병합 키 Sync용, T10 뒤)
 
-App Connection은 owner 계정의 fine-grained PAT다(리소스 소유자 `ukyi-app`, 저장소 `homelab`만, Metadata read, Environments RW, Secrets RW, 만료 지정). 만료 전에 바꾼다. 만료되면 Sync가 실패하고 프로젝트 Admin에게 메일이 온다.
+App Connection은 owner 계정의 fine-grained PAT다(리소스 소유자 `ukyi-app`, 저장소 `homelab`만, Metadata read, Environments RW, Secrets RW, 만료 없음. 사용자 결정 2026-10-21). 새었다고 의심되거나 범위를 바꿀 때 바꾼다. 만료가 없어 새면 회수할 때까지 유효하다.
+회수되면 Sync가 실패하고 프로젝트 Admin에게 메일이 온다.
 
 1. `tools/tf-github.sh verify` exit 0을 먼저 본다(3절 1번과 같은 이유).
 2. 같은 범위로 새 PAT를 발급한다. 다른 저장소나 권한을 더하지 않는다. 더하면 그 PAT가 새는 순간 다른 저장소의 secret도 바뀐다.
