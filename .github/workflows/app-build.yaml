@@ -124,8 +124,9 @@ jobs:
       # identity gha-homelab-deploy는 claim으로 이 파일의 태그 ref·main push·ukyi-app에 묶여 있다(approvals 2026-10-19).
       INFISICAL_IDENTITY_ID: 44ba77ec-d301-4226-8a9d-3e1321579416
       INFISICAL_PROJECT_SLUG: ukyi-homelab-ci-deploy
-      # App ukyi-homelab-deploy의 client ID. App을 만든 뒤 사람이 채운다(HUMAN-STEPS). 채우기 전에는 아래 확인에서 멈춘다.
-      DEPLOY_APP_CLIENT_ID: REPLACE_WITH_HOMELAB_DEPLOY_CLIENT_ID
+      # App ukyi-homelab-deploy(App ID 5404211)의 client ID. gh api /apps/ukyi-homelab-deploy로 읽는다(owner ukyi-app).
+      # REPLACE_로 되돌리면 아래 확인에서 멈춘다.
+      DEPLOY_APP_CLIENT_ID: Iv23lixKS54BYjxLjsSj
     steps:
       - name: build provenance attestation
         # 첫 단계다. 앱 저장소가 private이면 Free에서 attestation을 만들 수 없어 여기서 실패하고 배포 PR을 만들지 않는다
