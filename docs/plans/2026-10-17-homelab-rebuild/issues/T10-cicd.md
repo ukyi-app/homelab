@@ -81,7 +81,7 @@
 - Renovate (D-18, 확정(사용자 2026-10-18, T05)). 호스팅형 Renovate App을 homelab과 앱 저장소에 저장소별로 설치한다. 자동 병합은 모두 끈다. Renovate PR은 자동 병합 조건 밖이라 code owner 승인 뒤 사람이 병합한다. ESO는 주 1회 묶음으로 받는다. 설치 전에 호스팅형 App의 이용 조건(U20)을 확인한다. 맞지 않으면 self-hosted Renovate를 homelab과 분리한 별도 저장소 Actions로 돌린다(설계 F D-18, 부록 1).
 - 시험 자산(설계 E5).
   - 손으로 등록하는 시험 앱 저장소 `ukyi-app/homelab-probe`. 템플릿에서 `gh repo create --public --template`로 만든다. T11·T12가 이어 쓰고, T12 끝에 등록과 데이터를 지운다. T13의 `homelab-smoke`는 T13이 CLI로 새로 만든다.
-  - 봇 신원 대신 쓸 시험 App `ukyi-homelab-bot-standin`. homelab과 `homelab-probe`에 설치한다. T13은 `homelab-smoke`에도 설치한다.
+  - 봇 신원 대신 쓸 시험 App `ukyi-homelab-bot-standin`. homelab과 `homelab-probe`에 설치한다. 시나리오 15 뒤 2026-10-21 App째 삭제했다(마지막 키는 따로 지울 수 없다). T13은 새 이름으로 다시 만든다.
 - 외부 변경(App 생성·설치, Terraform github root apply, Actions 허용 범위, Secret Sync·App Connection, GHCR 패키지 Public 전환, Renovate 설치, `homelab-probe` 생성, 템플릿 내용 교체)은 사람 승인 뒤에 하고 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
 - T07에서 넘긴 주의(2026-10-19, T07 작성 중 발견):
   - AppProject `apps`는 T07이 `platform/root/templates/project-apps.yaml`로 미리 만들었고, 설계 C.3.3 표대로 cluster-scoped kind를 모두 막는다. ApplicationSet이 `CreateNamespace`·`managedNamespaceMetadata`로 `app-*` ns를 만들면 Argo CD의 sync 권한 검사가 그 Namespace를 거부할 수 있다(추측). 이 티켓에서 확인하고 정한다.

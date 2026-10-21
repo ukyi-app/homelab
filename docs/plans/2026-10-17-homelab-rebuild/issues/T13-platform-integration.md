@@ -32,10 +32,11 @@
    - AC-P12: 공개 HTTPS webhook 수신 경로(T08a), 읽기 전용 접근 Kubernetes·관측·Argo CD(T08b), 경보 외부 수신자(T08b), 격리 작업 실행 공간(T08b), 리뷰 전용 App 저장소별 설치 구조(T10).
    - AC-P8: 병합 조건 공개(T10), 봇 변경 PR의 자동 병합 차단(T10, 시험 신원. 실제 신원은 T19).
    - AC-P11: 비AI 알림 경로(T08b), 외부 생존 감시(T08b).
-5. 배포 갱신 주체가 아닌 신원의 digest PR이 자동 병합되지 않는지 확인한다 (AC-P8). T10의 시험 App `ukyi-homelab-bot-standin`을 `homelab-smoke`에도 설치해 시나리오 15로 본다.
+5. 배포 갱신 주체가 아닌 신원의 digest PR이 자동 병합되지 않는지 확인한다 (AC-P8). 시험 App(봇 신원 대역)을 새로 만들어 `homelab-smoke`에 설치하고 시나리오 15로 본다. T10의 `ukyi-homelab-bot-standin`은 2026-10-21 시험 뒤 삭제했으므로 새 이름(예: `ukyi-homelab-bot-standin-2`)과 새 키로 만들고, 시험이 끝나면 지운다(권한은 contents·pull requests 쓰기, webhook 없음).
 6. 시나리오 14에 D-08 추가 확인을 넣는다: 셀룰러 Tailscale 기기(AdGuard 정지 중 광고 도메인 차단, 일반 도메인 정상), 사용자 규칙 적용률(AdGuard Home 전용 시험 차단 규칙을 집 Wi-Fi·셀룰러에서 20회씩. 공용 DNS에서 정상 주소가 나오는 시험 이름을 쓰고 `0.0.0.0` 응답만 센다, 설계 G 시나리오 14). 측정값을 결과표에 남긴다.
 7. 시나리오 7·13 뒤 복구 자산의 운영 ESO client ID·secret으로 Infisical Universal Auth에 로그인해 성공을 확인한다. 토큰은 출력하지 않고 응답 코드만 본다. 시나리오 7의 장애 주입이 운영 client secret을 폐기하지 않았음을 확인하는 것이다(설계 E8).
 8. T07에서 넘긴 일(2026-10-19, PR #755 Codex 리뷰): `platform/root/values-vm.yaml`은 키 모양만 있고 값이 비어 있으며 빈 값을 막는 검사가 없다. VM 값을 채울 때 `templates/cluster-check.yaml`에 VM 격리 값(Infisical 프로젝트·환경, CNPG 버킷·serverName, Tailscale 이름 접두)이 비면 렌더가 실패하는 검사를 더한다. 그 전에는 `root-vm.yaml`을 apply하지 않는다(`bootstrap.md` 0절).
+9. T10에서 넘긴 일(2026-10-21, 사용자 승인 한계): 새 파드는 시작 직후 약 1초 동안 NetworkPolicy가 붙기 전이라 egress가 모두 열린다(k3s 내장 kube-router netpol의 동기화 지연, approvals 15:48 행, 설계 B.8 E5). 노드 nftables에서 파드 대역(`10.42.0.0/16`)이 tailnet(`100.64.0.0/10`)과 LAN 사설 대역으로 나가는 forward를 정책과 상관없이 막는 규칙을 `host/`에 넣고(그 길이 필요한 파드가 있는지 먼저 조사), 시작 즉시 연결하는 시험 파드로 재시험한다. 그 전까지 시나리오 1의 격리는 "통과(승인된 한계)"다.
 
 ## 필요한 자격
 
@@ -47,7 +48,7 @@
 - 그 밖의 `homelab-dev` 시험 값(Grafana·AdGuard·Argo CD 관리자 자격, `homelab-smoke`의 앱 키·DB·Valkey 비밀번호 등): 이 티켓에서 새 시험 값으로 채운다.
 - 복구 자산의 R2 읽기 전용 토큰(운영 백업 버킷만): 시나리오 13 동안만 VM에 손으로 넣는다. 복구 자산 목록은 T09가 만든다. 이 토큰을 발급하는 티켓은 설계에 정해져 있지 않다 [미검증].
 - 복구 자산의 운영 ESO client ID·secret: 준비 T09. 할 일 7의 로그인 확인에 쓴다.
-- T10이 만든 시험 App `ukyi-homelab-bot-standin`: `homelab-smoke`에도 설치한다(시나리오 15).
+- 시험 App(봇 신원 대역): T10의 `ukyi-homelab-bot-standin`은 삭제했다(2026-10-21). 이 티켓에서 새 이름(예: `ukyi-homelab-bot-standin-2`)으로 만들어 `homelab-smoke`에 설치하고, 새 키는 시험 직전에 받아 끝나면 App째 지운다(마지막 키는 따로 지울 수 없다).
 - CLI가 쓰는 사람의 `gh` 로그인, `infisical login`, kubeconfig(운영 context와 `homelab-vm`).
 - NUC 재부팅·네트워크 차단 시험(시나리오 12·17)은 사람 승인 뒤에 한다.
 
