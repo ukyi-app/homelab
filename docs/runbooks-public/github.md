@@ -72,7 +72,7 @@ gh api repos/ukyi-app/homelab/rules/branches/main --jq '[.[] | .type] | sort'   
     --jq '.[] | select(.result == "bypass") | [.pushed_at, .actor_name, .ref, .after_sha[0:12]] | @tsv'
   ```
 
-- 새 앱: `infra/github/app-repos.json` PR 병합 → 저장소 생성(템플릿에서 `gh repo create --public --template`) → `app-main`을 뺀 하드닝 → (fine-grained PAT를 쓰면) PAT의 Repository access 선택 저장소에 새 저장소를 더하고, org가 fine-grained PAT 승인을 요구하면 org 설정의 Personal access tokens 대기 요청을 승인한다 → `tools/tf-github.sh apply`가 `app-main`을 만든다. PAT에 새 저장소가 없으면 그 저장소의 ruleset 생성과 guard 조회가 403·404로 멈춘다(선택 저장소로 제한된 토큰). 목록 밖 public 저장소가 있는 동안 guard 8이 모든 plan을 멈춘다.
+- 새 앱: `infra/github/app-repos.json` PR 병합 → 저장소 생성(템플릿에서 `gh repo create --public --template`) → `app-main`을 뺀 하드닝 → (fine-grained PAT를 쓰면) PAT의 Repository access 선택 저장소에 새 저장소를 더하고, org가 fine-grained PAT 승인을 요구하면 org 설정의 Personal access tokens 대기 요청을 승인한다 → `tools/tf-github.sh apply`가 `app-main`을 만든다. PAT에 새 저장소가 없으면 그 저장소의 ruleset 생성과 guard 조회가 403·404로 멈춘다(선택 저장소로 제한된 토큰). 목록 밖 public 저장소가 있는 동안 guard 8이 모든 plan을 멈춘다. 반대로 목록 PR 병합 뒤 저장소를 만들기 전까지는 plan·verify가 guard 2·8 등으로 exit 1인 것이 정상이고, apply도 plan에서 멈춰 아무것도 바꾸지 않는다. 이 사이에는 다른 `infra/github` 변경도 apply할 수 없으니 저장소 생성과 하드닝을 바로 잇는다.
 - ruleset은 지우지 말고 `disabled`로만 끈다. 정답은 git의 HCL이다.
 
 ## 3. apply가 실패했을 때
