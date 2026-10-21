@@ -1,4 +1,4 @@
 repository: ghcr.io/ukyi-app/homelab-probe
-digest: sha256:fb70fcc4b2e0208c26a23d7f7a73e6b3b8d029a083642c2a02a32f0fd5d5de08
+digest: sha256:fa78e798a6ee65c56437afbe66fce4c443fcdc73ffe1d2a3529fe2cb4f4ce5b9
 revision: 5eb133e9d0820446236ac16554277966af87575c
 hold: false
