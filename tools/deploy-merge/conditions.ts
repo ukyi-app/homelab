@@ -148,6 +148,11 @@ export function evaluate(f: Facts): Verdict {
     fail(9, "앱 main의 pull_request 규칙(승인 1, code owner 리뷰, 새 push 때 승인 무효화)이 active가 아니다");
   }
   for (const t of ["non_fast_forward", "deletion"]) if (!rules.some((r) => r.type === t)) fail(9, `앱 main에 ${t} 규칙이 없다`);
+  // 승인 요건만으로는 owner PR을 막지 못한다. 작성자가 유일한 code owner면 쓰기 권한 App(Codex Connector, Renovate)의 승인
+  // 하나로 요건이 차고 그 App이 병합할 수 있었다(U08 (나), 2026-10-21 homelab #822). 실제 장치는 update(Restrict updates)다.
+  const update = rules.find((r) => r.type === "update");
+  if (!update) fail(9, "앱 main에 update(Restrict updates) 규칙이 없다");
+  else if (update.parameters?.update_allows_fetch_and_merge === true) fail(9, "앱 main의 update 규칙이 fetch and merge를 허용한다");
   if (!(repo.codeownersStatus === 200 && Array.isArray(repo.codeownersErrors) && repo.codeownersErrors.length === 0)) {
     fail(9, `앱 main의 CODEOWNERS가 없거나 오류가 있다(codeowners/errors ${repo.codeownersStatus ?? "읽지 못함"})`);
   }

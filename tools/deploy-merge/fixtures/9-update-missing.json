@@ -1,0 +1,1 @@
+{"expect": 9, "why": "update(Restrict updates) 규칙이 없다(승인 요건만으로는 owner PR의 App 승인 병합을 막지 못한다)", "patch": {"appRepo": {"rules": [{"type": "pull_request", "parameters": {"required_approving_review_count": 1, "require_code_owner_review": true, "dismiss_stale_reviews_on_push": true}}, {"type": "non_fast_forward"}, {"type": "deletion"}]}}}

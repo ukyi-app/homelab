@@ -1,0 +1,1 @@
+{"expect": "pass", "why": "update 규칙이 있고 parameters가 없어도(fetch and merge 기본 꺼짐) 통과한다", "patch": {"appRepo": {"rules": [{"type": "pull_request", "parameters": {"required_approving_review_count": 1, "require_code_owner_review": true, "dismiss_stale_reviews_on_push": true}}, {"type": "non_fast_forward"}, {"type": "deletion"}, {"type": "update"}]}}}
