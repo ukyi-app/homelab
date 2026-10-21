@@ -1,0 +1,1 @@
+{"expect": "pass", "why": "앞 둘이 404면 docs/를 쓴다", "patch": {"appRepo": {"codeownersFiles": [{"path": ".github/CODEOWNERS", "status": 404, "text": ""}, {"path": "CODEOWNERS", "status": 404, "text": ""}, {"path": "docs/CODEOWNERS", "status": 200, "text": "* @ukkiee\n"}]}}}

@@ -1,0 +1,1 @@
+{"expect": 9, "why": "앞 후보 .github/CODEOWNERS 조회 403. 뒤 루트 파일이 맞아도 그 파일로 판정하지 않는다", "patch": {"appRepo": {"codeownersFiles": [{"path": ".github/CODEOWNERS", "status": 403, "text": ""}, {"path": "CODEOWNERS", "status": 200, "text": "* @ukkiee\n"}]}}}
