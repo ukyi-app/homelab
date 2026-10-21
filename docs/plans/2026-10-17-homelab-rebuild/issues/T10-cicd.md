@@ -39,7 +39,7 @@
   - owner PR은 검토한 SHA를 고정해 관리자 bypass로 병합한다: `gh pr merge <n> --squash --admin --match-head-commit <검토한 SHA>`. bypass 모드 `exempt`는 쓰지 않고, bypass 기록은 월 1회 PR 작성자와 대조한다(설계 F D-07).
 - App 키 전달 (D-04). 배포 App 키는 Infisical OIDC identity `gha-homelab-deploy`로 받는다. 병합 App 키는 원본을 Infisical 프로젝트 `homelab-ci-merge`에 두고, Secret Sync로 environment secret 사본 1개를 만든다. `gha-homelab-merge` identity는 만들지 않는다.
   - Secret Sync: 대상 GitHub, Scope Repository Environment(`ukyi-app/homelab` / `automerge`). Auto-Sync 켬, Key Schema 비움, 삭제 켬, sync 1/10.
-  - App Connection: GitHub App이 아니라 `homelab` 하나로 좁힌 fine-grained PAT(Metadata read, Environments RW, Secrets RW, 만료 지정). 대가: owner 계정에 묶임, Infisical에 PAT 저장, 만료 관리, org가 fine-grained PAT를 허용해야 함. sync 실패 알림은 프로젝트 Admin 메일로 온다.
+  - App Connection: GitHub App이 아니라 `homelab` 하나로 좁힌 fine-grained PAT(Metadata read, Environments RW, Secrets RW, 만료 없음: 사용자 2026-10-21). 대가: owner 계정에 묶임, Infisical에 PAT 저장, 새면 회수할 때까지 유효함, org가 fine-grained PAT를 허용해야 함. sync 실패 알림은 프로젝트 Admin 메일로 온다.
   - environment `automerge`: 배포 브랜치 정책 main, `prevent_destroy`. 다시 만드는 일은 Terraform apply로만 하고 그 뒤에 Sync를 다시 실행한다. `prevent_destroy`는 콘솔 삭제를 막지 못하고, 지워진 뒤 `deploy-merge`가 돌면 정책 없는 `automerge`가 자동으로 다시 생긴다. 그래서 Sync 재실행·병합 키 회전·PAT 교체는 모두 `tools/tf-github.sh verify`(T12 뒤 `homelab github verify`) exit 0을 첫 단계로 한다(설계 C.4.8, C.6.5).
   - `deploy-merge`: `on`은 `workflow_run`(ci completed)만. merge job에 `environment: {name: automerge, deployment: false}`, `actions/create-github-app-token`에 `secrets.HOMELAB_MERGE_KEY`. Infisical OIDC 단계는 없다.
   - ci의 workflow-guard: YAML 별칭까지 푸는 파서로 읽는다. environment 이름은 대소문자를 무시하고 문자열형과 객체형을 모두 잡는다. environment 이름에 표현식을 쓰지 못하게 한다. `automerge`는 `deploy-merge.yaml`의 merge job만 쓴다. `deploy-merge` 트리거는 `workflow_run`만이다. `secrets: inherit`와 로컬이 아닌 reusable 호출을 금지한다. `toJSON(secrets)`와 동적 secrets 참조를 금지한다. 금지마다 음성 fixture를 둔다.
@@ -95,7 +95,7 @@
 - R2 state 키(`homelab-tfstate`): Infisical `homelab-admin`의 `/terraform/state`에서만 받는다. 준비: T09.
 - Infisical 프로젝트 `homelab-ci-deploy`·`homelab-ci-merge`와 배포 키 OIDC identity `gha-homelab-deploy`: 준비 T09(OIDC Free 사용 확인 U05 포함). `homelab-ci-merge`에는 machine identity가 없다.
 - App `ukyi-homelab-deploy`·`ukyi-homelab-merge`의 키: 이 티켓에서 App을 만들고 키를 키별 Infisical 프로젝트에 등록한다(배포 키는 `homelab-ci-deploy`, 병합 키는 `homelab-ci-merge`).
-- Infisical GitHub 연결용 fine-grained PAT(homelab만, Metadata read, Environments RW, Secrets RW, 만료 지정): 이 티켓의 사람 작업. org가 fine-grained PAT를 허용하는지 먼저 확인한다. 병합 키 sync는 1단계 apply로 environment가 생긴 뒤, 2단계 전에 만든다.
+- Infisical GitHub 연결용 fine-grained PAT(homelab만, Metadata read, Environments RW, Secrets RW, 만료 없음. 사용자 2026-10-21): 이 티켓의 사람 작업. org가 fine-grained PAT를 허용하는지 먼저 확인한다. 병합 키 sync는 1단계 apply로 environment가 생긴 뒤, 2단계 전에 만든다.
 - 시험 App `ukyi-homelab-bot-standin`·`ukyi-homelab-review-probe`의 키: 이 티켓에서 쓰기 직전(`homelab-probe` 생성 때와 종단 시험 때)에 만들고, 시험이 끝나면 지운다. 키가 오래 살지 않게 하려는 것이다.
 - 시나리오 7 배포 흐름 부분의 장애 주입: `eso-homelab`의 시험용 두 번째 Universal Auth client secret. T09의 "시험용 client secret 장애 주입" 방법을 따라 시험 때 발급하고 폐기한다(승인 기록). 운영 client secret은 폐기하지 않는다. `homelab-probe`의 시험 키 값은 사람이 Infisical `homelab`/`prod`에 만든다.
 - 콘솔 작업: Renovate App 설치, org Package Creation의 Public 허용 확인(REST로 읽을 수 없어 화면에서).
