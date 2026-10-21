@@ -1,7 +1,7 @@
 # T10 CI/CD
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중(2026-10-20 착수. 2026-10-21까지 끝: 작성 PR #788~#791과 후속, 배포·병합 App 생성·설치, 태그 `app-chart-v1.0.0`·`app-build-v1.0.0`·`app-build-v1.0.1`, `infra/github` 1·2단계 apply와 병합 키 Secret Sync, 템플릿 교체, `homelab-probe` 생성·하드닝, 시나리오 1(통과, 승인된 한계: 앱 파드 시작 직후 약 1초 egress 공백), 시나리오 11, 시나리오 15(15-11 제외). 남은 것: 시나리오 7, Renovate 설치, 리뷰 전용 App 구조 확인, 병합 키 회전 1회, 미검증 U08 나머지(병합 App bypass 병합 때 필수 검사, App 승인의 code owner 대체)·U20(Renovate 이용 조건)·U21·U35(guard 동작)·U37·U38. T13으로 넘김: 15-11(main 밖 빌드의 조건 5 거부), egress 공백 완화)
+- 상태: 진행 중(2026-10-20 착수. 2026-10-21까지 끝: 작성 PR #788~#791과 후속, 배포·병합 App 생성·설치, 태그 `app-chart-v1.0.0`·`app-build-v1.0.0`·`app-build-v1.0.1`, `infra/github` 1·2단계 apply와 병합 키 Secret Sync, 템플릿 교체, `homelab-probe` 생성·하드닝, 시나리오 1(통과, 승인된 한계: 앱 파드 시작 직후 약 1초 egress 공백), 시나리오 11, 시나리오 15(15-11 제외). 남은 것: 시나리오 7, Renovate 설치, 리뷰 전용 App 구조 확인, 병합 키 회전 1회, ruleset 변경이 예정된 상태에서 `terraform plan -lock=false`를 직접 돌렸을 때 guard 1로 멈추는지(실제 토큰), 미검증 U08 나머지(병합 App bypass 병합 때 필수 검사, App 승인의 code owner 대체)·U20(Renovate 이용 조건)·U21·U35(guard 동작)·U37·U38. T13으로 넘김: 15-11(main 밖 빌드의 조건 5 거부), egress 공백 완화)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T07(착수), T09(완료), T08a(`infra/github` 첫 apply만. R2 잠금 시험 U02 뒤)
   - 착수: T07 뒤 바로 시작한다. 차트, 워크플로, `infra/github` HCL 같은 작성 작업은 T09와 병행한다.
@@ -132,6 +132,7 @@
 - `homelab-probe` 첫 push 뒤 `gh api orgs/ukyi-app/packages/container/homelab-probe --jq .visibility`와 `curl -s -o /dev/null -w '%{http_code}' 'https://ghcr.io/token?scope=repository:ukyi-app/homelab-probe:pull'` → 200을 기록한다.
 - 이 단계에서 확인할 미검증 항목(2026-10-21 남은 것): U08의 나머지(병합 App bypass 병합 때 ruleset A 필수 검사 적용, App 승인이 code owner 승인을 대신하지 못함), U20, U21, U35, U37, U38(설계 부록 1). U30의 main 밖 이미지 거부는 T13(시나리오 15-11). 결과가 틀리면 부록 1의 "틀리면" 열대로 간다.
 - 확인한 항목(2026-10-21, 설계 부록 1의 결과와 같다): U39 통과(`homelab-probe` 첫 push로 만든 패키지가 `public`, 익명 토큰으로 manifest 200). U05의 배포 키 실동작(`homelab-probe` 첫 main push에서 `app-build@app-build-v1.0.0`의 deploy-pr이 배포 키를 받음. Infisical Subject를 GitHub 불변 형식으로 바꾼 뒤, 설계 B.8 E5). 시나리오 15의 U05 재확인: `homelab-probe` 시험 브랜치 워크플로의 OIDC 토큰으로 `gha-homelab-deploy` 로그인 → 403(approvals 15:05~15:30 행).
+- 래퍼 음성 시험(위 두 줄): `delete_repo` 범위·`admin:org` 없는 범위·빈 범위 머리글 토큰, 만료 없는 fine-grained PAT, 모르는 토큰 종류, admin이 아닌 토큰, `--allow-destroy` 없는 delete plan, 작업 사본의 미추적 `zz_override.tf`는 ci 단계 `tf-github wrapper`(`tools/tf-github.test.sh`, 가짜 gh·infisical·terraform)가 PR마다 거부를 확인한다. 실제 토큰으로 남은 것은 `terraform plan -lock=false` 직접 실행의 guard 1뿐이다(머리말 남은 것).
 - 확인한 항목(2026-10-21 시나리오 1·11·15, 근거는 approvals 같은 날 행): U09 통과(배포 App 토큰으로 `deploy/s15-wf`에 `ci.yaml`을 바꾼 push 거부, workflows 권한 없음). U25 통과(deploy-merge가 `GITHUB_TOKEN`으로 probe 저장소·`rules/branches/main`·`codeowners/errors`를 읽어 #805·#807을 병합하고, `app-main`을 끈 동안 #811을 조건 9로 멈춘 뒤 켜고 재판정해 병합). U30 정상 경로 통과((1)~(3): `app-build@app-build-v1.0.1`이 만든 attestation을 deploy-merge가 확인해 #805·#807·#811 자동 병합. main 밖 이미지 거부는 미실행, T13). U36 통과(PAT App Connection Sync, `automerge`·`AutoMerge` 선언 job이 `deployment: false`에도 배포 브랜치 정책으로 거부, probe가 homelab 워크플로를 불러 `automerge` 선언 시 키 길이 0). U08 부분 통과(관리자 `--admin`도 `ci` 실패 PR #808 거부 = 관리자 bypass에도 ruleset A 적용, 관리자 역할 bypass로 owner PR 병합 #799·#812).
 
 ## 되돌리는 방법
