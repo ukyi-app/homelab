@@ -24,12 +24,14 @@ spec:
         # CRD를 차트 템플릿으로 설치한다. crds.keep 기본값(true)이라 차트를 지워도 CRD와 인증서는 남는다.
         crds:
           enabled: true
-        # 이미지는 digest로 고정한다(quay.io/jetstack, v1.21.2 멀티 아키텍처 index, 2026-10-20 확인).
-        # 차트는 tag와 digest를 함께 렌더하고 pull은 digest로만 한다.
+        # 이미지는 멀티 아키텍처 index digest로 고정한다(2026-10-20 확인). 태그는 각 "# renovate:" 줄이 기준이다.
+        # 차트는 tag와 digest를 함께 렌더하고 pull은 digest로만 한다. "# renovate:" 줄은 Renovate가 태그·digest를 갱신하는 표지다.
         image:
+          # renovate: image=quay.io/jetstack/cert-manager-controller:v1.21.2
           digest: sha256:70f532fd9cfde0b09d55687200942399d89838bc2d5d5b45152eb799a15912b8
         acmesolver:
           image:
+            # renovate: image=quay.io/jetstack/cert-manager-acmesolver:v1.21.2
             digest: sha256:699b40d622211ab7accad8a21b04c5fbaa1841ef7a12621e8de492dbe27b2503
         # 설치 직후 API 확인 Job은 Helm post-install 훅이라 Argo CD에서는 PostSync 훅이 된다.
         # webhook이 늦게 뜨면 sync를 실패로 남기므로 끄고, 준비 확인은 Deployment health와 시험 Certificate로 한다.
@@ -43,6 +45,7 @@ spec:
             memory: 256Mi
         webhook:
           image:
+            # renovate: image=quay.io/jetstack/cert-manager-webhook:v1.21.2
             digest: sha256:a60e2dac46dbb8a7f3df95c54ce941012f54c2fe022f0ee55aaa1ab40ed957ae
           resources:
             requests:
@@ -52,6 +55,7 @@ spec:
               memory: 128Mi
         cainjector:
           image:
+            # renovate: image=quay.io/jetstack/cert-manager-cainjector:v1.21.2
             digest: sha256:c85268c64f2e0e76684bf5fe8906caff34b82523561c6affe0fae3546bd87562
           resources:
             requests:

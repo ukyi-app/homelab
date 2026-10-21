@@ -1,0 +1,141 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "앱 이미지(apps/*/image.yaml, 배포 App 몫) 밖의 버전을 갱신하는 단일 주체(설계 C.4.4, D-18). 단일 노드라 인프라 의존은 자동 병합하지 않는다(옛 renovate.json:129-132). Renovate PR은 deploy-merge 조건 1(작성자 배포 App) 밖이라 사람이 검토해 병합한다.",
+  "extends": ["config:recommended", "docker:pinDigests"],
+  "automerge": false,
+  "platformAutomerge": false,
+  "timezone": "Asia/Seoul",
+  "schedule": ["* 0-5 * * 1"],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "apps/*/image.yaml",
+    "platform/charts/app/ci/**",
+    "tools/ci/fixtures/**",
+    "tools/deploy-merge/fixtures/**",
+    "infra/github/tests/**"
+  ],
+  "argocd": {
+    "managerFilePatterns": ["/^platform/root/.+\\.yaml$/"]
+  },
+  "pre-commit": {
+    "description": "외부 훅 저장소는 커밋 SHA + '# frozen: vX' 주석으로 고정한다(.pre-commit-config.yaml). 이 매니저는 기본으로 꺼져 있고, 켜면 그 형식 그대로 갱신한다.",
+    "enabled": true
+  },
+  "customManagers": [
+    {
+      "description": "k3s는 재구축 목표값이다. 병합해도 라이브 클러스터는 안 바뀌고, 사람이 호스트에서 sudo host/install.sh --cluster <이름> --k3s로 적용한다(설계 C.4.4, B.8 E2).",
+      "customType": "regex",
+      "managerFilePatterns": ["/^host/versions\\.env$/"],
+      "matchStrings": ["INSTALL_K3S_VERSION=\"(?<currentValue>v[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "k3s-io/k3s",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\+k3s(?<build>\\d+)$"
+    },
+    {
+      "description": "Argo CD는 공식 install.yaml을 태그 URL로 받는다(platform/argocd/kustomization.yaml). kustomize 매니저는 raw URL 원격 리소스를 읽지 않는다.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^platform/argocd/kustomization\\.yaml$/"],
+      "matchStrings": ["raw\\.githubusercontent\\.com/argoproj/argo-cd/(?<currentValue>v\\d+\\.\\d+\\.\\d+)/manifests/install\\.yaml"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "argoproj/argo-cd"
+    },
+    {
+      "description": "플랫폼 이미지는 태그@digest로 적는다. Helm 템플릿 안({{ }}, $image 변수)에도 있어 kubernetes 매니저 대신 문자열로 찾는다. 두 번째 식은 차트 values처럼 digest만 적는 곳의 '# renovate: image=<이름>:<태그>' 표지다.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^platform/.+\\.yaml$/"],
+      "matchStrings": [
+        "(?<depName>[a-z0-9][a-z0-9./_-]*):(?<currentValue>[A-Za-z0-9][A-Za-z0-9._-]*)@(?<currentDigest>sha256:[0-9a-f]{64})",
+        "#\\s*renovate:\\s*image=(?<depName>[^\\s:]+):(?<currentValue>\\S+)\\s*\\n\\s*digest:\\s*(?<currentDigest>sha256:[0-9a-f]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "asdf 매니저가 모르는 .tool-versions 도구를 GitHub 릴리스로 찾는다.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.tool-versions$/"],
+      "matchStrings": ["(?m)^(?<depName>kubeconform) (?<currentValue>\\d+\\.\\d+\\.\\d+)$"],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "yannh/kubeconform",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "위와 같다. Infisical CLI 릴리스는 Infisical/cli 저장소의 vX.Y.Z다.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.tool-versions$/"],
+      "matchStrings": ["(?m)^(?<depName>infisical) (?<currentValue>\\d+\\.\\d+\\.\\d+)$"],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "Infisical/cli",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "공유 차트는 이 저장소의 app-chart-vX.Y.Z 태그이고 values.yaml에는 X.Y.Z만 적는다(ApplicationSet apps가 접두를 붙인다). 같은 저장소의 다른 태그(app-build-v* 등)는 extractVersion에 안 맞아 후보에서 빠진다.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^apps/[^/]+/values\\.yaml$/"],
+      "matchStrings": ["chartVersion:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "github-tags",
+      "depNameTemplate": "app-chart",
+      "packageNameTemplate": "ukyi-app/homelab",
+      "extractVersionTemplate": "^app-chart-v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "자기 저장소 참조(repoURL ukyi-app/homelab)의 revision은 main이다. 커밋이나 태그로 바꾸면 Argo CD가 main을 따라가지 않는다(옛 renovate.json:144-148, AGENTS.md).",
+      "matchManagers": ["argocd"],
+      "matchPackageNames": ["https://github.com/ukyi-app/homelab", "https://github.com/ukyi-app/homelab.git"],
+      "enabled": false
+    },
+    {
+      "description": "워크플로 uses:는 40자 SHA + 버전 주석 형식 그대로 갱신한다(설계 C.4.10). 새 액션을 더하는 것은 Renovate 몫이 아니다(허용 목록과 workflow-guard).",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "description": "ESO는 최신 minor 하나만 지원하고 2~3주마다 minor가 나온다. 주 1회 한 묶음으로 받는다(D-18, 설계 B.8 E3).",
+      "matchDepNames": ["external-secrets"],
+      "groupName": "external-secrets"
+    },
+    {
+      "description": "차트는 tag를, 값의 digest는 이미지를 정한다. 둘이 다른 버전을 가리키지 않게 차트와 그 이미지를 한 PR로 받고, 차트 appVersion과 이미지 태그가 맞는지 사람이 본다.",
+      "matchDepNames": ["cert-manager", "quay.io/jetstack/**"],
+      "groupName": "cert-manager"
+    },
+    {
+      "description": "차트와 그 이미지를 한 PR로(위 cert-manager와 같은 이유).",
+      "matchDepNames": ["traefik", "docker.io/library/traefik"],
+      "groupName": "traefik"
+    },
+    {
+      "description": "차트와 그 이미지를 한 PR로(위 cert-manager와 같은 이유).",
+      "matchDepNames": ["tailscale-operator", "docker.io/tailscale/**"],
+      "groupName": "tailscale-operator"
+    },
+    {
+      "description": "nginx는 짝수 minor가 stable, 홀수 minor가 mainline이다. go는 stable을 쓴다(platform/go/templates/deployment.yaml).",
+      "matchDepNames": ["docker.io/nginxinc/nginx-unprivileged"],
+      "allowedVersions": "/^1\\.\\d*[02468]\\.\\d+-alpine-slim$/"
+    },
+    {
+      "description": "kubectl은 k3s와 같은 minor로 둔다(.tool-versions, 서버와 한 minor 차이까지만 지원). Kubernetes는 minor를 하나씩 올려야 해서 minor마다 PR을 나눈다.",
+      "matchDepNames": ["k3s-io/k3s", "kubectl"],
+      "groupName": "k3s",
+      "separateMultipleMinor": true
+    },
+    {
+      "description": "helm·kustomize는 Argo CD에 든 버전과 맞춘다(.tool-versions). Argo CD를 올리는 PR에서 사람이 함께 옮긴다.",
+      "matchManagers": ["asdf"],
+      "matchDepNames": ["helm", "kustomize"],
+      "enabled": false
+    },
+    {
+      "description": "Terraform 실행 파일(.tool-versions)과 각 root의 required_version(= 고정)을 한 PR로 옮긴다. 하나만 바뀌면 init이 실패한다.",
+      "matchDepNames": ["terraform", "hashicorp/terraform"],
+      "groupName": "terraform"
+    },
+    {
+      "description": "CI가 받는 도구는 ci.yaml(bun은 deploy-merge.yaml도)에 sha256이 있다. Renovate는 이 값을 못 바꿔 PR의 ci가 sha256 불일치로 실패한다. 그 실패를 신호로 사람이 같은 PR에 sha256 커밋을 더한다(AGENTS.md의 '같은 커밋'은 병합되는 squash 커밋 기준).",
+      "matchDepNames": ["actionlint", "bun", "gitleaks", "shellcheck", "kubeconform", "terraform", "hashicorp/terraform"],
+      "prBodyNotes": ["ci.yaml의 sha256(bun은 deploy-merge.yaml도)을 새 버전 linux amd64 파일 값으로 바꾸는 커밋을 이 PR에 더한다. 안 하면 ci가 sha256 불일치로 실패한다."]
+    }
+  ]
+}
