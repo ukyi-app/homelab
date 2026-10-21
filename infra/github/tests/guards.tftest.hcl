@@ -6,7 +6,8 @@
 # - 의존이 있어 미뤄지는 guard 3·4·9의 관리 자원 쪽은 apply다. plan이면 평가되지 않아 expect_failures가 성립하지 않는다.
 #   run마다 state_key를 달리해 빈 state에서 자원을 만들게 한다. 앞 run이 만든 state를 이어 쓰면 변경이 없어 guard가
 #   plan 때 평가되고, apply run의 plan 단계 기대 실패를 Terraform test는 "Expected failure while planning"으로 실패 처리한다.
-#   import 대상(main-interim, main-checks, app-main)은 변경이 없어 처음부터 plan 때 평가되므로 plan으로 본다.
+#   state_key 없는 plan run(g3_app_extra, g4_checks_bypass, g4_app_main_app_bypass 등)은 첫 run all_guards_pass(apply)가
+#   기본 state에 만든 자원을 이어 써 변경이 없으므로 guard가 plan 때 평가된다. 그래서 all_guards_pass는 맨 앞에 둔다.
 # - 의존이 없어 plan 때 늘 평가되는 guard(1·2·5·6·7·8, repo·org secret)는 plan이다. 같은 이유로 apply로는 시험할 수 없다.
 # 덮어쓰지 않은 계산 문자열은 mock이 임의 8자를 넣어 나머지 guard까지 실패한다.
 
@@ -16,22 +17,6 @@ variables {
 }
 
 mock_provider "github" {}
-
-# imports.tf가 있는 동안 mock provider는 import를 못 한다. import 대상만 값을 덮는다(첫 apply 뒤 imports.tf를 지우면 함께 지운다).
-override_resource {
-  target = github_repository_ruleset.main_interim
-  values = { ruleset_id = 25372131 }
-}
-
-override_resource {
-  target = github_repository_ruleset.main_checks
-  values = { ruleset_id = 25397171 }
-}
-
-override_resource {
-  target = github_repository_ruleset.app_main
-  values = { ruleset_id = 1 }
-}
 
 override_data {
   target = data.github_rest_api.token_admin

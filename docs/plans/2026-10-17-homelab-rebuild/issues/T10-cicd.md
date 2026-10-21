@@ -1,7 +1,7 @@
 # T10 CI/CD
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중(2026-10-20 착수. 작성 작업 PR #788 전체 ci, #789 공유 차트·ApplicationSet, #790 워크플로, #791 `infra/github`·래퍼. 사람 작업과 종단 시험 남음)
+- 상태: 진행 중(2026-10-20 착수. 작성 작업 PR #788 전체 ci, #789 공유 차트·ApplicationSet, #790 워크플로, #791 `infra/github`·래퍼. `infra/github` 1단계 apply와 병합 키 Secret Sync 완료(2026-10-21), 2단계 PR(`main-interim` disabled, import 제거) 뒤 apply. 남은 사람 작업과 종단 시험)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T07(착수), T09(완료), T08a(`infra/github` 첫 apply만. R2 잠금 시험 U02 뒤)
   - 착수: T07 뒤 바로 시작한다. 차트, 워크플로, `infra/github` HCL 같은 작성 작업은 T09와 병행한다.
