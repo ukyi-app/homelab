@@ -4,7 +4,8 @@
 //
 // 모든 단계를 끝까지 돌리고 위반을 모아 한 번에 보인다. 하나라도 있으면 exit 1.
 // 로컬에서 일부만: bun run ci --only workflows,render
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
 import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkWorkloads } from "./policy";
@@ -116,6 +117,24 @@ const steps: Step[] = [
     name: "tf-github wrapper",
     // tools/tf-github.sh의 거부 규칙을 가짜 gh·infisical·terraform으로 시험한다(자격 없음).
     run: () => tool("tf-github", ["bash", "tools/tf-github.test.sh"]),
+  },
+  {
+    name: "temp cleanup",
+    // tempDir 폴더가 어떻게 끝나든 지워지는지(lib.ts). 자식 프로세스를 빈 TMPDIR로 돌려 끝난 뒤 남은 것을 센다.
+    run: () => {
+      const out: Violation[] = [];
+      const cases: [string, number][] = [["ok", 0], ["exit", 3], ["throw", 1], ["reject", 1], ["sigterm", 143]];
+      for (const [mode, want] of cases) {
+        const tmp = tempDir("cleanup-test");
+        const r = run(["bun", "tools/ci/temp-cleanup-child.ts", mode], { env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: tmp } });
+        const left = readdirSync(tmp);
+        if (!r.stdout.includes("made 2")) out.push({ rule: "temp-cleanup", where: mode, message: `자식이 폴더를 만들지 못했다: ${(r.stdout + r.stderr).trim()}` });
+        if (r.code !== want) out.push({ rule: "temp-cleanup", where: mode, message: `exit ${r.code}, 기대 ${want}` });
+        if (left.length > 0) out.push({ rule: "temp-cleanup", where: mode, message: `남은 임시 폴더: ${left.join(", ")}` });
+      }
+      console.log(`임시 폴더 정리 ${cases.length}경우`);
+      return out;
+    },
   },
   {
     name: "app-build deploy-pr",
@@ -303,8 +322,12 @@ const steps: Step[] = [
       if (roots.length === 0) out.push({ rule: "terraform", where: "infra", message: "Terraform root가 0개다(L40)" });
       const work = tempDir("terraform");
       // 자격이 들어가는 환경 변수는 넘기지 않는다. provider 캐시만 공유한다.
-      const env: Record<string, string | undefined> = { PATH: process.env.PATH, HOME: process.env.HOME, TF_IN_AUTOMATION: "1", TF_INPUT: "0" };
-      if (process.env.TF_PLUGIN_CACHE_DIR) env.TF_PLUGIN_CACHE_DIR = process.env.TF_PLUGIN_CACHE_DIR;
+      // 캐시를 정하지 않으면 사용자 캐시 폴더를 쓴다. 없으면 root마다, 실행마다 provider를 새로 받아 사본에 풀었다.
+      // 캐시의 provider는 .terraform.lock.hcl 해시와 맞을 때만 쓰인다(lockfile=readonly). 동시 실행 두 개가 같은
+      // provider를 처음 받는 순간만 겹칠 수 있다(Terraform 문서: 캐시는 동시 쓰기에 안전하지 않다).
+      const pluginCache = process.env.TF_PLUGIN_CACHE_DIR || join(process.env.XDG_CACHE_HOME || join(process.env.HOME ?? tmpdir(), ".cache"), "homelab-ci", "terraform-plugins");
+      mkdirSync(pluginCache, { recursive: true });
+      const env: Record<string, string | undefined> = { PATH: process.env.PATH, HOME: process.env.HOME, TF_IN_AUTOMATION: "1", TF_INPUT: "0", TF_PLUGIN_CACHE_DIR: pluginCache };
       for (const root of roots) {
         const dst = join(work, root);
         for (const f of gitFiles(`${root}/`)) {
