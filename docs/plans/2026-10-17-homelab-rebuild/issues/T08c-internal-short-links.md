@@ -1,7 +1,7 @@
 # T08c 내부 UI 짧은 주소 `go/`
 
 - 단계: P2 플랫폼 구축 (2026-10-20 추가, D-30)
-- 상태: 대기
+- 상태: 진행 중(2026-10-21 #804 배포, 맥 확인 끝, 아이폰·`go` 0개 시험·VM은 남음)
 - 명세: [../spec.md](../spec.md) §5.1 D-30
 - 설계: [../platform/design.md](../platform/design.md) C.3.5 "짧은 주소", F D-30
 - Blocked by: T08a
@@ -12,6 +12,8 @@
 ## 목표
 
 tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으로 넘어가게 한다. 새 인증서, DNS 쓰기 자격, 공개 DNS 레코드 없이 짧은 입력만 더한다.
+
+입력 방식(D-30, 사용자 2026-10-21 "1번으로 되긴하네 그냥 이렇게 하지뭐"): 처음 보는 단일 라벨 `go/argocd`는 모든 브라우저가 검색어로 보낸다. 기기·브라우저마다 처음 한 번 `http://go/<이름>`으로 열면 그 뒤로는 스킴 없는 `go/<이름>`이 이동한다. 이 방식으로 둔다.
 
 ## 선행 조건
 
@@ -47,8 +49,8 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 
 ## 완료 조건
 
-- 맥(Safari, Chrome)에서 `go/argocd` → Argo CD 로그인 화면, `go/adguard` → AdGuard 로그인 화면.
-- 아이폰 Safari(셀룰러, Tailscale 켬)에서 스킴 없이 친 `go/argocd`가 열린다. 이것이 D-30의 사용자 목표라 필수다. 검색어로 가거나 HTTPS로 바뀌어 실패하면 완료로 치지 않고, 원인과 `http://go/argocd` 결과를 기록한 뒤 구현이나 D-30을 사용자와 다시 정한다.
+- 맥(Safari, Chrome)에서 처음 한 번 `http://go/argocd`로 연 뒤 스킴 없는 `go/argocd` → Argo CD 로그인 화면, `go/adguard` → AdGuard 로그인 화면. **확인(사용자 2026-10-21 "전부 잘 열려").**
+- 아이폰 Safari(셀룰러, Tailscale 켬)에서 처음 한 번 `http://go/argocd`로 연 뒤 스킴 없이 친 `go/argocd`가 열린다. **미확인**(사용자 확인은 "모든 브라우저"였고 아이폰 Safari를 따로 확인했다는 말은 없다). 한 번 연 뒤에도 검색어로 가거나 HTTPS로 바뀌어 실패하면 완료로 치지 않고, 원인을 기록한 뒤 구현이나 D-30을 사용자와 다시 정한다.
 - 경로·쿼리 유지: `go/argocd/applications?x=1` → 같은 경로·쿼리. 그 시험 쿼리 문자열이 파드 로그에 없다(T08b 뒤라면 로그 저장소에도 없다).
 - 거부: `go/evil.com`·`go/a.b`는 404, `https://go/`는 연결 실패(인증서 경고가 아님).
 - `go` 파드를 0으로 줄여도 전체 주소 `https://argocd.<tailnet>.ts.net`은 그대로 열리고, 되돌리면 `go/`가 돌아온다.
