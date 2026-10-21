@@ -118,6 +118,11 @@ const steps: Step[] = [
     run: () => tool("tf-github", ["bash", "tools/tf-github.test.sh"]),
   },
   {
+    name: "app-build deploy-pr",
+    // app-build.yaml 배포 PR 단계를 그대로 꺼내 가짜 gh·git으로 돌린다(배포 브랜치 404·200·500의 lease, 설계 B.8 E5).
+    run: () => tool("app-build", ["bash", "tools/app-build.test.sh"]),
+  },
+  {
     name: "workflows",
     run: () => {
       const files = gitFiles(".github/workflows/*.yaml", ".github/workflows/*.yml").map((path) => ({ path, text: readText(path) }));
