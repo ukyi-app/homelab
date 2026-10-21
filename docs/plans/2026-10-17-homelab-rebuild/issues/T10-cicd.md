@@ -1,7 +1,7 @@
 # T10 CI/CD
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 진행 중(2026-10-20 착수. 작성 작업 PR #788 전체 ci, #789 공유 차트·ApplicationSet, #790 워크플로, #791 `infra/github`·래퍼. `infra/github` 1단계 apply와 병합 키 Secret Sync 완료(2026-10-21), 2단계 PR(`main-interim` disabled, import 제거) 뒤 apply. 남은 사람 작업과 종단 시험)
+- 상태: 진행 중(2026-10-20 착수. 작성 작업 PR #788 전체 ci, #789 공유 차트·ApplicationSet, #790 워크플로, #791 `infra/github`·래퍼. 2026-10-21까지 끝: 배포·병합 App 생성·설치, `infra/github` 1단계 apply와 병합 키 Secret Sync, 2단계(#798) apply(`main-interim` disabled), 템플릿 교체(`homelab-app-template` #41), `homelab-probe` 생성·하드닝과 그 `app-main` apply(#800, approvals 2026-10-21 행). 남은 것: 시나리오 1 손 등록 PR과 종단 시험(시나리오 1·7·11·15))
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T07(착수), T09(완료), T08a(`infra/github` 첫 apply만. R2 잠금 시험 U02 뒤)
   - 착수: T07 뒤 바로 시작한다. 차트, 워크플로, `infra/github` HCL 같은 작성 작업은 T09와 병행한다.
@@ -130,7 +130,8 @@
 - 병합 키 회전 절차를 한 번 실행해 environment secret의 `updated_at`이 교체 시각 이후인지 확인한다.
 - `gh api orgs/ukyi-app/installations`로 App 설치 범위를 확인한다. 배포·병합 App은 homelab만, 봇 신원 대역 시험 App `ukyi-homelab-bot-standin`은 homelab과 `homelab-probe`, Renovate는 고른 저장소만이다. 리뷰 전용 App 구조는 설계 C.8 리뷰 전용 App 줄의 명령으로 본다(한 저장소에만 설치한 시험 App `ukyi-homelab-review-probe`의 `repository_selection` → `selected`, 설치 토큰의 `GET /installation/repositories` → 그 저장소 하나).
 - `homelab-probe` 첫 push 뒤 `gh api orgs/ukyi-app/packages/container/homelab-probe --jq .visibility`와 `curl -s -o /dev/null -w '%{http_code}' 'https://ghcr.io/token?scope=repository:ukyi-app/homelab-probe:pull'` → 200을 기록한다.
-- 이 단계에서 확인할 미검증 항목: U08의 나머지(bypass 병합 때 ruleset A 필수 검사 적용, App 승인이 code owner 승인을 대신하지 못함), U09, U20, U21, U25, U30, U35, U36, U37, U38, U39, 그리고 시나리오 15에서 U05를 다시 본다(설계 부록 1). 결과가 틀리면 부록 1의 "틀리면" 열대로 간다.
+- 이 단계에서 확인할 미검증 항목: U08의 나머지(bypass 병합 때 ruleset A 필수 검사 적용, App 승인이 code owner 승인을 대신하지 못함), U09, U20, U21, U25, U30, U35, U36, U37, U38, 그리고 시나리오 15에서 U05를 다시 본다(설계 부록 1). 결과가 틀리면 부록 1의 "틀리면" 열대로 간다.
+- 확인한 항목(2026-10-21, 설계 부록 1의 결과와 같다): U39 통과(`homelab-probe` 첫 push로 만든 패키지가 `public`, 익명 토큰으로 manifest 200). U05의 배포 키 실동작(`homelab-probe` 첫 main push에서 `app-build@app-build-v1.0.0`의 deploy-pr이 배포 키를 받음. Infisical Subject를 GitHub 불변 형식으로 바꾼 뒤, 설계 B.8 E5).
 
 ## 되돌리는 방법
 
