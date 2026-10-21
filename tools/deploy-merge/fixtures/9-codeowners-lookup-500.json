@@ -1,0 +1,1 @@
+{"expect": 9, "why": "앞 후보 조회 500. 뒤 파일로 넘어가지 않는다", "patch": {"appRepo": {"codeownersFiles": [{"path": ".github/CODEOWNERS", "status": 500, "text": ""}, {"path": "CODEOWNERS", "status": 200, "text": "* @ukkiee\n"}]}}}

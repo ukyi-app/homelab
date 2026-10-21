@@ -1,1 +1,1 @@
-{"expect": 9, "why": "주석뿐", "patch": {"appRepo": {"codeownersText": "# * @ukkiee\n"}}}
+{"expect": 9, "why": "주석뿐", "patch": {"appRepo": {"codeownersFiles": [{"path": ".github/CODEOWNERS", "status": 200, "text": "# * @ukkiee\n"}]}}}

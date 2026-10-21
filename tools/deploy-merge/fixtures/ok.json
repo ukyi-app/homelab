@@ -61,7 +61,13 @@
     ],
     "codeownersStatus": 200,
     "codeownersErrors": [],
-    "codeownersText": "# main의 code owner 리뷰(app-main)가 이 파일을 쓴다.\n* @ukkiee\n"
+    "codeownersFiles": [
+      {
+        "path": ".github/CODEOWNERS",
+        "status": 200,
+        "text": "# main의 code owner 리뷰(app-main)가 이 파일을 쓴다.\n* @ukkiee\n"
+      }
+    ]
   },
   "codeOwner": "ukkiee"
 }

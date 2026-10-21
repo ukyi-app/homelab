@@ -34,8 +34,8 @@ export type Facts = {
     rules?: { type: string; parameters?: Record<string, any> }[];
     codeownersStatus?: number;
     codeownersErrors?: unknown[];
-    // main의 CODEOWNERS 원문(.github/, 루트, docs/ 순서로 GitHub이 고르는 첫 파일).
-    codeownersText?: string | null;
+    // main의 CODEOWNERS 후보 조회 응답(CODEOWNERS_PATHS 순서). 적용 파일은 codeownersFile이 고른다.
+    codeownersFiles?: { path: string; status: number; text: string }[];
   };
   // 앱 저장소 전체를 소유해야 하는 code owner 로그인(템플릿 계약 "* @<owner>").
   codeOwner?: string;
@@ -54,6 +54,22 @@ function parseImage(text: string | null | undefined): Record<string, unknown> | 
   } catch {
     return undefined;
   }
+}
+
+// GitHub이 CODEOWNERS를 찾는 순서. 먼저 있는 파일 하나만 적용한다.
+export const CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
+
+// 적용되는 CODEOWNERS 원문. 확인된 404에서만 다음 후보로 넘어간다. 앞 파일의 403·5xx를 "없음"으로 보고 뒤 파일을
+// 읽으면, GitHub이 적용하지 않는 파일로 조건 9를 판정한다(앞 파일이 다른 소유자여도 통과). 그래서 그때는 오류다.
+// 모든 후보가 404면 text null(조건 9가 거짓).
+export function codeownersFile(files: { path: string; status: number; text: string }[] | undefined): { text: string | null } | { error: string } {
+  for (const path of CODEOWNERS_PATHS) {
+    const r = (files ?? []).find((x) => x.path === path);
+    if (!r) return { error: `${path}를 조회하지 않았다` };
+    if (r.status === 200) return { text: r.text };
+    if (r.status !== 404) return { error: `${path} 조회 HTTP ${r.status}` };
+  }
+  return { text: null };
 }
 
 export function appFromBranch(ref: string | undefined): string | undefined {
@@ -137,7 +153,9 @@ export function evaluate(f: Facts): Verdict {
   }
   // 오류가 없다는 것은 문법만 보장한다. 주석뿐이거나 일부 경로만 소유하면 소유자 없는 경로는 쓰기 권한이 있는
   // 아무 신원(리뷰 App 등)의 승인으로 병합된다. 규칙 줄이 정확히 "* @<owner>" 하나여야 한다(뒤 줄이 앞 줄을 덮는다).
-  const rules9 = (repo.codeownersText ?? "")
+  const owners = codeownersFile(repo.codeownersFiles);
+  if ("error" in owners) fail(9, `앱 main의 CODEOWNERS를 읽지 못했다(${owners.error})`);
+  const rules9 = ("text" in owners ? (owners.text ?? "") : "")
     .split("\n")
     .map((l) => l.replace(/#.*$/, "").trim().replace(/\s+/g, " "))
     .filter((l) => l !== "");

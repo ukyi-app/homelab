@@ -5,7 +5,7 @@
 // 출력: ok=true|false, pr, sha. ok일 때만 merge job이 병합 키를 받는다.
 // 이유 댓글은 ukyi-homelab-deploy가 작성한 PR에만 단다. 다른 PR(모든 PR의 ci 완료마다 돈다)은 로그에만 남긴다.
 import { appendFileSync, readFileSync } from "node:fs";
-import { type Facts, appFromBranch, evaluate } from "./conditions";
+import { CODEOWNERS_PATHS, type Facts, appFromBranch, evaluate } from "./conditions";
 
 const API = "https://api.github.com";
 const HOMELAB = "ukyi-app/homelab";
@@ -17,6 +17,7 @@ const token = process.env.GH_TOKEN ?? "";
 // 상태 코드와 본문을 함께 돌려준다. 실패 응답 본문({"message":...})도 body에 들어오므로 부르는 곳은 status나 모양
 // (Array.isArray, 정규식)을 확인한 뒤에만 값을 쓴다. 확인이 빠져도 실패 본문에는 쓰는 필드가 없어 조건이 거짓이 된다
 // (병합하지 않는 쪽으로 닫힌다). app-build의 `gh api ... || true` 함정(설계 B.8 E5)과 같은 꼴은 여기 없다.
+// 실패를 "없음"으로 보고 다른 후보를 읽는 탐색(CODEOWNERS)은 확인된 404에서만 넘어간다(codeownersFile).
 
 async function gh(path: string, init: RequestInit & { accept?: string } = {}): Promise<{ status: number; body: any; text: string }> {
   const res = await fetch(`${API}/${path}`, {
@@ -38,6 +39,7 @@ async function gh(path: string, init: RequestInit & { accept?: string } = {}): P
   return { status: res.status, body, text };
 }
 
+// 200 밖은 모두 null이다. image.yaml 둘에만 쓴다: 대신 읽을 후보가 없어 null이면 조건 4가 거짓이 된다.
 async function raw(repo: string, path: string, ref: string): Promise<string | null> {
   const r = await gh(`repos/${repo}/contents/${path}?ref=${encodeURIComponent(ref)}`, { accept: "application/vnd.github.raw" });
   return r.status === 200 ? r.text : null;
@@ -160,17 +162,19 @@ export async function gather(event: any): Promise<Facts> {
 
   const rules = await gh(`repos/${appRepo}/rules/branches/main`);
   const owners = await gh(`repos/${appRepo}/codeowners/errors?ref=main`);
-  let codeownersText: string | null = null;
-  for (const path of [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]) {
-    codeownersText = await raw(appRepo, path, "main");
-    if (codeownersText !== null) break;
+  // 응답을 status째 넘긴다. 404에서만 다음 후보를 읽고, 어느 파일을 쓸지는 conditions.ts의 codeownersFile이 정한다.
+  const codeownersFiles: { path: string; status: number; text: string }[] = [];
+  for (const path of CODEOWNERS_PATHS) {
+    const r = await gh(`repos/${appRepo}/contents/${path}?ref=main`, { accept: "application/vnd.github.raw" });
+    codeownersFiles.push({ path, status: r.status, text: r.status === 200 ? r.text : "" });
+    if (r.status !== 404) break;
   }
   facts.appRepo = {
     visibility: repo.status === 200 ? repo.body?.visibility : undefined,
     rules: Array.isArray(rules.body) ? rules.body : [],
     codeownersStatus: owners.status,
     codeownersErrors: owners.body?.errors,
-    codeownersText,
+    codeownersFiles,
   };
   return facts;
 }

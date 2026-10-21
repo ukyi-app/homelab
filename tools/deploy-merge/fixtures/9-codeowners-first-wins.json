@@ -1,0 +1,1 @@
+{"expect": 9, "why": "앞 파일이 200이면 그 파일이 적용된다. 뒤 파일의 맞는 규칙은 보지 않는다", "patch": {"appRepo": {"codeownersFiles": [{"path": ".github/CODEOWNERS", "status": 200, "text": "* @someone\n"}, {"path": "CODEOWNERS", "status": 200, "text": "* @ukkiee\n"}]}}}

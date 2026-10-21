@@ -167,6 +167,7 @@ const steps: Step[] = [
     name: "deploy-merge fixtures",
     // 자동 병합 조건 9개(tools/deploy-merge/conditions.ts). ok.json은 모두 참인 대조군이고, 나머지는 ok.json에
     // patch 하나를 얹어 기대한 조건 하나만 거짓이 되는지 본다. 조건마다 음성 fixture가 하나 이상 있어야 한다.
+    // expect "pass"는 patch를 얹어도 모두 참이어야 하는 대조군이다(입력 해석의 정상 경로, 예: CODEOWNERS 404 뒤 다음 후보).
     run: () => {
       const out: Violation[] = [];
       const dir = "tools/deploy-merge/fixtures";
@@ -187,6 +188,10 @@ const steps: Step[] = [
       for (const f of files.filter((x) => !x.endsWith("/ok.json"))) {
         const fx = JSON.parse(readText(f));
         const got = evaluate(merge(base, fx.patch) as Facts).failures.map((x) => x.cond);
+        if (fx.expect === "pass") {
+          if (got.length > 0) out.push({ rule: "fixture", where: f, message: `대조군이 걸렸다: 조건 ${[...new Set(got)].join(", ")}` });
+          continue;
+        }
         covered.add(fx.expect);
         if (!got.includes(fx.expect)) out.push({ rule: "fixture", where: f, message: `조건 ${fx.expect}가 걸리지 않았다(걸린 것: ${got.join(", ") || "없음"})` });
         const others = [...new Set(got.filter((c) => c !== fx.expect))];
