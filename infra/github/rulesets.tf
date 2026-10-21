@@ -1,14 +1,15 @@
 # homelab ruleset 여섯(설계 C.4.7 서버 쪽 장치). 지우지 않고 enforcement를 disabled로만 끈다. 정답은 이 HCL이다.
 # 콘솔·gh api로 바꾸면 다음 verify가 차이(exit 2)나 guard 오류(exit 1)로 보인다.
 
-# 임시 ruleset(E1, gh api로 만듦). E5 1단계는 active 그대로 import하고, ruleset B가 main에 걸린 것을 확인한 뒤
-# 2단계 PR에서 disabled로 바꾼다. 한 apply로 하면 병렬 적용이나 부분 실패(#3519) 때 main에 필수 검사만 남는다.
+# 임시 ruleset(E1, gh api로 만듦). E5 1단계에서 active 그대로 import했고(2026-10-21), ruleset B가 main에 걸린 것을 확인한 뒤
+# 2단계에서 disabled로 바꿨다. 한 apply로 하면 병렬 적용이나 부분 실패(#3519) 때 main에 필수 검사만 남는다.
+# 다른 ruleset을 끄거나 고칠 때 먼저 active로 바꿔 main이 열리지 않게 하는 데 쓴다(런북 github.md).
 # 2단계 뒤에도 선언해 둔다. 빼면 guard 3(이름 집합)이 늘 실패하고, 이름으로 예외를 두면 몰래 바꾼 ruleset을 놓친다.
 resource "github_repository_ruleset" "main_interim" {
   repository  = local.homelab
   name        = "main-interim"
   target      = "branch"
-  enforcement = "active"
+  enforcement = "disabled"
 
   conditions {
     ref_name {
@@ -205,7 +206,7 @@ resource "github_repository_ruleset" "release_tags_create" {
 }
 
 # 앱 저장소와 템플릿의 main(설계 C.4.7 app-main). App bypass 없음. 자동 배포는 앱 main을 믿으므로 앱 main을 바꿀 수
-# 있는 신원이 곧 배포 주체다. 결정 5 하드닝이 같은 모양으로 먼저 건 것을 import한다(imports.tf).
+# 있는 신원이 곧 배포 주체다. 결정 5 하드닝이 같은 모양으로 먼저 건 것을 E5 1단계에서 import했다.
 # Free에서는 public 저장소에만 걸린다. private이 되면 자동 병합 조건 9가 멈춘다.
 # prevent_destroy를 두지 않는다. app-repos.json에서 빼는 앱 삭제는 delete plan이라 래퍼가 --allow-destroy 없이 멈춘다.
 resource "github_repository_ruleset" "app_main" {
