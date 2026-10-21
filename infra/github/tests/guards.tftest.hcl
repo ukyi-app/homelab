@@ -110,7 +110,7 @@ override_data {
 
 override_data {
   target = data.github_rest_api.public_repos
-  values = { code = 200, body = "[{\"name\":\"homelab\",\"archived\":false},{\"name\":\"homelab-app-template\",\"archived\":false},{\"name\":\"files\",\"archived\":false},{\"name\":\"homelab-bot\",\"archived\":false},{\"name\":\"old\",\"archived\":true}]" }
+  values = { code = 200, body = "[{\"name\":\"homelab\",\"archived\":false},{\"name\":\"homelab-app-template\",\"archived\":false},{\"name\":\"files\",\"archived\":false},{\"name\":\"homelab-bot\",\"archived\":false},{\"name\":\"homelab-probe\",\"archived\":false},{\"name\":\"old\",\"archived\":true}]" }
 }
 
 override_data {
@@ -215,6 +215,16 @@ run "g2_app_private" {
   override_data {
     target = data.github_rest_api.repo_app["homelab-bot"]
     values = { code = 200, body = "{\"visibility\":\"private\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
+  }
+  expect_failures = [data.github_rest_api.repo_app]
+}
+
+run "g2_listed_not_created" {
+  # app-repos.json에 넣고 저장소를 아직 만들지 않은 사이. 저장소 GET이 404라 plan이 멈춘다(apply까지 가지 않는다).
+  command = plan
+  override_data {
+    target = data.github_rest_api.repo_app["homelab-probe"]
+    values = { code = 404, body = "{\"message\":\"Not Found\"}" }
   }
   expect_failures = [data.github_rest_api.repo_app]
 }
@@ -361,7 +371,7 @@ run "g8_unlisted_public" {
   command = plan
   override_data {
     target = data.github_rest_api.public_repos
-    values = { code = 200, body = "[{\"name\":\"homelab\",\"archived\":false},{\"name\":\"homelab-app-template\",\"archived\":false},{\"name\":\"files\",\"archived\":false},{\"name\":\"homelab-bot\",\"archived\":false},{\"name\":\"newapp\",\"archived\":false}]" }
+    values = { code = 200, body = "[{\"name\":\"homelab\",\"archived\":false},{\"name\":\"homelab-app-template\",\"archived\":false},{\"name\":\"files\",\"archived\":false},{\"name\":\"homelab-bot\",\"archived\":false},{\"name\":\"homelab-probe\",\"archived\":false},{\"name\":\"newapp\",\"archived\":false}]" }
   }
   expect_failures = [data.github_rest_api.public_repos]
 }
