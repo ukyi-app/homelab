@@ -1,4 +1,4 @@
-# GitHub App ID(숫자). App을 만든 뒤 사람이 default에 숫자 리터럴로 적는다(HUMAN-STEPS).
+# GitHub App ID(숫자). default에 숫자 리터럴로 둔다. 값은 gh api /apps/<slug> --jq .id(owner ukyi-app)로 읽었다(2026-10-21).
 # data.github_app은 fine-grained 토큰에서 404로 죽어 plan을 조용히 무변경으로 만들었다(설계 B.1 P04).
 # private App의 ID는 익명 조회가 안 되는 값이라 이 공개 파일에 처음 실린다. 자격은 아니다(키가 있어야 토큰을 발급한다).
 # -var·tfvars로 넘기지 않는다(래퍼가 tfvars를 거부한다). 0이면 plan이 여기서 멈춘다.
@@ -6,7 +6,7 @@
 variable "homelab_deploy_app_id" {
   description = "App ukyi-homelab-deploy의 ID(ruleset C bypass)"
   type        = number
-  default     = 0
+  default     = 5404211
 
   validation {
     condition     = var.homelab_deploy_app_id > 0
@@ -17,7 +17,7 @@ variable "homelab_deploy_app_id" {
 variable "homelab_merge_app_id" {
   description = "App ukyi-homelab-merge의 ID(ruleset B bypass)"
   type        = number
-  default     = 0
+  default     = 5404220
 
   validation {
     condition     = var.homelab_merge_app_id > 0
