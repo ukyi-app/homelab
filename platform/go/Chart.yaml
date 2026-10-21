@@ -1,0 +1,10 @@
+# 내부 UI 짧은 주소 리다이렉터 go(T08c, 설계 C.3.5 "짧은 주소", D-30). tailnet에서 go/<이름>을
+# https://<접두><이름>.<tailnet>.ts.net 으로 302 보낸다.
+# 차트인 이유: tailnet 기기 이름과 리다이렉트 접두가 클러스터마다 달라(운영 "", VM "vm-") root가 valuesObject로 넘긴다
+# (E8 VM 격리 1·4번). platform/tailscale 차트에 넣지 않은 이유는 platform/root/templates/go.yaml 머리 주석.
+apiVersion: v2
+name: go
+description: Tailnet-only short link redirector (go/<name>) for one homelab cluster
+type: application
+version: 0.1.0
+appVersion: "1.30.6"

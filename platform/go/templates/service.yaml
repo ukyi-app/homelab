@@ -1,0 +1,40 @@
+{{- /*
+tailnet 노출(설계 C.3.5 "짧은 주소"). operator LoadBalancer Service라 프록시 기기 하나가 tailnet 주소로 받은 패킷을
+이 Service의 ClusterIP로 넘긴다(L3, v1.104.1 cmd/containerboot/forwarding.go). 인증서를 받지 않는다.
+
+Ingress로 내지 않는다. operator Ingress는 FQDN:443 인증서만 다뤄 짧은 이름 go/로 오면 TLS가 실패한다.
+443은 열지 않는다. 브라우저가 https://go를 먼저 시도해도 인증서 경고가 아니라 연결 실패로 끝나야 한다.
+짧은 이름 go에 맞는 인증서는 받을 수 없어, 443을 열면 TLS 오류 화면에서 멈춘다. 전체 이름 인증서를 붙여도 go와
+맞지 않으면서 CT에 이름만 새로 실린다.
+*/}}
+{{- $prefix := .Values.tailscale.prefix | toString }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: go
+  namespace: go
+  annotations:
+    # tailnet 기기 이름이자 브라우저에 치는 짧은 이름. 같은 이름의 기기가 이미 있으면 -1이 붙고 되돌아가지 않는다
+    # (공유 차트와 tools/ci/policy.ts가 go·vm-go를 예약한다).
+    # HSTS preload 최상위 도메인(app, dev 등)과 같은 이름이면 브라우저가 http://를 HTTPS로 바꿔 늘 실패한다. 이름을 바꿀 때 본다.
+    tailscale.com/hostname: {{ printf "%sgo" $prefix | quote }}
+    # ACL은 autogroup:member → tag:k8s-go:80만 연다. 내부 UI 프록시의 tag:k8s(443)에 80을 더하지 않으려고 태그를 나눴다.
+    tailscale.com/tags: tag:k8s-go
+spec:
+  type: LoadBalancer
+  # k3s servicelb(klipper)는 loadBalancerClass가 있는 Service에 svclb DaemonSet을 만들지 않는다(cloud-provider
+  # wantsLoadBalancer). 이 줄이 빠지면 servicelb가 노드 LAN·tailnet 주소에 80을 연다(PR #779의 교훈).
+  # 같은 servicelb의 상태 갱신은 class를 보지 않아, 이 Service의 EndpointSlice가 바뀔 때 status.loadBalancer를
+  # 비울 수 있다(k3s v1.36.5+k3s1 pkg/cloudprovider/servicelb.go updateStatus). operator가 다시 채운다. 데이터 경로는
+  # ClusterIP라 영향이 없고, Argo CD health가 잠깐 Progressing으로 보일 수 있다.
+  loadBalancerClass: tailscale
+  # LoadBalancer는 기본으로 NodePort도 받는다. 그러면 kube-proxy가 노드 모든 주소(LAN 포함)의 30000번대에 이 서비스를 연다.
+  # operator 프록시는 ClusterIP만 쓰므로 NodePort를 받지 않는다.
+  allocateLoadBalancerNodePorts: false
+  selector:
+    app: go
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
