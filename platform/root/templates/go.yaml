@@ -1,0 +1,48 @@
+{{- /*
+go: 내부 UI 짧은 주소 리다이렉터(T08c, 설계 C.3.5 "짧은 주소", D-30). 원본 platform/go, ns go.
+켜기: values.yaml의 components.go.enabled. 클러스터 값 cluster.tailscale.prefix를 받는다(운영 "" → go, VM "vm-" → vm-go).
+
+platform/tailscale 차트에 넣지 않고 따로 둔 이유:
+- tailscale ns는 프록시 때문에 privileged다. 리다이렉터는 권한이 필요 없어 restricted ns(go)에 둔다.
+- 한 Application이면 go의 실패(Infisical 키 누락 등)가 tailscale Application을 Degraded로 만들어 wave -5에서 root 전체를
+  멈춘다. go가 멈춰도 장애는 짧은 입력에서 끝나야 한다(D-30 이유).
+
+wave 1: 맨 뒤 wave(봇 자리와 같다). operator(-5)와 ClusterSecretStore(-7)가 Healthy가 된 뒤에 만들고,
+root sync는 마지막 wave의 health를 기다리지 않으므로 go가 Degraded여도 다른 구성 요소를 막지 않는다(설계 C.3.1).
+
+되돌리기(T08c): 이 Application에는 resources-finalizer가 없다. Application만 끄거나 지우면 Service가 남고 프록시 기기도 남는다.
+Application이 살아 있을 때 platform/go의 매니페스트를 지우는 PR로 prune을 확인한 뒤, 이 파일과 ACL 두 줄을 지운다.
+*/}}
+{{- if .Values.components.go.enabled }}
+{{- $tailscale := .Values.cluster.tailscale | default dict }}
+{{- /* 운영의 빈 접두는 유효하다. 값에 required를 걸면 운영도 실패하므로 키 존재 여부를 검사한다. */}}
+{{- if not (hasKey $tailscale "prefix") }}
+{{- fail "cluster.tailscale.prefix is missing in values-<cluster>.yaml (prod \"\", vm \"vm-\")" }}
+{{- end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: go
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/go
+    helm:
+      valuesObject:
+        tailscale:
+          prefix: {{ $tailscale.prefix | quote }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: go
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}

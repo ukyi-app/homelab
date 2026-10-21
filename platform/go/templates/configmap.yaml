@@ -1,0 +1,75 @@
+{{- /*
+리다이렉트 규칙(설계 C.3.5, T08c). 첫 경로 조각이 DNS 라벨이고 <접두><이름>이 63자 이하면
+302 https://<접두><이름>.<tailnet 도메인><나머지 경로와 쿼리>, `/`는 사용법 한 줄, 그 밖은 404.
+대상 호스트는 늘 라벨 하나 + tailnet 도메인이다. 점·@·:·%·\는 라벨에 없어 go/evil.com, go/a.b도 404라 열린 리다이렉트가 아니다.
+라벨 뒤에는 /나 ?만 올 수 있어 나머지 경로가 호스트를 바꾸지 못한다.
+
+63자 상한은 접두 길이만큼 이름 쪽에서 뺀다(운영 63자, VM vm- 접두라 60자). 렌더 때 정해 정규식에 박는다.
+tailnet 도메인은 저장소에 두지 않는다(D-23). 여기는 자리표시 __TAILNET_DOMAIN__이고,
+init 컨테이너가 Infisical에서 온 값을 검사한 뒤 바꿔 넣는다(templates/deployment.yaml).
+*/}}
+{{- if not (hasKey (.Values.tailscale | default dict) "prefix") }}
+{{- fail "tailscale.prefix is required (root passes cluster.tailscale.prefix; prod \"\", vm \"vm-\")" }}
+{{- end }}
+{{- $prefix := .Values.tailscale.prefix | toString }}
+{{- /* 이름 정규식 [a-z0-9]([a-z0-9-]{0,N}[a-z0-9])?의 N. 이름 최대 길이는 N+2 = 63 - 접두 길이. */}}
+{{- $n := sub 61 (len $prefix) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: go-nginx
+  namespace: go
+data:
+  nginx.conf.tmpl: |
+    worker_processes 1;
+    pid /tmp/nginx.pid;
+    # 요청 단위 오류·경고(error 이하)는 요청 줄 전체(경로·쿼리)를 함께 적는다. crit 이상만 남긴다.
+    # 기동 실패(설정 오류, bind 실패)는 emerg라 그대로 보인다.
+    error_log stderr crit;
+
+    events {
+      worker_connections 256;
+    }
+
+    http {
+      # 접근 로그를 끈다. 남은 경로·쿼리에 토큰이나 인증 코드가 실릴 수 있고, 파드 로그는 T08b 수집기가 14일 보관한다.
+      access_log off;
+      server_tokens off;
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /tmp/proxy_temp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+
+      # $uri가 아니라 $request_uri(디코딩·정규화 전 원문)로 맞춘다. 디코딩한 값을 Location에 넣으면 %0d%0a 같은
+      # 인코딩이 풀려 헤더를 깰 수 있고, 퍼센트 인코딩을 원문 그대로 넘겨야 대상 앱이 같은 경로를 받는다.
+      # 사용법도 원문으로 판정한다. location = /는 디코딩·정규화한 $uri로 골라져 /argocd/..%2F?x=1(유효 라벨)이나
+      # /evil.com/..(거부 대상)까지 사용법 200을 받았다(T08c 추가 리뷰). 그래서 location은 하나만 두고
+      # 모든 요청이 아래 두 map의 같은 판정을 거친다.
+      map $request_uri $go_usage {
+        default 0;
+        "~^/(\?.*)?$" 1;
+      }
+
+      map $request_uri $go_target {
+        default "";
+        "~^/(?<go_name>[a-z0-9](?:[a-z0-9-]{0,{{ $n }}}[a-z0-9])?)(?<go_rest>[/?].*)?$" "https://{{ $prefix }}${go_name}.__TAILNET_DOMAIN__${go_rest}";
+      }
+
+      server {
+        listen 8080 default_server;
+
+        location / {
+          default_type text/plain;
+          if ($go_usage) {
+            return 200 "usage: {{ $prefix }}go/<name>[/path] -> https://{{ $prefix }}<name>.<tailnet>.ts.net/path\n";
+          }
+          if ($go_target = "") {
+            return 404;
+          }
+          # 301을 쓰지 않는다. 브라우저가 영구 캐시해 규칙이나 대상을 바꿔도 기기마다 옛 대상으로 간다. no-store로 302도 캐시하지 않게 한다.
+          add_header Cache-Control "no-store" always;
+          return 302 $go_target;
+        }
+      }
+    }

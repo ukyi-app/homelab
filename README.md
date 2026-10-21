@@ -10,6 +10,10 @@ NUC 한 대에서 도는 k3s 홈랩의 원본 저장소다. Git이 원본이고,
 - 플랫폼 설계: [docs/plans/2026-10-17-homelab-rebuild/platform/design.md](docs/plans/2026-10-17-homelab-rebuild/platform/design.md). 저장소 배치는 C.1, 누가 무엇을 바꾸는지는 C.2.
 - 에이전트 작업 규칙: [AGENTS.md](AGENTS.md).
 
+## 내부 UI
+
+tailnet에 붙은 기기의 브라우저에서 `go/<이름>`(예: `go/argocd`)을 치면 `https://<이름>.<tailnet>.ts.net`으로 넘어간다. 경로와 쿼리는 그대로 따라가고, `go`가 멈춰도 전체 주소는 그대로 열린다(설계 C.3.5).
+
 ## 도구
 
 버전은 `.tool-versions` 한 곳에 있다. `mise install`로 맞춘다.
