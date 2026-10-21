@@ -1,0 +1,6 @@
+# E5 시험 앱(설계 E5 "CLI 없는 동등 절차" 시나리오 1). DB·공개 URL 없이 손으로 등록한다.
+# 64Mi는 같은 digest를 --memory 64m으로 띄워 /healthz 200을 받은 값이다.
+chartVersion: 1.0.0
+kind: web
+port: 8080
+resources: { cpu: 50m, memory: 64Mi }
