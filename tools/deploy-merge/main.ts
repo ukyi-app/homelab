@@ -14,6 +14,10 @@ const SIGNER = "^https://github\\.com/ukyi-app/homelab/\\.github/workflows/app-b
 
 const token = process.env.GH_TOKEN ?? "";
 
+// 상태 코드와 본문을 함께 돌려준다. 실패 응답 본문({"message":...})도 body에 들어오므로 부르는 곳은 status나 모양
+// (Array.isArray, 정규식)을 확인한 뒤에만 값을 쓴다. 확인이 빠져도 실패 본문에는 쓰는 필드가 없어 조건이 거짓이 된다
+// (병합하지 않는 쪽으로 닫힌다). app-build의 `gh api ... || true` 함정(설계 B.8 E5)과 같은 꼴은 여기 없다.
+
 async function gh(path: string, init: RequestInit & { accept?: string } = {}): Promise<{ status: number; body: any; text: string }> {
   const res = await fetch(`${API}/${path}`, {
     ...init,

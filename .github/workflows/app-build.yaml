@@ -186,6 +186,9 @@ jobs:
           APP_SLUG: ${{ steps.token.outputs.app-slug }}
         run: |
           set -euo pipefail
+          # 이 블록의 gh api는 read_image·read_lease 말고는 `|| true` 없이 set -e 아래 대입으로만 쓴다. 실패하면 그 자리에서
+          # 멈추고, stdout에 나온 실패 본문이 값으로 쓰이지 않는다. 실패를 받아 넘길 곳은 stderr의 HTTP 상태로 가른다.
+          # 시험: tools/app-build.test.sh(이 블록을 그대로 꺼내 가짜 gh·git으로 돌린다).
           image="ghcr.io/ukyi-app/${APP}"
           branch="deploy/${APP}"
           note() { echo "$*"; echo "$*" >> "$GITHUB_STEP_SUMMARY"; }
@@ -209,6 +212,22 @@ jobs:
             [[ $cur_repo == "$image" ]] || { echo "::error::${ref}의 repository가 ${image}가 아니다"; exit 1; }
             [[ $cur_digest =~ ^sha256:[0-9a-f]{64}$ && $cur_rev =~ ^[0-9a-f]{40}$ && $cur_hold =~ ^(true|false)$ ]] ||
               { echo "::error::${ref}의 apps/${APP}/image.yaml 형식이 틀렸다"; exit 1; }
+          }
+
+          # 배포 브랜치의 현재 SHA를 lease에 넣는다. 브랜치가 없으면(404, 앱의 첫 배포 PR) 빈 값이고,
+          # 빈 lease는 push에서 "브랜치가 아직 없어야 한다"는 뜻이다. 404가 아닌 실패는 여기서 멈춘다.
+          # 함정: gh api는 실패해도 응답 본문(404 JSON)을 stdout에 낸다. `|| true`로 삼키면 그 JSON이 lease가 되어
+          # 모든 앱의 첫 배포 push가 git 파싱 오류로 끝난다(app-build-v1.0.0, 설계 B.8 E5). 404는 read_image처럼 stderr로 가른다.
+          read_lease() {
+            local err
+            err=$(mktemp)
+            if lease=$(GH_TOKEN=$HOMELAB_TOKEN gh api "repos/ukyi-app/homelab/git/ref/heads/${branch}" --jq .object.sha 2>"$err"); then
+              [[ $lease =~ ^[0-9a-f]{40}$ ]] || { echo "::error::${branch}의 ref 응답이 SHA가 아니다"; exit 1; }
+              return 0
+            fi
+            lease=""
+            if grep -q 'HTTP 404' "$err"; then return 0; fi
+            cat "$err" >&2; exit 1
           }
 
           # 새 revision이 base보다 앞인지(앱 저장소 compare, GITHUB_TOKEN). ahead만 갱신한다(설계 C.4.3).
@@ -241,7 +260,7 @@ jobs:
               exit 0
             fi
 
-            lease=$(GH_TOKEN=$HOMELAB_TOKEN gh api "repos/ukyi-app/homelab/git/ref/heads/${branch}" --jq .object.sha 2>/dev/null || true)
+            read_lease
             if [[ -n $lease ]] && read_image "$branch"; then
               status=$(compare "$cur_rev")
               if [[ $status != ahead ]]; then
