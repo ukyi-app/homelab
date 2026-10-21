@@ -1,5 +1,5 @@
 // ci 검사 공통 도구. 외부 패키지 없이 Bun 내장 기능만 쓴다(의존성 설치가 필수 검사를 막지 않게).
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -65,8 +65,42 @@ export function gitFiles(...pathspecs: string[]): string[] {
   return out.split("\0").filter(Boolean).sort();
 }
 
+// 이 실행이 만든 임시 폴더. 끝날 때 모두 지운다(정상, 실패 exit, 잡히지 않은 예외, SIGINT·SIGTERM·SIGHUP).
+// 함정: terraform 사본은 provider까지 들어 개당 수백 MB다. 남기면 tmpfs 사용자 할당량을 넘겨 다음 terraform init이
+// "disk quota exceeded"로 실패한다(2026-10-21 로컬 실측: 387개, 24GB). 시험: ci 단계 "temp cleanup".
+const temps = new Set<string>();
+let cleanupInstalled = false;
+
+export function removeTempDirs(): void {
+  for (const d of temps) {
+    try {
+      rmSync(d, { recursive: true, force: true });
+    } catch (e) {
+      console.error(`임시 폴더를 지우지 못했다: ${d}: ${(e as Error).message}`);
+    }
+  }
+  temps.clear();
+}
+
+function installCleanup(): void {
+  if (cleanupInstalled) return;
+  cleanupInstalled = true;
+  // exit 처리기는 동기 작업만 돈다. rmSync라 충분하다.
+  process.on("exit", removeTempDirs);
+  // 신호 처리기를 달면 기본 종료가 사라지므로 직접 128+신호 번호로 끝낸다.
+  for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]] as const) {
+    process.on(sig, () => {
+      removeTempDirs();
+      process.exit(code);
+    });
+  }
+}
+
 export function tempDir(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), `homelab-ci-${prefix}-`));
+  installCleanup();
+  const d = mkdtempSync(join(tmpdir(), `homelab-ci-${prefix}-`));
+  temps.add(d);
+  return d;
 }
 
 export function toolVersion(name: string): string {
