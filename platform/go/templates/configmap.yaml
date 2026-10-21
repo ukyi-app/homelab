@@ -43,6 +43,14 @@ data:
 
       # $uri가 아니라 $request_uri(디코딩·정규화 전 원문)로 맞춘다. 디코딩한 값을 Location에 넣으면 %0d%0a 같은
       # 인코딩이 풀려 헤더를 깰 수 있고, 퍼센트 인코딩을 원문 그대로 넘겨야 대상 앱이 같은 경로를 받는다.
+      # 사용법도 원문으로 판정한다. location = /는 디코딩·정규화한 $uri로 골라져 /argocd/..%2F?x=1(유효 라벨)이나
+      # /evil.com/..(거부 대상)까지 사용법 200을 받았다(T08c 추가 리뷰). 그래서 location은 하나만 두고
+      # 모든 요청이 아래 두 map의 같은 판정을 거친다.
+      map $request_uri $go_usage {
+        default 0;
+        "~^/(\?.*)?$" 1;
+      }
+
       map $request_uri $go_target {
         default "";
         "~^/(?<go_name>[a-z0-9](?:[a-z0-9-]{0,{{ $n }}}[a-z0-9])?)(?<go_rest>[/?].*)?$" "https://{{ $prefix }}${go_name}.__TAILNET_DOMAIN__${go_rest}";
@@ -51,12 +59,11 @@ data:
       server {
         listen 8080 default_server;
 
-        location = / {
-          default_type text/plain;
-          return 200 "usage: {{ $prefix }}go/<name>[/path] -> https://{{ $prefix }}<name>.<tailnet>.ts.net/path\n";
-        }
-
         location / {
+          default_type text/plain;
+          if ($go_usage) {
+            return 200 "usage: {{ $prefix }}go/<name>[/path] -> https://{{ $prefix }}<name>.<tailnet>.ts.net/path\n";
+          }
           if ($go_target = "") {
             return 404;
           }

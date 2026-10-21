@@ -148,6 +148,7 @@ for cluster in prod vm; do
   expect "/a" 302 "$(url a)"
   expect "/0-9" 302 "$(url 0-9)"
   expect "/argocd//evil.com" 302 "$(url argocd)//evil.com"
+  expect "/argocd/..%2F?x=1" 302 "$(url argocd)/..%2F?x=1"
   # 사용법
   expect "/" 200 -
   expect "/?q=1" 200 -
@@ -158,8 +159,13 @@ for cluster in prod vm; do
   expect "/argocd@evil.com" 404 -
   expect "/argocd:443" 404 -
   expect '/argocd\@evil.com' 404 -
-  # 디코딩한 $uri로는 /로 정규화돼 사용법이 나온다. 리다이렉트만 아니면 된다.
-  expect "/argocd%2F..%2F" 200 -
+  # 판정은 원문($request_uri)이다. 디코딩·정규화한 경로로 판정하면 아래가 사용법 200을 받는다(T08c 추가 리뷰).
+  expect "/argocd%2F..%2F" 404 -
+  expect "/evil.com/.." 404 -
+  expect "//" 404 -
+  expect "/%2f" 404 -
+  expect "/%2e" 404 -
+  expect "/./" 404 -
   expect "/%61rgocd" 404 -
   expect "//evil.com" 404 -
   expect "/Argocd" 404 -
