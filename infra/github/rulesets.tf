@@ -76,6 +76,11 @@ resource "github_repository_ruleset" "main_checks" {
 
 # B. 사람 검토. owner가 만든 PR은 자기 승인이 안 돼 관리자 bypass(pull_request 모드)로 병합한다.
 # 그 bypass는 B에만 있어 A의 ci는 그대로 적용된다(U08). ukyi-homelab-merge App은 자동 병합 조건을 통과한 PR만 병합한다.
+# update(Restrict updates): main 갱신(PR 병합 포함)을 bypass 신원만 하게 한다. 승인 요건만으로는 막지 못한다.
+# owner가 연 PR(Codex PR도 작성자가 owner)은 작성자가 유일한 code owner라 쓰기 권한 App의 승인 하나로 리뷰 요건이 찼고,
+# bypass 없는 배포 App이 승인·병합해 main에 들어갔다(2026-10-21 #822, U08 (나)). pull_requests·contents write를 함께 가진
+# 신원(배포 App, Codex Connector, Renovate)이 모두 같은 길을 쓸 수 있다. 그래서 사람 병합도 늘 관리자 bypass다.
+# update_allows_fetch_and_merge는 두지 않는다(fork 동기화 예외가 필요 없다).
 resource "github_repository_ruleset" "main_review" {
   repository  = local.homelab
   name        = "main-review"
@@ -104,6 +109,7 @@ resource "github_repository_ruleset" "main_review" {
   rules {
     deletion         = true
     non_fast_forward = true
+    update           = true
     pull_request {
       required_approving_review_count   = 1
       require_code_owner_review         = true
@@ -209,6 +215,9 @@ resource "github_repository_ruleset" "release_tags_create" {
 # 있는 신원이 곧 배포 주체다. 결정 5 하드닝이 같은 모양으로 먼저 건 것을 E5 1단계에서 import했다.
 # Free에서는 public 저장소에만 걸린다. private이 되면 자동 병합 조건 9가 멈춘다.
 # prevent_destroy를 두지 않는다. app-repos.json에서 빼는 앱 삭제는 delete plan이라 래퍼가 --allow-destroy 없이 멈춘다.
+# update(Restrict updates)는 main-review와 같은 이유다. 앱 저장소에도 Codex Connector·Renovate가 쓰기 권한으로 있고,
+# owner PR을 App 승인으로 병합하면 app-build → 배포 PR 자동 병합까지 이어진다. 앱 main 갱신은 관리자 bypass 병합뿐이다.
+# deploy-merge 조건 9가 이 규칙이 main에 걸려 있는지 본다.
 resource "github_repository_ruleset" "app_main" {
   for_each = local.app_main_repos
 
@@ -233,6 +242,7 @@ resource "github_repository_ruleset" "app_main" {
   rules {
     deletion         = true
     non_fast_forward = true
+    update           = true
     pull_request {
       required_approving_review_count   = 1
       require_code_owner_review         = true

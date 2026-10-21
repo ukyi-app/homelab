@@ -62,6 +62,7 @@ gh api repos/ukyi-app/homelab/rules/branches/main --jq '[.[] | .type] | sort'   
 ## 2. 평소 운영
 
 - **남이 만든 PR(fork, 외부 기여자, 봇)의 검토:** GitHub의 diff와 CI 결과로만 본다. 그 브랜치를 로컬에 체크아웃해 `mise install`, `pre-commit run`, `bun run ci`, `tools/*.sh`를 돌리지 않는다. `.pre-commit-config.yaml`의 훅(`repo: local`의 `bun tools/ci/main.ts` 포함), `tools/ci/`, `.tool-versions`가 모두 그 PR의 트리에서 와서, 병합 전 코드가 owner의 자격(`gh` 인증, Infisical 로그인, SSH 키)으로 돈다. 훅 쪽에서 막는 장치는 두지 않는다: 그 장치도 같은 PR이 고칠 수 있는 파일에 있어 경계가 되지 못한다. 로컬 실행이 꼭 필요하면 자격이 없는 일회용 컨테이너에서 한다. 직접 만든 브랜치와 병합된 main에서는 평소대로 돌린다.
+- **병합은 늘 관리자 bypass다:** homelab·앱 저장소 main은 Restrict updates(`update` 규칙)라 bypass 신원만 갱신한다. 사람이 병합하는 PR은 작성자가 owner든 Renovate·봇이든 검토 뒤 `gh pr merge <n> --squash --admin --match-head-commit <검토한 SHA>`(웹은 bypass 체크)로 병합한다. App 승인은 병합 조건이 아니다. owner PR은 작성자가 유일한 code owner라 쓰기 권한 App의 승인 하나로 리뷰 요건이 찼고, 그 App이 병합까지 했다(2026-10-21, U08).
 - 보호를 바꿀 때: HCL PR(CI의 fmt·validate·mock 시험) → 검토 → 관리자 bypass 병합(`gh pr merge <n> --squash --admin --match-head-commit <검토한 SHA>`) → `tools/tf-github.sh plan`으로 diff 확인 → 예상과 같으면 `apply`, 다르면 고치는 PR.
 - 월 1회와 콘솔에서 무언가를 바꾼 뒤 `tools/tf-github.sh verify`.
 - 월 1회 bypass 기록을 PR 작성자와 대조한다. 기본값 `day`로 부르면 놓친다.

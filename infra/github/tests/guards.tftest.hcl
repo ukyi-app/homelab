@@ -464,3 +464,20 @@ run "g5_codeowners_override" {
   }
   expect_failures = [data.github_rest_api.codeowners_content]
 }
+
+run "main_update_restricted" {
+  # main 갱신은 bypass 신원만(Restrict updates, U08 (나)). 승인 요건만으로는 owner PR의 App 승인 병합을 막지 못했다.
+  command = plan
+  assert {
+    condition     = github_repository_ruleset.main_review.rules[0].update == true
+    error_message = "main-review에 update 규칙이 없다."
+  }
+  assert {
+    condition     = alltrue([for r in github_repository_ruleset.app_main : r.rules[0].update == true])
+    error_message = "app-main 중 update 규칙이 없는 저장소가 있다."
+  }
+  assert {
+    condition     = !coalesce(github_repository_ruleset.main_review.rules[0].update_allows_fetch_and_merge, false) && alltrue([for r in github_repository_ruleset.app_main : !coalesce(r.rules[0].update_allows_fetch_and_merge, false)])
+    error_message = "update_allows_fetch_and_merge를 켜지 않는다."
+  }
+}
