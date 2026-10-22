@@ -73,8 +73,17 @@ gh api repos/ukyi-app/homelab/rules/branches/main --jq '[.[] | .type] | sort'   
     --jq '.[] | select(.result == "bypass") | [.pushed_at, .actor_name, .ref, .after_sha[0:12]] | @tsv'
   ```
 
-- 새 앱: `infra/github/app-repos.json` PR 병합 → 저장소 생성(템플릿에서 `gh repo create --public --template`) → `app-main`을 뺀 하드닝 → (fine-grained PAT를 쓰면) PAT의 Repository access 선택 저장소에 새 저장소를 더하고, org가 fine-grained PAT 승인을 요구하면 org 설정의 Personal access tokens 대기 요청을 승인한다 → `tools/tf-github.sh apply`가 `app-main`을 만든다. PAT에 새 저장소가 없으면 그 저장소의 ruleset 생성과 guard 조회가 403·404로 멈춘다(선택 저장소로 제한된 토큰). 목록 밖 public 저장소가 있는 동안 guard 8이 모든 plan을 멈춘다. 반대로 목록 PR 병합 뒤 저장소를 만들기 전까지는 plan·verify가 guard 2·8 등으로 exit 1인 것이 정상이고, apply도 plan에서 멈춰 아무것도 바꾸지 않는다. 이 사이에는 다른 `infra/github` 변경도 apply할 수 없으니 저장소 생성과 하드닝을 바로 잇는다.
+- 새 앱: `infra/github/app-repos.json` PR 병합 → 저장소 생성(템플릿에서 `gh repo create --public --template`) → `app-main`을 뺀 하드닝(PR 생성 `pull_request_creation_policy=collaborators_only` 포함) → (fine-grained PAT를 쓰면) PAT의 Repository access 선택 저장소에 새 저장소를 더하고, org가 fine-grained PAT 승인을 요구하면 org 설정의 Personal access tokens 대기 요청을 승인한다 → `tools/tf-github.sh apply`가 `app-main`을 만든다. PAT에 새 저장소가 없으면 그 저장소의 ruleset 생성과 guard 조회가 403·404로 멈춘다(선택 저장소로 제한된 토큰). 목록 밖 public 저장소가 있는 동안 guard 8이 모든 plan을 멈춘다. 반대로 목록 PR 병합 뒤 저장소를 만들기 전까지는 plan·verify가 guard 2·8 등으로 exit 1인 것이 정상이고, apply도 plan에서 멈춰 아무것도 바꾸지 않는다. 이 사이에는 다른 `infra/github` 변경도 apply할 수 없으니 저장소 생성과 하드닝을 바로 잇는다.
 - ruleset은 지우지 말고 `disabled`로만 끈다. 정답은 git의 HCL이다.
+- **외부인 입력 제한(U38 대책, 2026-10-22):** org interaction limit `collaborators_only`는 최대 6개월이라 만료(다음 2027-04-22) 전에 다시 건다. org limit이라 org의 모든 public 저장소와 새 저장소에 걸린다. 만료를 알려 주는 장치(verify guard 등)는 아직 정하지 않았다.
+
+  ```bash
+  gh api orgs/ukyi-app/interaction-limits --jq '[.limit, .expires_at] | @tsv'   # 확인
+  gh api -X PUT orgs/ukyi-app/interaction-limits -f limit=collaborators_only -f expiry=six_months   # 다시 걸기
+  gh api -X DELETE orgs/ukyi-app/interaction-limits   # 되돌리기
+  ```
+
+  PR 생성 Collaborators only는 저장소마다다(`gh api -X PATCH repos/ukyi-app/<저장소> -f pull_request_creation_policy=collaborators_only`, 되돌리기는 `all`). 이 필드는 저장소 GET 응답에 있고 PATCH가 받지만 공식 REST 문서에는 아직 없다. 새 앱 저장소는 만들 때 켠다(위 "새 앱"의 하드닝).
 
 ## 3. apply가 실패했을 때
 
