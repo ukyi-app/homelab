@@ -311,7 +311,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | [T07](issues/T07-bootstrap.md) | 부트스트랩: main 교체·k3s·Argo CD | P2 | T01, T02, T06 | 완료 (2026-10-19, main `eaf7bb5`, 재부팅 뒤 확인 통과) | 에이전트 + 사람 |
 | [T08a](issues/T08a-network.md) | 네트워크·DNS·외부 공개 | P2 | T07, T09 | 완료 (2026-10-21) | 에이전트 + 사람 |
 | [T08b](issues/T08b-observability.md) | 관측·알림·봇 자리 | P2 | T08a, T09 | 대기 | 에이전트 + 사람 |
-| [T08c](issues/T08c-internal-short-links.md) | 내부 UI 짧은 주소 `go/` | P2 | T08a | 진행 중(2026-10-21 #804 배포, 맥 확인 끝, 아이폰·`go` 0개 시험·VM은 남음) | 에이전트 + 사람 |
+| [T08c](issues/T08c-internal-short-links.md) | 내부 UI 짧은 주소 `go/` | P2 | T08a | 진행 중(2026-10-21 #804 배포. 2026-10-22까지 맥·아이폰, `go` 0개 시험, VM 렌더 확인. 남은 것: 파드 로그에 시험 쿼리가 없는지와 Tailscale을 끈 기기 확인의 기록. VM 실접속은 T13 시나리오 13) | 에이전트 + 사람 |
 | [T09](issues/T09-secrets.md) | 시크릿 체계 | P2 | T07 | 완료 (2026-10-20. 시나리오 6·7 E3 범위 통과, 플랫폼·Terraform 자격 등록, 복구 자산 두 곳 보관) | 에이전트 + 사람 |
 | [T10](issues/T10-cicd.md) | CI/CD | P2 | T07(착수), T09(완료), T08a(`infra/github` 첫 apply만) | 진행 중 (2026-10-20 착수) | 에이전트 + 사람 |
 | [T11](issues/T11-data-services.md) | 데이터 서비스 | P2 | T08a, T09, T10 | 대기 | 에이전트 + 사람 |
