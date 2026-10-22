@@ -1,7 +1,7 @@
 # T08c 내부 UI 짧은 주소 `go/`
 
 - 단계: P2 플랫폼 구축 (2026-10-20 추가, D-30)
-- 상태: 진행 중(2026-10-21 #804 배포. 2026-10-22까지 맥·아이폰, `go` 0개 시험, VM 렌더, 파드 로그의 시험 쿼리, Tailscale을 끈 기기 확인. 남은 것: 완료 조건 "저장소·이미지·로그에 tailnet 이름이 없다"의 판정. VM 실접속은 T13 시나리오 13)
+- 상태: 완료(2026-10-22. VM 실접속은 T13 시나리오 13)
 - 명세: [../spec.md](../spec.md) §5.1 D-30
 - 설계: [../platform/design.md](../platform/design.md) C.3.5 "짧은 주소", F D-30
 - Blocked by: T08a
@@ -57,7 +57,7 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 - Tailscale을 끈 기기에서는 `go`가 풀리지 않는다. 노드 LAN `192.168.117.15`에 80이 새로 열리지 않는다(svclb 없음). svclb DaemonSet 없음·NodePort 없음은 **확인**(approvals 2026-10-21 15:14 행). Tailscale을 끈 기기 확인은 **확인**(사용자 2026-10-22, approvals 18:37 행).
 - tailnet 기기 목록에서 프록시 이름이 정확히 `go`다(접미 번호 없음). **확인**(LB 호스트 이름 접미 없음, approvals 2026-10-21 15:14 행).
 - VM: `values-vm.yaml`로 렌더한 Service hostname이 `vm-go`이고 리다이렉트 접두가 `vm-`다. VM 실접속(`vm-go/argocd` → `vm-argocd`)은 T13 시나리오 13에서 확인한다. **렌더 확인(2026-10-22):** `helm template root platform/root -f platform/root/values-vm.yaml`의 Application `go`가 `tailscale.prefix: "vm-"`를 넘기고, 그 값으로 렌더한 `platform/go`의 Service `tailscale.com/hostname`이 `vm-go`, 리다이렉트가 `https://vm-${go_name}.<tailnet 도메인>${go_rest}`, 사용법이 `vm-go/<name>`이다.
-- 저장소·이미지·로그에 tailnet 이름이 없다(gitleaks, D-23). **작업 트리 확인(2026-10-22):** 실행 때 읽은 MagicDNS 접미로 대조해 작업 트리 0건, T08c가 더한 줄 0건. 이미지는 upstream `nginx-unprivileged` digest 고정이라 빌드하지 않고, tailnet 도메인은 실행 때 env로 들어간다. 파드 로그 0줄(approvals 18:38 행). gitleaks 기본 룰은 tailnet 이름을 잡지 않아 이 조건의 근거가 되지 못한다. 완료 판정은 주 진행자가 한다.
+- 저장소·이미지·로그에 tailnet 이름이 없다(gitleaks, D-23). **통과(사용자 결정 2026-10-22 18:46 "완료로 판정하고 gitleaks 규칙도 같이 해줘", approvals 같은 시각 행).** 판정 범위는 작업 트리·이미지·로그다: 실행 때 읽은 MagicDNS 접미로 대조해 작업 트리 0건, T08c가 더한 줄 0건, 이미지는 upstream `nginx-unprivileged` digest 고정이라 빌드하지 않고 tailnet 도메인은 실행 때 env로 들어간다, 파드 로그 0줄(approvals 18:38 행). 옛 히스토리는 D-03(히스토리 유지, force push 없음) 범위라 이 조건 밖이다. tailnet 이름은 HTTPS 인증서로 CT 로그에 이미 공개된다(설계 C.3.5, S120). gitleaks 기본 룰은 tailnet 이름을 잡지 않아, 새로 들어오는 것은 `.gitleaks.toml`의 `tailnet-hostname`·`tailscale-ip` 룰이 막는다(작업 트리와 staged 변경, ci 단계 `gitleaks rules`가 룰을 시험).
 - approvals.md에 Infisical 키 등록(프로젝트·환경·경로·키 이름과 승인·등록 결과, 값은 쓰지 않음. `homelab`/prod와 `homelab-dev`/dev 둘), ACL apply, 병합을 기록한다. **기록됨**(Infisical 키 2026-10-21 14:24 행, ACL apply 02:2x 행, #804 병합 15:14 행).
 
 ## 되돌리는 방법

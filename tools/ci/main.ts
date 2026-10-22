@@ -4,7 +4,7 @@
 //
 // 모든 단계를 끝까지 돌리고 위반을 모아 한 번에 보인다. 하나라도 있으면 exit 1.
 // 로컬에서 일부만: bun run ci --only workflows,render
-import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
@@ -60,6 +60,52 @@ const steps: Step[] = [
     // 작업 트리만 본다. 히스토리 전체를 보면 옛 커밋의 오탐이나 이미 폐기한 옛 값 하나가 모든 PR을 막는다.
     // push된 커밋은 저장소의 secret scanning·push protection이 먼저 본다.
     run: () => tool("gitleaks", ["gitleaks", "dir", "--config", ".gitleaks.toml", "--redact", "--no-banner", "--exit-code", "1", "."]),
+  },
+  {
+    name: "gitleaks rules",
+    // .gitleaks.toml의 D-23 룰 둘이 실제 꼴은 잡고 자리표시·면제 값은 놓아주는지. 실제 꼴의 값은 여기서 조립해
+    // 임시 폴더에만 쓴다. 저장소에 그대로 적으면 위 gitleaks 단계가 이 파일을 잡는다.
+    run: () => {
+      const out: Violation[] = [];
+      const ts = ["ts", "net"].join(".");
+      const ip = (...o: number[]) => o.join(".");
+      const host = "tail" + "1a2b3c";
+      // [경로, 내용, 기대 룰(없으면 걸리지 않아야 함)]
+      const cases: [string, string, string | undefined][] = [
+        ["host.md", `${host}.${ts}`, "tailnet-hostname"],
+        ["fqdn.md", `nuc.${host}.${ts}`, "tailnet-hostname"],
+        ["upper.md", `${host.toUpperCase()}.${ts.toUpperCase()}`, "tailnet-hostname"],
+        ["hyphen.md", `cobra-ghost.${ts}`, "tailnet-hostname"],
+        ["example-elsewhere.md", `example.${ts}`, "tailnet-hostname"],
+        ["tools/go-redirect.test.sh", `${host}.${ts}`, "tailnet-hostname"],
+        ["placeholder.md", `<tailnet>.${ts} <서비스>.<tailnet>.${ts} *.${ts} .${ts}`, undefined],
+        ["tools/go-redirect.test.sh", `example.${ts} example-tailnet.${ts} Example.${ts}`, undefined],
+        ["ip.md", ip(100, 101, 2, 3), "tailscale-ip"],
+        ["ip-low.md", ip(100, 64, 0, 1), "tailscale-ip"],
+        ["ip-high.md", ip(100, 127, 255, 254), "tailscale-ip"],
+        ["ip-other-cidr.md", `${ip(100, 64, 0, 0)}/12`, "tailscale-ip"],
+        ["ip-outside.md", `${ip(100, 63, 255, 255)} ${ip(100, 128, 0, 1)}`, undefined],
+        ["ip-range.md", `${ip(100, 64, 0, 0)}/10 ${ip(100, 100, 100, 100)}`, undefined],
+      ];
+      // 경우마다 따로 스캔한다. 면제의 paths는 스캔 루트 기준이라 저장소와 같은 상대 경로에 둬야 한다.
+      const reports = tempDir("gitleaks-report");
+      cases.forEach(([path, text, want], i) => {
+        const dir = tempDir("gitleaks-rules");
+        mkdirSync(dirname(join(dir, path)), { recursive: true });
+        writeFileSync(join(dir, path), `${text}\n`);
+        const report = join(reports, `${i}.json`);
+        const r = run(["gitleaks", "dir", "--config", join(ROOT, ".gitleaks.toml"), "--no-banner", "--exit-code", "0", "--report-format", "json", "--report-path", report, "."], { cwd: dir });
+        if (r.code !== 0) {
+          out.push({ rule: "gitleaks-rules", where: `${i}:${path}`, message: `gitleaks exit ${r.code}: ${(r.stdout + r.stderr).trim()}` });
+          return;
+        }
+        const rules = [...new Set((JSON.parse(readFileSync(report, "utf8")) as { RuleID: string }[]).map((x) => x.RuleID))];
+        const ok = want ? rules.length === 1 && rules[0] === want : rules.length === 0;
+        if (!ok) out.push({ rule: "gitleaks-rules", where: `${i}:${path}`, message: `기대 ${want ?? "없음"}, 결과 ${rules.join(",") || "없음"}` });
+      });
+      console.log(`gitleaks D-23 룰 ${cases.length}경우`);
+      return out;
+    },
   },
   {
     name: "tracked files",

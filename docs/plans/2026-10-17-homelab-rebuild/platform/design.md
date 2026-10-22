@@ -1265,6 +1265,7 @@ homelab의 필수 검사는 `ci` 하나다(ADR 0003). `ci`는 `bun run ci` 하�
 | 검사 | 막는 사고(B행) | 도구 |
 |---|---|---|
 | 시크릿 유출 | 평문 시크릿 커밋(L16, L17, R42) | gitleaks(고정 버전) + `kind: Secret` 매니페스트 0건 |
+| 공개 금지 값(D-23) | tailnet 이름·Tailscale IP 커밋 | gitleaks 기본 룰은 둘 다 잡지 않아 `.gitleaks.toml`에 `tailnet-hostname`·`tailscale-ip` 룰을 더했다(2026-10-22, 대역 표기 `100.64.0.0/10`과 MagicDNS 고정 주소만 면제). 룰 시험은 ci 단계 `gitleaks rules`. CI는 작업 트리, pre-commit은 staged 변경만 보므로 히스토리는 범위 밖이다(D-03) |
 | 앱·데이터 values 스키마 | 오타·미지원 키, 부분 등록(L03, L04) | 각자 고정한 차트 버전의 `values.schema.json` |
 | 렌더 + 스키마 | 깨진 매니페스트 | helm template(앱마다 그 차트 태그, platform의 로컬 차트 `root`는 클러스터 값 파일마다, `bot-slot`은 자기 values로), kustomize build(그 밖의 플랫폼) → kubeconform(CRD 스키마 포함) |
 | 렌더 결과 정책 | limit 누락(L28), digest 아닌 이미지(L27), 자기 저장소 참조 revision이 `main`이 아님(L31), 읽기 전용 Role의 verb·roleRef(L30), Ingress host 규칙 | TypeScript 검사 1개(렌더 출력 대상) |
