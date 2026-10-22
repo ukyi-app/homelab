@@ -1,0 +1,28 @@
+{{- /*
+(2) 작업자로 오는 작업 전달(설계 C.8 담는 것 (2)). platform/sandbox의 기본 거부에 더하는 유일한 ingress 허용이다.
+ns와 라벨을 함께 본다. 같은 봇 ns의 다른 파드(마이그레이션 Job 등)나 다른 ns의 같은 라벨은 닿지 않는다.
+작업자의 응답은 작업자 init 방화벽의 ESTABLISHED 허용으로 나간다.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bot-slot-worker-ingress
+  namespace: sandbox
+  labels:
+    {{- include "botSlot.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "botSlot.workerSelector" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.target.namespace }}
+          podSelector:
+            {{- include "botSlot.targetPodSelector" . | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.target.workerPort }}

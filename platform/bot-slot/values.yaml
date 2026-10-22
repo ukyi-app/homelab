@@ -1,0 +1,17 @@
+# 대상 값 하나(설계 C.8). E4b~E8은 시험 값, E9(T16b)가 봇 등록 PR보다 먼저 봇 값으로 바꾼다:
+#   namespace: app-homelab-bot, app: homelab-bot, probe: false (D-15).
+# 봇을 지울 때는 시험 값과 probe: true로 되돌린다. 봇 ns 값을 남기면 다음 콜드스타트에서 이 Application이
+# ns를 기다리며 끝없이 재시도한다(이 Application은 대상 ns를 만들지 않는다).
+target:
+  # 봇 파드가 도는 ns. 시험 값이면 probe: true가 이 ns를 만든다.
+  namespace: bot-slot-probe
+  # 봇 파드의 homelab.ukyi.app/app 라벨 값(공유 차트의 selector 라벨).
+  app: bot-slot-probe
+  # sandbox 작업자 컨테이너 포트. platform/sandbox의 worker 컨테이너 포트와 같아야 한다(values.schema.json이 8080으로 묶는다).
+  workerPort: 8080
+  # 봇의 경보 수신 포트. 앱 포트(공개 webhook, 8080)와 갈라 Traefik과 Alertmanager의 허용을 포트로 나눈다(D-15).
+  alertPort: 8081
+
+# E4b~E8 준비 확인용. 시험 ns, 공유 차트 정책을 손으로 옮긴 정책, 시험 파드 둘을 만든다.
+# target.namespace가 bot-slot-probe일 때만 true다(values.schema.json).
+probe: true

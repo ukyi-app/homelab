@@ -8,6 +8,11 @@ data:
   policy.default: ""
   # owner에게 p 정책으로 전체 권한을 직접 준다. g로 role:admin에 묶지 않는 이유: 나중에 SSO를 붙이면
   # 같은 이름의 그룹이 그 역할을 물려받을 수 있다(옛 bootstrap-values.yaml).
-  # 봇 계정 bot-reader의 읽기 전용 정책은 T08b가 더한다.
+  # bot-reader는 보기만(설계 C.8 읽기 전용 접근 (b)). sync·exec·logs·update·delete는 주지 않는다.
+  # v3에서 logs·exec는 applications와 따로 묻는 자원이라 applications, get이 그것들을 열지 않는다.
+  # 자원별 객체 모양: applications·applicationsets는 <project>/<이름>, projects는 <project>.
   policy.csv: |
     p, owner, *, *, *, allow
+    p, bot-reader, applications, get, */*, allow
+    p, bot-reader, applicationsets, get, */*, allow
+    p, bot-reader, projects, get, *, allow
