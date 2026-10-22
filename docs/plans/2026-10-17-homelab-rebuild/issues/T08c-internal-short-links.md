@@ -1,7 +1,7 @@
 # T08c 내부 UI 짧은 주소 `go/`
 
 - 단계: P2 플랫폼 구축 (2026-10-20 추가, D-30)
-- 상태: 진행 중(2026-10-21 #804 배포. 2026-10-22까지 맥·아이폰, `go` 0개 시험, VM 렌더 확인. 남은 것: 파드 로그에 시험 쿼리가 없는지와 Tailscale을 끈 기기 확인의 기록. VM 실접속은 T13 시나리오 13)
+- 상태: 진행 중(2026-10-21 #804 배포. 2026-10-22까지 맥·아이폰, `go` 0개 시험, VM 렌더, 파드 로그의 시험 쿼리, Tailscale을 끈 기기 확인. 남은 것: 완료 조건 "저장소·이미지·로그에 tailnet 이름이 없다"의 판정. VM 실접속은 T13 시나리오 13)
 - 명세: [../spec.md](../spec.md) §5.1 D-30
 - 설계: [../platform/design.md](../platform/design.md) C.3.5 "짧은 주소", F D-30
 - Blocked by: T08a
@@ -51,13 +51,13 @@ tailnet 안에서 `go/<이름>`을 치면 `https://<이름>.<tailnet>.ts.net`으
 
 - 맥(Safari, Chrome)에서 처음 한 번 `http://go/argocd`로 연 뒤 스킴 없는 `go/argocd` → Argo CD 로그인 화면, `go/adguard` → AdGuard 로그인 화면. **확인(사용자 2026-10-21 "전부 잘 열려").**
 - 아이폰 Safari(셀룰러, Tailscale 켬)에서 처음 한 번 `http://go/argocd`로 연 뒤 스킴 없이 친 `go/argocd`가 열린다. **확인(사용자 2026-10-22 "둘 다 잘 열려").** 셀룰러·Tailscale 켬, `http://go/argocd`를 한 번 연 뒤 스킴 없는 `go/argocd`가 열렸다(approvals 2026-10-22 11:05~11:06 행). 한 번 연 뒤에도 검색어로 가거나 HTTPS로 바뀌어 실패하면 완료로 치지 않고, 원인을 기록한 뒤 구현이나 D-30을 사용자와 다시 정한다.
-- 경로·쿼리 유지: `go/argocd/applications?x=1` → 같은 경로·쿼리. 그 시험 쿼리 문자열이 파드 로그에 없다(T08b 뒤라면 로그 저장소에도 없다). 경로·쿼리 유지는 **확인**(맥, approvals 2026-10-21 16:15 행). 파드 로그 확인은 **기록 없음**(설정은 `access_log off`·`error_log stderr crit`이고, `tools/go-redirect.test.sh`가 로그의 경로·쿼리 0건을 확인한다).
+- 경로·쿼리 유지: `go/argocd/applications?x=1` → 같은 경로·쿼리. 그 시험 쿼리 문자열이 파드 로그에 없다(T08b 뒤라면 로그 저장소에도 없다). 경로·쿼리 유지는 **확인**(맥, approvals 2026-10-21 16:15 행). 파드 로그 확인도 **확인**: 사용자가 2026-10-22에 `go/argocd/applications?x=1` → 같은 경로·쿼리를 다시 확인했고(approvals 18:37 행), 그 뒤 `go` 파드 로그는 0줄, `x=1` 0건이다(유일한 복제본, 재시작 0, 시험 전부터 실행, approvals 18:38 행). 설정은 `access_log off`·`error_log stderr crit`이고 `tools/go-redirect.test.sh`가 로그의 경로·쿼리 0건을 확인한다. 로그 저장소(T08b)는 아직 없어 해당 없음이고, T08b 뒤 확인은 [T08b](T08b-observability.md) 완료 조건이 맡는다.
 - 거부: `go/evil.com`·`go/a.b`는 404, `https://go/`는 연결 실패(인증서 경고가 아님). **확인**(맥 "404·`https://go/` 실패", approvals 2026-10-21 16:15 행).
 - `go` 파드를 0으로 줄여도 전체 주소 `https://argocd.<tailnet>.ts.net`은 그대로 열리고, 되돌리면 `go/`가 돌아온다. **통과(2026-10-22, approvals 11:05~11:06 행).** skip-reconcile 임시 주석으로 `go`만 조정을 멈추고 0개로 줄인 동안 전체 주소 200, 주석 제거 뒤 Argo CD self-heal이 18초 만에 되살렸다(11:05:55 → 새 파드 Ready 11:06:13). 원복 뒤 맥 `go/argocd` 열림(사용자 확인).
-- Tailscale을 끈 기기에서는 `go`가 풀리지 않는다. 노드 LAN `192.168.117.15`에 80이 새로 열리지 않는다(svclb 없음). svclb DaemonSet 없음·NodePort 없음은 **확인**(approvals 2026-10-21 15:14 행). Tailscale을 끈 기기 확인은 **기록 없음**.
+- Tailscale을 끈 기기에서는 `go`가 풀리지 않는다. 노드 LAN `192.168.117.15`에 80이 새로 열리지 않는다(svclb 없음). svclb DaemonSet 없음·NodePort 없음은 **확인**(approvals 2026-10-21 15:14 행). Tailscale을 끈 기기 확인은 **확인**(사용자 2026-10-22, approvals 18:37 행).
 - tailnet 기기 목록에서 프록시 이름이 정확히 `go`다(접미 번호 없음). **확인**(LB 호스트 이름 접미 없음, approvals 2026-10-21 15:14 행).
 - VM: `values-vm.yaml`로 렌더한 Service hostname이 `vm-go`이고 리다이렉트 접두가 `vm-`다. VM 실접속(`vm-go/argocd` → `vm-argocd`)은 T13 시나리오 13에서 확인한다. **렌더 확인(2026-10-22):** `helm template root platform/root -f platform/root/values-vm.yaml`의 Application `go`가 `tailscale.prefix: "vm-"`를 넘기고, 그 값으로 렌더한 `platform/go`의 Service `tailscale.com/hostname`이 `vm-go`, 리다이렉트가 `https://vm-${go_name}.<tailnet 도메인>${go_rest}`, 사용법이 `vm-go/<name>`이다.
-- 저장소·이미지·로그에 tailnet 이름이 없다(gitleaks, D-23).
+- 저장소·이미지·로그에 tailnet 이름이 없다(gitleaks, D-23). **작업 트리 확인(2026-10-22):** 실행 때 읽은 MagicDNS 접미로 대조해 작업 트리 0건, T08c가 더한 줄 0건. 이미지는 upstream `nginx-unprivileged` digest 고정이라 빌드하지 않고, tailnet 도메인은 실행 때 env로 들어간다. 파드 로그 0줄(approvals 18:38 행). gitleaks 기본 룰은 tailnet 이름을 잡지 않아 이 조건의 근거가 되지 못한다. 완료 판정은 주 진행자가 한다.
 - approvals.md에 Infisical 키 등록(프로젝트·환경·경로·키 이름과 승인·등록 결과, 값은 쓰지 않음. `homelab`/prod와 `homelab-dev`/dev 둘), ACL apply, 병합을 기록한다. **기록됨**(Infisical 키 2026-10-21 14:24 행, ACL apply 02:2x 행, #804 병합 15:14 행).
 
 ## 되돌리는 방법
