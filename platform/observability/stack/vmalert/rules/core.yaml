@@ -24,6 +24,28 @@ groups:
         annotations:
           summary: "수집 대상 {{ $labels.job }}/{{ $labels.instance }}가 5분 넘게 응답하지 않는다"
 
+      # up == 0은 발견된 대상만 본다. 파드가 사라지거나 라벨·포트 이름이 바뀌어 발견 대상이 0개면 up이 없어 조용하다.
+      # 늘 있어야 하는 job을 적는다(vmsingle/scrape.yaml의 job 이름). cnpg는 T11 전이라 넣지 않았다.
+      # adguard-querylog는 AdGuardQuerylogReaderDown이 본다.
+      - alert: TargetMissing
+        expr: |
+          absent(up{job="kube-state-metrics"})
+          or absent(up{job="node-exporter"})
+          or absent(up{job="vector"})
+          or absent(up{job="vmalert"})
+          or absent(up{job="alertmanager"})
+          or absent(up{job="victorialogs"})
+          or absent(up{job="grafana"})
+          or absent(up{job="argocd"})
+          or absent(up{job="external-secrets"})
+          or absent(up{job="kubelet-cadvisor"})
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "수집 대상 {{ $labels.job }}이 10분 넘게 발견되지 않는다"
+          description: "파드가 없거나 수집 설정의 라벨·포트 선택이 맞지 않는다(vmsingle/scrape.yaml)."
+
   - name: node
     rules:
       - alert: NodeMemoryHigh

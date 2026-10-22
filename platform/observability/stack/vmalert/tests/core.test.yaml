@@ -121,3 +121,41 @@ tests:
             exp_annotations:
               summary: 호스트 유닛 backup.service의 상태가 failed다
               description: systemctl status backup.service, journalctl -u backup.service
+
+  - name: TargetMissing은 발견 대상이 사라진 job마다 발화한다
+    interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics", instance="kube-state-metrics"}'
+        values: "1x15"
+      - series: 'up{job="node-exporter", instance="nuc"}'
+        values: "1x15"
+      - series: 'up{job="vector", instance="nuc"}'
+        values: "0x15"
+      - series: 'up{job="vmalert", instance="vmalert"}'
+        values: "1x15"
+      - series: 'up{job="alertmanager", instance="alertmanager"}'
+        values: "1x15"
+      - series: 'up{job="victorialogs", instance="victorialogs"}'
+        values: "1x15"
+      - series: 'up{job="grafana", instance="grafana"}'
+        values: "1x15"
+      - series: 'up{job="argocd", instance="argocd-application-controller"}'
+        values: "1x15"
+      - series: 'up{job="kubelet-cadvisor", instance="nuc"}'
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 9m
+        groupname: core
+        alertname: TargetMissing
+        exp_alerts: []
+      - eval_time: 11m
+        groupname: core
+        alertname: TargetMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: external-secrets
+            exp_annotations:
+              summary: 수집 대상 external-secrets이 10분 넘게 발견되지 않는다
+              description: 파드가 없거나 수집 설정의 라벨·포트 선택이 맞지 않는다(vmsingle/scrape.yaml).
+
