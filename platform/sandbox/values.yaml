@@ -6,19 +6,20 @@ infisical:
 proxy:
   # 작업자는 DNS 없이 이 주소로만 나간다(설계 C.8). 서비스 대역(10.43.0.0/16)의 정적 구간(앞 256개)에서 고른다.
   # 동적 할당은 이 구간을 마지막에야 쓰므로, 빈 클러스터에서 앞 wave Service가 먼저 이 주소를 가져가 생성이 실패할 일이 적다.
-  # 10.43.0.1(kubernetes)·10.43.0.10(kube-dns)과 겹치지 않는다. 바꾸면 작업자 init 규칙과 HTTPS_PROXY가 함께 바뀐다.
+  # 10.43.0.1(kubernetes)·10.43.0.10(kube-dns)과 겹치면 Service 생성이 실패한다(values.schema.json이 둘을 거부한다). 바꾸면 작업자 init 규칙과 HTTPS_PROXY가 함께 바뀐다.
   clusterIP: 10.43.0.28
   port: 3128
   # CONNECT 443으로 허용하는 이름. 정확한 이름만 쓴다. 앞에 점을 붙이면 하위 도메인 전체가 열린다(.github.com은 github.com도 연다).
   # github.com·api.github.com·gist.github.com과 그 밖의 *.github.com은 넣지 않는다(D-15. values.schema.json이 막는다).
   # 프록시(Envoy)는 CONNECT 이름과 터널 안 TLS SNI를 둘 다 이 목록과 맞춘다(templates/proxy-configmap.yaml).
   # 남는 위험: SNI는 허용 이름이고 TLS 안 HTTP Host만 다른 요청은 못 본다. CDN 뒤 이름을 더할 때는 그 CDN이
-  # SNI·Host 불일치를 거부하는지 본다(2026-10-22 lab: registry.npmjs.org 앞 Cloudflare는 403).
+  # SNI·Host 불일치를 거부하는지 본다(2026-10-22 lab: registry.npmjs.org 앞 Cloudflare는 403. npm은 아래 이유로 뺐다).
   allowedDomains:
     # 작업자 코드 읽기. public 저장소 압축본만 받는다(D-15).
     - codeload.github.com
-    # [제안] 패키지 레지스트리. 게시 API는 막지 못한다(설계 C.8 "남는 위험(쓰기 유출)").
-    - registry.npmjs.org
+    # 패키지 레지스트리. 받기와 게시가 다른 호스트인 것만 둔다(설계 C.8 "남는 위험(쓰기 유출)").
+    # npm(registry.npmjs.org)은 받기와 게시가 같은 호스트라 넣지 않는다. 작업 입력의 npm 토큰으로 auth.json을
+    # 게시할 수 있다(#836 보안 리뷰). PyPI 게시는 upload.pypi.org라 열리지 않는다.
     - pypi.org
     - files.pythonhosted.org
     # 모델 API·구독 인증 호스트는 T16b가 E9 실측으로 더한다(설계 C.8, D-14).
