@@ -2,6 +2,7 @@
 # 기본 룰셋에 D-23 룰 둘(tailnet 이름, Tailscale IP)을 더한다. 기본 룰은 둘 다 잡지 않는다.
 # 검사 범위는 CI가 작업 트리(gitleaks dir), pre-commit이 staged 변경뿐이라 히스토리는 보지 않는다.
 # 모든 호출에 --ignore-gitleaks-allow를 둔다. 없으면 같은 줄의 gitleaks:allow 주석 하나로 어느 룰이든 비켜 간다.
+# .gitleaksignore도 두지 않는다. 그 fingerprint의 finding은 버려진다(ci와 pre-commit 훅이 파일을 거부한다).
 #
 # 면제를 더할 때는 targetRules로 룰을 좁히고, 경로(paths)나 정확한 값(regexes)으로 한 번 더 좁힌다.
 # 룰 없이 경로만 적으면 그 파일에서 기본 룰셋 전체가 꺼진다. 옛 저장소에서 평문 Secret을 면제된
@@ -17,12 +18,12 @@ useDefault = true
 # RE2에는 lookaround가 없어 경계 글자가 match에 들어가므로 값은 secretGroup으로 꺼내고 면제도 secret을 본다.
 # 뒤 경계 글자는 소비하지 않는다. 매치는 겹치지 않아서, 뒤 경계로 먹은 글자를 다음 값이 앞 경계로 쓰지 못한다.
 # 그러면 면제된 값 바로 뒤의 실제 값이 빠진다. 대신 값 뒤에 이어지는 라벨 글자(IP는 숫자·점)까지 secret에 넣고,
-# 그 꼴이 아닌 secret(.ts.network, 100.64.1.2.3 등)은 아래 면제로 푼다.
+# 그 꼴이 아닌 secret(.ts.network, .ts.net.example, 100.64.1.2.3 등)은 아래 면제로 푼다.
 # 실제 꼴의 <라벨>.ts.net만 잡는다. 문서의 자리표시(<tailnet>.ts.net, *.ts.net)는 .ts.net 바로 앞이 라벨 글자가 아니라 걸리지 않는다.
 [[rules]]
 id = "tailnet-hostname"
 description = "tailnet 이름(MagicDNS)은 저장소에 두지 않는다(D-23). 실행 때 tailscale status --json으로 읽는다"
-regex = '''(?im)(?:^|[^a-z0-9-])([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.ts\.net[a-z0-9-]*)'''
+regex = '''(?im)(?:^|[^a-z0-9-])([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.ts\.net[a-z0-9-]*(?:\.[a-z0-9-]+)*)'''
 secretGroup = 1
 keywords = ["ts.net"]
 
@@ -34,12 +35,15 @@ regex = '''(?m)(?:^|[^0-9.])(100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9
 secretGroup = 1
 keywords = ["100."]
 
-# Tailscale IPv6 fd7a:115c:a1e0::/48 안의 주소. 접두 뒤에 16진 묶음이 하나 이상 있어야 해서 대역 표기
-# (fd7a:115c:a1e0::/48)와 검사 패턴 속 접두(fd7a:115c:a1e0:)는 처음부터 걸리지 않는다. 경계 글자는 쓰지 않는다.
+# Tailscale IPv6 fd7a:115c:a1e0::/48 안의 주소. 접두 뒤에 16진 글자가 하나 이상 있어야 해서 대역 표기
+# (fd7a:115c:a1e0::/48)와 검사 패턴 속 접두(fd7a:115c:a1e0:)는 처음부터 걸리지 않는다.
+# 경계는 위와 같다: 앞은 글자로(xfd7a… 안 걸림), 뒤는 소비하지 않고 이어지는 영숫자·콜론을 secret에 흡수한 뒤
+# 완전한 IPv6 꼴이 아닌 secret을 아래 면제로 푼다.
 [[rules]]
 id = "tailscale-ipv6"
 description = "Tailscale IPv6 주소는 저장소에 두지 않는다(D-23)"
-regex = '''(?i)fd7a:115c:a1e0:(?::?[0-9a-f]{1,4})+'''
+regex = '''(?im)(?:^|[^0-9a-z:])(fd7a:115c:a1e0::?[0-9a-f][0-9a-z:]*)'''
+secretGroup = 1
 keywords = ["fd7a:115c:a1e0"]
 
 # 대역 표기와 모든 tailnet이 같이 쓰는 MagicDNS 주소(quad-100)는 기기 주소가 아니다.
@@ -60,12 +64,29 @@ regexes = [
   '''/(?:3[3-9]|[4-9][0-9]|[0-9]{3,})$''',
 ]
 
-# .ts.net 뒤에 라벨 글자가 이어지면(.ts.network 등) tailnet 이름이 아니다.
+# .ts.net 뒤에 라벨 글자(.ts.network)나 점과 라벨(.ts.net.example)이 이어지면 tailnet 이름이 아니다.
+# 종결점(foo.ts.net.)은 점 뒤에 라벨이 없어 secret에 들어가지 않으므로 계속 걸린다.
 [[allowlists]]
-description = "ts.net 뒤에 라벨 글자가 이어지는 다른 도메인"
+description = "ts.net 뒤에 라벨이 이어지는 다른 도메인"
 targetRules = ["tailnet-hostname"]
 regexTarget = "secret"
-regexes = ['''(?i)\.ts\.net[a-z0-9-]+$''']
+regexes = ['''(?i)\.ts\.net[a-z0-9.-]+$''']
+
+# 완전한 IPv6 꼴이 아닌 secret: 16진이 아닌 글자, 다섯 자 이상 묶음, :::, :: 둘, 콜론 여덟 개 이상,
+# :: 없이 묶음이 여덟보다 적음, 홑콜론으로 끝남.
+[[allowlists]]
+description = "IPv6 꼴이 아닌 fd7a:115c:a1e0 문자열"
+targetRules = ["tailscale-ipv6"]
+regexTarget = "secret"
+regexes = [
+  '''(?i)[g-z]''',
+  '''(?i)(?:^|:)[0-9a-f]{5,}''',
+  ''':::''',
+  '''::.*::''',
+  '''^(?:[^:]*:){8,}''',
+  '''(?i)^(?:[0-9a-f]+:){3,6}[0-9a-f]+$''',
+  '''[^:]:$''',
+]
 
 # go 리다이렉터 시험의 가짜 도메인. 경로와 값이 둘 다 맞을 때만 푼다(AND).
 [[allowlists]]
