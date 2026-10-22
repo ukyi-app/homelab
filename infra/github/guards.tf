@@ -24,6 +24,8 @@ data "github_rest_api" "token_admin" {
 # 2. 저장소 설정. 리소스가 아니라 gh api로 맞추고 여기서 확인만 한다(github_repository를 두지 않아 destroy로 지울 길이 없다).
 #    기본 브랜치도 main이어야 한다. 바뀌면 PR이 보호 안 된 브랜치로 열리고, Argo CD·ruleset·CODEOWNERS·자동 병합 조건은
 #    계속 main을 본다(앱 저장소의 app-main은 ~DEFAULT_BRANCH라 새 기본 브랜치를 보호해 배포 갱신이 어긋난다).
+#    PR 생성 collaborators_only(U38 대책)도 여기서 본다. pull_request_creation_policy는 저장소 GET 응답에 있지만 공식
+#    REST 문서에는 없는 필드라, 이름이 바뀌거나 빠지면 조건이 false가 되어 guard가 막는 쪽으로 실패한다.
 data "github_rest_api" "repo_homelab" {
   endpoint = "repos/ukyi-app/homelab"
 
@@ -36,10 +38,11 @@ data "github_rest_api" "repo_homelab" {
         jsondecode(self.body).allow_squash_merge == true &&
         jsondecode(self.body).allow_merge_commit == false &&
         jsondecode(self.body).allow_rebase_merge == false &&
-        jsondecode(self.body).delete_branch_on_merge == true,
+        jsondecode(self.body).delete_branch_on_merge == true &&
+        jsondecode(self.body).pull_request_creation_policy == "collaborators_only",
         false
       )
-      error_message = "guard 2: homelab 설정이 public, 기본 브랜치 main, allow_auto_merge=false, squash만, 병합 뒤 브랜치 삭제가 아니다. gh api -X PATCH로 맞춘다."
+      error_message = "guard 2: homelab 설정이 public, 기본 브랜치 main, allow_auto_merge=false, squash만, 병합 뒤 브랜치 삭제, PR 생성 collaborators_only가 아니다. gh api -X PATCH로 맞춘다(PR 생성: gh api -X PATCH repos/ukyi-app/homelab -f pull_request_creation_policy=collaborators_only)."
     }
   }
 }
@@ -54,10 +57,11 @@ data "github_rest_api" "repo_app" {
         jsondecode(self.body).visibility == "public" &&
         jsondecode(self.body).default_branch == "main" &&
         jsondecode(self.body).security_and_analysis.secret_scanning.status == "enabled" &&
-        jsondecode(self.body).security_and_analysis.secret_scanning_push_protection.status == "enabled",
+        jsondecode(self.body).security_and_analysis.secret_scanning_push_protection.status == "enabled" &&
+        jsondecode(self.body).pull_request_creation_policy == "collaborators_only",
         false
       )
-      error_message = "guard 2: 앱 저장소·템플릿이 public이 아니거나 기본 브랜치가 main이 아니거나 secret scanning·push protection이 꺼져 있다(D-29)."
+      error_message = "guard 2: 앱 저장소·템플릿이 public이 아니거나 기본 브랜치가 main이 아니거나 secret scanning·push protection이 꺼져 있거나 PR 생성이 collaborators_only가 아니다(D-29, U38). PR 생성: gh api -X PATCH repos/ukyi-app/<저장소> -f pull_request_creation_policy=collaborators_only."
     }
   }
 }
@@ -70,6 +74,25 @@ data "github_rest_api" "private_vulnerability_reporting" {
     postcondition {
       condition     = try(self.code == 200 && jsondecode(self.body).enabled == true, false)
       error_message = "guard 2: private vulnerability reporting이 꺼져 있다(D-29). gh api -X PUT repos/ukyi-app/<저장소>/private-vulnerability-reporting."
+    }
+  }
+}
+
+# 2(외부인 입력). org interaction limit이 collaborators_only이고 만료까지 45일 넘게 남았다(U38 대책). 최대 6개월이고
+#    영구 옵션이 없는데 GitHub는 만료를 미리 알려 주지 않는다. verify가 월 1회라 30일이면 며칠 밀려도 놓치고, 45일이면
+#    만료 전 verify가 적어도 한 번 걸린다. 걸리면 verify뿐 아니라 plan·apply도 다시 걸 때까지 멈춘다.
+#    limit이 없으면 응답이 빈 본문이나 {}라 try가 false로 떨어진다. 관리 자원이 아니라 의존 없이 plan 때 늘 읽는다.
+data "github_rest_api" "interaction_limit_org" {
+  endpoint = "orgs/ukyi-app/interaction-limits"
+
+  lifecycle {
+    postcondition {
+      condition = try(
+        jsondecode(self.body).limit == "collaborators_only" &&
+        timecmp(jsondecode(self.body).expires_at, timeadd(plantimestamp(), "1080h")) > 0,
+        false
+      )
+      error_message = "guard 2: org interaction limit이 collaborators_only가 아니거나 만료까지 45일 이하다(U38). 다시 건다: gh api -X PUT orgs/ukyi-app/interaction-limits -f limit=collaborators_only -f expiry=six_months"
     }
   }
 }
