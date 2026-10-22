@@ -19,7 +19,7 @@ repos:
     hooks:
       - id: gitleaks
         name: gitleaks (staged)
-        entry: gitleaks git --pre-commit --staged --redact --verbose --config .gitleaks.toml
+        entry: gitleaks git --pre-commit --staged --redact --verbose --ignore-gitleaks-allow --config .gitleaks.toml
         language: system
         pass_filenames: false
       - id: actionlint

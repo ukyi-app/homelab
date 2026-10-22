@@ -54,12 +54,16 @@ function hasSecret(v: unknown): boolean {
   return false;
 }
 
+// 작업 트리 검사와 룰 시험이 같은 인자를 쓴다. 그래서 룰 시험의 gitleaks:allow 경우가 CI 호출의 플래그도 보증한다.
+// --ignore-gitleaks-allow: 같은 줄의 gitleaks:allow 주석으로 룰을 비켜 가지 못하게 한다(.gitleaks.toml 머리 주석).
+const GITLEAKS_DIR = ["gitleaks", "dir", "--config", join(ROOT, ".gitleaks.toml"), "--no-banner", "--ignore-gitleaks-allow"];
+
 const steps: Step[] = [
   {
     name: "gitleaks",
     // 작업 트리만 본다. 히스토리 전체를 보면 옛 커밋의 오탐이나 이미 폐기한 옛 값 하나가 모든 PR을 막는다.
     // push된 커밋은 저장소의 secret scanning·push protection이 먼저 본다.
-    run: () => tool("gitleaks", ["gitleaks", "dir", "--config", ".gitleaks.toml", "--redact", "--no-banner", "--exit-code", "1", "."]),
+    run: () => tool("gitleaks", [...GITLEAKS_DIR, "--redact", "--exit-code", "1", "."]),
   },
   {
     name: "gitleaks rules",
@@ -70,12 +74,16 @@ const steps: Step[] = [
       const ts = ["ts", "net"].join(".");
       const ip = (...o: number[]) => o.join(".");
       const host = "tail" + "1a2b3c";
+      const v6 = ["fd7a", "115c", "a1e0"].join(":");
+      const allow = "gitleaks" + ":allow";
       // [경로, 내용, 기대 룰(없으면 걸리지 않아야 함)]
       const cases: [string, string, string | undefined][] = [
         ["host.md", `${host}.${ts}`, "tailnet-hostname"],
         ["fqdn.md", `nuc.${host}.${ts}`, "tailnet-hostname"],
         ["upper.md", `${host.toUpperCase()}.${ts.toUpperCase()}`, "tailnet-hostname"],
         ["hyphen.md", `cobra-ghost.${ts}`, "tailnet-hostname"],
+        ["underscore.md", `_${host}.${ts}_`, "tailnet-hostname"],
+        ["allow-comment.md", `${host}.${ts} # ${allow}`, "tailnet-hostname"],
         ["example-elsewhere.md", `example.${ts}`, "tailnet-hostname"],
         ["tools/go-redirect.test.sh", `${host}.${ts}`, "tailnet-hostname"],
         ["placeholder.md", `<tailnet>.${ts} <서비스>.<tailnet>.${ts} *.${ts} .${ts}`, undefined],
@@ -84,8 +92,15 @@ const steps: Step[] = [
         ["ip-low.md", ip(100, 64, 0, 1), "tailscale-ip"],
         ["ip-high.md", ip(100, 127, 255, 254), "tailscale-ip"],
         ["ip-other-cidr.md", `${ip(100, 64, 0, 0)}/12`, "tailscale-ip"],
-        ["ip-outside.md", `${ip(100, 63, 255, 255)} ${ip(100, 128, 0, 1)}`, undefined],
+        ["ip-underscore.md", `_${ip(100, 101, 2, 3)}_`, "tailscale-ip"],
+        ["ip-allow-comment.md", `${ip(100, 101, 2, 3)} // ${allow}`, "tailscale-ip"],
+        ["ip-outside.md", `${ip(100, 63, 255, 255)} ${ip(100, 128, 0, 1)} ${ip(1100, 64, 1, 1)}`, undefined],
         ["ip-range.md", `${ip(100, 64, 0, 0)}/10 ${ip(100, 100, 100, 100)}`, undefined],
+        ["v6.md", `${v6}:ab12:4843:cd96:6258:b240`, "tailscale-ipv6"],
+        ["v6-short.md", `${v6}::1234:5678`, "tailscale-ipv6"],
+        ["v6-upper.md", `${v6.toUpperCase()}::AB12`, "tailscale-ipv6"],
+        ["v6-allow-comment.md", `${v6}::1 # ${allow}`, "tailscale-ipv6"],
+        ["v6-range.md", `${v6}::/48 '${v6}:'`, undefined],
       ];
       // 경우마다 따로 스캔한다. 면제의 paths는 스캔 루트 기준이라 저장소와 같은 상대 경로에 둬야 한다.
       const reports = tempDir("gitleaks-report");
@@ -94,7 +109,7 @@ const steps: Step[] = [
         mkdirSync(dirname(join(dir, path)), { recursive: true });
         writeFileSync(join(dir, path), `${text}\n`);
         const report = join(reports, `${i}.json`);
-        const r = run(["gitleaks", "dir", "--config", join(ROOT, ".gitleaks.toml"), "--no-banner", "--exit-code", "0", "--report-format", "json", "--report-path", report, "."], { cwd: dir });
+        const r = run([...GITLEAKS_DIR, "--exit-code", "0", "--report-format", "json", "--report-path", report, "."], { cwd: dir });
         if (r.code !== 0) {
           out.push({ rule: "gitleaks-rules", where: `${i}:${path}`, message: `gitleaks exit ${r.code}: ${(r.stdout + r.stderr).trim()}` });
           return;
@@ -103,6 +118,10 @@ const steps: Step[] = [
         const ok = want ? rules.length === 1 && rules[0] === want : rules.length === 0;
         if (!ok) out.push({ rule: "gitleaks-rules", where: `${i}:${path}`, message: `기대 ${want ?? "없음"}, 결과 ${rules.join(",") || "없음"}` });
       });
+      // pre-commit 훅도 인라인 면제를 받지 않아야 한다. 이 시험은 dir 호출만 돌리므로 훅 설정은 원문으로 본다.
+      if (!/entry: gitleaks git .*--ignore-gitleaks-allow/.test(readText(".pre-commit-config.yaml"))) {
+        out.push({ rule: "gitleaks-rules", where: ".pre-commit-config.yaml", message: "gitleaks 훅에 --ignore-gitleaks-allow가 없다" });
+      }
       console.log(`gitleaks D-23 룰 ${cases.length}경우`);
       return out;
     },

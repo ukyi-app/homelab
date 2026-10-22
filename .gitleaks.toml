@@ -1,6 +1,7 @@
 # CI(.github/workflows/ci.yaml)와 pre-commit이 --config로 이 파일을 읽는다.
 # 기본 룰셋에 D-23 룰 둘(tailnet 이름, Tailscale IP)을 더한다. 기본 룰은 둘 다 잡지 않는다.
 # 검사 범위는 CI가 작업 트리(gitleaks dir), pre-commit이 staged 변경뿐이라 히스토리는 보지 않는다.
+# 모든 호출에 --ignore-gitleaks-allow를 둔다. 없으면 같은 줄의 gitleaks:allow 주석 하나로 어느 룰이든 비켜 간다.
 #
 # 면제를 더할 때는 targetRules로 룰을 좁히고, 경로(paths)나 정확한 값(regexes)으로 한 번 더 좁힌다.
 # 룰 없이 경로만 적으면 그 파일에서 기본 룰셋 전체가 꺼진다. 옛 저장소에서 평문 Secret을 면제된
@@ -12,25 +13,37 @@
 [extend]
 useDefault = true
 
-# 실제 꼴의 <라벨>.ts.net. 문서의 자리표시(<tailnet>.ts.net, *.ts.net)는 .ts.net 바로 앞이 라벨 글자가 아니라 걸리지 않는다.
+# 경계는 \b가 아니라 라벨 밖 글자나 줄 시작·끝이다. \b는 _를 단어 글자로 봐서 _<이름>.ts.net_ 같은 강조를 놓친다.
+# RE2에는 lookaround가 없어 경계 글자가 match에 들어가므로 값은 secretGroup으로 꺼내고 면제도 secret을 본다.
+# 실제 꼴의 <라벨>.ts.net만 잡는다. 문서의 자리표시(<tailnet>.ts.net, *.ts.net)는 .ts.net 바로 앞이 라벨 글자가 아니라 걸리지 않는다.
 [[rules]]
 id = "tailnet-hostname"
 description = "tailnet 이름(MagicDNS)은 저장소에 두지 않는다(D-23). 실행 때 tailscale status --json으로 읽는다"
-regex = '''(?i)\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.ts\.net\b'''
+regex = '''(?im)(?:^|[^a-z0-9-])([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.ts\.net)(?:[^a-z0-9-]|$)'''
+secretGroup = 1
 keywords = ["ts.net"]
 
-# CGNAT 100.64.0.0/10 안의 주소. 뒤의 /접두 길이까지 match에 넣어 대역 표기만 정확히 면제한다.
+# CGNAT 100.64.0.0/10 안의 주소. 뒤의 /접두 길이까지 secret에 넣어 대역 표기만 정확히 면제한다. 경계는 위와 같은 이유로 글자다.
 [[rules]]
 id = "tailscale-ip"
 description = "Tailscale IP는 저장소에 두지 않는다(D-23)"
-regex = '''\b100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}(?:/[0-9]{1,2})?\b'''
+regex = '''(?m)(?:^|[^0-9.])(100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}(?:/[0-9]{1,2})?)(?:[^0-9]|$)'''
+secretGroup = 1
 keywords = ["100."]
+
+# Tailscale IPv6 fd7a:115c:a1e0::/48 안의 주소. 접두 뒤에 16진 묶음이 하나 이상 있어야 해서 대역 표기
+# (fd7a:115c:a1e0::/48)와 검사 패턴 속 접두(fd7a:115c:a1e0:)는 처음부터 걸리지 않는다. 면제가 따로 없다.
+[[rules]]
+id = "tailscale-ipv6"
+description = "Tailscale IPv6 주소는 저장소에 두지 않는다(D-23)"
+regex = '''(?i)fd7a:115c:a1e0:(?::?[0-9a-f]{1,4})+'''
+keywords = ["fd7a:115c:a1e0"]
 
 # 대역 표기와 모든 tailnet이 같이 쓰는 MagicDNS 주소(quad-100)는 기기 주소가 아니다.
 [[allowlists]]
 description = "Tailscale 대역 표기와 MagicDNS 고정 주소"
 targetRules = ["tailscale-ip"]
-regexTarget = "match"
+regexTarget = "secret"
 regexes = ['''^100\.64\.0\.0/10$''', '''^100\.100\.100\.100$''']
 
 # go 리다이렉터 시험의 가짜 도메인. 경로와 값이 둘 다 맞을 때만 푼다(AND).
@@ -39,5 +52,5 @@ description = "go 리다이렉터 시험의 example 도메인"
 targetRules = ["tailnet-hostname"]
 condition = "AND"
 paths = ['''^tools/go-redirect\.test\.sh$''']
-regexTarget = "match"
+regexTarget = "secret"
 regexes = ['''(?i)^example(?:-tailnet)?\.ts\.net$''']
