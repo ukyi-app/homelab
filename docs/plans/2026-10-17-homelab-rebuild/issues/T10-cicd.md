@@ -7,7 +7,7 @@
   - 착수: T07 뒤 바로 시작한다. 차트, 워크플로, `infra/github` HCL 같은 작성 작업은 T09와 병행한다.
   - 완료: T09 뒤. Infisical 프로젝트 `homelab-ci-deploy`·`homelab-ci-merge`와 배포 키 OIDC identity `gha-homelab-deploy`가 있어야 배포 PR이 생기고, 종단 시험(아래 CLI 없는 동등 절차)을 할 수 있다(설계 C.4.8 "T09 → T10 간선의 답").
   - `infra/github` 첫 apply: T08a의 첫 Terraform apply와 R2 잠금 동시 실행 시험(U02) 뒤에 한다. R2 state를 처음 쓰는 단계를 하나로 둔다(설계 E.0).
-- 선행 결정: D-04 (확정(사용자 2026-10-18): 배포 키 OIDC, 병합 키 Secret Sync), D-07 (확정(사용자 2026-10-18, T05): 배포 digest PR만 자동 병합, 서버 강제), D-18 (확정(사용자 2026-10-18, T05): 호스팅형 Renovate App 저장소별 설치, 자동 병합 모두 끔), D-21 (확정(사용자 2026-10-18, T05): `homelab-app-template` 재사용, 내용 교체), D-23 (확정: public 유지), D-26 (확정(사용자 2026-10-18, T05): Codex Connector 유지 + 조건 넷), D-28 (확정(사용자 2026-10-18): GitHub 보호 설정 Terraform), D-29 (확정(사용자 2026-10-18): 앱 저장소 public만), D-30 (확정(사용자 2026-10-20): 내부 UI 짧은 주소 리다이렉터 `go`. 공유 차트의 `internal.name` 검사에서 `go`·`vm-go`를 예약어로 막는다)
+- 선행 결정: D-04 (확정(사용자 2026-10-18): 배포 키 OIDC, 병합 키 Secret Sync), D-07 (확정(사용자 2026-10-18, T05): 배포 digest PR만 자동 병합, 서버 강제), D-18 (확정(사용자 2026-10-18, T05): 호스팅형 Renovate App 저장소별 설치, 자동 병합 모두 끔), D-21 (확정(사용자 2026-10-18, T05): `homelab-app-template` 재사용, 내용 교체), D-23 (확정: public 유지), D-26 (확정(사용자 2026-10-18, T05): Codex Connector 유지 + 조건 다섯. (5) Codex 작업 환경 없음은 2026-10-22 더함), D-28 (확정(사용자 2026-10-18): GitHub 보호 설정 Terraform), D-29 (확정(사용자 2026-10-18): 앱 저장소 public만), D-30 (확정(사용자 2026-10-20): 내부 UI 짧은 주소 리다이렉터 `go`. 공유 차트의 `internal.name` 검사에서 `go`·`vm-go`를 예약어로 막는다)
 - 참조 결정: D-24 (봇 쓰기 신원. 확정(사용자 2026-10-18, T15): 봇 전용 쓰기 GitHub App. App 생성·설치는 T19). T10은 이 신원이 없어도 자동 병합 차단 조건을 설계하고, 시험용 다른 신원으로 검증한다. D-16 (봇 PR 리뷰. 확정(사용자 2026-10-18, T15): 기본안). Codex Connector 설치 범위 축소는 확정(사용자 2026-10-18, T15): 선택 저장소로 줄이고 `homelab-bot-ops`를 뺀다. 사람이 T15에서 `homelab-bot-ops`에 운영 산출물을 처음 올리기 전에 하기로 했고, 2026-10-18 17:45에 완료했다(spec §11, D-26, [../approvals.md](../approvals.md)).
 - 연결 AC: AC-P7, AC-P8, AC-P12
 - 수행: 에이전트 + 사람 (GitHub App 2개와 시험 App 2개 생성·설치, Terraform github root apply(owner 로컬), Actions 허용 범위, Infisical Secret Sync와 App Connection용 PAT, GHCR 패키지 Public 전환, Renovate 설치, `homelab-probe` 저장소 생성, 템플릿 내용 교체 승인)
@@ -45,11 +45,12 @@
   - ci의 workflow-guard: YAML 별칭까지 푸는 파서로 읽는다. environment 이름은 대소문자를 무시하고 문자열형과 객체형을 모두 잡는다. environment 이름에 표현식을 쓰지 못하게 한다. `automerge`는 `deploy-merge.yaml`의 merge job만 쓴다. `deploy-merge` 트리거는 `workflow_run`만이다. `secrets: inherit`와 로컬이 아닌 reusable 호출을 금지한다. `toJSON(secrets)`와 동적 secrets 참조를 금지한다. 금지마다 음성 fixture를 둔다.
   - D-26 조건 (2)를 "environment secret을 쓰는 워크플로는 `workflow_run`만"으로 넓힌다.
   - D-07이 자동 병합을 두기로 확정돼(T05) 병합 App 키, Secret Sync, environment `automerge`는 유지된다. identity는 4/5다.
-- D-26 조건 넷 (확정(사용자 2026-10-18, T05), 설계 F D-26). Codex Connector는 유지한다.
+- D-26 조건 다섯 (확정(사용자 2026-10-18, T05). (5)는 2026-10-22 사용자 결정으로 더함, 설계 F D-26). Codex Connector는 유지한다.
   - (1) homelab과 앱 저장소의 어떤 ruleset bypass에도 넣지 않는다.
   - (2) 시크릿을 쓰는 `workflow_dispatch` 워크플로를 두지 않고, environment secret을 쓰는 워크플로는 트리거를 `workflow_run` 하나만 둔다. ci의 workflow-guard가 확인한다.
   - (3) 배포 키는 앱 main push의 태그 고정 `app-build`만 OIDC claim으로 꺼낸다. 병합 키는 environment `automerge`(배포 브랜치 main)의 secret이라 `deploy-merge`의 merge job만 쓴다.
   - (4) 앱 저장소는 public만 두고 그 main과 `homelab-app-template` main에 `app-main`을 건다. 자동 배포는 `app-main`이 active로 확인된 앱에서만 일어난다(조건 9).
+  - (5) homelab과 앱 저장소(`homelab-app-template`, `homelab-probe`, `files`, `homelab-bot`(`infra/github/app-repos.json`의 앱 저장소), 이후 새 앱)에 Codex 클라우드 작업 환경(environment)을 두지 않는다. 리뷰(`@codex review`, 자동 리뷰)와 로컬 Codex CLI는 환경 없이 쓴다. 환경이 없으면 `@codex` 작업이 시작되지 않아 Codex가 owner 권한으로 병합 API를 부르는 길이 없다(U37). 만들게 되면 그 전에 U37을 다시 시험한다.
   - 설치 범위 축소는 확정(사용자 2026-10-18, T15): 선택 저장소로 줄이고 `homelab-bot-ops`를 뺀다. 사람 작업이고 T15에서 했다(2026-10-18 17:45 완료, spec §11, D-16). Codex 쪽 미검증 U21(Draft·배포 App PR의 자동 리뷰 건너뛰기), U37(owner 권한 병합), U38(외부인 호출)을 이 티켓에서 시험해 기록한다(설계 부록 1).
 - GitHub 보호 설정 (D-28). Terraform root `infra/github`로 선언한다. 새 App ID 기준으로 필수 검사, main 보호, ruleset을 새로 정의한다. 옛 것은 T06이 지운다. org가 Free 플랜이라 브랜치 보호와 ruleset은 public 저장소에서만 동작한다(D-23, D-29).
   - 리소스는 `github_repository_ruleset`, `github_repository_environment`(+ deployment policy), `github_actions_repository_permissions`, `github_workflow_repository_permissions`만 쓴다. `github_repository`와 시크릿 리소스는 두지 않는다. 저장소 설정(`allow_auto_merge=false`, squash만, 병합 뒤 삭제 등)은 guard로 확인만 하고 값은 `gh api`로 맞춘다. fork PR 승인 정책은 provider가 지원하지 않아 `gh api` PUT + guard.
