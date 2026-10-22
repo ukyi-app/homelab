@@ -25,17 +25,22 @@ override_data {
 
 override_data {
   target = data.github_rest_api.repo_homelab
-  values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
+  values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true,\"pull_request_creation_policy\":\"collaborators_only\"}" }
 }
 
 override_data {
   target = data.github_rest_api.repo_app
-  values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
+  values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}},\"pull_request_creation_policy\":\"collaborators_only\"}" }
 }
 
 override_data {
   target = data.github_rest_api.private_vulnerability_reporting
   values = { code = 200, body = "{\"enabled\":true}" }
+}
+
+override_data {
+  target = data.github_rest_api.interaction_limit_org
+  values = { code = 200, body = "{\"limit\":\"collaborators_only\",\"origin\":\"organization\",\"expires_at\":\"2999-01-01T00:00:00Z\"}" }
 }
 
 override_data {
@@ -169,7 +174,7 @@ run "g2_auto_merge_on" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_homelab
-    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":true,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":true,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true,\"pull_request_creation_policy\":\"collaborators_only\"}" }
   }
   expect_failures = [data.github_rest_api.repo_homelab]
 }
@@ -178,7 +183,7 @@ run "g2_merge_commit_on" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_homelab
-    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":true,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":true,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true,\"pull_request_creation_policy\":\"collaborators_only\"}" }
   }
   expect_failures = [data.github_rest_api.repo_homelab]
 }
@@ -187,7 +192,7 @@ run "g2_default_branch_homelab" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_homelab
-    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"develop\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true}" }
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"develop\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true,\"pull_request_creation_policy\":\"collaborators_only\"}" }
   }
   expect_failures = [data.github_rest_api.repo_homelab]
 }
@@ -196,7 +201,7 @@ run "g2_default_branch_app" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_app["files"]
-    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"master\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"master\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}},\"pull_request_creation_policy\":\"collaborators_only\"}" }
   }
   expect_failures = [data.github_rest_api.repo_app]
 }
@@ -205,7 +210,7 @@ run "g2_app_push_protection_off" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_app["files"]
-    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"disabled\"}}}" }
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"disabled\"}},\"pull_request_creation_policy\":\"collaborators_only\"}" }
   }
   expect_failures = [data.github_rest_api.repo_app]
 }
@@ -214,7 +219,7 @@ run "g2_app_private" {
   command = plan
   override_data {
     target = data.github_rest_api.repo_app["homelab-bot"]
-    values = { code = 200, body = "{\"visibility\":\"private\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
+    values = { code = 200, body = "{\"visibility\":\"private\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}},\"pull_request_creation_policy\":\"collaborators_only\"}" }
   }
   expect_failures = [data.github_rest_api.repo_app]
 }
@@ -236,6 +241,90 @@ run "g2_pvr_off" {
     values = { code = 200, body = "{\"enabled\":false}" }
   }
   expect_failures = [data.github_rest_api.private_vulnerability_reporting]
+}
+
+run "g2_pr_creation_all_homelab" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.repo_homelab
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"allow_auto_merge\":false,\"allow_squash_merge\":true,\"allow_merge_commit\":false,\"allow_rebase_merge\":false,\"delete_branch_on_merge\":true,\"pull_request_creation_policy\":\"all\"}" }
+  }
+  expect_failures = [data.github_rest_api.repo_homelab]
+}
+
+run "g2_pr_creation_all_app" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.repo_app["homelab-probe"]
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}},\"pull_request_creation_policy\":\"all\"}" }
+  }
+  expect_failures = [data.github_rest_api.repo_app]
+}
+
+run "g2_pr_creation_field_missing" {
+  # 문서에 없는 필드라 이름이 바뀌면 응답에서 빠진다. 막는 쪽으로 실패해야 한다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.repo_app["files"]
+    values = { code = 200, body = "{\"visibility\":\"public\",\"default_branch\":\"main\",\"security_and_analysis\":{\"secret_scanning\":{\"status\":\"enabled\"},\"secret_scanning_push_protection\":{\"status\":\"enabled\"}}}" }
+  }
+  expect_failures = [data.github_rest_api.repo_app]
+}
+
+run "g2_interaction_limit_none_empty" {
+  # limit이 없으면 빈 응답(문서). 빈 본문과 {} 둘 다 본다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.interaction_limit_org
+    values = { code = 200, body = "" }
+  }
+  expect_failures = [data.github_rest_api.interaction_limit_org]
+}
+
+run "g2_interaction_limit_none_object" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.interaction_limit_org
+    values = { code = 200, body = "{}" }
+  }
+  expect_failures = [data.github_rest_api.interaction_limit_org]
+}
+
+run "g2_interaction_limit_contributors" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.interaction_limit_org
+    values = { code = 200, body = "{\"limit\":\"contributors_only\",\"origin\":\"organization\",\"expires_at\":\"2999-01-01T00:00:00Z\"}" }
+  }
+  expect_failures = [data.github_rest_api.interaction_limit_org]
+}
+
+run "g2_interaction_limit_expired" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.interaction_limit_org
+    values = { code = 200, body = "{\"limit\":\"collaborators_only\",\"origin\":\"organization\",\"expires_at\":\"2020-01-01T00:00:00Z\"}" }
+  }
+  expect_failures = [data.github_rest_api.interaction_limit_org]
+}
+
+run "g2_interaction_limit_within_45d" {
+  # 지금+44일. 아직 유효하지만 45일 안이라 멈춘다. 시험 파일에는 plantimestamp()가 없어 timestamp()로 만든다(경계 양쪽 1일 여유).
+  command = plan
+  override_data {
+    target = data.github_rest_api.interaction_limit_org
+    values = { code = 200, body = jsonencode({ limit = "collaborators_only", origin = "organization", expires_at = timeadd(timestamp(), "1056h") }) }
+  }
+  expect_failures = [data.github_rest_api.interaction_limit_org]
+}
+
+run "g2_interaction_limit_after_45d" {
+  # 지금+46일은 통과한다(경계 반대쪽).
+  command = plan
+  override_data {
+    target = data.github_rest_api.interaction_limit_org
+    values = { code = 200, body = jsonencode({ limit = "collaborators_only", origin = "organization", expires_at = timeadd(timestamp(), "1104h") }) }
+  }
 }
 
 run "g3_extra_ruleset" {
