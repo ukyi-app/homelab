@@ -1,0 +1,140 @@
+# VictoriaMetrics single. 저장과 수집을 함께 한다(vmagent 없음, 설계 C.3.7 [S167]).
+# 수집 대상은 vmsingle/scrape.yaml. 파드·노드 발견과 kubelet cAdvisor 수집에 아래 읽기 권한을 쓴다.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vmsingle
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: observability-vmsingle
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list", "watch"]
+  # kubelet /metrics/cadvisor는 nodes/metrics로 인가된다. nodes/proxy는 kubelet exec까지 열어 주지 않는다.
+  - apiGroups: [""]
+    resources: ["nodes/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: observability-vmsingle
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: observability-vmsingle
+subjects:
+  - kind: ServiceAccount
+    name: vmsingle
+    namespace: observability
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmsingle
+  labels:
+    app.kubernetes.io/name: vmsingle
+spec:
+  selector:
+    app.kubernetes.io/name: vmsingle
+  ports:
+    - name: http
+      port: 8428
+      targetPort: http
+---
+# local-path는 용량을 강제하지 않는다. 디스크는 NodeFilesystemAlmostFull이 본다.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vmsingle-data
+  labels:
+    app.kubernetes.io/name: vmsingle
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-retain
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vmsingle
+  labels:
+    app.kubernetes.io/name: vmsingle
+spec:
+  serviceName: vmsingle
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vmsingle
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vmsingle
+    spec:
+      serviceAccountName: vmsingle
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vmsingle
+          # v1.154.1, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
+          image: victoriametrics/victoria-metrics:v1.154.1@sha256:c7884f32920dd45a9d86542a717227e63af03e060e53bbf8031e6e6fd0e1e05d
+          args:
+            - -storageDataPath=/storage
+            # retention.maxDiskSpaceUsageBytes는 엔터프라이즈 전용이라 커뮤니티판이 flag not defined로 죽는다.
+            # 보존 기간으로만 제한한다(설계 B.8 E4).
+            - -retentionPeriod=30d
+            # 절대값으로 둔다. allowedPercent는 limit을 올리면 캐시 예산도 같이 올라 OOM 여유가 늘지 않는다.
+            # 536870912 B = 512 MiB(limit 1 GiB의 50%). 캐시는 mmap이라 GOMEMLIMIT이 막지 못한다.
+            - -memory.allowedBytes=536870912
+            - -httpListenAddr=:8428
+            - -promscrape.config=/etc/vmsingle/scrape.yaml
+            # 수집 설정 ConfigMap은 해시 없이 붙인다. 이 주기로 파일을 다시 읽는다.
+            - -promscrape.configCheckInterval=30s
+            - -dedup.minScrapeInterval=30s
+          env:
+            # limit에 연동하지 않은 고정값이다. limit을 올려도 힙 상한이 따라 오르지 않는다.
+            - name: GOMEMLIMIT
+              value: "768MiB"
+          ports:
+            - name: http
+              containerPort: 8428
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            # 옛 실측 RSS peak 694.9Mi(수집 대상이 지금보다 많았다)의 약 1.5배.
+            limits:
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: storage
+              mountPath: /storage
+            - name: scrape
+              mountPath: /etc/vmsingle
+              readOnly: true
+      volumes:
+        # hostPath 백엔드라 fsGroup이 적용되지 않는다. local-path가 디렉터리를 0777로 만들어 uid 65534가 쓴다.
+        - name: storage
+          persistentVolumeClaim:
+            claimName: vmsingle-data
+        - name: scrape
+          configMap:
+            name: vmsingle-scrape

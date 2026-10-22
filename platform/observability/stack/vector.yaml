@@ -1,0 +1,105 @@
+# vector: 노드의 파드 로그(/var/log/pods)를 VictoriaLogs로. root여야 읽힌다. 아니면 수집이 조용히 0이다
+# (설계 B.8 E4). 그래서 observability ns가 privileged다.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vector
+---
+# kubernetes_logs가 파드·ns 메타데이터를 붙이려고 읽는다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: observability-vector
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: observability-vector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: observability-vector
+subjects:
+  - kind: ServiceAccount
+    name: vector
+    namespace: observability
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vector
+  labels:
+    app.kubernetes.io/name: vector
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vector
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9598"
+    spec:
+      serviceAccountName: vector
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vector
+          # 0.60.0, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22. kubernetes_logs의 glibc 의존이 없는 libc판.
+          image: timberio/vector:0.60.0-distroless-libc@sha256:a9ed9a4710bdc2efa66e94c1e8edc7b439709e6e50079f1e1b2b1bf479d387da
+          # tokio 워커는 기본으로 코어 수만큼 뜬다. 위생상 묶는다(옛 OOM의 원인은 아니었다).
+          args: ["--config", "/etc/vector/vector.yaml", "--threads", "4"]
+          env:
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: metrics
+              containerPort: 9598
+          resources:
+            requests:
+              cpu: 50m
+              memory: 160Mi
+            # 옛 실측: 320Mi에서 2시간에 22회 OOMKilled, 512Mi로 백로그 버스트를 견딘 peak 418Mi.
+            # VictoriaLogs가 멈췄다 돌아오면 쌓인 로그를 한꺼번에 보낸다. limit을 깎기 전에 버스트를 줄인다.
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              # 파드 로그 파일은 root 소유라 DAC 권한 없이 소유자로 읽는다.
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/vector
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: vector-config
+        # 읽기 위치(checkpoint)를 파드 재생성에도 남긴다. emptyDir이면 재생성마다 /var/log를 처음부터 다시 읽어
+        # 백로그 버스트로 OOM이 났다(옛 근본 원인 2026-06-23).
+        - name: data
+          hostPath:
+            path: /var/lib/vector
+            type: DirectoryOrCreate
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods
+            type: Directory

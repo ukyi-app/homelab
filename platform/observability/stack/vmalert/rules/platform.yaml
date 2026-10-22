@@ -1,0 +1,70 @@
+# 플랫폼 구성 요소 지표. Argo CD notifications는 쓰지 않고 이 지표 경보로 대신한다
+# (옛 webhook 방식이 토큰을 DEBUG 로그로 남겼다, 설계 B.8 E4).
+groups:
+  - name: platform
+    rules:
+      - alert: ArgoCDAppDegraded
+        expr: max by (name) (argocd_app_info{health_status="Degraded"}) == 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Argo CD Application {{ $labels.name }}가 30분 넘게 Degraded다"
+
+      - alert: ArgoCDAppOutOfSync
+        expr: max by (name) (argocd_app_info{sync_status="OutOfSync"}) == 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Argo CD Application {{ $labels.name }}가 30분 넘게 OutOfSync다"
+
+      # ESO는 Ready 조건마다 status True·False 두 시계열을 내고 해당하는 쪽이 1이다(v2.13.0 실측).
+      - alert: ExternalSecretNotReady
+        expr: max by (namespace, name) (externalsecret_status_condition{condition="Ready", status="False"}) == 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ExternalSecret {{ $labels.namespace }}/{{ $labels.name }}가 10분 넘게 Ready가 아니다"
+          description: "Infisical 키 이름·경로와 ESO 인증을 본다. 이미 만든 Secret은 마지막 값으로 남아 있다."
+
+  # 아래는 T11(CNPG)·데이터 차트(Valkey)가 지표를 내기 전에는 시계열이 없어 발화하지 않는다.
+  # 지표 이름은 그 티켓이 실제 수집으로 확인한다([미검증]).
+  - name: data
+    rules:
+      # cnpg_collector_up은 인스턴스 파드(포트 이름 metrics, 9187)가 PostgreSQL에 붙으면 1이다.
+      - alert: CNPGClusterNotHealthy
+        expr: max by (namespace, cluster) (cnpg_collector_up) < 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CNPG 클러스터 {{ $labels.namespace }}/{{ $labels.cluster }}에서 PostgreSQL에 붙은 인스턴스가 없다"
+
+      # Barman Cloud Plugin 지표(옛 cnpg_collector_* 백업 지표를 대신한다). 백업이 한 번도 없으면 값이 0이라 바로 발화한다.
+      - alert: PGBackupStale
+        expr: time() - max by (namespace, cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp) > 26 * 3600
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.cluster }}의 마지막 성공 백업이 26시간보다 오래됐다"
+
+      - alert: WALArchiveFailing
+        expr: |
+          max by (namespace, cluster) (cnpg_pg_stat_archiver_last_failed_time)
+          > max by (namespace, cluster) (cnpg_pg_stat_archiver_last_archived_time)
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.cluster }}의 WAL 아카이브가 마지막 성공 뒤 실패하고 있다"
+
+      # 백업 CronJob 이름에 valkey-backup이 들어간다고 가정한다(데이터 차트가 정할 때 맞춘다).
+      # 한 번도 성공하지 않은 CronJob은 last_successful_time이 없어 여기서 잡히지 않는다. 실패는 KubeJobFailed가 본다.
+      - alert: ValkeyBackupStale
+        expr: time() - max by (namespace, cronjob) (kube_cronjob_status_last_successful_time{cronjob=~".*valkey-backup.*"}) > 26 * 3600
+        labels:
+          severity: warning
+        annotations:
+          summary: "Valkey 백업 {{ $labels.namespace }}/{{ $labels.cronjob }}의 마지막 성공이 26시간보다 오래됐다"

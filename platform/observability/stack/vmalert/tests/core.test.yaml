@@ -1,0 +1,161 @@
+# vmalert-tool unittest(ci: tools/ci). 시각은 2000-01-01 UTC(946684800)에서 시작한다.
+rule_files:
+  - ../rules/core.yaml
+evaluation_interval: 1m
+tests:
+  - name: Watchdog는 늘 발화한다
+    interval: 1m
+    input_series:
+      - series: 'up{job="vmsingle", instance="vmsingle"}'
+        values: "1x5"
+    alert_rule_test:
+      - eval_time: 1m
+        groupname: core
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels:
+              severity: none
+            exp_annotations:
+              summary: 경보 경로 생존 신호(늘 발화)
+
+  - name: TargetDown은 5분 지나야 발화한다
+    interval: 1m
+    input_series:
+      - series: 'up{job="vector", instance="nuc"}'
+        values: "0x10"
+      - series: 'up{job="vmalert", instance="vmalert"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 4m
+        groupname: core
+        alertname: TargetDown
+        exp_alerts: []
+      - eval_time: 6m
+        groupname: core
+        alertname: TargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: vector
+              instance: nuc
+            exp_annotations:
+              summary: 수집 대상 vector/nuc가 5분 넘게 응답하지 않는다
+
+  - name: NodeMemoryHigh는 MemAvailable로 본다
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemAvailable_bytes{instance="nuc"}'
+        values: "5x20"
+      - series: 'node_memory_MemTotal_bytes{instance="nuc"}'
+        values: "100x20"
+      - series: 'node_memory_MemAvailable_bytes{instance="idle"}'
+        values: "50x20"
+      - series: 'node_memory_MemTotal_bytes{instance="idle"}'
+        values: "100x20"
+    alert_rule_test:
+      - eval_time: 14m
+        groupname: node
+        alertname: NodeMemoryHigh
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: node
+        alertname: NodeMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: nuc
+            exp_annotations:
+              summary: 노드 nuc 메모리 사용률이 15분 넘게 90%를 넘는다(MemAvailable 기준)
+
+  - name: NodeFilesystemAlmostFull은 읽기 전용과 tmpfs를 빼고 본다
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{instance="nuc", mountpoint="/", fstype="ext4"}'
+        values: "5x20"
+      - series: 'node_filesystem_size_bytes{instance="nuc", mountpoint="/", fstype="ext4"}'
+        values: "100x20"
+      - series: 'node_filesystem_readonly{instance="nuc", mountpoint="/", fstype="ext4"}'
+        values: "0x20"
+      - series: 'node_filesystem_avail_bytes{instance="nuc", mountpoint="/boot/efi", fstype="ext4"}'
+        values: "1x20"
+      - series: 'node_filesystem_size_bytes{instance="nuc", mountpoint="/boot/efi", fstype="ext4"}'
+        values: "100x20"
+      - series: 'node_filesystem_readonly{instance="nuc", mountpoint="/boot/efi", fstype="ext4"}'
+        values: "1x20"
+      - series: 'node_filesystem_avail_bytes{instance="nuc", mountpoint="/dev/shm", fstype="tmpfs"}'
+        values: "1x20"
+      - series: 'node_filesystem_size_bytes{instance="nuc", mountpoint="/dev/shm", fstype="tmpfs"}'
+        values: "100x20"
+      - series: 'node_filesystem_readonly{instance="nuc", mountpoint="/dev/shm", fstype="tmpfs"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 16m
+        groupname: node
+        alertname: NodeFilesystemAlmostFull
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: nuc
+              mountpoint: /
+              fstype: ext4
+            exp_annotations:
+              summary: nuc / 여유가 10% 아래다
+
+  - name: NodeSystemdUnitFailed
+    interval: 1m
+    input_series:
+      - series: 'node_systemd_unit_state{instance="nuc", name="k3s.service", state="failed"}'
+        values: "0x10"
+      - series: 'node_systemd_unit_state{instance="nuc", name="backup.service", state="failed"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 6m
+        groupname: node
+        alertname: NodeSystemdUnitFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: nuc
+              name: backup.service
+              state: failed
+            exp_annotations:
+              summary: 호스트 유닛 backup.service의 상태가 failed다
+              description: systemctl status backup.service, journalctl -u backup.service
+
+  - name: TargetMissing은 발견 대상이 사라진 job마다 발화한다
+    interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics", instance="kube-state-metrics"}'
+        values: "1x15"
+      - series: 'up{job="node-exporter", instance="nuc"}'
+        values: "1x15"
+      - series: 'up{job="vector", instance="nuc"}'
+        values: "0x15"
+      - series: 'up{job="vmalert", instance="vmalert"}'
+        values: "1x15"
+      - series: 'up{job="alertmanager", instance="alertmanager"}'
+        values: "1x15"
+      - series: 'up{job="victorialogs", instance="victorialogs"}'
+        values: "1x15"
+      - series: 'up{job="grafana", instance="grafana"}'
+        values: "1x15"
+      - series: 'up{job="argocd", instance="argocd-application-controller"}'
+        values: "1x15"
+      - series: 'up{job="kubelet-cadvisor", instance="nuc"}'
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 9m
+        groupname: core
+        alertname: TargetMissing
+        exp_alerts: []
+      - eval_time: 11m
+        groupname: core
+        alertname: TargetMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: external-secrets
+            exp_annotations:
+              summary: 수집 대상 external-secrets이 10분 넘게 발견되지 않는다
+              description: 파드가 없거나 수집 설정의 라벨·포트 선택이 맞지 않는다(vmsingle/scrape.yaml).
+

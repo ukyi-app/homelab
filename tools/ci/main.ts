@@ -7,6 +7,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { checkAlerting } from "./alerting";
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
 import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkWorkloads } from "./policy";
 import { kubeconform, renderAll } from "./render";
@@ -346,6 +347,11 @@ const steps: Step[] = [
       for (const s of r.skipped) console.log(`외부 차트(렌더하지 않음): ${s}`);
       return [...r.violations, ...checkAll(r.docs), ...kubeconform(r.targets)];
     },
+  },
+  {
+    name: "alerting",
+    // 경보 룰 단위 시험과 Alertmanager 설정 검사(tools/ci/alerting.ts).
+    run: checkAlerting,
   },
   {
     name: "chart fixtures",

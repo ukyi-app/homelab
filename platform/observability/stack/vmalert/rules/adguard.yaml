@@ -1,0 +1,77 @@
+# AdGuard Home 경보(D-08, AC-P6 한계 승인의 완화).
+groups:
+  - name: adguard
+    rules:
+      # 공유기가 보조 DNS로 넘어가지 않아 멈추면 Tailscale 없는 LAN 기기의 DNS가 전부 끊긴다.
+      # replicas: 0이나 Deployment가 없을 때는 시계열 자체가 없어 absent로 잡는다. KubePodNotReady(15분)로는 늦다.
+      # kube-state-metrics가 멈춰도 absent로 울린다(그때는 TargetDown이 함께 온다).
+      - alert: AdGuardDown
+        expr: |
+          kube_deployment_status_replicas_available{namespace="adguard", deployment="adguard"} < 1
+          or absent(kube_deployment_status_replicas_available{namespace="adguard", deployment="adguard"})
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: AdGuard Home에 사용 가능한 파드가 없다. 집 LAN DNS가 끊겼다
+          runbook: docs/runbooks-public/nuc-dns-outage.md
+
+      # tailnet 이탈(D-08 (b′)). 이탈해도 공용 서버가 답해 증상이 없어 이 경보가 유일한 감지다.
+      # tailnet 질의는 출처가 "지금" svclb 파드 IP다(U32). 10.42.0.1이 아닌 출처로 세면 AdGuard Service에 직접
+      # 묻는 클러스터 파드도 tailnet으로 세어 끊겨도 울리지 않는다.
+      #
+      # 리더(platform/adguard querylog-reader)는 질의 로그 파일에서 클라이언트 IP별 마지막 질의 시각만 낸다.
+      # AdGuard는 메모리 버퍼(querylog.size_memory)가 찰 때만 파일에 쓴다. 그래서 지금 시각이 아니라 파일의
+      # 가장 새 항목과 비교한다: "파일에 쌓인 마지막 1시간 동안 svclb 출처가 0건". 버퍼 크기(1000이든 100이든)는
+      # 감지를 늦출 뿐 오경보를 만들지 않는다. 버퍼는 순서대로 한꺼번에 비워져 tailnet 항목만 남는 일이 없다.
+      #
+      # 기준 시각은 "지금 svclb IP 출처의 마지막 질의"와 "지금 svclb 파드 시작 시각" 중 더 최근 값이다. 재시작한 svclb가
+      # 옛 IP를 다시 받아도 그 옛 항목으로 비교하지 않는다. svclb 파드 정보가 아예 없으면 0이라 울린다(svclb가 없으면
+      # tailnet 경로도 없다). 리더가 없으면 AdGuardQuerylogReaderDown이 본다.
+      #
+      # 둘째 조건은 벽시계 안전망이다. LAN 질의까지 끊기거나 버퍼가 차지 않아 파일이 멈추면 첫째 조건의 두 값이 함께 멈춰
+      # 영원히 울리지 않는다. 그래서 기준 시각이 지금보다 6시간 넘게 오래되면 파일과 상관없이 울린다. 6시간 동안 집 전체
+      # 질의가 버퍼 하나(100, 시드 이전 1000)를 못 채울 때만 오경보가 난다.
+      - alert: AdGuardTailnetQueriesMissing
+        expr: |
+          (
+            max(adguard_querylog_last_query_timestamp_seconds)
+            - max(
+              label_replace(max(
+                max by (client) (adguard_querylog_last_query_timestamp_seconds)
+                * on (client) group_left ()
+                max by (client) (label_replace(kube_pod_info{namespace="kube-system", created_by_kind="DaemonSet", created_by_name=~"svclb-adguard-dns-.+"}, "client", "$1", "pod_ip", "(.+)"))
+              ), "base", "query", "", "")
+              or label_replace(max(kube_pod_start_time{namespace="kube-system", pod=~"svclb-adguard-dns-.+"}), "base", "start", "", "")
+              or label_replace(vector(0), "base", "none", "", "")
+            )
+            > 3600
+          )
+          or
+          (
+            time()
+            - max(
+              label_replace(max(
+                max by (client) (adguard_querylog_last_query_timestamp_seconds)
+                * on (client) group_left ()
+                max by (client) (label_replace(kube_pod_info{namespace="kube-system", created_by_kind="DaemonSet", created_by_name=~"svclb-adguard-dns-.+"}, "client", "$1", "pod_ip", "(.+)"))
+              ), "base", "query", "", "")
+              or label_replace(max(kube_pod_start_time{namespace="kube-system", pod=~"svclb-adguard-dns-.+"}), "base", "start", "", "")
+              or label_replace(vector(0), "base", "none", "", "")
+            )
+            > 6 * 3600
+            and on () count(adguard_querylog_last_query_timestamp_seconds) > 0
+          )
+        labels:
+          severity: critical
+        annotations:
+          summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
+          description: "파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다."
+
+      - alert: AdGuardQuerylogReaderDown
+        expr: absent(up{job="adguard-querylog"} == 1)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: AdGuard 질의 로그 리더가 10분 넘게 수집되지 않는다. tailnet 이탈 경보가 동작하지 않는다

@@ -1,0 +1,10 @@
+# VictoriaLogs 데이터소스는 플러그인이 필요해 두지 않는다. 로그는 VictoriaLogs 자체 UI(/select/vmui)로 본다.
+apiVersion: 1
+datasources:
+  - name: VictoriaMetrics
+    uid: victoriametrics
+    type: prometheus
+    access: proxy
+    url: http://vmsingle:8428
+    isDefault: true
+    editable: false

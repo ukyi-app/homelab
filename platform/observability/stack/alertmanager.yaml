@@ -1,0 +1,155 @@
+# Alertmanager. 설정 본문은 alertmanager/alertmanager.yml이고 configMapGenerator가 해시 이름으로 굽는다.
+# 설정을 고치면 볼륨이 가리키는 ConfigMap 이름이 바뀌어 sync만으로 롤아웃된다.
+#
+# 자격은 receiver마다 다른 ExternalSecret과 optional 볼륨이다. Alertmanager는 *_file을 보낼 때마다 읽는다
+# (0.34.1 notify/telegram, notify/webhook). 그래서 Secret이 아직 없어도 파드는 뜨고 그 receiver만 실패하며
+# (alertmanager_notifications_failed_total), Secret이 생기면 kubelet이 볼륨을 채워 재시작 없이 보낸다.
+# 키 하나가 없을 때 다른 receiver까지 막지 않으려고 ExternalSecret을 receiver별로 나눴다.
+# 다만 키가 없는 ExternalSecret은 Degraded라 observability Application도 Degraded이고, root가 뒤 wave를 기다린다.
+# 켜기 전에 Infisical 키를 먼저 넣는다.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-telegram
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: infisical-platform
+  target:
+    name: alertmanager-telegram
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    # template이 없으면 ES의 Argo CD tracking 주석까지 Secret으로 복사된다(설계 B.8 E3).
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+  data:
+    - secretKey: token
+      remoteRef:
+        key: alerting/TELEGRAM_BOT_TOKEN
+    # chat ID는 비밀은 아니지만 개인 식별자라 공개 저장소에 두지 않는다(chat_id_file).
+    - secretKey: chat_id
+      remoteRef:
+        key: alerting/TELEGRAM_CHAT_ID
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-healthchecks
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: infisical-platform
+  target:
+    name: alertmanager-healthchecks
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+  data:
+    - secretKey: ping_url
+      remoteRef:
+        key: alerting/HEALTHCHECKS_PING_URL
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  labels:
+    app.kubernetes.io/name: alertmanager
+spec:
+  replicas: 1
+  # emptyDir 상태(silence·알림 기록)만 있어 겹쳐 떠도 문제없다. 기본 RollingUpdate로 끊김을 줄인다.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alertmanager
+      annotations:
+        # alertmanager_notifications_total{integration="telegram"}가 전송 확인 지표다(로그가 아니다, 설계 B.8 E4).
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9093"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: alertmanager
+          # v0.34.1(티켓 고정), Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
+          image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+          args:
+            - --config.file=/etc/alertmanager/config/alertmanager.yml
+            - --storage.path=/alertmanager
+            # 단일 인스턴스. 빈 값이면 gossip 클러스터를 띄우지 않는다.
+            - --cluster.listen-address=
+            - --web.listen-address=:9093
+            # receiver별 실패를 지표에서 가른다(healthchecks 실패를 Telegram 실패로 읽지 않게).
+            - --enable-feature=receiver-name-in-metrics
+          ports:
+            - name: http
+              containerPort: 9093
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager/config
+              readOnly: true
+            - name: telegram
+              mountPath: /etc/alertmanager/secrets/telegram
+              readOnly: true
+            - name: healthchecks
+              mountPath: /etc/alertmanager/secrets/healthchecks
+              readOnly: true
+            - name: data
+              mountPath: /alertmanager
+      volumes:
+        - name: config
+          configMap:
+            name: alertmanager-config
+        - name: telegram
+          secret:
+            secretName: alertmanager-telegram
+            optional: true
+        - name: healthchecks
+          secret:
+            secretName: alertmanager-healthchecks
+            optional: true
+        - name: data
+          emptyDir:
+            sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  labels:
+    app.kubernetes.io/name: alertmanager
+spec:
+  selector:
+    app.kubernetes.io/name: alertmanager
+  ports:
+    - name: http
+      port: 9093
+      targetPort: http

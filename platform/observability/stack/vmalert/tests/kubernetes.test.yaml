@@ -1,0 +1,106 @@
+rule_files:
+  - ../rules/kubernetes.yaml
+evaluation_interval: 1m
+tests:
+  - name: KubePodCrashLooping은 대기 사유를 본다
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_waiting_reason{job="kube-state-metrics", instance="kube-state-metrics", namespace="app-a", pod="a-1", container="app", reason="CrashLoopBackOff"}'
+        values: "1x10"
+      - series: 'kube_pod_container_status_waiting_reason{job="kube-state-metrics", instance="kube-state-metrics", namespace="app-b", pod="b-1", container="app", reason="ContainerCreating"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 4m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: []
+      - eval_time: 6m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: app-a
+              pod: a-1
+              container: app
+            exp_annotations:
+              summary: app-a/a-1의 app가 CrashLoopBackOff다
+
+  - name: KubePodNotReady는 끝난 파드를 빼고 15분 뒤에 발화한다
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_ready{namespace="app-a", pod="a-1", condition="true"}'
+        values: "0x20"
+      - series: 'kube_pod_status_phase{namespace="app-a", pod="a-1", phase="Running"}'
+        values: "1x20"
+      - series: 'kube_pod_status_phase{namespace="app-a", pod="a-1", phase="Succeeded"}'
+        values: "0x20"
+      - series: 'kube_pod_status_ready{namespace="app-a", pod="job-1", condition="true"}'
+        values: "0x20"
+      - series: 'kube_pod_status_phase{namespace="app-a", pod="job-1", phase="Succeeded"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 14m
+        groupname: kubernetes
+        alertname: KubePodNotReady
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: kubernetes
+        alertname: KubePodNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: app-a
+              pod: a-1
+            exp_annotations:
+              summary: app-a/a-1가 15분 넘게 Ready가 아니다
+
+  # 창보다 먼저 있던 시계열로 시험한다. 창 안에서 새로 생긴 시계열은 첫 값이 증가로 세어진다(룰 주석).
+  - name: OOMKilled는 최근 재시작이 있을 때만 발화한다
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_last_terminated_reason{namespace="observability", pod="vector-x", container="vector", reason="OOMKilled"}'
+        values: "1x30"
+      - series: 'kube_pod_container_status_restarts_total{namespace="observability", pod="vector-x", container="vector"}'
+        values: "3x15 4x15"
+      - series: 'kube_pod_container_status_last_terminated_reason{namespace="app-a", pod="a-1", container="app", reason="OOMKilled"}'
+        values: "1x30"
+      - series: 'kube_pod_container_status_restarts_total{namespace="app-a", pod="a-1", container="app"}'
+        values: "7x30"
+    alert_rule_test:
+      - eval_time: 18m
+        groupname: kubernetes
+        alertname: OOMKilled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: observability
+              pod: vector-x
+              container: vector
+            exp_annotations:
+              summary: observability/vector-x의 vector가 OOMKilled로 재시작했다
+              description: limit에 백로그 여유가 있는지 본다(vector·VictoriaLogs 결합 루프, 설계 B.8 E4).
+      - eval_time: 28m
+        groupname: kubernetes
+        alertname: OOMKilled
+        exp_alerts: []
+
+  - name: KubeJobFailed
+    interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="app-a", job_name="backup-1", condition="true"}'
+        values: "1x5"
+      - series: 'kube_job_failed{namespace="app-a", job_name="backup-2", condition="true"}'
+        values: "0x5"
+    alert_rule_test:
+      - eval_time: 2m
+        groupname: kubernetes
+        alertname: KubeJobFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: app-a
+              job_name: backup-1
+            exp_annotations:
+              summary: Job app-a/backup-1가 실패했다
+              description: 원인을 본 뒤 실패한 Job을 지우면 해소된다.

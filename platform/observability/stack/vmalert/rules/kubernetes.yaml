@@ -1,0 +1,46 @@
+# kube-state-metrics 지표. 수집이 honor_labels라 namespace·pod는 대상 파드의 값이다.
+groups:
+  - name: kubernetes
+    rules:
+      # 재시작 카운터의 increase 대신 대기 사유(gauge)를 본다. 카운터는 KSM 재시작에 새 시계열이 생긴다.
+      - alert: KubePodCrashLooping
+        expr: max by (namespace, pod, container) (kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}) == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }}의 {{ $labels.container }}가 CrashLoopBackOff다"
+
+      # 끝난 파드(Succeeded·Failed)는 Ready가 아니어도 정상이다. 실패한 Job 파드는 KubeJobFailed가 본다.
+      - alert: KubePodNotReady
+        expr: |
+          max by (namespace, pod) (kube_pod_status_ready{condition="true"}) == 0
+          unless on (namespace, pod) max by (namespace, pod) (kube_pod_status_phase{phase=~"Succeeded|Failed"}) == 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }}가 15분 넘게 Ready가 아니다"
+
+      # 마지막 종료 사유는 다음 종료까지 남는다. 최근 10분 안에 재시작이 있었을 때만 본다.
+      # 시계열이 창 안에서 처음 생기면 VictoriaMetrics는 첫 값을 통째로 증가로 센다(단위 시험에서 확인).
+      # 그래서 수집 설정이 KSM의 instance를 고정한다. KSM 재시작마다 새 시계열이 생기면 재시작 이력이 있는 모든 컨테이너가 울린다.
+      - alert: OOMKilled
+        expr: |
+          max by (namespace, pod, container) (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}) == 1
+          and on (namespace, pod, container)
+          max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }}의 {{ $labels.container }}가 OOMKilled로 재시작했다"
+          description: "limit에 백로그 여유가 있는지 본다(vector·VictoriaLogs 결합 루프, 설계 B.8 E4)."
+
+      # 실패한 Job은 history에서 지워질 때까지 남는다. CronJob은 failedJobsHistoryLimit만큼 남고 성공해도 지워지지 않는다.
+      - alert: KubeJobFailed
+        expr: max by (namespace, job_name) (kube_job_failed{condition="true"}) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job {{ $labels.namespace }}/{{ $labels.job_name }}가 실패했다"
+          description: "원인을 본 뒤 실패한 Job을 지우면 해소된다."

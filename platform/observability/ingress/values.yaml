@@ -1,0 +1,2 @@
+# root가 cluster.tailscale에서 넘긴다. 운영 "", VM "vm-". 빈 값과 키 누락을 구분하려고 기본값을 두지 않는다.
+tailscale: {}

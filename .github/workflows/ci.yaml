@@ -52,6 +52,8 @@ jobs:
           HELM_SHA256: "479dca836e5b45e8bd222400c5591b0e3a647378f03ff96597180db97c17fdae" # 4.2.1 linux-amd64
           KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883" # 0.8.0 linux-amd64
           TERRAFORM_SHA256: "38034b38d03096399a7a1264a14561a8029b2b496fd1f169452656e53968f1b7" # 1.16.6 linux_amd64
+          ALERTMANAGER_SHA256: "265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8" # 0.34.1 linux-amd64
+          VMUTILS_SHA256: "989c8f73edc5d131eb169bb689d7b77bb1d31b14314159c7f6bbae38ba655938" # 1.154.1 linux-amd64(enterprise 아님)
         run: |
           bin="$RUNNER_TEMP/bin"
           dl="$RUNNER_TEMP/dl"
@@ -108,6 +110,20 @@ jobs:
           fetch "https://releases.hashicorp.com/terraform/${v}/terraform_${v}_linux_amd64.zip" "$TERRAFORM_SHA256" "$dl/terraform.zip"
           unzip -q "$dl/terraform.zip" terraform -d "$bin"
 
+          # amtool만 쓴다(tools/ci/alerting.ts). .tool-versions의 이름은 mise backend 접두가 붙은 aqua:prometheus/alertmanager다.
+          ver aqua:prometheus/alertmanager
+          fetch "https://github.com/prometheus/alertmanager/releases/download/v${v}/alertmanager-${v}.linux-amd64.tar.gz" "$ALERTMANAGER_SHA256" "$dl/alertmanager.tar.gz"
+          tar -xzf "$dl/alertmanager.tar.gz" -C "$bin" --strip-components=1 "alertmanager-${v}.linux-amd64/amtool"
+
+          # vmalert-tool-prod만 쓴다. .tool-versions의 이름에 mise 옵션 괄호가 붙어 ver의 정확한 일치 대신 접두로 찾는다.
+          v=$(awk '$1 ~ /^github:VictoriaMetrics\/VictoriaMetrics\[/ { print $2 }' .tool-versions)
+          if [[ -z $v ]]; then
+            echo "::error::.tool-versions에 vmutils(github:VictoriaMetrics/VictoriaMetrics) 버전이 없다"
+            exit 1
+          fi
+          fetch "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v${v}/vmutils-linux-amd64-v${v}.tar.gz" "$VMUTILS_SHA256" "$dl/vmutils.tar.gz"
+          tar -xzf "$dl/vmutils.tar.gz" -C "$bin" vmalert-tool-prod
+
           "$bin/actionlint" -version
           "$bin/gitleaks" version
           "$bin/kustomize" version
@@ -116,6 +132,8 @@ jobs:
           "$bin/helm" version --short
           "$bin/kubeconform" -v
           "$bin/terraform" version
+          "$bin/amtool" --version
+          "$bin/vmalert-tool-prod" --version
           echo "$bin" >> "$GITHUB_PATH"
 
       - name: bun run ci

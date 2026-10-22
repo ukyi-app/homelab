@@ -1,0 +1,198 @@
+# 질의 로그 시각은 파일 안의 시각이다. 벽시계 조건(6시간)을 함께 보려고 시험 시계(946684800에서 시작) 근처의 절대 시각을 쓴다.
+# LAN은 10.42.0.1(cni0), 지금 svclb 파드 IP는 10.42.0.9, AdGuard Service에 직접 묻는 클러스터 파드는 10.42.0.15다(U32).
+rule_files:
+  - ../rules/adguard.yaml
+evaluation_interval: 1m
+tests:
+  - name: AdGuardDown은 replica 0에서 1분 뒤 발화한다
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="adguard", deployment="adguard"}'
+        values: "1 1 0x10"
+    alert_rule_test:
+      - eval_time: 2m
+        groupname: adguard
+        alertname: AdGuardDown
+        exp_alerts: []
+      - eval_time: 4m
+        groupname: adguard
+        alertname: AdGuardDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: adguard
+              deployment: adguard
+            exp_annotations:
+              summary: AdGuard Home에 사용 가능한 파드가 없다. 집 LAN DNS가 끊겼다
+              runbook: docs/runbooks-public/nuc-dns-outage.md
+
+  - name: AdGuardDown은 Deployment 시계열이 없어도 발화한다(replicas 0 시험 방식)
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="go", deployment="go"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 3m
+        groupname: adguard
+        alertname: AdGuardDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: adguard
+              deployment: adguard
+            exp_annotations:
+              summary: AdGuard Home에 사용 가능한 파드가 없다. 집 LAN DNS가 끊겼다
+              runbook: docs/runbooks-public/nuc-dns-outage.md
+
+  - name: tailnet 질의가 있으면 발화하지 않는다(파일이 늘지 않는 동안도)
+    interval: 1m
+    input_series:
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.1"}'
+        values: "946690000x120"
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.9"}'
+        values: "946689000x120"
+      - series: 'kube_pod_info{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde", pod_ip="10.42.0.9", created_by_kind="DaemonSet", created_by_name="svclb-adguard-dns-c41016c6"}'
+        values: "1x120"
+      - series: 'kube_pod_start_time{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde"}'
+        values: "946681000x120"
+    alert_rule_test:
+      - eval_time: 2h
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts: []
+
+  - name: 파일의 마지막 1시간에 svclb 출처가 없으면 발화한다. 클러스터 파드의 직접 질의는 가리지 못한다
+    interval: 1m
+    input_series:
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.1"}'
+        values: "946690000x10"
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.15"}'
+        values: "946690000x10"
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.9"}'
+        values: "946686000x10"
+      - series: 'kube_pod_info{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde", pod_ip="10.42.0.9", created_by_kind="DaemonSet", created_by_name="svclb-adguard-dns-c41016c6"}'
+        values: "1x10"
+      - series: 'kube_pod_start_time{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde"}'
+        values: "946681000x10"
+    alert_rule_test:
+      - eval_time: 1m
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
+
+  - name: svclb 재시작 직후 새 IP 항목이 없으면 svclb 시작 시각을 기준으로 삼는다
+    interval: 1m
+    input_series:
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.1"}'
+        values: "946690000x10 946700000x10"
+      # 옛 svclb IP. 지금 svclb IP가 아니라 세지 않는다.
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.9"}'
+        values: "946689990x20"
+      - series: 'kube_pod_info{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-fghij", pod_ip="10.42.0.20", created_by_kind="DaemonSet", created_by_name="svclb-adguard-dns-c41016c6"}'
+        values: "1x20"
+      - series: 'kube_pod_start_time{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-fghij"}'
+        values: "946689500x20"
+    alert_rule_test:
+      - eval_time: 5m
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts: []
+      - eval_time: 15m
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
+
+  - name: svclb 파드가 없으면 발화한다
+    interval: 1m
+    input_series:
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.1"}'
+        values: "946690000x5"
+    alert_rule_test:
+      - eval_time: 2m
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
+
+  - name: 리더가 없으면 이탈 경보 대신 리더 경보가 발화한다
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_info{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde", pod_ip="10.42.0.9", created_by_kind="DaemonSet", created_by_name="svclb-adguard-dns-c41016c6"}'
+        values: "1x15"
+      - series: 'up{job="adguard-querylog", instance="adguard-querylog"}'
+        values: "1x3 0x12"
+    alert_rule_test:
+      - eval_time: 15m
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts: []
+      - eval_time: 12m
+        groupname: adguard
+        alertname: AdGuardQuerylogReaderDown
+        exp_alerts: []
+      - eval_time: 15m
+        groupname: adguard
+        alertname: AdGuardQuerylogReaderDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: AdGuard 질의 로그 리더가 10분 넘게 수집되지 않는다. tailnet 이탈 경보가 동작하지 않는다
+
+  - name: 재시작한 svclb가 옛 IP를 다시 받으면 옛 항목 대신 파드 시작 시각을 기준으로 삼는다
+    interval: 1m
+    input_series:
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.1"}'
+        values: "946690000x10"
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.9"}'
+        values: "946680000x10"
+      - series: 'kube_pod_info{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-klmno", pod_ip="10.42.0.9", created_by_kind="DaemonSet", created_by_name="svclb-adguard-dns-c41016c6"}'
+        values: "1x10"
+      - series: 'kube_pod_start_time{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-klmno"}'
+        values: "946689500x10"
+    alert_rule_test:
+      - eval_time: 5m
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts: []
+
+  # 파일이 멈추면 첫째 조건의 두 값이 함께 멈춘다. 벽시계 6시간 안전망이 잡는다.
+  - name: 파일이 멈춰도 벽시계 6시간이 지나면 발화한다
+    interval: 10m
+    input_series:
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.1"}'
+        values: "946684900x50"
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.9"}'
+        values: "946684800x50"
+      - series: 'kube_pod_info{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde", pod_ip="10.42.0.9", created_by_kind="DaemonSet", created_by_name="svclb-adguard-dns-c41016c6"}'
+        values: "1x50"
+      - series: 'kube_pod_start_time{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde"}'
+        values: "946600000x50"
+    alert_rule_test:
+      - eval_time: 5h
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts: []
+      - eval_time: 7h
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
