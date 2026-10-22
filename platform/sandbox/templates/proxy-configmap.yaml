@@ -1,0 +1,132 @@
+{{- /*
+Envoy 설정 전체. 허용은 "CONNECT, 443, CONNECT 이름이 허용 목록, 터널 안 TLS SNI도 허용 목록" 넷을 모두 만족할 때 하나뿐이다.
+CONNECT 이름만 보는 프록시(squid 등)는 CONNECT를 허용 이름으로 열고 SNI를 바꿔 같은 CDN의 아무 사이트에 닿는다
+(2026-10-22 lab 실측: CONNECT registry.npmjs.org + SNI discord.com이 squid에서는 200, 이 구성에서는 TLS 실패). 사용자 결정 (a).
+흐름: connect 리스너(HTTP)가 CONNECT를 끝내고 터널 바이트를 내부 리스너 sni_gate로 넘긴다. sni_gate는 tls_inspector로 SNI를
+읽어 server_names에 맞는 체인만 받고, sni_dynamic_forward_proxy가 그 SNI 이름으로 업스트림을 푼다. SNI가 없거나 목록 밖이면 맞는
+체인이 없어 연결을 닫는다. 업스트림은 CONNECT 이름이 아니라 SNI로 고르므로, 허용 이름끼리 엇갈리면 다른 허용 호스트로 갈 뿐이다.
+남는 위험: SNI는 허용 이름이고 TLS 안 HTTP Host만 다른 요청은 프록시가 볼 수 없다. lab에서는 Cloudflare가 403으로 거부했지만
+CDN의 동작이지 이 설정의 보장이 아니다(REPORT, 설계 C.8).
+허용 이름이 사설 주소로 풀리는 경우(DNS 재바인딩)는 Envoy가 막지 않는다. templates/proxy-networkpolicy.yaml의 except가 막는다.
+관리(admin) 리스너는 두지 않는다. 파드 안에서 설정·통계를 바꾸거나 /quitquitquit로 멈출 길을 남기지 않는다.
+*/}}
+{{- $names := .Values.proxy.allowedDomains }}
+{{- $authorities := list }}
+{{- range $names }}{{ $authorities = append $authorities (printf "%s:443" .) }}{{ end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egress-proxy
+  namespace: egress
+  labels:
+    {{- include "sandbox.proxyLabels" . | nindent 4 }}
+data:
+  envoy.yaml: |
+    bootstrap_extensions:
+      - name: envoy.bootstrap.internal_listener
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.bootstrap.internal_listener.v3.InternalListener
+    # 연결 수 상한이 없으면 Envoy가 시작 때 경고하고, 작업자 하나가 파일 기술자를 다 쓸 수 있다.
+    overload_manager:
+      resource_monitors:
+        - name: envoy.resource_monitors.global_downstream_max_connections
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
+            max_active_downstream_connections: 1000
+    static_resources:
+      listeners:
+        - name: connect
+          address:
+            socket_address: {address: 0.0.0.0, port_value: {{ .Values.proxy.port }}}
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: connect
+                    # 표준 출력(VictoriaLogs가 모은다). CONNECT 줄에는 host:port만 남고 터널 안 경로·헤더는 없다.
+                    access_log:
+                      - name: envoy.access_loggers.stdout
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                    upgrade_configs:
+                      - upgrade_type: CONNECT
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                    route_config:
+                      virtual_hosts:
+                        # domains는 포트까지 맞춘다. 443 밖(예: :22)과 IP 문자열은 아래 deny로 간다.
+                        - name: allowed
+                          domains: {{ toJson $authorities }}
+                          routes:
+                            - match: {connect_matcher: {}}
+                              route:
+                                cluster: sni_gate
+                                # 기본 route timeout 15s가 터널 전체에 걸리면 긴 내려받기·스트리밍 응답이 끊긴다.
+                                # 끊김은 HCM stream_idle_timeout(기본 5분)이 맡는다.
+                                timeout: 0s
+                                upgrade_configs:
+                                  - upgrade_type: CONNECT
+                                    connect_config: {}
+                            # 평문 HTTP는 허용 이름이어도 거부한다. 작업자에는 HTTPS_PROXY만 있다.
+                            - match: {prefix: "/"}
+                              direct_response: {status: 403}
+                        - name: deny
+                          domains: ["*"]
+                          routes:
+                            - match: {connect_matcher: {}}
+                              direct_response: {status: 403}
+                            - match: {prefix: "/"}
+                              direct_response: {status: 403}
+        - name: sni_gate
+          internal_listener: {}
+          listener_filters:
+            - name: envoy.filters.listener.tls_inspector
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+          # 기본 체인을 두지 않는다. 두면 SNI 없음·목록 밖 SNI가 그리로 빠진다.
+          filter_chains:
+            - filter_chain_match:
+                server_names: {{ toJson $names }}
+              filters:
+                - name: envoy.filters.network.sni_dynamic_forward_proxy
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.sni_dynamic_forward_proxy.v3.FilterConfig
+                    port_value: 443
+                    # 아래 upstream 클러스터와 같은 이름·설정이어야 같은 DNS 캐시를 쓴다.
+                    dns_cache_config:
+                      name: egress
+                      # 클러스터가 IPv4 단일 스택이다. IPv6 허용 줄은 NetworkPolicy에도 없다.
+                      dns_lookup_family: V4_ONLY
+                - name: envoy.filters.network.tcp_proxy
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                    stat_prefix: tls
+                    cluster: upstream
+                    access_log:
+                      - name: envoy.access_loggers.stdout
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                          log_format:
+                            text_format_source:
+                              inline_string: "tls sni=%REQUESTED_SERVER_NAME% upstream=%UPSTREAM_HOST% flags=%RESPONSE_FLAGS% sent=%BYTES_SENT% received=%BYTES_RECEIVED%\n"
+      clusters:
+        - name: sni_gate
+          load_assignment:
+            cluster_name: sni_gate
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        envoy_internal_address: {server_listener_name: sni_gate}
+        - name: upstream
+          lb_policy: CLUSTER_PROVIDED
+          cluster_type:
+            name: envoy.clusters.dynamic_forward_proxy
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig
+              dns_cache_config:
+                name: egress
+                dns_lookup_family: V4_ONLY

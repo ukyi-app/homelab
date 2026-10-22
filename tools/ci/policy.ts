@@ -336,6 +336,56 @@ export function checkIngress(docs: Doc[]): Violation[] {
   return out;
 }
 
+// 격리 작업 공간(설계 C.8 격리 행). sandbox ns 워크로드의 자격·권한과 작업자의 프록시 주소를 본다.
+// NET_ADMIN은 init 컨테이너에만(출력 차단 규칙). 본 컨테이너가 가지면 규칙을 지우고 노드 로컬 경로로 나간다.
+// HTTPS_PROXY는 같은 렌더 맥락의 egress/egress-proxy Service clusterIP·포트여야 한다. 어긋나면 init 규칙이 허용한 주소와
+// 작업자가 쓰는 주소가 달라 모든 외부 연결이 끊기거나, 다른 주소를 허용하게 된다.
+// sandbox 구성 요소를 끄면 대상이 0이라 세지 않는다.
+const SANDBOX_NS = "sandbox";
+const SANDBOX_INIT_CAPS = new Set(["NET_ADMIN"]);
+export function checkSandbox(docs: Doc[]): Violation[] {
+  docs = expand(docs);
+  const out: Violation[] = [];
+  const nsOf = (d: Doc) => d.obj.metadata?.namespace ?? d.ns;
+  const proxies = new Map<string, string>();
+  for (const d of docs) {
+    if (d.obj.kind !== "Service" || nsOf(d) !== "egress" || d.obj.metadata?.name !== "egress-proxy") continue;
+    const port = (d.obj.spec?.ports ?? [])[0]?.port;
+    proxies.set(context(d.origin), `http://${d.obj.spec?.clusterIP}:${port}`);
+  }
+  for (const d of docs) {
+    const k = d.obj.kind;
+    if ((k === "RoleBinding" && nsOf(d) === SANDBOX_NS) || (k === "ClusterRoleBinding" && (d.obj.subjects ?? []).some((s: any) => s?.kind === "ServiceAccount" && s.namespace === SANDBOX_NS))) {
+      out.push({ rule: "sandbox", where: id(d), message: "sandbox에 RBAC 바인딩을 두지 않는다(설계 C.8)" });
+    }
+    if (!WORKLOAD_KINDS.has(k) || nsOf(d) !== SANDBOX_NS) continue;
+    const spec = podSpec(d.obj) ?? {};
+    const where = id(d);
+    if (spec.automountServiceAccountToken !== false) out.push({ rule: "sandbox", where, message: "automountServiceAccountToken: false가 아니다" });
+    if (spec.serviceAccountName && spec.serviceAccountName !== "default") out.push({ rule: "sandbox", where, message: `serviceAccountName ${spec.serviceAccountName}을 쓰지 않는다` });
+    for (const f of ["hostNetwork", "hostPID", "hostIPC"]) if (spec[f] === true) out.push({ rule: "sandbox", where, message: `${f}를 쓰지 않는다` });
+    for (const v of spec.volumes ?? []) if (v?.hostPath) out.push({ rule: "sandbox", where, message: `hostPath 볼륨 ${v.name}을 쓰지 않는다` });
+    const proxy = proxies.get(context(d.origin));
+    const check = (c: any, init: boolean) => {
+      const cw = `${where} container ${c.name}`;
+      const sc = c.securityContext ?? {};
+      if (sc.privileged === true) out.push({ rule: "sandbox", where: cw, message: "privileged를 쓰지 않는다" });
+      if (sc.allowPrivilegeEscalation !== false) out.push({ rule: "sandbox", where: cw, message: "allowPrivilegeEscalation: false가 아니다" });
+      const drop: string[] = sc.capabilities?.drop ?? [];
+      if (!drop.includes("ALL")) out.push({ rule: "sandbox", where: cw, message: "capabilities.drop에 ALL이 없다" });
+      const add: string[] = sc.capabilities?.add ?? [];
+      const bad = add.filter((a) => !init || !SANDBOX_INIT_CAPS.has(a));
+      if (bad.length) out.push({ rule: "sandbox", where: cw, message: `${init ? "init" : "본"} 컨테이너가 capability ${bad.join(", ")}를 더한다(NET_ADMIN은 init만)` });
+      if (init) return;
+      const env = (c.env ?? []).find((e: any) => e.name === "HTTPS_PROXY")?.value;
+      if (env !== proxy) out.push({ rule: "sandbox", where: cw, message: `HTTPS_PROXY ${env}가 egress-proxy Service 주소 ${proxy}와 다르다` });
+    };
+    for (const c of spec.initContainers ?? []) check(c, true);
+    for (const c of spec.containers ?? []) check(c, false);
+  }
+  return out;
+}
+
 export function checkAll(docs: Doc[]): Violation[] {
-  return [...checkNoSecrets(docs), ...checkWorkloads(docs), ...checkRevisions(docs), ...checkReadonlyRbac(docs), ...checkIngress(docs)];
+  return [...checkNoSecrets(docs), ...checkWorkloads(docs), ...checkRevisions(docs), ...checkReadonlyRbac(docs), ...checkIngress(docs), ...checkSandbox(docs)];
 }

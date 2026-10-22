@@ -1,0 +1,157 @@
+{{- /*
+작업자 자리(설계 C.8 격리 행, D-14, D-15). 이 티켓은 시험 작업자로 모양만 확인한다. 실제 작업자 이미지는 T16b가 넣는다.
+netshoot v0.16(2026-07-01 기준 최신, 멀티 아키텍처 index, 2026-10-22 Docker Hub에서 확인). iptables(nft)·curl·nslookup·nc와
+busybox httpd가 있어 init 방화벽과 시험 작업자(HTTP 8080, 준비 확인의 curl)를 한 이미지로 한다. 시험용이라 운영 작업자에는 쓰지 않는다.
+*/}}
+{{- $image := "docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70" }}
+{{- $proxy := printf "http://%s:%d" .Values.proxy.clusterIP (int .Values.proxy.port) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: sandbox
+  labels:
+    {{- include "sandbox.workerLabels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  # 한 auth.json은 직렬 작업 하나만 쓴다(D-14, S219). RollingUpdate면 교체 중 두 파드가 같은 CODEX_HOME을 쓴다.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "sandbox.workerLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sandbox.workerLabels" . | nindent 8 }}
+    spec:
+      # SA 토큰을 붙이지 않고 sandbox:default에 RBAC를 주지 않는다. API 서버로 가는 길(10.43.0.1, 노드 IP:6443)도 init 규칙이 막는다.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        # Secret 볼륨(worker-seed)을 본 컨테이너 사용자가 읽게 한다.
+        fsGroup: 10001
+      initContainers:
+        # 파드 netns 출력 차단(U13). 새로 여는 연결은 프록시 ClusterIP:포트 하나만 남긴다. 허용 셋 중 하나라도 빠지면:
+        # -o lo가 없으면 파드 안 127.0.0.1 통신이 끊기고, ESTABLISHED,RELATED가 없으면 봇 요청의 응답 패킷이 막혀 작업 전달이 끊긴다.
+        # 목적지는 DNAT 전 주소(ClusterIP)다. kube-proxy의 DNAT는 노드 쪽에서 일어나 파드 netns의 OUTPUT은 ClusterIP를 본다.
+        # NET_ADMIN은 이 컨테이너에만 있다. 본 컨테이너는 규칙을 못 바꾸고, 규칙은 파드 netns에 남아 본 컨테이너 재시작에도 유지된다.
+        # 규칙을 못 걸면 여기서 실패해 파드가 뜨지 않는다(열린 채로 뜨지 않는다).
+        - name: egress-firewall
+          image: {{ $image }}
+          command: ["/bin/sh", "-euc"]
+          args:
+            - |
+              for t in iptables ip6tables; do
+                "$t" -P OUTPUT DROP
+                "$t" -F OUTPUT
+                "$t" -A OUTPUT -o lo -j ACCEPT
+                "$t" -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+              done
+              iptables -A OUTPUT -d "$PROXY_IP/32" -p tcp --dport "$PROXY_PORT" -m conntrack --ctstate NEW -j ACCEPT
+              # REJECT: DNS·직접 연결 시도가 시간 초과까지 매달리지 않고 바로 실패한다. 정책 DROP은 그 뒤의 그물이다.
+              iptables -A OUTPUT -j REJECT
+              ip6tables -A OUTPUT -j REJECT
+              iptables -S OUTPUT
+              ip6tables -S OUTPUT
+          env:
+            - name: PROXY_IP
+              value: {{ .Values.proxy.clusterIP | quote }}
+            - name: PROXY_PORT
+              value: {{ .Values.proxy.port | quote }}
+          securityContext:
+            # netfilter 규칙은 root + NET_ADMIN이 필요하다. ns가 privileged인 이유가 이 컨테이너 하나다(platform/namespaces).
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_ADMIN"]
+          volumeMounts:
+            # iptables의 잠금 파일(/run/xtables.lock) 자리.
+            - name: firewall-run
+              mountPath: /run
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      containers:
+        - name: worker
+          image: {{ $image }}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              mkdir -p /tmp/www
+              echo ok > /tmp/www/index.html
+              exec /usr/sbin/httpd -f -p 8080 -h /tmp/www
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # 이름 해석은 프록시가 한다(U29). 대문자·소문자를 모두 둔다. 도구마다 읽는 쪽이 다르다(curl은 https_proxy를 둘 다 읽는다).
+            # HTTP_PROXY는 두지 않는다. 프록시가 평문 HTTP를 거부한다.
+            - name: HTTPS_PROXY
+              value: {{ $proxy | quote }}
+            - name: https_proxy
+              value: {{ $proxy | quote }}
+            # loopback은 프록시를 거치지 않는다. 없으면 127.0.0.1로 가는 HTTPS 요청이 프록시에서 거부된다.
+            - name: NO_PROXY
+              value: 127.0.0.1,localhost
+            - name: no_proxy
+              value: 127.0.0.1,localhost
+            - name: CODEX_HOME
+              value: /codex-home
+          # kubelet 프로브는 노드에서 오므로 NetworkPolicy에 막히지 않는다(설계 B.8). 응답 패킷은 init 규칙의 ESTABLISHED로 나간다.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: codex-home
+              mountPath: /codex-home
+            - name: seed
+              mountPath: /run/worker-seed
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: codex-home
+          persistentVolumeClaim:
+            claimName: codex-home
+        # optional: 시드는 CODEX_HOME에 auth.json이 없을 때만 쓴다(D-14). 필수로 두면 시드가 없을 때 파드가 못 떠
+        # Deployment가 Degraded가 되고, root sync가 wave -2에서 실패해 뒤 wave Application 변경이 막힌다.
+        - name: seed
+          secret:
+            secretName: worker-seed
+            optional: true
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: firewall-run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi

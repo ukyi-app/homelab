@@ -1,0 +1,17 @@
+# 작업자 전용 CODEX_HOME(D-14). Codex가 갱신한 auth.json을 실행 사이에 남긴다. ESO 한 방향 전달로는 갱신본을 못 지킨다.
+# local-retain: PVC·Application이 지워져도 노드의 폴더가 남아 갱신본을 잃지 않는다. 다시 붙이려면 PV를 손으로 다시 묶는다.
+# 1Gi: auth.json은 수 KB이고 나머지는 Codex 세션 기록(sessions/)이다. 차면 작업이 실패하니 봇 코드가 오래된 기록을 지운다(T16b).
+# 백업하지 않는다: 살아 있는 구독 자격을 R2 백업으로 옮기면 노출 면이 늘어난다. 잃으면 사람이 다시 시드한다(설계 C.8, S219).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codex-home
+  namespace: sandbox
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-retain
+  resources:
+    requests:
+      storage: 1Gi

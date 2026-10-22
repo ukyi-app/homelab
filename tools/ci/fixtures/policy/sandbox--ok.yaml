@@ -1,0 +1,28 @@
+# check: sandbox
+# expect: pass
+# NET_ADMIN은 init에만, 작업자 HTTPS_PROXY는 egress-proxy Service 주소(설계 C.8).
+apiVersion: v1
+kind: Service
+metadata: {name: egress-proxy, namespace: egress}
+spec:
+  clusterIP: 10.43.0.28
+  ports: [{name: proxy, port: 3128}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker, namespace: sandbox}
+spec:
+  selector: {matchLabels: {app: worker}}
+  template:
+    metadata: {labels: {app: worker}}
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: fw
+          image: x
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL], add: [NET_ADMIN]}}
+      containers:
+        - name: worker
+          image: x
+          env: [{name: HTTPS_PROXY, value: "http://10.43.0.28:3128"}]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
