@@ -986,6 +986,7 @@ kubectl apply -f platform/root/root-prod.yaml                               # 3.
 | vmalert | 룰 평가 → Alertmanager | `-configCheckInterval=30s`, 룰은 Git, 단위 시험은 CI(`vmalert-tool unittest`, U11 확인 T08b). v1.154.1 |
 | Alertmanager | 라우팅 | 0.34.1[S164]. 설정은 configMapGenerator 해시로 롤아웃 |
 | Grafana | 사람 UI, 봇의 읽기 API(Viewer 서비스 계정, C.8) | 대시보드는 Git provisioning, 플러그인 없음(`GF_PLUGINS_PREINSTALL_DISABLED`), Tailscale Ingress. 13.2.4 |
+| vmauth | Grafana 데이터소스와 vmsingle 사이 읽기 전용 프록시(U12 대안) | Viewer도 데이터소스 resources 경로로 임의 경로에 POST해 vmsingle 직결이면 `delete_series`·import에 닿는다(T08b 실측). 질의 API 경로만 허용하고 Grafana의 vmsingle 직접 연결은 NetworkPolicy로 막는다. vmsingle의 `-deleteAuthKey`는 import·write를 막지 못해 쓰지 않는다. v1.154.1 |
 | VictoriaLogs single + vector | 로그 14일 | vector는 root(privileged ns `observability`). VictoriaLogs v1.53.0, vector 0.60.0. Grafana 데이터소스는 플러그인이 필요해 두지 않는다 |
 | node-exporter(systemd 수집 켬) + kube-state-metrics | 호스트·클러스터 지표 | 호스트 유닛 실패를 node-exporter가 본다(옛 스윕 유닛 대체). node-exporter v1.12.1, KSM v2.20.0 |
 

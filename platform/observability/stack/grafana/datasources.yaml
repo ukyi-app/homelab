@@ -5,6 +5,7 @@ datasources:
     uid: victoriametrics
     type: prometheus
     access: proxy
-    url: http://vmsingle:8428
+    # vmsingle 직결이 아니라 읽기 전용 프록시(vmauth/auth.yaml)로. Viewer도 이 데이터소스로 임의 경로를 부를 수 있다.
+    url: http://vmauth:8427
     isDefault: true
     editable: false

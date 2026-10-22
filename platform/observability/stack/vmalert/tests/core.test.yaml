@@ -139,6 +139,8 @@ tests:
         values: "1x15"
       - series: 'up{job="grafana", instance="grafana"}'
         values: "1x15"
+      - series: 'up{job="vmauth", instance="vmauth"}'
+        values: "1x15"
       - series: 'up{job="argocd", instance="argocd-application-controller"}'
         values: "1x15"
       - series: 'up{job="kubelet-cadvisor", instance="nuc"}'
