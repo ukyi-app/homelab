@@ -37,7 +37,9 @@ export function checkAlerting(): Violation[] {
         if (alerts.has(r.alert)) out.push({ rule: "alert-rules", where: f, message: `경보 이름 ${r.alert}가 ${alerts.get(r.alert)}에도 있다` });
         alerts.set(r.alert, f);
         const rb = r.annotations?.runbook;
-        if (rb !== undefined && (!rb.startsWith(RUNBOOK_BASE) || gitFiles(rb.slice(RUNBOOK_BASE.length)).length === 0)) {
+        // gitFiles는 pathspec이라 디렉터리·glob도 여러 파일에 맞는다. 결과가 그 경로 하나여야 파일이다.
+        const rbPath = rb?.slice(RUNBOOK_BASE.length);
+        if (rb !== undefined && (!rb.startsWith(RUNBOOK_BASE) || JSON.stringify(gitFiles(rbPath!)) !== JSON.stringify([rbPath]))) {
           out.push({ rule: "alert-rules", where: f, message: `경보 ${r.alert}의 runbook(${rb})은 ${RUNBOOK_BASE}로 시작하고 저장소에 있는 파일을 가리켜야 한다` });
         }
       }
