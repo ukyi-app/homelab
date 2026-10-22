@@ -20,7 +20,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       initContainers:
-        - name: fw
+        - name: egress-firewall
           image: x
           securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL], add: [NET_ADMIN]}}
       containers:

@@ -1,0 +1,22 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: egress/egress-proxy Service
+# Service와 HTTPS_PROXY가 함께 빠지면 둘이 같아(undefined) 통과하던 경우. 작업자의 외부 연결이 모두 끊긴다.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker, namespace: sandbox}
+spec:
+  selector: {matchLabels: {app: worker}}
+  template:
+    metadata: {labels: {app: worker}}
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: egress-firewall
+          image: x
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL], add: [NET_ADMIN]}}
+      containers:
+        - name: worker
+          image: x
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
