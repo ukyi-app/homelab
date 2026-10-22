@@ -126,7 +126,8 @@ for cluster in prod vm; do
   startup_rejects "ts.net 뒤에 더 붙음" "example.ts.net.evil.com"
   startup_rejects "ts.net만" ".ts.net"
   startup_rejects "대문자" "Example.ts.net"
-  startup_rejects "줄바꿈" $'evil.com\nexample.ts.net'
+  # 따옴표를 나눈다. 붙여 쓰면 gitleaks tailnet-hostname 룰이 \n의 n까지 라벨로 읽어 면제 값과 어긋난다.
+  startup_rejects "줄바꿈" $'evil.com\n'"example.ts.net"
   startup_rejects "두 단계" "a.example.ts.net"
 
   if out=$(pod "$domain" 2>&1); then ok "[$cluster] 시작 검사 통과: 정상 값"; else bad "[$cluster] 시작 검사가 정상 값을 거부했다: $out"; fi

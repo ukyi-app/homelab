@@ -4,7 +4,7 @@
 //
 // 모든 단계를 끝까지 돌리고 위반을 모아 한 번에 보인다. 하나라도 있으면 exit 1.
 // 로컬에서 일부만: bun run ci --only workflows,render
-import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
@@ -54,12 +54,129 @@ function hasSecret(v: unknown): boolean {
   return false;
 }
 
+// 작업 트리 검사와 룰 시험이 같은 인자를 쓴다. 그래서 룰 시험의 gitleaks:allow 경우가 CI 호출의 플래그도 보증한다.
+// --ignore-gitleaks-allow: 같은 줄의 gitleaks:allow 주석으로 룰을 비켜 가지 못하게 한다(.gitleaks.toml 머리 주석).
+const GITLEAKS_DIR = ["gitleaks", "dir", "--config", join(ROOT, ".gitleaks.toml"), "--no-banner", "--ignore-gitleaks-allow"];
+
+// .gitleaksignore의 fingerprint는 어느 룰의 finding이든 버린다. --gitleaks-ignore-path를 빈 곳으로 돌려도 gitleaks가
+// 스캔 루트의 파일을 따로 읽어(v8.30.1 실측) 막지 못하므로, 루트에 있거나 어디든 추적되면 거부한다.
+function gitleaksIgnoreFiles(dir: string, tracked: string[]): string[] {
+  const found = tracked.filter((f) => basename(f) === ".gitleaksignore");
+  if (existsSync(join(dir, ".gitleaksignore")) && !found.includes(".gitleaksignore")) found.push(".gitleaksignore");
+  return found;
+}
+
 const steps: Step[] = [
   {
     name: "gitleaks",
     // 작업 트리만 본다. 히스토리 전체를 보면 옛 커밋의 오탐이나 이미 폐기한 옛 값 하나가 모든 PR을 막는다.
     // push된 커밋은 저장소의 secret scanning·push protection이 먼저 본다.
-    run: () => tool("gitleaks", ["gitleaks", "dir", "--config", ".gitleaks.toml", "--redact", "--no-banner", "--exit-code", "1", "."]),
+    run: () => [
+      ...gitleaksIgnoreFiles(ROOT, gitFiles()).map((f) => ({ rule: "gitleaks", where: f, message: ".gitleaksignore를 두지 않는다(gitleaks finding을 버린다)" })),
+      ...tool("gitleaks", [...GITLEAKS_DIR, "--redact", "--exit-code", "1", "."]),
+    ],
+  },
+  {
+    name: "gitleaks rules",
+    // .gitleaks.toml의 D-23 룰(tailnet 이름, IPv4, IPv6)이 실제 꼴은 잡고 자리표시·면제 값은 놓아주는지. 실제 꼴의 값은 여기서 조립해
+    // 임시 폴더에만 쓴다. 저장소에 그대로 적으면 위 gitleaks 단계가 이 파일을 잡는다.
+    run: () => {
+      const out: Violation[] = [];
+      const ts = ["ts", "net"].join(".");
+      const ip = (...o: number[]) => o.join(".");
+      const host = "tail" + "1a2b3c";
+      const v6 = ["fd7a", "115c", "a1e0"].join(":");
+      const allow = "gitleaks" + ":allow";
+      // [경로, 내용, 기대 룰(없으면 걸리지 않아야 함)]
+      const cases: [string, string, string | undefined][] = [
+        ["host.md", `${host}.${ts}`, "tailnet-hostname"],
+        ["fqdn.md", `nuc.${host}.${ts}`, "tailnet-hostname"],
+        ["upper.md", `${host.toUpperCase()}.${ts.toUpperCase()}`, "tailnet-hostname"],
+        ["hyphen.md", `cobra-ghost.${ts}`, "tailnet-hostname"],
+        ["underscore.md", `_${host}.${ts}_`, "tailnet-hostname"],
+        ["allow-comment.md", `${host}.${ts} # ${allow}`, "tailnet-hostname"],
+        ["example-elsewhere.md", `example.${ts}`, "tailnet-hostname"],
+        ["tools/go-redirect.test.sh", `${host}.${ts}`, "tailnet-hostname"],
+        ["placeholder.md", `<tailnet>.${ts} <서비스>.<tailnet>.${ts} *.${ts} .${ts}`, undefined],
+        ["tools/go-redirect.test.sh", `example.${ts} example-tailnet.${ts} Example.${ts}`, undefined],
+        // 면제 값 바로 뒤의 실제 값(뒤 경계를 소비하면 빠진다), 반대 순서, 밑줄.
+        ["tools/go-redirect.test.sh", `example.${ts} ${host}.${ts}`, "tailnet-hostname"],
+        ["tools/go-redirect.test.sh", `${host}.${ts} example.${ts}`, "tailnet-hostname"],
+        ["tools/go-redirect.test.sh", `_example.${ts}_ _${host}.${ts}_`, "tailnet-hostname"],
+        ["two-names.md", `a.${ts} b.${ts}`, "tailnet-hostname"],
+        ["other-domain.md", `foo.${ts}work cdn.${ts}-mirror.example foo.${ts}.example _bar.${ts}.example.org_`, undefined],
+        ["trailing-dot.md", `${host}.${ts}.`, "tailnet-hostname"],
+        ["after-other-domain.md", `foo.${ts}.example ${host}.${ts}`, "tailnet-hostname"],
+        ["ip.md", ip(100, 101, 2, 3), "tailscale-ip"],
+        ["ip-low.md", ip(100, 64, 0, 1), "tailscale-ip"],
+        ["ip-high.md", ip(100, 127, 255, 254), "tailscale-ip"],
+        ["ip-other-cidr.md", `${ip(100, 64, 0, 0)}/12`, "tailscale-ip"],
+        ["ip-underscore.md", `_${ip(100, 101, 2, 3)}_`, "tailscale-ip"],
+        ["ip-allow-comment.md", `${ip(100, 101, 2, 3)} // ${allow}`, "tailscale-ip"],
+        ["ip-outside.md", `${ip(100, 63, 255, 255)} ${ip(100, 128, 0, 1)} ${ip(1100, 64, 1, 1)}`, undefined],
+        ["ip-not-ip.md", `${ip(100, 64, 999, 999)} ${ip(100, 64, 1, 2, 3)} ${ip(100, 64, 1, 256)} ${ip(100, 64, 1, 1000)} ${ip(100, 64, 0, 0)}/33 ${ip(5, 100, 64, 1, 1)}`, undefined],
+        ["ip-cidr32.md", `${ip(100, 101, 2, 3)}/32`, "tailscale-ip"],
+        ["ip-sentence-end.md", `주소는 ${ip(100, 101, 2, 3)}.`, "tailscale-ip"],
+        ["ip-after-range.md", `${ip(100, 64, 0, 0)}/10 ${ip(100, 101, 2, 3)}`, "tailscale-ip"],
+        ["ip-before-range.md", `${ip(100, 101, 2, 3)} ${ip(100, 64, 0, 0)}/10`, "tailscale-ip"],
+        ["ip-after-quad100.md", `${ip(100, 100, 100, 100)},${ip(100, 101, 2, 3)}`, "tailscale-ip"],
+        ["ip-after-not-ip.md", `${ip(100, 64, 999, 1)} ${ip(100, 101, 2, 3)}`, "tailscale-ip"],
+        ["ip-underscore-pair.md", `_${ip(100, 64, 0, 0)}/10_ _${ip(100, 101, 2, 3)}_`, "tailscale-ip"],
+        ["ip-range.md", `${ip(100, 64, 0, 0)}/10 ${ip(100, 100, 100, 100)}`, undefined],
+        ["v6.md", `${v6}:ab12:4843:cd96:6258:b240`, "tailscale-ipv6"],
+        ["v6-full-zero.md", `${v6}:0:0:0:0:1`, "tailscale-ipv6"],
+        ["v6-short.md", `${v6}::1234:5678`, "tailscale-ipv6"],
+        ["v6-upper.md", `${v6.toUpperCase()}::AB12`, "tailscale-ipv6"],
+        ["v6-allow-comment.md", `${v6}::1 # ${allow}`, "tailscale-ipv6"],
+        ["v6-range.md", `${v6}::/48 '${v6}:'`, undefined],
+        ["v6-magicdns.md", `${v6}::53 ${v6.toUpperCase()}::53`, undefined],
+        ["v6-after-magicdns.md", `${v6}::53 ${v6}::1234`, "tailscale-ipv6"],
+        ["v6-magicdns-longer.md", `${v6}::5353`, "tailscale-ipv6"],
+        ["v6-not-ip.md", `x${v6}::1 ${v6}::12345 ${v6}:::1 ${v6}::1::2 ${v6}:1:2:3:4:5:6 ${v6}:1:2:3:4:5:6:7 ${v6}::1: ${v6}::1g ${v6}:1:2:3:4:5:: ${v6}::1:2:3:4:5`, undefined],
+        ["v6-trailing-double-colon.md", `${v6}:1:2:3:4::`, "tailscale-ipv6"],
+        ["v6-underscore.md", `_${v6}::1_`, "tailscale-ipv6"],
+        ["v6-cidr128.md", `${v6}::1/128`, "tailscale-ipv6"],
+        ["v6-after-not-ip.md", `${v6}::12345 ${v6}::1`, "tailscale-ipv6"],
+      ];
+      // 경우마다 따로 스캔한다. 면제의 paths는 스캔 루트 기준이라 저장소와 같은 상대 경로에 둬야 한다.
+      const reports = tempDir("gitleaks-report");
+      cases.forEach(([path, text, want], i) => {
+        const dir = tempDir("gitleaks-rules");
+        mkdirSync(dirname(join(dir, path)), { recursive: true });
+        writeFileSync(join(dir, path), `${text}\n`);
+        const report = join(reports, `${i}.json`);
+        const r = run([...GITLEAKS_DIR, "--exit-code", "0", "--report-format", "json", "--report-path", report, "."], { cwd: dir });
+        if (r.code !== 0) {
+          out.push({ rule: "gitleaks-rules", where: `${i}:${path}`, message: `gitleaks exit ${r.code}: ${(r.stdout + r.stderr).trim()}` });
+          return;
+        }
+        const rules = [...new Set((JSON.parse(readFileSync(report, "utf8")) as { RuleID: string }[]).map((x) => x.RuleID))];
+        const ok = want ? rules.length === 1 && rules[0] === want : rules.length === 0;
+        if (!ok) out.push({ rule: "gitleaks-rules", where: `${i}:${path}`, message: `기대 ${want ?? "없음"}, 결과 ${rules.join(",") || "없음"}` });
+      });
+      // .gitleaksignore 우회: 실제로 finding을 버리는지(거부가 필요한 이유)와 ci·pre-commit 훅이 그 파일을 거부하는지.
+      const ign = tempDir("gitleaks-ignore");
+      writeFileSync(join(ign, "f.md"), `${host}.${ts}\n`);
+      const fpReport = join(reports, "ignore.json");
+      run([...GITLEAKS_DIR, "--exit-code", "0", "--report-format", "json", "--report-path", fpReport, "."], { cwd: ign });
+      const fp = (JSON.parse(readFileSync(fpReport, "utf8")) as { Fingerprint: string }[])[0]?.Fingerprint;
+      if (!fp) out.push({ rule: "gitleaks-rules", where: "gitleaksignore", message: "우회 시험 값이 처음부터 걸리지 않았다" });
+      writeFileSync(join(ign, ".gitleaksignore"), `${fp}\n`);
+      if (run([...GITLEAKS_DIR, "--exit-code", "1", "."], { cwd: ign }).code !== 0) {
+        console.log("참고: .gitleaksignore가 finding을 버리지 않았다(gitleaks 동작 변화). 거부는 그대로 둔다");
+      }
+      if (gitleaksIgnoreFiles(ign, []).length !== 1) out.push({ rule: "gitleaks-rules", where: "gitleaksignore", message: "ci가 루트 .gitleaksignore를 거부하지 않는다" });
+      if (gitleaksIgnoreFiles(ROOT, ["a/b/.gitleaksignore"]).length === 0) out.push({ rule: "gitleaks-rules", where: "gitleaksignore", message: "ci가 추적된 하위 .gitleaksignore를 거부하지 않는다" });
+      // pre-commit 훅: 설정의 entry를 그대로 .gitleaksignore가 있는 폴더에서 돌린다. gitleaks까지 가기 전에 멈춰야 한다.
+      // 인라인 면제도 받지 않아야 한다(이 시험의 gitleaks 호출은 dir뿐이라 훅 인자는 원문으로 본다).
+      const hook = parseAll(readText(".pre-commit-config.yaml"))[0].repos.flatMap((r: { hooks: { id: string; entry?: string }[] }) => r.hooks).find((h: { id: string }) => h.id === "gitleaks");
+      const entry: string = hook?.entry ?? "";
+      if (!entry.includes("--ignore-gitleaks-allow")) out.push({ rule: "gitleaks-rules", where: ".pre-commit-config.yaml", message: "gitleaks 훅에 --ignore-gitleaks-allow가 없다" });
+      const h = run(["bash", "-c", entry], { cwd: ign });
+      if (h.code === 0 || !h.stderr.includes(".gitleaksignore")) out.push({ rule: "gitleaks-rules", where: ".pre-commit-config.yaml", message: `gitleaks 훅이 .gitleaksignore를 거부하지 않는다(exit ${h.code})` });
+      console.log(`gitleaks D-23 룰 ${cases.length}경우`);
+      return out;
+    },
   },
   {
     name: "tracked files",

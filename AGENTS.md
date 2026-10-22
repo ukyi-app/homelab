@@ -33,7 +33,7 @@ NUC 한 대의 k3s 홈랩을 Git으로 운영하는 공개(public) 저장소다.
 
 - 시크릿 값은 Infisical에만 있다. 저장소에는 참조(키 이름)만 두고 `kind: Secret` 매니페스트는 두지 않는다. 자격은 `infisical run`으로 환경변수에 넣고 파일로 만들지 않는다.
 - tailnet 이름(MagicDNS 이름), Tailscale IP, 개인 이메일, 복구 자산 목록, 토큰 인벤토리, 로컬 런북은 저장소 밖에 둔다(D-23). 필요하면 실행 때 얻는다(예: `install.sh`가 `tailscale status --json`으로 MagicDNS 이름을 읽는다).
-- gitleaks가 CI와 pre-commit에서 본다. 면제를 더할 때는 `.gitleaks.toml` 주석의 규칙을 따른다.
+- gitleaks가 CI(작업 트리)와 pre-commit(staged)에서 본다. 기본 룰에 tailnet 이름·Tailscale IP 룰을 더했다(히스토리는 보지 않는다). 면제를 더할 때는 `.gitleaks.toml` 주석의 규칙을 따른다.
 
 ## Code Review Rules
 
