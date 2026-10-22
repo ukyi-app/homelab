@@ -77,10 +77,14 @@ spec:
               memory: 32Mi
             limits:
               memory: 80Mi
+          # /healthz는 프로세스만 보고 API 접근·informer 동기화가 실패해도 200이다. 그러면 지표가 비어도 up=1이라
+          # TargetDown·TargetMissing이 침묵한다. v2.20.0 공식 예시(examples/standard)대로 telemetry 포트의 /readyz.
           readinessProbe:
             httpGet:
-              path: /healthz
-              port: http-metrics
+              path: /readyz
+              port: telemetry
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
