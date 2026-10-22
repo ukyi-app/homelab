@@ -11,6 +11,7 @@ resources:
   - networkpolicy.yaml
   - vmsingle.yaml
   - vmalert.yaml
+  - vmauth.yaml
   - alertmanager.yaml
   - grafana.yaml
   - victorialogs.yaml
@@ -26,6 +27,10 @@ configMapGenerator:
   - name: alertmanager-config
     files:
       - alertmanager/alertmanager.yml
+  # vmauth는 다시 읽을 수 있지만 상태가 없어 재시작해도 잃는 것이 없다.
+  - name: vmauth-config
+    files:
+      - vmauth/auth.yaml
   - name: vector-config
     files:
       - vector/vector.yaml

@@ -36,6 +36,7 @@ groups:
           or absent(up{job="alertmanager"})
           or absent(up{job="victorialogs"})
           or absent(up{job="grafana"})
+          or absent(up{job="vmauth"})
           or absent(up{job="argocd"})
           or absent(up{job="external-secrets"})
           or absent(up{job="kubelet-cadvisor"})
