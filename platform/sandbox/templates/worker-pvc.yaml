@@ -2,13 +2,15 @@
 # local-retain: PVC·Application이 지워져도 노드의 폴더가 남아 갱신본을 잃지 않는다. 다시 붙이려면 PV를 손으로 다시 묶는다.
 # 1Gi: auth.json은 수 KB이고 나머지는 Codex 세션 기록(sessions/)이다. 차면 작업이 실패하니 봇 코드가 오래된 기록을 지운다(T16b).
 # 백업하지 않는다: 살아 있는 구독 자격을 R2 백업으로 옮기면 노출 면이 늘어난다. 잃으면 사람이 다시 시드한다(설계 C.8, S219).
+# wave는 작업자 Deployment와 같아야 한다. local-retain은 WaitForFirstConsumer라 파드가 생겨야 Bound가 되는데,
+# 앞 wave에 두면 Argo CD가 Pending(Progressing)인 PVC를 기다리며 Deployment wave로 넘어가지 않는다(2026-10-23 첫 배포 실측).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: codex-home
   namespace: sandbox
   annotations:
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   accessModes: ["ReadWriteOnce"]
   storageClassName: local-retain
