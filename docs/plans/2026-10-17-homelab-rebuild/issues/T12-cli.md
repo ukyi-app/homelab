@@ -20,6 +20,7 @@
 - 만들 것(설계 E7): `cli/`(설계 C.7의 명령), 시험(`plan` 부수효과 0 단언 포함), `bun build --compile` 배포 절차.
 - `homelab github plan`·`apply`·`verify` (D-28): T10의 래퍼 `tools/tf-github.sh`와 같은 규칙으로 감싼다(토큰 종류별 확인, fetch한 `origin/main`의 임시 worktree에서만 실행, `TF_CLI_ARGS*`·`TF_LOG*` unset, `TF_CLI_CONFIG_FILE`은 래퍼 소유 설정 파일로 고정, plan 종료 코드 0·2만, delete는 `--allow-destroy`로만, apply 전 state 백업, apply 실패 뒤 ruleset 재import). 설계 문서 C.3.9·C.7.
 - `homelab app new` (D-29): private 선택지(`--private`)를 두지 않는다. 템플릿 main의 `app-main`이 active인지 확인 → `infra/github/app-repos.json` PR → 병합 뒤 재실행으로 public 저장소 생성, 보안 설정(`gh api`), `homelab github apply`로 `app-main`(설계 C.7).
+  - 보안 설정에 PR 생성 `pull_request_creation_policy=collaborators_only`(`gh api -X PATCH repos/ukyi-app/<app>`)를 넣는다. 저장소마다라 새 저장소에는 따로 켜야 한다(U38 대책, 2026-10-22. 기존 다섯 저장소는 모두 `all`이었다). interaction limit은 org 단위라 따로 걸지 않는다.
 - `homelab app add` (D-29): 앱 저장소가 private이거나 GHCR 패키지를 익명으로 받을 수 없으면 멈춘다. 봇 저장소(T14가 만든 기존 저장소)도 이 명령으로 등록한다(설계 E9).
 
 ## 제약
