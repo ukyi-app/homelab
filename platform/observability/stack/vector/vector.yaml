@@ -1,0 +1,34 @@
+data_dir: /var/lib/vector
+sources:
+  pods:
+    type: kubernetes_logs
+  internal:
+    type: internal_metrics
+transforms:
+  fields:
+    type: remap
+    inputs: [pods]
+    source: |
+      .namespace = .kubernetes.pod_namespace
+      .pod = .kubernetes.pod_name
+      .container = .kubernetes.container_name
+      del(.kubernetes)
+      del(.file)
+sinks:
+  victorialogs:
+    type: elasticsearch
+    inputs: [fields]
+    endpoints: ["http://victorialogs:9428/insert/elasticsearch"]
+    mode: bulk
+    api_version: v8
+    compression: gzip
+    healthcheck:
+      enabled: false
+    query:
+      _msg_field: message
+      _time_field: timestamp
+      _stream_fields: namespace,pod,container,stream
+  metrics:
+    type: prometheus_exporter
+    inputs: [internal]
+    address: 0.0.0.0:9598

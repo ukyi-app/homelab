@@ -42,7 +42,7 @@ components:
 
   # T08b. observability, wave -4
   observability:
-    enabled: false
+    enabled: true
 
   # T11. cnpg-cluster(Cluster pg, ObjectStore, ScheduledBackup), wave -3
   cnpgCluster:

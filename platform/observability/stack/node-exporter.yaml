@@ -1,0 +1,84 @@
+# node-exporter. hostPath·hostPID가 PSA baseline에서도 금지라 ns가 privileged다(설계 B.8 E4).
+# hostNetwork는 쓰지 않는다. 쓰면 9100이 LAN·tailnet 주소에 열린다. 대가: node_network_* 지표는 이 파드의
+# netns 값이다(네트워크 경보는 두지 않는다).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  labels:
+    app.kubernetes.io/name: node-exporter
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: node-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: node-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+    spec:
+      hostPID: true
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: node-exporter
+          # v1.12.1, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
+          image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+          args:
+            - --path.rootfs=/host/root
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.udev.data=/host/root/run/udev/data
+            - --web.listen-address=:9100
+            - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/kubelet/.+|var/lib/rancher/k3s/agent/containerd/.+)($|/)
+            # 호스트 유닛 실패(NodeSystemdUnitFailed). 옛 주기 스윕 유닛을 대신한다.
+            - --collector.systemd
+            - --collector.systemd.unit-exclude=.+\.(automount|device|mount|scope|slice)
+          env:
+            # 시스템 버스는 호스트 루트 마운트 안에서 찾는다. 유닛 목록 읽기는 root가 아니어도 된다.
+            - name: DBUS_SYSTEM_BUS_ADDRESS
+              value: unix:path=/host/root/run/dbus/system_bus_socket
+          ports:
+            - name: metrics
+              containerPort: 9100
+          resources:
+            requests:
+              cpu: 10m
+              memory: 24Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: root
+              mountPath: /host/root
+              readOnly: true
+              mountPropagation: HostToContainer
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: root
+          hostPath:
+            path: /

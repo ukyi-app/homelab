@@ -1,0 +1,55 @@
+# 룰 작성 규칙(설계 B.8 E4):
+# 1. push 지표는 *_over_time으로 본다. 주기가 룩백보다 길면 룰이 영원히 발화하지 않는다.
+# 2. instance 라벨은 재시작·재부팅에 바뀐다. 수집 설정이 고정 이름으로 바꾸고, 룰은 instance로 join하지 않는다.
+# 3. "N회 실패"는 failedJobsHistoryLimit가 N 이상일 때만 셀 수 있다. 여기서는 실패 한 번을 본다.
+# 4. 메모리 압력은 working_set이 아니라 MemAvailable로 본다(working_set은 캐시를 압력으로 센다).
+# 아직 없는 지표(CNPG, Valkey 백업)는 시계열이 없으면 발화하지 않게 쓴다. absent는 정지 감지에만 쓴다.
+# 룰마다 vmalert/tests에 단위 시험이 있다(ci가 alertname마다 확인한다).
+groups:
+  - name: core
+    rules:
+      # 늘 발화한다. Alertmanager가 healthchecks.io로 1분마다 보내고, 끊기면 healthchecks.io가 알린다.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: 경보 경로 생존 신호(늘 발화)
+
+      - alert: TargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "수집 대상 {{ $labels.job }}/{{ $labels.instance }}가 5분 넘게 응답하지 않는다"
+
+  - name: node
+    rules:
+      - alert: NodeMemoryHigh
+        expr: 1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes > 0.9
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "노드 {{ $labels.instance }} 메모리 사용률이 15분 넘게 90%를 넘는다(MemAvailable 기준)"
+
+      # 913G 루트 LV에서 10%는 약 91G다. local-path는 PVC 용량을 강제하지 않아 이 경보가 디스크 상한이다.
+      - alert: NodeFilesystemAlmostFull
+        expr: |
+          node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs"} / node_filesystem_size_bytes{fstype=~"ext4|xfs|btrfs"} < 0.10
+          and node_filesystem_readonly{fstype=~"ext4|xfs|btrfs"} == 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} 여유가 10% 아래다"
+
+      - alert: NodeSystemdUnitFailed
+        expr: node_systemd_unit_state{state="failed"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "호스트 유닛 {{ $labels.name }}의 상태가 failed다"
+          description: "systemctl status {{ $labels.name }}, journalctl -u {{ $labels.name }}"

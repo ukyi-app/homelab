@@ -1,0 +1,142 @@
+# vmsingle 수집 설정. 대상마다 job을 따로 두고 instance를 고정 이름으로 바꾼다.
+# 파드 IP:포트 instance는 재시작·재부팅마다 바뀌어 increase가 새 시계열을 누적으로 읽고 오발화한다(설계 B.8 E4).
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: vmsingle
+    static_configs:
+      - targets: ["localhost:8428"]
+        labels:
+          instance: vmsingle
+
+  # 같은 ns의 구성 요소. 파드 annotation prometheus.io/scrape·port로 고른다.
+  - job_name: observability
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [observability]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        regex: "true"
+        action: keep
+      # kube-state-metrics는 아래 자기 job에서 honor_labels로 받는다.
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        regex: kube-state-metrics
+        action: drop
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: (Pending|Succeeded|Failed)
+        action: drop
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        target_label: job
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        target_label: instance
+      # DaemonSet(node-exporter, vector)은 노드마다 하나라 노드 이름을 instance로 쓴다.
+      - source_labels: [__meta_kubernetes_pod_controller_kind, __meta_kubernetes_pod_node_name]
+        regex: DaemonSet;(.+)
+        target_label: instance
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+
+  # honor_labels: kube_* 지표의 namespace·pod는 대상 파드의 값이다. 덮어쓰면 모두 observability가 되고
+  # 진짜 값은 exported_*로 밀린다(옛 PodOOMKilled join 고장). 그래서 대상 라벨을 더하지 않는다.
+  - job_name: kube-state-metrics
+    honor_labels: true
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [observability]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_container_port_name]
+        regex: kube-state-metrics;http-metrics
+        action: keep
+      - target_label: instance
+        replacement: kube-state-metrics
+
+  # argocd_app_info. application-controller 8082는 상류 NetworkPolicy가 모든 ns에 연다(2026-10-22 실측).
+  - job_name: argocd
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [argocd]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_container_port_number]
+        regex: argocd-application-controller;8082
+        action: keep
+      - target_label: instance
+        replacement: argocd-application-controller
+    # 앱 지표의 namespace 라벨(Application이 있는 argocd)을 대상 라벨로 덮지 않는다.
+    honor_labels: true
+
+  # externalsecret_status_condition. external-secrets ns에는 NetworkPolicy가 없다(2026-10-22 실측).
+  - job_name: external-secrets
+    honor_labels: true
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [external-secrets]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_container_port_name]
+        regex: external-secrets;metrics
+        action: keep
+      - target_label: instance
+        replacement: external-secrets
+
+  # AdGuard 질의 로그 리더(platform/adguard). 클라이언트 IP별 마지막 질의 시각만 낸다.
+  - job_name: adguard-querylog
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [adguard]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app, __meta_kubernetes_pod_container_port_name]
+        regex: adguard-querylog;metrics
+        action: keep
+      - target_label: instance
+        replacement: adguard-querylog
+
+  # CNPG 인스턴스(T11). 아직 파드가 없으면 대상이 0개라 up 시계열도 없다.
+  - job_name: cnpg
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [database]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster, __meta_kubernetes_pod_container_port_name]
+        regex: .+;metrics
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+        target_label: cluster
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: instance
+
+  # 컨테이너 메모리·CPU(limit 여유 산정용). metrics-server는 k3s에서 껐다.
+  # kubelet 인증서는 k3s server CA가 서명해 SA의 ca.crt로 검증한다. 검증을 끄면 그 주소로 답하는 무엇에든
+  # SA 토큰이 넘어간다(옛 vmagent 정정 2026-09-02).
+  - job_name: kubelet-cadvisor
+    scheme: https
+    metrics_path: /metrics/cadvisor
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    authorization:
+      credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_node_name]
+        target_label: instance
+    # 시계열 수를 줄인다. 대시보드와 limit 산정에 쓰는 것만 남긴다.
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: container_(memory_working_set_bytes|memory_rss|cpu_usage_seconds_total|oom_events_total)
+        action: keep
+      - source_labels: [container]
+        regex: ""
+        action: drop

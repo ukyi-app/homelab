@@ -1,0 +1,99 @@
+# VictoriaLogs single. 파드 로그 14일. vector가 elasticsearch bulk API로 넣는다.
+# AdGuard 질의 로그는 넣지 않는다(도메인 이름은 개인정보다). vector는 /var/log/pods만 읽는다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: victorialogs
+  labels:
+    app.kubernetes.io/name: victorialogs
+spec:
+  selector:
+    app.kubernetes.io/name: victorialogs
+  ports:
+    - name: http
+      port: 9428
+      targetPort: http
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: victorialogs-data
+  labels:
+    app.kubernetes.io/name: victorialogs
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-retain
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: victorialogs
+  labels:
+    app.kubernetes.io/name: victorialogs
+spec:
+  serviceName: victorialogs
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: victorialogs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: victorialogs
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9428"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: victorialogs
+          # v1.53.0(날짜로 가장 새 릴리스. v1.52.1은 그 뒤에 나온 이전 계열 보수판), Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
+          image: victoriametrics/victoria-logs:v1.53.0@sha256:251121fa882af99b95ba0c230a4a2f412ea602d2698c64a96c58dc9842bb755d
+          args:
+            - -storageDataPath=/storage
+            - -retentionPeriod=14d
+            # VictoriaLogs의 이 플래그는 커뮤니티판에도 있다(VictoriaMetrics 쪽과 다르다).
+            # 8GiB = 8589934592 B, PVC 10Gi의 80%. GB와 Gi를 섞어 쓰면 반대로 읽히므로 바이트로 적는다.
+            - -retention.maxDiskSpaceUsageBytes=8589934592
+            # 절대값. 옛 구성은 allowedPercent가 limit을 따라 캐시를 키워 OOM 결합 루프에 들었다(설계 B.8 E4).
+            # 134217728 B = 128 MiB.
+            - -memory.allowedBytes=134217728
+            - -httpListenAddr=:9428
+          env:
+            - name: GOMEMLIMIT
+              value: "320MiB"
+          ports:
+            - name: http
+              containerPort: 9428
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            # 장애 뒤 vector 백로그가 한꺼번에 들어오는 버스트 여유. 옛 256Mi에서 vector와 함께 OOM 루프를 돌았다.
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: storage
+              mountPath: /storage
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: victorialogs-data

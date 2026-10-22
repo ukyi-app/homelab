@@ -1,0 +1,111 @@
+{{- /*
+AdGuard 질의 로그 리더(T08b, D-08 tailnet 이탈 감시). 관측 스택이 수집하고 경보는
+platform/observability/stack/vmalert/rules/adguard.yaml이 낸다.
+API는 관리자 자격이 필요하고(읽기 전용 역할이 없다) Infisical에는 bcrypt 해시만 있어, 자격 없이 PVC의 질의 로그 파일을
+읽기 전용으로 붙인다. 단일 노드 local-path(hostPath)라 RWO PVC를 같은 노드의 두 파드가 함께 붙일 수 있다.
+이 Deployment는 AdGuard 파드와 따로라, 고쳐도 AdGuard(LAN DNS)를 재시작하지 않는다.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adguard-querylog-reader
+  namespace: adguard
+data:
+  vector.yaml: |
+{{ .Files.Get "files/querylog-reader.yaml" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adguard-querylog
+  namespace: adguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: adguard-querylog
+  template:
+    metadata:
+      labels:
+        app: adguard-querylog
+      annotations:
+        # 설정 ConfigMap이 바뀌면 롤아웃한다. vector는 설정 파일을 다시 읽지 않는다.
+        checksum/config: {{ .Files.Get "files/querylog-reader.yaml" | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      # 질의 로그 디렉터리는 AdGuard(uid 65532)가 0700으로 만든다. 같은 uid라야 읽힌다.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vector
+          # 0.60.0, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22. 파일 읽기만 해 static판이다.
+          image: timberio/vector:0.60.0-distroless-static@sha256:6dc08ffc32aa4984174a97a117e270b81867b1205d3737602ad4fda53637853e
+          args: ["--config", "/etc/vector/vector.yaml", "--threads", "1"]
+          ports:
+            - name: metrics
+              containerPort: 9598
+          readinessProbe:
+            tcpSocket:
+              port: metrics
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            # 시작 때 7일치 로그(약 400 MB)를 처음부터 다시 읽는다. 로컬 실측(430 MB 합성 로그, 0.60.0):
+            # CPU 약 10초, 최대 RSS 57 MB. 줄 단위 스트림이라 메모리는 파일 크기를 따르지 않는다.
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+            - name: querylog
+              mountPath: /querylog
+              subPath: work
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/vector
+      volumes:
+        - name: config
+          configMap:
+            name: adguard-querylog-reader
+        - name: querylog
+          persistentVolumeClaim:
+            claimName: adguard-data
+            readOnly: true
+        - name: data
+          emptyDir:
+            sizeLimit: 16Mi
+---
+# 관측 스택의 수집만 받고 아무 데도 나가지 않는다. 같은 ns의 adguard NetworkPolicy는 app: adguard만 고른다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: adguard-querylog
+  namespace: adguard
+spec:
+  podSelector:
+    matchLabels:
+      app: adguard-querylog
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vmsingle
+      ports:
+        - protocol: TCP
+          port: 9598
+  egress: []

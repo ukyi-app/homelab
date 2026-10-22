@@ -1,0 +1,167 @@
+# Grafana. 대시보드는 Git provisioning이고 UI 저장은 남지 않는다. 플러그인 없이 둔다(설계 C.3.7).
+# 사람은 tailnet Ingress(../ingress)로 들어온다.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: grafana-admin
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: infisical-platform
+  target:
+    name: grafana-admin
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+  data:
+    - secretKey: user
+      remoteRef:
+        key: observability/GRAFANA_ADMIN_USER
+    - secretKey: password
+      remoteRef:
+        key: observability/GRAFANA_ADMIN_PASSWORD
+---
+# 사용자·서비스 계정(봇 Viewer SA, 설계 C.8)이 sqlite DB에 남는다. 대시보드는 Git이 원본이다.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+  labels:
+    app.kubernetes.io/name: grafana
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-retain
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels:
+    app.kubernetes.io/name: grafana
+spec:
+  replicas: 1
+  # RWO sqlite에 두 프로세스가 동시에 쓰지 않게 한다.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: grafana
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: grafana
+          # 13.2.4, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
+          image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+          env:
+            # 관리자 자격은 DB를 처음 만들 때만 적용된다. 그 뒤 Infisical 값을 바꿔도 비밀번호는 그대로다.
+            # 회전은 grafana cli admin reset-admin-password로 한다.
+            - name: GF_SECURITY_ADMIN_USER__FILE
+              value: /etc/grafana/secrets/user
+            - name: GF_SECURITY_ADMIN_PASSWORD__FILE
+              value: /etc/grafana/secrets/password
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            # 12부터 기본 플러그인을 시작 때 내려받는다. 플러그인을 두지 않고, 다운로드가 디스크를 채우던
+            # 부팅·축출 루프(설계 B.8 E4)도 막는다. egress도 막혀 있어 켜 두면 시작이 늦어진다.
+            - name: GF_PLUGINS_PREINSTALL_DISABLED
+              value: "true"
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES
+              value: "false"
+            - name: GF_NEWS_NEWS_FEED_ENABLED
+              value: "false"
+            - name: GF_PATHS_PROVISIONING
+              value: /etc/grafana/provisioning
+          ports:
+            - name: http
+              containerPort: 3000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 384Mi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+            - name: tmp
+              mountPath: /tmp
+            - name: admin
+              mountPath: /etc/grafana/secrets
+              readOnly: true
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/datasources/datasources.yaml
+              subPath: datasources.yaml
+              readOnly: true
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml
+              subPath: dashboards.yaml
+              readOnly: true
+            # subPath로 붙이지 않는다. 그래야 kubelet이 갱신하고 Grafana가 주기적으로 다시 읽는다.
+            - name: dashboards
+              mountPath: /var/lib/grafana-dashboards
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: grafana-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: admin
+          secret:
+            secretName: grafana-admin
+        # 해시 이름이라 데이터소스 변경은 롤아웃으로 적용된다(subPath 갱신이 안 되는 것과 상관없다).
+        - name: provisioning
+          configMap:
+            name: grafana-provisioning
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  labels:
+    app.kubernetes.io/name: grafana
+spec:
+  selector:
+    app.kubernetes.io/name: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

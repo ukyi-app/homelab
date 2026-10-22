@@ -1,9 +1,11 @@
 # 도구 버전은 이 파일 한 곳에 둔다(설계 C.4.6, 옛 R29·R37: 버전 선언이 여러 곳이면 어긋났다).
 # 로컬은 mise install, CI는 .github/workflows/ci.yaml이 이 값을 읽는다.
-# CI가 받는 도구(actionlint, bun, gitleaks, helm, kubeconform, kustomize, shellcheck, terraform)의 버전을 바꾸면
+# CI가 받는 도구(actionlint, alertmanager, bun, gitleaks, helm, kubeconform, kustomize, shellcheck, terraform, vmutils)의 버전을 바꾸면
 # ci.yaml의 sha256도 같은 커밋에서 바꾼다.
 # 안 바꾸면 ci의 설치 단계가 sha256 불일치로 실패한다.
 actionlint 1.7.12
+# amtool: Alertmanager 설정 검사(tools/ci/alerting.ts). 배포 이미지(platform/observability/stack/alertmanager.yaml)와 같은 버전.
+aqua:prometheus/alertmanager 0.34.1
 # bun: ci 검사 실행기(bun run ci, tools/ci/). 외부 패키지 없이 내장 YAML 파서만 쓴다. T12 CLI도 같은 bun을 쓴다.
 bun 1.4.3
 gitleaks 8.30.1
@@ -19,6 +21,9 @@ shellcheck 0.11.0
 # uv: 로그인 비밀번호의 bcrypt 해시(docs/runbooks-public/rotate.md 2절, bcrypt는 실행 때 정확한 버전으로 받는다).
 # CI는 받지 않으므로 ci.yaml에 sha256이 없다.
 uv 0.13.3
+# vmutils의 vmalert-tool-prod: 경보 룰 단위 시험(U11, tools/ci/alerting.ts). 배포 vmalert와 같은 버전으로 올린다.
+# 자산 이름에 버전을 직접 적는다. v*.tar.gz로 두면 enterprise 자산이 먼저 잡힌다(2026-10-22 실측). 버전을 바꾸면 두 곳을 함께 바꾼다.
+github:VictoriaMetrics/VictoriaMetrics[asset_pattern=vmutils-linux-amd64-v1.154.1.tar.gz,bin=vmalert-tool-prod] 1.154.1
 # Terraform: apply·plan은 owner 로컬에서만. CI는 자격 없이 fmt·validate·test만 한다(설계 C.3.9).
 terraform 1.16.6
 # Infisical CLI: Terraform 자격을 infisical run으로 환경변수에만 넣는다(infra/README.md). 0.44.3은 나온 지 하루라

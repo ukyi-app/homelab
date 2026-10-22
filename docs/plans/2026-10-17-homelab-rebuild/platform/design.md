@@ -982,12 +982,12 @@ kubectl apply -f platform/root/root-prod.yaml                               # 3.
 
 | 구성 | 역할 | 설정 요지 |
 |---|---|---|
-| VictoriaMetrics single | 메트릭 저장 + 스크레이프. vmsingle이 `-promscrape.config`로 직접 수집하므로 vmagent를 두지 않는다[S167] | 보존 30일, `-memory.allowedBytes` 절대값(B.8 E4) |
-| vmalert | 룰 평가 → Alertmanager | `-configCheckInterval=30s`, 룰은 Git, 단위 시험은 CI |
+| VictoriaMetrics single | 메트릭 저장 + 스크레이프. vmsingle이 `-promscrape.config`로 직접 수집하므로 vmagent를 두지 않는다[S167] | 보존 30일, `-memory.allowedBytes` 절대값(B.8 E4). v1.154.1(T08b) |
+| vmalert | 룰 평가 → Alertmanager | `-configCheckInterval=30s`, 룰은 Git, 단위 시험은 CI(`vmalert-tool unittest`, U11 확인 T08b). v1.154.1 |
 | Alertmanager | 라우팅 | 0.34.1[S164]. 설정은 configMapGenerator 해시로 롤아웃 |
-| Grafana | 사람 UI, 봇의 읽기 API(Viewer 서비스 계정, C.8) | 대시보드는 Git provisioning, 플러그인 없음, Tailscale Ingress |
-| VictoriaLogs single + vector | 로그 14일 | vector는 root(privileged ns `observability`) |
-| node-exporter(systemd 수집 켬) + kube-state-metrics | 호스트·클러스터 지표 | 호스트 유닛 실패를 node-exporter가 본다(옛 스윕 유닛 대체) |
+| Grafana | 사람 UI, 봇의 읽기 API(Viewer 서비스 계정, C.8) | 대시보드는 Git provisioning, 플러그인 없음(`GF_PLUGINS_PREINSTALL_DISABLED`), Tailscale Ingress. 13.2.4 |
+| VictoriaLogs single + vector | 로그 14일 | vector는 root(privileged ns `observability`). VictoriaLogs v1.53.0, vector 0.60.0. Grafana 데이터소스는 플러그인이 필요해 두지 않는다 |
+| node-exporter(systemd 수집 켬) + kube-state-metrics | 호스트·클러스터 지표 | 호스트 유닛 실패를 node-exporter가 본다(옛 스윕 유닛 대체). node-exporter v1.12.1, KSM v2.20.0 |
 
 **핵심 룰(15개 안팎):** Watchdog(항상 발화), TargetDown, KubePodCrashLooping, KubePodNotReady(15분), OOMKilled, NodeMemoryHigh, NodeFilesystemAlmostFull, NodeSystemdUnitFailed, ArgoCDAppDegraded·OutOfSync(30분, `argocd_app_info` 지표), ExternalSecretNotReady(ESO 지표), CNPGClusterNotHealthy, PGBackupStale(마지막 성공 백업 26시간 초과)·WALArchiveFailing, ValkeyBackupStale, KubeJobFailed, AdGuard tailnet 이탈(아래). 룰 작성 규칙 4줄은 B.8 E4. Argo CD notifications는 설정하지 않고 지표 경보로 대신한다(옛 webhook 방식 토큰 유출 함정).
 
@@ -1014,7 +1014,7 @@ receivers:
   - name: telegram
     telegram_configs:
       - bot_token_file: /etc/alertmanager/secrets/telegram/token
-        chat_id: <비밀 아님, values에>
+        chat_id_file: /etc/alertmanager/secrets/telegram/chat_id   # 0.34.1에 있다. chat ID는 개인 식별자라 공개 저장소에 두지 않는다(T08b)
   - name: healthchecks
     webhook_configs:
       - url_file: /etc/alertmanager/secrets/healthchecks/ping_url
@@ -1024,7 +1024,7 @@ receivers:
 - **비AI 알림 경로(D-10):** Alertmanager 내장 `telegram_configs`가 봇을 거치지 않고 보낸다[S163][S165]. 봇 route를 켤 때는 위 예시처럼 Telegram 형제 route를 함께 켜고, 봇이 정상일 때와 멈췄을 때 모두 Telegram 수신을 확인한다(E9, C.8). `continue: true`는 부모 receiver로 되돌려 보내는 기능이 아니다[S163]. 전송 확인 지표는 `alertmanager_notifications_total{integration="telegram"}`(B.8 E4).
 - **외부 생존 감시(D-10):** Watchdog → healthchecks.io 체크(Period 5분, Grace 5분). Watchdog 라우트는 `group_interval: 1m`과 `repeat_interval: 1m`을 함께 둬 약 1분마다 ping한다. Alertmanager는 group_interval 틱(기본 5m)에서만 다시 보내므로[S163] `repeat_interval`만 1m으로 두면 실제 간격이 5분이 되어 Period와 같아지고 여유가 Grace 5분뿐이다. 1분 간격이면 일시적인 전송 실패 몇 번은 Period 안에서 흡수된다. healthchecks.io ping은 GET·POST를 받고[S161], Watchdog 패턴은 공식 런북이 설명한다[S162]. healthchecks.io 쪽 통지(이메일, Telegram)는 NUC를 거치지 않는다. **[미검증]** Alertmanager webhook이 ping URL로 직접 보내는 구성의 실제 동작(조사 메모의 추론). 실패하면 옛 relay를 가드(연결 없이 반환하면 ping하지 않음, `2d2054a:platform/victoria-stack/prod/deadmanswitch-relay.yaml:13-16`)와 함께 작게 둔다.
 - **선택 항목:** 공개 경로 생존 확인. 클러스터 안 CronJob이 인터넷을 돌아 공개 시험 URL을 호출하고 성공하면 두 번째 healthchecks 체크를 ping한다. 터널·Traefik·앱 경로 고장을 잡는다. 무료 체크는 20개다[S160]. 기본은 두지 않는다(F D-10의 선택 항목).
-- **AdGuard tailnet 이탈 감시(D-08):** (b′)에서는 AdGuard Home이 tailnet에서 빠져도 공용 서버가 답해 증상이 없다(C.3.6). 그래서 AdGuard Home 질의 로그에서 tailnet 출처 질의가 1시간 0건이면 경보한다. 질의 로그를 세는 방식(작은 CronJob이 AdGuard API를 읽어 지표를 내거나 healthchecks 체크를 ping)은 E4b에서 정한다[제안]. tailnet 출처를 가르려면 tailnet 질의가 LAN 질의와 다른 출처로 보여야 한다. E4a의 U32 결과(2026-10-21): 공유기 경유 LAN 질의는 `10.42.0.1`(노드 cni0), tailnet 질의는 svclb 파드 IP로 보인다. tailnet 질의는 "지금 svclb 파드 IP"(kube-system의 `svccontroller.k3s.cattle.io/svcname=adguard-dns` 라벨 파드 IP를 셀 때마다 API로 읽는다. 재시작마다 바뀐다)인 출처로 센다. "`10.42.0.1`이 아닌 출처"로 세면 AdGuard Service에 직접 묻는 클러스터 파드(10.42.0.x)도 tailnet으로 잡혀, tailnet 경로가 끊겨도 경보가 울리지 않는다(DNS ingress는 출처를 좁히지 않음). 대안은 tailnet 기기의 주기 시험 질의다. (b′)에서 이 경보가 이탈을 잡는 유일한 장치라서, E4b 완료 기준에 실제 발화 시험을 둔다(E4b). 경보는 1시간 무질의가 지난 뒤 다음 평가 주기에 울린다.
+- **AdGuard tailnet 이탈 감시(D-08):** (b′)에서는 AdGuard Home이 tailnet에서 빠져도 공용 서버가 답해 증상이 없다(C.3.6). 그래서 AdGuard Home 질의 로그에서 tailnet 출처 질의가 1시간 0건이면 경보한다. 질의 로그를 세는 방식은 E4b(T08b, 2026-10-22)에서 정했다: `adguard` ns의 리더 파드(vector, `platform/adguard` querylog-reader)가 `adguard-data` PVC를 읽기 전용으로 붙여 질의 로그 파일에서 클라이언트 IP별 마지막 질의 시각만 지표로 내고(도메인 이름은 내지 않고 VictoriaLogs로도 보내지 않는다), 룰이 그 시각을 kube-state-metrics의 svclb 파드 IP와 맞춘다. API는 관리자 자격이 필요하고(읽기 전용 역할 없음) Infisical에는 bcrypt 해시만 있어 쓰지 않았다. AdGuard는 메모리 버퍼(`querylog.size_memory`)가 찰 때만 파일에 써서, 룰은 지금 시각이 아니라 파일의 가장 새 항목과 비교한다(버퍼 크기는 지연만 바꾸고 오경보를 만들지 않는다). 버퍼는 100으로 낮추고 init이 라이브 설정에도 강제한다(병합이 AdGuard를 한 번 재시작하므로 별도 PR로 정지 경보 시험과 묶는다). tailnet 출처를 가르려면 tailnet 질의가 LAN 질의와 다른 출처로 보여야 한다. E4a의 U32 결과(2026-10-21): 공유기 경유 LAN 질의는 `10.42.0.1`(노드 cni0), tailnet 질의는 svclb 파드 IP로 보인다. tailnet 질의는 "지금 svclb 파드 IP"(kube-system의 `svccontroller.k3s.cattle.io/svcname=adguard-dns` 라벨 파드 IP를 셀 때마다 API로 읽는다. 재시작마다 바뀐다)인 출처로 센다. "`10.42.0.1`이 아닌 출처"로 세면 AdGuard Service에 직접 묻는 클러스터 파드(10.42.0.x)도 tailnet으로 잡혀, tailnet 경로가 끊겨도 경보가 울리지 않는다(DNS ingress는 출처를 좁히지 않음). 대안은 tailnet 기기의 주기 시험 질의다. (b′)에서 이 경보가 이탈을 잡는 유일한 장치라서, E4b 완료 기준에 실제 발화 시험을 둔다(E4b). 경보는 1시간 무질의가 지난 뒤 다음 평가 주기에 울린다.
 
 #### C.3.8 백업
 

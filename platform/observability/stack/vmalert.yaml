@@ -1,0 +1,86 @@
+# vmalert. 룰은 Git(vmalert/rules), 단위 시험은 ci(vmalert/tests, tools/ci).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmalert
+  labels:
+    app.kubernetes.io/name: vmalert
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vmalert
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vmalert
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8880"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vmalert
+          # v1.154.1, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22. vmsingle과 같은 버전으로 올린다.
+          image: victoriametrics/vmalert:v1.154.1@sha256:aafb962b5a5713c71f0d697d629416f9cccf23aecb74f0ec5e829ddbf3f221f2
+          args:
+            - -rule=/rules/*.yaml
+            - -datasource.url=http://vmsingle:8428
+            - -notifier.url=http://alertmanager:9093
+            # 재시작 때 for 진행 상태(ALERTS_FOR_STATE)를 vmsingle에서 되살린다. 없으면 1시간 창 경보가 처음부터 센다.
+            - -remoteWrite.url=http://vmsingle:8428
+            - -remoteRead.url=http://vmsingle:8428
+            - -evaluationInterval=30s
+            # 없으면 룰 ConfigMap이 바뀌어도 옛 룰을 계속 평가한다(설계 B.8 E4).
+            - -configCheckInterval=30s
+            - -httpListenAddr=:8880
+          env:
+            - name: GOMEMLIMIT
+              value: "57MiB"
+          ports:
+            - name: http
+              containerPort: 8880
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            # 옛 실측 peak 약 26Mi.
+            limits:
+              memory: 64Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: rules
+              mountPath: /rules
+              readOnly: true
+      volumes:
+        - name: rules
+          configMap:
+            name: vmalert-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalert
+  labels:
+    app.kubernetes.io/name: vmalert
+spec:
+  selector:
+    app.kubernetes.io/name: vmalert
+  ports:
+    - name: http
+      port: 8880
+      targetPort: http

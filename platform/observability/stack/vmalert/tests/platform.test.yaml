@@ -1,0 +1,169 @@
+rule_files:
+  - ../rules/platform.yaml
+evaluation_interval: 1m
+tests:
+  - name: ArgoCDAppDegraded·OutOfSync는 30분 뒤에 발화한다
+    interval: 1m
+    input_series:
+      - series: 'argocd_app_info{name="adguard", namespace="argocd", health_status="Degraded", sync_status="Synced"}'
+        values: "1x40"
+      - series: 'argocd_app_info{name="go", namespace="argocd", health_status="Healthy", sync_status="OutOfSync"}'
+        values: "1x40"
+      - series: 'argocd_app_info{name="tailscale", namespace="argocd", health_status="Healthy", sync_status="Synced"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 29m
+        groupname: platform
+        alertname: ArgoCDAppDegraded
+        exp_alerts: []
+      - eval_time: 31m
+        groupname: platform
+        alertname: ArgoCDAppDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              name: adguard
+            exp_annotations:
+              summary: Argo CD Application adguard가 30분 넘게 Degraded다
+      - eval_time: 31m
+        groupname: platform
+        alertname: ArgoCDAppOutOfSync
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              name: go
+            exp_annotations:
+              summary: Argo CD Application go가 30분 넘게 OutOfSync다
+
+  - name: ExternalSecretNotReady는 Ready=False 시계열이 1일 때만
+    interval: 1m
+    input_series:
+      - series: 'externalsecret_status_condition{namespace="observability", name="alertmanager-healthchecks", condition="Ready", status="False"}'
+        values: "1x15"
+      - series: 'externalsecret_status_condition{namespace="observability", name="alertmanager-healthchecks", condition="Ready", status="True"}'
+        values: "0x15"
+      - series: 'externalsecret_status_condition{namespace="adguard", name="adguard-auth", condition="Ready", status="False"}'
+        values: "0x15"
+      - series: 'externalsecret_status_condition{namespace="adguard", name="adguard-auth", condition="Ready", status="True"}'
+        values: "1x15"
+      - series: 'externalsecret_status_condition{namespace="app-a", name="old", condition="Deleted", status="False"}'
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 9m
+        groupname: platform
+        alertname: ExternalSecretNotReady
+        exp_alerts: []
+      - eval_time: 11m
+        groupname: platform
+        alertname: ExternalSecretNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: observability
+              name: alertmanager-healthchecks
+            exp_annotations:
+              summary: ExternalSecret observability/alertmanager-healthchecks가 10분 넘게 Ready가 아니다
+              description: Infisical 키 이름·경로와 ESO 인증을 본다. 이미 만든 Secret은 마지막 값으로 남아 있다.
+
+  - name: 데이터 지표가 아직 없으면 아무것도 발화하지 않는다
+    interval: 1m
+    input_series:
+      - series: 'up{job="vmsingle", instance="vmsingle"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: data
+        alertname: CNPGClusterNotHealthy
+        exp_alerts: []
+      - eval_time: 10m
+        groupname: data
+        alertname: PGBackupStale
+        exp_alerts: []
+      - eval_time: 10m
+        groupname: data
+        alertname: WALArchiveFailing
+        exp_alerts: []
+      - eval_time: 10m
+        groupname: data
+        alertname: ValkeyBackupStale
+        exp_alerts: []
+
+  - name: CNPGClusterNotHealthy와 WALArchiveFailing
+    interval: 1m
+    input_series:
+      - series: 'cnpg_collector_up{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "0x10"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "200x15"
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "100x15"
+    alert_rule_test:
+      - eval_time: 6m
+        groupname: data
+        alertname: CNPGClusterNotHealthy
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: database
+              cluster: pg
+            exp_annotations:
+              summary: CNPG 클러스터 database/pg에서 PostgreSQL에 붙은 인스턴스가 없다
+      - eval_time: 11m
+        groupname: data
+        alertname: WALArchiveFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: database
+              cluster: pg
+            exp_annotations:
+              summary: database/pg의 WAL 아카이브가 마지막 성공 뒤 실패하고 있다
+
+  - name: WALArchiveFailing은 실패 뒤 성공하면 해소된다
+    interval: 1m
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "200x15"
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "300x15"
+    alert_rule_test:
+      - eval_time: 11m
+        groupname: data
+        alertname: WALArchiveFailing
+        exp_alerts: []
+
+  # time()은 946684800 + eval_time이다. 백업 시각 946684800은 시험 시작 시각이다.
+  - name: PGBackupStale·ValkeyBackupStale은 26시간을 넘으면 발화한다
+    interval: 10m
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "946684800x170"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="app-a", cronjob="a-valkey-backup"}'
+        values: "946684800x170"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="app-a", cronjob="a-report"}'
+        values: "946684800x170"
+    alert_rule_test:
+      - eval_time: 25h
+        groupname: data
+        alertname: PGBackupStale
+        exp_alerts: []
+      - eval_time: 27h
+        groupname: data
+        alertname: PGBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: database
+              cluster: pg
+            exp_annotations:
+              summary: database/pg의 마지막 성공 백업이 26시간보다 오래됐다
+      - eval_time: 27h
+        groupname: data
+        alertname: ValkeyBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: app-a
+              cronjob: a-valkey-backup
+            exp_annotations:
+              summary: Valkey 백업 app-a/a-valkey-backup의 마지막 성공이 26시간보다 오래됐다

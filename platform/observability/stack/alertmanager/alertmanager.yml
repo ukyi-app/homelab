@@ -1,0 +1,55 @@
+# Alertmanager 설정(설계 C.3.7). ConfigMap 키는 이 파일 이름이다. 바꾸면 alertmanager.yaml의 --config.file도 바꾼다.
+# ci가 amtool check-config로 본다(tools/ci).
+route:
+  # 비AI 알림 경로(D-10). 봇과 독립이다.
+  receiver: telegram
+  group_by: ["alertname", "namespace"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['alertname="Watchdog"']
+      # 외부 생존 감시. healthchecks.io가 ping이 끊기면 NUC를 거치지 않고 알린다.
+      receiver: healthchecks
+      group_wait: 0s
+      # 다시 보내기는 group_interval 틱에서만 일어난다. 빼면 기본 5m이 실제 간격이 되어 Period 5분과 같아진다.
+      group_interval: 1m
+      repeat_interval: 1m
+    # 봇 자리(설계 C.8): 봇이 생기면 아래 네 줄을 함께 켠다(T16b). continue: true는 다음 형제 route를 계속
+    # 검사하게 할 뿐, 일치한 자식이 있으면 부모 receiver(telegram)로는 보내지 않는다. 그래서 Telegram 형제 route를 둔다.
+    # - matchers: ['severity=~"warning|critical"']
+    #   receiver: bot
+    #   continue: true
+    # - matchers: ['severity=~"warning|critical"']
+    #   receiver: telegram
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /etc/alertmanager/secrets/telegram/token
+        # 0.34.1부터 있다(notify/telegram/config.go). chat ID를 공개 저장소에 두지 않으려고 파일로 읽는다.
+        chat_id_file: /etc/alertmanager/secrets/telegram/chat_id
+        parse_mode: HTML
+        send_resolved: true
+        # HTML 모드에서 Alertmanager가 {{ }} 값을 자동으로 escape한다. 수동 escape를 더하면 &amp;lt;처럼
+        # 이중 escape돼 메시지가 깨진다(옛 실측). <b> 같은 리터럴 태그는 템플릿 문자열이라 그대로 남는다.
+        message: |-
+          {{- if eq .Status "resolved" }}🔵 <b>해소</b>
+          {{- else if eq .CommonLabels.severity "critical" }}🔴 <b>발생</b>
+          {{- else }}⚠️ <b>경고</b>
+          {{- end }} · {{ .CommonLabels.alertname }}
+          {{- range .Alerts }}
+
+          {{ .Annotations.summary }}
+          {{- if .Annotations.description }}
+          {{ .Annotations.description }}
+          {{- end }}
+          {{- if .Annotations.runbook }}
+          → {{ .Annotations.runbook }}
+          {{- end }}
+          {{- end }}
+  - name: healthchecks
+    webhook_configs:
+      # healthchecks.io ping은 POST도 받는다. URL 자체가 자격이라 파일로 읽는다.
+      - url_file: /etc/alertmanager/secrets/healthchecks/ping_url
+        send_resolved: false
