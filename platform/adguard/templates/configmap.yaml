@@ -41,7 +41,10 @@ data:
       enabled: true
       file_enabled: true
       interval: 7d
-      size_memory: 1000
+      # 메모리 버퍼가 이만큼 차야 파일에 쓴다(주기 flush 없음, v0.107.79 internal/querylog/qlog.go).
+      # 파일은 tailnet 이탈 감시(querylog-reader)의 입력이라 작게 둬 감지 지연을 줄인다.
+      # 이 값만은 시드가 라이브 설정에도 강제한다(deployment.yaml init). 적용은 다음 AdGuard 재시작 때다.
+      size_memory: 100
     statistics:
       enabled: true
       interval: 1d
