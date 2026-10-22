@@ -344,6 +344,9 @@ export function checkIngress(docs: Doc[]): Violation[] {
 // SA는 kind: User(system:serviceaccount:sandbox:<이름>)로도 묶인다. API 서버가 SA 토큰을 그 사용자 이름으로 인증한다.
 // 방화벽 init은 이름·capability만 보면 기본 DROP을 빼거나 허용 주소를 바꿔도 통과한다. 그래서 명령과 규칙 줄을
 // 고정본과 맞추고(빈 줄·주석 줄은 뺀다), PROXY_IP·PROXY_PORT env도 egress-proxy Service와 맞춘다.
+// 규칙이 실제로 걸리게 이미지·env·마운트도 고정한다. 아니면 PATH나 마운트로 no-op iptables를 앞세워 통과한다.
+// args는 문자열 하나다. sh -c는 첫 원소만 스크립트로 돌리고 나머지는 $0·$1이 된다.
+// 같은 이름의 env가 둘이면 kubelet은 뒤의 값을 쓰는데 검사가 앞의 값을 보면 어긋난다. 그래서 중복 이름을 거부한다.
 // HTTPS_PROXY는 같은 렌더 맥락의 egress/egress-proxy Service clusterIP·포트여야 한다. 어긋나면 init 규칙이 허용한 주소와
 // 작업자가 쓰는 주소가 달라 모든 외부 연결이 끊기거나, 다른 주소를 허용하게 된다. Service가 없으면 비교할 기준이 없어 실패로 본다.
 // sandbox 구성 요소를 끄면 대상이 0이라 세지 않는다.
@@ -354,6 +357,9 @@ const SANDBOX_FIREWALL_CAPS = new Set(["NET_ADMIN"]);
 const SANDBOX_GROUPS = new Set([`system:serviceaccounts:${SANDBOX_NS}`, "system:serviceaccounts", "system:authenticated"]);
 // platform/sandbox/templates/worker-deployment.yaml의 egress-firewall. 규칙을 바꾸면 같은 PR에서 이 고정본도 바꾼다.
 const SANDBOX_FIREWALL_COMMAND = ["/bin/sh", "-euc"];
+const SANDBOX_FIREWALL_IMAGE = "docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70";
+// iptables 잠금 파일(/run/xtables.lock) 자리. 이름은 emptyDir 볼륨이어야 한다.
+const SANDBOX_FIREWALL_MOUNT = { name: "firewall-run", mountPath: "/run" };
 const SANDBOX_FIREWALL_SCRIPT = [
   "for t in iptables ip6tables; do",
   '"$t" -P OUTPUT DROP',
@@ -424,11 +430,27 @@ export function checkSandbox(docs: Doc[]): Violation[] {
       const add: string[] = sc.capabilities?.add ?? [];
       const bad = add.filter((a) => !(init && c.name === SANDBOX_FIREWALL && SANDBOX_FIREWALL_CAPS.has(a)));
       if (bad.length) out.push({ rule: "sandbox", where: cw, message: `capability ${bad.join(", ")}를 더한다(NET_ADMIN은 ${SANDBOX_FIREWALL}만)` });
+      const envNames: string[] = (c.env ?? []).map((e: any) => e?.name);
+      const dup = [...new Set(envNames.filter((n, i) => envNames.indexOf(n) !== i))];
+      if (dup.length) out.push({ rule: "sandbox", where: cw, message: `env 이름 ${dup.join(", ")}가 둘 이상이다(kubelet은 뒤의 값을 쓴다)` });
       const envOf = (name: string) => (c.env ?? []).find((e: any) => e.name === name)?.value;
       if (init && c.name === SANDBOX_FIREWALL) {
         const same = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((x, i) => x === b[i]);
-        if (!same(Array.isArray(c.command) ? c.command : [], SANDBOX_FIREWALL_COMMAND) || !same(scriptLines(c.args), SANDBOX_FIREWALL_SCRIPT)) {
+        const args = Array.isArray(c.args) && c.args.length === 1 && typeof c.args[0] === "string" ? c.args : null;
+        if (!same(Array.isArray(c.command) ? c.command : [], SANDBOX_FIREWALL_COMMAND) || !args || !same(scriptLines(args), SANDBOX_FIREWALL_SCRIPT)) {
           out.push({ rule: "sandbox", where: cw, message: "방화벽 명령·규칙이 고정본(tools/ci/policy.ts SANDBOX_FIREWALL_SCRIPT)과 다르다" });
+        }
+        const mounts: any[] = c.volumeMounts ?? [];
+        const vol = (spec.volumes ?? []).find((v: any) => v?.name === SANDBOX_FIREWALL_MOUNT.name);
+        const envOk = c.envFrom === undefined && [...envNames].sort().join(",") === "PROXY_IP,PROXY_PORT";
+        const mountOk =
+          mounts.length === 1 &&
+          Object.keys(mounts[0] ?? {}).sort().join(",") === "mountPath,name" &&
+          mounts[0].name === SANDBOX_FIREWALL_MOUNT.name &&
+          mounts[0].mountPath === SANDBOX_FIREWALL_MOUNT.mountPath &&
+          vol?.emptyDir !== undefined;
+        if (c.image !== SANDBOX_FIREWALL_IMAGE || !envOk || !mountOk || c.workingDir !== undefined) {
+          out.push({ rule: "sandbox", where: cw, message: "방화벽 실행 환경(이미지·env·마운트)이 고정본과 다르다" });
         }
         if (proxy && (envOf("PROXY_IP") !== proxy.ip || envOf("PROXY_PORT") !== String(proxy.port))) {
           out.push({ rule: "sandbox", where: cw, message: `PROXY_IP·PROXY_PORT ${envOf("PROXY_IP")}:${envOf("PROXY_PORT")}가 egress-proxy Service ${proxy.ip}:${proxy.port}와 다르다` });
