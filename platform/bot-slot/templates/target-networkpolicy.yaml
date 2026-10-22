@@ -1,0 +1,67 @@
+{{- /*
+(1) 봇 ns 정책(설계 C.8 담는 것 (1)). 공유 차트의 기본 거부·허용 목록(C.4.5)에 봇만 쓰는 클러스터 안 경로를 더한다.
+차트의 인터넷 443 규칙이 10.0.0.0/8을 빼서 이 경로들은 차트만으로는 막힌다. NetworkPolicy는 허용의 합집합이다.
+포트는 Service 포트가 아니라 파드 포트다(정책은 DNAT 뒤 목적지에 걸린다).
+vmsingle·VictoriaLogs·Alertmanager API는 열지 않는다. Alertmanager API는 침묵을 만들 수 있다.
+Kubernetes API는 노드 로컬 경로라 이 정책과 무관하고 읽기 전용 SA가 경계다(rbac.yaml).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bot-slot
+  namespace: {{ .Values.target.namespace }}
+  labels:
+    {{- include "botSlot.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "botSlot.targetSelector" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 경보 수신. 받는 쪽 Alertmanager의 egress는 observability-networkpolicy.yaml이 연다.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - protocol: TCP
+          port: {{ .Values.target.alertPort }}
+  egress:
+    # 작업 전달. 받는 쪽 허용은 sandbox-networkpolicy.yaml.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sandbox
+          podSelector:
+            matchLabels:
+              {{- include "botSlot.workerSelector" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.target.workerPort }}
+    # 대시보드 보기·데이터소스 질의(Grafana SA bot-reader). 받는 쪽 허용은 observability-networkpolicy.yaml.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: grafana
+      ports:
+        - protocol: TCP
+          port: 3000
+    # Argo CD API(로컬 계정 bot-reader). argocd-server는 공식 install.yaml 정책이 모든 출처의 ingress를 연다(v3.5.5).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: argocd
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-server
+      ports:
+        - protocol: TCP
+          port: 8080

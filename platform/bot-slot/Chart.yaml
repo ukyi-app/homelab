@@ -1,0 +1,8 @@
+# 봇 자리 Application(설계 C.8 "봇 자리 Application", T08b). 봇 쪽 platform 리소스(NetworkPolicy, 읽기 전용 SA·역할)를 한곳에 모은다.
+# 차트인 이유: values.yaml의 target 하나가 모든 리소스의 대상 ns·라벨·포트를 정한다. 그 값을 바꾸는 PR 하나로 봇 ns 정책,
+# sandbox ingress 출처, SA bot-reader의 ns가 함께 바뀐다.
+apiVersion: v2
+name: bot-slot
+description: Platform-side network policies and read-only identity for the homelab bot
+type: application
+version: 0.1.0

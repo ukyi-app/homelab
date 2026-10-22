@@ -62,7 +62,7 @@ components:
 
   # T08b. bot-slot(봇 자리, 설계 C.8), wave 1
   botSlot:
-    enabled: false
+    enabled: true
 
   # T08c. go(내부 UI 짧은 주소 리다이렉터, D-30), wave 1
   # 켜기 전에 Infisical /platform/go/TAILNET_DOMAIN이 있어야 한다. 없으면 go만 Degraded다(맨 뒤 wave라 다른 구성 요소는 막지 않는다).

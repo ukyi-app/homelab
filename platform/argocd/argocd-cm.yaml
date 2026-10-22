@@ -12,10 +12,12 @@ data:
   # 기본 jitter 1분이 위 값에 더해져 실제 간격이 60~120초가 된다. 0이면 끈다(설계 B.8 E2).
   timeout.reconciliation.jitter: "0"
 
-  # 내장 admin을 끈다. 사람은 로컬 계정 owner(login만), 봇 계정 bot-reader(apiKey만)는 T08b가 더한다.
+  # 내장 admin을 끈다. 사람은 로컬 계정 owner(login만), 봇은 bot-reader(apiKey만, 설계 C.8 읽기 전용 접근 (b)).
   # owner 비밀번호는 ESO가 Infisical의 bcrypt 해시를 argocd-secret에 합친다(platform/external-secrets/templates/argocd-owner.yaml).
+  # bot-reader는 비밀번호가 없어 UI·CLI 로그인을 못 하고, 토큰은 사람이 owner로 `argocd account generate-token --account bot-reader`로 만든다.
   admin.enabled: "false"
   accounts.owner: login
+  accounts.bot-reader: apiKey
 
   # install.yaml이 이미 기본 목록을 이 키에 둔다. 키를 통째로 덮어쓰므로 기본 목록을 그대로 옮기고 Event만 더했다.
   # 설계 표의 Endpoints·EndpointSlice는 기본 목록에 있다. Event는 옛 실측이다(옛 bootstrap-values.yaml).

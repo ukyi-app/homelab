@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["target", "probe"],
+  "properties": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "app", "workerPort", "alertPort"],
+      "properties": {
+        "namespace": { "type": "string", "pattern": "^(bot-slot-probe|app-[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?)$" },
+        "app": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$" },
+        "workerPort": { "const": 8080 },
+        "alertPort": { "type": "integer", "minimum": 1024, "maximum": 65535, "not": { "const": 8080 } }
+      }
+    },
+    "probe": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "probe": { "const": true } } },
+      "then": { "properties": { "target": { "properties": { "namespace": { "const": "bot-slot-probe" } } } } }
+    },
+    {
+      "if": { "properties": { "target": { "properties": { "namespace": { "const": "bot-slot-probe" } } } } },
+      "then": { "properties": { "probe": { "const": true } } }
+    }
+  ]
+}

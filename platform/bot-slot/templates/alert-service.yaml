@@ -1,0 +1,21 @@
+{{- /*
+경보 수신 Service(설계 C.8 "대상 값 하나"의 [제안]을 E4b에서 정함: 이 Application이 만든다).
+공유 차트의 Service는 앱 포트(port) 하나뿐이라 Alertmanager가 가리킬 경보 수신 포트를 담지 못한다. 차트를 넓히지 않고
+target으로 여기서 만든다. Alertmanager receiver bot의 url(T16b)은 http://<target.app>-alerts.<target.namespace>:<alertPort>/ 이다.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.target.app }}-alerts
+  namespace: {{ .Values.target.namespace }}
+  labels:
+    {{- include "botSlot.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "botSlot.targetSelector" . | nindent 4 }}
+  ports:
+    - name: alerts
+      port: {{ .Values.target.alertPort }}
+      targetPort: {{ .Values.target.alertPort }}
+      protocol: TCP
