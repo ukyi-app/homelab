@@ -23,8 +23,7 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.target.namespace }}
           podSelector:
-            matchLabels:
-              {{- include "botSlot.targetSelector" . | nindent 14 }}
+            {{- include "botSlot.targetPodSelector" . | nindent 12 }}
       ports:
         - protocol: TCP
           port: 3000
@@ -49,8 +48,7 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.target.namespace }}
           podSelector:
-            matchLabels:
-              {{- include "botSlot.targetSelector" . | nindent 14 }}
+            {{- include "botSlot.targetPodSelector" . | nindent 12 }}
       ports:
         - protocol: TCP
           port: {{ .Values.target.alertPort }}

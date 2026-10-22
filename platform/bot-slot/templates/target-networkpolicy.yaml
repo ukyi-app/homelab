@@ -14,8 +14,7 @@ metadata:
     {{- include "botSlot.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels:
-      {{- include "botSlot.targetSelector" . | nindent 6 }}
+    {{- include "botSlot.targetPodSelector" . | nindent 4 }}
   policyTypes:
     - Ingress
     - Egress
