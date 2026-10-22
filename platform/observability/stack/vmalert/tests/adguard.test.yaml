@@ -24,7 +24,7 @@ tests:
               deployment: adguard
             exp_annotations:
               summary: AdGuard Home에 사용 가능한 파드가 없다. 집 LAN DNS가 끊겼다
-              runbook: docs/runbooks-public/nuc-dns-outage.md
+              runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/nuc-dns-outage.md
 
   - name: AdGuardDown은 Deployment 시계열이 없어도 발화한다(replicas 0 시험 방식)
     interval: 1m
@@ -42,7 +42,7 @@ tests:
               deployment: adguard
             exp_annotations:
               summary: AdGuard Home에 사용 가능한 파드가 없다. 집 LAN DNS가 끊겼다
-              runbook: docs/runbooks-public/nuc-dns-outage.md
+              runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/nuc-dns-outage.md
 
   - name: tailnet 질의가 있으면 발화하지 않는다(파일이 늘지 않는 동안도)
     interval: 1m

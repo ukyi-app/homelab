@@ -7,8 +7,10 @@ const STACK = "platform/observability/stack";
 const RULES = `${STACK}/vmalert/rules`;
 const TESTS = `${STACK}/vmalert/tests`;
 const AM_CONFIG = `${STACK}/alertmanager/alertmanager.yml`;
+// Telegram은 "nuc-dns-outage.md" 같은 상대 경로를 .md(몰도바) 도메인으로 자동 링크한다(라이브 실측). 그래서 전체 URL만 받는다.
+const RUNBOOK_BASE = "https://github.com/ukyi-app/homelab/blob/main/";
 
-type RuleFile = { groups?: { name: string; rules?: { alert?: string; record?: string }[] }[] };
+type RuleFile = { groups?: { name: string; rules?: { alert?: string; record?: string; annotations?: { runbook?: string } }[] }[] };
 type TestFile = { rule_files?: string[]; tests?: { alert_rule_test?: { alertname: string; exp_alerts?: unknown[] }[] }[] };
 
 export function checkAlerting(): Violation[] {
@@ -34,6 +36,10 @@ export function checkAlerting(): Violation[] {
         if (!r.alert) continue;
         if (alerts.has(r.alert)) out.push({ rule: "alert-rules", where: f, message: `경보 이름 ${r.alert}가 ${alerts.get(r.alert)}에도 있다` });
         alerts.set(r.alert, f);
+        const rb = r.annotations?.runbook;
+        if (rb !== undefined && (!rb.startsWith(RUNBOOK_BASE) || gitFiles(rb.slice(RUNBOOK_BASE.length)).length === 0)) {
+          out.push({ rule: "alert-rules", where: f, message: `경보 ${r.alert}의 runbook(${rb})은 ${RUNBOOK_BASE}로 시작하고 저장소에 있는 파일을 가리켜야 한다` });
+        }
       }
     }
   }
