@@ -1,0 +1,48 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: PROXY_IP·PROXY_PORT
+# init 규칙의 허용 주소가 프록시가 아니면 작업자가 그 주소로 직접 나간다.
+apiVersion: v1
+kind: Service
+metadata: {name: egress-proxy, namespace: egress}
+spec:
+  clusterIP: 10.43.0.28
+  ports: [{name: proxy, port: 3128}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker, namespace: sandbox}
+spec:
+  selector: {matchLabels: {app: worker}}
+  template:
+    metadata: {labels: {app: worker}}
+    spec:
+      automountServiceAccountToken: false
+      volumes: [{name: firewall-run, emptyDir: {}}]
+      initContainers:
+        - name: egress-firewall
+          image: docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70
+          command: ["/bin/sh", "-euc"]
+          args:
+            - |
+              for t in iptables ip6tables; do
+                "$t" -P OUTPUT DROP
+                "$t" -F OUTPUT
+                "$t" -A OUTPUT -o lo -j ACCEPT
+                "$t" -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+              done
+              iptables -A OUTPUT -d "$PROXY_IP/32" -p tcp --dport "$PROXY_PORT" -m conntrack --ctstate NEW -j ACCEPT
+              # 주석 줄은 비교하지 않는다.
+              iptables -A OUTPUT -j REJECT
+              ip6tables -A OUTPUT -j REJECT
+              iptables -S OUTPUT
+              ip6tables -S OUTPUT
+          volumeMounts: [{name: firewall-run, mountPath: /run}]
+          env: [{name: PROXY_IP, value: "10.43.0.1"}, {name: PROXY_PORT, value: "3128"}]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL], add: [NET_ADMIN]}}
+      containers:
+        - name: worker
+          image: x
+          env: [{name: HTTPS_PROXY, value: "http://10.43.0.28:3128"}]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}

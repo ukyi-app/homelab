@@ -1,0 +1,11 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: RBAC 바인딩을 두지 않는다
+# SA는 kind: User(system:serviceaccount:<ns>:<이름>)로도 묶인다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: leak}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}
+subjects:
+  - {kind: User, apiGroup: rbac.authorization.k8s.io, name: "system:serviceaccount:sandbox:default"}
