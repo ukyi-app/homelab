@@ -44,6 +44,7 @@ spec:
               mkdir -p /data/conf /data/work
               cp -n /seed/AdGuardHome.yaml /data/conf/AdGuardHome.yaml
               yq -i '.users = [{"name": strenv(ADGUARD_ADMIN_USER), "password": strenv(ADGUARD_ADMIN_PASSWORD_BCRYPT)}]' /data/conf/AdGuardHome.yaml
+              yq -i '.querylog.size_memory = (load("/seed/AdGuardHome.yaml").querylog.size_memory // .querylog.size_memory)' /data/conf/AdGuardHome.yaml
               chmod 600 /data/conf/AdGuardHome.yaml
           env:
             - name: ADGUARD_ADMIN_USER
@@ -59,6 +60,9 @@ spec:
           # hostPath 백엔드에는 fsGroup 소유권 변경이 적용되지 않는다.
           # 빈 PVC의 디렉터리·파일도 본 프로세스와 같은 uid 65532가 만들어야 한다.
           # 자격은 매 파드 시작에 덮어쓴다. ESO 갱신만으로 재시작하지 않아 DNS 단절을 자동 유발하지 않는다.
+          # querylog.size_memory도 같은 방식으로 시드 값을 강제한다(tailnet 이탈 감시의 입력, configmap.yaml).
+          # 시드만 바꾸면 파드 템플릿이 그대로라 재시작이 없고, 다음 재시작 때 적용된다. 시드에 값이 없으면 라이브 값을 둔다
+          # (init 실패는 LAN DNS 정지라 실패 경로를 두지 않는다).
           # 비밀번호 회전은 Secret 갱신을 확인한 뒤 승인된 재배포로 적용한다. UI의 자격 변경은 재시작 때 사라진다.
           securityContext:
             allowPrivilegeEscalation: false
