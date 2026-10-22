@@ -1,0 +1,66 @@
+{{- /*
+Envoy 1.40.0(2026-10-13, 최신 안정판), 공식 envoyproxy/envoy의 distroless 변형, 멀티 아키텍처 index(2026-10-22 Docker Hub에서 확인).
+distroless는 셸이 없고 nonroot(65532)로 envoy만 실행한다. 디버그가 필요하면 같은 버전의 v1.40.0 태그(셸 있음)를 lab에서 쓴다(U14, REPORT).
+*/}}
+{{- $image := "docker.io/envoyproxy/envoy:distroless-v1.40.0@sha256:23b72ac1fa94908b2ca7ebf194cc6083cd0d4913210c7d7453e4b2008ca26c84" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress-proxy
+  namespace: egress
+  labels:
+    {{- include "sandbox.proxyLabels" . | nindent 4 }}
+spec:
+  # 작업자가 하나(동시성 1)라 하나로 충분하다. 멈추면 작업자의 외부 연결이 모두 끊기고, 다른 길로 새지는 않는다.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "sandbox.proxyLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sandbox.proxyLabels" . | nindent 8 }}
+      annotations:
+        # 허용 목록만 바뀌면 파드가 다시 뜨지 않아 옛 목록이 남는다.
+        checksum/config: {{ include (print $.Template.BasePath "/proxy-configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: envoy
+          image: {{ $image }}
+          args: ["-c", "/etc/envoy-homelab/envoy.yaml", "--log-level", "warn"]
+          ports:
+            - name: proxy
+              containerPort: {{ .Values.proxy.port }}
+              protocol: TCP
+          # admin 리스너가 없어 /ready를 못 쓴다. kubelet 프로브는 노드에서 오므로 NetworkPolicy에 막히지 않는다(설계 B.8).
+          readinessProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/envoy-homelab
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: egress-proxy

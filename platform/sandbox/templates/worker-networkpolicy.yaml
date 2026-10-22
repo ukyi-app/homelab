@@ -1,0 +1,28 @@
+# sandbox ns 기본 거부. 작업자가 나갈 수 있는 곳은 egress ns 프록시 파드의 프록시 포트 하나다. DNS(CoreDNS 53)는 열지 않는다.
+# CoreDNS는 임의 이름을 공용 DNS에 재귀 질의하므로, 열면 이름에 실은 자격이 허용 목록 밖으로 나간다(설계 C.8).
+# 작업 전달 ingress(봇 → 작업자 8080)는 bot-slot Application이 따로 더한다. 여기는 기본 거부만 둔다.
+#
+# NetworkPolicy는 노드 로컬 경로(노드 IP의 6443·10250·22)를 막지 못하고(TD:263-274), kube-router가 새 파드 규칙을
+# 수 초 늦게 건다(B.8 E4). 둘 다 작업자 파드의 init 방화벽(templates/worker-deployment.yaml)이 막는다.
+# 이 정책은 목적지를 DNAT 뒤 주소(프록시 파드)로, init 규칙은 파드 netns에서 보이는 ClusterIP로 쓴다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: sandbox
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: egress
+          podSelector:
+            matchLabels:
+              {{- include "sandbox.proxyLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.proxy.port }}

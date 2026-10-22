@@ -1,0 +1,8 @@
+# 격리 작업 공간(ns sandbox)과 허용 목록 egress 프록시(ns egress)(설계 C.8 격리 행, T08b).
+# 차트인 이유: 작업자 전용 ClusterSecretStore가 읽을 Infisical 프로젝트·환경이 클러스터마다 달라 root가 valuesObject로 넘긴다
+# (E8 VM 격리 1번 A안). 값을 여기 직접 적으면 VM이 운영 값을 읽는다.
+apiVersion: v2
+name: sandbox
+description: Isolated worker namespace and allowlist egress proxy for one homelab cluster
+type: application
+version: 0.1.0

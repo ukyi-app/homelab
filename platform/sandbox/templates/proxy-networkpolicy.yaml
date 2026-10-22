@@ -1,0 +1,57 @@
+# 프록시: 들어오는 것은 sandbox 작업자에서 프록시 포트뿐, 나가는 것은 DNS와 인터넷 443뿐이다.
+# egress ns의 다른 파드(지금은 없다)에는 걸지 않는다. ns 기본 거부를 두지 않은 이유: 이 ns에는 프록시만 둔다.
+# 인터넷 443의 except는 공유 차트(platform/charts/app/templates/networkpolicy.yaml, 설계 C.4.5 "tailnet 차단")에
+# link-local(169.254.0.0/16)과 loopback 대역을 더했다(2026-10-22 lab 실험에서 쓴 목록).
+# 파드가 tailnet으로 나가면 출발 주소가 NUC의 Tailscale 주소로 바뀐다(U28). IPv6 허용 줄은 두지 않는다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-proxy
+  namespace: egress
+  labels:
+    {{- include "sandbox.proxyLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sandbox.proxyLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sandbox
+          podSelector:
+            matchLabels:
+              {{- include "sandbox.workerLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.proxy.port }}
+  egress:
+    # 목적지 이름은 프록시가 푼다(U29). CoreDNS가 공용 DNS에 재귀 질의하는 것은 작업자가 아니라 프록시의 허용 이름뿐이다.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443

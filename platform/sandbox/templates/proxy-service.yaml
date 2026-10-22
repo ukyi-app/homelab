@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: egress-proxy
+  namespace: egress
+  labels:
+    {{- include "sandbox.proxyLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  # 고정값. 작업자는 DNS가 없어 이 주소로 프록시를 찾는다(설계 C.8). clusterIP는 바꿀 수 없는 필드라
+  # 값을 바꾸면 Argo CD sync가 실패한다. 그때는 Service를 지우고 다시 만든다(그동안 작업자 외부 연결이 끊긴다).
+  clusterIP: {{ .Values.proxy.clusterIP }}
+  selector:
+    {{- include "sandbox.proxyLabels" . | nindent 4 }}
+  ports:
+    - name: proxy
+      port: {{ .Values.proxy.port }}
+      targetPort: proxy
+      protocol: TCP

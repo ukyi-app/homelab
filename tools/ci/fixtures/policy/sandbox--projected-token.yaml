@@ -1,0 +1,35 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: serviceAccountToken을 넣지 않는다
+# automount를 꺼도 projected 볼륨으로 SA 토큰을 받을 수 있다.
+apiVersion: v1
+kind: Service
+metadata: {name: egress-proxy, namespace: egress}
+spec:
+  clusterIP: 10.43.0.28
+  ports: [{name: proxy, port: 3128}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker, namespace: sandbox}
+spec:
+  selector: {matchLabels: {app: worker}}
+  template:
+    metadata: {labels: {app: worker}}
+    spec:
+      automountServiceAccountToken: false
+      volumes:
+        - name: token
+          projected:
+            sources:
+              - serviceAccountToken: {path: token}
+      initContainers:
+        - name: egress-firewall
+          image: x
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL], add: [NET_ADMIN]}}
+      containers:
+        - name: worker
+          image: x
+          env: [{name: HTTPS_PROXY, value: "http://10.43.0.28:3128"}]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}

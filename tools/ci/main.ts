@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { checkAlerting } from "./alerting";
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
-import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkWorkloads } from "./policy";
+import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkSandbox, checkWorkloads } from "./policy";
 import { kubeconform, renderAll } from "./render";
 import { RULES, checkActionFile, checkWorkflow, checkWorkflows } from "./workflow-guard";
 import { type Facts, evaluate } from "../deploy-merge/conditions";
@@ -400,6 +400,7 @@ const steps: Step[] = [
         revision: checkRevisions,
         "readonly-rbac": checkReadonlyRbac,
         ingress: checkIngress,
+        sandbox: checkSandbox,
       };
       const out: Violation[] = [];
       const covered = new Set<string>();

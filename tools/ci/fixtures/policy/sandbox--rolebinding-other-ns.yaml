@@ -1,0 +1,11 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: RBAC 바인딩을 두지 않는다
+# RoleBinding은 다른 ns에 있어도 subject로 sandbox SA를 묶을 수 있다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: leak, namespace: kube-system}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: secrets-reader}
+subjects:
+  - {kind: ServiceAccount, name: default, namespace: sandbox}

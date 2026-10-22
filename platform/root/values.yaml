@@ -50,7 +50,7 @@ components:
 
   # T08b. sandbox(격리 작업 공간과 egress 프록시), wave -2
   sandbox:
-    enabled: false
+    enabled: true
 
   # T10. appset-apps(ApplicationSet apps), wave 0
   appsetApps:
