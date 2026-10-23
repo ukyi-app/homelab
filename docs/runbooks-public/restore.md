@@ -13,7 +13,7 @@
 복원 Job, 임시 Cluster `pg-restore-*`, 도우미 Job은 Git에 두지 않는다. 사람이 `kubectl`로 만드는 일회성 객체라 Argo CD가 되돌리지도 치우지도 않는다(설계 C.5.7).
 
 - 이름은 실행마다 고유하게(아래 `RUN`), 라벨은 `homelab.ukyi.app/restore=<실행 id>`. 어느 앱의 복원인지는 실행 id와 함께 작업 기록에 남긴다.
-- 같은 실행에서 다시 시도할 때: 한 번 돌고 끝나는 Job(1절의 수동 백업·Valkey 복원)은 시도마다 시도 id(`TRY`, 난수 4자)를 붙인 새 이름으로 만든다. 실패한 시도의 로그를 지우지 않고 남기려는 것이다. 띄워 두고 `exec`하는 도우미 Job(2절의 `-r2`·`-db`)은 이름으로 찾으므로 하나여야 해서, 블록이 먼저 지우고(파드까지) 새로 만든다. 정리는 둘 다 라벨로 한다.
+- 같은 실행에서 다시 시도할 때: 1절의 수동 백업 Job은 시도마다 시도 id(`TRY`, 난수 4자)를 붙인 새 이름으로 만든다. 실패한 시도의 로그를 지우지 않고 남기려는 것이다. 1절의 Valkey 복원 Job은 실행마다 이름 하나(`restore-<실행 id>-vk`)다. 두 복원 Job이 같은 PVC에 동시에 쓰면 안 되므로, 이미 있으면 `kubectl create`가 실패해 멈춘다. 다시 하려면 앞 Job이 끝났는지(또는 멈췄는지) 사람이 보고 지운 뒤 만든다. 띄워 두고 `exec`하는 도우미 Job(2절의 `-r2`·`-db`)은 이름으로 찾으므로 하나여야 해서, 블록이 먼저 지우고(파드까지) 새로 만든다. 정리는 둘 다 라벨로 한다.
 - 명령은 bash와 zsh에서 같게 돌도록 썼다(따옴표 없는 변수의 단어 나누기에 기대지 않는다).
 - 끝나면 지우고 0개를 확인한다. 옛 자동 드릴은 고아 클러스터·PVC를 다시 써서 거짓 PASS를 냈다.
 - 앱 멈춤·재개와 Valkey 서버 내림·올림만 Git PR이다. selfHeal 때문에 `kubectl scale`은 되돌려진다(설계 B.8 E2).
@@ -90,18 +90,19 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
    kubectl -n app-$APP get deploy,pvc,cronjob
    ```
 
-2. **복원 Job:** PVC에 RDB를 `dump.rdb`로 두고 `appendonlydir`을 지운다. `OBJECT=latest`면 가장 최근 것이다(이름이 UTC 시각이라 정렬이 시각순). 특정 시점이면 파일 이름을 적는다. 서버가 uid 1000으로 쓴 파일을 지워야 해서 같은 uid로 돈다(local-retain hostPath PV에는 fsGroup이 적용되지 않는다).
+2. **복원 Job:** PVC에 RDB를 `dump.rdb`로 두고 `appendonlydir`을 지운다. Job 이름은 실행마다 하나(`restore-<실행 id>-vk`)다. 같은 RUN으로 다시 만들면 이름이 겹쳐 `kubectl create`가 실패한다. 이것은 의도다: 앞 Job이 아직 돌고 있으면 두 Job이 같은 PVC의 `/data/dump.rdb.new`를 함께 쓴다. 다시 하려면 `kubectl -n app-$APP get job restore-$RUN-vk`로 앞 Job이 끝났는지(또는 멈췄는지) 보고, 로그를 남긴 뒤 지우고 만든다. `OBJECT=latest`면 가장 최근 것이다(이름이 UTC 시각이라 정렬이 시각순). 특정 시점이면 파일 이름을 적는다. 서버가 uid 1000으로 쓴 파일을 지워야 해서 같은 uid로 돈다(local-retain hostPath PV에는 fsGroup이 적용되지 않는다).
 
    ```bash
    OBJECT=latest
-   TRY=$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')        # 시도마다 새로
+   # 한 블록이다. 같은 RUN의 Job이 이미 있으면 create가 실패하고 이 블록은 거기서 끝난다(뒤의 wait·logs가 앞 Job을 보지 않게).
+   ( set -euo pipefail
    BUCKET=$(kubectl -n app-$APP get cronjob $APP-valkey-backup \
      -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name=="BUCKET")].value}')
    kubectl create -f - <<EOF
    apiVersion: batch/v1
    kind: Job
    metadata:
-     name: restore-$RUN-vk-$TRY
+     name: restore-$RUN-vk
      namespace: app-$APP
      labels: { homelab.ukyi.app/restore: "$RUN" }
    spec:
@@ -153,8 +154,11 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
            - { name: data, persistentVolumeClaim: { claimName: valkey-data } }
            - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
    EOF
-   kubectl -n app-$APP wait --for=condition=complete job/restore-$RUN-vk-$TRY --timeout=15m
-   kubectl -n app-$APP logs job/restore-$RUN-vk-$TRY          # 받은 객체와 /data의 dump.rdb, appendonlydir 없음
+   kubectl -n app-$APP wait --for=condition=complete job/restore-$RUN-vk --timeout=15m
+   kubectl -n app-$APP logs job/restore-$RUN-vk          # 받은 객체와 /data의 dump.rdb, appendonlydir 없음
+   )
+   # 서브셸 뒤에 ||·&&를 붙이지 않는다(그 자리에서는 안의 set -e가 꺼진다, 0.1). 종료 코드는 다음 줄에서 본다.
+   [ $? -eq 0 ] && echo "복원 Job 끝" || echo "멈춤: 복원 Job을 만들지 못했거나 끝나지 않았다. 'kubectl -n app-$APP get job restore-$RUN-vk'로 앞 Job을 본다"
    ```
 
 3. **복원 모드로 올림(PR):** `running: true`와 `restoreMode: true`를 함께. 새 파드가 `appendonly no`로 떠 RDB를 읽는다. 키 수와 표식 키를 본다.
@@ -197,7 +201,7 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
 
 CNPG 복원은 제자리가 아니라 항상 새 클러스터다. 그래서 임시 클러스터를 시각 T1로 PITR하고, 그 DB 하나만 덤프해 공유 Cluster `pg`에 다시 넣는다.
 
-복원 객체 이름에는 앱 이름을 넣지 않는다(`pg-restore-<실행 id>`, `restore-<실행 id>-r2`·`-db`·`-vk-<시도 id>`, `backup-<실행 id>-<시도 id>`, 모두 38자 이하). CNPG는 인스턴스 이름 `<클러스터>-1`을 파드 hostname으로 쓰는데, 앱 이름(최대 53자)을 넣으면 63자를 넘어 임시 클러스터가 뜨지 않는다.
+복원 객체 이름에는 앱 이름을 넣지 않는다(`pg-restore-<실행 id>`, `restore-<실행 id>-r2`·`-db`·`-vk`, `backup-<실행 id>-<시도 id>`, 모두 35자 이하). CNPG는 인스턴스 이름 `<클러스터>-1`을 파드 hostname으로 쓰는데, 앱 이름(최대 53자)을 넣으면 63자를 넘어 임시 클러스터가 뜨지 않는다.
 
 **복원은 앱 역할로 한다.** 덤프는 앱이 만든 객체다. 앱 owner 자격이 털린 뒤라면 함수·CHECK 제약 같은 객체에 코드를 심어 둘 수 있고, 슈퍼유저(`postgres`)로 `pg_restore`하면 그 코드가 슈퍼유저 문맥에서 돌아 앱 역할을 승격하고 다른 앱 DB에 닿는다(2a의 로컬 시험에서 재현). 그래서 덤프는 앱 ns의 Job이 앱 연결 Secret(`<앱>-db`)으로 접속해 `--no-owner --no-privileges`로 넣고, 권한(ACL)만 같은 앱 역할로 따로 넣은 뒤 원본과 대조한다(4단계). 앱을 멈추는 것만으로는 저장된 코드를 막지 못한다.
 
