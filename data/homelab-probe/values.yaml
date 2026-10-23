@@ -1,0 +1,3 @@
+# T11 시나리오 2. 공유 Cluster pg에 역할·DB homelab-probe(비밀번호 원본 /apps/homelab-probe/postgres/PASSWORD).
+chartVersion: 1.0.0
+postgres: { enabled: true }
