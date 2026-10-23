@@ -12,7 +12,8 @@
 
 복원 Job, 임시 Cluster `pg-restore-*`, 도우미 Job은 Git에 두지 않는다. 사람이 `kubectl`로 만드는 일회성 객체라 Argo CD가 되돌리지도 치우지도 않는다(설계 C.5.7).
 
-- 이름은 실행마다 고유하게, 라벨은 `homelab.ukyi.app/restore=<실행 id>`.
+- 이름은 실행마다 고유하게(아래 `RUN`), 라벨은 `homelab.ukyi.app/restore=<실행 id>`. 어느 앱의 복원인지는 실행 id와 함께 작업 기록에 남긴다.
+- 명령은 bash와 zsh에서 같게 돌도록 썼다(따옴표 없는 변수의 단어 나누기에 기대지 않는다).
 - 끝나면 지우고 0개를 확인한다. 옛 자동 드릴은 고아 클러스터·PVC를 다시 써서 거짓 PASS를 냈다.
 - 앱 멈춤·재개와 Valkey 서버 내림·올림만 Git PR이다. selfHeal 때문에 `kubectl scale`은 되돌려진다(설계 B.8 E2).
 - 필요한 권한은 사람 kubeconfig(cluster-admin)다. 봇 읽기 계정과 CI에는 없다.
@@ -21,8 +22,26 @@
 export KUBECONFIG=~/.kube/homelab.yaml
 set -o pipefail                   # 파이프 왼쪽(pg_dump 등)의 실패를 놓치지 않는다. 없으면 오른쪽이 성공하면 전체가 성공이다
 APP=<앱 이름>
-RUN=$(date +%Y%m%d-%H%M)          # 실행 id. 이름과 라벨에 쓴다
+# 실행 id(22자): 초 단위 UTC 시각 + 난수 6자. 같은 분에 두 앱을 복원하거나 다시 시도해도 이름·라벨이 겹치지 않아
+# 정리(라벨로 지우기)가 다른 실행의 PVC를 지우지 않는다. 이름에 앱 이름을 넣지 않는 이유는 2절 머리.
+RUN=$(date -u +%Y%m%d-%H%M%S)-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')
+# 이 실행의 확인 표식(ok-<이름>)과 목록 파일. 값(비밀번호·데이터)은 두지 않는다.
+W=$(mktemp -d "${TMPDIR:-/tmp}/restore-$RUN.XXXXXX")
+need() { for g in "$@"; do [ -f "$W/ok-$g" ] || { echo "멈춤: '$g' 확인이 끝나지 않았다" >&2; return 1; }; done; }
+# 블록을 (다시) 시작할 때 그 단계와 뒤 단계의 표식을 지운다. 같은 RUN으로 다시 돌릴 때 옛 표식이 남아
+# 실패한 단계를 통과한 것처럼 보이지 않게. 순서는 2절 단계 순서다.
+begin() { local hit=""; for g in run vars predump tmp suspended auth list db main acl verify; do
+  [ "$g" = "$1" ] && hit=1; [ -z "$hit" ] || rm -f "$W/ok-$g"; done; }
+( set -euo pipefail; begin run
+  out=$(kubectl get cluster,job,pvc -A -l homelab.ukyi.app/restore=$RUN -o name)
+  [ -z "$out" ]
+  touch "$W/ok-run" )
+[ -f "$W/ok-run" ] && echo "통과: run" || echo "멈춤: 실행 id가 겹치거나 조회에 실패했다. RUN을 다시 만든다"
 ```
+
+**확인이 실패하면 멈춘다.** 확인 블록은 `( set -euo pipefail ... touch "$W/ok-<이름>" )` 한 줄 뒤에 `[ -f "$W/ok-<이름>" ]`로 판정하는 모양이다. 서브셸이라 블록 안의 명령 하나가 실패하면 그 블록만 끝나고(셸은 남는다), 마지막 줄의 표식이 생기지 않는다. 서브셸 뒤에 `&&`·`||`를 붙이거나 `if`의 조건으로 쓰지 않는다. bash와 zsh는 그 자리의 명령에 `set -e`를 적용하지 않아, 안에서 실패해도 다음 줄로 넘어간다(2a 시험에서 그렇게 DB가 지워지는 것을 봤다). 지우거나 되돌리기 어려운 단계(DB 삭제, 복원, 앱 재개)의 블록은 `need <앞 표식들>`로 시작해, 앞의 확인 하나라도 끝나지 않았으면 아무것도 하지 않는다. 블록 안 변수는 밖으로 나오지 않으므로 다음 블록이 쓸 값은 `$W`의 파일로 넘긴다. 블록은 `begin <단계>`로 시작해 그 단계와 뒤 단계의 표식을 먼저 지운다. 같은 `RUN`으로 블록을 다시 돌리면 그 뒤 블록도 차례로 다시 돌려야 한다.
+
+**DB에서 읽은 이름은 믿지 않는다.** 확장·스키마 이름과 버전은 앱이 만든 값이다(앱 자격이 털렸으면 공격자가 고른 값). `postgres`로 실행하는 SQL에 문자열로 이어 붙이지 않는다. 정규식과 허용 목록으로 거른 뒤 psql 변수로 넘기고, 식별자는 `:"이름"`, 문자열은 `:'값'`으로 psql이 인용하게 한다. psql 변수는 `-c`에서는 치환되지 않아 SQL은 표준 입력으로 보낸다. 화면에 내보낼 때는 `cat -v`로 제어문자를 막는다.
 
 ### 0.2 확인은 라벨로
 
@@ -73,7 +92,7 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
    apiVersion: batch/v1
    kind: Job
    metadata:
-     name: restore-$APP-$RUN
+     name: restore-$RUN-vk
      namespace: app-$APP
      labels: { homelab.ukyi.app/restore: "$RUN" }
    spec:
@@ -125,8 +144,8 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
            - { name: data, persistentVolumeClaim: { claimName: valkey-data } }
            - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
    EOF
-   kubectl -n app-$APP wait --for=condition=complete job/restore-$APP-$RUN --timeout=15m
-   kubectl -n app-$APP logs job/restore-$APP-$RUN          # 받은 객체와 /data의 dump.rdb, appendonlydir 없음
+   kubectl -n app-$APP wait --for=condition=complete job/restore-$RUN-vk --timeout=15m
+   kubectl -n app-$APP logs job/restore-$RUN-vk          # 받은 객체와 /data의 dump.rdb, appendonlydir 없음
    ```
 
 3. **복원 모드로 올림(PR):** `running: true`와 `restoreMode: true`를 함께. 새 파드가 `appendonly no`로 떠 RDB를 읽는다. 키 수와 표식 키를 본다.
@@ -156,7 +175,7 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
    kubectl -n app-$APP get cronjob $APP-valkey-backup   # SUSPEND False
    ```
 
-6. **정리:** `kubectl -n app-$APP delete job restore-$APP-$RUN` 뒤 0.2의 확인이 0개.
+6. **정리:** `kubectl -n app-$APP delete job restore-$RUN-vk` 뒤 0.2의 확인이 0개.
 
 백업 Job의 ACL은 `default` 사용자(`~* &* +@all`)다. 사용자를 나누면 `--rdb`에는 `sync`·`replconf`가 필요하다(U18 실측: 없으면 `NOPERM ... 'sync'`).
 
@@ -164,9 +183,9 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
 
 CNPG 복원은 제자리가 아니라 항상 새 클러스터다. 그래서 임시 클러스터를 시각 T1로 PITR하고, 그 DB 하나만 덤프해 공유 Cluster `pg`에 다시 넣는다.
 
-이 절의 객체 이름에는 앱 이름을 넣지 않는다(`pg-restore-<실행 id>`, `restore-<실행 id>-r2`·`-db`). CNPG는 인스턴스 이름 `<클러스터>-1`을 파드 hostname으로 쓰는데, 앱 이름(최대 53자)을 넣으면 63자를 넘어 임시 클러스터가 뜨지 않는다. 어느 앱의 복원인지는 실행 id와 함께 기록한다.
+복원 객체 이름에는 앱 이름을 넣지 않는다(`pg-restore-<실행 id>`, `restore-<실행 id>-r2`·`-db`·`-vk`, 모두 33자 이하). CNPG는 인스턴스 이름 `<클러스터>-1`을 파드 hostname으로 쓰는데, 앱 이름(최대 53자)을 넣으면 63자를 넘어 임시 클러스터가 뜨지 않는다.
 
-**복원은 앱 역할로 한다.** 덤프는 앱이 만든 객체다. 앱 owner 자격이 털린 뒤라면 함수·CHECK 제약 같은 객체에 코드를 심어 둘 수 있고, 슈퍼유저(`postgres`)로 `pg_restore`하면 그 코드가 슈퍼유저 문맥에서 돌아 앱 역할을 승격하고 다른 앱 DB에 닿는다(2a의 로컬 시험에서 재현). 그래서 덤프는 앱 ns의 Job이 앱 연결 Secret(`<앱>-db`)으로 접속해 `--no-owner --no-privileges`로 넣는다. 앱을 멈추는 것만으로는 저장된 코드를 막지 못한다.
+**복원은 앱 역할로 한다.** 덤프는 앱이 만든 객체다. 앱 owner 자격이 털린 뒤라면 함수·CHECK 제약 같은 객체에 코드를 심어 둘 수 있고, 슈퍼유저(`postgres`)로 `pg_restore`하면 그 코드가 슈퍼유저 문맥에서 돌아 앱 역할을 승격하고 다른 앱 DB에 닿는다(2a의 로컬 시험에서 재현). 그래서 덤프는 앱 ns의 Job이 앱 연결 Secret(`<앱>-db`)으로 접속해 `--no-owner --no-privileges`로 넣고, 권한(ACL)만 같은 앱 역할로 따로 넣은 뒤 원본과 대조한다(4단계). 앱을 멈추는 것만으로는 저장된 코드를 막지 못한다.
 
 Secret·ObjectStore 이름은 `platform/cnpg/cluster`를 따른다(R2 자격 Secret `r2-backup`, 키 `ACCESS_KEY_ID`·`SECRET_ACCESS_KEY`·`ENDPOINT_URL`, ObjectStore `r2`). 바뀌면 이 절을 함께 고친다.
 
@@ -179,13 +198,26 @@ IMG=$(kubectl -n database get cluster pg -o jsonpath='{.spec.imageName}')
 SIZE=$(kubectl -n database get cluster pg -o jsonpath='{.spec.storage.size}')
 BUCKET=$(kubectl -n database get objectstore r2 -o jsonpath='{.spec.configuration.destinationPath}' | sed -E 's#^s3://([^/]+)/.*#\1#')
 PRIMARY=$(kubectl -n database get cluster pg -o jsonpath='{.status.currentPrimary}')
-kubectl -n database get backups      # T1 앞에 completed base backup이 있는지
+dump() { kubectl -n database exec "$TMP" -c postgres -- pg_dump -U postgres -Fc -d "$APP"; }   # 임시 클러스터의 그 DB
+J() { kubectl -n app-$APP exec -i job/restore-$RUN-db -- "$@"; }                                 # 4-1의 앱 역할 복원 Job
+( set -euo pipefail; begin vars; need run
+  # 검사는 한 줄에 하나. "a && b"의 앞쪽 실패에는 set -e가 멈추지 않는다
+  [ -n "$T1" ]; [ -n "$BUCKET" ]; [ -n "$PRIMARY" ]
+  # SQL·YAML·sed에 들어가는 값의 모양. APP은 앱 차트와 같은 DNS 라벨이다
+  printf '%s' "$APP" | grep -qE '^[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$'
+  printf '%s' "$SRV" | grep -qE '^[a-z0-9-]+$'
+  printf '%s' "$IMG" | grep -qE '^[a-z0-9./_-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$'
+  printf '%s' "$SIZE" | grep -qE '^[0-9]+(Mi|Gi|Ti)$'
+  kubectl -n database get backups      # T1 앞에 completed base backup이 있는지 눈으로 본다
+  touch "$W/ok-vars" )
+[ -f "$W/ok-vars" ] && echo "통과: vars" || echo "멈춤: 값이 비었거나 조회에 실패했다"
 ```
 
-1. **되돌림용 덤프:** 지금 DB를 R2 `pgdump/<앱>/pre-restore-<실행 id>.dump`에 남긴다. 덤프는 파드 안 `postgres` 로컬 접속으로 하고 도우미 Job(rclone)으로 바로 올린다. 사람 기기에 데이터가 남지 않고, `database` ns의 5432 기본 거부(앱 ns만 허용)도 건드리지 않는다. 이 prefix에는 lifecycle이 없어 복원을 확인한 뒤 손으로 지운다.
+1. **되돌림용 덤프:** 지금 DB를 R2 `pgdump/<앱>/pre-restore-<실행 id>.dump`에 남긴다. 덤프는 파드 안 `postgres` 로컬 접속으로 하고 도우미 Job(rclone)으로 바로 올린다. 사람 기기에 데이터가 남지 않고, `database` ns의 5432 기본 거부(앱 ns만 허용)도 건드리지 않는다. 올린 사본은 끝까지 읽어 본다. 목록(`--list`)만 보면 앞에 있는 목차만 읽어 잘린 사본도 통과한다. 이 prefix에는 lifecycle이 없어 복원을 확인한 뒤 손으로 지운다.
 
    ```bash
-   kubectl create -f - <<EOF
+   ( set -euo pipefail; begin predump; need run vars
+     kubectl create -f - <<YAML
    apiVersion: batch/v1
    kind: Job
    metadata:
@@ -219,24 +251,22 @@ kubectl -n database get backups      # T1 앞에 completed base backup이 있는
              securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
              volumeMounts: [{ name: tmp, mountPath: /tmp }]
          volumes: [{ name: tmp, emptyDir: { sizeLimit: 16Mi } }]
-   EOF
-   kubectl -n database wait --for=condition=ready pod -l job-name=restore-$RUN-r2 --timeout=5m
-   KEY="r2:$BUCKET/pgdump/$APP/pre-restore-$RUN.dump"
-   kubectl -n database exec $PRIMARY -c postgres -- pg_dump -U postgres -Fc -d "$APP" \
-     | kubectl -n database exec -i job/restore-$RUN-r2 -- rclone rcat "$KEY" \
-     && echo "덤프 올림"                                                            # 0.1의 pipefail로 pg_dump 실패도 여기서 멈춘다
-   # 올린 사본을 끝까지 읽어 본다. 목록(--list)만 보면 앞에 있는 목차만 읽어 잘린 사본도 통과한다.
-   kubectl -n database exec job/restore-$RUN-r2 -- rclone cat "$KEY" \
-     | kubectl -n database exec -i $PRIMARY -c postgres -- pg_restore -f /dev/null \
-     && echo "되돌림 사본 확인"
+   YAML
+     kubectl -n database wait --for=condition=ready pod -l job-name=restore-$RUN-r2 --timeout=5m
+     KEY="r2:$BUCKET/pgdump/$APP/pre-restore-$RUN.dump"
+     kubectl -n database exec "$PRIMARY" -c postgres -- pg_dump -U postgres -Fc -d "$APP" \
+       | kubectl -n database exec -i job/restore-$RUN-r2 -- rclone rcat "$KEY"
+     kubectl -n database exec job/restore-$RUN-r2 -- rclone cat "$KEY" \
+       | kubectl -n database exec -i "$PRIMARY" -c postgres -- pg_restore -f /dev/null
+     touch "$W/ok-predump" )
+   [ -f "$W/ok-predump" ] && echo "되돌림 사본 확인" || echo "멈춤: 되돌림 사본을 확인하지 못했다"
    ```
-
-   **"되돌림 사본 확인"이 나오지 않으면 여기서 멈춘다.** 4단계가 지금 DB를 지운다.
 
 2. **임시 클러스터:** `bootstrap.recovery`로 T1까지 되감는다. WAL 아카이버 plugin을 붙이지 않는다(운영 prefix에 쓰지 않게, 설계 B.8 E6). PVC는 `local-path`(Delete)라 PVC를 지우면 노드의 폴더도 지워진다. `inheritedMetadata`가 실행 id 라벨을 PVC·파드에 물려준다.
 
    ```bash
-   kubectl create -f - <<EOF
+   ( set -euo pipefail; need run vars
+     kubectl create -f - <<YAML
    apiVersion: postgresql.cnpg.io/v1
    kind: Cluster
    metadata:
@@ -261,10 +291,14 @@ kubectl -n database get backups      # T1 앞에 completed base backup이 있는
            parameters:
              barmanObjectName: r2
              serverName: $SRV
-   EOF
-   kubectl -n database wait --for=condition=Ready cluster/pg-restore-$RUN --timeout=30m
+   YAML
+     kubectl -n database wait --for=condition=Ready cluster/pg-restore-$RUN --timeout=30m )
    TMP=$(kubectl -n database get cluster pg-restore-$RUN -o jsonpath='{.status.currentPrimary}')
-   kubectl -n database exec $TMP -c postgres -- psql -U postgres -d "$APP" -tAc 'select count(*) from <표식 테이블>'
+   ( set -euo pipefail; begin tmp; need run vars
+     [ -n "$TMP" ]
+     kubectl -n database exec "$TMP" -c postgres -- psql -U postgres -d "$APP" -v ON_ERROR_STOP=1 -tAc 'select count(*) from <표식 테이블>'
+     touch "$W/ok-tmp" )
+   [ -f "$W/ok-tmp" ] && echo "통과: tmp" || echo "멈춤: 임시 클러스터가 준비되지 않았다"
    ```
 
    U26 확인(복원 시험의 임시 Cluster에서): 이 클러스터의 `spec.bootstrap`을 `initdb`로 바꾸는 patch가 webhook에 거부되지 않는지, 떠 있는 클러스터에 영향이 없는지 본다. 결과는 설계 부록 1 U26에 적는다.
@@ -278,34 +312,38 @@ kubectl -n database get backups      # T1 앞에 completed base backup이 있는
 3. **앱 멈춤(PR):** `apps/<앱>/values.yaml`에 `suspended: true`(앱 차트 1.1.0부터. replicas 0, 마이그레이션 Job 없음). 병합 뒤 파드가 없는지 본다.
 
    ```bash
-   kubectl -n app-$APP get pods -l homelab.ukyi.app/app=$APP     # No resources
+   ( set -euo pipefail; begin suspended; need run vars
+     # Deployment가 0으로 줄었고 실제로 0개다. 완료된(Succeeded) <앱>-migrate 파드는 남아 있어도 된다.
+     # hook 삭제 정책이 BeforeHookCreation뿐이라 다음 hook 직전에만 지워지고, suspended면 새 hook도 없다.
+     [ "$(kubectl -n app-$APP get deploy $APP -o jsonpath='{.spec.replicas}')" = 0 ]
+     [ "$(kubectl -n app-$APP get deploy $APP -o jsonpath='{.status.replicas}')" = "" ] \
+       || [ "$(kubectl -n app-$APP get deploy $APP -o jsonpath='{.status.replicas}')" = 0 ]
+     # 돌고 있거나 뜨려는 앱 파드(마이그레이션 포함)가 없다. Valkey 캐시 파드는 이 라벨이 없다.
+     out=$(kubectl -n app-$APP get pods -l homelab.ukyi.app/app=$APP --field-selector=status.phase!=Succeeded,status.phase!=Failed -o name)
+     [ -z "$out" ]
+     touch "$W/ok-suspended" )
+   [ -f "$W/ok-suspended" ] && echo "통과: suspended" || echo "멈춤: 앱 파드가 남아 있거나 조회에 실패했다"
    ```
 
-4. **덤프·복원:** 빈 DB에 넣는다. `--clean`만 쓰면 덤프에 있는 객체만 지워 T1 뒤에 만든 스키마·테이블이 남는다. 그래서 DB를 지우고 다시 만든다. DB를 지우고 만드는 것은 `postgres`가 하고(덤프 내용을 실행하지 않는다), 덤프를 넣는 것은 앱 역할이 한다.
+4. **덤프·복원:** 빈 DB에 넣는다. `--clean`만 쓰면 덤프에 있는 객체만 지워 T1 뒤에 만든 스키마·테이블이 남는다. 그래서 DB를 지우고 다시 만든다. DB DROP·CREATE와 확장 만들기만 `postgres`가 하고(덤프 내용을 실행하지 않는다), 덤프를 넣는 것은 앱 역할이 두 번에 나눠 한다: 본 복원(`--no-privileges`)과 ACL 복원. 4-3(DB 삭제) 앞의 확인 표식이 모두 있어야 4-3이 시작한다. 아래 절차는 2a의 로컬 시험으로 그대로 돌려 봤다.
 
-   먼저 덤프에 확장이 있는지 본다. 확장은 앱 역할이 만들 수 없어 `--exit-on-error`로 멈춘다. 있으면 DB를 다시 만든 직후 `postgres`로 `CREATE EXTENSION`을 먼저 한다(확장 이름만 쓰고 덤프의 SQL을 실행하지 않는다).
-
-   ```bash
-   kubectl -n database exec $TMP -c postgres -- pg_dump -U postgres -Fc -d "$APP" \
-     | kubectl -n database exec -i $PRIMARY -c postgres -- pg_restore --list | grep ' EXTENSION ' || echo "확장 없음"
-   ```
-
-   앱 ns에 복원 Job을 띄운다. 이미지는 클러스터와 같은 PostgreSQL 이미지다(`pg_restore` major = 서버 major). 앱 차트의 NetworkPolicy가 이 ns에서 `pg` 5432를 열어 둔다(`uses.postgres`). uid 26은 이 이미지의 `postgres` 사용자다.
+   **4-1. 앱 ns 복원 Job과 접속 확인.** 이미지는 클러스터와 같은 PostgreSQL 이미지다(`pg_restore` major = 서버 major, uid 26). 앱 차트의 NetworkPolicy가 이 ns에서 `pg` 5432를 열어 둔다(`uses.postgres`). 시작 스크립트가 `DATABASE_URL`에서 비밀번호를 꺼내 메모리 emptyDir의 pgpass로 두고, 이후 `pg_restore`·`psql`은 libpq 환경변수(`PGHOST`·`PGUSER`·`PGDATABASE`·`PGPASSFILE`)로 접속한다. 비밀번호가 명령행 인자(`-d <URL>`)에 들어가지 않는다. 셸 내장만 써서 꺼내 파생 프로세스의 argv에도 없다(로컬 실측 0건). pgpass는 행 단위라 줄바꿈(CR·LF)이 든 비밀번호는 담을 수 없다. 그런 값이면 시작 스크립트가 실패해 Job이 Ready가 되지 않는다(비밀번호는 영숫자로 만든다, `rotate.md` 3c). 마지막으로 지금 DB에 앱 역할로 실제 접속해 본다. `--list`는 접속하지 않으므로, 이 확인이 없으면 비밀번호 문제가 DB를 지운 뒤에야 드러난다.
 
    ```bash
-   kubectl create -f - <<EOF
+   ( set -euo pipefail; begin auth; need run vars
+     cat <<'YAML' | sed "s/__APP__/$APP/g; s/__RUN__/$RUN/g; s#__IMG__#$IMG#g" | kubectl create -f -
    apiVersion: batch/v1
    kind: Job
    metadata:
-     name: restore-$RUN-db
-     namespace: app-$APP
-     labels: { homelab.ukyi.app/restore: "$RUN" }
+     name: restore-__RUN__-db
+     namespace: app-__APP__
+     labels: { homelab.ukyi.app/restore: "__RUN__" }
    spec:
      backoffLimit: 0
      activeDeadlineSeconds: 7200
      template:
        metadata:
-         labels: { homelab.ukyi.app/restore: "$RUN" }
+         labels: { homelab.ukyi.app/restore: "__RUN__" }
        spec:
          restartPolicy: Never
          automountServiceAccountToken: false
@@ -313,48 +351,171 @@ kubectl -n database get backups      # T1 앞에 completed base backup이 있는
          securityContext: { runAsNonRoot: true, runAsUser: 26, runAsGroup: 26, seccompProfile: { type: RuntimeDefault } }
          containers:
            - name: restore
-             image: $IMG
-             command: ["sleep", "7000"]
+             image: __IMG__
+             command: ["bash", "-c"]
+             args:
+               - |
+                 set -euo pipefail
+                 umask 077
+                 # postgresql://<앱>:<urlquery 비밀번호>@...에서 비밀번호만. pgpass는 : 와 \ 를 이스케이프한다.
+                 enc=${DATABASE_URL#*://*:}; enc=${enc%%@*}
+                 # pgpass는 행 단위다. 줄바꿈이 든 비밀번호는 담을 수 없어 시작하지 않는다(DB를 지우기 전에 드러나게).
+                 case $enc in *%0[AaDd]*) echo "비밀번호에 줄바꿈이 있다. 영숫자로 다시 만든다" >&2; exit 1;; esac
+                 pw=$(printf '%b' "${enc//%/\\x}")
+                 pw=${pw//\\/\\\\}; pw=${pw//:/\\:}
+                 printf '%s:%s:%s:%s:%s\n' "$PGHOST" "$PGPORT" "$PGDATABASE" "$PGUSER" "$pw" > "$PGPASSFILE"
+                 unset enc pw
+                 exec sleep 7000
              env:
                - { name: HOME, value: /tmp }
-               - { name: DATABASE_URL, valueFrom: { secretKeyRef: { name: $APP-db, key: DATABASE_URL } } }
+               - { name: PGHOST, value: pg-rw.database.svc }
+               - { name: PGPORT, value: "5432" }
+               - { name: PGUSER, value: __APP__ }
+               - { name: PGDATABASE, value: __APP__ }
+               - { name: PGSSLMODE, value: require }
+               - { name: PGPASSFILE, value: /tmp/pgpass }
+               - { name: DATABASE_URL, valueFrom: { secretKeyRef: { name: __APP__-db, key: DATABASE_URL } } }
              resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
              securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
              volumeMounts: [{ name: tmp, mountPath: /tmp }]
-         volumes: [{ name: tmp, emptyDir: { sizeLimit: 16Mi } }]
-   EOF
-   kubectl -n app-$APP wait --for=condition=ready pod -l job-name=restore-$RUN-db --timeout=5m
+         volumes: [{ name: tmp, emptyDir: { medium: Memory, sizeLimit: 16Mi } }]
+   YAML
+     kubectl -n app-$APP wait --for=condition=ready pod -l job-name=restore-$RUN-db --timeout=5m
+     [ "$(J psql -v ON_ERROR_STOP=1 -tAc 'select current_user')" = "$APP" ]
+     touch "$W/ok-auth" )
+   [ -f "$W/ok-auth" ] && echo "통과: auth" || echo "멈춤: 복원 Job이 앱 역할로 접속하지 못했다"
    ```
 
+   **4-2. 목록과 확장.** 목록을 못 만들거나(임시 클러스터 접근·덤프 실패) 확장 조회가 실패하면 표식이 생기지 않는다. "확장 없음"은 조회가 성공하고 결과가 비었을 때만이다. 확장은 원본의 스키마와 버전을 그대로 쓴다. 이름만으로 만들면 PostgreSQL이 기본 스키마와 control 파일의 기본 버전을 고르고, 덤프의 `EXTENSION` 항목은 4-4에서 빼므로 그 차이가 교정되지 않는다.
+
    ```bash
-   kubectl -n database exec $PRIMARY -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 \
-     -c "DROP DATABASE \"$APP\" WITH (FORCE)"
-   # CNPG Database 리소스가 먼저 다시 만들 수 있다. 있으면 owner와 비어 있음만 보고, 없으면 만든다.
-   kubectl -n database exec $PRIMARY -c postgres -- psql -U postgres -tAc \
-     "select pg_get_userbyid(datdba) from pg_database where datname='$APP'"
-   kubectl -n database exec $PRIMARY -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 \
-     -c "CREATE DATABASE \"$APP\" OWNER \"$APP\""          # 위가 비었을 때만
-   # (확장이 있었으면 여기서 postgres로 CREATE EXTENSION)
-   # 앱 역할로 넣는다. --no-owner: 모든 객체가 앱 역할 소유가 된다. --no-privileges: GRANT·REVOKE를 넣지 않는다.
-   kubectl -n database exec $TMP -c postgres -- pg_dump -U postgres -Fc -d "$APP" \
-     | kubectl -n app-$APP exec -i job/restore-$RUN-db -- sh -c 'pg_restore --no-owner --no-privileges --exit-on-error -d "$DATABASE_URL"' \
-     && echo "복원됨"
-   kubectl -n database get database $APP -o jsonpath='{.status.applied}{"\n"}'   # true(재조정이 다시 만든 DB를 건드리지 않음)
-   # 앱 역할이 승격되지 않았는지. 모두 f여야 한다
-   kubectl -n database exec $PRIMARY -c postgres -- psql -U postgres -tAc \
-     "select rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls from pg_roles where rolname='$APP'"
+   ( set -euo pipefail; begin list; need tmp auth
+     dump | J pg_restore --list > "$W/list"
+     [ -s "$W/list" ]
+     kubectl -n database exec "$TMP" -c postgres -- psql -U postgres -d "$APP" -v ON_ERROR_STOP=1 -tA -F ' ' -c \
+       "select e.extname, n.nspname, e.extversion from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname <> 'plpgsql' order by e.oid" > "$W/ext"
+     # 앱이 만든 값이다. 세 칸 모양을 거르고, 대상 이미지가 실제로 설치할 수 있는 이름·버전 조합만 받는다.
+     # 이상한 이름이면 여기서 멈춘다(손으로 본다). 이름·스키마 규칙: 소문자로 시작, 소문자·숫자·_ 63자.
+     # "! cmd"와 "a && b"의 앞쪽에는 set -e가 듣지 않는다. 실패는 if로 직접 끝낸다.
+     if grep -vE '^[a-z][a-z0-9_]{0,62} [a-z_][a-z0-9_]{0,62} [A-Za-z0-9._-]{1,32}$' "$W/ext" | cat -v; then
+       echo "이름·버전 모양이 이상한 확장 줄이 있다" >&2; exit 1; fi
+     while read -r e sch v; do
+       [ -n "$e" ] || continue
+       ok=$(printf '%s\n' "select 1 from pg_available_extension_versions where name = :'e' and version = :'v'" \
+         | kubectl -n database exec -i "$PRIMARY" -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 -tA -v e="$e" -v v="$v")
+       [ "$ok" = 1 ]
+     done < "$W/ext"
+     # 4-4 목록: 미리 만들 확장과, 그 확장이 사는 public이 아닌 스키마의 항목을 주석(;)으로 뺀다(4-3이 먼저 만든다).
+     # TOC 줄: "<id>; <cat> <oid> EXTENSION - <이름>", "... COMMENT - EXTENSION <이름>", "... SCHEMA - <이름> <owner>"
+     awk 'FILENAME == ARGV[1] { ext[$1] = 1; if ($2 != "public") sch[$2] = 1; next }
+          ($4 == "EXTENSION" && $5 == "-" && ($6 in ext)) ||
+          ($4 == "COMMENT" && $6 == "EXTENSION" && ($7 in ext)) ||
+          ($4 == "SCHEMA" && $5 == "-" && ($6 in sch)) { print ";" $0; next }
+          { print }' "$W/ext" "$W/list" > "$W/main.list"
+     [ -s "$W/main.list" ]
+     grep -E '^[0-9]+; [0-9]+ [0-9]+ (ACL|DEFAULT ACL) ' "$W/list" > "$W/acl.list" || [ $? -eq 1 ]
+     touch "$W/ok-list" )
+   [ -f "$W/ok-list" ] && echo "통과: list" || echo "멈춤: 목록이나 확장 조회에 실패했다(지금 DB는 그대로다)"
+   [ -f "$W/ok-list" ] && { cat -v "$W/ext"; [ -s "$W/ext" ] || echo "확장 없음"; }
    ```
 
-   객체 소유자는 모두 앱 역할이다. 덤프에 다른 역할 소유의 객체가 있었다면 그 소유는 돌아오지 않는다(앱 역할 하나가 DB owner라 보통 없다).
-
-5. **캐시 비우기와 앱 재개(PR):** 앱이 캐시 Valkey(`cache.enabled`)를 쓰면 재개 전에 캐시 파드를 지운다. 캐시는 `emptyDir`이라 새 파드는 빈 상태로 뜬다. 지우지 않으면 T1 뒤의 값(되돌린 DB에 없는 행)을 계속 돌려준다.
+   **4-3. DB 다시 만들기(`postgres`).** 여기서 지금 DB를 지운다. 앞의 확인(되돌림 사본, 임시 클러스터, 앱 멈춤, 앱 역할 접속, 목록)이 하나라도 없으면 시작하지 않는다.
 
    ```bash
-   kubectl -n app-$APP delete pod -l app.kubernetes.io/name=valkey,app.kubernetes.io/instance=$APP   # 캐시를 쓸 때만
-   kubectl -n app-$APP rollout status deploy/$APP-valkey
+   ( set -euo pipefail; begin db; need predump tmp suspended auth list
+     # SQL은 표준 입력으로, 값은 psql 변수로(-c에서는 치환되지 않는다). :"x"는 식별자, :'x'는 문자열로 psql이 인용한다.
+     q() { kubectl -n database exec -i "$PRIMARY" -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 -tA -v app="$APP" "$@"; }
+     # 4-2와 같은 모양 검사를 한 번 더 한다(그 사이 파일이 바뀌었을 때).
+     if grep -qvE '^[a-z][a-z0-9_]{0,62} [a-z_][a-z0-9_]{0,62} [A-Za-z0-9._-]{1,32}$' "$W/ext"; then
+       echo "이름·버전 모양이 이상한 확장 줄이 있다" >&2; exit 1; fi
+     # IF EXISTS: 같은 RUN으로 다시 돌릴 때 앞 실행이 이미 지웠을 수 있다
+     printf '%s\n' 'DROP DATABASE IF EXISTS :"app" WITH (FORCE)' | q
+     # CNPG Database 리소스가 먼저 다시 만들 수 있다. 있으면 owner만 보고, 없으면 만든다.
+     own=$(printf '%s\n' "select pg_get_userbyid(datdba) from pg_database where datname = :'app'" | q)
+     if [ -z "$own" ]; then printf '%s\n' 'CREATE DATABASE :"app" OWNER :"app"' | q
+     elif [ "$own" != "$APP" ]; then echo "DB owner가 앱 역할이 아니다" >&2; exit 1; fi
+     # 확장은 앱 역할이 만들 수 없다. 원본의 스키마·버전으로 만들고 덤프의 SQL은 실행하지 않는다.
+     while read -r e sch v; do
+       [ -n "$e" ] || continue
+       if [ "$sch" != public ]; then
+         printf '%s\n' 'CREATE SCHEMA IF NOT EXISTS :"sch" AUTHORIZATION :"app"' | q -d "$APP" -v sch="$sch"
+       fi
+       printf '%s\n' "CREATE EXTENSION :\"e\" SCHEMA :\"sch\" VERSION :'v'" | q -d "$APP" -v e="$e" -v sch="$sch" -v v="$v"
+     done < "$W/ext"
+     touch "$W/ok-db" )
+   [ -f "$W/ok-db" ] && echo "통과: db" || echo "멈춤: DB를 다시 만들지 않았다. 위에 '확인이 끝나지 않았다'가 있으면 그 단계로 돌아간다. DROP 뒤 'already exists'로 실패했으면 이 블록을 다시 돌린다(빈 DB를 다시 지운다)"
+   ```
+
+   **4-4. 본 복원(앱 역할).** 4-3에서 만든 확장의 `EXTENSION`과 `COMMENT - EXTENSION` 항목은 목록에서 뺐다(4-2). 남기면 앱 역할이 `postgres` 소유 확장에 주석을 달다 `must be owner of extension`으로 멈춘다(로컬 실측). `--no-owner`는 모든 객체를 앱 역할 소유로, `--no-privileges`는 GRANT·REVOKE를 건너뛴다. 덤프는 원래 순서 그대로 읽으므로 표준 입력과 `-L`을 함께 쓸 수 있다.
+
+   ```bash
+   ( set -euo pipefail; begin main; need db list
+     J sh -c 'cat > /tmp/main.list' < "$W/main.list"
+     J sh -c 'cat > /tmp/acl.list' < "$W/acl.list"
+     dump | J sh -c 'pg_restore -L /tmp/main.list --no-owner --no-privileges --exit-on-error -d "$PGDATABASE"'
+     touch "$W/ok-main" )
+   [ -f "$W/ok-main" ] && echo "본 복원됨" || echo "멈춤: 본 복원에 실패했다(되돌림 사본은 1단계)"
+   ```
+
+   **4-5. ACL 복원(앱 역할)과 대조.** `--no-privileges`만으로 끝내면 원본의 `REVOKE ... FROM PUBLIC`이 사라져, 새 함수는 PostgreSQL 기본값(PUBLIC 실행 가능)으로 돌아간다. 공유 클러스터라 다른 앱 역할이 원래 못 부르던 함수(특히 `SECURITY DEFINER`)를 부를 수 있게 된다. 그래서 ACL 항목(`ACL`, `DEFAULT ACL`)만 앱 역할로 따로 넣는다. GRANT·REVOKE는 객체 소유자만 할 수 있어 앱 역할로는 자기 DB의 자기 객체 권한만 바뀐다. 슈퍼유저 문맥에서 덤프를 실행하는 문제(위 "복원은 앱 역할로 한다")가 생기지 않는다. 그다음 임시 클러스터(원본)와 복원본의 ACL이 같은지 본다. 두 조회는 각각 성공과 결과가 비어 있지 않음을 확인한 뒤 비교한다(조회가 둘 다 실패해 빈 출력끼리 비교하면 "같음"이 된다). 결과에는 늘 `public` 스키마 줄이 있어 비지 않는다.
+
+   ```bash
+   ACL_SQL=$(cat <<'SQL'
+   select kind, name, coalesce(acl, '-') from (
+     select 'function' kind, p.oid::regprocedure::text name, p.proacl::text acl from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname not in ('pg_catalog', 'information_schema') and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')
+     union all
+     select 'relation', c.oid::regclass::text, c.relacl::text from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname not like 'pg_toast%' and not exists (select 1 from pg_depend d where d.classid = 'pg_class'::regclass and d.objid = c.oid and d.deptype = 'e')
+     union all
+     select 'schema', n.nspname, n.nspacl::text from pg_namespace n where n.nspname not like 'pg\_%' and n.nspname <> 'information_schema'
+     union all
+     select 'type', t.oid::regtype::text, t.typacl::text from pg_type t join pg_namespace n on n.oid = t.typnamespace
+      where t.typacl is not null and n.nspname not in ('pg_catalog', 'information_schema')
+     union all
+     select 'default', pg_get_userbyid(a.defaclrole) || ' ' || coalesce(a.defaclnamespace::regnamespace::text, '*') || ' ' || a.defaclobjtype::text, a.defaclacl::text from pg_default_acl a
+   ) x order by 1, 2;
+   SQL
+   )
+   ( set -euo pipefail; begin acl; need main
+     if [ -s "$W/acl.list" ]; then dump | J sh -c 'pg_restore -L /tmp/acl.list --no-owner --exit-on-error -d "$PGDATABASE"'; fi
+     acl() { printf '%s\n' "$ACL_SQL" | kubectl -n database exec -i "$1" -c postgres -- psql -U postgres -d "$APP" -v ON_ERROR_STOP=1 -qAt; }
+     acl "$TMP" > "$W/acl-src"
+     acl "$PRIMARY" > "$W/acl-dst"
+     [ -s "$W/acl-src" ]
+     [ -s "$W/acl-dst" ]
+     diff "$W/acl-src" "$W/acl-dst" | cat -v      # 이름은 앱이 만든 값이라 제어문자를 막아 보인다
+     touch "$W/ok-acl" )
+   [ -f "$W/ok-acl" ] && echo "ACL 원본과 같음" || echo "멈춤: ACL 복원·조회에 실패했거나 원본과 다르다(재개하지 않는다)"
+   ```
+
+   다르면 차이 줄(`kind|이름|ACL`)을 보고 원본 ACL대로 앱 역할로 GRANT·REVOKE한 뒤 이 블록을 다시 돌린다.
+
+   **4-6. 확인.**
+
+   ```bash
+   ( set -euo pipefail; begin verify; need acl
+     [ "$(kubectl -n database get database $APP -o jsonpath='{.status.applied}')" = true ]   # 재조정이 다시 만든 DB를 건드리지 않음
+     # 앱 역할이 승격되지 않았는지
+     [ "$(kubectl -n database exec "$PRIMARY" -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 -tAc \
+       "select rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls from pg_roles where rolname='$APP'")" = "f|f|f|f|f" ]
+     touch "$W/ok-verify" )
+   [ -f "$W/ok-verify" ] && echo "확인 끝" || echo "멈춤: Database 적용이나 역할 권한이 이상하다(재개하지 않는다)"
+   ```
+
+   객체 소유자는 모두 앱 역할이다(4-3에서 만든 확장만 `postgres`). 덤프에 다른 역할 소유의 객체가 있었다면 그 소유는 돌아오지 않는다(앱 역할 하나가 DB owner라 보통 없다).
+
+5. **캐시 비우기와 앱 재개(PR):** `ok-verify`가 없으면 재개 PR을 올리지 않는다. 앱이 캐시 Valkey(`cache.enabled`)를 쓰면 재개 전에 캐시 파드를 지운다. 캐시는 `emptyDir`이라 새 파드는 빈 상태로 뜬다. 지우지 않으면 T1 뒤의 값(되돌린 DB에 없는 행)을 계속 돌려준다.
+
+   ```bash
+   ( set -euo pipefail; need verify
+     # 캐시를 쓸 때만
+     kubectl -n app-$APP delete pod -l app.kubernetes.io/name=valkey,app.kubernetes.io/instance=$APP
+     kubectl -n app-$APP rollout status deploy/$APP-valkey )
    ```
 
    그다음 PR로 `suspended` 줄을 지운다. 마이그레이션 Job이 다시 돌고 앱이 뜬다.
+
 6. **정리:** 임시 Cluster, 그 PVC, 도우미 Job 둘을 지우고 0개를 본다.
 
    ```bash
@@ -394,6 +555,16 @@ for mode in superuser app-role; do
 done
 podman rm -f pgm
 ```
+
+같은 날 0.1과 3·4단계의 블록을 문서에서 그대로 꺼내 zsh와 bash로 돌렸다. 원본·대상 PostgreSQL 18 둘, 복원 Job 대신 CNPG 이미지 컨테이너(uid 26, 읽기 전용 루트)를 썼고 `kubectl`은 `podman` 대역 함수다. 1·2단계 표식은 손으로 만들었다(R2·CNPG 복구는 클러스터에서만 된다). 3단계(앱 멈춤 확인)는 로컬 kind(v0.33.0, Kubernetes 1.37)에서 실제 Deployment·Job으로 돌렸다. 원본에는 위 악성 CHECK, 기본이 아닌 스키마(`ext`)·옛 버전(1.0, 기본 1.2)의 untrusted 확장(`postgres_fdw`), 전역 `REVOKE EXECUTE ... FROM PUBLIC`, 다른 역할 GRANT, 특수문자 비밀번호(`@ : / + 공백 % \`)를 넣었다.
+
+- 정상: 모든 표식, 확장은 `ext` 스키마 1.0(owner `postgres`), ACL 원본과 같음, 권한 없던 역할의 함수 실행 거부, `rolsuper` 등 모두 f, argv의 비밀번호 0건. `COMMENT - EXTENSION`을 목록에 남기면 `must be owner of extension`으로 멈춘다.
+- 확장 스키마 이름이 `e";DROP ROLE third;--`: 4-2의 모양 검사에서 멈춰 4-3이 시작하지 않았다(지금 DB·역할 그대로). 검사를 건너뛰고 4-3의 인용 SQL에 같은 이름을 직접 넣으면 그 이름 그대로의 스키마가 생기고 역할은 그대로였다. 버전 값에 `'; DROP ROLE ...`을 넣으면 문자열로 다뤄져 거부됐다.
+- 목록 단계에서 임시 클러스터가 죽음, 줄바꿈 든 비밀번호(Job이 시작하지 않음), 되돌림 사본 표식 없음: 셋 다 4-3이 시작하지 않아 지금 DB가 그대로였다.
+- 같은 RUN으로 4-3을 다시 돌리다 실패: 블록 시작에서 `ok-db`가 지워져 4-4가 멈췄다.
+- 본 복원 뒤 ACL 조회 실패: `ok-acl`이 생기지 않아 4-6과 재개 블록이 멈췄다.
+- 3단계: replicas 0 + 완료된 `<앱>-migrate` 파드만 있으면 통과, replicas 1이거나 앱 라벨의 실행 중 파드가 있으면 멈춤.
+- 고치기 전 모양 `( set -e ... ) && touch`와 `! grep`은 실패를 찍은 뒤에도 다음 줄로 넘어갔다. `&&`·`||`의 왼쪽과 `!` 뒤에는 `set -e`가 듣지 않기 때문이다(0.1의 규칙).
 
 ## 3. 빈 NUC 복구 (설계 C.6.4)
 
