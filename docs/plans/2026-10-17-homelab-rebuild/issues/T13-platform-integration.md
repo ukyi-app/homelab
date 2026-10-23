@@ -50,7 +50,7 @@
 - 복구 자산의 운영 ESO client ID·secret: 준비 T09. 할 일 7의 로그인 확인에 쓴다.
 - 시험 App(봇 신원 대역): T10의 `ukyi-homelab-bot-standin`은 삭제했다(2026-10-21). 이 티켓에서 새 이름(예: `ukyi-homelab-bot-standin-2`)으로 만들어 `homelab-smoke`에 설치하고, 새 키는 시험 직전에 받아 끝나면 App째 지운다(마지막 키는 따로 지울 수 없다).
 - CLI가 쓰는 사람의 `gh` 로그인, `infisical login`, kubeconfig(운영 context와 `homelab-vm`).
-- NUC 재부팅·네트워크 차단 시험(시나리오 12·17)은 사람 승인 뒤에 한다.
+- NUC 재부팅·네트워크 차단 시험(시나리오 12·17)은 사람 승인 뒤에 한다. 시나리오 17의 물리 차단(전원 또는 네트워크)은 여기서 처음 한다. T08b는 파드에서 healthchecks ping 주소로 가는 443만 막아 대신했다(사용자 결정 2026-10-23).
 
 ## 완료 조건
 
