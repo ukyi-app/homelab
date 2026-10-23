@@ -38,16 +38,19 @@ export function importsOf(text: string): string[] {
   return transpiler.scanImports(text).map((i) => i.path);
 }
 
-// node:fs를 import해도 되는 파일과 그 이름. temp.ts는 임시 폴더를 만들고 지우는 유일한 곳, 나머지는 읽기만.
+// node:fs를 import해도 되는 파일과 그 이름. 파일을 바꾸는 곳은 둘뿐이다: temp.ts(임시 폴더)와
+// infisical-backup.ts(Infisical 로컬 백업 폴더 잠금·비우기, #873 P1). 나머지는 읽기만.
+const FS_WRITERS = new Set(["core/temp.ts", "core/infisical-backup.ts"]);
 const FS_IMPORTERS: Record<string, Set<string> | "any"> = {
   "core/temp.ts": "any",
+  "core/infisical-backup.ts": "any",
   "core/version.ts": new Set(["readFileSync"]),
   "core/input.ts": new Set(["readFileSync", "readSync"]),
   "main.ts": new Set(["readSync"]),
 };
 // 어디서도 import하지 않는 모듈(프로세스·네트워크·Bun 내장 API. 실행은 exec.ts의 전역 Bun.spawnSync 하나로만).
 const FORBIDDEN_MODULES = /^(bun(:.*)?|(node:)?(child_process|net|http|https|http2|dgram|tls|worker_threads|vm|cluster|fs\/promises))$/;
-// 파일을 바꾸는 함수 호출. import 방식과 상관없이 호출 자체를 막는다(temp.ts만 예외).
+// 파일을 바꾸는 함수 호출. import 방식과 상관없이 호출 자체를 막는다(FS_WRITERS만 예외).
 const FS_WRITE_CALL = /\b(writeFileSync|appendFileSync|writeFile|appendFile|rmSync|rmdirSync|unlinkSync|renameSync|copyFileSync|cpSync|mkdirSync|mkdtempSync|truncateSync|chmodSync|chownSync|symlinkSync|linkSync|utimesSync|openSync|createWriteStream)\s*\(|Bun\.(write|file)\b/;
 
 export function fsProblems(file: string, text: string): string[] {
@@ -66,7 +69,7 @@ export function fsProblems(file: string, text: string): string[] {
       else for (const name of clause.replace(/[{}]/g, "").split(",").map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean)) if (!allowed.has(name)) bad.push(name);
     }
   }
-  if (file !== "core/temp.ts" && FS_WRITE_CALL.test(t)) bad.push(`파일 쓰기 호출 ${t.match(FS_WRITE_CALL)![0].trim()}`);
+  if (!FS_WRITERS.has(file) && FS_WRITE_CALL.test(t)) bad.push(`파일 쓰기 호출 ${t.match(FS_WRITE_CALL)![0].trim()}`);
   return bad;
 }
 
@@ -144,13 +147,14 @@ describe("소스 규칙", () => {
   test("시크릿 원문 해석(revealSecret)은 core 안에서만, 추적 초기화는 시험 전용", () => {
     expect(src.filter((p) => !rel(p).startsWith("core/") && /\brevealSecret\b/.test(body(p))).map(rel)).toEqual([]);
     expect(offenders(/\bresetTrackedForTests\b/, ["core/secret.ts"])).toEqual([]);
+    expect(offenders(/\bresetBackupGuardForTests\b/, ["core/infisical-backup.ts"])).toEqual([]);
   });
 
   test("exitCode는 github 하위 명령만", () => {
     expect(src.filter((p) => rel(p).startsWith("commands/") && !rel(p).startsWith("commands/github") && /exitCode/.test(body(p))).map(rel)).toEqual([]);
   });
 
-  test("fs는 정해진 파일만, 읽기 이름만. 금지 모듈은 어디서도 import하지 않고 파일 쓰기 호출은 temp.ts만", () => {
+  test("fs는 정해진 파일만, 읽기 이름만. 금지 모듈은 어디서도 import하지 않고 파일 쓰기 호출은 temp.ts·infisical-backup.ts만", () => {
     const bad = src.flatMap((p) => fsProblems(rel(p), readFileSync(p, "utf8")).map((b) => `${rel(p)}: ${b}`));
     expect(bad).toEqual([]);
   });

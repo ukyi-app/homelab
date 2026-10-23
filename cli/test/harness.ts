@@ -32,10 +32,11 @@ export const REST = "...";
 // echoEnv: 스텁이 받은 환경변수 중 이 이름들을 JSON으로 stdout에 낸다.
 // materialize: 스텁이 argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일(github 위임 시험).
 // echoCwd: 스텁이 실행된 폴더를 stdout에 낸다.
-export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean };
+// homeWrite: 스텁이 $HOME 아래에 파일을 쓰려 한다(Infisical 로컬 백업 흉내, force면 권한을 무시하는 파일시스템 흉내).
+export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean; homeWrite?: { path: string; force?: boolean } };
 export type Matcher = string | RegExp;
 export type Rule = { argv: Matcher[]; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
-export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null; cwd: string };
+export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null; cwd: string; homeWrite?: "written" | "denied" };
 
 // noStdin: 스텁이 stdin을 읽지 않는다(github 위임처럼 부모 stdin을 넘기는 호출).
 export function rule(argv: Matcher[], resp: Resp | Resp[] = {}, opts: { captureStdin?: boolean; noStdin?: boolean } = {}): Rule {
@@ -183,11 +184,11 @@ export function stubSandbox(rules: Rule[], opts: RunOpts = {}): { env: Record<st
 
 // 같은 프로세스에서 단계·어댑터를 시험할 문맥. makeRuntime으로 실제와 같은 ReadCtx를 만든다(PATH는 스텁 폴더 하나).
 // 쓰기 문맥은 applyWith로만 얻는다(엔진이 Step.apply에 주는 것과 같다).
-export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: ReadCtx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string } {
+export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: ReadCtx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string; home: string } {
   const sb = stubSandbox(rules, opts);
   const progress: string[] = [];
   const ctx = makeRuntime({ mode, json: false, line: "homelab test", env: sb.env, isTTY: false, ask: () => null, progress: (l) => progress.push(l), delegate: opts.delegate });
-  return { ctx, calls: sb.calls, progress, bin: sb.bin };
+  return { ctx, calls: sb.calls, progress, bin: sb.bin, home: sb.env.HOME };
 }
 
 // apply 한 번 안에서 fn(w)를 돌린다. fn이 던지면 그 오류를 다시 던진다. 엔진 결과도 돌려준다.

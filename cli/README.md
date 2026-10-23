@@ -18,6 +18,7 @@ homelab doctor                    # 도구·로그인·kubectl context
 - `bun link`는 쓰지 않는다(설계 B.8 E7). 바이너리는 커밋하지 않는다(`cli/dist/`는 무시).
 - 개발 실행: `bun run cli -- doctor`. 시험: `bun test cli/`(필수 검사 `bun run ci`의 `cli` 단계가 같은 것을 돈다).
 - Infisical을 쓰는 명령은 `HOMELAB_INFISICAL_PROJECT_ID`(homelab 프로젝트 ID)를 읽는다. 없으면 tty에서 한 번 묻는다. 값은 저장소에 두지 않는다.
+- `infisical`을 부를 때마다 `~/.infisical/secrets-backup/`을 0500으로 잠그고(남은 파일은 지운다) 호출 뒤 파일이 0개인지 본다. 권한이 듣지 않는 파일시스템(또는 root)이면 실행하지 않고 멈춘다. CLI 0.44.2가 조회 값을 그 폴더에 남기기 때문이다(`tools/tf-github.sh`와 같은 방식).
 
 ## 동작 규칙
 

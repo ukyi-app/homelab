@@ -7,7 +7,9 @@ import { basename, dirname, join } from "node:path";
 type Matcher = string | { re: string };
 // materialize: argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일.
 // echoCwd: 스텁이 실행된 폴더를 stdout에 낸다(git rev-parse --show-toplevel 흉내).
-type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean };
+// homeWrite: $HOME 아래 path에 파일을 쓰려 한다(Infisical CLI의 secrets-backup 흉내). 실패는 무시한다(CLI 0.44.2도 무시).
+//   force면 부모 폴더를 0700으로 바꾼 뒤 쓴다(권한이 듣지 않는 파일시스템 흉내). 결과는 원장의 homeWrite에 적는다.
+type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean; homeWrite?: { path: string; force?: boolean } };
 // noStdin: stdin을 읽지 않는다(위임이 부모 stdin을 넘기는 호출. 열린 stdin을 끝까지 읽으면 멈춘다).
 type Rule = { argv: Matcher[]; rest: boolean; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
 
@@ -27,6 +29,18 @@ function matches(rule: Rule): boolean {
   return rule.argv.every((m, i) => (typeof m === "string" ? m === argv[i] : new RegExp(`^(?:${m.re})$`).test(argv[i])));
 }
 
+function homeWrite(w: { path: string; force?: boolean }): "written" | "denied" {
+  const p = join(process.env.HOME ?? "/nonexistent", w.path);
+  try {
+    mkdirSync(dirname(p), { recursive: true });
+    if (w.force) chmodSync(dirname(p), 0o700);
+    writeFileSync(p, "backup");
+    return "written";
+  } catch {
+    return "denied";
+  }
+}
+
 const index = rules.findIndex(matches);
 const stdin = process.stdin.isTTY || (index !== -1 && rules[index].noStdin) ? "" : await Bun.stdin.text();
 const call: Record<string, unknown> = {
@@ -37,18 +51,22 @@ const call: Record<string, unknown> = {
   cwd: process.cwd(),
 };
 if (index !== -1 && rules[index].captureStdin) call.stdin = stdin;
+// responses는 호출 순서대로 하나씩 쓴다. 다 쓰면 마지막 응답을 반복한다.
+let resp: Resp | undefined;
+if (index !== -1) {
+  const counter = join(dir, `count-${index}`);
+  const n = existsSync(counter) ? Number(readFileSync(counter, "utf8")) : 0;
+  writeFileSync(counter, String(n + 1));
+  resp = rules[index].responses[Math.min(n, rules[index].responses.length - 1)];
+  if (resp.homeWrite) call.homeWrite = homeWrite(resp.homeWrite);
+}
 appendFileSync(join(dir, "ledger.jsonl"), JSON.stringify(call) + "\n");
 
-if (index === -1) {
+if (!resp) {
   process.stderr.write(`stub: 시나리오에 없는 호출: ${JSON.stringify(argv)}\n`);
   process.exit(97);
 }
 
-// responses는 호출 순서대로 하나씩 쓴다. 다 쓰면 마지막 응답을 반복한다.
-const counter = join(dir, `count-${index}`);
-const n = existsSync(counter) ? Number(readFileSync(counter, "utf8")) : 0;
-writeFileSync(counter, String(n + 1));
-const resp = rules[index].responses[Math.min(n, rules[index].responses.length - 1)];
 if (resp.sleepMs) await Bun.sleep(resp.sleepMs);
 if (resp.materialize) {
   const dest = argv[argv.length - 1];
