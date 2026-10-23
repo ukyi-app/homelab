@@ -1,21 +1,24 @@
 // PATH 스텁 본체. 도구 이름의 실행 파일(harness.ts가 만든다)이 이 파일을 bun으로 부른다.
 // argv를 원장(JSONL)에 적고 규칙에 맞는 첫 응답을 낸다. stdin은 길이와 sha256만 적는다(시크릿이 지나는 길이다).
 // 규칙에 captureStdin이 있으면 원문도 적는다(시크릿이 없는 gh api 본문 확인용).
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 type Matcher = string | { re: string };
-type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[] };
-type Rule = { argv: Matcher[]; rest: boolean; responses: Resp[]; captureStdin?: boolean };
+// materialize: argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일.
+type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string> };
+// noStdin: stdin을 읽지 않는다(위임이 부모 stdin을 넘기는 호출. 열린 stdin을 끝까지 읽으면 멈춘다).
+type Rule = { argv: Matcher[]; rest: boolean; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
 
-const dir = process.env.HOMELAB_STUB_DIR;
+// 환경을 비우고 띄운 호출(github 위임의 git clone)은 HOMELAB_STUB_DIR가 없다. 그때는 스텁 실행 파일 위치(<dir>/bin/<도구>)에서 찾는다.
+const fromPath = dirname(dirname(process.argv[2] ?? ""));
+const dir = process.env.HOMELAB_STUB_DIR ?? (existsSync(join(fromPath, "rules.json")) ? fromPath : undefined);
 if (!dir) {
   process.stderr.write("stub: HOMELAB_STUB_DIR가 없다\n");
   process.exit(98);
 }
 // harness가 만든 sh 실행 파일이 자기 경로($0)를 첫 인자로 넘긴다.
 const argv = [basename(process.argv[2]), ...process.argv.slice(3)];
-const stdin = process.stdin.isTTY ? "" : await Bun.stdin.text();
 const rules: Rule[] = JSON.parse(readFileSync(join(dir, "rules.json"), "utf8"));
 
 function matches(rule: Rule): boolean {
@@ -24,6 +27,7 @@ function matches(rule: Rule): boolean {
 }
 
 const index = rules.findIndex(matches);
+const stdin = process.stdin.isTTY || (index !== -1 && rules[index].noStdin) ? "" : await Bun.stdin.text();
 const call: Record<string, unknown> = {
   argv,
   stdinLength: stdin.length,
@@ -44,6 +48,15 @@ const n = existsSync(counter) ? Number(readFileSync(counter, "utf8")) : 0;
 writeFileSync(counter, String(n + 1));
 const resp = rules[index].responses[Math.min(n, rules[index].responses.length - 1)];
 if (resp.sleepMs) await Bun.sleep(resp.sleepMs);
+if (resp.materialize) {
+  const dest = argv[argv.length - 1];
+  for (const [rel, content] of Object.entries(resp.materialize)) {
+    const p = join(dest, rel);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, content === "stub" ? `#!/bin/sh\nexec '${process.execPath}' '${process.argv[1]}' "$0" "$@"\n` : content);
+    chmodSync(p, 0o755);
+  }
+}
 if (resp.stdout) process.stdout.write(resp.stdout);
 // 자식이 받은 환경을 시험이 보게 한다(값이 없으면 null).
 if (resp.echoEnv) process.stdout.write(JSON.stringify(Object.fromEntries(resp.echoEnv.map((k) => [k, process.env[k] ?? null]))));

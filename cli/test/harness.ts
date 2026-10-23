@@ -7,13 +7,13 @@ import { expect } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Ctx } from "../src/core/command";
-import { runEngine } from "../src/core/engine";
-import { PLAN_WRITE_BLOCKED, makeExec } from "../src/core/exec";
+import type { ReadCtx, WriteCtx } from "../src/core/command";
+import { PLAN_WRITE_BLOCKED } from "../src/core/exec";
+import { makeRuntime } from "../src/core/runtime";
 import { argvFor as ghArgv } from "../src/core/github";
 import { argvFor as infisicalArgv } from "../src/core/infisical";
 import { kubectlArgv } from "../src/core/kubectl";
-import type { Mode } from "../src/core/result";
+import type { Mode, Result } from "../src/core/result";
 import { classify } from "../src/core/writes";
 
 const MAIN = join(import.meta.dir, "..", "src", "main.ts");
@@ -30,13 +30,15 @@ export const DEFAULT_TOOLS = ["gh", "git", "kubectl", "infisical", "curl", "terr
 export const REST = "...";
 
 // echoEnv: 스텁이 받은 환경변수 중 이 이름들을 JSON으로 stdout에 낸다.
-export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[] };
+// materialize: 스텁이 argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일(github 위임 시험).
+export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string> };
 export type Matcher = string | RegExp;
-export type Rule = { argv: Matcher[]; responses: Resp[]; captureStdin?: boolean };
+export type Rule = { argv: Matcher[]; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
 export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null };
 
-export function rule(argv: Matcher[], resp: Resp | Resp[] = {}, opts: { captureStdin?: boolean } = {}): Rule {
-  return { argv, responses: Array.isArray(resp) ? resp : [resp], captureStdin: opts.captureStdin };
+// noStdin: 스텁이 stdin을 읽지 않는다(github 위임처럼 부모 stdin을 넘기는 호출).
+export function rule(argv: Matcher[], resp: Resp | Resp[] = {}, opts: { captureStdin?: boolean; noStdin?: boolean } = {}): Rule {
+  return { argv, responses: Array.isArray(resp) ? resp : [resp], captureStdin: opts.captureStdin, noStdin: opts.noStdin };
 }
 
 export function sha256(text: string): string {
@@ -106,7 +108,7 @@ function stubDir(rules: Rule[], tools?: string[]): { dir: string; bin: string; h
   const serial = rules.map((r) => {
     const rest = r.argv[r.argv.length - 1] === REST;
     const argv = (rest ? r.argv.slice(0, -1) : r.argv).map((m) => (typeof m === "string" ? m : { re: m.source }));
-    return { argv, rest, responses: r.responses, captureStdin: r.captureStdin };
+    return { argv, rest, responses: r.responses, captureStdin: r.captureStdin, noStdin: r.noStdin };
   });
   writeFileSync(join(dir, "rules.json"), JSON.stringify(serial));
   return { dir, bin, home };
@@ -138,8 +140,13 @@ function baseEnv(s: { dir: string; bin: string; home: string }, opts: RunOpts): 
   };
 }
 
+// core 임시 폴더(homelab-cli-<용도>-*)로의 git clone은 쓰기로 세지 않는다. exec도 같은 예외만 허용한다(github 위임의 실행 사본).
+// 하위 프로세스(runCli)는 TMPDIR가 스텁 폴더라 위치가 달라 이름 꼴로만 본다.
+const OWNED_CLONE = /\/homelab-cli-[a-z0-9]+-[^/]+\/tree$/;
+const tempClone = (c: Call) => c.argv[0] === "git" && c.argv.includes("clone") && OWNED_CLONE.test(c.argv.at(-1) ?? "");
+
 function summarize(calls: Call[]) {
-  return { calls, writes: calls.filter((c) => classify(c.argv).write), unmatched: calls.filter((c) => c.rule === null) };
+  return { calls, writes: calls.filter((c) => classify(c.argv).write && !tempClone(c)), unmatched: calls.filter((c) => c.rule === null) };
 }
 
 export async function runCli(args: string[], rules: Rule[], opts: RunOpts = {}): Promise<CliRun> {
@@ -172,23 +179,41 @@ export function stubSandbox(rules: Rule[], opts: RunOpts = {}): { env: Record<st
   return { env: baseEnv(s, opts), bin: s.bin, calls: () => summarize(readLedger(s.dir)) };
 }
 
-// 같은 프로세스에서 단계·어댑터를 시험할 Ctx. calls()가 그때까지의 스텁 원장을 돌려준다.
-// apply 모드여도 쓰기는 runWithWrites 창 안에서만 실행된다(엔진이 Step.apply를 그 안에서 부른다).
-export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: Ctx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string } {
+// 같은 프로세스에서 단계·어댑터를 시험할 문맥. makeRuntime으로 실제와 같은 ReadCtx를 만든다(PATH는 스텁 폴더 하나).
+// 쓰기 문맥은 applyWith로만 얻는다(엔진이 Step.apply에 주는 것과 같다).
+export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: ReadCtx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string } {
   const sb = stubSandbox(rules, opts);
   const progress: string[] = [];
-  const ctx: Ctx = {
-    mode,
-    json: false,
-    line: "homelab test",
-    env: sb.env,
-    isTTY: false,
-    exec: makeExec(mode, opts.delegate ?? false, sb.env),
-    engine: (plan) => runEngine(ctx, plan),
-    progress: (l) => progress.push(l),
-    ask: () => null,
-  };
+  const ctx = makeRuntime({ mode, json: false, line: "homelab test", env: sb.env, isTTY: false, ask: () => null, progress: (l) => progress.push(l), delegate: opts.delegate });
   return { ctx, calls: sb.calls, progress, bin: sb.bin };
+}
+
+// apply 한 번 안에서 fn(w)를 돌린다. fn이 던지면 그 오류를 다시 던진다. 엔진 결과도 돌려준다.
+export async function applyWith<T>(ctx: ReadCtx, fn: (w: WriteCtx) => T | Promise<T>): Promise<{ value: T; result: Result }> {
+  let done = false;
+  let value: T | undefined;
+  let error: unknown;
+  const result = await ctx.engine({
+    command: "test",
+    steps: [
+      {
+        id: "apply-with",
+        target: "시험",
+        read: async () => (done ? { state: "same", action: "none", detail: "" } : { state: "missing", action: "create", detail: "" }),
+        apply: async (w) => {
+          done = true;
+          try {
+            value = await fn(w);
+          } catch (e) {
+            error = e;
+            throw e;
+          }
+        },
+      },
+    ],
+  });
+  if (error) throw error;
+  return { value: value as T, result };
 }
 
 // plan·읽기 명령의 부수효과 0(AC-2). 원장이 비면 실패한다(아무것도 읽지 않은 plan은 시험이 아니다).

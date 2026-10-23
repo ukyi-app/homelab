@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { inspect } from "node:util";
 import { renderHuman, render, OutputBlocked } from "../../src/core/output";
 import { valueProblem } from "../../src/core/infisical";
-import { Secret, allowGeneration, containsTracked, generatePassword } from "../../src/core/secret";
+import { MIN_SECRET, Secret, containsTracked, newPassword } from "../../src/core/secret";
 import type { Result } from "../../src/core/result";
 
 const base = (extra: Partial<Result> = {}): Result => ({ command: "db add", app: "smoke", mode: "plan", status: "pending", steps: [], notes: [], next: null, ...extra });
@@ -23,18 +23,21 @@ describe("Secret", () => {
     expect(s.sha256Prefix()).toBe(new Bun.CryptoHasher("sha256").update("fakevalue-secret-2222").digest("hex").slice(0, 12));
   });
 
-  test("비밀번호는 apply 안에서만 만든다", () => {
-    allowGeneration(false);
-    expect(() => generatePassword()).toThrow();
-    allowGeneration(true);
-    try {
-      const p = generatePassword();
-      expect(p.length).toBe(40);
-      expect(/^[A-Za-z0-9]{40}$/.test(p.reveal())).toBe(true);
-      expect(generatePassword().equals(p)).toBe(false);
-    } finally {
-      allowGeneration(false);
-    }
+  test("생성 비밀번호는 영숫자 40자, 매번 다르다(명령은 apply 문맥의 generatePassword로만 얻는다)", () => {
+    const p = newPassword();
+    expect(p.length).toBe(40);
+    expect(/^[A-Za-z0-9]{40}$/.test(p.reveal())).toBe(true);
+    expect(newPassword().equals(p)).toBe(false);
+  });
+
+  test("원문 추적은 16자 이상만(사용자 결정 2026-10-23): 짧은 값은 고정 옵션·JSON 키와 겹쳐도 출력을 막지 않는다", () => {
+    expect(MIN_SECRET).toBe(16);
+    new Secret("false");
+    new Secret("mode");
+    expect(containsTracked("--expand=false")).toBe(false);
+    expect(containsTracked('{"mode":"plan"}')).toBe(false);
+    new Secret("fakevalue-secret-16");
+    expect(containsTracked("x fakevalue-secret-16 y")).toBe(true);
   });
 });
 
@@ -86,11 +89,13 @@ describe("출력 차단", () => {
   });
 });
 
-describe("Infisical 값 형식(.env 한 줄로 왕복하는 값만)", () => {
-  test.each([["a\nOTHER=x"], ["a\r"], ["tab\tx"], [" lead"], ["trail "], ['"q"'], ["'q"], [""]])("거부: %p", (v) => {
-    expect(valueProblem(new Secret(v))).not.toBeNull();
+describe("Infisical 값 형식(.env 한 줄로 왕복하고 16자 이상인 값만)", () => {
+  const pad = (v: string) => v + "x".repeat(Math.max(0, 16 - v.length));
+  test.each([["a\nOTHER=x"], ["a\r"], ["tab\tx"], [" lead"], ["trail "], ['"q"'], ["'q"], [""], ["short"]])("거부: %p", (v) => {
+    const value = v === "short" || v === "" ? v : v.startsWith(" ") || v.startsWith('"') || v.startsWith("'") ? pad(v) : v.endsWith(" ") ? "x".repeat(16) + v : pad(v);
+    expect(valueProblem(new Secret(value))).not.toBeNull();
   });
   test.each([["abc#def"], ["a$HOME"], ["a${HOME}b"], ['a "q" b'], ["@/etc/hostname"]])("통과(그대로 간다, 2026-10-23 실측): %p", (v) => {
-    expect(valueProblem(new Secret(v))).toBeNull();
+    expect(valueProblem(new Secret(pad(v)))).toBeNull();
   });
 });

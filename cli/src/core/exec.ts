@@ -1,29 +1,30 @@
-// 외부 명령 seam. cli/src에서 프로세스를 띄우는 곳은 여기 하나다(정적 시험이 다른 곳의 spawn·fetch를 막는다).
-// 네트워크도 gh·curl 같은 도구로만 나가게 해 PATH 스텁 시험이 모든 바깥 호출을 본다(L50).
-// seam은 재시도하지 않는다. 변이 호출의 타임아웃은 "실패"가 아니라 "결과 미상"이고 재시도는 두 번 실행이다(B.8 E7).
-// 엔진이 상태를 다시 읽어 이어 간다.
+// 외부 명령 seam. cli/src에서 프로세스를 띄우는 곳은 여기 하나다. 명령(commands/)은 이 모듈을 볼 수 없고
+// core 어댑터(runtime.ts가 문맥으로 준다)만 부른다. 어댑터마다 argv 모양이 고정이라 안전의 근거는 어댑터 모양이고,
+// 아래 판정(writes.ts)은 원장 집계와 마지막 방어선이다(사용자 결정 2026-10-23, #873 3라운드).
+// seam은 재시도하지 않는다. 변이 호출의 타임아웃은 "결과 미상"이고 재시도는 두 번 실행이다(B.8 E7).
 //
-// 안전 계약(02~04가 우회할 수 없어야 한다, #873 1라운드):
-// - 쓰기는 apply 모드에서 엔진이 Step.apply()를 도는 동안(runWithWrites 창)에만 실행한다. read()·단계 준비·
-//   타임아웃 뒤 재조회는 apply 모드여도 읽기 전용이다. 창을 여는 함수는 engine.ts·main.ts만 쓴다(정적 시험).
-// - 직접 stdio(inherit, stdout-to-stderr)는 github 위임 명령만. 그 밖의 명령 출력은 모두 출력 계층을 거친다.
-// - 값을 내는 호출(kubectl Secret 조회, infisical secrets 조회·토큰, gh auth token)은 secretStdout으로만 실행한다.
-// - 민감 호출(secretStdout, Secret stdin, 값을 내는 호출)의 stderr 원문은 돌려주지 않는다. 오류에 값이 실릴 수 있다.
+// - read exec: 쓰기로 판정된 argv를 실행하지 않는다. 예외는 core가 만든 임시 폴더로의 git clone 하나.
+// - write exec: 엔진이 Step.apply() 한 번마다 새로 만들고 끝나면 폐기한다(live). 폐기한 exec를 붙잡아 두었다가 써도 막힌다.
+//   전역 쓰기 창이 없으므로 다른 엔진·병렬 흐름의 read가 쓰기를 빌려 쓸 수 없다(#873 2라운드 P2).
+// - 직접 stdio(inherit, stdout-to-stderr)는 github 위임만. 위임 stdout-to-stderr는 부모 stdin을 넘긴다.
+// - 값을 내는 호출은 secretStdout으로만, 민감 호출의 stderr 원문은 돌려주지 않는다.
 import { basename } from "node:path";
 import { Secret, containsTracked, isSecret } from "./secret";
-import type { Mode } from "./result";
+import { ownedTemp } from "./temp";
 import { classify } from "./writes";
 
 export type ExecOpts = {
   input?: string | Secret;
   timeoutMs?: number;
   cwd?: string;
-  // inherit: 래퍼의 대화형 질문을 사람이 직접 받는다. stdout-to-stderr: --json일 때 stdout을 지키고 stdin은 넘긴다. 둘 다 delegate만.
   stdio?: "pipe" | "inherit" | "stdout-to-stderr";
-  // stdout을 Secret으로만 돌려준다.
   secretStdout?: boolean;
   // 자식 환경에 더하거나 지울 값(undefined면 지움).
   env?: Record<string, string | undefined>;
+  // 자식 환경을 이 값으로 바꾼다(env -i처럼). git clone이 전역·시스템 설정과 hook을 끊을 때 쓴다.
+  cleanEnv?: Record<string, string>;
+  // read exec에서 git clone을 허용할 core 임시 폴더. argv 마지막이 그 아래여야 한다.
+  cloneInto?: string;
 };
 
 export type ExecResult = {
@@ -33,7 +34,7 @@ export type ExecResult = {
   // 민감 호출이면 빈 문자열이고 stderrHidden이 true다.
   stderr: string;
   stderrHidden?: boolean;
-  // stderr에 NotFound·not found가 있었는지. 민감 호출에서도 원문 없이 쓸 수 있게 따로 둔다.
+  // kubectl API의 NotFound 응답(Error from server (NotFound))만. 인증 플러그인의 "not found" 같은 다른 오류는 아니다.
   notFound: boolean;
   errKind?: "not-found" | "timeout" | "spawn";
 };
@@ -46,18 +47,7 @@ export const PLAN_WRITE_BLOCKED = "plan-write-blocked";
 const READ_TIMEOUT_MS = 30_000;
 const WRITE_TIMEOUT_MS = 120_000;
 const MAX_ERR = 2_000;
-
-// 쓰기 창. 엔진이 Step.apply()를 await하는 동안만 0보다 크다.
-let writeDepth = 0;
-
-export async function runWithWrites<T>(fn: () => Promise<T>): Promise<T> {
-  writeDepth++;
-  try {
-    return await fn();
-  } finally {
-    writeDepth--;
-  }
-}
+const KUBE_NOT_FOUND = /^Error from server \(NotFound\)/m;
 
 function timeoutFor(write: boolean, env: Record<string, string | undefined>, asked?: number): number {
   const base = asked ?? (write ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS);
@@ -67,10 +57,9 @@ function timeoutFor(write: boolean, env: Record<string, string | undefined>, ask
 }
 
 // 함정(옛 tools/lib/exec.ts 실측): git hook 안에서 CLI를 띄우면 GIT_DIR·GIT_WORK_TREE·GIT_INDEX_FILE이 상속돼
-// git -C <다른 곳>이 hook의 저장소를 본다. 자격이 없으면 프롬프트에서 멈추므로 GIT_TERMINAL_PROMPT=0.
-// 판정은 basename이다. /usr/bin/git처럼 절대 경로로 불러도 같다(쓰기 판정 classify와 같은 기준).
-function childEnv(argv0: string, base: Record<string, string | undefined>, extra?: Record<string, string | undefined>): Record<string, string> {
-  const env: Record<string, string | undefined> = { ...base, ...extra };
+// git -C <다른 곳>이 hook의 저장소를 본다. 자격이 없으면 프롬프트에서 멈추므로 GIT_TERMINAL_PROMPT=0. 판정은 basename.
+function childEnv(argv0: string, base: Record<string, string | undefined>, opts: ExecOpts): Record<string, string> {
+  const env: Record<string, string | undefined> = opts.cleanEnv ? { ...opts.cleanEnv } : { ...base, ...opts.env };
   if (basename(argv0) === "git") {
     delete env.GIT_DIR;
     delete env.GIT_WORK_TREE;
@@ -82,30 +71,40 @@ function childEnv(argv0: string, base: Record<string, string | undefined>, extra
   return out;
 }
 
-export function makeExec(mode: Mode, delegate: boolean, env: Record<string, string | undefined>): Exec {
+type MakeOpts = {
+  env: Record<string, string | undefined>;
+  // 쓰기 exec만: 이 apply가 아직 진행 중인지. false면 모든 호출을 막는다.
+  live?: () => boolean;
+  // github 위임 명령의 exec. 직접 stdio를 쓸 수 있고, 쓰기는 래퍼(tf-github.sh) 하나만.
+  delegate?: boolean;
+};
+
+function cloneAllowed(argv: string[], opts: ExecOpts): boolean {
+  if (!opts.cloneInto || !ownedTemp(opts.cloneInto)) return false;
+  const pos = argv.slice(1).filter((a) => !a.startsWith("-"));
+  return basename(argv[0]) === "git" && argv.includes("clone") && (argv.at(-1) ?? "").startsWith(`${opts.cloneInto}/`) && pos.length >= 3;
+}
+
+export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
   return (argv, opts = {}) => {
     if (argv.length === 0) throw new Error("빈 argv");
+    if (kind === "write" && !(m.live?.() ?? false)) throw new Error(`${PLAN_WRITE_BLOCKED}: 끝난 apply의 쓰기 문맥을 다시 썼다(Step.apply 밖)`);
     for (const a of argv) {
       if (containsTracked(a)) throw new Error(`시크릿 값을 명령행 인자로 넘기려 했다: ${basename(argv[0])}(값은 stdin으로만 넘긴다)`);
       if (a.includes("\0")) throw new Error(`NUL이 든 인자: ${basename(argv[0])}`);
     }
     const verdict = classify(argv);
     if (verdict.write) {
-      const open = mode === "apply" && writeDepth > 0;
-      // github apply(delegate)는 래퍼 하나만 쓰기로 허용한다.
-      const target = !delegate || basename(argv[0]) === "tf-github.sh";
-      if (!open || !target) {
-        const where = mode !== "apply" ? `${mode} 모드` : writeDepth === 0 ? "apply 모드의 읽기 단계(Step.apply 밖)" : "github 위임 명령의 래퍼 밖";
-        throw new Error(`${PLAN_WRITE_BLOCKED}: ${where}에서 쓰기 호출을 막았다(${verdict.reason})`);
-      }
+      const ok = kind === "write" ? !m.delegate || basename(argv[0]) === "tf-github.sh" : cloneAllowed(argv, opts);
+      if (!ok) throw new Error(`${PLAN_WRITE_BLOCKED}: ${kind === "read" ? "읽기 문맥" : "github 위임의 래퍼 밖"}에서 쓰기 호출을 막았다(${verdict.reason})`);
     }
     if (verdict.sensitiveOutput && !opts.secretStdout) throw new Error(`값을 내는 호출은 secretStdout으로만 실행한다: ${verdict.reason}`);
     const stdio = opts.stdio ?? "pipe";
     if (stdio !== "pipe") {
-      if (!delegate) throw new Error(`stdio ${stdio}는 github 위임 명령만 쓴다(출력 계층을 거치지 않는다)`);
+      if (!m.delegate) throw new Error(`stdio ${stdio}는 github 위임 명령만 쓴다(출력 계층을 거치지 않는다)`);
       if (opts.secretStdout || isSecret(opts.input)) throw new Error(`stdio ${stdio}에 시크릿 입출력을 함께 쓰지 않는다`);
     }
-    const sensitive = Boolean(opts.secretStdout) || isSecret(opts.input) || verdict.sensitiveOutput;
+    const sensitive = Boolean(opts.secretStdout) || isSecret(opts.input) || Boolean(verdict.sensitiveOutput);
     const input = opts.input === undefined ? undefined : isSecret(opts.input) ? opts.input.reveal() : opts.input;
     // 입력을 따로 주지 않은 위임 명령은 부모 stdin을 넘긴다(래퍼가 묻는 값과 마지막 yes를 사람이 직접 답한다).
     const stdin = input !== undefined ? new TextEncoder().encode(input) : stdio !== "pipe" ? "inherit" : "ignore";
@@ -113,11 +112,11 @@ export function makeExec(mode: Mode, delegate: boolean, env: Record<string, stri
     try {
       p = Bun.spawnSync(argv, {
         cwd: opts.cwd,
-        env: childEnv(argv[0], env, opts.env),
+        env: childEnv(argv[0], m.env, opts),
         stdin,
         stdout: stdio === "pipe" ? "pipe" : stdio === "inherit" ? "inherit" : 2,
         stderr: stdio === "pipe" ? "pipe" : "inherit",
-        timeout: timeoutFor(verdict.write, env, opts.timeoutMs),
+        timeout: timeoutFor(verdict.write, m.env, opts.timeoutMs),
       } as Parameters<typeof Bun.spawnSync>[1]);
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
@@ -125,12 +124,12 @@ export function makeExec(mode: Mode, delegate: boolean, env: Record<string, stri
     }
     const stdoutText = p.stdout ? p.stdout.toString() : "";
     const rawErr = p.stderr ? p.stderr.toString() : "";
-    // 자식이 죽기 전에 쓴 stderr가 원인의 유일한 단서일 때가 많다. 민감 호출이 아니면 앞부분만 남긴다.
     const result: ExecResult = {
       code: p.exitCode,
       stdout: opts.secretStdout ? "" : stdoutText,
+      // 자식이 죽기 전에 쓴 stderr가 원인의 유일한 단서일 때가 많다. 민감 호출이 아니면 앞부분만 남긴다.
       stderr: sensitive ? "" : rawErr.trim().slice(0, MAX_ERR),
-      notFound: /NotFound|not found/i.test(rawErr),
+      notFound: basename(argv[0]) === "kubectl" && KUBE_NOT_FOUND.test(rawErr),
     };
     if (sensitive) result.stderrHidden = true;
     if (opts.secretStdout) result.stdoutSecret = new Secret(stdoutText);

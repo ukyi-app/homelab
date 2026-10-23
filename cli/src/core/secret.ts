@@ -1,28 +1,25 @@
 // 시크릿 값은 이 객체로만 다닌다. 출력·argv·파일에 값을 두지 않는다(설계 C.7 "어떤 출력에도 시크릿 값이 없다").
 // 문자열로 바뀌는 모든 길(toString, 템플릿 문자열, JSON.stringify, console의 inspect)은 값 대신 [secret]을 낸다.
-// 그래도 원문이 다른 문자열에 섞일 수 있으므로(예: 실패한 자식의 stderr) 원문을 추적해 출력 계층이 마지막에 한 번 더 막는다.
-const tracked = new Set<string>();
-// 짧은 값(6자 미만)은 흔한 글자와 겹치므로 앞뒤가 영숫자가 아닐 때만 맞춘다. 그래도 길이 때문에 빼지는 않는다
-// (#873 1라운드 P1: 짧은 앱 시크릿이 오류 출력으로 샜다). 겹치면 출력이 막힌다(새기보다 막는 쪽).
-const shortTracked = new Set<string>();
-const SHORT = 6;
+// 명령은 이 모듈을 import할 수 없다(정적 시험). Secret은 core 어댑터가 만들고 명령은 불투명하게 넘기기만 한다.
+//
+// 원문 추적(출력·argv의 마지막 방어선)은 16자 이상만 한다. 사용자 결정(2026-10-23, #873 3라운드): 짧은 값을 추적하면
+// 고정 옵션(--expand=false)·JSON 키("mode")와 겹쳐 정상 출력이 깨지고, 경계 조건으로 줄이면 붙은 원문이 샌다.
+// 대신 시크릿 입력은 16자 이상만 받고(MIN_SECRET), 기존의 짧은 값은 Secret 객체로만 들고 출력에 오지 않는 구조로 막는다.
+export const MIN_SECRET = 16;
 
-// generatePassword는 엔진이 Step.apply()를 도는 동안만 허용한다(plan·read·재조회에서 부르면 실패).
-let generationAllowed = false;
+const tracked = new Set<string>();
 
 export class Secret {
   readonly #raw: string;
 
   constructor(raw: string) {
     this.#raw = raw;
-    // 공백뿐인 값을 짧은 값으로 추적하면 줄바꿈이 있는 모든 출력이 막힌다. 그런 시크릿은 Infisical 쓰기도 거부한다.
-    if (raw.trim().length === 0) return;
-    const forms = [raw, JSON.stringify(raw).slice(1, -1), Buffer.from(raw).toString("base64")];
+    if (raw.length < MIN_SECRET) return;
     // JSON 출력에서는 "·\ 등이 이스케이프된 꼴로, kubectl 출력에서는 Secret data의 base64 꼴로 나타난다.
-    for (const f of forms) (f.length >= SHORT ? tracked : shortTracked).add(f);
+    for (const f of [raw, JSON.stringify(raw).slice(1, -1), Buffer.from(raw).toString("base64")]) tracked.add(f);
   }
 
-  // core 안에서만 쓴다(stdin 넘김, 해시). commands/에서 쓰면 정적 시험이 막는다.
+  // core 안에서만 쓴다(stdin 넘김, 해시).
   reveal(): string {
     return this.#raw;
   }
@@ -60,22 +57,14 @@ export function isSecret(x: unknown): x is Secret {
 // 추적 중인 원문이 text에 들어 있는지. 출력과 argv 검사에 쓴다.
 export function containsTracked(text: string): boolean {
   for (const raw of tracked) if (text.includes(raw)) return true;
-  for (const raw of shortTracked) {
-    const esc = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`(^|[^A-Za-z0-9])${esc}([^A-Za-z0-9]|$)`).test(text)) return true;
-  }
   return false;
-}
-
-export function allowGeneration(on: boolean): void {
-  generationAllowed = on;
 }
 
 const ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 // 영숫자만 쓴다(rotate.md 3c "32자 이상, 영숫자"). DATABASE_URL·.env 줄에 넣어도 이스케이프가 필요 없다.
-export function generatePassword(length = 40): Secret {
-  if (!generationAllowed) throw new Error("plan·읽기 모드에서 비밀번호를 만들려 했다(apply 안에서만 만든다)");
+// 부르는 곳은 runtime.ts의 쓰기 문맥 하나다(정적 시험). 명령은 apply 안에서 w.generatePassword()로만 얻는다.
+export function newPassword(length = 40): Secret {
   // 62의 배수 아래 값만 써 치우침을 없앤다.
   const limit = 256 - (256 % ALNUM.length);
   let out = "";

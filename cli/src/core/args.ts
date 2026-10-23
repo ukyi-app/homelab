@@ -36,7 +36,8 @@ function checkValue(what: string, value: string, spec: { values?: string[]; patt
   if (value === "") throw new UsageError(`${what}: 값이 비었다`);
   if (hasControl(value)) throw new UsageError(`${what}: 줄바꿈·제어 문자를 받지 않는다`);
   if (spec.values && !spec.values.includes(value)) throw new UsageError(`${what}: ${spec.values.join(" | ")} 중 하나`);
-  if (spec.pattern && !fullMatch(spec.pattern, value)) throw new UsageError(`${what}: 형식이 아니다: ${JSON.stringify(value)}`);
+  // 값은 되찍지 않는다. 시크릿을 인자로 잘못 넣은 경우 출력·로그로 다시 퍼진다(Connector 2라운드).
+  if (spec.pattern && !fullMatch(spec.pattern, value)) throw new UsageError(`${what}: 형식이 아니다`);
 }
 
 export function parseInput(specFlags: FlagSpec[], specArgs: ArgSpec[], tokens: string[]): Input {
@@ -60,12 +61,12 @@ export function parseInput(specFlags: FlagSpec[], specArgs: ArgSpec[], tokens: s
       flags.help = true;
       continue;
     }
-    if (!t.startsWith("--")) throw new UsageError(`짧은 플래그는 받지 않는다: ${t}`);
+    if (!t.startsWith("--")) throw new UsageError(`짧은 플래그는 받지 않는다: ${t.slice(0, 2)}`);
     const eq = t.indexOf("=");
     const name = t.slice(2, eq === -1 ? undefined : eq);
     const inline = eq === -1 ? undefined : t.slice(eq + 1);
     const spec = byName.get(name);
-    if (!spec) throw new UsageError(`모르는 플래그: --${name}`);
+    if (!spec) throw new UsageError(`모르는 플래그: --${name.slice(0, 40)}`);
     if (flags[name] !== undefined) throw new UsageError(`--${name}를 두 번 줬다(중복 플래그는 받지 않는다)`);
     if (spec.kind === "bool") {
       if (inline !== undefined) throw new UsageError(`--${name}는 값을 받지 않는다`);
@@ -89,7 +90,9 @@ export function parseInput(specFlags: FlagSpec[], specArgs: ArgSpec[], tokens: s
   }
 
   const args: Record<string, string | undefined> = {};
-  if (positional.length > specArgs.length) throw new UsageError(`인자가 많다: ${positional.slice(specArgs.length).join(" ")}`);
+  // --help면 위치 인자를 보지 않는다(필수 인자를 몰라도 도움말을 본다, Connector 2라운드).
+  if (flags.help === true) return { args, flags, apply: flags.apply === true, json: flags.json === true, help: true };
+  if (positional.length > specArgs.length) throw new UsageError(`인자가 ${positional.length - specArgs.length}개 많다(값은 보이지 않는다. 시크릿은 stdin으로)`);
   specArgs.forEach((a, idx) => {
     const v = positional[idx];
     if (v === undefined) {
@@ -101,7 +104,7 @@ export function parseInput(specFlags: FlagSpec[], specArgs: ArgSpec[], tokens: s
     args[a.name] = v;
   });
 
-  return { args, flags, apply: flags.apply === true, json: flags.json === true, help: flags.help === true };
+  return { args, flags, apply: flags.apply === true, json: flags.json === true, help: false };
 }
 
 export function usageLine(path: string[], specArgs: ArgSpec[], specFlags: FlagSpec[]): string {

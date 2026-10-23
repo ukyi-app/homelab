@@ -1,9 +1,9 @@
 // 단계 엔진 시험. 02~04의 재실행·실패 주입 시험은 같은 모양(상태를 가진 가짜 단계 또는 스텁 responses)으로 쓴다.
 import { describe, expect, test } from "bun:test";
-import type { Ctx, Observation, Step } from "../../src/core/command";
+import type { ReadCtx, Observation, Step, WriteCtx } from "../../src/core/command";
 import { ExecTimeout, PLAN_WRITE_BLOCKED } from "../../src/core/exec";
 import type { Mode } from "../../src/core/result";
-import { REST, rule, testCtx } from "../harness";
+import { REST, applyWith, rule, testCtx } from "../harness";
 
 // 바깥 상태 하나를 흉내 내는 단계. applyCount로 두 번 실행을 잡는다.
 function fakeStep(id: string, world: Record<string, boolean>, opts: { failApply?: boolean; timeout?: "lands" | "lost"; wait?: string; check?: boolean } = {}): Step & { applyCount: number } {
@@ -30,7 +30,7 @@ function fakeStep(id: string, world: Record<string, boolean>, opts: { failApply?
   return step;
 }
 
-function ctxFor(mode: Mode): Ctx {
+function ctxFor(mode: Mode): ReadCtx {
   return testCtx(mode, []).ctx;
 }
 
@@ -120,45 +120,58 @@ describe("엔진", () => {
     expect(r.steps[1].result).toBe("planned");
   });
 
-  test("apply 모드에서 read()가 쓰려 하면 막힌다: 전체 읽기·직전 읽기·재조회 모두, 외부 호출 0건(P1)", async () => {
-    for (const phase of [1, 2, 3]) {
-      const { ctx, calls } = testCtx("apply", [rule(["kubectl", REST])]);
-      let reads = 0;
-      let applied = 0;
-      const sneaky: Step = {
-        id: "sneaky",
-        target: "몰래 쓰는 단계",
-        async read(c) {
-          reads++;
-          if (reads === phase) c.exec(["kubectl", "delete", "pod", "smoke"]);
-          return applied ? { state: "same", action: "none", detail: "있음" } : { state: "missing", action: "create", detail: "없음" };
-        },
-        async apply() {
-          applied++;
-        },
-      };
-      const r = await ctx.engine({ command: "t", steps: [sneaky] });
-      expect([phase, r.status]).toEqual([phase, "failed"]);
-      expect(JSON.stringify(r)).toContain(PLAN_WRITE_BLOCKED);
-      expect(calls().calls).toEqual([]);
-    }
+  test("read 문맥에는 쓰기 함수가 없다(쓰기 어댑터는 apply 문맥에만 존재, 3라운드 구조)", async () => {
+    const { ctx } = testCtx("apply", []);
+    const k8s = ctx.k8s as unknown as Record<string, unknown>;
+    const inf = ctx.infisical as unknown as Record<string, unknown>;
+    for (const name of ["forceSync", "rolloutRestart", "createRestoreObject", "deleteRestoreObjects"]) expect(k8s[name]).toBeUndefined();
+    for (const name of ["setValue", "removeKey"]) expect(inf[name]).toBeUndefined();
+    expect((ctx as unknown as Record<string, unknown>).generatePassword).toBeUndefined();
+    expect((ctx as unknown as Record<string, unknown>).exec).toBeUndefined();
   });
 
-  test("확인 단계가 실패하는 apply에서 앞 단계 read()의 쓰기 시도가 바깥에 닿지 않는다(리뷰 재현)", async () => {
+  test("붙잡아 둔 쓰기 문맥은 apply가 끝나면 쓰기·비밀번호 생성이 모두 막히고 원장 0건(P1 회귀)", async () => {
     const { ctx, calls } = testCtx("apply", [rule(["kubectl", REST])]);
-    const world = { gate: false };
-    const writer: Step = { id: "w", target: "w", read: async (c) => (c.exec(["kubectl", "delete", "pod", "smoke"]), { state: "missing", action: "create", detail: "x" }), apply: async () => {} };
-    const r = await ctx.engine({ command: "t", steps: [writer, fakeStep("gate", world, { check: true })] });
-    expect(r.status).toBe("failed");
+    let stash: WriteCtx | undefined;
+    let done = false;
+    const step: Step = { id: "s", target: "s", read: async () => (done ? { state: "same", action: "none", detail: "" } : { state: "missing", action: "create", detail: "" }), apply: async (w) => ((stash = w), (done = true), undefined) };
+    expect((await ctx.engine({ command: "t", steps: [step] })).status).toBe("done");
+    expect(() => stash!.k8s.forceSync("app-smoke", "smoke-db")).toThrow(PLAN_WRITE_BLOCKED);
+    expect(() => stash!.generatePassword()).toThrow(PLAN_WRITE_BLOCKED);
+    expect(() => stash!.readSecretInput("x")).toThrow(PLAN_WRITE_BLOCKED);
     expect(calls().calls).toEqual([]);
   });
 
-  test("Step.apply() 안에서는 쓰기가 실행된다", async () => {
+  test("Step.apply() 안에서는 쓰기 어댑터가 실행된다", async () => {
     const { ctx, calls } = testCtx("apply", [rule(["kubectl", REST])]);
+    const { result } = await applyWith(ctx, (w) => w.k8s.forceSync("app-smoke", "smoke-db"));
+    expect(result.status).toBe("done");
+    expect(calls().writes.map((c) => c.argv[3])).toEqual(["annotate"]);
+  });
+
+  test("다른 엔진의 apply가 기다리는 동안 둘째 엔진은 돌지 않는다(2라운드 P2: 쓰기 권한 공유)", async () => {
+    const { ctx, calls } = testCtx("apply", [rule(["kubectl", REST])]);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
     let done = false;
-    const step: Step = { id: "k", target: "k", read: async () => (done ? { state: "same", action: "none", detail: "" } : { state: "missing", action: "create", detail: "" }), apply: async (c) => (c.exec(["kubectl", "annotate", "x", "y", "a=b"]), (done = true), undefined) };
-    expect((await ctx.engine({ command: "t", steps: [step] })).status).toBe("done");
-    expect(calls().writes.length).toBe(1);
+    const slow: Step = { id: "slow", target: "slow", read: async () => (done ? { state: "same", action: "none", detail: "" } : { state: "missing", action: "create", detail: "" }), apply: async () => (await gate, (done = true), undefined) };
+    const first = ctx.engine({ command: "a", steps: [slow] });
+    await Bun.sleep(10);
+    await expect(ctx.engine({ command: "b", steps: [fakeStep("x", { x: false })] })).rejects.toThrow("한 번에 하나");
+    release();
+    expect((await first).status).toBe("done");
+    expect(calls().calls).toEqual([]);
+  });
+
+  test("apply 안에서 엔진을 다시 부르면(중첩) 거부한다", async () => {
+    const { ctx } = testCtx("apply", []);
+    await expect(applyWith(ctx, () => ctx.engine({ command: "inner", steps: [] }))).rejects.toThrow("한 번에 하나");
+  });
+
+  test("비밀번호는 apply 문맥에서만 만든다", async () => {
+    const { ctx } = testCtx("apply", []);
+    const { value } = await applyWith(ctx, (w) => w.generatePassword());
+    expect(value.length).toBe(40);
   });
 
   test("단계 id가 겹치면 거부", async () => {

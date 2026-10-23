@@ -1,6 +1,6 @@
 // 이 실행이 만든 임시 폴더. 끝날 때 모두 지운다(정상, 실패 exit, 잡히지 않은 예외, SIGINT·SIGTERM·SIGHUP).
 // tools/ci/lib.ts의 tempDir과 같은 방식이다. 함정: terraform 사본은 개당 수백 MB라 남기면 tmpfs 할당량을 넘긴다(2026-10-21 실측).
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -31,9 +31,19 @@ function install(): void {
   }
 }
 
-export function tempDir(prefix: string): string {
+// cli/src에서 파일을 만드는 곳은 이 파일 하나다(정적 시험). subdirs는 그 안에 빈 폴더로 만든다.
+export function tempDir(prefix: string, subdirs: string[] = []): string {
   install();
   const d = mkdtempSync(join(tmpdir(), `homelab-cli-${prefix}-`));
   temps.add(d);
+  for (const s of subdirs) {
+    if (!/^[a-z0-9-]+$/.test(s)) throw new Error("임시 하위 폴더 이름 형식이 아니다");
+    mkdirSync(join(d, s));
+  }
   return d;
+}
+
+// 이 실행이 tempDir로 만든 폴더인지. exec가 git clone 목적지를 이것으로만 허용한다.
+export function ownedTemp(dir: string): boolean {
+  return temps.has(dir);
 }

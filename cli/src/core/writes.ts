@@ -1,4 +1,5 @@
-// 외부 명령 argv가 바깥 상태를 바꾸는지 판정한다.
+// 외부 명령 argv가 바깥 상태를 바꾸는지 판정한다. 안전의 근거는 core 어댑터의 고정 argv이고(명령은 argv를 만들 수 없다),
+// 이 판정은 read exec의 마지막 방어선과 시험의 PATH 원장 집계에 쓴다(사용자 결정 2026-10-23).
 // 설계 C.7 "plan은 읽기 전용이다"(비밀번호 생성, Infisical 쓰기, 브랜치 push, PR 생성, kubectl 변경 없음), L50, AC-P13.
 // 읽기 허용 목록 방식이다. 목록에 없으면 쓰기로 본다(모르는 도구·하위 명령 포함). 목록을 넓히면 이 판정과
 // cli/test/core/writes.test.ts의 표를 함께 고친다. exec가 plan·read 모드에서 쓰기를 막고, 시험이 스텁 원장을 이 판정으로 센다.
@@ -70,11 +71,11 @@ function gh(args: string[]): Verdict {
 }
 
 function git(args: string[]): Verdict {
+  // 명령은 git을 부를 수 없다. core의 github 위임이 임시 폴더로 fresh clone만 한다(exec가 목적지를 확인).
+  // 읽기 하위 명령도 --output 같은 파일 쓰기 옵션이 있어(#873 2라운드 P2) 버전 확인 말고는 모두 쓰기로 본다.
   if (args.length === 1 && args[0] === "--version") return read("git --version");
   const [sub] = positionals("git", args);
-  // clone은 임시 폴더에 받기만 한다(github 하위 명령의 실행 사본). 원격은 바뀌지 않는다.
-  const reads = ["ls-remote", "rev-parse", "log", "show", "cat-file", "clone"];
-  return sub && reads.includes(sub) ? read(`git ${sub}`) : write(`git ${sub ?? ""}`.trim());
+  return write(`git ${sub ?? ""}`.trim());
 }
 
 // kubectl 인자가 Secret 리소스를 가리키는지. secret, secrets, Secret, secrets.v1, secret/x, pods,secrets, --raw .../secrets/... 모두.
@@ -83,6 +84,9 @@ export function targetsSecret(positional: string[]): boolean {
 }
 
 function kubectl(args: string[]): Verdict {
+  // --raw는 임의 API 경로(Secret 포함)를 읽고, config view --raw는 토큰·개인키를 낸다. 어댑터가 쓰지 않으므로
+  // 등호형(--raw=)까지 모두 거부한다(#873 2라운드 P1).
+  if (args.some((a) => a === "--raw" || a.startsWith("--raw=") || a === "--flatten")) return write("kubectl --raw·--flatten은 쓰지 않는다", true);
   const pos = positionals("kubectl", args);
   const [verb, sub] = pos;
   const secret = targetsSecret(pos.slice(1));
@@ -90,11 +94,11 @@ function kubectl(args: string[]): Verdict {
   if (verb && simple.includes(verb)) return read(`kubectl ${verb}`, secret);
   const nested: Record<string, string[]> = {
     auth: ["can-i", "whoami"],
-    config: ["current-context", "get-contexts", "view"],
+    config: ["current-context", "get-contexts"],
     rollout: ["status", "history"],
   };
   if (verb && sub && nested[verb]?.includes(sub)) return read(`kubectl ${verb} ${sub}`, secret);
-  // exec·port-forward·cp·debug·proxy도 쓰기로 본다. 파드 안에서 무엇을 하는지 argv로 판정할 수 없다.
+  // exec·port-forward·cp·debug·proxy·config view도 쓰기로 본다.
   return write(`kubectl ${verb ?? ""} ${sub ?? ""}`.trim(), secret);
 }
 

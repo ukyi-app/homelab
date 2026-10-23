@@ -14,7 +14,8 @@ const contents = (path: string, ref: string) => `${R}/contents/${path}?ref=${ref
 const pulls = `${R}/pulls?head=${encodeURIComponent(`ukyi-app:${BRANCH}`)}&state=open`;
 const CLI_MSG = "feat(smoke): x\n\nHomelab-CLI: db add";
 
-const spec = { command: "db add", app: "smoke", title: "feat(smoke): PostgreSQL 연결", body: "homelab db add smoke --apply", changes: [{ path: PATH, content: "postgres:\n  enabled: true\n" }] };
+const CONTENT = "postgres:\n  enabled: true\n";
+const spec = { command: "db add", app: "smoke", title: "feat(smoke): PostgreSQL 연결", body: "homelab db add smoke --apply", files: [PATH], edit: () => ({ [PATH]: CONTENT }) };
 
 const mainAt = (sha = FAKE_SHA): Rule => ghGet(`${R}/git/ref/heads/main`, 200, { object: { sha } });
 const notOnMain = (): Rule => ghGet(contents(PATH, FAKE_SHA), 404, {});
@@ -36,7 +37,7 @@ describe("PR 작성기", () => {
   });
 
   test("main과 같으면 same(PR 필요 없음)", async () => {
-    const { ctx, calls } = testCtx("plan", [mainAt(), ghGet(contents(PATH, FAKE_SHA), 200, file(spec.changes[0].content))]);
+    const { ctx, calls } = testCtx("plan", [mainAt(), ghGet(contents(PATH, FAKE_SHA), 200, file(CONTENT)), ghGet(pulls, 200, [])]);
     expect((await prStep(spec).read(ctx)).state).toBe("same");
     expectPlanReadOnly(calls());
   });
@@ -49,21 +50,21 @@ describe("PR 작성기", () => {
   });
 
   test("열린 PR: CLI 머리 + 이 명령 파일만 + 내용 같음이면 same + 병합 대기", async () => {
-    const { ctx, calls } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, CLI_MSG), compare(HEAD, [PATH]), ghGet(contents(PATH, HEAD), 200, file(spec.changes[0].content))]);
+    const { ctx, calls } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, CLI_MSG), compare(HEAD, [PATH]), ghGet(contents(PATH, HEAD), 200, file(CONTENT))]);
     const o = await prStep(spec).read(ctx);
     expect([o.state, o.wait]).toEqual(["same", "PR #12 검토·병합 대기"]);
     expectPlanReadOnly(calls());
   });
 
   test("열린 PR에 이 명령 밖 파일이 있으면 내용이 같아도 differs(Connector 리뷰)", async () => {
-    const { ctx } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, CLI_MSG), compare(HEAD, [PATH, "apps/smoke/values.yaml"]), ghGet(contents(PATH, HEAD), 200, file(spec.changes[0].content))]);
+    const { ctx } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, CLI_MSG), compare(HEAD, [PATH, "apps/smoke/values.yaml"]), ghGet(contents(PATH, HEAD), 200, file(CONTENT))]);
     const o = await prStep(spec).read(ctx);
     expect([o.state, o.action]).toEqual(["differs", "update"]);
     expect(o.detail).toContain("이 명령 밖 파일 1개");
   });
 
   test("열린 PR 머리가 사람 커밋이면 내용이 같아도 plan이 실패한다(같다고 보고하지 않는다)", async () => {
-    const { ctx, calls } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, "사람이 고친 커밋"), compare(HEAD, [PATH]), ghGet(contents(PATH, HEAD), 200, file(spec.changes[0].content))]);
+    const { ctx, calls } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, "사람이 고친 커밋"), compare(HEAD, [PATH]), ghGet(contents(PATH, HEAD), 200, file(CONTENT))]);
     const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
     expect(r.status).toBe("failed");
     expect(r.error?.message).toContain("트레일러");
@@ -78,7 +79,7 @@ describe("PR 작성기", () => {
       ghGet(pulls, [ghResponse(200, []), ghResponse(200, []), ghResponse(200, []), ghResponse(200, [{ number: 7, head: { sha: NEW_COMMIT } }])]),
       headMsg(NEW_COMMIT, "feat(smoke): PostgreSQL 연결\n\nHomelab-CLI: db add"),
       compare(NEW_COMMIT, [PATH]),
-      ghGet(contents(PATH, NEW_COMMIT), 200, file(spec.changes[0].content)),
+      ghGet(contents(PATH, NEW_COMMIT), 200, file(CONTENT)),
       ghGet(`${R}/git/ref/heads/${BRANCH}`, 404, {}),
       ...writes(),
       ghSend("POST", `${R}/git/refs`, 201, {}),
@@ -90,7 +91,7 @@ describe("PR 작성기", () => {
     const c = calls();
     expect(c.unmatched).toEqual([]);
     const sent = c.calls.filter((x) => x.stdin !== undefined).map((x) => JSON.parse(x.stdin!));
-    expect(sent[0]).toEqual({ base_tree: "d".repeat(40), tree: [{ path: PATH, mode: "100644", type: "blob", content: spec.changes[0].content }] });
+    expect(sent[0]).toEqual({ base_tree: "d".repeat(40), tree: [{ path: PATH, mode: "100644", type: "blob", content: CONTENT }] });
     expect(sent[1].parents).toEqual([FAKE_SHA]);
     expect(sent[1].message).toEndWith("\n\nHomelab-CLI: db add");
     expect(sent[2]).toEqual({ ref: `refs/heads/${BRANCH}`, sha: NEW_COMMIT });
@@ -107,7 +108,7 @@ describe("PR 작성기", () => {
       compare(HEAD, [PATH]),
       compare(NEW_COMMIT, [PATH]),
       ghGet(contents(PATH, HEAD), 200, file("old\n")),
-      ghGet(contents(PATH, NEW_COMMIT), 200, file(spec.changes[0].content)),
+      ghGet(contents(PATH, NEW_COMMIT), 200, file(CONTENT)),
       ghGet(`${R}/git/ref/heads/${BRANCH}`, 200, { object: { sha: HEAD } }),
       ...writes(),
       ghSend("PATCH", `${R}/git/refs/heads/${BRANCH}`, 200, {}),
@@ -160,10 +161,54 @@ describe("PR 작성기", () => {
     expect(r.error?.message).toContain("덮지 않았다");
   });
 
-  test("변경 검증: 경로·중복·빈 목록", () => {
-    expect(() => prStep({ ...spec, changes: [{ path: "../x", content: "" }] })).toThrow();
-    expect(() => prStep({ ...spec, changes: [{ path: "a\nb", content: "" }] })).toThrow();
-    expect(() => prStep({ ...spec, changes: [spec.changes[0], spec.changes[0]] })).toThrow();
-    expect(() => prStep({ ...spec, changes: [] })).toThrow();
+  test("apply 직전 main이 바뀌면 그 스냅샷에서 다시 계산해 동시 변경을 되돌리지 않는다(2라운드 P2 주입)", async () => {
+    const LIST = "infra/github/app-repos.json";
+    const B = "f".repeat(40);
+    const addBeta = { command: "app new", app: "beta", title: "feat(beta): 앱 목록", body: "b", files: [LIST], edit: (cur: Record<string, string | null>) => ({ [LIST]: JSON.stringify([...JSON.parse(cur[LIST] ?? "[]"), "beta"]) }) };
+    const lpulls = `${R}/pulls?head=${encodeURIComponent("ukyi-app:cli/app-new-beta")}&state=open`;
+    const rules: Rule[] = [
+      // 전체 읽기·직전 읽기는 main A, apply 안은 main B(그사이 alpha가 병합됨), 재조회는 B.
+      ghGet(`${R}/git/ref/heads/main`, [ghResponse(200, { object: { sha: FAKE_SHA } }), ghResponse(200, { object: { sha: FAKE_SHA } }), ghResponse(200, { object: { sha: B } })]),
+      ghGet(contents(LIST, FAKE_SHA), 200, file('["existing"]')),
+      ghGet(contents(LIST, B), 200, file('["existing","alpha"]')),
+      ghGet(lpulls, [ghResponse(200, []), ghResponse(200, []), ghResponse(200, []), ghResponse(200, [{ number: 9, head: { sha: NEW_COMMIT } }])]),
+      headMsg(B, "main"),
+      headMsg(NEW_COMMIT, "x\n\nHomelab-CLI: app new"),
+      ghGet(`${R}/compare/${B}...${NEW_COMMIT}`, 200, { files: [{ filename: LIST }] }),
+      ghGet(contents(LIST, NEW_COMMIT), 200, file('["existing","alpha","beta"]')),
+      ghGet(`${R}/git/ref/heads/cli/app-new-beta`, 404, {}),
+      ghSend("POST", `${R}/git/trees`, 201, { sha: "e".repeat(40) }),
+      ghSend("POST", `${R}/git/commits`, 201, { sha: NEW_COMMIT }),
+      ghSend("POST", `${R}/git/refs`, 201, {}),
+      ghSend("POST", `${R}/pulls`, 201, { number: 9 }),
+    ];
+    const { ctx, calls } = testCtx("apply", rules);
+    const r = await ctx.engine({ command: "app new", app: "beta", steps: [prStep(addBeta)] });
+    expect(r.status).toBe("waiting");
+    const bodies = calls().calls.filter((x) => x.stdin !== undefined).map((x) => JSON.parse(x.stdin!));
+    expect(bodies[0]).toEqual({ base_tree: "d".repeat(40), tree: [{ path: LIST, mode: "100644", type: "blob", content: '["existing","alpha","beta"]' }] });
+    expect(bodies[1].parents).toEqual([B]);
+  });
+
+  test("main에 이미 반영됐어도 열린 PR부터 본다: 밖 파일이 있으면 plan 실패, 없으면 same + 닫기 안내(Connector 2라운드)", async () => {
+    const base = [mainAt(), ghGet(contents(PATH, FAKE_SHA), 200, file(CONTENT)), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, CLI_MSG)];
+    const extra = testCtx("plan", [...base, compare(HEAD, [PATH, "apps/smoke/values.yaml"])]);
+    const r1 = await extra.ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
+    expect(r1.status).toBe("failed");
+    expect(r1.error?.message).toContain("이 명령 밖 파일");
+    const clean = testCtx("plan", [...base, compare(HEAD, [PATH])]);
+    const r2 = await clean.ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
+    expect(r2.status).toBe("same");
+    expect(r2.notes.join(" ")).toContain("gh pr close 12");
+    expectPlanReadOnly(clean.calls());
+  });
+
+  test("변경 검증: 경로·중복·빈 목록·edit 결과 키", async () => {
+    expect(() => prStep({ ...spec, files: ["../x"] })).toThrow();
+    expect(() => prStep({ ...spec, files: ["a\nb"] })).toThrow();
+    expect(() => prStep({ ...spec, files: [PATH, PATH] })).toThrow();
+    expect(() => prStep({ ...spec, files: [] })).toThrow();
+    const { ctx } = testCtx("plan", [mainAt(), notOnMain()]);
+    await expect(prStep({ ...spec, edit: () => ({ "other.yaml": "x" }) }).read(ctx)).rejects.toThrow("files의 파일마다");
   });
 });

@@ -1,4 +1,6 @@
-// 소스 규칙 정적 검사(cli/README.md "명령 더하기"). 어기면 PATH 스텁·쓰기 창·출력 차단이 보장하던 것이 깨진다.
+// 소스 규칙 정적 검사(cli/README.md "명령 더하기"). 3라운드 구조(사용자 결정 2026-10-23)의 근거는 두 가지다:
+// 명령은 core의 타입 있는 어댑터만 부르고(import 허용 목록 + 전역 금지), core 안에서도 exec·문맥 조립·쓰기 문맥 내부는
+// 정해진 파일만 쓴다. 어기면 고정 argv·쓰기 문맥 폐기·출력 차단이 보장하던 것이 깨진다.
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -34,8 +36,7 @@ function offenders(re: RegExp, allowed: string[]): string[] {
   return src.filter((p) => !allowed.includes(rel(p)) && re.test(body(p))).map(rel);
 }
 
-// node:fs에서 가져와도 되는 이름. 읽기만 한다. 그 밖(writeFile*, append*, rm*, rename*, copy*, cp*, mkdir*, mkdtemp*,
-// unlink*, truncate*, chmod*, chown*, symlink*, link*, utimes*, open*, createWriteStream, promises)은 막는다.
+// node:fs에서 가져와도 되는 이름. 읽기만 한다. 그 밖(쓰기·지우기·옮기기·만들기·promises)은 막는다.
 const FS_READ = new Set(["readFileSync", "readSync", "existsSync", "readdirSync", "statSync", "lstatSync"]);
 
 export function fsWriteImports(text: string): string[] {
@@ -47,15 +48,39 @@ export function fsWriteImports(text: string): string[] {
       bad.push(m[3]);
       continue;
     }
-    const clause = m[2];
-    // 기본·이름공간 import(import fs from, import * as fs from)는 무엇이든 부를 수 있다.
-    if (!clause.trim().startsWith("{")) bad.push(`${clause.trim()} from ${m[3]}`);
-    for (const name of clause.replace(/[{}]/g, "").split(",").map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean)) {
-      if (clause.trim().startsWith("{") && !FS_READ.has(name)) bad.push(name);
-    }
+    const clause = m[2].trim();
+    if (!clause.startsWith("{")) bad.push(`${clause} from ${m[3]}`);
+    else for (const name of clause.replace(/[{}]/g, "").split(",").map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean)) if (!FS_READ.has(name)) bad.push(name);
   }
+  // Bun 모듈의 named import(write, spawn, $, file, serve …)도 막는다(#873 2라운드 P2: import { write } from "bun").
+  for (const m of t.matchAll(/from\s+["'](bun(:[a-z]+)?)["']/g)) bad.push(`import from ${m[1]}`);
   if (/\brequire\s*\(|\bimport\s*\(/.test(t)) bad.push("require()·동적 import()");
   if (/Bun\.(write|file)\b|createWriteStream/.test(t)) bad.push("Bun.write·Bun.file·createWriteStream");
+  return bad;
+}
+
+// 명령 파일이 import할 수 있는 것: core의 문맥·정의 모듈과 같은 접두의 자기 도우미 파일뿐.
+const COMMAND_IMPORTS = new Set(["../core/command", "../core/names", "../core/result", "../core/pr", "../core/command-info"]);
+// 명령 파일에서 쓰면 안 되는 전역(외부 명령·네트워크·파일·환경변수·출력의 우회로).
+const COMMAND_GLOBALS = /\b(Bun|process|fetch|require|globalThis|eval|Deno|XMLHttpRequest|WebSocket|navigator|console|Function)\b|\bimport\s*\(/;
+
+// 명령 파일 이름 목록(등록 표). 도우미 파일의 주인은 이 중 가장 긴 접두다(db-add-values.ts → db-add).
+const REGISTERED = [...readFileSync(join(SRC, "registry.ts"), "utf8").matchAll(/from "\.\/commands\/([a-z0-9-]+)"/g)].map((m) => m[1]);
+
+export function commandProblems(file: string, text: string, names: string[] = REGISTERED): string[] {
+  const stem = file.replace(/\.ts$/, "");
+  const owner = names.filter((n) => stem === n || stem.startsWith(`${n}-`)).sort((a, b) => b.length - a.length)[0];
+  const bad: string[] = [];
+  const t = code(text);
+  for (const m of t.matchAll(/(?:import|export)\s[\s\S]*?from\s+["']([^"']+)["']/g)) {
+    const spec = m[1];
+    if (COMMAND_IMPORTS.has(spec)) continue;
+    // 같은 명령의 파일(./db-add, ./db-add-values)만. 다른 명령의 파일은 소유 범위 밖이다.
+    if (owner && (spec === `./${owner}` || spec.startsWith(`./${owner}-`))) continue;
+    bad.push(`import ${spec}`);
+  }
+  const g = t.match(COMMAND_GLOBALS);
+  if (g) bad.push(`전역 ${g[0]}`);
   return bad;
 }
 
@@ -65,7 +90,25 @@ describe("소스 규칙", () => {
     expect(REGISTRY.length).toBeGreaterThan(10);
   });
 
-  test("프로세스·네트워크는 core/exec.ts에서만(PATH 스텁이 모든 바깥 호출을 본다)", () => {
+  test("명령 파일은 core 문맥 모듈과 자기 도우미만 import하고, 외부 실행·파일·환경변수 전역을 쓰지 않는다", () => {
+    const bad = src.filter((p) => rel(p).startsWith("commands/")).flatMap((p) => commandProblems(rel(p).slice("commands/".length), readFileSync(p, "utf8")).map((b) => `${rel(p)}: ${b}`));
+    expect(bad).toEqual([]);
+  });
+
+  test("명령 규칙 검사가 우회 꼴을 잡는다", () => {
+    expect(commandProblems("doctor.ts", 'import { write } from "bun";')).toEqual(["import bun"]);
+    expect(commandProblems("doctor.ts", 'import { makeExec } from "../core/exec";')).toEqual(["import ../core/exec"]);
+    expect(commandProblems("doctor.ts", 'import { readFileSync } from "node:fs";')).toEqual(["import node:fs"]);
+    expect(commandProblems("db-add.ts", 'import { f } from "./app-add-values";')).toEqual(["import ./app-add-values"]);
+    expect(commandProblems("db-add.ts", 'import { f } from "./db-add-values";')).toEqual([]);
+    expect(commandProblems("doctor.ts", "const x = process.env.GITHUB_TOKEN;")).toEqual(["전역 process"]);
+    expect(commandProblems("doctor.ts", "Bun.spawnSync(['x']);")).toEqual(["전역 Bun"]);
+    expect(commandProblems("doctor.ts", "await fetch('https://x');")).toEqual(["전역 fetch"]);
+    expect(commandProblems("doctor.ts", "const m = await import('../core/exec');")).toEqual(["전역 import("]);
+    expect(commandProblems("doctor.ts", 'import { defineCommand } from "../core/command";')).toEqual([]);
+  });
+
+  test("프로세스·네트워크는 core/exec.ts에서만", () => {
     expect(offenders(/Bun\.spawn|Bun\.\$|child_process|\bfetch\(|new WebSocket|Bun\.connect|Bun\.listen|node:(net|http|https|dgram|tls)/, ["core/exec.ts"])).toEqual([]);
   });
 
@@ -73,21 +116,18 @@ describe("소스 규칙", () => {
     expect(offenders(/console\.|process\.stdout|process\.stderr/, ["core/output.ts"])).toEqual([]);
   });
 
-  test("쓰기 창·exec 생성·비밀번호 허용은 엔진과 진입점만(02~04가 우회할 수 없게)", () => {
-    expect(offenders(/\brunWithWrites\b/, ["core/exec.ts", "core/engine.ts", "main.ts"])).toEqual([]);
-    expect(offenders(/\bmakeExec\b/, ["core/exec.ts", "main.ts"])).toEqual([]);
-    expect(offenders(/\ballowGeneration\b/, ["core/secret.ts", "core/engine.ts"])).toEqual([]);
-  });
-
-  test("Secret.reveal()은 core 안에서만", () => {
-    expect(src.filter((p) => !rel(p).startsWith("core/") && /\.reveal\(/.test(body(p))).map(rel)).toEqual([]);
+  test("exec 생성·문맥 조립·비밀번호 생성·쓰기 문맥 내부는 정해진 core 파일만", () => {
+    expect(offenders(/\bmakeExec\b/, ["core/exec.ts", "core/runtime.ts"])).toEqual([]);
+    expect(offenders(/\bmakeRuntime\b/, ["core/runtime.ts", "main.ts"])).toEqual([]);
+    expect(offenders(/\bnewPassword\b/, ["core/secret.ts", "core/runtime.ts"])).toEqual([]);
+    expect(offenders(/\b(writeExecOf|registerWriteExec)\b/, ["core/runtime-internal.ts", "core/runtime.ts", "core/pr.ts"])).toEqual([]);
   });
 
   test("exitCode는 github 하위 명령만", () => {
     expect(src.filter((p) => rel(p).startsWith("commands/") && !rel(p).startsWith("commands/github") && /exitCode/.test(body(p))).map(rel)).toEqual([]);
   });
 
-  test("파일을 바꾸는 API는 core/temp.ts만(시크릿을 파일에 두지 않는다, Connector 리뷰)", () => {
+  test("파일을 바꾸는 API는 core/temp.ts만, bun 모듈 import는 어디서도 안 된다", () => {
     const bad = src.filter((p) => rel(p) !== "core/temp.ts").flatMap((p) => fsWriteImports(readFileSync(p, "utf8")).map((b) => `${rel(p)}: ${b}`));
     expect(bad).toEqual([]);
   });
@@ -97,14 +137,14 @@ describe("소스 규칙", () => {
     expect(fsWriteImports('import { rmSync as r } from "fs";')).toEqual(["rmSync"]);
     expect(fsWriteImports('import * as fs from "node:fs";')).toEqual(["* as fs from node:fs"]);
     expect(fsWriteImports('import { readFile } from "node:fs/promises";')).toEqual(["node:fs/promises"]);
+    expect(fsWriteImports('import { write } from "bun";')).toEqual(["import from bun"]);
     expect(fsWriteImports("const fs = require('fs');")).toEqual(["require()·동적 import()"]);
     expect(fsWriteImports('await Bun.write("x", "y");')).toEqual(["Bun.write·Bun.file·createWriteStream"]);
     expect(fsWriteImports('import { readFileSync, existsSync } from "node:fs";')).toEqual([]);
   });
 });
 
-// 등록 표의 파일 → 그 파일이 내보내는 명령. 이름이 아니라 실제 default export로 대조한다
-// (#873 1라운드 P2: 소스 문자열 대조가 두 단어 명령 17개를 모두 놓쳤다).
+// 등록 표의 파일 → 그 파일이 내보내는 명령. 이름이 아니라 실제 default export로 대조한다.
 async function commandFiles(): Promise<{ file: string; cmd: CommandSpec }[]> {
   const reg = readFileSync(join(SRC, "registry.ts"), "utf8");
   const out: { file: string; cmd: CommandSpec }[] = [];
@@ -149,7 +189,6 @@ describe("명령 파일", () => {
     const entries = await commandFiles();
     const dbAdd = entries.find((e) => e.cmd.path.join(" ") === "db add");
     expect(dbAdd).toBeDefined();
-    const implemented = [{ file: dbAdd!.file, cmd: { ...dbAdd!.cmd, placeholder: undefined } }];
-    expect(missingPlanTests(implemented, join(TEST, "commands"))).toEqual(["db-add"]);
+    expect(missingPlanTests([{ file: dbAdd!.file, cmd: { ...dbAdd!.cmd, placeholder: undefined } }], join(TEST, "commands"))).toEqual(["db-add"]);
   });
 });

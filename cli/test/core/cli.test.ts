@@ -19,6 +19,22 @@ describe("진입점", () => {
   });
 });
 
+describe("사용법 오류는 값을 되찍지 않는다(Connector 2라운드)", () => {
+  test("남는 위치 인자·형식이 틀린 값", async () => {
+    const leaked = "fakevalue-positional-0001";
+    for (const argv of [["secret", "set", "smoke", "API_TOKEN", leaked], ["db", "add", `Bad${leaked}`], ["db", "add", "smoke", "--json", leaked]]) {
+      const r = await runCli(argv, []);
+      expect(r.code).toBe(64);
+      expect(r.stdout + r.stderr).not.toContain(leaked);
+    }
+    for (const argv of [["nope", leaked], ["db", leaked], [leaked]]) {
+      const u = await runCli([...argv, "--json"], []);
+      expect(u.code).toBe(64);
+      expect(u.stdout + u.stderr).not.toContain(leaked);
+    }
+  });
+});
+
 describe("등록 표", () => {
   test("경로가 겹치지 않고, 명령 플래그가 전역 플래그 이름을 쓰지 않는다", () => {
     const seen = new Set<string>();
@@ -45,6 +61,8 @@ describe("모든 명령: 사용법 오류는 외부 호출 없이 64", () => {
       const h = await runCli([...base, "--help"], []);
       expect(h.code).toBe(0);
       expect(h.stdout).toStartWith(`homelab ${c.path.join(" ")}`);
+      // 필수 인자를 몰라도 도움말은 0(Connector 2라운드).
+      expect((await runCli([...c.path, "--help"], [])).code).toBe(0);
     });
   }
 });

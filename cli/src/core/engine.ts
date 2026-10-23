@@ -2,10 +2,10 @@
 // 여러 시스템의 변경은 원자적이지 않다. 그래서 단계마다 실행 직전에 현재 상태를 읽고 이미 된 단계는 건너뛴다.
 // apply 순서: 전체 읽기 한 번(확인 단계가 막히면 아무것도 쓰기 전에 멈춤) → 단계마다 다시 읽기 → 차이만 apply 한 번 → 다시 읽어 확인.
 // apply가 타임아웃이면 재시도하지 않고 다시 읽는다(B.8 E7: 타임아웃 뒤 재시도는 두 번 실행이다).
-import type { Ctx, Observation, Plan } from "./command";
-import { ExecTimeout, runWithWrites } from "./exec";
+// Step.read는 ReadCtx(쓰기 함수 없음), Step.apply는 그 apply만의 WriteCtx를 받는다.
+import type { Observation, Plan, ReadCtx, WriteCtx } from "./command";
+import { ExecTimeout } from "./exec";
 import type { Result, Status, StepReport } from "./result";
-import { allowGeneration } from "./secret";
 
 const RERUN = "같은 명령을 다시 실행하면 된 단계는 건너뛰고 이어 간다";
 
@@ -21,7 +21,8 @@ function planLine(line: string): string {
   return line.replace(/ --apply(?= |$)/, "");
 }
 
-export async function runEngine(ctx: Ctx, plan: Plan): Promise<Result> {
+// newWrite: 이 apply 한 번의 쓰기 문맥을 만든다(runtime.ts). plan·read에서는 부르지 않는다.
+export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: WriteCtx; revoke: () => void }): Promise<Result> {
   const ids = new Set<string>();
   for (const s of plan.steps) {
     if (ids.has(s.id)) throw new Error(`단계 id가 겹친다: ${s.id}`);
@@ -89,12 +90,12 @@ export async function runEngine(ctx: Ctx, plan: Plan): Promise<Result> {
     let timedOut = false;
     try {
       // 비밀번호는 apply 안에서만 만든다. read()에서 만들면 plan이 부수효과를 갖는다.
-      // 쓰기 창도 이 await 동안만 열린다. read()·재조회는 apply 모드여도 쓰기가 막힌다(exec.ts 안전 계약).
-      allowGeneration(true);
+      // 쓰기 문맥은 이 apply 한 번에만 있다. read()·재조회는 읽기 문맥이라 쓰기 함수가 없다.
+      const { w, revoke } = newWrite();
       try {
-        await runWithWrites(() => s.apply!(ctx, seen));
+        await s.apply(w, seen);
       } finally {
-        allowGeneration(false);
+        revoke();
       }
     } catch (e) {
       if (!(e instanceof ExecTimeout)) {

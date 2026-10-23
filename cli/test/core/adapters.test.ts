@@ -1,30 +1,32 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { argvFor, getValue, has, listKeys, projectId, removeKey, resetProjectCache, setValue } from "../../src/core/infisical";
-import { runWithWrites } from "../../src/core/exec";
+// core 어댑터 시험. 명령이 받는 문맥(testCtx는 makeRuntime으로 실제와 같은 ReadCtx를 만든다)으로만 부른다.
+import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
+import type { KubeKind } from "../../src/core/command";
+import { argvFor as ghArgv } from "../../src/core/github";
+import { argvFor, projectResolver, valueProblem } from "../../src/core/infisical";
+import { containsSecretManifest } from "../../src/core/kubectl";
 import { render } from "../../src/core/output";
-import { getJson, listJson, secretExists } from "../../src/core/kubectl";
-import { prStep } from "../../src/core/pr";
-import { ghSend } from "../../src/core/github";
-import { kubectlArgv, secretHash } from "../../src/core/kubectl";
-import { CliError } from "../../src/core/result";
+import { CliError, type Result } from "../../src/core/result";
 import { Secret } from "../../src/core/secret";
-import { FAKE_PROJECT, FAKE_SECRETS, REST, expectNoSecrets, expectPlanReadOnly, infisicalList, infisicalSet, kubectlRule, rule, sha256, testCtx } from "../harness";
+import { classify } from "../../src/core/writes";
+import { FAKE_PROJECT, FAKE_SECRETS, REST, applyWith, expectNoSecrets, expectPlanReadOnly, infisicalList, infisicalSet, kubectlRule, rule, sha256, testCtx } from "../harness";
 
-afterEach(() => resetProjectCache());
+const ok = (extra: Partial<Result> = {}): Result => ({ command: "t", mode: "plan", status: "same", steps: [], notes: [], next: null, ...extra });
 
 describe("Infisical 어댑터", () => {
-  test("존재는 폴더 목록으로 본다(`secrets get`의 *not found* 함정 회피). 값은 출력에 없다", () => {
-    const { ctx, calls } = testCtx("plan", [infisicalList("/apps/smoke/postgres", { PASSWORD: FAKE_SECRETS[0] })]);
-    expect(has(ctx, "/apps/smoke/postgres", "PASSWORD")).toBe(true);
-    expect(has(ctx, "/apps/smoke/postgres", "OTHER")).toBe(false);
-    expect([...listKeys(ctx, "/apps/smoke/postgres")]).toEqual(["PASSWORD"]);
-    expect(String(getValue(ctx, "/apps/smoke/postgres", "PASSWORD"))).toBe("[secret]");
+  test("존재는 폴더 목록으로 본다(`secrets get`의 *not found* 함정 회피). 키 이름만 나온다", () => {
+    const { ctx, calls } = testCtx("plan", [infisicalList("/apps/smoke/postgres", { PASSWORD: FAKE_SECRETS[0], OTHER: FAKE_SECRETS[1] })]);
+    expect(ctx.infisical.has("/apps/smoke/postgres", "PASSWORD")).toBe(true);
+    expect(ctx.infisical.has("/apps/smoke/postgres", "NOPE")).toBe(false);
+    expect(ctx.infisical.listKeys("/apps/smoke/postgres")).toEqual(["OTHER", "PASSWORD"]);
+    expect(String(ctx.infisical.getValue("/apps/smoke/postgres", "PASSWORD"))).toBe("[secret]");
+    expect(ctx.infisical.valueHash("/apps/smoke/postgres", "PASSWORD")).toBe(sha256(FAKE_SECRETS[0]).slice(0, 12));
     expectPlanReadOnly(calls());
   });
 
-  test("쓰기는 --file /dev/stdin에 KEY=값 한 줄, argv에 값이 없다", async () => {
+  test("쓰기는 apply 문맥에서만, --file /dev/stdin에 KEY=값 한 줄, argv에 값이 없다", async () => {
     const { ctx, calls } = testCtx("apply", [infisicalSet("/apps/smoke/postgres")]);
-    await runWithWrites(async () => setValue(ctx, "/apps/smoke/postgres", "PASSWORD", new Secret(FAKE_SECRETS[1])));
+    await applyWith(ctx, (w) => w.infisical.setValue("/apps/smoke/postgres", "PASSWORD", new Secret(FAKE_SECRETS[1])));
     const c = calls();
     expect(c.calls.length).toBe(1);
     expect(c.calls[0].argv).toEqual(argvFor.set(FAKE_PROJECT, "/apps/smoke/postgres"));
@@ -32,90 +34,115 @@ describe("Infisical 어댑터", () => {
     expectNoSecrets(c);
   });
 
-  test("줄바꿈이 낀 값·키·경로는 쓰기 전에 거부(다음 줄이 다른 키가 된다)", () => {
+  test("16자 미만·줄바꿈·제어 문자·앞뒤 공백·양끝 따옴표 값은 쓰기 전에 거부(원장 0건)", async () => {
     const { ctx, calls } = testCtx("apply", [infisicalSet("/apps/smoke")]);
-    expect(() => setValue(ctx, "/apps/smoke", "TOKEN", new Secret("fakevalue\nOTHER=x"))).toThrow("줄바꿈");
-    expect(() => setValue(ctx, "/apps/smoke", "TOKEN\nX", new Secret("fakevalue-ok-1"))).toThrow();
-    expect(() => setValue(ctx, "/apps/smoke\n/x", "TOKEN", new Secret("fakevalue-ok-1"))).toThrow();
+    for (const v of ["fifteen-chars15", "fakevalue-0001-a\nOTHER=x", "fakevalue-0001-ab\t", " fakevalue-0001-ab", '"fakevalue-0001-ab"']) {
+      await expect(applyWith(ctx, (w) => w.infisical.setValue("/apps/smoke", "TOKEN", new Secret(v)))).rejects.toThrow();
+    }
     expect(calls().calls).toEqual([]);
+    expect(valueProblem(new Secret("a".repeat(16)))).toBeNull();
   });
 
-  test("plan에서 쓰기·삭제는 exec가 막는다", () => {
-    const { ctx, calls } = testCtx("plan", [infisicalSet("/apps/smoke"), rule(argvFor.remove(FAKE_PROJECT, "/apps/smoke", "TOKEN"))]);
-    expect(() => setValue(ctx, "/apps/smoke", "TOKEN", new Secret("fakevalue-ok-2"))).toThrow("plan-write-blocked");
-    expect(() => removeKey(ctx, "/apps/smoke", "TOKEN")).toThrow("plan-write-blocked");
-    expect(calls().calls).toEqual([]);
+  test("짧은 값은 추적하지 않아 고정 옵션·JSON 키와 겹쳐도 정상 동작(2라운드 P2, 사용자 결정)", () => {
+    new Secret("false");
+    new Secret("mode");
+    const { ctx } = testCtx("plan", [infisicalList("/apps/smoke", { A: FAKE_SECRETS[0] })]);
+    expect(ctx.infisical.has("/apps/smoke", "A")).toBe(true);
+    expect(() => render(ok({ app: "smoke" }), true)).not.toThrow();
+    expect(() => render(ok(), false)).not.toThrow();
   });
 
-  test("프로젝트 ID: 환경변수 없고 tty 아니면 CliError + 다음 행동, 형식이 틀려도 실패", () => {
-    const { ctx } = testCtx("plan", [], { project: false });
-    expect(() => projectId(ctx)).toThrow(CliError);
-    const bad = testCtx("plan", [], { env: { HOMELAB_INFISICAL_PROJECT_ID: "not-a-uuid" } });
-    expect(() => projectId(bad.ctx)).toThrow("UUID");
-    const asked = testCtx("plan", [], { project: false });
-    asked.ctx.isTTY = true;
-    asked.ctx.ask = () => FAKE_PROJECT;
-    expect(projectId(asked.ctx)).toBe(FAKE_PROJECT);
-  });
-});
-
-describe("짧은 시크릿(P1: 길이와 관계없이 보호)", () => {
-  test("5자 값의 쓰기 실패 오류에 값이 실려도 오류 메시지·출력에 없다", async () => {
-    const short = "q7x2z";
-    const { ctx } = testCtx("apply", [infisicalSet("/apps/smoke", { code: 1, stderr: `error: invalid value ${short}\n` })]);
-    let message = "";
-    await runWithWrites(async () => {
-      try {
-        setValue(ctx, "/apps/smoke", "PIN", new Secret(short));
-      } catch (e) {
-        message = (e as Error).message;
-      }
-    });
-    expect(message).toContain("오류 원문을 버렸다");
-    expect(message).not.toContain(short);
-    const out = render({ command: "secret set", mode: "apply", status: "failed", steps: [], notes: [], next: null, error: { message, next: "x" } }, true);
-    expect(out).not.toContain(short);
+  test("프로젝트 ID: 없고 tty 아니면 CliError, 형식 틀림, tty면 한 번 묻는다", () => {
+    expect(() => projectResolver({ env: {}, isTTY: false, ask: () => null }).id()).toThrow(CliError);
+    expect(() => projectResolver({ env: { HOMELAB_INFISICAL_PROJECT_ID: "nope" }, isTTY: false, ask: () => null }).id()).toThrow("UUID");
+    let asked = 0;
+    const p = projectResolver({ env: {}, isTTY: true, ask: () => (asked++, FAKE_PROJECT) });
+    expect([p.id(), p.id(), asked]).toEqual([FAKE_PROJECT, FAKE_PROJECT, 1]);
   });
 
-  test("5자 값이 출력·PR 내용·요청 본문에 섞이면 막는다", () => {
-    const short = "k9m3w";
-    new Secret(short);
-    expect(() => render({ command: "t", mode: "plan", status: "same", steps: [], notes: [`값 ${short}`], next: null }, false)).toThrow("시크릿");
-    expect(() => prStep({ command: "db add", app: "smoke", title: "t", body: "b", changes: [{ path: "apps/smoke/values.yaml", content: `pin: ${short}\n` }] })).toThrow("시크릿");
-    const { ctx, calls } = testCtx("apply", []);
-    expect(() => ghSend(ctx, "POST", "repos/x/pulls", { body: `pin ${short}` })).toThrow("시크릿");
-    expect(calls().calls).toEqual([]);
+  test("시크릿 입력은 16자 이상만, 파이프 끝 줄바꿈 하나만 뗀다", async () => {
+    const child = join(import.meta.dir, "..", "fixtures", "core", "input-child.ts");
+    const runChild = async (stdin: string) => {
+      const p = Bun.spawn([process.execPath, "--no-env-file", child], { stdin: new TextEncoder().encode(stdin), stdout: "pipe", stderr: "pipe" });
+      const [out] = await Promise.all([new Response(p.stdout).text(), p.exited]);
+      return out.trim();
+    };
+    expect(await runChild("short\n")).toStartWith("error:");
+    expect(await runChild("fakevalue-input-0001\n")).toBe(`ok ${sha256("fakevalue-input-0001").slice(0, 12)}`);
+    expect(await runChild("fakevalue-input-0001\nsecond\n")).toStartWith("error:");
   });
 });
 
 describe("kubectl 어댑터", () => {
-  test("범용 조회는 Secret을 거부한다(단건·목록·표기 변형, P1)", () => {
+  test("범용 조회에 Secret 종류는 없다(타입 밖 값을 넣어도 외부 호출 전에 거부)", () => {
     const { ctx, calls } = testCtx("read", [rule(["kubectl", REST])]);
-    for (const kind of ["secret", "secrets", "Secret", "secrets.v1", "secret.v1.", "pods,secrets"]) {
-      expect(() => getJson(ctx, "app-smoke", kind, "x")).toThrow("Secret");
-      expect(() => listJson(ctx, "app-smoke", kind)).toThrow("Secret");
+    for (const kind of ["secret", "secrets", "Secret", "secrets.v1", "pods,secrets"]) {
+      expect(() => ctx.k8s.get(kind as KubeKind, "app-smoke", "x")).toThrow("Secret은 secretHash");
+      expect(() => ctx.k8s.list(kind as KubeKind, "app-smoke")).toThrow("Secret은 secretHash");
     }
     expect(calls().calls).toEqual([]);
   });
 
-  test("secretExists는 키 이름만, 값은 결과·원장에 없다", () => {
-    const data = { data: { password: Buffer.from(FAKE_SECRETS[0]).toString("base64"), user: Buffer.from("smoke-user").toString("base64") } };
+  test("secretHash는 요청한 키만 추적: 같은 Secret의 username(공개 앱 이름)이 다음 조회·출력을 막지 않는다(2라운드 P1)", () => {
+    const app = "homelab-probe-long";
+    const data = { data: { username: Buffer.from(app).toString("base64"), password: Buffer.from(FAKE_SECRETS[0]).toString("base64") } };
+    const { ctx, calls } = testCtx("read", [
+      kubectlRule(["-n", "database", "get", "secret", `pg-role-${app}`, "-o", "json"], { stdout: JSON.stringify(data) }),
+      kubectlRule(["-n", "database", "get", "databaseroles.postgresql.cnpg.io", app, "-o", "json"], { stdout: JSON.stringify({ status: { applied: true } }) }),
+    ]);
+    expect(ctx.k8s.secretHash("database", `pg-role-${app}`, "password")).toBe(sha256(FAKE_SECRETS[0]).slice(0, 12));
+    expect(ctx.k8s.get("databaserole", "database", app)?.status?.applied).toBe(true);
+    expect(() => render(ok({ app, notes: [`역할 ${app}`] }), true)).not.toThrow();
+    expect(() => render(ok({ notes: [FAKE_SECRETS[0]] }), true)).toThrow("시크릿");
+    expectPlanReadOnly(calls());
+  });
+
+  test("secretExists는 키 이름만", () => {
+    const data = { data: { password: Buffer.from(FAKE_SECRETS[0]).toString("base64"), user: Buffer.from("u").toString("base64") } };
     const { ctx, calls } = testCtx("read", [kubectlRule(["-n", "database", "get", "secret", "pg-role-smoke", "-o", "json"], { stdout: JSON.stringify(data) })]);
-    const r = secretExists(ctx, "database", "pg-role-smoke");
-    expect(r).toEqual({ exists: true, keys: ["password", "user"] });
-    expect(JSON.stringify(r)).not.toContain(FAKE_SECRETS[0]);
+    expect(ctx.k8s.secretExists("database", "pg-role-smoke")).toEqual({ exists: true, keys: ["password", "user"] });
     expectPlanReadOnly(calls());
   });
 
-  test("secretHash는 해시 앞 12자만, 값은 원장·결과에 없다", () => {
-    const data = { data: { password: Buffer.from(FAKE_SECRETS[0]).toString("base64") } };
-    const { ctx, calls } = testCtx("plan", [kubectlRule(["-n", "database", "get", "secret", "pg-role-smoke", "-o", "json"], { stdout: JSON.stringify(data) })]);
-    const h = secretHash(ctx, "database", "pg-role-smoke", "password");
-    expect(h).toBe(sha256(FAKE_SECRETS[0]).slice(0, 12));
-    expectPlanReadOnly(calls());
+  test("API NotFound만 없음(null). 인증 플러그인의 not found는 오류로 던진다(Connector 2라운드)", () => {
+    const { ctx } = testCtx("read", [
+      kubectlRule(["-n", "app-smoke", "get", "deployments.apps", "a", "-o", "json"], { code: 1, stderr: 'Error from server (NotFound): deployments.apps "a" not found\n' }),
+      kubectlRule(["-n", "app-smoke", "get", "deployments.apps", "b", "-o", "json"], { code: 1, stderr: "error: exec plugin: executable kubelogin not found\n" }),
+    ]);
+    expect(ctx.k8s.get("deployment", "app-smoke", "a")).toBeNull();
+    expect(() => ctx.k8s.get("deployment", "app-smoke", "b")).toThrow();
   });
 
-  test("모든 호출에 --request-timeout", () => {
-    expect(kubectlArgv(["get", "pods"]).at(-1)).toBe("--request-timeout=20s");
+  test("복원 객체: 라벨 필수, 허용 종류만, List 안 Secret까지 거부(Connector 2라운드 P1)", async () => {
+    const { ctx, calls } = testCtx("apply", [rule(["kubectl", REST])]);
+    const labels = { "homelab.ukyi.app/restore": "r1abc" };
+    const bad = [
+      { kind: "Secret", metadata: { labels } },
+      { kind: "List", items: [{ kind: "Secret" }], metadata: { labels } },
+      { kind: "Job", metadata: { labels }, spec: { template: { items: [{ kind: "secret" }] } } },
+      { kind: "Job", metadata: {} },
+      { kind: "Deployment", metadata: { labels } },
+    ];
+    for (const m of bad) await expect(applyWith(ctx, (w) => w.k8s.createRestoreObject("database", m))).rejects.toThrow();
+    expect(calls().calls).toEqual([]);
+    await applyWith(ctx, (w) => w.k8s.createRestoreObject("database", { kind: "Job", metadata: { name: "restore-r1abc", labels } }));
+    expect(calls().writes.length).toBe(1);
+    expect(containsSecretManifest({ kind: "SecretList" })).toBe(true);
+  });
+});
+
+describe("gh·GHCR 어댑터", () => {
+  test("gh GET은 ukyi-app 경로와 user만(graphql·다른 owner는 외부 호출 전 거부)", () => {
+    const { ctx, calls } = testCtx("read", [rule(["gh", REST])]);
+    for (const p of ["graphql", "repos/other/x", "repos/ukyi-app/x\nfoo", "/repos/ukyi-app/x"]) expect(() => ctx.gh.get(p)).toThrow();
+    expect(calls().calls).toEqual([]);
+  });
+
+  test("GHCR 익명 토큰은 고정 argv(-q로 .curlrc 끔)이고 읽기로 판정된다", () => {
+    expect(classify(ghArgv.ghcr("smoke")).write).toBe(false);
+    const { ctx, calls } = testCtx("read", [rule(ghArgv.ghcr("smoke"), { stdout: "200" })]);
+    expect(ctx.ghcr.anonymousPullStatus("smoke")).toBe(200);
+    expect(() => ctx.ghcr.anonymousPullStatus("Bad/App")).toThrow();
+    expectPlanReadOnly(calls());
   });
 });

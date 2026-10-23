@@ -1,11 +1,10 @@
 // homelab CLI 진입점(설계 C.7). argv → 등록 표 → 파싱 → 실행 → 출력 → 종료 코드(PLAN D2).
 import { readSync } from "node:fs";
 import { APPLY_FLAG, GLOBAL_FLAGS, parseInput, usageLine } from "./core/args";
-import type { CommandSpec, Ctx } from "./core/command";
-import { runEngine } from "./core/engine";
-import { makeExec, runWithWrites } from "./core/exec";
+import type { CommandSpec } from "./core/command";
 import { OutputBlocked, render, writeStderr, writeStdout } from "./core/output";
 import { CliError, EXIT, UsageError, type Mode, type Result } from "./core/result";
+import { makeRuntime } from "./core/runtime";
 import { versionLine } from "./core/version";
 import { REGISTRY } from "./registry";
 
@@ -80,7 +79,10 @@ async function main(argv: string[]): Promise<number> {
   }
   const cmd = findCommand(argv);
   if (!cmd) {
-    const r = usageResult(argv.filter((a) => !a.startsWith("-")).slice(0, 2).join(" "), `모르는 명령: ${argv.join(" ")}`, "homelab --help");
+    // 명령줄을 되찍지 않는다(뒤에 값이 있을 수 있다). 등록 표에 있는 첫 단어만 보인다.
+    const first = argv.find((a) => !a.startsWith("-")) ?? "";
+    const head = REGISTRY.some((c) => c.path[0] === first) ? first : "(모르는 단어)";
+    const r = usageResult(head, `모르는 명령: ${head}`, "homelab --help");
     if (json) emit(r, true);
     else writeStderr(`사용법 오류: ${r.error!.message}\n${overview()}`);
     return EXIT.usage;
@@ -102,24 +104,12 @@ async function main(argv: string[]): Promise<number> {
   }
 
   const mode: Mode = cmd.kind === "change" ? (input.apply ? "apply" : "plan") : cmd.kind === "delegate" && cmd.delegateMode === "apply" ? "apply" : "read";
-  const env = { ...process.env };
   const line = ["homelab", ...argv.filter((a) => a !== "--json")].map(quote).join(" ");
-  const ctx: Ctx = {
-    mode,
-    json,
-    line,
-    env,
-    isTTY: Boolean(process.stdin.isTTY),
-    exec: makeExec(mode, cmd.kind === "delegate", env),
-    engine: (plan) => runEngine(ctx, plan),
-    progress: (l) => writeStderr(`${l}\n`),
-    ask,
-  };
+  const ctx = makeRuntime({ mode, json, line, env: { ...process.env }, isTTY: Boolean(process.stdin.isTTY), ask, progress: (l) => writeStderr(`${l}\n`), delegate: cmd.kind === "delegate" });
 
   let result: Result;
   try {
-    // github apply만 엔진 밖에서 쓴다(래퍼 하나, exec가 래퍼 밖 쓰기를 막는다).
-    result = cmd.kind === "delegate" && mode === "apply" ? await runWithWrites(() => cmd.run(ctx, input)) : await cmd.run(ctx, input);
+    result = await cmd.run(ctx, input);
   } catch (e) {
     if (e instanceof UsageError) {
       if (json) emit(usageResult(command, e.message, usage), true);
