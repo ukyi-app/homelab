@@ -1,0 +1,9 @@
+{{- /*
+ApplicationSet 본문은 files/applicationset.yaml에 그대로 둔다. Argo CD의 Go 템플릿을 Helm이 렌더하지 않게 하려는 것이다
+(platform/appsets/apps와 같은 방식). Helm은 클러스터 값 자리표시 하나만 바꾼다.
+*/}}
+{{- $bucket := (.Values.backup | default dict).bucket | default "" | toString }}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" $bucket) }}
+{{- fail (printf "backup.bucket %q는 R2 버킷 이름이어야 한다(root가 cluster.backup.bucket을 넘긴다)" $bucket) }}
+{{- end }}
+{{ .Files.Get "files/applicationset.yaml" | replace "__BACKUP_BUCKET__" (quote $bucket) }}

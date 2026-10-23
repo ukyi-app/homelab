@@ -39,3 +39,10 @@ spec:
       kind: NetworkPolicy
     - group: ""
       kind: ServiceAccount
+    # ReplicaSet·Pod는 차트가 만들지 않지만 UI 리소스 트리와 Argo CD 파드 로그에 필요하다(project-apps.yaml과 같은 이유).
+    # Job·Cluster는 넣지 않는다. 복원 객체는 GitOps 밖이다(설계 C.5.7). 그래서 백업 CronJob이 만든 Job은
+    # 트리에 안 보인다. 백업 확인은 kubectl -n app-<앱> get jobs와 ValkeyBackupStale 경보로 한다.
+    - group: apps
+      kind: ReplicaSet
+    - group: ""
+      kind: Pod

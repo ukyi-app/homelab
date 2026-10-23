@@ -1,0 +1,68 @@
+# ApplicationSet data(설계 C.3.3, C.5.1). data/<앱>/values.yaml 하나가 앱 하나의 데이터다. Application 이름은 <앱>-data라
+# 앱 Application(<앱>, ApplicationSet apps)과 따로 산다. 앱을 지워도 데이터는 남는다(설계 C.5.5).
+#
+# 차트는 태그(data-chart-v<chartVersion>), values는 main이다. 같은 저장소의 두 revision을 한 Application에 섞으면
+# Argo CD가 거부하므로 git 파일 생성기가 읽은 values를 helm.valuesObject로 넣는다(apps와 같은 이유와 모양).
+# goTemplateOptions에 missingkey=error를 두지 않는다. 한 앱의 파일이 깨지면 모든 데이터 Application 갱신이 멈춘다.
+# 빠진 키는 ci가 같은 렌더(tools/ci/render.ts)와 차트 schema로 PR에서 막는다.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: data
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - git:
+        repoURL: https://github.com/ukyi-app/homelab
+        # 자기 저장소 참조는 main(L31). git 생성기의 키는 targetRevision이 아니라 revision이다.
+        revision: main
+        # 공개 webhook이 없어 60초 폴링(설계 C.3.3).
+        requeueAfterSeconds: 60
+        files:
+          - path: data/*/values.yaml
+        values:
+          app: "{{ .path.basename }}"
+  # data/<앱>을 지우면 그 Application을 지운다. Database·DatabaseRole·Valkey PVC는 보호 주석이 있어 남는다(설계 C.5.5).
+  syncPolicy:
+    applicationsSync: sync
+  template:
+    metadata:
+      name: "{{ .values.app }}-data"
+      namespace: argocd
+      labels:
+        homelab.ukyi.app/app: "{{ .values.app }}"
+    spec:
+      # 고정값이다. 템플릿 값으로 열면 데이터 등록이 프로젝트 경계를 고를 수 있다(ApplicationSet Security 문서).
+      project: data
+      source:
+        repoURL: https://github.com/ukyi-app/homelab
+        targetRevision: "data-chart-v{{ .chartVersion }}"
+        path: platform/charts/app-data
+        helm:
+          # 릴리스 이름 = 앱 이름. 영속 Valkey Service가 <앱>-valkey가 되고 차트가 ns app-<앱>과 대조한다.
+          releaseName: "{{ .values.app }}"
+      # 영속 Valkey는 앱 ns에, PostgreSQL 리소스는 ns database에 명시한다. 앱 ns는 앱 Application이 만든다.
+      # CreateNamespace를 켜지 않는다. DB만 쓰는 데이터(앱 없음, 시나리오 10)는 ns 없이도 동기화된다.
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "app-{{ .values.app }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 10
+          backoff:
+            duration: 30s
+            maxDuration: 5m
+  # 사람(data/<앱>/values.yaml)의 키를 그대로 차트 values로. path·values는 생성기 변수라 뺀다.
+  # backup은 클러스터 값이다(운영 homelab-backups, VM 전용 버킷). data values에 같은 키가 있어도 이 값이 이긴다.
+  templatePatch: |
+    spec:
+      source:
+        helm:
+          valuesObject:
+            {{- omit . "path" "values" "backup" | toYaml | nindent 8 }}
+            backup:
+              bucket: __BACKUP_BUCKET__

@@ -1,0 +1,7 @@
+# ApplicationSet data(설계 C.3.3, C.5). 클러스터 값(백업 버킷)을 받아야 해서 apps와 같이 작은 로컬 차트로 감싼다.
+# root의 appset-data Application(wave 0)이 렌더한다.
+apiVersion: v2
+name: appset-data
+description: ApplicationSet data for one homelab cluster
+type: application
+version: 0.1.0
