@@ -1,0 +1,4 @@
+# backup·cnpg는 root가 cluster.backup·cluster.cnpg에서 넘긴다. 여기는 빈 자리만 둔다(values.schema.json이 필수로 본다).
+# 빈 값으로 렌더되면 버킷 루트나 남의 prefix에 아카이브할 수 있어 기본값을 두지 않는다.
+backup: {}
+cnpg: {}

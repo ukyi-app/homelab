@@ -1,0 +1,78 @@
+{{- $plugin := include "cnpg.pluginName" . }}
+# 공유 Cluster pg(D-05, 설계 C.5.3). 앱마다 Database·DatabaseRole을 데이터 차트가 따로 둔다. 여기에 앱 역할을 덧붙이지 않는다.
+# Prune=false,Delete=false: revert나 Application 삭제로 클러스터와 PVC가 지워지지 않게(설계 C.5.5).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  instances: 1
+  # standard: minimal + 모든 locale + pgvector·pgaudit 같은 확장. system 변형은 in-tree barman용이라 1.31에서 빠진다.
+  # 복원·덤프 Job도 이 이미지를 쓴다(major가 같아야 한다, 설계 B.8 E6). 올릴 때 함께 옮긴다.
+  # renovate: image=ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:d72ace96f5803b12c341bb5dac48532e8c1f92f69e8a717a59d779bfc038dea9
+  # 파라미터는 노드 RAM(64GB)이 아니라 이 파드의 memory limit 기준이다. 노드 기준이면 shared_buffers가 limit을 넘어 OOM이다.
+  # 옛 값(limit 1Gi, PGDATA 49MB)에서 앱 여러 개가 함께 쓰는 만큼 두 배로 잡았다.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+  postgresql:
+    parameters:
+      shared_buffers: 512MB
+      effective_cache_size: 1536MB
+      work_mem: 8MB
+      maintenance_work_mem: 128MB
+      max_connections: "100"
+      # 쓰기가 적어도 5분마다 WAL을 넘겨 R2의 복구 시점이 5분보다 늦어지지 않게 한다.
+      archive_timeout: 5min
+      wal_compression: "on"
+      max_wal_size: 1GB
+      min_wal_size: 256MB
+  storage:
+    storageClass: local-retain
+    size: 20Gi
+  # WAL을 따로 두면 아카이브가 막혀 WAL이 쌓여도 데이터 볼륨이 차지 않는다. 차면 쓰기만 멈춘다.
+  walStorage:
+    storageClass: local-retain
+    size: 5Gi
+  # bootstrap은 초기화 때만 읽힌다. recovery를 남기면 볼륨을 잃고 다시 만들 때 낡은 아카이브에서 조용히 복구된다.
+  # 그래서 평상시는 initdb이고, 빈 NUC 복구 PR에서만 recoverySource를 넣어 recovery로 렌더한다(설계 C.6.4, B.8 E6).
+  bootstrap:
+    {{- if .Values.cnpg.recoverySource }}
+    recovery:
+      source: origin
+    {{- else }}
+    # app DB·역할은 CNPG 기본값이라 적는다(빈 initdb로 두면 webhook이 같은 값을 채운다). 앱은 쓰지 않는다.
+    initdb:
+      database: app
+      owner: app
+    {{- end }}
+  {{- with .Values.cnpg.recoverySource }}
+  # 복구 원본. 지금 Git의 serverName(복구 PR이 옮겨 적는다)을 r2-source ObjectStore에서 읽는다.
+  # externalClusters도 SSA atomic 리스트라 plugin 기본값(enabled, isWALArchiver)까지 적는다.
+  externalClusters:
+    - name: origin
+      plugin:
+        name: {{ $plugin }}
+        enabled: true
+        isWALArchiver: false
+        parameters:
+          barmanObjectName: r2-source
+          serverName: {{ .serverName }}
+  {{- end }}
+  # plugins는 SSA atomic 리스트다. 서버 기본값(enabled)을 빼면 영구 OutOfSync다(설계 B.8 E6).
+  plugins:
+    - name: {{ $plugin }}
+      enabled: true
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: r2
+        # 클러스터 세대. 재구축·복구마다 새 값이다. 두 primary가 같은 prefix에 아카이브하면 타임라인이 섞이고
+        # R2에 버저닝이 없어 되돌릴 수 없다. 비어 있지 않은 prefix면 CNPG가 "Expected empty archive"로 멈춘다(설계 C.6.4).
+        serverName: {{ .Values.cnpg.serverName }}

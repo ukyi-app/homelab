@@ -34,6 +34,7 @@ groups:
   - name: data
     rules:
       # cnpg_collector_up은 인스턴스 파드(포트 이름 metrics, 9187)가 PostgreSQL에 붙으면 1이다.
+      # 이 그룹의 CNPG 지표 셋은 CNPG 1.30.1 + plugin v0.15.1의 9187 출력에서 이름을 확인했다(2026-10-23 kind, T11).
       - alert: CNPGClusterNotHealthy
         expr: max by (namespace, cluster) (cnpg_collector_up) < 1
         for: 5m
@@ -42,7 +43,7 @@ groups:
         annotations:
           summary: "CNPG 클러스터 {{ $labels.namespace }}/{{ $labels.cluster }}에서 PostgreSQL에 붙은 인스턴스가 없다"
 
-      # Barman Cloud Plugin 지표(옛 cnpg_collector_* 백업 지표를 대신한다). 백업이 한 번도 없으면 값이 0이라 바로 발화한다.
+      # Barman Cloud Plugin 지표(옛 cnpg_collector_* 백업 지표를 대신한다). sidecar가 인스턴스 9187로 낸다. 백업이 한 번도 없으면 값이 0이라 바로 발화한다.
       - alert: PGBackupStale
         expr: time() - max by (namespace, cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp) > 26 * 3600
         labels:
@@ -50,6 +51,7 @@ groups:
         annotations:
           summary: "{{ $labels.namespace }}/{{ $labels.cluster }}의 마지막 성공 백업이 26시간보다 오래됐다"
 
+      # 실패한 적이 없으면 last_failed_time이 -1이다. 복구 직후 sidecar가 뜨기 전 몇 초 동안 실패가 쌓여도 곧 성공 시각이 앞서 발화하지 않는다.
       - alert: WALArchiveFailing
         expr: |
           max by (namespace, cluster) (cnpg_pg_stat_archiver_last_failed_time)

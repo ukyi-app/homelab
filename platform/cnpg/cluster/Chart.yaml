@@ -1,0 +1,8 @@
+# 공유 PostgreSQL Cluster pg와 그 백업(ObjectStore, ScheduledBackup), 자격 ExternalSecret, database ns NetworkPolicy
+# (설계 C.5.3, C.3.8, T11). operator와 Barman Cloud Plugin은 root의 cnpg-operator Application이 공식 차트로 설치한다.
+# 차트인 이유: 버킷·serverName·복구 원본이 클러스터마다 달라 root가 valuesObject로 넘긴다(E8 VM 격리 1번 A안).
+apiVersion: v2
+name: cnpg-cluster
+description: Shared CloudNativePG cluster pg with Barman Cloud backups for one homelab cluster
+type: application
+version: 0.1.0

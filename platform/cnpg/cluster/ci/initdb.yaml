@@ -1,0 +1,5 @@
+# 평상시 렌더(initdb). 운영 값과 같은 모양이다(platform/root/values-prod.yaml의 cluster.backup·cluster.cnpg).
+backup:
+  bucket: homelab-backups
+cnpg:
+  serverName: pg-20261023

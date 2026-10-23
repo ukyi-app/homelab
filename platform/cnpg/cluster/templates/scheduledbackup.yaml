@@ -1,0 +1,19 @@
+# 매일 03:00 KST. ScheduledBackup은 operator 파드의 시간대(UTC)로 돈다. 노드 TZ(Asia/Seoul)로 도는 CronJob과 다르다
+# (옛 실측 03:00Z = 12:00 KST, 설계 B.8 E1). 6필드 cron이라 맨 앞이 초다.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: pg-daily
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  schedule: "0 0 18 * * *"
+  # 만들자마자 첫 base backup을 한다. 첫 백업 전에는 PGBackupStale이 바로 발화한다.
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: pg
+  method: plugin
+  pluginConfiguration:
+    name: {{ include "cnpg.pluginName" . }}

@@ -1,0 +1,111 @@
+# database ns: 들어오는 연결은 기본 거부, 필요한 것만 연다(설계 C.5.1). 나가는 연결은 막지 않는다.
+# 인스턴스는 Kubernetes API와 R2(인터넷 443)에 나가야 하고, R2 주소는 고정 대역이 아니다.
+# NetworkPolicy는 노드 자체에서 오는 연결(kubelet probe)을 막지 못한다(설계 B.8 E4). 그래서 probe 허용은 따로 두지 않는다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# 앱은 kind=app 라벨 ns에서 5432로만 온다. 라벨은 ApplicationSet apps가 앱 ns에 붙인다.
+# 앱 차트의 egress도 같은 대상(cnpg.io/cluster: pg)만 연다(platform/charts/app/templates/networkpolicy.yaml).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-from-apps
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: pg
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              homelab.ukyi.app/kind: app
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# operator가 인스턴스 관리자(8000)로 상태를 읽고 명령한다. 막으면 Cluster가 healthy가 되지 않는다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: instance-manager-from-operator
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# vmsingle이 인스턴스 지표(9187)를 수집한다(platform/observability/stack/vmsingle/scrape.yaml의 job cnpg).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-from-vmsingle
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vmsingle
+      ports:
+        - protocol: TCP
+          port: 9187
+---
+# 같은 ns 안: CNPG 파드끼리(복제, 임시 복원 Cluster pg-restore-*)와 복원 Job(라벨 homelab.ukyi.app/restore).
+# 복원 리소스는 GitOps 밖에서 사람이 만드는 일회성 객체라 그 라벨로 미리 연다(설계 C.5.7).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: intra-namespace
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: cnpg.io/cluster
+                operator: Exists
+        - podSelector:
+            matchExpressions:
+              - key: homelab.ukyi.app/restore
+                operator: Exists
