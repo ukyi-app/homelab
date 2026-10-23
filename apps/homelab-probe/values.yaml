@@ -5,7 +5,7 @@ kind: web
 port: 8080
 resources: { cpu: 50m, memory: 64Mi }
 # T11 시나리오 2(PostgreSQL). DB·역할은 data/homelab-probe/가 만든다.
-uses: { postgres: true }
+uses: { postgres: true, valkey: true }
 # 시험 앱 코드에 마이그레이션이 없어 이미지의 bun으로 멱등 DDL만 돈다(Bun.sql은 DATABASE_URL을 읽는다).
 # 역할이 아직 없으면 접속 실패로 Job이 실패하고 Argo CD retry로 수렴한다(설계 G 시나리오 2).
 migration:
