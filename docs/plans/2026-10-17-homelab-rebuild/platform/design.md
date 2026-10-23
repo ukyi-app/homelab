@@ -1077,7 +1077,7 @@ receivers:
 - **래퍼** (`tools/tf-github.sh`. E7부터 `homelab github`가 같은 규칙으로 감싼다):
   - `GITHUB_TOKEN`은 환경변수로만 넘긴다(기본 `gh auth token`, 또는 만료 있는 fine-grained PAT). `-var`로 넘기면 값이 plan 파일에 남는다. `GITHUB_APP_ID`·`GITHUB_APP_INSTALLATION_ID`·`GITHUB_APP_PEM_FILE`을 unset한다(셋이 모두 있으면 provider가 토큰보다 App 인증을 먼저 쓴다[S191]).
   - 토큰 종류를 먼저 가른다. classic·OAuth 토큰(`ghp_`, `gho_`)은 `X-OAuth-Scopes` 머리글을 끝까지 읽은 뒤, 비어 있거나 `delete_repo`가 있으면 거부한다. `gh api -i user | grep -q` 꼴은 pipefail 아래 SIGPIPE로 열린 채 실패한다(실측 2026-10-18: 범위가 있는데도 15회 중 1회, 30회 중 1회 놓침). fine-grained PAT(`github_pat_`)에는 그 머리글이 없어 다른 규칙을 쓴다: 만료 머리글(`GitHub-Authentication-Token-Expiration`)이 있어야 한다(래퍼는 머리글이 있는지만 본다. 실제 토큰으로는 시험하지 않았다(U35 미실행 항목): 운영은 classic/OAuth 토큰을 쓰고, 머리글이 없거나 이름이 다르면 거부 쪽으로 실패한다). 발급 규칙(리소스 소유자 `ukyi-app`, 대상 저장소만 선택, 만료 지정)은 사람이 지킨다. **이 경로에는 저장소 삭제 방어가 없다.** ruleset을 쓰는 데 필요한 Administration write가 저장소 삭제 권한도 주기 때문이다. 대신 owner 계정의 다른 저장소와 org에는 닿지 않고 만료가 있다. 그 밖의 토큰 종류는 거부한다. 그다음 guard 1과 같은 확인(`gh api repos/ukyi-app/homelab --jq .permissions.admin`이 `true`)을 plan 전에 한 번 한다.
-  - 사용자의 작업 사본에서 돌지 않는다. `git fetch origin main` 뒤 `git worktree add --detach <임시 디렉터리> origin/main`으로 만든 깨끗한 사본의 `infra/github`에서 plan·apply하고, 실행한 SHA를 출력한 뒤 사본을 지운다. plan도 HCL과 provider를 실행하므로, 작업 사본의 수정본·미추적 파일이나 `.gitignore`가 숨기는 `*_override.tf`·`*.auto.tfvars`(git status에 안 보인다)가 owner 토큰과 R2 키를 가진 채 실행되면 안 된다. 같은 작업 사본을 AI 에이전트도 편집하고, 옛 구성은 같은 무시 패턴을 bats no-override 가드와 짝지었다(R41). 임시 사본에 `*override.tf*`·`*.tfvars*`가 있으면 거부한다(커밋된 것은 CI도 거부한다). `TF_CLI_ARGS`·`TF_CLI_ARGS_*`, `TF_LOG*`(디버그 로그가 요청 내용을 남긴다)를 unset한다. `TF_CLI_CONFIG_FILE`은 unset하지 않고 래퍼가 만든 설정 파일(`provider_installation { direct {} }`만 담음)을 가리키게 한다. unset하면 Terraform이 같은 사용자(또는 AI 에이전트)가 쓸 수 있는 `~/.terraformrc`로 돌아가고, 거기의 `dev_overrides`나 암묵 로컬 미러로 다른 provider 바이너리가 들어올 수 있다. registry에서 받은 provider는 `.terraform.lock.hcl` 해시로 확인한다. 그래서 봇·Renovate·Codex Connector의 PR 브랜치 코드는 이 경로로 실행되지 않는다. PR의 미리보기는 CI의 mock 시험으로만 한다.
+  - 사용자의 작업 사본에서 돌지 않는다. 고정 URL(`https://github.com/ukyi-app/homelab.git`)에서 main을 임시 디렉터리에 새로 clone한 사본의 `infra/github`에서 plan·apply하고, 실행한 SHA를 출력한 뒤 사본을 지운다. git은 `env -i`로 띄워 작업 사본의 `.git`(설정, remote URL, URL rewrite, hook)과 전역·시스템 git 설정을 쓰지 않는다(`tools/tf-github.sh`. 처음 문구의 `git worktree`는 작업 사본의 `.git`을 써서 실제 래퍼가 택하지 않았다, T12 정정). plan도 HCL과 provider를 실행하므로, 작업 사본의 수정본·미추적 파일이나 `.gitignore`가 숨기는 `*_override.tf`·`*.auto.tfvars`(git status에 안 보인다)가 owner 토큰과 R2 키를 가진 채 실행되면 안 된다. 같은 작업 사본을 AI 에이전트도 편집하고, 옛 구성은 같은 무시 패턴을 bats no-override 가드와 짝지었다(R41). 임시 사본에 `*override.tf*`·`*.tfvars*`가 있으면 거부한다(커밋된 것은 CI도 거부한다). `TF_CLI_ARGS`·`TF_CLI_ARGS_*`, `TF_LOG*`(디버그 로그가 요청 내용을 남긴다)를 unset한다. `TF_CLI_CONFIG_FILE`은 unset하지 않고 래퍼가 만든 설정 파일(`provider_installation { direct {} }`만 담음)을 가리키게 한다. unset하면 Terraform이 같은 사용자(또는 AI 에이전트)가 쓸 수 있는 `~/.terraformrc`로 돌아가고, 거기의 `dev_overrides`나 암묵 로컬 미러로 다른 provider 바이너리가 들어올 수 있다. registry에서 받은 provider는 `.terraform.lock.hcl` 해시로 확인한다. 그래서 봇·Renovate·Codex Connector의 PR 브랜치 코드는 이 경로로 실행되지 않는다. PR의 미리보기는 CI의 mock 시험으로만 한다.
   - `rm -f tfplan` 뒤 `plan -out=tfplan -detailed-exitcode`. 종료 코드는 0·2만 허용한다(1은 guard 실패 포함. 그 밖의 코드도 거부해 낡은 tfplan으로 판단하지 않는다).
   - plan에 delete가 있으면 `--allow-destroy` 없이는 멈춘다(app-main 삭제, environment 교체 방어. homelab ruleset 여섯과 environment `automerge`는 `prevent_destroy`도 있다).
   - apply 전에 `terraform state pull` 사본을 저장소 밖에 남긴다.
@@ -1778,12 +1778,13 @@ Pro(identity당 월 $20 연간 / $23 월간)는 RBAC, 버전 이력·PITR, 감�
 | `homelab rollback <app> --to <rev\|digest>` / `--release` | 이미지 롤백·해제 | `image.yaml`의 git 기록 | PR |
 | `homelab db rotate <app>` / `homelab cache rotate <app>` | 명시적 비밀번호 회전(C.6.5) | 상태 | Infisical, Secret, 재시작 |
 | `homelab db restore <app> --to <시각>` / `homelab db restore-check` | 앱 하나 복원(C.5.7) / 최신 백업 복원 시험 | 백업 목록 | `kubectl`로 만드는 GitOps 밖 일회성 임시 Cluster·Job(라벨 `homelab.ukyi.app/restore`, 끝나면 지우고 0개 확인, selfHeal·prune 대상 아님, 사람 kubeconfig의 `database` ns 쓰기 권한 필요, C.5.7), 앱 멈춤·재개 PR |
+| `homelab cache restore <app>` | 영속 Valkey 하나 복원(C.5.6, restore.md 1절. 결정 D1, 사용자 2026-10-23, T12) | R2 백업 목록, `data/<app>`의 `valkey.persistent` | restore.md 1절 순서(복원 모드로 RDB를 읽은 뒤 AOF를 켠다)를 `kubectl`로, 일회성 객체는 끝나면 지우고 0개 확인 |
 | `homelab app remove <app>` | 앱 삭제(데이터 보존) | homelab | PR |
 | `homelab data list` | 주인 없는 보존 데이터 | homelab, CNPG, PV·PVC | 없음 |
 | `homelab data purge <app> --confirm <app>` | 데이터 폐기(C.5.5) | 백업 신선도, 앱 등록 여부 | PR 2개, Infisical 키 삭제(마지막, 재확인 뒤) |
-| `homelab github plan` / `apply` / `verify` | GitHub Terraform root(C.3.9)를 E5 래퍼 `tools/tf-github.sh`와 같은 규칙으로 감싼다: `GITHUB_TOKEN` 환경변수로만, `GITHUB_APP_*`·`TF_CLI_ARGS*`·`TF_LOG*` unset, `TF_CLI_CONFIG_FILE`은 래퍼 소유 설정 파일로 고정, 토큰 종류별 확인(classic·OAuth는 `delete_repo` 범위 거부, fine-grained PAT는 만료 확인), fetch한 `origin/main`의 임시 worktree에서만 실행, plan 종료 코드 0·2만, delete는 `--allow-destroy`로만, apply 전 state 백업, apply 실패 뒤 ruleset 재import. `plan`·`verify`는 `-lock=false`라 R2에 잠금을 쓰지 않는다(AC-P13). `verify`는 `plan -lock=false -detailed-exitcode`(0 같음, 2 차이, 1 guard 실패) | GitHub(대상 homelab, `homelab-app-template`, `app-repos.json`의 앱 저장소), R2 state | ruleset, environment, Actions 권한(`apply`만). 저장소 설정과 fork PR 정책은 리소스가 아니라 guard가 다르다고 알려 주면 사람이 `gh api`로 맞춘다 |
+| `homelab github plan` / `apply` / `verify` | GitHub Terraform root(C.3.9)를 E5 래퍼 `tools/tf-github.sh`와 같은 규칙으로 감싼다: `GITHUB_TOKEN` 환경변수로만, `GITHUB_APP_*`·`TF_CLI_ARGS*`·`TF_LOG*` unset, `TF_CLI_CONFIG_FILE`은 래퍼 소유 설정 파일로 고정, 토큰 종류별 확인(classic·OAuth는 `delete_repo` 범위 거부, fine-grained PAT는 만료 확인), 고정 URL(`https://github.com/ukyi-app/homelab.git`)에서 main을 새로 clone한 사본에서만 실행(`env -i`로 hook·전역 git 설정을 끊는다. 작업 사본과 그 `.git`은 쓰지 않는다), plan 종료 코드 0·2만, delete는 `--allow-destroy`로만, apply 전 state 백업, apply 실패 뒤 ruleset 재import. `plan`·`verify`는 `-lock=false`라 R2에 잠금을 쓰지 않는다(AC-P13). `verify`는 `plan -lock=false -detailed-exitcode`(0 같음, 2 차이, 1 guard 실패). `homelab github *`의 종료 코드는 래퍼 코드 그대로다(결정 D2) | GitHub(대상 homelab, `homelab-app-template`, `app-repos.json`의 앱 저장소), R2 state | ruleset, environment, Actions 권한(`apply`만). 저장소 설정과 fork PR 정책은 리소스가 아니라 guard가 다르다고 알려 주면 사람이 `gh api`로 맞춘다 |
 
-**`plan`은 읽기 전용이다.** 비밀번호 생성, Infisical 쓰기, 브랜치 push, PR 생성, `kubectl` 변경이 일어나지 않는다. 시험은 외부 명령 argv를 기록하는 PATH 스텁으로 모든 명령을 `plan` 모드로 돌려 쓰기 부명령이 0건임을 단언한다(L50, AC-P13).
+**`plan`은 읽기 전용이다.** 비밀번호 생성, Infisical 쓰기, 브랜치 push, PR 생성, `kubectl` 변경이 일어나지 않는다. 시험은 외부 명령 argv를 기록하는 PATH 스텁으로 모든 명령을 `plan` 모드로 돌려 쓰기 부명령이 0건임을 단언한다(L50, AC-P13). 쓰기 판정은 읽기 허용 목록이고 목록 밖(모르는 도구·하위 명령 포함)은 쓰기로 본다(`cli/src/core/writes.ts`). 실행 중에도 외부 명령 seam이 `plan`·읽기 명령에서 쓰기로 판정된 호출을 실행하지 않고 실패한다. 외부 호출은 그 seam 하나로만 나간다(`fetch`·직접 spawn은 시험이 막는다, T12).
 
 **재실행 안전:** 여러 시스템의 변경은 원자적 트랜잭션이 아니다. 그래서 각 단계가 실행 직전에 현재 상태를 읽고 이미 된 단계는 건너뛴다(Infisical 키 있음 → 재사용, 파일 같음 → 변경 없음, 같은 브랜치 PR 열림 → 갱신). 변이 호출이 타임아웃이면 재시도하지 않고 상태를 다시 읽는다(B.8 E7). 중복 플래그는 거부한다.
 
@@ -1801,15 +1802,19 @@ $ homelab db add smoke
 
 ```json
 {"schema":"homelab-cli/v1","command":"db add","app":"smoke","mode":"plan","status":"pending",
- "steps":[{"id":"infisical-password","state":"missing","action":"create"},
-          {"id":"data-values","state":"missing","action":"create"},
-          {"id":"app-values","state":"differs","action":"update"},
-          {"id":"pr","state":"missing","action":"create"}],
- "next":"homelab db add smoke --apply"}
+ "steps":[{"id":"infisical-password","state":"missing","action":"create","target":"Infisical homelab/prod /apps/smoke/postgres/PASSWORD","detail":"없음 → 생성","result":"planned"},
+          {"id":"data-values","state":"missing","action":"create","target":"data/smoke/values.yaml","detail":"없음 → 생성 (postgres)","result":"planned"},
+          {"id":"app-values","state":"differs","action":"update","target":"apps/smoke/values.yaml","detail":"uses.postgres: false → true","result":"planned"},
+          {"id":"pr","state":"missing","action":"create","target":"PR ukyi-app/homelab","detail":"새로 (브랜치 cli/db-add-smoke)","result":"planned"}],
+ "notes":[],"next":"homelab db add smoke --apply"}
 ```
 
-- 어떤 출력에도 시크릿 값이 없다. 값의 존재와 마지막 변경 시각만 보인다.
-- 종료 코드: 0 완료 또는 변경 없음, 1 실패(원인과 다음 행동 출력), 2 사용법 오류, 3 대기(PR 병합·동기화 대기).
+- JSON 키(T12): `mode`는 `plan | apply | read`, `status`는 `same`(변경 없음) `pending`(plan에 차이) `done` `waiting`(apply 뒤 바깥 대기) `failed` `usage`. `steps[].state`는 `missing | differs | same`이고 apply에서는 실행 직전에 읽은 상태다(그래서 재실행의 모든 단계가 `same`, G 시나리오 5). `action`은 `create | update | delete | none`, `result`는 `planned | skipped | applied | waiting | failed | not-run`. 실패에는 `error: {message, next}`, `github *`에는 래퍼 종료 코드 `exitCode`가 붙는다.
+
+- 어떤 출력에도 시크릿 값이 없다. 값의 존재만 보인다. 마지막 변경 시각은 Infisical CLI 0.44.2가 내지 않는다(목록 JSON은 `secretKey`·`secretValue`뿐, 2026-10-23 로컬 가짜 API 실측, T12). 시크릿은 값 감쌈 타입으로만 다니고 stdin으로만 넘기며, 출력 계층이 추적 중인 원문이 섞인 출력을 막는다.
+- 종료 코드(결정 D2, 사용자 2026-10-23, T12): 0 완료·변경 없음·plan(차이가 있어도), 1 실패(원인과 다음 행동 출력), 3 대기(apply 뒤 PR 병합·동기화 대기), 64 사용법 오류(EX_USAGE. 모르는·중복 플래그, 줄바꿈이 낀 값 포함). `homelab github *`만 래퍼 코드 그대로(0 같음, 2 차이, 1 guard·실패).
+- PR 작성(결정 D3, T12): 로컬 체크아웃 없이 GitHub API(`gh api`)로 tree·commit을 만들어 브랜치에 올린다. 커밋 부모는 항상 최신 main이고 브랜치 ref는 force로 옮긴다. 브랜치 머리 커밋에 트레일러 `Homelab-CLI:`가 없으면(사람이 push한 커밋) 덮지 않고 멈춘다(lead 결정 2026-10-23).
+- 배포: `bun cli/build.ts --install`이 `~/.local/bin/homelab`에 두고 이전 파일을 `homelab.prev`로 남긴다(되돌리기, `cli/README.md`). `--compile` 실행 파일은 기본으로 실행 폴더의 `.env`·`bunfig.toml`을 읽어(2026-10-23 실측) 둘 다 끈다.
 - CLI가 만드는 PR 브랜치는 `cli/<동사>-<app>`이다. 사람이 검토 후 병합한다. 작성자가 owner 자신이라 승인할 수 없으므로 검토한 head SHA를 고정해 관리자 bypass로 병합하고(`gh pr merge <n> --squash --admin --match-head-commit <검토한 SHA>`), 필수 검사 `ci`는 그대로 걸린다(C.4.7). 사람의 `gh` 로그인, `infisical login`, kubeconfig를 쓰고 자격을 저장하지 않는다.
 
 ### C.8 봇을 위한 여지
@@ -2050,7 +2055,7 @@ T15 결정(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15))으로 T16�
 
 | 항목 | 내용 |
 |---|---|
-| 만들 것 | `cli/`(C.7 명령), 시험(`plan` 부수효과 0 단언 포함), `bun build --compile` 배포 절차 |
+| 만들 것 | `cli/`(C.7 명령, `cache restore` 포함), 시험(`plan` 부수효과 0 단언 포함, 필수 `ci`의 `cli` 단계), `bun build --compile` 배포 절차(`cli/build.ts`, `cli/README.md`) |
 | 옛 저장소에서 가져올 것 | L01·L02의 쓸 만한 부분(이름 정규식, 실행 seam, Argo CD revision 해석), L12 판정 기준, L48, L50 기법, R37, B.8 "E7" |
 | 선행 조건 | E5, E6. 읽기 명령(`doctor`, `status`)은 E5 뒤 먼저 착수 가능. 새 외부 자격 없음 |
 | 완료 기준 | 시나리오 5 통과(`homelab-probe`로). `plan` 실행 전후 Git·Infisical·클러스터 상태가 같음(AC-P13). 사람용 출력과 JSON 출력. **CLI 경로 재확인:** C.7의 쓰기 명령(`app add`, `db add`, `cache add`, `secret set`, `db rotate`, `db restore`, `rollback`, `app remove`, `data purge`, `github apply`)과 읽기 명령(`status`, `data list`, `github plan`, `github verify`)을 `homelab-probe`에 한 번씩 실행해 E5·E6 동등 절차와 같은 확인을 통과(시나리오 2·3·8·9·10의 CLI 경로). `homelab github verify`는 래퍼 `tools/tf-github.sh verify`와 같은 종료 코드. `app new`는 `plan`만 보고 실제 생성은 E8 시나리오 1. 끝에 `app remove`·`data purge`로 `homelab-probe`의 등록과 데이터를 지운다 |
@@ -2462,7 +2467,7 @@ Free 안에서 키 전달과 identity 배분:
 
 - **결정:**
   - `infra/github` Terraform root. 리소스는 `github_repository_ruleset`, `github_repository_environment`(+ deployment policy), `github_actions_repository_permissions`, `github_workflow_repository_permissions`만이다. `github_repository`와 시크릿 리소스는 두지 않는다. 저장소 설정(`allow_auto_merge=false`, squash만, 병합 뒤 삭제 등)은 guard로 확인만 하고 값은 `gh api`로 맞춘다. fork PR 승인 정책은 provider 미지원이라 `gh api` PUT + guard다.
-  - 실행은 owner 로컬만. 래퍼(E5 `tools/tf-github.sh`, E7부터 `homelab github plan`·`apply`·`verify`): `GITHUB_TOKEN`은 환경변수로만(기본 `gh auth token`, 또는 만료 있는 fine-grained PAT, `-var` 금지), `GITHUB_APP_ID`·`GITHUB_APP_INSTALLATION_ID`·`GITHUB_APP_PEM_FILE` unset, 토큰 종류별 확인(classic·OAuth는 범위를 끝까지 읽어 비었거나 `delete_repo`가 있으면 거부, pipefail·SIGPIPE로 열린 채 실패하지 않게. fine-grained PAT는 만료 머리글을 확인하고 저장소 삭제 방어가 없다는 대가를 진다), fetch한 `origin/main`의 임시 worktree에서만 실행(plan도 코드를 실행한다. 작업 사본의 override 파일·`TF_CLI_ARGS*`·`TF_LOG*` 차단, `TF_CLI_CONFIG_FILE`은 래퍼 소유 설정 파일로 고정해 `~/.terraformrc`의 `dev_overrides`를 막음), `plan`·`verify`는 `-lock=false`, `rm -f tfplan` 후 plan, 종료 코드 0·2만 허용, plan에 delete가 있으면 `--allow-destroy` 없이는 멈춤, apply 전 state pull 백업, apply가 실패하면 그 plan의 ruleset을 state rm 후 import(provider v6.13.0 #3519 etag 버그 대응, 수정 #3637 미출시[S192]). provider 6.13.0 정확 핀(legacy 클라이언트)과 `.terraform.lock.hcl` 변경은 사람이 확인한다.
+  - 실행은 owner 로컬만. 래퍼(E5 `tools/tf-github.sh`, E7부터 `homelab github plan`·`apply`·`verify`): `GITHUB_TOKEN`은 환경변수로만(기본 `gh auth token`, 또는 만료 있는 fine-grained PAT, `-var` 금지), `GITHUB_APP_ID`·`GITHUB_APP_INSTALLATION_ID`·`GITHUB_APP_PEM_FILE` unset, 토큰 종류별 확인(classic·OAuth는 범위를 끝까지 읽어 비었거나 `delete_repo`가 있으면 거부, pipefail·SIGPIPE로 열린 채 실패하지 않게. fine-grained PAT는 만료 머리글을 확인하고 저장소 삭제 방어가 없다는 대가를 진다), 고정 URL에서 main을 새로 clone한 사본에서만 실행(`env -i`로 hook·전역 git 설정 차단. plan도 코드를 실행한다. 작업 사본의 override 파일·`TF_CLI_ARGS*`·`TF_LOG*` 차단, `TF_CLI_CONFIG_FILE`은 래퍼 소유 설정 파일로 고정해 `~/.terraformrc`의 `dev_overrides`를 막음), `plan`·`verify`는 `-lock=false`, `rm -f tfplan` 후 plan, 종료 코드 0·2만 허용, plan에 delete가 있으면 `--allow-destroy` 없이는 멈춤, apply 전 state pull 백업, apply가 실패하면 그 plan의 ruleset을 state rm 후 import(provider v6.13.0 #3519 etag 버그 대응, 수정 #3637 미출시[S192]). provider 6.13.0 정확 핀(legacy 클라이언트)과 `.terraform.lock.hcl` 변경은 사람이 확인한다.
   - guard는 check 블록이 아니라 `github_rest_api` 데이터 소스 postcondition이다(실패하면 plan 오류[S193]): 토큰 admin 여부, 저장소 설정, 저장소별 ruleset 이름 집합과 개수, ruleset별 bypass 허용 목록과 exempt 금지, `codeowners/errors` 빈 배열, 옛 브랜치 보호 404, fork PR 승인 정책, org public 저장소 완결성, 그리고 D-04의 environment `automerge` 브랜치 정책·secret 이름과 repo·org secret 0개. guard 실패가 모든 apply를 막을 때의 비상 경로(`-target` 재생성 뒤 전체 verify)를 런북에 둔다(C.3.9).
   - App ID는 숫자 리터럴이다. private App의 ID는 익명 조회가 안 되는 값이라 공개 HCL에 처음 노출된다는 점을 기록한다(자격은 아니다).
   - state: R2 `homelab-tfstate`의 `v2/github/terraform.tfstate`, `use_lockfile = true`. R2 PutObject의 `If-None-Match` 원자성[S37]과 S3 backend lockfile 구현[S195]으로 U02는 문서·소스로 확인됐고, E4a에서 동시 실행 시험 1회만 남았다. R2는 versioning이 없으므로 래퍼가 백업한다.
@@ -2493,9 +2498,9 @@ Free 안에서 키 전달과 identity 배분:
   - **`page`·`trip-mate-api`:** 쓰지 않으므로 저장소와 GHCR 패키지를 삭제했다(2026-10-18 결정·실행, 0절 7항). 남는 앱 저장소는 `files`와 `homelab-app-template`이다. 두 앱의 옛 자격(trip-mate-api의 Google OAuth client, OXR app id, `BETTER_AUTH_SECRET`, page admin token)은 T06 자격 폐기 표에서 폐기한다(E1). 두 앱은 재연결 대상이 아니다(E10).
 - **지금 하드닝(사용자 결정 5, 2026-10-18 결정·실행):** 지금 열린 구멍(public 앱 저장소 main 보호 0개, fork PR 승인 `first_time_contributors`, Codex Connector의 org 전체 쓰기, 0절 8항)을 E5보다 먼저 막는다. `files`와 `homelab-app-template`에 `.github/CODEOWNERS`(`* @<owner 계정>`)와 `app-main` ruleset(PR 필수, 승인 1, code owner, 새 push 때 승인 무효화, force push·삭제 금지, bypass 저장소 관리자 역할 `pull_request` 모드), secret scanning·push protection, 저장소와 org의 fork PR 승인 `all_external_contributors`를 건다. 자동 권한 검사가 에이전트 실행을 막아 사람이 스크립트로 실행했다(2026-10-18). U08 셋째 조건의 첫 실측인 `current_user_can_bypass`는 두 저장소 모두 `pull_requests_only`였다. E5는 이 `app-main`을 import한다(C.3.9). 커밋 이메일: 커밋 작성자 이메일 공개는 사용자가 받아들였다(2026-10-18). GitHub 이메일 비공개 설정은 하지 않고, 작업 사본은 전역 설정(개인 이메일)으로 커밋한다.
 - **이유:** Free에서 서버 쪽 강제와 출처 확인은 public 저장소에만 있다. 자동 배포는 앱 main을 믿으므로 앱 main을 보호할 수 있어야 하고, 그러려면 public이어야 한다. 규칙이 하나면 private 분기와 pull 자격, 그 미검증 항목(옛 U30 (4))이 빠진다. 비앱 저장소는 배포되지 않아 공개 이득이 없다.
-- **대가:** 코드·이슈·Actions 로그·public 이미지가 되돌릴 수 없게 공개된다. private으로 돌려도 노출은 회수되지 않고 보호만 사라진다. 외부인 입력이 봇·Codex로 들어가는 경로, 공개 로그 안에서 배포 키를 다루는 경로, 앱 저장소에서 tailnet 이름 같은 내부 정보가 새는 경로를 위 기본 설정으로 막아야 한다(C.4.10). 새 앱마다 패키지 Public 손 전환이 생길 수 있다(U39).
+- **대가:** 코드·이슈·Actions 로그·public 이미지가 되돌릴 수 없게 공개된다. private으로 돌려도 노출은 회수되지 않고 보호만 사라진다. 외부인 입력이 봇·Codex로 들어가는 경로, 공개 로그 안에서 배포 키를 다루는 경로, 앱 저장소에서 tailnet 이름 같은 내부 정보가 새는 경로를 위 기본 설정으로 막아야 한다(C.4.10). U39가 통과해 첫 push 패키지가 public이었다(부록 1). 문서끼리 어긋나는 동작이라 GitHub가 바꾸면 새 앱마다 패키지 Public 손 전환이 다시 생길 수 있고, 그때는 `homelab app add`의 GHCR 익명 확인이 멈춰 알린다.
 - **spec 대비:** 해당 없음(새 결정).
-- **미검증:** 패키지 가시성 상속(U39), Codex 외부 호출(U38. 시험 대신 대책을 먼저 걸었다, 부록 1), U08 셋째 조건의 실제 bypass 병합(하드닝의 `current_user_can_bypass`는 `pull_requests_only`).
+- **미검증:** Codex 외부 호출(U38. 시험 대신 대책을 먼저 걸었다, 부록 1), U08 셋째 조건의 실제 bypass 병합(하드닝의 `current_user_can_bypass`는 `pull_requests_only`). 패키지 가시성 상속(U39)은 통과했다(2026-10-21 `homelab-probe` 첫 push 패키지가 `public`, 부록 1).
 
 ### D-30 내부 UI 짧은 주소
 

@@ -1,0 +1,139 @@
+// homelab CLI 진입점(설계 C.7). argv → 등록 표 → 파싱 → 실행 → 출력 → 종료 코드(PLAN D2).
+import { readSync } from "node:fs";
+import { APPLY_FLAG, GLOBAL_FLAGS, parseInput, usageLine } from "./core/args";
+import type { CommandSpec, Ctx } from "./core/command";
+import { runEngine } from "./core/engine";
+import { makeExec } from "./core/exec";
+import { OutputBlocked, render, writeStderr, writeStdout } from "./core/output";
+import { CliError, EXIT, UsageError, type Mode, type Result } from "./core/result";
+import { versionLine } from "./core/version";
+import { REGISTRY } from "./registry";
+
+function findCommand(argv: string[]): CommandSpec | undefined {
+  let best: CommandSpec | undefined;
+  for (const c of REGISTRY) {
+    if (c.path.every((p, i) => argv[i] === p) && (!best || c.path.length > best.path.length)) best = c;
+  }
+  return best;
+}
+
+function quote(t: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(t) ? t : `'${t.replaceAll("'", `'\\''`)}'`;
+}
+
+function flagsOf(c: CommandSpec) {
+  return [...c.flags, ...(c.kind === "change" ? [APPLY_FLAG] : []), ...GLOBAL_FLAGS];
+}
+
+function overview(): string {
+  const lines = ["사용법: homelab <명령> [인자] [--apply] [--json]", "", "명령:"];
+  for (const c of REGISTRY) lines.push(`  ${usageLine(c.path, c.args, c.flags).slice("homelab ".length).padEnd(70)} ${c.summary}${c.placeholder ? ` (아직 구현 전, ${c.placeholder})` : ""}`);
+  lines.push("", "바꾸는 명령은 기본이 plan(아무것도 바꾸지 않음)이고 --apply로 실행한다.", "종료 코드: 0 완료·변경 없음·plan, 1 실패, 3 대기(PR 병합·동기화), 64 사용법 오류. github 하위 명령은 래퍼 코드 그대로.");
+  return lines.join("\n") + "\n";
+}
+
+// tty에서 한 줄 읽는다. 질문은 stderr로(stdout은 결과 자리).
+function ask(question: string): string | null {
+  writeStderr(question);
+  const buf = Buffer.alloc(1);
+  let line = "";
+  for (;;) {
+    let n = 0;
+    try {
+      n = readSync(0, buf, 0, 1, null);
+    } catch {
+      return null;
+    }
+    if (n === 0) return line.length > 0 ? line : null;
+    const ch = buf.toString("utf8");
+    if (ch === "\n") return line.replace(/\r$/, "");
+    line += ch;
+  }
+}
+
+function usageResult(command: string, message: string, usage: string): Result {
+  return { command, mode: "read", status: "usage", steps: [], notes: [], next: usage, error: { message, next: usage } };
+}
+
+function emit(result: Result, json: boolean): void {
+  try {
+    writeStdout(render(result, json));
+  } catch (e) {
+    if (!(e instanceof OutputBlocked)) throw e;
+    // 값이 섞인 결과는 버리고 무엇이 막혔는지만 낸다.
+    const blocked: Result = { command: result.command, app: result.app, mode: result.mode, status: "failed", steps: [], notes: [], next: null, error: { message: e.message, next: "버그다. 이 출력과 명령줄(값 없이)을 남기고 알린다" } };
+    writeStdout(render(blocked, json));
+    result.status = "failed";
+    result.exitCode = undefined;
+  }
+}
+
+async function main(argv: string[]): Promise<number> {
+  const json = argv.includes("--json");
+  if (argv.length === 1 && argv[0] === "--version") {
+    writeStdout(`${versionLine()}\n`);
+    return 0;
+  }
+  if (argv.length === 0 || (argv.length === 1 && (argv[0] === "--help" || argv[0] === "-h"))) {
+    writeStdout(overview());
+    return argv.length === 0 ? EXIT.usage : 0;
+  }
+  const cmd = findCommand(argv);
+  if (!cmd) {
+    const r = usageResult(argv.filter((a) => !a.startsWith("-")).slice(0, 2).join(" "), `모르는 명령: ${argv.join(" ")}`, "homelab --help");
+    if (json) emit(r, true);
+    else writeStderr(`사용법 오류: ${r.error!.message}\n${overview()}`);
+    return EXIT.usage;
+  }
+  const command = cmd.path.join(" ");
+  const usage = usageLine(cmd.path, cmd.args, flagsOf(cmd));
+  let input;
+  try {
+    input = parseInput(flagsOf(cmd), cmd.args, argv.slice(cmd.path.length));
+  } catch (e) {
+    if (!(e instanceof UsageError)) throw e;
+    if (json) emit(usageResult(command, e.message, usage), true);
+    else writeStderr(`사용법 오류: ${e.message}\n${usage}\n`);
+    return EXIT.usage;
+  }
+  if (input.help) {
+    writeStdout(`${usage}\n  ${cmd.summary}\n`);
+    return 0;
+  }
+
+  const mode: Mode = cmd.kind === "change" ? (input.apply ? "apply" : "plan") : cmd.kind === "delegate" && cmd.delegateMode === "apply" ? "apply" : "read";
+  const env = { ...process.env };
+  const line = ["homelab", ...argv.filter((a) => a !== "--json")].map(quote).join(" ");
+  const ctx: Ctx = {
+    mode,
+    json,
+    line,
+    env,
+    isTTY: Boolean(process.stdin.isTTY),
+    exec: makeExec(mode, cmd.kind === "delegate", env),
+    engine: (plan) => runEngine(ctx, plan),
+    progress: (l) => writeStderr(`${l}\n`),
+    ask,
+  };
+
+  let result: Result;
+  try {
+    result = await cmd.run(ctx, input);
+  } catch (e) {
+    if (e instanceof UsageError) {
+      if (json) emit(usageResult(command, e.message, usage), true);
+      else writeStderr(`사용법 오류: ${e.message}\n${usage}\n`);
+      return EXIT.usage;
+    }
+    const next = e instanceof CliError ? e.next : `원인을 고친 뒤 다시: ${line}`;
+    result = { command, mode, status: "failed", steps: [], notes: [], next, error: { message: (e as Error).message, next } };
+  }
+  if (result.exitCode !== undefined && cmd.kind !== "delegate") {
+    result = { ...result, status: "failed", exitCode: undefined, error: { message: "exitCode는 github 하위 명령만 쓴다", next: "버그다. 명령 파일을 고친다" } };
+  }
+  emit(result, json);
+  if (cmd.kind === "delegate" && result.exitCode !== undefined) return result.exitCode;
+  return EXIT[result.status];
+}
+
+process.exit(await main(process.argv.slice(2)));

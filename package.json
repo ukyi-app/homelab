@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "ci": "bun tools/ci/main.ts"
+    "ci": "bun tools/ci/main.ts",
+    "cli": "bun cli/src/main.ts",
+    "cli:build": "bun cli/build.ts",
+    "test:cli": "bun test cli/"
   }
 }

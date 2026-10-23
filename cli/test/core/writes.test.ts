@@ -1,0 +1,77 @@
+import { describe, expect, test } from "bun:test";
+import { classify } from "../../src/core/writes";
+
+// 판정 표. 읽기 허용 목록을 넓히면 여기에 근거와 함께 한 줄을 더한다.
+const READS: string[][] = [
+  ["gh", "api", "-i", "repos/ukyi-app/homelab/git/ref/heads/main"],
+  ["gh", "api", "-X", "GET", "search/issues", "-f", "q=x"],
+  ["gh", "api", "--method=HEAD", "x"],
+  ["gh", "auth", "status", "--active", "--hostname", "github.com"],
+  ["gh", "pr", "list"],
+  ["gh", "pr", "view", "1"],
+  ["gh", "run", "view", "1"],
+  ["gh", "--version"],
+  ["git", "ls-remote", "https://github.com/ukyi-app/homelab", "main"],
+  ["git", "-C", "/tmp/x", "rev-parse", "HEAD"],
+  ["git", "clone", "--depth", "1", "https://github.com/ukyi-app/homelab", "/tmp/x"],
+  ["kubectl", "-n", "app-x", "get", "deploy", "x", "-o", "json", "--request-timeout=20s"],
+  ["kubectl", "get", "pods", "-A"],
+  ["kubectl", "logs", "-n", "x", "deploy/x"],
+  ["kubectl", "auth", "can-i", "list", "pods"],
+  ["kubectl", "config", "current-context"],
+  ["kubectl", "-n", "x", "rollout", "status", "deploy/x"],
+  ["kubectl", "version", "--client", "-o", "json"],
+  ["infisical", "secrets", "--path", "/apps/x", "--env", "prod", "-o", "json"],
+  ["infisical", "secrets", "get", "KEY", "--path", "/apps/x"],
+  ["infisical", "user", "get", "token", "--silent"],
+  ["infisical", "--version"],
+  ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "https://ghcr.io/token?scope=repository:ukyi-app/x:pull"],
+  ["curl", "-sSfL", "-XGET", "https://x"],
+  ["terraform", "version"],
+  ["tf-github.sh", "plan"],
+  ["/tmp/clone/tools/tf-github.sh", "verify"],
+  ["jq", "-r", ".x"],
+];
+
+const WRITES: string[][] = [
+  ["gh", "api", "-i", "-X", "POST", "repos/x/git/trees", "--input", "-"],
+  ["gh", "api", "repos/x/pulls", "-f", "title=x"],
+  ["gh", "api", "repos/x/pulls", "--input", "-"],
+  ["gh", "api", "-XPATCH", "repos/x/pulls/1"],
+  ["gh", "api", "graphql", "-f", "query=x"],
+  ["gh", "pr", "create"],
+  ["gh", "pr", "merge", "1"],
+  ["gh", "repo", "create", "x"],
+  ["gh", "workflow", "run", "x"],
+  ["git", "push", "origin", "HEAD"],
+  ["git", "-C", "/tmp/x", "commit", "-m", "x"],
+  ["kubectl", "-n", "x", "annotate", "externalsecret", "x", "force-sync=1", "--overwrite"],
+  ["kubectl", "apply", "-f", "-"],
+  ["kubectl", "-n", "x", "create", "-f", "-"],
+  ["kubectl", "delete", "pod", "x"],
+  ["kubectl", "patch", "x", "y"],
+  ["kubectl", "-n", "x", "rollout", "restart", "deploy/x"],
+  ["kubectl", "-n", "x", "exec", "x", "--", "psql"],
+  ["kubectl", "port-forward", "x", "1:1"],
+  ["infisical", "secrets", "set", "--file", "/dev/stdin"],
+  ["infisical", "secrets", "delete", "KEY"],
+  ["infisical", "secrets", "folders", "create"],
+  ["infisical", "run", "--", "sh"],
+  ["infisical", "login"],
+  ["curl", "-X", "POST", "https://x"],
+  ["curl", "-d", "a=b", "https://x"],
+  ["curl", "-sd", "a=b", "https://x"],
+  ["curl", "--json", "{}", "https://x"],
+  ["curl", "-T", "f", "https://x"],
+  ["terraform", "apply"],
+  ["terraform", "plan"],
+  ["tf-github.sh", "apply"],
+  ["sh", "-c", "anything"],
+  ["bash", "tools/tf-github.sh", "plan"],
+  ["unknown-tool"],
+];
+
+describe("쓰기 판정(읽기 허용 목록, 나머지는 쓰기)", () => {
+  for (const argv of READS) test(`읽기: ${argv.join(" ")}`, () => expect(classify(argv).write).toBe(false));
+  for (const argv of WRITES) test(`쓰기: ${argv.join(" ")}`, () => expect(classify(argv).write).toBe(true));
+});
