@@ -107,7 +107,7 @@ spec:
       ports:
         - protocol: TCP
           port: 3000
-  # 플러그인·업데이트 확인을 껐다. 데이터소스(vmauth)와 DNS만.
+  # 데이터소스(vmauth), DNS, 플러그인 내려받기(443). 업데이트 확인과 preinstall은 껐다.
   egress:
     - to:
         - podSelector:
@@ -116,6 +116,20 @@ spec:
       ports:
         - protocol: TCP
           port: 8427
+    # init 컨테이너가 GitHub 릴리스에서 플러그인을 받는다. NetworkPolicy는 파드 단위라 Grafana 본 컨테이너에도
+    # 인터넷 443이 열리는 것이 대가다. 사설망·tailnet·link-local은 빼 측면 접근을 막는다(Alertmanager와 같은 except).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
     - to:
         - namespaceSelector:
             matchLabels:
@@ -129,7 +143,7 @@ spec:
         - protocol: TCP
           port: 53
 ---
-# 8427(프록시)만 Grafana에 연다. 8426(내부 API)은 위 scrape-from-vmsingle로 vmsingle만 닿는다.
+# 8427(프록시)만 Grafana에 연다. 뒤는 vmsingle 8428과 VictoriaLogs 9428. 8426(내부 API)은 위 scrape-from-vmsingle로 vmsingle만 닿는다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -155,6 +169,13 @@ spec:
       ports:
         - protocol: TCP
           port: 8428
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: victorialogs
+      ports:
+        - protocol: TCP
+          port: 9428
     - to:
         - namespaceSelector:
             matchLabels:
@@ -182,6 +203,10 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: vector
+        # Grafana는 vmauth를 거친다. Grafana가 직접 닿으면 읽기 전용 허용 목록을 건너뛴다.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vmauth
       ports:
         - protocol: TCP
           port: 9428

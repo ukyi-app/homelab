@@ -1,4 +1,3 @@
-# VictoriaLogs 데이터소스는 플러그인이 필요해 두지 않는다. 로그는 VictoriaLogs 자체 UI(/select/vmui)로 본다.
 apiVersion: 1
 datasources:
   - name: VictoriaMetrics
@@ -8,4 +7,12 @@ datasources:
     # vmsingle 직결이 아니라 읽기 전용 프록시(vmauth/auth.yaml)로. Viewer도 이 데이터소스로 임의 경로를 부를 수 있다.
     url: http://vmauth:8427
     isDefault: true
+    editable: false
+  # 플러그인은 grafana.yaml의 init 컨테이너가 넣는다. 위와 같은 이유로 VictoriaLogs 직결이 아니라 vmauth로.
+  # uid는 봇 질의 템플릿(QueryTemplate.datasource)이 가리키므로 바꾸지 않는다.
+  - name: VictoriaLogs
+    uid: victorialogs
+    type: victoriametrics-logs-datasource
+    access: proxy
+    url: http://vmauth:8427
     editable: false
