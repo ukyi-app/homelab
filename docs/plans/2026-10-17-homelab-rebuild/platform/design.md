@@ -1551,7 +1551,7 @@ spec:
 | 유실 허용 | 전부(재생성) | 프로세스·노드 재시작 약 1초(AOF everysec[S41]), 디스크 유실 최대 24시간(하루 1회 RDB) |
 | 앱 삭제 시 | 함께 삭제 | 보존(C.5.5) |
 
-앱은 어느 쪽이든 `VALKEY_URL` env 하나로 붙는다(공유 차트가 배선).
+앱은 어느 쪽이든 `VALKEY_URL` env 하나로 붙는다(공유 차트가 배선). 앱 이름 한도는 캐시 51자(공식 차트의 init 컨테이너 `<app>-valkey-init`이 63자 안), 영속 38자(CronJob `<app>-valkey-backup`이 52자 안)다. 차트가 렌더를 막는다(T11).
 
 **영속 Valkey 복원 절차** (U18 로컬 확인 2026-10-23, T11. 실행 명령은 `docs/runbooks-public/restore.md` 1절. 클러스터에서는 시나리오 4가 처음이다)
 
@@ -1566,10 +1566,10 @@ spec:
 CNPG 복원은 제자리가 아니라 항상 새 클러스터를 만든다[S32]. 공유 클러스터 안의 DB 하나만 되돌리는 공식 절차는 없다. 그래서 `homelab db restore <app> --to <시각>`(목표 UX)이 아래를 단계별로 확인하며 한다.
 
 1. **되돌림용 덤프:** 현재 DB를 `pg_dump -Fc`로 R2 `pgdump/<app>/pre-restore-<시각>`에 남긴다. 주 파드 안 `postgres` 로컬 접속으로 덤프해 도우미 Job(rclone, 실행 id 라벨)의 `rclone rcat`으로 바로 올린다(T11. 5432 네트워크를 쓰지 않고 사람 기기에 데이터가 남지 않는다). `pgdump/`에는 lifecycle이 없어 확인 뒤 손으로 지운다.
-2. **임시 클러스터:** `pg-restore-<app>-<시각>`을 `bootstrap.recovery`(ObjectStore, `recoveryTarget.targetTime`)로 만든다[S32]. 이 클러스터에는 WAL 아카이버 plugin을 붙이지 않는다(운영 prefix에 쓰지 않게, B.8 E6).
+2. **임시 클러스터:** `pg-restore-<실행 id>`를(앱 이름을 넣지 않는다. CNPG가 `<클러스터>-1`을 파드 hostname으로 써 앱 이름 37자부터 63자를 넘는다, T11) `bootstrap.recovery`(ObjectStore, `recoveryTarget.targetTime`)로 만든다[S32]. 이 클러스터에는 WAL 아카이버 plugin을 붙이지 않는다(운영 prefix에 쓰지 않게, B.8 E6).
 3. **앱 멈춤:** PR로 `apps/<app>/values.yaml`에 `suspended: true`(앱 차트 1.1.0. replicas 0, 마이그레이션 Job도 렌더하지 않아 복원 중 스키마를 바꾸지 않는다). 사람 승인.
-4. **덤프·복원:** 빈 DB에 복원한다. 공유 클러스터에서 앱이 멈춘 것을 확인하고 `DROP DATABASE <app> WITH (FORCE)`(남은 연결을 끊고 지운다[S216]) → `CREATE DATABASE <app> OWNER <앱 역할>`(Database 리소스와 같은 설정) → 임시 클러스터에서 그 DB만 덤프해 소유자를 보존한 채 복원한다: `kubectl exec <임시 주 파드> -- pg_dump -Fc <app> | kubectl exec -i <pg 주 파드> -- pg_restore -d <app>`(둘 다 파드 안 `postgres` 로컬 접속, `--clean` 없이). `--clean`만 쓰면 덤프에 있는 객체만 지워 T1 뒤에 만든 스키마·테이블이 남는다[S215]. 빈 DB라 앱 역할이 아닌 역할의 객체(확장 등)도 덤프 그대로 돌아온다. CNPG Database 리소스는 그대로 두며, 재조정이 다시 만든 DB를 건드리지 않는지는 E6에서 확인한다(형식 미검증).
-5. **앱 재개:** PR로 `suspended: false`.
+4. **덤프·복원:** 빈 DB에 복원한다. 공유 클러스터에서 앱이 멈춘 것을 확인하고 `DROP DATABASE <app> WITH (FORCE)`(남은 연결을 끊고 지운다[S216]) → `CREATE DATABASE <app> OWNER <앱 역할>`(Database 리소스와 같은 설정) → 임시 클러스터에서 그 DB만 덤프해 **앱 역할로** 복원한다: `kubectl exec <임시 주 파드> -- pg_dump -Fc <app> | kubectl exec -i <앱 ns 복원 Job> -- pg_restore --no-owner --no-privileges -d "$DATABASE_URL"`(덤프는 `postgres` 로컬 접속, 복원은 앱 연결 Secret으로 `pg-rw` 접속, `--clean` 없이). 덤프는 앱이 만든 객체라 슈퍼유저로 복원하면 심어 둔 함수·CHECK가 슈퍼유저 문맥에서 돌아 앱 역할을 승격할 수 있다(로컬 시험에서 재현, `docs/runbooks-public/restore.md` 2a, T11). 그래서 모든 객체가 앱 역할 소유가 되고, 확장은 `postgres`가 이름으로만 먼저 만든다. 복원 뒤 앱 역할의 `rolsuper` 등이 모두 false인지 본다. `--clean`만 쓰면 덤프에 있는 객체만 지워 T1 뒤에 만든 스키마·테이블이 남는다[S215]. CNPG Database 리소스는 그대로 두며, 재조정이 다시 만든 DB를 건드리지 않는지는 E6에서 확인한다(형식 미검증).
+5. **앱 재개:** 캐시 Valkey를 쓰는 앱은 캐시 파드를 지워 비운다(T1 뒤의 값이 남는다). 그다음 PR로 `suspended: false`.
 6. **정리:** 임시 Cluster와 그 PVC, 1·4단계 Job을 지우고 모두 없는지 확인한다(옛 드릴의 고아·PVC 재사용 거짓 PASS 함정). 확인은 아래 라벨로 `kubectl -n database get cluster,job,pvc -l homelab.ukyi.app/restore=<실행 id>` → 0개.
 7. **확인:** 앱 readiness와 표식 행(시나리오 10).
 
@@ -1577,7 +1577,7 @@ CNPG 복원은 제자리가 아니라 항상 새 클러스터를 만든다[S32].
 
 - AppProject `data`의 허용 kind(C.3.3)에 Job·Cluster를 넣지 않는다. 어느 Application도 이 객체를 소유하지 않으므로(Argo CD 추적 주석 없음) selfHeal이 되돌리거나 prune이 지우는 대상이 아니다. 같은 이유로 Argo CD가 대신 치워 주지도 않는다.
 - 필요한 kubeconfig 권한: 사람의 kubeconfig(C.2, 현재 cluster-admin)로 `database` ns의 `clusters.postgresql.cnpg.io`·`jobs` create·get·delete, `persistentvolumeclaims` get·delete, Valkey 복원이면 앱 ns의 `jobs` create·get·delete. 봇 읽기 계정(C.8)과 CI에는 이 권한이 없다.
-- 객체 이름은 실행마다 고유하게(`pg-restore-<app>-<시각>`, `restore-<app>-<시각>`) 하고 라벨 `homelab.ukyi.app/restore=<실행 id>`를 붙인다. 임시 Cluster는 `inheritedMetadata`로 그 라벨을 PVC 등 자기가 만드는 객체에 물려준다(옛 구성이 같은 필드로 PVC·Service에 주석을 물려줌, `2d2054a:platform/cnpg/prod/cluster.yaml:124-129`). 6단계 정리 확인과, 중간 실패로 남은 객체를 `homelab data list`가 보여 주는 기준이 이 라벨이다.
+- 객체 이름은 실행마다 고유하게(`pg-restore-<실행 id>`, `restore-<실행 id>-r2`·`-db`, Valkey 복원은 `restore-<app>-<실행 id>`) 하고 라벨 `homelab.ukyi.app/restore=<실행 id>`를 붙인다. 임시 Cluster는 `inheritedMetadata`로 그 라벨을 PVC 등 자기가 만드는 객체에 물려준다(옛 구성이 같은 필드로 PVC·Service에 주석을 물려줌, `2d2054a:platform/cnpg/prod/cluster.yaml:124-129`). 6단계 정리 확인과, 중간 실패로 남은 객체를 `homelab data list`가 보여 주는 기준이 이 라벨이다.
 - `database` ns의 NetworkPolicy는 앱 ns에서 오는 5432만 받는다(C.5.1). 그래서 덤프·복원은 Job의 5432 접속이 아니라 `kubectl exec` 파이프(파드 안 로컬 접속)로 하고, 허용 규칙을 따로 두지 않는다(T11).
 - 3·5단계(앱 멈춤·재개)만 Git PR이다. 앱 replicas는 selfHeal 때문에 `kubectl scale`로 바꿀 수 없다(B.8 E2).
 
