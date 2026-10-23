@@ -26,6 +26,7 @@
 - R2 백업과 앱 단위 복원 절차. 보존은 확정(사용자 2026-10-18, T05)대로 PostgreSQL·Valkey 14일, 운영 버킷은 `homelab-backups` 하나다(설계 C.3.8).
   - PostgreSQL: Barman Cloud Plugin의 base backup + WAL 연속 아카이브. `homelab-backups`의 `pg/` prefix, serverName `pg-<YYYYMMDD>`. 매일 03:00 KST(ScheduledBackup은 UTC라 `0 0 18 * * *`), 14일(ObjectStore `retentionPolicy`).
   - 영속 Valkey: 같은 버킷 `valkey/<app>/`, 매일 03:30 KST, 14일(R2 lifecycle, prefix `valkey/` 명시. `prefix = ""`는 버킷 전체 만료다).
+  - 백업 CronJob 이름에 `valkey-backup`을 넣는다. T08b의 경보 ValkeyBackupStale이 `kube_cronjob_status_last_successful_time{cronjob=~".*valkey-backup.*"}`로 본다(`platform/observability/stack/vmalert/rules/platform.yaml`). 다른 이름을 쓰면 같은 PR에서 룰과 그 단위 시험을 고친다. 아니면 백업이 멈춰도 경보가 울리지 않는다.
   - 앱 하나 복원은 임시 클러스터 PITR → 그 DB만 덤프·복원이다(설계 C.5.7). 복원 리소스(임시 Cluster `pg-restore-*`, 덤프·복원 Job, Valkey 복원 Job)는 GitOps 밖의 일회성 객체이고 라벨 `homelab.ukyi.app/restore=<실행 id>`를 붙인다.
   - 복원 드릴은 자동화하지 않는다. 시나리오 10이 첫 실행이다(설계 C.3.8).
 - Valkey 캐시용·영속용 기본값 (D-06, 확정(사용자 2026-10-18, T05)). 값은 설계 C.5.6 표.

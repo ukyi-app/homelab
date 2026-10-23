@@ -1,7 +1,7 @@
 # T08b 관측·알림·봇 자리
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 대기
+- 상태: 완료(2026-10-23. 시나리오 17은 ping 차단으로 대체(사용자 결정), 봇 route는 T16b가 켠다)
 - 명세: [../spec.md](../spec.md) §4.2, §4.4
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4b, E.3, C.3.7, C.8
 - Blocked by: T08a, T09
@@ -43,7 +43,7 @@
 ### 비AI 알림 (D-10, AC-P11)
 
 - 봇과 독립된 비AI 알림 (D-10, AC-P11). D-10 확정(사용자 2026-10-18, T05)대로 homelab 알림용 새 Telegram 봇을 쓴다. 봇은 T09가 만들고 토큰을 Infisical `homelab`의 `/platform/alerting`에 등록한다. 옛 Telegram 봇과 토큰은 `mac-uptime-guard`를 처리하는 T22까지 그대로 두고 이 티켓에서 쓰지 않는다.
-- Alertmanager 기본 receiver `telegram`(내장 `telegram_configs`)이 봇을 거치지 않고 보낸다. 토큰은 `bot_token_file`이고 `chat_id`는 비밀이 아니라 values에 둔다. 자동 HTML escape 위에 이중 escape를 하지 않는다. 전송 확인은 로그가 아니라 `alertmanager_notifications_total{integration="telegram"}`이다.
+- Alertmanager 기본 receiver `telegram`(내장 `telegram_configs`)이 봇을 거치지 않고 보낸다. 토큰은 `bot_token_file`, chat ID는 `chat_id_file`(Infisical `/platform/alerting`의 `TELEGRAM_CHAT_ID`)이다. chat ID는 비밀은 아니지만 개인 식별자라 공개 저장소에 두지 않는다(lead 결정 2026-10-22. Alertmanager 0.34.1에 있다, 설계 C.3.7). 자동 HTML escape 위에 이중 escape를 하지 않는다. 전송 확인은 로그가 아니라 `alertmanager_notifications_total{integration="telegram"}`이다.
 - 라우트 모양은 설계 C.3.7 예시다. 봇 자리 route 네 줄(`severity=~"warning|critical"` → `bot`과 `continue: true`, 이어서 같은 matcher → `telegram` 형제 route)은 주석으로 둔다. `continue: true`는 부모 receiver로 되돌려 보내지 않으므로, 봇 route를 켤 때는 Telegram 형제 route를 함께 켠다(T16b).
 
 ### 외부 생존 감시 (D-10, AC-P11)
@@ -127,14 +127,14 @@
 
 ## 완료 조건
 
-- 시나리오 16(비AI 경보), 17(외부 감시)을 통과한다.
-- 시나리오 6·7의 경보 부분(T09가 넘긴 것)을 통과한다.
-- "tailnet 출처 질의 1시간 0건" 경보의 실제 발화 시험을 통과했다(아래 검증).
-- AdGuard 정지 경보(사용 가능 replica 1분 넘게 1 미만 또는 시계열 없음, 경보 문구에 런북 `docs/runbooks-public/nuc-dns-outage.md`)의 발화 시험을 두 방식으로 통과했다: `replicas: 0` PR(파드 없음)과 파드 NotReady. 정지는 LAN DNS 전체 장애라 시험 창을 짧게 잡는다(AC-P6 한계 승인, T08a 2026-10-20).
-- 설계 C.8의 읽기 전용 접근(CI 검사 L30은 T10)·경보 외부 수신자·격리 작업 공간 준비 확인을 통과한다(D-14 영속 공간 유지와 상주 작업자 모양, D-15 허용 목록 확인 포함. 설계 E4b).
-- 핵심 룰 단위 시험을 통과한다.
-- T08c에서 넘긴 확인: 맥이나 아이폰에서 `go/argocd/applications?x=<시험 값>`을 연 뒤 로그 저장소(VictoriaLogs)에서 그 시험 값이 0건이다(`go` 접근 로그에 경로·쿼리가 남지 않음, T08c 완료 조건 "경로·쿼리 유지").
-- 새 체크가 초록이 된 뒤 옛 healthchecks 체크를 지웠고, T06 자격 폐기 표의 그 줄(옛 ping URL, `보류(D-10, T08b)`)이 닫혔고, approvals에 기록돼 있다. (2026-10-19 T06 중 사용자가 먼저 지웠다. 이 항목은 그 approvals 기록과 콘솔에 옛 체크가 없음을 보는 것으로 닫는다)
+- 시나리오 16(비AI 경보), 17(외부 감시)을 통과한다. **시나리오 16 통과**(2026-10-23 00:43, 봇 없이 Telegram 도착, 전송 카운터 0→1·실패 0, approvals 00:43 행). **시나리오 17은 대체 방식으로 통과**(사용자 결정 2026-10-23 01:06 "ping만 막기", approvals 01:06·01:09~01:29 행): NUC가 Wi-Fi이고 작업 세션이 NUC 위라 물리 차단 대신 파드에서 healthchecks ping 주소로 가는 443만 nft로 20분 막았다. 01:19 down 알림이 이메일·Telegram(NUC를 거치지 않는 healthchecks 연동) 둘 다 왔고, 해제 뒤 up 알림이 왔다. NUC 전원·네트워크를 실제로 끊는 시험은 하지 않았다(ping이 끊기는 결과는 같다).
+- 시나리오 6·7의 경보 부분(T09가 넘긴 것)을 통과한다. **통과**(approvals 2026-10-23 01:06·01:12~01:27 행): 시나리오 6은 없는 키를 가리키는 시험 ExternalSecret으로 `ExternalSecretNotReady` Telegram 01:17:57. 시나리오 7은 부트스트랩 Secret의 client secret을 틀린 값으로 잠시 바꿔 같은 경보 Telegram 01:26:48. 원래 값으로 되돌린 뒤 store Ready, 해소 알림, 시험 ns 삭제(01:33:03). 시험용 client secret을 새로 발급하지 않고 틀린 값으로 같은 인증 실패를 만들었다(운영 client secret 폐기 없음).
+- "tailnet 출처 질의 1시간 0건" 경보의 실제 발화 시험을 통과했다(아래 검증). **통과**(approvals 2026-10-23 01:14:48·02:21~03:12 행): nft로 tailnet → 53만 막은 뒤 `AdGuardTailnetQueriesMissing` firing 02:21:30, Telegram 02:22:30. 타이머 해제(03:05:17) 뒤 질의가 돌아와 resolved 03:07:00, 해소 알림 03:12:30.
+- AdGuard 정지 경보(사용 가능 replica 1분 넘게 1 미만 또는 시계열 없음, 경보 문구에 런북 `docs/runbooks-public/nuc-dns-outage.md`)의 발화 시험을 두 방식으로 통과했다: `replicas: 0` PR(파드 없음)과 파드 NotReady. 정지는 LAN DNS 전체 장애라 시험 창을 짧게 잡는다(AC-P6 한계 승인, T08a 2026-10-20). **두 방식 모두 통과**(approvals 2026-10-23 00:45~00:48·00:53~00:56 행): `replicas: 0`(#837) → `AdGuardDown` firing·Telegram, 되돌림(#838) 뒤 해소. readiness 실패(#839) → firing 00:55:39·Telegram, 되돌림(#840) 뒤 해소. 알림에 런북 링크가 있다(Telegram이 `.md`를 도메인으로 링크해 전체 GitHub 주소로 바꿈, #841).
+- 설계 C.8의 읽기 전용 접근(CI 검사 L30은 T10)·경보 외부 수신자·격리 작업 공간 준비 확인을 통과한다(D-14 영속 공간 유지와 상주 작업자 모양, D-15 허용 목록 확인 포함. 설계 E4b). **통과**(approvals 2026-10-23 01:50~01:52·02:0x·02:12~02:14·03:13·09:08 행): 아래 검증 목록이 그대로 나왔다. 경보 외부 수신자는 봇 route를 잠시 켠 PR(#846)에서 `BotRouteTest`가 시험 수신기, `alertmanager_notifications_total{integration="webhook"}`, Telegram에 모두 도착한 것을 본 뒤 되돌렸다(#847, 사용자 승인 2026-10-23). 프록시는 CONNECT 이름과 TLS SNI를 함께 보는 Envoy로 바꿨고(사용자 결정 2026-10-22), npm은 허용 목록에서 뺐다(#844). Grafana Viewer는 resources 경로로 쓰기에 닿아 읽기 전용 vmauth를 앞에 두었다(U12, #842). ClusterSecretStore health 덮어쓰기는 두지 않았다(첫 설정 실수를 가리고, Infisical 장애 때는 다른 store도 함께 Degraded라 얻는 것이 적다. 켜는 순서로 막는다).
+- 핵심 룰 단위 시험을 통과한다. **통과**: 룰 20개 모두 `vmalert-tool unittest` 시험이 있고 `ci`가 돌린다(U11).
+- T08c에서 넘긴 확인: 맥이나 아이폰에서 `go/argocd/applications?x=<시험 값>`을 연 뒤 로그 저장소(VictoriaLogs)에서 그 시험 값이 0건이다(`go` 접근 로그에 경로·쿼리가 남지 않음, T08c 완료 조건 "경로·쿼리 유지"). **확인**(approvals 2026-10-23 01:1x 행): 기기에서 시험 값을 연 뒤 VictoriaLogs 60분 질의에서 0건, 같은 창에 다른 ns 로그는 들어왔다.
+- 새 체크가 초록이 된 뒤 옛 healthchecks 체크를 지웠고, T06 자격 폐기 표의 그 줄(옛 ping URL, `보류(D-10, T08b)`)이 닫혔고, approvals에 기록돼 있다. (2026-10-19 T06 중 사용자가 먼저 지웠다. 이 항목은 그 approvals 기록과 콘솔에 옛 체크가 없음을 보는 것으로 닫는다) **닫음**: 새 체크 초록(U10, approvals 2026-10-23 01:0x 행), 콘솔에는 새 체크 하나뿐(사용자 확인, approvals 09:0x 행).
 
 ## 검증
 
