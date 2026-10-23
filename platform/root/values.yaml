@@ -45,10 +45,10 @@ components:
     enabled: true
 
   # T11. cnpg-cluster(Cluster pg, ObjectStore, ScheduledBackup), wave -3
-  # 켜기 전에 Infisical /platform/backup에 R2_ACCESS_KEY_ID·R2_SECRET_ACCESS_KEY·R2_ENDPOINT가 있어야 한다.
-  # 없으면 cnpg-cluster가 Degraded이고 root가 뒤 wave를 모두 기다린다.
+  # Infisical /platform/backup에 R2_ACCESS_KEY_ID·R2_SECRET_ACCESS_KEY·R2_ENDPOINT가 있어야 한다(2026-10-23 사람이 넣음).
+  # 키가 빠지면 cnpg-cluster가 Degraded이고 root가 뒤 wave를 모두 기다린다.
   cnpgCluster:
-    enabled: false
+    enabled: true
 
   # T08b. sandbox(격리 작업 공간과 egress 프록시), wave -2
   sandbox:

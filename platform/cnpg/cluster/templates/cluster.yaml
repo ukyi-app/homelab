@@ -10,7 +10,9 @@ metadata:
     argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   instances: 1
-  # standard: minimal + 모든 locale + pgvector·pgaudit 같은 확장. system 변형은 in-tree barman용이라 1.31에서 빠진다.
+  # standard: minimal + 모든 locale + pgvector·pgaudit 같은 확장. 백업은 plugin sidecar가 하므로 이미지에 barman이 필요 없다.
+  # operator 기본값인 system 변형(standard + barman-cloud 바이너리)은 in-tree barmanObjectStore용이라 쓰지 않는다.
+  # postgres-containers README가 system을 deprecated로 두고 in-tree Barman Cloud 지원이 빠질 때(CNPG 1.31.0 예정) 없앤다고 적었다.
   # 복원·덤프 Job도 이 이미지를 쓴다(major가 같아야 한다, 설계 B.8 E6). 올릴 때 함께 옮긴다.
   # renovate: image=ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie
   imageName: ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:d72ace96f5803b12c341bb5dac48532e8c1f92f69e8a717a59d779bfc038dea9
