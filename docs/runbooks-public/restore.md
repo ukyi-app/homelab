@@ -291,8 +291,22 @@ stopped() { local r sr out
   if [ "$r" = 0 ] && { [ "$sr" = "" ] || [ "$sr" = 0 ]; } && [ -z "$out" ]; then return 0; fi
   echo "멈춤: 앱이 멈춰 있지 않다(아래: spec.replicas, status.replicas, 끝나지 않은 앱 파드)" >&2
   printf '%s\n' "$r" "$sr" "$out" | cat -v >&2; return 1; }
-# 4-4·4-5가 쓰는 입력(4-2가 만든 목록과 SQL)이 4-3이 DROP 전에 읽어 본 것과 같은지. 없어지거나 바뀌었으면 실패한다.
+# 4-3·4-4·4-5가 쓰는 입력(4-2가 만든 확장 목록, 목록, SQL)이 4-2가 검증을 끝낸 때와 같은지. 없어지거나 바뀌었으면 실패한다.
+# 기준(inputs.sha)은 4-2만 만든다. 뒤 단계가 다시 만들면 그 사이 바뀐 내용(예: 주석 한 줄로 잘린 목록)을 새 기준으로 받는다.
 same() { ( cd "$W" && sha256sum -c inputs.sha ); }
+# 임시 클러스터가 지금도 이 실행의 복원 원본인지(4-3이 DROP 직전에 본다). 표식(ok-tmp)은 남아도 그 뒤 클러스터가
+# 죽거나 spec이 바뀔 수 있다(예: U26 patch는 bootstrap.recovery를 지운다). Ready, 주 파드가 TMP, 복구 원본·지점이 2단계와 같다.
+srcok() { local c="cluster/pg-restore-$RUN" v k want
+  kubectl -n database wait --for=condition=Ready "$c" --timeout=60s >/dev/null || return 1
+  for k in status.currentPrimary spec.bootstrap.recovery.source spec.bootstrap.recovery.recoveryTarget.targetTime \
+    'spec.externalClusters[?(@.name=="origin")].plugin.name' \
+    'spec.externalClusters[?(@.name=="origin")].plugin.parameters.barmanObjectName' \
+    'spec.externalClusters[?(@.name=="origin")].plugin.parameters.serverName'; do
+    case $k in status.*) want=$TMP ;; *.source) want=origin ;; *.targetTime) want=$T1 ;; *.plugin.name) want=barman-cloud.cloudnative-pg.io ;;
+      *barmanObjectName*) want=r2 ;; *serverName*) want=$SRV ;; esac
+    v=$(kubectl -n database get "$c" -o jsonpath="{.$k}") || return 1
+    [ "$v" = "$want" ] || { echo "멈춤: 임시 클러스터의 ${k}가 2단계와 다르다" >&2; return 1; }
+  done; }
 ( set -euo pipefail; step vars
   # 조회는 독립 할당으로(실패면 set -e가 멈춘다)
   SRV=$(kubectl -n database get cluster pg -o jsonpath='{.spec.plugins[?(@.name=="barman-cloud.cloudnative-pg.io")].parameters.serverName}')
@@ -326,8 +340,11 @@ same() { ( cd "$W" && sha256sum -c inputs.sha ); }
   # 잠금이 없던 문서로 시작한 다른 실행: 앱 ns의 끝나지 않은(Complete·Failed 조건이 없는) restore-<실행 id>-db Job
   jobs=$(kubectl -n app-$APP get job -l homelab.ukyi.app/restore -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.homelab\.ukyi\.app/restore}{"\t"}{.status.conditions[?(@.status=="True")].type}{"\n"}{end}')
   other=$(printf '%s\n' "$jobs" | awk -F'\t' -v run="$RUN" '$1 ~ /^restore-.*-db$/ && $2 != run && (" " $3 " ") !~ / (Complete|Failed) / { print "job/" $1 }')
+  # Job을 지운 뒤에도 파드는 남아 돌 수 있다(background 삭제는 파드를 나중에 지운다). 끝나지 않은(지우는 중 포함) 파드도 본다.
+  pods=$(kubectl -n app-$APP get pod -l homelab.ukyi.app/restore -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.homelab\.ukyi\.app/restore}{"\t"}{.status.phase}{"\t"}{.metadata.labels.job-name}{"\n"}{end}')
+  other="$other$(printf '%s\n' "$pods" | awk -F'\t' -v run="$RUN" '$4 ~ /^restore-.*-db$/ && $2 != run && $3 != "Succeeded" && $3 != "Failed" { print "pod/" $1 }')"
   if [ -n "$other" ]; then printf '%s\n' "$other" | cat -v >&2
-    echo "다른 실행의 복원 Job이 이 앱에서 돌고 있다(위)" >&2; exit 1; fi
+    echo "다른 실행의 복원 Job·파드가 이 앱에 남아 있다(위)" >&2; exit 1; fi
   # 없으면 만든다. 동시에 만들면 하나만 성공하고 나머지는 AlreadyExists로 멈춘다. 이름 조회는 없음과 오류를 나눈다(--ignore-not-found).
   held=$(kubectl -n app-$APP get configmap restore-pg --ignore-not-found -o jsonpath='{.data.run}')
   if [ -z "$held" ]; then kubectl create -f - <<YAML
@@ -453,7 +470,7 @@ YAML
    [ -f "$W/ok-tmp" ] && echo "통과: tmp" || echo "멈춤: 임시 클러스터가 준비되지 않았다"
    ```
 
-   U26 확인(복원 시험의 임시 Cluster에서): 이 클러스터의 `spec.bootstrap`을 `initdb`로 바꾸는 patch가 webhook에 거부되지 않는지, 떠 있는 클러스터에 영향이 없는지 본다. 결과는 설계 부록 1 U26에 적는다.
+   U26 확인(복원 시험의 임시 Cluster에서): 이 클러스터의 `spec.bootstrap`을 `initdb`로 바꾸는 patch가 webhook에 거부되지 않는지, 떠 있는 클러스터에 영향이 없는지 본다. 결과는 설계 부록 1 U26에 적는다. 4-6이 끝난 뒤에 한다. 그 전에 하면 4-3의 원본 확인(`srcok`, 복구 원본·지점)이 멈춘다.
 
    ```bash
    kubectl -n database patch cluster pg-restore-$RUN --type=merge \
@@ -546,6 +563,7 @@ YAML
    ```bash
    ( set -euo pipefail; step list
      use
+     rm -f "$W/inputs.sha"      # 이 블록이 끝까지 성공할 때만 기준이 다시 생긴다
      dump | J pg_restore --list > "$W/list"
      [ -s "$W/list" ]
      kubectl -n database exec "$TMP" -c postgres -- psql -U postgres -d "$APP" -v ON_ERROR_STOP=1 -tA -F ' ' -c \
@@ -600,12 +618,15 @@ YAML
        dump | J pg_restore -L /tmp/acl-su.list -f - > "$W/acl-su.sql"
      fi
      sqlok "$W/acl-su.sql" | cat -v || { echo "postgres로 넣을 ACL에 허용하지 않는 문장이 있다(위 줄)" >&2; exit 1; }
+     # 검증이 모두 끝난 이 내용을 기준으로 고정한다(same). 뒤 단계는 비교만 한다.
+     ( cd "$W" && sha256sum ext main.list acl.list acl-su.sql ) > "$W/inputs.sha.new"
+     mv "$W/inputs.sha.new" "$W/inputs.sha"
      touch "$W/ok-list" )
    [ -f "$W/ok-list" ] && echo "통과: list" || echo "멈춤: 목록이나 확장 조회에 실패했다(지금 DB는 그대로다)"
    [ -f "$W/ok-list" ] && { cat -v "$W/ext"; [ -s "$W/ext" ] || echo "확장 없음"; }
    ```
 
-   **4-3. DB 다시 만들기.** 여기서 지금 DB를 지운다. 앞의 확인(되돌림 사본, 임시 클러스터, 앱 멈춤, 앱 역할 접속, 목록)이 하나라도 없으면 시작하지 않는다. 지우기 직전에 다시 보는 것: 잠금이 이 실행의 것인지(`step`), 4-4·4-5가 쓸 목록·SQL을 읽을 수 있는지(못 읽으면 DROP 뒤가 아니라 여기서 멈춘다), 앱이 지금도 멈춰 있는지(표식 뒤 다른 PR로 다시 떴을 수 있다), 복원 Job이 살아 있고 앱 역할로 접속되는지. 표식(`ok-auth`)은 남아도 Job은 약 2시간(`sleep 7000`, `activeDeadlineSeconds: 7200`) 뒤 끝나므로, 4-1 뒤 오래 지났으면 지운 뒤에야 4-4에서 멈출 수 있다. 확장은 원본 소유자로 만든다. `postgres` 소유는 `postgres`가, 앱 역할 소유(trusted)는 앱 역할(복원 Job)이 만든다.
+   **4-3. DB 다시 만들기.** 여기서 지금 DB를 지운다. 앞의 확인(되돌림 사본, 임시 클러스터, 앱 멈춤, 앱 역할 접속, 목록)이 하나라도 없으면 시작하지 않는다. 지우기 직전에 다시 보는 것: 잠금이 이 실행의 것인지(`step`), 4-4·4-5가 쓸 목록·SQL이 4-2가 검증한 그대로인지(없어지거나 바뀌었으면 DROP 뒤가 아니라 여기서 멈춘다), 임시 클러스터가 지금도 이 실행의 복원 원본이고 덤프가 끝까지 읽히는지, 앱이 지금도 멈춰 있는지(표식 뒤 다른 PR로 다시 떴을 수 있다), 복원 Job이 살아 있고 앱 역할로 접속되는지. 표식(`ok-auth`)은 남아도 Job은 약 2시간(`sleep 7000`, `activeDeadlineSeconds: 7200`) 뒤 끝나므로, 4-1 뒤 오래 지났으면 지운 뒤에야 4-4에서 멈출 수 있다. 확장은 원본 소유자로 만든다. `postgres` 소유는 `postgres`가, 앱 역할 소유(trusted)는 앱 역할(복원 Job)이 만든다.
 
    ```bash
    ( set -euo pipefail; step db
@@ -613,21 +634,19 @@ YAML
      # SQL은 표준 입력으로, 값은 psql 변수로(-c에서는 치환되지 않는다). :"x"는 식별자, :'x'는 문자열로 psql이 인용한다.
      q() { kubectl -n database exec -i "$PRIMARY" -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 -tA -v app="$APP" "$@"; }
      jobready
-     # 확장 목록은 DROP 전에 한 번 읽고 뒤에서는 이 값만 쓴다. 파일이 없어지거나 못 읽으면 DROP 전에 멈춘다
-     # (DROP 뒤에 파일을 다시 읽다 실패하지 않게). 4-2와 같은 모양 검사를 한 번 더 한다(그 사이 파일이 바뀌었을 때).
+     # 4-3·4-4·4-5가 쓸 입력(확장 목록, 본 복원 목록, ACL 목록·SQL)이 4-2가 검증한 그대로인지 DROP 전에 본다.
+     # 없어지거나 못 읽거나 바뀌었으면 DROP 뒤가 아니라 여기서 멈춘다. 고치려면 4-2부터 다시 돌린다(기준은 4-2만 만든다).
+     same >/dev/null || { echo "4-2 뒤 입력 파일이 없어졌거나 바뀌었다(위). 4-2를 다시 돌린다" >&2; exit 1; }
+     # 확장 목록은 한 번 읽고 뒤에서는 이 값만 쓴다(DROP 뒤에 파일을 다시 읽다 실패하지 않게). 모양 검사도 한 번 더.
      ext=$(cat "$W/ext")
      extok "$ext"
-     # 4-4·4-5가 쓸 입력도 DROP 전에 읽어 본다. 본 복원 목록은 비어 있으면 안 되고, ACL 목록·SQL은 비어도 되지만
-     # 있어야 한다(4-2가 늘 만든다. 없으면 "ACL 없음"이 아니라 오류다). 읽은 내용의 sha256을 남겨 4-4·4-5는
-     # 같은 내용일 때만 쓴다(same). 그래서 4-4·4-5에서 목록을 못 읽는 것은 DROP 뒤가 아니라 여기서 드러난다.
-     rm -f "$W/inputs.sha"
-     for f in main.list acl.list acl-su.sql; do
-       [ -f "$W/$f" ] || { echo "4-2가 만든 $f가 없다. 4-2를 다시 돌린다" >&2; exit 1; }; done
      [ -s "$W/main.list" ] || { echo "본 복원 목록 main.list가 비었다. 4-2를 다시 돌린다" >&2; exit 1; }
      sqlok "$W/acl-su.sql" | cat -v || { echo "postgres로 넣을 ACL에 허용하지 않는 문장이 있다(위 줄)" >&2; exit 1; }
-     ( cd "$W" && sha256sum main.list acl.list acl-su.sql ) > "$W/inputs.sha.new"
-     mv "$W/inputs.sha.new" "$W/inputs.sha"
-     same >/dev/null
+     # 복원 원본이 지금도 읽히는지: 임시 클러스터의 spec·상태(srcok)와, 그 목록으로 덤프를 끝까지 읽어 보기(4-2와 같은 확인).
+     # 원본이 죽었으면 4-4에서야 덤프 실패로 멈춰 지금 DB만 지운 꼴이 된다.
+     srcok
+     J sh -c 'cat > /tmp/main.list' < "$W/main.list"
+     dump | J pg_restore -L /tmp/main.list -f /dev/null
      # 앱이 지금도 멈춰 있는지(표식 뒤 다른 PR로 다시 떴을 수 있다). 떠 있으면 FORCE DROP이 실행 중인 앱의 DB를 지운다.
      stopped
      # 파괴 단계에 들어간다는 표시. ok-가 아니라 begin이 지우지 않는다. 1단계가 이것을 보고 되돌림 사본을 새로 만들지 않는다.
@@ -758,16 +777,23 @@ YAML
 
    그다음 PR로 `suspended` 줄을 지운다. 마이그레이션 Job이 다시 돌고 앱이 뜬다.
 
-6. **정리:** 임시 Cluster, 그 PVC, 도우미 Job 둘, 잠금을 지우고 0개를 본다. 잠금은 앱을 재개한 뒤에 지운다(그 전에 지우면 다른 실행이 DB를 지울 수 있다).
+6. **정리:** 임시 Cluster, 그 PVC, 도우미 Job 둘, 잠금을 지우고 0개를 본다. 잠금은 앱을 재개한 뒤에 지운다(그 전에 지우면 다른 실행이 DB를 지울 수 있다). 잠금은 이 실행의 파드가 모두 없어진 것을 확인한 뒤 마지막에 지운다. `kubectl delete job`의 기본(background)은 Job 객체를 먼저 없애고 파드를 나중에 지워, 끝나지 않은 `pg_restore`·`psql`이 도는 동안 잠금이 풀릴 수 있다. 그래서 Job은 foreground로 지우고 기다린다. 앞의 삭제·확인이 하나라도 실패하면 잠금은 남는다(다음 실행이 멈춘다). 원인을 고치고 이 블록을 다시 돌린다.
 
    ```bash
-   kubectl -n database delete cluster pg-restore-$RUN
-   kubectl -n database delete job restore-$RUN-r2
-   kubectl -n app-$APP delete job restore-$RUN-db
-   kubectl -n database delete pvc -l homelab.ukyi.app/restore=$RUN
-   kubectl -n app-$APP delete configmap -l homelab.ukyi.app/restore=$RUN       # 잠금 restore-pg(이 실행의 것만)
-   kubectl -n database get cluster,job,pvc -l homelab.ukyi.app/restore=$RUN    # No resources
-   kubectl -n app-$APP get job,configmap -l homelab.ukyi.app/restore=$RUN       # No resources
+   ( set -euo pipefail
+     kubectl -n app-$APP delete job restore-$RUN-db --ignore-not-found --cascade=foreground --wait=true --timeout=5m
+     kubectl -n database delete job restore-$RUN-r2 --ignore-not-found --cascade=foreground --wait=true --timeout=5m
+     kubectl -n database delete cluster pg-restore-$RUN --ignore-not-found --wait=true --timeout=10m
+     kubectl -n database delete pvc -l homelab.ukyi.app/restore=$RUN --wait=true --timeout=10m
+     # 잠금 말고는 이 실행의 것이 하나도 없어야 한다(파드 포함). 조회는 독립 할당(실패면 set -e가 멈춘다).
+     out=$(kubectl get cluster,job,pvc,pod -A -l homelab.ukyi.app/restore=$RUN -o name)
+     if [ -n "$out" ]; then printf '%s\n' "$out" | cat -v >&2
+       echo "이 실행의 객체가 남아 있다(위). 없어진 뒤 이 블록을 다시 돌린다(잠금은 그대로)" >&2; exit 1; fi
+     kubectl -n app-$APP delete configmap -l homelab.ukyi.app/restore=$RUN       # 잠금 restore-pg(이 실행의 것만)
+     out=$(kubectl get cluster,job,pvc,pod,configmap -A -l homelab.ukyi.app/restore=$RUN -o name)
+     [ -z "$out" ] )
+   # 서브셸 뒤에 ||·&&를 붙이지 않는다(0.1). 종료 코드는 다음 줄에서 본다.
+   [ $? -eq 0 ] && echo "정리 끝(0개)" || echo "멈춤: 정리가 끝나지 않았다. 잠금이 남았으면 다음 실행은 멈춘다"
    ```
 
 7. **확인:** 앱 readiness와 표식 행(시나리오 10). 다른 앱 DB(시나리오 10의 `homelab-probe2`)의 T1 뒤 쓰기가 남아 있는지도 본다.
