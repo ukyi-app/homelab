@@ -4,10 +4,11 @@
 // cli/test/core/writes.test.ts의 표를 함께 고친다. exec가 plan·read 모드에서 쓰기를 막고, 시험이 스텁 원장을 이 판정으로 센다.
 import { basename } from "node:path";
 
-export type Verdict = { write: boolean; reason: string };
+// sensitiveOutput: stdout에 시크릿 값이 나오는 호출. exec가 secretStdout으로만 실행하게 한다.
+export type Verdict = { write: boolean; reason: string; sensitiveOutput?: boolean };
 
-const read = (reason: string): Verdict => ({ write: false, reason });
-const write = (reason: string): Verdict => ({ write: true, reason });
+const read = (reason: string, sensitiveOutput = false): Verdict => (sensitiveOutput ? { write: false, reason, sensitiveOutput } : { write: false, reason });
+const write = (reason: string, sensitiveOutput = false): Verdict => (sensitiveOutput ? { write: true, reason, sensitiveOutput } : { write: true, reason });
 
 // 값을 받는 전역 플래그. 이것들의 값은 하위 명령 이름으로 세지 않는다.
 const VALUE_FLAGS: Record<string, string[]> = {
@@ -62,7 +63,9 @@ function gh(args: string[]): Verdict {
     run: ["list", "view"],
     repo: ["view"],
   };
-  if (sub && verb && reads[sub]?.includes(verb)) return read(`gh ${sub} ${verb}`);
+  // gh auth token, auth status --show-token은 토큰을 낸다.
+  const token = sub === "auth" && (verb === "token" || args.includes("-t") || args.includes("--show-token"));
+  if (sub && verb && reads[sub]?.includes(verb)) return read(`gh ${sub} ${verb}`, token);
   return write(`gh ${sub ?? ""} ${verb ?? ""}`.trim());
 }
 
@@ -74,43 +77,61 @@ function git(args: string[]): Verdict {
   return sub && reads.includes(sub) ? read(`git ${sub}`) : write(`git ${sub ?? ""}`.trim());
 }
 
+// kubectl 인자가 Secret 리소스를 가리키는지. secret, secrets, Secret, secrets.v1, secret/x, pods,secrets, --raw .../secrets/... 모두.
+export function targetsSecret(positional: string[]): boolean {
+  return positional.some((p) => p.toLowerCase().split(/[,/]/).some((piece) => /^secrets?$/.test(piece.split(".")[0])));
+}
+
 function kubectl(args: string[]): Verdict {
-  const [verb, sub] = positionals("kubectl", args);
-  const simple = ["get", "describe", "logs", "explain", "api-resources", "api-versions", "version", "cluster-info", "top", "wait", "events"];
-  if (verb && simple.includes(verb)) return read(`kubectl ${verb}`);
+  const pos = positionals("kubectl", args);
+  const [verb, sub] = pos;
+  const secret = targetsSecret(pos.slice(1));
+  const simple = ["get", "describe", "explain", "api-resources", "api-versions", "version", "cluster-info", "top", "wait", "events", "logs"];
+  if (verb && simple.includes(verb)) return read(`kubectl ${verb}`, secret);
   const nested: Record<string, string[]> = {
     auth: ["can-i", "whoami"],
     config: ["current-context", "get-contexts", "view"],
     rollout: ["status", "history"],
   };
-  if (verb && sub && nested[verb]?.includes(sub)) return read(`kubectl ${verb} ${sub}`);
+  if (verb && sub && nested[verb]?.includes(sub)) return read(`kubectl ${verb} ${sub}`, secret);
   // exec·port-forward·cp·debug·proxy도 쓰기로 본다. 파드 안에서 무엇을 하는지 argv로 판정할 수 없다.
-  return write(`kubectl ${verb ?? ""} ${sub ?? ""}`.trim());
+  return write(`kubectl ${verb ?? ""} ${sub ?? ""}`.trim(), secret);
 }
 
 function infisical(args: string[]): Verdict {
   if (args.length === 1 && args[0] === "--version") return read("infisical --version");
   const [a, b, c] = positionals("infisical", args);
-  if (a === "secrets" && (b === undefined || b === "get")) return read(`infisical secrets ${b ?? "(목록)"}`);
+  // 목록·조회·토큰은 값을 낸다.
+  if (a === "secrets" && (b === undefined || b === "get")) return read(`infisical secrets ${b ?? "(목록)"}`, true);
   if (a === "secrets" && b === "folders" && c === "get") return read("infisical secrets folders get");
-  if (a === "user" && b === "get" && c === "token") return read("infisical user get token");
-  // run은 자식 명령을 모른다.
-  return write(`infisical ${[a, b, c].filter(Boolean).join(" ")}`);
+  if (a === "user" && b === "get" && c === "token") return read("infisical user get token", true);
+  // run은 자식 명령을 모른다. export는 값을 낸다.
+  return write(`infisical ${[a, b, c].filter(Boolean).join(" ")}`, a === "export" || a === "run");
 }
 
+// curl은 읽기 꼴 하나만 허용한다(#873 1라운드 P1). 함정: curl은 ~/.curlrc와 -K/--config 파일에서 request·data를
+// 읽어 argv에 없는 POST를 보낸다(실제 curl과 127.0.0.1 서버로 재현). 그래서 첫 인자가 -q(.curlrc 끔)여야 하고,
+// 나머지는 아래 옵션과 URL 하나뿐이어야 한다. 그 밖의 옵션은 해석하지 않고 쓰기로 본다.
+// -w는 %{http_code}만: curl 8.3+의 %output{파일}은 파일에 쓴다. -o는 /dev/null·-만.
+const CURL_BOOL = /^-[sSfLI]+$|^--(silent|show-error|fail|location|head)$/;
+
 function curl(args: string[]): Verdict {
-  for (let i = 0; i < args.length; i++) {
+  if (args.length === 1 && args[0] === "--version") return read("curl --version");
+  if (args[0] !== "-q") return write("curl: 첫 인자가 -q가 아니면 ~/.curlrc를 읽는다");
+  let urls = 0;
+  for (let i = 1; i < args.length; i++) {
     const a = args[i];
-    if (a === "-X" || a === "--request") {
-      const m = args[i + 1]?.toUpperCase();
-      if (m !== "GET" && m !== "HEAD") return write(`curl -X ${m}`);
-      i++;
-    } else if (a === "-XGET" || a === "-XHEAD" || a === "--request=GET" || a === "--request=HEAD") continue;
-    else if (/^--(request|data|data-[a-z]+|json|form|form-string|upload-file)(=|$)/.test(a)) return write(`curl ${a}`);
-    // 짧은 플래그 묶음(-sd 등)에 본문·메서드 플래그(d F T X)가 끼면 쓰기로 본다.
-    else if (/^-[A-Za-z]+/.test(a) && !a.startsWith("--") && /[dFTX]/.test(a.slice(1).match(/^[A-Za-z]+/)![0])) return write(`curl ${a}`);
+    const v = args[i + 1];
+    if (CURL_BOOL.test(a)) continue;
+    if ((a === "-o" || a === "--output") && (v === "/dev/null" || v === "-")) i++;
+    else if ((a === "-w" || a === "--write-out") && v === "%{http_code}") i++;
+    else if ((a === "-m" || a === "--max-time" || a === "--connect-timeout") && v !== undefined && /^[0-9]+$/.test(v)) i++;
+    else if ((a === "-X" || a === "--request") && (v === "GET" || v === "HEAD")) i++;
+    else if ((a === "-H" || a === "--header") && v !== undefined && !v.startsWith("@") && !/[\u0000-\u001f]/.test(v)) i++;
+    else if (!a.startsWith("-") && /^https?:\/\/[^\s]+$/.test(a)) urls++;
+    else return write(`curl: 허용 목록 밖 인자 ${a}`);
   }
-  return read("curl GET");
+  return urls === 1 ? read("curl GET") : write(`curl: URL이 ${urls}개`);
 }
 
 export function classify(argv: string[]): Verdict {

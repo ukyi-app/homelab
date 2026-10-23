@@ -1,7 +1,10 @@
 // GitHub API PR 작성기(PLAN D3). 로컬 체크아웃 없이 blob·tree·commit을 API로 만들어 cli/<동사>-<app> 브랜치에 올리고 PR을 연다.
 // 작성자는 사람의 gh 로그인이고 병합하지 않는다(사람이 검토 후 병합, 설계 C.7·C.4.7).
-// 브랜치 갱신(lead 결정 2026-10-23): 커밋 부모는 항상 최신 main, ref는 force로 옮긴다. 브랜치 머리 커밋에
-// Homelab-CLI 트레일러가 없으면(사람이 push한 커밋) 덮지 않고 멈춘다.
+// 브랜치 갱신: 머리 커밋에 Homelab-CLI 트레일러가 없으면(사람이 push한 커밋) 멈춘다(lead 결정 2026-10-23).
+// 갱신은 force를 쓰지 않는다(#873 1라운드 P1). 새 커밋의 부모를 [최신 main, 확인한 브랜치 머리]로 두고 fast-forward로만 옮긴다.
+// 확인과 PATCH 사이에 사람이 push하면 새 커밋이 그 push의 자손이 아니라 GitHub가 422(fast forward 아님)로 거부한다.
+// 그래서 확인 시점과 갱신 시점의 경쟁이 GitHub 쪽에서 원자적으로 막힌다. PR diff는 main과의 merge-base가 최신 main이라
+// 이번 변경만 보인다.
 import type { Ctx, Observation, Step } from "./command";
 import { HOMELAB_REPO, ghGet, ghSend, ok } from "./github";
 import { GIT_SHA, fullMatch, repoPathProblem } from "./names";
@@ -46,7 +49,26 @@ function openPr(ctx: Ctx, branch: string): OpenPr | null {
   const list = Array.isArray(r.json) ? r.json : [];
   if (list.length > 1) throw new Error(`${branch}에 열린 PR이 ${list.length}개다. 하나만 남기고 닫는다`);
   if (list.length === 0) return null;
-  return { number: list[0].number, headSha: list[0].head?.sha };
+  const headSha = list[0].head?.sha;
+  if (typeof headSha !== "string" || !fullMatch(GIT_SHA, headSha)) throw new Error(`PR #${list[0].number} 머리 SHA를 읽지 못했다`);
+  return { number: list[0].number, headSha };
+}
+
+// 브랜치 머리 커밋이 CLI가 만든 것인지. 아니면 던진다(사람 커밋을 덮지도, 같다고 보고하지도 않는다).
+function requireCliHead(ctx: Ctx, branch: string, sha: string): void {
+  const msg = ok(ghGet(ctx, `repos/${HOMELAB_REPO}/git/commits/${sha}`), "브랜치 머리 커밋 읽기").json?.message ?? "";
+  if (!new RegExp(`^${TRAILER}: `, "m").test(msg)) {
+    throw new Error(`${branch} 머리 커밋에 ${TRAILER} 트레일러가 없다(사람이 push한 커밋을 덮지 않는다). 그 커밋을 옮기거나 브랜치를 지운 뒤 다시 실행한다`);
+  }
+}
+
+// PR이 main에 대해 바꾸는 파일 목록(merge-base 기준).
+function changedFiles(ctx: Ctx, base: string, head: string): Set<string> {
+  const r = ok(ghGet(ctx, `repos/${HOMELAB_REPO}/compare/${base}...${head}`), "PR 변경 목록");
+  const files = Array.isArray(r.json?.files) ? r.json.files : [];
+  // compare는 파일 300개까지 준다. CLI PR은 몇 개뿐이라 그보다 많으면 사람 변경이 섞인 것으로 본다.
+  if (files.length >= 300) throw new Error("PR 변경 파일이 300개 이상이다(CLI가 만든 PR이 아니다)");
+  return new Set(files.map((f: { filename: string }) => f.filename));
 }
 
 function validate(changes: FileChange[]): void {
@@ -78,38 +100,52 @@ export function prStep(spec: PrSpec): Step {
   if (!fullMatch(/cli\/[a-z0-9-]+/, branch)) throw new Error(`브랜치 이름이 아니다: ${JSON.stringify(branch)}`);
   const target = `PR ${HOMELAB_REPO}`;
 
+  const paths = new Set(spec.changes.map((c) => c.path));
+
   const read = async (ctx: Ctx): Promise<Observation> => {
     const base = mainSha(ctx);
     const onMain = spec.changes.every((c) => readRepoFile(ctx, c.path, base) === c.content);
     if (onMain) return { state: "same", action: "none", detail: "main과 같음 (PR 필요 없음)" };
     const pr = openPr(ctx, branch);
     if (!pr) return { state: "missing", action: "create", detail: `새로 (브랜치 ${branch})` };
+    // same이라고 하려면 머리가 CLI 커밋이고, PR 전체 변경이 이 명령의 파일뿐이며, 내용이 같아야 한다(Connector 리뷰).
+    requireCliHead(ctx, branch, pr.headSha);
+    const extra = [...changedFiles(ctx, base, pr.headSha)].filter((f) => !paths.has(f));
     const onBranch = spec.changes.every((c) => readRepoFile(ctx, c.path, pr.headSha) === c.content);
-    if (onBranch) return { state: "same", action: "none", detail: `PR #${pr.number} 열림, 내용 같음`, wait: `PR #${pr.number} 검토·병합 대기` };
-    return { state: "differs", action: "update", detail: `PR #${pr.number} 갱신 (브랜치 ${branch})` };
+    if (extra.length === 0 && onBranch) return { state: "same", action: "none", detail: `PR #${pr.number} 열림, 내용 같음`, wait: `PR #${pr.number} 검토·병합 대기` };
+    return { state: "differs", action: "update", detail: `PR #${pr.number} 갱신 (브랜치 ${branch}${extra.length ? `, 이 명령 밖 파일 ${extra.length}개를 뺀다` : ""})` };
   };
 
   const apply = async (ctx: Ctx): Promise<void> => {
     const base = mainSha(ctx);
     const baseTree = ok(ghGet(ctx, `repos/${HOMELAB_REPO}/git/commits/${base}`), "main 커밋 읽기").json?.tree?.sha;
     if (typeof baseTree !== "string") throw new Error("main tree를 읽지 못했다");
+
+    const ref = ghGet(ctx, `repos/${HOMELAB_REPO}/git/ref/heads/${branch}`);
+    let head: string | null = null;
+    if (ref.status !== 404) {
+      head = ok(ref, "브랜치 읽기").json?.object?.sha;
+      if (typeof head !== "string" || !fullMatch(GIT_SHA, head)) throw new Error(`${branch} 머리 SHA를 읽지 못했다`);
+      requireCliHead(ctx, branch, head);
+    }
+
     // tree 항목에 내용을 직접 넣으면 blob을 따로 만들지 않아도 된다. sha null은 삭제.
     const tree = spec.changes.map((c) => (c.content === null ? { path: c.path, mode: "100644", type: "blob", sha: null } : { path: c.path, mode: "100644", type: "blob", content: c.content }));
     const treeSha = ok(ghSend(ctx, "POST", `repos/${HOMELAB_REPO}/git/trees`, { base_tree: baseTree, tree }), "tree 만들기").json?.sha;
     const message = `${spec.title}\n\n${TRAILER}: ${spec.command}`;
-    const commit = ok(ghSend(ctx, "POST", `repos/${HOMELAB_REPO}/git/commits`, { message, tree: treeSha, parents: [base] }), "커밋 만들기").json?.sha;
+    const parents = head ? [base, head] : [base];
+    const commit = ok(ghSend(ctx, "POST", `repos/${HOMELAB_REPO}/git/commits`, { message, tree: treeSha, parents }), "커밋 만들기").json?.sha;
     if (typeof commit !== "string" || !fullMatch(GIT_SHA, commit)) throw new Error("커밋 SHA를 받지 못했다");
 
-    const ref = ghGet(ctx, `repos/${HOMELAB_REPO}/git/ref/heads/${branch}`);
-    if (ref.status === 404) {
-      ok(ghSend(ctx, "POST", `repos/${HOMELAB_REPO}/git/refs`, { ref: `refs/heads/${branch}`, sha: commit }), "브랜치 만들기");
+    if (head === null) {
+      // 그사이 누가 같은 브랜치를 만들었으면 422로 거부된다(덮지 않는다).
+      const created = ghSend(ctx, "POST", `repos/${HOMELAB_REPO}/git/refs`, { ref: `refs/heads/${branch}`, sha: commit });
+      if (created.status === 422) throw new Error(`${branch}가 그사이 생겼다. 덮지 않았다. 다시 실행해 상태를 읽는다`);
+      ok(created, "브랜치 만들기");
     } else {
-      const head = ok(ref, "브랜치 읽기").json?.object?.sha;
-      const headMsg = ok(ghGet(ctx, `repos/${HOMELAB_REPO}/git/commits/${head}`), "브랜치 머리 커밋 읽기").json?.message ?? "";
-      if (!new RegExp(`^${TRAILER}: `, "m").test(headMsg)) {
-        throw new Error(`${branch} 머리 커밋에 ${TRAILER} 트레일러가 없다(사람이 push한 커밋을 덮지 않는다). 그 커밋을 옮기거나 브랜치를 지운 뒤 다시 실행한다`);
-      }
-      ok(ghSend(ctx, "PATCH", `repos/${HOMELAB_REPO}/git/refs/heads/${branch}`, { sha: commit, force: true }), "브랜치 옮기기");
+      const moved = ghSend(ctx, "PATCH", `repos/${HOMELAB_REPO}/git/refs/heads/${branch}`, { sha: commit, force: false });
+      if (moved.status === 422) throw new Error(`${branch}가 확인 뒤 바뀌었다(사람 push?). 덮지 않았다. 다시 실행해 상태를 읽는다`);
+      ok(moved, "브랜치 옮기기");
     }
 
     const pr = openPr(ctx, branch);

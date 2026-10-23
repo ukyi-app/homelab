@@ -3,7 +3,7 @@
 // apply 순서: 전체 읽기 한 번(확인 단계가 막히면 아무것도 쓰기 전에 멈춤) → 단계마다 다시 읽기 → 차이만 apply 한 번 → 다시 읽어 확인.
 // apply가 타임아웃이면 재시도하지 않고 다시 읽는다(B.8 E7: 타임아웃 뒤 재시도는 두 번 실행이다).
 import type { Ctx, Observation, Plan } from "./command";
-import { ExecTimeout } from "./exec";
+import { ExecTimeout, runWithWrites } from "./exec";
 import type { Result, Status, StepReport } from "./result";
 import { allowGeneration } from "./secret";
 
@@ -50,6 +50,7 @@ export async function runEngine(ctx: Ctx, plan: Plan): Promise<Result> {
     try {
       const o = normalize(await s.read(ctx));
       reports[i] = { ...reports[i], state: o.state, action: o.action, detail: detailOf(o), result: ctx.mode === "apply" ? "not-run" : o.state === "same" ? "skipped" : "planned" };
+      if (o.warn) notes.push(`${s.target}: ${o.warn}`);
       if (!s.apply && o.state !== "same") {
         reports[i].result = "failed";
         blocked ??= { message: `${s.target}: ${o.detail}`, next: o.next ?? `원인을 고친 뒤 다시: ${planLine(ctx.line)}` };
@@ -88,9 +89,10 @@ export async function runEngine(ctx: Ctx, plan: Plan): Promise<Result> {
     let timedOut = false;
     try {
       // 비밀번호는 apply 안에서만 만든다. read()에서 만들면 plan이 부수효과를 갖는다.
+      // 쓰기 창도 이 await 동안만 열린다. read()·재조회는 apply 모드여도 쓰기가 막힌다(exec.ts 안전 계약).
       allowGeneration(true);
       try {
-        await s.apply(ctx, seen);
+        await runWithWrites(() => s.apply!(ctx, seen));
       } finally {
         allowGeneration(false);
       }

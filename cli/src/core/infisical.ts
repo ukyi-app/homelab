@@ -50,8 +50,9 @@ export const argvFor = {
   remove: (project: string, path: string, key: string) => ["infisical", "secrets", "delete", key, ...base(project, path), "--type", "shared"],
 };
 
-// 폴더의 키 → 값. 가져온(import) 키와 개인 덮어쓰기는 빼고 이 폴더의 shared 키만 본다.
-export function listFolder(ctx: Ctx, path: string): Map<string, Secret> {
+// 폴더 목록을 읽어 키 이름과, 원하면 키 하나의 값을 낸다. 가져온(import) 키와 개인 덮어쓰기는 빼고 이 폴더의 shared 키만 본다.
+// 다른 키의 값은 Secret으로도 남기지 않고 버린다(필요 없는 값을 들고 다니지 않는다).
+function readFolder(ctx: Ctx, path: string, want?: string): { keys: Set<string>; value: Secret | null } {
   checkFolder(path);
   const r = ctx.exec(argvFor.list(projectId(ctx), path), { secretStdout: true });
   if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${path} 목록: 시간 초과`);
@@ -63,22 +64,28 @@ export function listFolder(ctx: Ctx, path: string): Map<string, Secret> {
     throw new Error(`Infisical ${path} 목록: JSON이 아니다`);
   }
   if (!Array.isArray(parsed)) throw new Error(`Infisical ${path} 목록: 배열이 아니다`);
-  const out = new Map<string, Secret>();
+  const keys = new Set<string>();
+  let value: Secret | null = null;
   for (const item of parsed) {
     if (typeof item?.secretKey !== "string" || typeof item?.secretValue !== "string") throw new Error(`Infisical ${path} 목록: 모양이 다르다`);
-    out.set(item.secretKey, new Secret(item.secretValue));
+    keys.add(item.secretKey);
+    if (item.secretKey === want) value = new Secret(item.secretValue);
   }
-  return out;
+  return { keys, value };
+}
+
+export function listKeys(ctx: Ctx, path: string): Set<string> {
+  return readFolder(ctx, path).keys;
 }
 
 export function has(ctx: Ctx, path: string, key: string): boolean {
   checkKey(key);
-  return listFolder(ctx, path).has(key);
+  return readFolder(ctx, path).keys.has(key);
 }
 
 export function getValue(ctx: Ctx, path: string, key: string): Secret | null {
   checkKey(key);
-  return listFolder(ctx, path).get(key) ?? null;
+  return readFolder(ctx, path, key).value;
 }
 
 // .env 한 줄로 왕복하지 않는 값은 받지 않는다(위 실측). 틀리면 이유, 맞으면 null.

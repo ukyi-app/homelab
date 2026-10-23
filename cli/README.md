@@ -26,7 +26,7 @@ homelab doctor                    # 도구·로그인·kubectl context
 - 중복·모르는 플래그는 거부한다. 값에 줄바꿈·제어 문자가 있으면 거부하고 값 전체를 형식과 맞춘다.
 - 재실행 안전: 단계마다 실행 직전에 현재 상태를 읽고 된 단계는 건너뛴다. 타임아웃은 재시도하지 않고 다시 읽는다.
 - `--json`은 `schema: homelab-cli/v1` 문서 하나를 stdout에 낸다. 진행 줄은 stderr.
-- PR은 GitHub API로 `cli/<명령>-<app>` 브랜치에 만든다(로컬 체크아웃 없음). 커밋 부모는 최신 main이고 브랜치는 force로 옮긴다. 브랜치 머리 커밋에 `Homelab-CLI:` 트레일러가 없으면(사람 커밋) 멈춘다. 병합은 사람이 한다.
+- PR은 GitHub API로 `cli/<명령>-<app>` 브랜치에 만든다(로컬 체크아웃 없음). 브랜치 머리 커밋에 `Homelab-CLI:` 트레일러가 없으면(사람 커밋) 멈춘다. 갱신은 force 없이 부모 [최신 main, 확인한 머리]의 fast-forward라, 확인 뒤 사람 push가 끼면 GitHub가 거부하고 CLI는 덮지 않고 멈춘다. 병합은 사람이 한다.
 
 ## 명령 더하기
 
@@ -34,7 +34,10 @@ homelab doctor                    # 도구·로그인·kubectl context
 
 - **모양:** `defineCommand({ path, summary, kind, args, flags, run })`. `kind`는 `change`(plan/`--apply`), `read`, `delegate`(`github *`만).
 - **바꾸는 일은 `ctx.engine({ command, app, steps })`의 `Step.apply()` 안에서만.** `read()`와 단계 목록을 만드는 코드는 읽기만 한다. `read()`는 이미 된 일에 `same`을 낸다. `apply()`에 재시도 루프를 두지 않는다.
-- **외부 호출은 `ctx.exec` 또는 `src/core/` 어댑터로만.** `fetch`·`Bun.spawn`·`Bun.$`·`child_process`·`console`·`process.stdout`·파일 쓰기는 정적 시험이 막는다. plan·read 모드의 쓰기 호출은 exec가 실행하지 않는다(`src/core/writes.ts`의 읽기 허용 목록 밖은 모두 쓰기).
-- **시크릿:** 값은 `Secret`으로만 들고 stdin으로만 넘긴다(argv·파일·출력·PR 내용 금지). 같은지는 `sha256Prefix()`. 비밀번호는 `generatePassword()`를 `apply()` 안에서만. Infisical 쓰기는 `infisical.setValue()`만.
+- **외부 호출은 `ctx.exec` 또는 `src/core/` 어댑터로만.** `fetch`·`Bun.spawn`·`Bun.$`·`child_process`·`console`·`process.stdout`·쓰기 가능한 `node:fs` API·동적 import는 정적 시험이 막는다. 쓰기로 판정된 호출(`src/core/writes.ts`의 읽기 허용 목록 밖은 모두 쓰기)은 `--apply`에서 엔진이 `Step.apply()`를 도는 동안만 실행된다. `read()`와 단계 준비는 `--apply`여도 쓰지 못하고, `ctx.exec`를 붙잡아 두었다가 밖에서 써도 막힌다.
+- **직접 stdio(`inherit`, `stdout-to-stderr`)는 `github *`만.** 나머지 명령의 자식 출력은 모두 출력 계층을 거친다.
+- **값을 내는 조회는 전용 어댑터로만:** kubectl Secret은 `secretHash`·`secretExists`, Infisical은 `has`·`listKeys`·`getValue`. 범용 `getJson`·`listJson`은 Secret을 거부하고, exec는 값을 내는 호출(Secret 조회, `infisical secrets`, 토큰)을 `secretStdout` 없이 실행하지 않으며 그 stderr 원문은 버린다.
+- **curl은 `-q`로 시작하는 허용 꼴만**(`.curlrc`·`-K`가 몰래 POST를 만든다). 허용 옵션은 `writes.ts`의 curl 주석.
+- **시크릿:** 값은 `Secret`으로만 들고 stdin으로만 넘긴다(argv·파일·출력·PR 내용 금지). 길이와 관계없이 추적한다(6자 미만은 앞뒤가 영숫자가 아닐 때 맞춘다). 같은지는 `sha256Prefix()`. 비밀번호는 `generatePassword()`를 `apply()` 안에서만. Infisical 쓰기는 `infisical.setValue()`만.
 - **출력:** Result의 `target`·`detail`·`notes`·`next`로만 말한다. 실패에는 `error.next`(다음 행동)가 있다. `exitCode`는 `github *`만.
 - **시험:** `test/commands/<이름>.test.ts`에 `expectPlanReadOnly(...)`를 부르는 plan 시험(정적 시험이 확인), 다 된 상태에서 apply → 모든 `state: same`, 중간 쓰기 실패 → exit 1과 뒤 단계 `not-run` → 재실행으로 이어짐, 사람용·`--json` 출력에 가짜 시크릿 없음. 장치는 `test/harness.ts`(`runCli`·`testCtx`·규칙 도우미)이고 모양은 `test/core/pr.test.ts`·`test/core/engine.test.ts`를 본다. 스텁 응답 `responses`는 호출 순서대로 쓰이고, apply는 단계마다 전체 읽기·직전 읽기·(실행)·재조회 순으로 읽는다.

@@ -16,12 +16,14 @@ export type Observation = {
   wait?: string;
   // 이 단계가 막혔을 때 사람이 할 일.
   next?: string;
+  // same이지만 알려 둘 것. 실패로 세지 않고 "주의:" 줄로 보인다(전체 읽기 한 번만).
+  warn?: string;
 };
 
 export type Step = {
   id: string;
   target: string;
-  // 읽기만 한다. 쓰기 부명령을 부르면 exec가 막는다(plan·read 모드).
+  // 읽기만 한다. 쓰기 부명령을 부르면 exec가 막는다(apply 모드에서도).
   read(ctx: Ctx): Promise<Observation>;
   // 없으면 확인 단계: same이 아니면 명령이 실패한다(apply에서는 아무것도 쓰기 전에).
   apply?(ctx: Ctx, seen: Observation): Promise<void>;
@@ -42,6 +44,7 @@ export type Ctx = {
   json: boolean;
   // 사람이 친 명령줄(--json 뺌). 다음 행동 문구에 쓴다.
   line: string;
+  // 쓰기는 엔진이 Step.apply()를 도는 동안만 실행된다. 이 exec를 붙잡아 두었다가 밖에서 써도 막힌다.
   exec: Exec;
   env: Record<string, string | undefined>;
   isTTY: boolean;

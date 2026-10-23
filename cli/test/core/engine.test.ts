@@ -1,9 +1,9 @@
 // 단계 엔진 시험. 02~04의 재실행·실패 주입 시험은 같은 모양(상태를 가진 가짜 단계 또는 스텁 responses)으로 쓴다.
 import { describe, expect, test } from "bun:test";
 import type { Ctx, Observation, Step } from "../../src/core/command";
-import { ExecTimeout } from "../../src/core/exec";
+import { ExecTimeout, PLAN_WRITE_BLOCKED } from "../../src/core/exec";
 import type { Mode } from "../../src/core/result";
-import { testCtx } from "../harness";
+import { REST, rule, testCtx } from "../harness";
 
 // 바깥 상태 하나를 흉내 내는 단계. applyCount로 두 번 실행을 잡는다.
 function fakeStep(id: string, world: Record<string, boolean>, opts: { failApply?: boolean; timeout?: "lands" | "lost"; wait?: string; check?: boolean } = {}): Step & { applyCount: number } {
@@ -118,6 +118,47 @@ describe("엔진", () => {
     const r = await ctxFor("plan").engine({ command: "t", steps: [broken, fakeStep("b", world)] });
     expect(r.status).toBe("failed");
     expect(r.steps[1].result).toBe("planned");
+  });
+
+  test("apply 모드에서 read()가 쓰려 하면 막힌다: 전체 읽기·직전 읽기·재조회 모두, 외부 호출 0건(P1)", async () => {
+    for (const phase of [1, 2, 3]) {
+      const { ctx, calls } = testCtx("apply", [rule(["kubectl", REST])]);
+      let reads = 0;
+      let applied = 0;
+      const sneaky: Step = {
+        id: "sneaky",
+        target: "몰래 쓰는 단계",
+        async read(c) {
+          reads++;
+          if (reads === phase) c.exec(["kubectl", "delete", "pod", "smoke"]);
+          return applied ? { state: "same", action: "none", detail: "있음" } : { state: "missing", action: "create", detail: "없음" };
+        },
+        async apply() {
+          applied++;
+        },
+      };
+      const r = await ctx.engine({ command: "t", steps: [sneaky] });
+      expect([phase, r.status]).toEqual([phase, "failed"]);
+      expect(JSON.stringify(r)).toContain(PLAN_WRITE_BLOCKED);
+      expect(calls().calls).toEqual([]);
+    }
+  });
+
+  test("확인 단계가 실패하는 apply에서 앞 단계 read()의 쓰기 시도가 바깥에 닿지 않는다(리뷰 재현)", async () => {
+    const { ctx, calls } = testCtx("apply", [rule(["kubectl", REST])]);
+    const world = { gate: false };
+    const writer: Step = { id: "w", target: "w", read: async (c) => (c.exec(["kubectl", "delete", "pod", "smoke"]), { state: "missing", action: "create", detail: "x" }), apply: async () => {} };
+    const r = await ctx.engine({ command: "t", steps: [writer, fakeStep("gate", world, { check: true })] });
+    expect(r.status).toBe("failed");
+    expect(calls().calls).toEqual([]);
+  });
+
+  test("Step.apply() 안에서는 쓰기가 실행된다", async () => {
+    const { ctx, calls } = testCtx("apply", [rule(["kubectl", REST])]);
+    let done = false;
+    const step: Step = { id: "k", target: "k", read: async () => (done ? { state: "same", action: "none", detail: "" } : { state: "missing", action: "create", detail: "" }), apply: async (c) => (c.exec(["kubectl", "annotate", "x", "y", "a=b"]), (done = true), undefined) };
+    expect((await ctx.engine({ command: "t", steps: [step] })).status).toBe("done");
+    expect(calls().writes.length).toBe(1);
   });
 
   test("단계 id가 겹치면 거부", async () => {

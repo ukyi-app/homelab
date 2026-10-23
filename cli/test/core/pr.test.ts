@@ -6,17 +6,28 @@ import { FAKE_SHA, expectPlanReadOnly, ghGet, ghResponse, ghSend, testCtx, type 
 
 const R = `repos/${HOMELAB_REPO}`;
 const BRANCH = "cli/db-add-smoke";
-const PR_HEAD = "b".repeat(40);
+const HEAD = "b".repeat(40);
 const NEW_COMMIT = "c".repeat(40);
+const PATH = "data/smoke/values.yaml";
 const file = (content: string) => ({ type: "file", encoding: "base64", content: Buffer.from(content).toString("base64") });
 const contents = (path: string, ref: string) => `${R}/contents/${path}?ref=${ref}`;
 const pulls = `${R}/pulls?head=${encodeURIComponent(`ukyi-app:${BRANCH}`)}&state=open`;
+const CLI_MSG = "feat(smoke): x\n\nHomelab-CLI: db add";
 
-const spec = { command: "db add", app: "smoke", title: "feat(smoke): PostgreSQL 연결", body: "homelab db add smoke --apply", changes: [{ path: "data/smoke/values.yaml", content: "postgres:\n  enabled: true\n" }] };
+const spec = { command: "db add", app: "smoke", title: "feat(smoke): PostgreSQL 연결", body: "homelab db add smoke --apply", changes: [{ path: PATH, content: "postgres:\n  enabled: true\n" }] };
 
-function mainAt(sha = FAKE_SHA): Rule {
-  return ghGet(`${R}/git/ref/heads/main`, 200, { object: { sha } });
-}
+const mainAt = (sha = FAKE_SHA): Rule => ghGet(`${R}/git/ref/heads/main`, 200, { object: { sha } });
+const notOnMain = (): Rule => ghGet(contents(PATH, FAKE_SHA), 404, {});
+const headMsg = (sha: string, message: string): Rule => ghGet(`${R}/git/commits/${sha}`, 200, { message, tree: { sha: "d".repeat(40) } });
+const compare = (head: string, files: string[]): Rule => ghGet(`${R}/compare/${FAKE_SHA}...${head}`, 200, { files: files.map((filename) => ({ filename })) });
+const openPr = (head: string) => ghResponse(200, [{ number: 12, head: { sha: head } }]);
+
+// apply에서 공통으로 쓰는 쓰기 규칙.
+const writes = (): Rule[] => [
+  headMsg(FAKE_SHA, "main"),
+  ghSend("POST", `${R}/git/trees`, 201, { sha: "e".repeat(40) }),
+  ghSend("POST", `${R}/git/commits`, 201, { sha: NEW_COMMIT }),
+];
 
 describe("PR 작성기", () => {
   test("브랜치 이름은 cli/<동사>-<app>", () => {
@@ -25,98 +36,131 @@ describe("PR 작성기", () => {
   });
 
   test("main과 같으면 same(PR 필요 없음)", async () => {
-    const { ctx, calls } = testCtx("plan", [mainAt(), ghGet(contents("data/smoke/values.yaml", FAKE_SHA), 200, file(spec.changes[0].content))]);
-    const o = await prStep(spec).read(ctx);
-    expect(o.state).toBe("same");
+    const { ctx, calls } = testCtx("plan", [mainAt(), ghGet(contents(PATH, FAKE_SHA), 200, file(spec.changes[0].content))]);
+    expect((await prStep(spec).read(ctx)).state).toBe("same");
     expectPlanReadOnly(calls());
   });
 
   test("main과 다르고 열린 PR이 없으면 missing/create", async () => {
-    const { ctx, calls } = testCtx("plan", [mainAt(), ghGet(contents("data/smoke/values.yaml", FAKE_SHA), 404, { message: "Not Found" }), ghGet(pulls, 200, [])]);
+    const { ctx, calls } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, 200, [])]);
     const o = await prStep(spec).read(ctx);
     expect([o.state, o.action]).toEqual(["missing", "create"]);
     expectPlanReadOnly(calls());
   });
 
-  test("열린 PR 내용이 같으면 same + 병합 대기, 다르면 differs/update", async () => {
-    const base = [mainAt(), ghGet(contents("data/smoke/values.yaml", FAKE_SHA), 404, {}), ghGet(pulls, 200, [{ number: 12, head: { sha: PR_HEAD } }])];
-    const same = testCtx("plan", [...base, ghGet(contents("data/smoke/values.yaml", PR_HEAD), 200, file(spec.changes[0].content))]);
-    const o1 = await prStep(spec).read(same.ctx);
-    expect([o1.state, o1.wait]).toEqual(["same", "PR #12 검토·병합 대기"]);
-    const diff = testCtx("plan", [...base, ghGet(contents("data/smoke/values.yaml", PR_HEAD), 200, file("old\n"))]);
-    const o2 = await prStep(spec).read(diff.ctx);
-    expect([o2.state, o2.action]).toEqual(["differs", "update"]);
+  test("열린 PR: CLI 머리 + 이 명령 파일만 + 내용 같음이면 same + 병합 대기", async () => {
+    const { ctx, calls } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, CLI_MSG), compare(HEAD, [PATH]), ghGet(contents(PATH, HEAD), 200, file(spec.changes[0].content))]);
+    const o = await prStep(spec).read(ctx);
+    expect([o.state, o.wait]).toEqual(["same", "PR #12 검토·병합 대기"]);
+    expectPlanReadOnly(calls());
   });
 
-  test("apply 새로: tree(내용 직접) → commit(부모 main, 트레일러) → ref 생성 → PR 생성. 엔진 결과는 waiting(3)", async () => {
+  test("열린 PR에 이 명령 밖 파일이 있으면 내용이 같아도 differs(Connector 리뷰)", async () => {
+    const { ctx } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, CLI_MSG), compare(HEAD, [PATH, "apps/smoke/values.yaml"]), ghGet(contents(PATH, HEAD), 200, file(spec.changes[0].content))]);
+    const o = await prStep(spec).read(ctx);
+    expect([o.state, o.action]).toEqual(["differs", "update"]);
+    expect(o.detail).toContain("이 명령 밖 파일 1개");
+  });
+
+  test("열린 PR 머리가 사람 커밋이면 내용이 같아도 plan이 실패한다(같다고 보고하지 않는다)", async () => {
+    const { ctx, calls } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, "사람이 고친 커밋"), compare(HEAD, [PATH]), ghGet(contents(PATH, HEAD), 200, file(spec.changes[0].content))]);
+    const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
+    expect(r.status).toBe("failed");
+    expect(r.error?.message).toContain("트레일러");
+    expectPlanReadOnly(calls());
+  });
+
+  test("apply 새로: ref 없음 → tree(내용 직접) → commit(부모 main 하나, 트레일러) → ref 생성 → PR 생성 → waiting", async () => {
     const rules: Rule[] = [
       mainAt(),
-      // 읽기(전체·직전) 두 번은 없음, 실행 뒤 재조회는 PR 브랜치에 있음.
-      ghGet(contents("data/smoke/values.yaml", FAKE_SHA), 404, {}),
+      notOnMain(),
+      // 전체 읽기·직전 읽기·apply 안 PR 찾기는 없음, 재조회는 PR 7(머리 NEW_COMMIT).
       ghGet(pulls, [ghResponse(200, []), ghResponse(200, []), ghResponse(200, []), ghResponse(200, [{ number: 7, head: { sha: NEW_COMMIT } }])]),
-      ghGet(contents("data/smoke/values.yaml", NEW_COMMIT), 200, file(spec.changes[0].content)),
-      ghGet(`${R}/git/commits/${FAKE_SHA}`, 200, { tree: { sha: "d".repeat(40) } }),
-      ghSend("POST", `${R}/git/trees`, 201, { sha: "e".repeat(40) }),
-      ghSend("POST", `${R}/git/commits`, 201, { sha: NEW_COMMIT }),
+      headMsg(NEW_COMMIT, "feat(smoke): PostgreSQL 연결\n\nHomelab-CLI: db add"),
+      compare(NEW_COMMIT, [PATH]),
+      ghGet(contents(PATH, NEW_COMMIT), 200, file(spec.changes[0].content)),
       ghGet(`${R}/git/ref/heads/${BRANCH}`, 404, {}),
+      ...writes(),
       ghSend("POST", `${R}/git/refs`, 201, {}),
       ghSend("POST", `${R}/pulls`, 201, { number: 7 }),
     ];
     const { ctx, calls } = testCtx("apply", rules);
     const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
-    expect(r.status).toBe("waiting");
-    expect(r.steps[0].result).toBe("waiting");
+    expect([r.status, r.steps[0].result]).toEqual(["waiting", "waiting"]);
     const c = calls();
     expect(c.unmatched).toEqual([]);
-    const sent = c.calls.filter((x) => x.stdin !== undefined).map((x) => [x.argv[4], x.argv[5], JSON.parse(x.stdin!)]);
-    expect(sent[0][2]).toEqual({ base_tree: "d".repeat(40), tree: [{ path: "data/smoke/values.yaml", mode: "100644", type: "blob", content: spec.changes[0].content }] });
-    expect(sent[1][2].parents).toEqual([FAKE_SHA]);
-    expect(sent[1][2].message).toEndWith("\n\nHomelab-CLI: db add");
-    expect(sent[2][2]).toEqual({ ref: `refs/heads/${BRANCH}`, sha: NEW_COMMIT });
-    expect(sent[3][2]).toMatchObject({ head: BRANCH, base: "main" });
+    const sent = c.calls.filter((x) => x.stdin !== undefined).map((x) => JSON.parse(x.stdin!));
+    expect(sent[0]).toEqual({ base_tree: "d".repeat(40), tree: [{ path: PATH, mode: "100644", type: "blob", content: spec.changes[0].content }] });
+    expect(sent[1].parents).toEqual([FAKE_SHA]);
+    expect(sent[1].message).toEndWith("\n\nHomelab-CLI: db add");
+    expect(sent[2]).toEqual({ ref: `refs/heads/${BRANCH}`, sha: NEW_COMMIT });
+    expect(sent[3]).toMatchObject({ head: BRANCH, base: "main" });
   });
 
-  test("브랜치 머리가 사람 커밋이면(트레일러 없음) 덮지 않고 실패", async () => {
+  test("갱신은 force 없이 부모 [main, 확인한 머리]로 fast-forward, 열린 PR을 갱신", async () => {
     const rules: Rule[] = [
       mainAt(),
-      ghGet(contents("data/smoke/values.yaml", FAKE_SHA), 404, {}),
-      ghGet(pulls, 200, []),
-      ghGet(`${R}/git/commits/${FAKE_SHA}`, 200, { tree: { sha: "d".repeat(40) } }),
-      ghSend("POST", `${R}/git/trees`, 201, { sha: "e".repeat(40) }),
-      ghSend("POST", `${R}/git/commits`, 201, { sha: NEW_COMMIT }),
-      ghGet(`${R}/git/ref/heads/${BRANCH}`, 200, { object: { sha: PR_HEAD } }),
-      ghGet(`${R}/git/commits/${PR_HEAD}`, 200, { message: "사람이 고친 커밋" }),
-    ];
-    const { ctx, calls } = testCtx("apply", rules);
-    const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
-    expect(r.status).toBe("failed");
-    expect(r.error?.message).toContain("트레일러");
-    expect(calls().calls.some((c) => c.argv.includes("PATCH"))).toBe(false);
-  });
-
-  test("CLI 커밋이면 최신 main 부모로 force 이동하고 열린 PR을 갱신", async () => {
-    const rules: Rule[] = [
-      mainAt(),
-      ghGet(contents("data/smoke/values.yaml", FAKE_SHA), 404, {}),
-      ghGet(pulls, [ghResponse(200, [{ number: 12, head: { sha: PR_HEAD } }]), ghResponse(200, [{ number: 12, head: { sha: PR_HEAD } }]), ghResponse(200, [{ number: 12, head: { sha: PR_HEAD } }]), ghResponse(200, [{ number: 12, head: { sha: NEW_COMMIT } }])]),
-      ghGet(contents("data/smoke/values.yaml", PR_HEAD), 200, file("old\n")),
-      ghGet(contents("data/smoke/values.yaml", NEW_COMMIT), 200, file(spec.changes[0].content)),
-      ghGet(`${R}/git/commits/${FAKE_SHA}`, 200, { tree: { sha: "d".repeat(40) } }),
-      ghSend("POST", `${R}/git/trees`, 201, { sha: "e".repeat(40) }),
-      ghSend("POST", `${R}/git/commits`, 201, { sha: NEW_COMMIT }),
-      ghGet(`${R}/git/ref/heads/${BRANCH}`, 200, { object: { sha: PR_HEAD } }),
-      ghGet(`${R}/git/commits/${PR_HEAD}`, 200, { message: "feat(smoke): x\n\nHomelab-CLI: db add" }),
+      notOnMain(),
+      ghGet(pulls, [openPr(HEAD), openPr(HEAD), openPr(HEAD), openPr(NEW_COMMIT)]),
+      headMsg(HEAD, CLI_MSG),
+      headMsg(NEW_COMMIT, CLI_MSG),
+      compare(HEAD, [PATH]),
+      compare(NEW_COMMIT, [PATH]),
+      ghGet(contents(PATH, HEAD), 200, file("old\n")),
+      ghGet(contents(PATH, NEW_COMMIT), 200, file(spec.changes[0].content)),
+      ghGet(`${R}/git/ref/heads/${BRANCH}`, 200, { object: { sha: HEAD } }),
+      ...writes(),
       ghSend("PATCH", `${R}/git/refs/heads/${BRANCH}`, 200, {}),
       ghSend("PATCH", `${R}/pulls/12`, 200, {}),
     ];
     const { ctx, calls } = testCtx("apply", rules);
     const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
     expect(r.status).toBe("waiting");
-    const patch = calls().calls.find((c) => c.argv.includes(`${R}/git/refs/heads/${BRANCH}`) && c.argv.includes("PATCH"));
-    expect(JSON.parse(patch!.stdin!)).toEqual({ sha: NEW_COMMIT, force: true });
+    const bodies = calls().calls.filter((x) => x.stdin !== undefined).map((x) => [x.argv[5], JSON.parse(x.stdin!)] as const);
+    expect(bodies.find(([p]) => p === `${R}/git/commits`)![1].parents).toEqual([FAKE_SHA, HEAD]);
+    expect(bodies.find(([p]) => p === `${R}/git/refs/heads/${BRANCH}`)![1]).toEqual({ sha: NEW_COMMIT, force: false });
   });
 
-  test("변경 검증: 경로·중복·시크릿", () => {
+  test("확인 뒤 사람이 push하면(GitHub 422 fast forward 아님) 덮지 않고 실패한다(P1 경쟁 주입)", async () => {
+    const rules: Rule[] = [
+      mainAt(),
+      notOnMain(),
+      ghGet(pulls, [openPr(HEAD)]),
+      headMsg(HEAD, CLI_MSG),
+      compare(HEAD, [PATH]),
+      ghGet(contents(PATH, HEAD), 200, file("old\n")),
+      ghGet(`${R}/git/ref/heads/${BRANCH}`, 200, { object: { sha: HEAD } }),
+      ...writes(),
+      // 확인과 PATCH 사이에 머리가 H로 바뀐 상황: 새 커밋은 H의 자손이 아니라 GitHub가 거부한다.
+      ghSend("PATCH", `${R}/git/refs/heads/${BRANCH}`, 422, { message: "Update is not a fast forward" }),
+    ];
+    const { ctx, calls } = testCtx("apply", rules);
+    const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
+    expect(r.status).toBe("failed");
+    expect(r.error?.message).toContain("덮지 않았다");
+    const c = calls().calls;
+    expect(c.some((x) => x.argv.includes(`${R}/pulls/12`))).toBe(false);
+    for (const x of c.filter((y) => y.stdin !== undefined)) expect(JSON.parse(x.stdin!).force).not.toBe(true);
+  });
+
+  test("브랜치 머리가 사람 커밋이면(트레일러 없음) 커밋을 만들기 전에 실패", async () => {
+    const rules: Rule[] = [mainAt(), notOnMain(), ghGet(pulls, 200, []), ghGet(`${R}/git/ref/heads/${BRANCH}`, 200, { object: { sha: HEAD } }), headMsg(FAKE_SHA, "main"), headMsg(HEAD, "사람이 고친 커밋")];
+    const { ctx, calls } = testCtx("apply", rules);
+    const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
+    expect(r.status).toBe("failed");
+    expect(r.error?.message).toContain("트레일러");
+    expect(calls().writes).toEqual([]);
+  });
+
+  test("만들려는 브랜치가 그사이 생기면(422) 덮지 않고 실패", async () => {
+    const rules: Rule[] = [mainAt(), notOnMain(), ghGet(pulls, 200, []), ghGet(`${R}/git/ref/heads/${BRANCH}`, 404, {}), ...writes(), ghSend("POST", `${R}/git/refs`, 422, { message: "Reference already exists" })];
+    const { ctx } = testCtx("apply", rules);
+    const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
+    expect(r.status).toBe("failed");
+    expect(r.error?.message).toContain("덮지 않았다");
+  });
+
+  test("변경 검증: 경로·중복·빈 목록", () => {
     expect(() => prStep({ ...spec, changes: [{ path: "../x", content: "" }] })).toThrow();
     expect(() => prStep({ ...spec, changes: [{ path: "a\nb", content: "" }] })).toThrow();
     expect(() => prStep({ ...spec, changes: [spec.changes[0], spec.changes[0]] })).toThrow();

@@ -2,11 +2,12 @@
 // 문자열로 바뀌는 모든 길(toString, 템플릿 문자열, JSON.stringify, console의 inspect)은 값 대신 [secret]을 낸다.
 // 그래도 원문이 다른 문자열에 섞일 수 있으므로(예: 실패한 자식의 stderr) 원문을 추적해 출력 계층이 마지막에 한 번 더 막는다.
 const tracked = new Set<string>();
+// 짧은 값(6자 미만)은 흔한 글자와 겹치므로 앞뒤가 영숫자가 아닐 때만 맞춘다. 그래도 길이 때문에 빼지는 않는다
+// (#873 1라운드 P1: 짧은 앱 시크릿이 오류 출력으로 샜다). 겹치면 출력이 막힌다(새기보다 막는 쪽).
+const shortTracked = new Set<string>();
+const SHORT = 6;
 
-// 짧은 값은 흔한 낱말과 겹쳐 출력 전체를 막는다. 운영 시크릿은 32자 이상이다(rotate.md 3c).
-const MIN_TRACKED = 6;
-
-// generatePassword는 apply 안에서만 부른다. main이 모드를 정해 plan·read에서 부르면 실패하게 한다.
+// generatePassword는 엔진이 Step.apply()를 도는 동안만 허용한다(plan·read·재조회에서 부르면 실패).
 let generationAllowed = false;
 
 export class Secret {
@@ -14,12 +15,11 @@ export class Secret {
 
   constructor(raw: string) {
     this.#raw = raw;
-    if (raw.length >= MIN_TRACKED) {
-      tracked.add(raw);
-      // JSON 출력에서는 "·\ 등이 이스케이프된 꼴로, kubectl 오류 출력에서는 Secret data의 base64 꼴로 나타난다.
-      tracked.add(JSON.stringify(raw).slice(1, -1));
-      tracked.add(Buffer.from(raw).toString("base64"));
-    }
+    // 공백뿐인 값을 짧은 값으로 추적하면 줄바꿈이 있는 모든 출력이 막힌다. 그런 시크릿은 Infisical 쓰기도 거부한다.
+    if (raw.trim().length === 0) return;
+    const forms = [raw, JSON.stringify(raw).slice(1, -1), Buffer.from(raw).toString("base64")];
+    // JSON 출력에서는 "·\ 등이 이스케이프된 꼴로, kubectl 출력에서는 Secret data의 base64 꼴로 나타난다.
+    for (const f of forms) (f.length >= SHORT ? tracked : shortTracked).add(f);
   }
 
   // core 안에서만 쓴다(stdin 넘김, 해시). commands/에서 쓰면 정적 시험이 막는다.
@@ -60,6 +60,10 @@ export function isSecret(x: unknown): x is Secret {
 // 추적 중인 원문이 text에 들어 있는지. 출력과 argv 검사에 쓴다.
 export function containsTracked(text: string): boolean {
   for (const raw of tracked) if (text.includes(raw)) return true;
+  for (const raw of shortTracked) {
+    const esc = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^A-Za-z0-9])${esc}([^A-Za-z0-9]|$)`).test(text)) return true;
+  }
   return false;
 }
 

@@ -51,10 +51,16 @@ describe("doctor", () => {
     expect(r.json.error.next).toBe("mise install");
   });
 
-  test("프로젝트 ID가 없으면 실패하고 묻지 않는다", async () => {
+  test("프로젝트 ID가 없으면 경고(exit 0, 주의 줄), 형식이 틀리면 실패", async () => {
     const r = await runCli(["doctor", "--json"], healthy(), { project: false });
-    expect(r.code).toBe(1);
-    expect(r.json.steps.find((s: { id: string }) => s.id === "infisical-project").state).toBe("missing");
+    expect(r.code).toBe(0);
+    expectPlanReadOnly(r);
+    expect(r.json.status).toBe("same");
+    expect(r.json.notes.join(" ")).toContain("HOMELAB_INFISICAL_PROJECT_ID");
+    const h = await runCli(["doctor"], healthy(), { project: false });
+    expect(h.stdout).toContain("주의: 환경변수 HOMELAB_INFISICAL_PROJECT_ID");
+    const bad = await runCli(["doctor", "--json"], healthy(), { env: { HOMELAB_INFISICAL_PROJECT_ID: "nope" } });
+    expect(bad.code).toBe(1);
   });
 
   test("--apply는 읽기 명령에 사용법 오류(64)", async () => {

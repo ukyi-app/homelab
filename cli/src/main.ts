@@ -3,7 +3,7 @@ import { readSync } from "node:fs";
 import { APPLY_FLAG, GLOBAL_FLAGS, parseInput, usageLine } from "./core/args";
 import type { CommandSpec, Ctx } from "./core/command";
 import { runEngine } from "./core/engine";
-import { makeExec } from "./core/exec";
+import { makeExec, runWithWrites } from "./core/exec";
 import { OutputBlocked, render, writeStderr, writeStdout } from "./core/output";
 import { CliError, EXIT, UsageError, type Mode, type Result } from "./core/result";
 import { versionLine } from "./core/version";
@@ -118,7 +118,8 @@ async function main(argv: string[]): Promise<number> {
 
   let result: Result;
   try {
-    result = await cmd.run(ctx, input);
+    // github apply만 엔진 밖에서 쓴다(래퍼 하나, exec가 래퍼 밖 쓰기를 막는다).
+    result = cmd.kind === "delegate" && mode === "apply" ? await runWithWrites(() => cmd.run(ctx, input)) : await cmd.run(ctx, input);
   } catch (e) {
     if (e instanceof UsageError) {
       if (json) emit(usageResult(command, e.message, usage), true);

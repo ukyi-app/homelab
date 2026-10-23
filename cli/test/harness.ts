@@ -166,23 +166,29 @@ export async function runCli(args: string[], rules: Rule[], opts: RunOpts = {}):
   return { code, stdout, stderr, json, ...summarize(calls) };
 }
 
-// 같은 프로세스에서 단계·어댑터를 시험할 Ctx. calls()가 그때까지의 스텁 원장을 돌려준다.
-export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: Ctx; calls: () => ReturnType<typeof summarize>; progress: string[] } {
+// 스텁 폴더와 그 환경만. 하위 프로세스를 직접 띄우는 시험(예: stdin 전달)에 쓴다.
+export function stubSandbox(rules: Rule[], opts: RunOpts = {}): { env: Record<string, string>; bin: string; calls: () => ReturnType<typeof summarize> } {
   const s = stubDir(rules, opts.tools);
-  const env = baseEnv(s, opts);
+  return { env: baseEnv(s, opts), bin: s.bin, calls: () => summarize(readLedger(s.dir)) };
+}
+
+// 같은 프로세스에서 단계·어댑터를 시험할 Ctx. calls()가 그때까지의 스텁 원장을 돌려준다.
+// apply 모드여도 쓰기는 runWithWrites 창 안에서만 실행된다(엔진이 Step.apply를 그 안에서 부른다).
+export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: Ctx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string } {
+  const sb = stubSandbox(rules, opts);
   const progress: string[] = [];
   const ctx: Ctx = {
     mode,
     json: false,
     line: "homelab test",
-    env,
+    env: sb.env,
     isTTY: false,
-    exec: makeExec(mode, opts.delegate ?? false, env),
+    exec: makeExec(mode, opts.delegate ?? false, sb.env),
     engine: (plan) => runEngine(ctx, plan),
     progress: (l) => progress.push(l),
     ask: () => null,
   };
-  return { ctx, calls: () => summarize(readLedger(s.dir)), progress };
+  return { ctx, calls: sb.calls, progress, bin: sb.bin };
 }
 
 // plan·읽기 명령의 부수효과 0(AC-2). 원장이 비면 실패한다(아무것도 읽지 않은 plan은 시험이 아니다).

@@ -63,7 +63,8 @@ export default defineCommand({
         target: `환경변수 ${PROJECT_ENV}`,
         async read(c) {
           const id = c.env[PROJECT_ENV];
-          if (id === undefined || id === "") return bad("missing", "없음(Infisical 쓰는 명령이 tty에서 묻는다)", `export ${PROJECT_ENV}=<homelab project ID>`);
+          // lead 결정(2026-10-23): 없음은 경고. Infisical을 쓰는 명령이 tty에서 한 번 묻는다.
+          if (id === undefined || id === "") return { ...same("없음(Infisical 쓰는 명령이 tty에서 묻는다)"), warn: `없으면 tty에서 묻는다. 묻지 않게 하려면 export ${PROJECT_ENV}=<homelab project ID>` };
           return fullMatch(PROJECT_ID, id) ? same("있음(UUID)") : bad("differs", "UUID 형식이 아님", `${PROJECT_ENV}를 Infisical 프로젝트 설정의 ID로 고친다`);
         },
       },

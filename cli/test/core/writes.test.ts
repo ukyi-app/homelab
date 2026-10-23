@@ -25,8 +25,9 @@ const READS: string[][] = [
   ["infisical", "secrets", "get", "KEY", "--path", "/apps/x"],
   ["infisical", "user", "get", "token", "--silent"],
   ["infisical", "--version"],
-  ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "https://ghcr.io/token?scope=repository:ukyi-app/x:pull"],
-  ["curl", "-sSfL", "-XGET", "https://x"],
+  ["curl", "-q", "-s", "-o", "/dev/null", "-w", "%{http_code}", "https://ghcr.io/token?scope=repository:ukyi-app/x:pull"],
+  ["curl", "-q", "-sSfL", "-X", "GET", "-m", "20", "-H", "Accept: application/json", "https://x"],
+  ["curl", "--version"],
   ["terraform", "version"],
   ["tf-github.sh", "plan"],
   ["/tmp/clone/tools/tf-github.sh", "verify"],
@@ -57,8 +58,19 @@ const WRITES: string[][] = [
   ["infisical", "secrets", "delete", "KEY"],
   ["infisical", "secrets", "folders", "create"],
   ["infisical", "run", "--", "sh"],
+  ["infisical", "export"],
   ["infisical", "login"],
   ["curl", "-X", "POST", "https://x"],
+  // -q가 없으면 ~/.curlrc의 request·data를 읽는다.
+  ["curl", "-s", "https://x"],
+  ["curl", "-q", "--config", "-", "https://x"],
+  ["curl", "-q", "-K", "f", "https://x"],
+  ["curl", "-q", "-XGET", "https://x"],
+  ["curl", "-q", "-o", "/tmp/out", "https://x"],
+  ["curl", "-q", "-w", "%output{/tmp/x}", "https://x"],
+  ["curl", "-q", "-H", "@headers.txt", "https://x"],
+  ["curl", "-q", "https://a", "https://b"],
+  ["curl", "-q", "-sd", "x", "https://x"],
   ["curl", "-d", "a=b", "https://x"],
   ["curl", "-sd", "a=b", "https://x"],
   ["curl", "--json", "{}", "https://x"],
@@ -74,4 +86,33 @@ const WRITES: string[][] = [
 describe("쓰기 판정(읽기 허용 목록, 나머지는 쓰기)", () => {
   for (const argv of READS) test(`읽기: ${argv.join(" ")}`, () => expect(classify(argv).write).toBe(false));
   for (const argv of WRITES) test(`쓰기: ${argv.join(" ")}`, () => expect(classify(argv).write).toBe(true));
+});
+
+// 값을 내는 호출 표시. exec가 이것들을 secretStdout 없이 실행하지 않는다.
+const SENSITIVE: string[][] = [
+  ["kubectl", "-n", "x", "get", "secret", "y", "-o", "json"],
+  ["kubectl", "get", "secrets", "-A"],
+  ["kubectl", "get", "Secret", "y"],
+  ["kubectl", "get", "secrets.v1", "y"],
+  ["kubectl", "get", "secret/y"],
+  ["kubectl", "get", "pods,secrets"],
+  ["kubectl", "describe", "secret", "y"],
+  ["kubectl", "get", "--raw", "/api/v1/namespaces/x/secrets/y"],
+  ["infisical", "secrets", "--path", "/apps/x"],
+  ["infisical", "secrets", "get", "KEY"],
+  ["infisical", "user", "get", "token"],
+  ["infisical", "export"],
+  ["gh", "auth", "token"],
+  ["gh", "auth", "status", "--show-token"],
+];
+const NOT_SENSITIVE: string[][] = [
+  ["kubectl", "get", "externalsecret", "app-secret"],
+  ["kubectl", "get", "externalsecrets.external-secrets.io", "-A"],
+  ["kubectl", "get", "pods"],
+  ["gh", "auth", "status"],
+];
+
+describe("값을 내는 호출", () => {
+  for (const argv of SENSITIVE) test(`민감: ${argv.join(" ")}`, () => expect(classify(argv).sensitiveOutput).toBe(true));
+  for (const argv of NOT_SENSITIVE) test(`보통: ${argv.join(" ")}`, () => expect(classify(argv).sensitiveOutput ?? false).toBe(false));
 });
