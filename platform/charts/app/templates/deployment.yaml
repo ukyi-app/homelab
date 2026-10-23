@@ -17,7 +17,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   # 단일 노드다. 늘려도 고가용성이 아니고, 마이그레이션이 없는 앱의 self-migration이 겹친다(설계 C.5.4).
-  replicas: 1
+  # suspended: DB 복원 동안 앱을 멈춘다(설계 C.5.7 3단계). selfHeal 때문에 kubectl scale은 되돌려진다(B.8 E2).
+  replicas: {{ ternary 0 1 (.Values.suspended | default false) }}
   revisionHistoryLimit: 3
   selector:
     matchLabels:

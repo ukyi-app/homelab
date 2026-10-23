@@ -1,5 +1,5 @@
 # 시험 values: 포트 없는 worker. readiness는 exec로만 쓴다.
-chartVersion: 1.0.0
+chartVersion: 1.1.0
 kind: worker
 resources: { cpu: 20m, memory: 64Mi }
 probes:

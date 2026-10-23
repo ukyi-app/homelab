@@ -1,0 +1,14 @@
+# expect: fail
+# match: additional properties 'maxmemory' not allowed
+# 캐시 크기는 고정이다(subchart 값은 템플릿으로 계산하지 못한다). 적어도 반영되지 않으므로 막는다.
+chartVersion: 1.1.0
+kind: web
+port: 8080
+resources: {cpu: 10m, memory: 32Mi}
+uses: {valkey: true}
+cache: {enabled: true, maxmemory: 128mb}
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

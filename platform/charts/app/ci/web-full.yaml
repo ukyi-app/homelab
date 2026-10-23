@@ -1,6 +1,6 @@
 # 시험 values(설계 C.4.5): 선택 항목을 모두 켠 web 앱. ci가 렌더·정책·kubeconform을 돌린다.
 # 릴리스 이름 app, ns app-app으로 렌더한다(tools/ci/render.ts).
-chartVersion: 1.0.0
+chartVersion: 1.1.0
 kind: web
 port: 8080
 resources: { cpu: 50m, memory: 128Mi }
@@ -17,6 +17,8 @@ env:
 uses:
   postgres: true
   valkey: true
+cache:
+  enabled: true
 migration:
   command: ["./migrate", "up"]
 repository: ghcr.io/ukyi-app/app

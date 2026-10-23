@@ -1,3 +1,5 @@
+{{- /* 멈춘 동안(suspended)은 돌지 않는다. 복원 중인 DB에 스키마를 바꾸지 않게(설계 C.5.7). */ -}}
+{{- if not .Values.suspended }}
 {{- with .Values.migration }}
 {{- $name := include "app.name" $ }}
 # 마이그레이션(D-22). Sync 단계 hook이라 ExternalSecret(wave 0) 뒤, 새 Deployment(wave 2) 앞에 돈다.
@@ -46,4 +48,5 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+{{- end }}
 {{- end }}

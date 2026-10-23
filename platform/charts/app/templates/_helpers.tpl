@@ -17,6 +17,16 @@ Argo CD는 releaseName이 없으면 Application 이름을 릴리스 이름으로
 {{- if ne .Values.repository (printf "ghcr.io/ukyi-app/%s" $name) -}}
 {{- fail (printf "repository는 ghcr.io/ukyi-app/%s여야 한다: %s" $name .Values.repository) -}}
 {{- end -}}
+{{- if .Values.cache.enabled -}}
+{{- if not .Values.uses.valkey -}}
+{{- fail "cache.enabled는 uses.valkey: true와 함께 쓴다(앱이 VALKEY_URL로 붙는다)" -}}
+{{- end -}}
+{{- /* 공식 valkey 차트는 릴리스 이름에 valkey가 들어 있으면 접미사 없이 릴리스 이름만 쓴다. 그러면 캐시 Service가
+       앱 Service 이름과 겹치고 연결 주소 <앱>-valkey가 없다. */ -}}
+{{- if contains "valkey" $name -}}
+{{- fail (printf "캐시 Valkey를 쓰는 앱 이름에 valkey를 넣지 않는다: %s" $name) -}}
+{{- end -}}
+{{- end -}}
 {{- $name -}}
 {{- end }}
 
