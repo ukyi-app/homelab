@@ -87,9 +87,24 @@ function alive(pid: number): boolean {
   }
 }
 
+// 시험 HOME의 Infisical 백업 폴더는 0500이다(core/infisical-backup.ts). 안에 파일이 남으면(돌연변이 확인 등) 그냥은 못 지우므로
+// 권한을 풀고 다시 지운다.
+function removeTree(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    const open = (d: string) => {
+      chmodSync(d, 0o700);
+      for (const e of readdirSync(d, { withFileTypes: true })) if (e.isDirectory()) open(join(d, e.name));
+    };
+    open(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 for (const name of readdirSync(tmpdir())) {
   const m = name.match(/^homelab-cli-test-(\d+)$/);
-  if (m && Number(m[1]) !== process.pid && !alive(Number(m[1]))) rmSync(join(tmpdir(), name), { recursive: true, force: true });
+  if (m && Number(m[1]) !== process.pid && !alive(Number(m[1]))) removeTree(join(tmpdir(), name));
 }
 
 function stubDir(rules: Rule[], tools?: string[]): { dir: string; bin: string; home: string } {
@@ -172,7 +187,7 @@ export async function runCli(args: string[], rules: Rule[], opts: RunOpts = {}):
     }
   }
   const calls = readLedger(s.dir);
-  rmSync(s.dir, { recursive: true, force: true });
+  removeTree(s.dir);
   return { code, stdout, stderr, json, ...summarize(calls) };
 }
 

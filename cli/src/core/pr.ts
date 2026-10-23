@@ -8,6 +8,7 @@
 // 브랜치 갱신: 머리 커밋에 Homelab-CLI 트레일러가 없으면(사람이 push한 커밋) 멈춘다(lead 결정 2026-10-23).
 // force는 쓰지 않는다(#873 1라운드). 새 커밋의 부모를 [main 스냅샷, 확인한 브랜치 머리]로 두고 fast-forward로만 옮긴다.
 // 확인과 PATCH 사이에 사람이 push하면 새 커밋이 그 push의 자손이 아니라 GitHub가 422로 거부한다.
+import { jsonStringify } from "./intrinsics";
 import type { Observation, ReadCtx, RepoRead, Step, WriteCtx } from "./command";
 import type { Exec } from "./exec";
 import { HOMELAB_REPO, ghGetRaw, ghSend, ok } from "./github";
@@ -99,7 +100,7 @@ function snapshot(repo: RepoRead, files: string[], ref: string): FileContents {
 function desiredOf(spec: PrSpec, current: FileContents): FileContents {
   const out = spec.edit({ ...current });
   const keys = Object.keys(out ?? {}).sort();
-  if (JSON.stringify(keys) !== JSON.stringify([...spec.files].sort())) throw new Error("edit()는 files의 파일마다 내용을 하나씩 돌려줘야 한다");
+  if (jsonStringify(keys) !== jsonStringify([...spec.files].sort())) throw new Error("edit()는 files의 파일마다 내용을 하나씩 돌려줘야 한다");
   for (const [path, content] of Object.entries(out)) {
     if (isSecret(content)) throw new Error(`${path}: 파일 내용에 시크릿 객체를 넣으려 했다`);
     if (content !== null && typeof content !== "string") throw new Error(`${path}: 파일 내용은 문자열이나 null이다`);

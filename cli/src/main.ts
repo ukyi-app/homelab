@@ -1,4 +1,6 @@
 // homelab CLI 진입점(설계 C.7). argv → 등록 표 → 파싱 → 실행 → 출력 → 종료 코드(PLAN D2).
+// 첫 import는 intrinsics다(명령 모듈이 평가되기 전에 내장 함수를 잡는다, 정적 시험).
+import "./core/intrinsics";
 import { readSync } from "node:fs";
 import { APPLY_FLAG, GLOBAL_FLAGS, parseInput, usageLine } from "./core/args";
 import type { CommandSpec } from "./core/command";

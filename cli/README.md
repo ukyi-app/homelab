@@ -37,6 +37,7 @@ homelab doctor                    # 도구·로그인·kubectl context
 
 **구조(안전의 근거):** 명령은 외부 명령을 직접 실행할 수 없다. 받는 것은 타입 있는 어댑터뿐이고 어댑터마다 argv 모양이 고정이다.
 
+- **위협 모델:** 이 경계는 실수로 새는 것을 막는다. 같은 프로세스에서 일부러 전역을 바꾸는 코드는 막지 않는다(명령 코드는 리뷰받은 저장소 코드, 설계 C.7). 그래도 명령 파일은 내장 전역(`JSON`·`Object`·프로토타입 등)을 바꾸지 않는다(정적 시험). core는 시작할 때 잡아 둔 함수(`src/core/intrinsics.ts`)를 쓴다.
 - **import:** 명령 파일은 `../core/command`(정의·문맥 타입), `../core/names`, `../core/result`, `../core/pr`, `../core/command-info`와 자기 접두 도우미만 import한다. `Bun`·`process`·`fetch`·`require`·동적 import·`console` 같은 전역도 쓰지 않는다. 정적 시험이 막는다.
 - **읽기 문맥 `ctx`(run과 `Step.read`):** `ctx.k8s`(get·list·secretHash·secretExists·logs·canI·rolloutStatus·currentContext), `ctx.infisical`(has·listKeys·getValue·valueHash·projectStatus), `ctx.gh.get`(repos/ukyi-app/…·orgs/ukyi-app/…·user만), `ctx.repo`(mainSha·readFile), `ctx.ghcr.anonymousPullStatus`, `ctx.tools`(doctor용), `ctx.github`(github 위임 명령만). 쓰기 함수는 없다.
 - **쓰기 문맥 `w`(`Step.apply(w, seen)`만):** 위 읽기에 더해 `w.k8s`(forceSync·rolloutRestart·createRestoreObject·deleteRestoreObjects), `w.infisical`(setValue·removeKey), `w.generatePassword()`, `w.readSecretInput(prompt)`. 엔진이 apply 한 번마다 새로 만들고 끝나면 폐기한다. 붙잡아 두었다가 쓰면 모든 호출이 막힌다. 엔진은 한 번에 하나만 돈다(중첩·병렬 거부).

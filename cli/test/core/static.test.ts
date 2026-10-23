@@ -62,7 +62,8 @@ export function fsProblems(file: string, text: string): string[] {
   }
   const t = code(text);
   if (allowed && allowed !== "any") {
-    for (const m of t.matchAll(/import\s*(type\s+)?([\s\S]*?)\s*from\s*["']((node:)?fs)["']/g)) {
+    // 절에 따옴표·세미콜론이 없게 한다. 없으면 앞의 부작용 import(import "./x";)부터 한 덩어리로 읽는다.
+    for (const m of t.matchAll(/import\s*(type\s+)?([^;"'`]*?)\s*from\s*["']((node:)?fs)["']/g)) {
       if (m[1]) continue;
       const clause = m[2].trim();
       if (!clause.startsWith("{")) bad.push(`${clause} from ${m[3]}`);
@@ -77,6 +78,21 @@ export function fsProblems(file: string, text: string): string[] {
 const COMMAND_IMPORTS = new Set(["../core/command", "../core/names", "../core/result", "../core/pr", "../core/command-info"]);
 // 명령 파일에서 쓰면 안 되는 전역(외부 명령·네트워크·파일·환경변수·출력의 우회로).
 const COMMAND_GLOBALS = /\b(Bun|process|fetch|require|globalThis|eval|Deno|XMLHttpRequest|WebSocket|navigator|console|Function)\b|\bimport\s*\(/;
+// 내장 전역을 바꾸는 꼴: 재할당·복합 대입·delete, 프로토타입 접근, defineProperty류, Object.assign(내장, …), global·self 경유.
+// 실수로 core의 판정을 바꾸지 않게 하는 장치다. 일부러 우회하는 코드까지 막지는 않는다(설계 C.7 위협 모델, T12-01b).
+// core는 시작할 때 잡아 둔 함수(core/intrinsics.ts)를 쓴다.
+const BUILTINS = "JSON|Object|Array|String|Number|Boolean|Symbol|BigInt|Math|Date|RegExp|Promise|Reflect|Proxy|Map|Set|WeakMap|WeakSet|Error|TypeError|TextEncoder|TextDecoder|Buffer|crypto|Intl|URL|Atomics|structuredClone|setTimeout|setInterval|queueMicrotask";
+const GLOBAL_WRITE = new RegExp(
+  [
+    `(?<![\\w$.])(${BUILTINS})\\s*(\\.\\s*[\\w$]+|\\[[^\\]]*\\])*\\s*(=(?![=>])|[-+*/%&|^]=|\\|\\|=|&&=|\\?\\?=|\\+\\+|--)`,
+    `\\bdelete\\s+(${BUILTINS})\\b`,
+    `\\.\\s*(prototype|constructor|__proto__)\\b`,
+    `\\b(defineProperty|defineProperties|setPrototypeOf|getPrototypeOf|__defineGetter__|__defineSetter__)\\b`,
+    `\\bObject\\s*\\.\\s*assign\\s*\\(\\s*(${BUILTINS})\\b`,
+    `(?<![\\w$.])(global|self)\\s*[.[]`,
+  ].join("|"),
+);
+
 // 명령 파일 이름 목록(등록 표). 도우미 파일의 주인은 이 중 가장 긴 접두다(db-add-values.ts → db-add).
 const REGISTERED = [...readFileSync(join(SRC, "registry.ts"), "utf8").matchAll(/from "\.\/commands\/([a-z0-9-]+)"/g)].map((m) => m[1]);
 
@@ -93,6 +109,8 @@ export function commandProblems(file: string, text: string, names: string[] = RE
   }
   const g = code(text).match(COMMAND_GLOBALS);
   if (g) bad.push(`전역 ${g[0]}`);
+  const w = code(text).match(GLOBAL_WRITE);
+  if (w) bad.push(`내장 전역 변경 ${w[0].trim()}`);
   return bad;
 }
 
@@ -127,6 +145,46 @@ describe("소스 규칙", () => {
     expect(commandProblems("doctor.ts", "await fetch('https://x');")).toEqual(["전역 fetch"]);
     expect(commandProblems("doctor.ts", "const m = await import('../core/exec');")).toEqual(["import ../core/exec", "전역 import("]);
     expect(commandProblems("doctor.ts", 'import { defineCommand } from "../core/command";')).toEqual([]);
+  });
+
+  test("명령 규칙 검사가 내장 전역 변경을 잡고 보통 사용은 놓아준다(T12-01b)", () => {
+    const caught = [
+      "JSON.stringify = (x) => '';",
+      "JSON . parse=f;",
+      "String.prototype.includes = () => false;",
+      "Array['isArray'] = f;",
+      "Object.freeze ||= f;",
+      "Math.random += 1;",
+      "delete JSON.parse;",
+      "Object.defineProperty(JSON, 'parse', { value: f });",
+      "Reflect.setPrototypeOf(a, b);",
+      "Object.assign(JSON, { parse: f });",
+      "''.constructor.prototype.trim = f;",
+      "x.__proto__.y = 1;",
+      "self.JSON = {};",
+      "global['Map'] = M;",
+      "Map = class {};",
+    ];
+    for (const t of caught) expect([t, commandProblems("doctor.ts", t).some((b) => b.startsWith("내장 전역 변경"))]).toEqual([t, true]);
+    const fine = [
+      "const v = JSON.parse(o)?.clientVersion;",
+      "const m = new Map<string, number>(); m.set('a', 1);",
+      "if (Object.keys(x).length === 0) return;",
+      "const ok = Array.isArray(x) && x.length >= 2;",
+      "const t = (a: number) => a => 1;",
+      "obj.Error = 1; obj.JSON = 2;",
+      "const myself = 1; const globalName = 2;",
+      "const n = Number(x); const s = String(y) === 'z';",
+    ];
+    for (const t of fine) expect([t, commandProblems("doctor.ts", t)]).toEqual([t, []]);
+  });
+
+  test("main.ts의 첫 import는 core/intrinsics다(명령 모듈보다 먼저 내장 함수를 잡는다)", () => {
+    expect(importsOf(readFileSync(join(SRC, "main.ts"), "utf8"))[0]).toBe("./core/intrinsics");
+  });
+
+  test("core는 JSON·Object.freeze를 직접 부르지 않고 잡아 둔 함수를 쓴다", () => {
+    expect(offenders(/\bJSON\s*\.\s*(parse|stringify)\b|\bObject\.freeze\b/, ["core/intrinsics.ts"]).filter((f) => f.startsWith("core/") || f === "main.ts")).toEqual([]);
   });
 
   test("프로세스·네트워크는 core/exec.ts에서만", () => {
@@ -169,6 +227,8 @@ describe("소스 규칙", () => {
     expect(fsProblems("core/x.ts", "const fs = require('fs');")).toEqual(["import fs"]);
     expect(fsProblems("core/x.ts", 'await Bun.write("x", "y");')).toEqual(["파일 쓰기 호출 Bun.write"]);
     expect(fsProblems("core/version.ts", 'import { readFileSync } from "node:fs";')).toEqual([]);
+    expect(fsProblems("main.ts", 'import "./core/intrinsics";\nimport { readSync } from "node:fs";')).toEqual([]);
+    expect(fsProblems("main.ts", 'import "./core/intrinsics";\nimport { writeSync } from "node:fs";')).toEqual(["writeSync"]);
   });
 });
 

@@ -7,6 +7,7 @@
 // - `secrets set --file /dev/stdin`은 stdin의 .env 줄을 읽어 값을 요청 본문으로만 보낸다(argv에 값 없음).
 //   .env 파싱은 앞뒤 공백을 자르고 양끝 따옴표를 벗긴다. 값 안의 #·$·${}·따옴표는 그대로 간다.
 //   줄바꿈이 있으면 다음 줄이 다른 키가 된다. 그래서 setValue가 값 전체 형식을 먼저 본다.
+import { jsonParse } from "./intrinsics";
 import type { InfisicalRead, InfisicalWrite } from "./command";
 import { ExecTimeout, why, type Exec } from "./exec";
 import { PROJECT_ID, SECRET_KEY, fullMatch, hasControl } from "./names";
@@ -82,7 +83,7 @@ export function infisicalRead(exec: Exec, project: ReturnType<typeof projectReso
     if (r.code !== 0 || !r.stdoutSecret) throw new Error(`Infisical ${path} 목록: ${why(r)}`);
     let parsed: unknown;
     try {
-      parsed = JSON.parse(revealSecret(r.stdoutSecret));
+      parsed = jsonParse(revealSecret(r.stdoutSecret));
     } catch {
       throw new Error(`Infisical ${path} 목록: JSON이 아니다`);
     }

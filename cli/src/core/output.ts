@@ -1,6 +1,7 @@
 // 출력 계층. stdout·stderr에 쓰는 곳은 이 파일 하나다(정적 시험이 다른 곳의 console·process.stdout을 막는다).
 // stdout에는 결과 하나만(사람용 또는 JSON 문서 하나), 진행 줄과 경고는 stderr.
 // 시크릿 차단 두 겹: Result 안에 Secret 객체가 있으면 렌더하지 않고, 렌더한 글자에 추적 중인 원문이 있으면 내보내지 않는다.
+import { jsonStringify } from "./intrinsics";
 import { findSecretPath } from "./guard";
 import { containsTracked } from "./secret";
 import type { Result, StepResult } from "./result";
@@ -13,8 +14,8 @@ export class OutputBlocked extends Error {}
 export function secretProblem(r: Result): string | null {
   const obj = findSecretPath(r, "result");
   if (obj) return `${obj}에 시크릿 객체가 있다`;
-  for (const s of r.steps) if (containsTracked(JSON.stringify(s))) return `단계 ${s.id}`;
-  const rest = JSON.stringify({ ...r, steps: [] });
+  for (const s of r.steps) if (containsTracked(jsonStringify(s))) return `단계 ${s.id}`;
+  const rest = jsonStringify({ ...r, steps: [] });
   return containsTracked(rest) ? "단계 밖(notes·next·error)" : null;
 }
 
@@ -28,7 +29,7 @@ export function renderJson(r: Result): string {
   doc.next = r.next;
   if (r.error) doc.error = r.error;
   if (r.exitCode !== undefined) doc.exitCode = r.exitCode;
-  return JSON.stringify(doc) + "\n";
+  return jsonStringify(doc) + "\n";
 }
 
 // 한글·CJK는 터미널에서 두 칸이다. 열 맞춤에 쓴다.

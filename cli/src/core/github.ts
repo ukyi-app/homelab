@@ -1,5 +1,6 @@
 // gh·curl·git 어댑터. 사람의 gh 로그인을 쓰고 자격을 저장하지 않는다(설계 C.7). argv는 여기서만 만든다.
 // gh api -i로 상태 줄을 함께 받는다. 404에도 gh는 exit 1이지만 상태 줄과 본문을 stdout에 내므로 상태 코드로 판정한다.
+import { jsonParse, jsonStringify } from "./intrinsics";
 import { join } from "node:path";
 import type { GhcrRead, GhRead, GhResponse, GithubDelegate } from "./command";
 import { ExecTimeout, why, type Exec } from "./exec";
@@ -19,7 +20,7 @@ function parse(stdout: string, what: string): GhResponse {
   let json: any = null;
   if (text.trim()) {
     try {
-      json = JSON.parse(text);
+      json = jsonParse(text);
     } catch {
       json = null;
     }
@@ -54,7 +55,7 @@ export function ghSend(exec: Exec, method: "POST" | "PATCH" | "PUT" | "DELETE", 
   if (hasControl(path) || !/^repos\/ukyi-app\/[A-Za-z0-9._\/-]+$/.test(path)) throw new Error("gh 쓰기 경로 형식이 아니다");
   const where = findSecretPath(body, "body");
   if (where) throw new Error(`${method} ${path}: 요청 본문(${where})에 시크릿 객체가 있다`);
-  const text = JSON.stringify(body);
+  const text = jsonStringify(body);
   // 이 CLI는 GitHub에 시크릿을 보내지 않는다(공개 저장소의 파일·PR 본문뿐).
   if (containsTracked(text)) throw new Error(`${method} ${path}: 요청 본문에 시크릿 값이 섞였다`);
   return call(exec, argvFor.send(method, path), `${method} ${path}`, text);
