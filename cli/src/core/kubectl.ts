@@ -3,8 +3,9 @@
 // --raw·config view 같은 원문 출력 옵션은 쓰지 않는다. 모든 호출에 --request-timeout(서버가 멈추면 기본으로 오래 기다린다).
 import type { KubeKind, KubeRead, KubeWrite } from "./command";
 import { ExecTimeout, must, why, type Exec, type ExecOpts } from "./exec";
+import { findSecretPath } from "./guard";
 import { hasControl } from "./names";
-import { Secret } from "./secret";
+import { Secret, revealSecret } from "./secret";
 
 const REQUEST_TIMEOUT = "--request-timeout=20s";
 const NAME = /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/;
@@ -95,7 +96,7 @@ export function kubeRead(exec: Exec): KubeRead {
       if (r.code !== 0 && r.notFound) return null;
       if (r.code !== 0 || !r.stdoutSecret) throw new Error(`kubectl get secret ${name}: ${why(r)}`);
       // 요청한 키 하나만 Secret으로 만든다. 같은 Secret의 username(앱 이름 같은 공개 값)은 추적하지 않는다(#873 2라운드 P1).
-      const encoded = JSON.parse(r.stdoutSecret.reveal()).data?.[key];
+      const encoded = JSON.parse(revealSecret(r.stdoutSecret)).data?.[key];
       if (typeof encoded !== "string") return null;
       return new Secret(Buffer.from(encoded, "base64").toString("utf8")).sha256Prefix(12);
     },
@@ -106,8 +107,11 @@ export function kubeRead(exec: Exec): KubeRead {
       if (r.errKind === "timeout") throw new ExecTimeout(`kubectl get secret ${name}: 시간 초과`);
       if (r.code !== 0 && r.notFound) return { exists: false, keys: [] };
       if (r.code !== 0 || !r.stdoutSecret) throw new Error(`kubectl get secret ${name}: ${why(r)}`);
-      return { exists: true, keys: Object.keys(JSON.parse(r.stdoutSecret.reveal()).data ?? {}).sort() };
+      return { exists: true, keys: Object.keys(JSON.parse(revealSecret(r.stdoutSecret)).data ?? {}).sort() };
     },
+    // 앱 로그를 그대로 돌려준다. 앱이 자격을 로그에 쓰지 않는 것은 앱 계약이다(설계 C.7, Connector 3라운드 판단).
+    // CLI는 로그 속 임의 값이 시크릿인지 알 수 없고(추측 마스킹은 놓친 값을 가린 것처럼 보이게 한다), 같은 사람은
+    // kubeconfig로 kubectl logs를 직접 볼 수 있다. 이 실행이 다룬 시크릿(16자 이상)이 섞이면 출력 계층이 결과 전체를 막는다.
     logs(ns, deployment, opts = {}) {
       checkName("namespace", ns);
       checkName("Deployment", deployment);
@@ -157,6 +161,8 @@ export function kubeWrite(exec: Exec): KubeWrite {
       if (typeof kind !== "string" || !RESTORE_KINDS.has(kind)) throw new Error("복원 객체로 만들 수 없는 종류다(Cluster·Job·Pod·PersistentVolumeClaim만)");
       // Secret 매니페스트는 만들지 않는다(자격은 ExternalSecret, AGENTS.md).
       if (containsSecretManifest(manifest)) throw new Error("매니페스트 안에 kind: Secret이 있다");
+      // Secret 객체는 JSON에서 "[secret]"이 되어 엉뚱한 값이 들어간다. 시크릿은 매니페스트로 넘기지 않는다.
+      if (findSecretPath(manifest, "manifest")) throw new Error("매니페스트에 시크릿 객체가 있다");
       const labels = (manifest.metadata as { labels?: Record<string, unknown> } | undefined)?.labels;
       const runId = labels?.[RESTORE_LABEL];
       if (typeof runId !== "string" || !/^[a-z0-9]{1,22}$/.test(runId)) throw new Error(`복원 객체에 라벨 ${RESTORE_LABEL}=<실행 id>가 없다`);

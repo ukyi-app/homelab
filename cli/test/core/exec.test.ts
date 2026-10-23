@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { PLAN_WRITE_BLOCKED, makeExec } from "../../src/core/exec";
-import { Secret } from "../../src/core/secret";
+import { Secret, revealSecret } from "../../src/core/secret";
 import { tempDir } from "../../src/core/temp";
 import { REST, rule, sha256, stubSandbox } from "../harness";
 
@@ -101,7 +101,7 @@ describe("값을 내는 호출", () => {
   test("민감 호출의 stderr 원문은 버리고, argv의 시크릿 원문(16자 이상)은 막는다", () => {
     const e = execs([rule(["infisical", REST], { code: 1, stderr: "error: bad value fakevalue-exec-0002\n" })]);
     const s = new Secret("fakevalue-exec-0002");
-    expect(() => e.write(["infisical", "secrets", "set", `K=${s.reveal()}`])).toThrow("명령행 인자");
+    expect(() => e.write(["infisical", "secrets", "set", `K=${revealSecret(s)}`])).toThrow("명령행 인자");
     const r = e.write(["infisical", "secrets", "set", "--file", "/dev/stdin"], { input: s });
     expect([r.stderr, r.stderrHidden]).toEqual(["", true]);
     expect(e.calls().calls[0].stdinSha256).toBe(sha256("fakevalue-exec-0002"));

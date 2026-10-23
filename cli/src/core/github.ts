@@ -111,7 +111,14 @@ export function githubDelegate(readExec: Exec, writeOnce: () => Exec | null, env
       if (env.TMPDIR) clean.TMPDIR = env.TMPDIR;
       const c = readExec(cloneArgv(work), { cleanEnv: clean, cloneInto: work, timeoutMs: 120_000 });
       if (c.code !== 0) throw new Error(`main을 clone하지 못했다: ${why(c)}`);
-      const r = exec([join(work, "tree", "tools", "tf-github.sh"), sub, ...(opts.allowDestroy ? ["--allow-destroy"] : [])], { stdio: json ? "stdout-to-stderr" : "inherit", env: { TF_GITHUB_CLONE: work }, timeoutMs: 3_600_000 });
+      const r = exec([join(work, "tree", "tools", "tf-github.sh"), sub, ...(opts.allowDestroy ? ["--allow-destroy"] : [])], {
+        stdio: json ? "stdout-to-stderr" : "inherit",
+        // 래퍼는 TF_GITHUB_CLONE을 보기 전에 git rev-parse --show-toplevel을 set -e로 실행한다. cwd를 clone으로 두지 않으면
+        // 저장소 밖(예: 홈)에서 실행한 CLI가 exit 128로 끝난다(#873 3라운드). 백업 경로 보호의 기준도 이 clone이 된다.
+        cwd: join(work, "tree"),
+        env: { TF_GITHUB_CLONE: work },
+        timeoutMs: 3_600_000,
+      });
       if (r.errKind === "not-found") throw new Error("clone한 main에 tools/tf-github.sh가 없다");
       return r.code ?? 1;
     },

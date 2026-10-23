@@ -55,6 +55,8 @@ function openPr(ctx: ReadCtx | WriteCtx, branch: string): OpenPr | null {
   const list = Array.isArray(r.json) ? r.json : [];
   if (list.length > 1) throw new Error(`${branch}에 열린 PR이 ${list.length}개다. 하나만 남기고 닫는다`);
   if (list.length === 0) return null;
+  // base가 main이 아닌 PR을 같다고 보면 main에 반영할 PR 없이 영원히 기다린다(Connector 3라운드).
+  if (list[0].base?.ref !== "main") throw new Error(`PR #${list[0].number}의 base가 main이 아니다. 닫거나 base를 main으로 바꾼 뒤 다시 실행한다`);
   const headSha = list[0].head?.sha;
   if (typeof headSha !== "string" || !fullMatch(GIT_SHA, headSha)) throw new Error(`PR #${list[0].number} 머리 SHA를 읽지 못했다`);
   return { number: list[0].number, headSha };

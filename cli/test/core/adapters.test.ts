@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { KubeKind } from "../../src/core/command";
 import { argvFor as ghArgv } from "../../src/core/github";
 import { argvFor, projectResolver, valueProblem } from "../../src/core/infisical";
+import { readHiddenLine } from "../../src/core/input";
 import { containsSecretManifest } from "../../src/core/kubectl";
 import { render } from "../../src/core/output";
 import { CliError, type Result } from "../../src/core/result";
@@ -41,6 +42,8 @@ describe("Infisical 어댑터", () => {
     }
     expect(calls().calls).toEqual([]);
     expect(valueProblem(new Secret("a".repeat(16)))).toBeNull();
+    // 깨진 디코딩의 흔적(U+FFFD)은 거부한다.
+    expect(valueProblem(new Secret("abcdefghijklmno\uFFFD\uFFFD"))).toContain("U+FFFD");
   });
 
   test("짧은 값은 추적하지 않아 고정 옵션·JSON 키와 겹쳐도 정상 동작(2라운드 P2, 사용자 결정)", () => {
@@ -73,6 +76,31 @@ describe("Infisical 어댑터", () => {
   });
 });
 
+describe("키 이름과 TTY 입력", () => {
+  test("Infisical 키는 차트 env 이름 꼴(^[A-Z_][A-Z0-9_]*$): _TOKEN 허용(Connector 3라운드)", async () => {
+    const { ctx, calls } = testCtx("apply", [infisicalSet("/apps/smoke")]);
+    await applyWith(ctx, (w) => w.infisical.setValue("/apps/smoke", "_TOKEN", new Secret("fakevalue-under-0001")));
+    expect(calls().calls.length).toBe(1);
+    await expect(applyWith(ctx, (w) => w.infisical.setValue("/apps/smoke", "1TOKEN", new Secret("fakevalue-under-0001")))).rejects.toThrow("키 이름");
+  });
+
+  test("TTY 입력은 바이트를 모아 UTF-8로 한 번만 디코딩한다(한글이 U+FFFD로 바뀌지 않는다, #873 3라운드)", () => {
+    const feed = (text: string, end = [0x0d]) => {
+      const bytes = [...new TextEncoder().encode(text), ...end];
+      let i = 0;
+      return () => (i < bytes.length ? bytes[i++] : null);
+    };
+    expect(readHiddenLine(feed("abcdefghijklmno한"))).toBe("abcdefghijklmno한");
+    expect(readHiddenLine(feed("가나다라마바"))).toBe("가나다라마바");
+    // 6자는 16자 검사에서 걸린다(바이트 단위였다면 U+FFFD 18자로 통과했다).
+    expect(valueProblem(new Secret(readHiddenLine(feed("가나다라마바"))))).toContain("16자");
+    expect(() => readHiddenLine(feed("x", [0x03]))).toThrow("취소");
+    let i = 0;
+    const broken = [0xed, 0x95, 0x0d];
+    expect(() => readHiddenLine(() => (i < broken.length ? broken[i++] : null))).toThrow("UTF-8");
+  });
+});
+
 describe("kubectl 어댑터", () => {
   test("범용 조회에 Secret 종류는 없다(타입 밖 값을 넣어도 외부 호출 전에 거부)", () => {
     const { ctx, calls } = testCtx("read", [rule(["kubectl", REST])]);
@@ -94,6 +122,17 @@ describe("kubectl 어댑터", () => {
     expect(ctx.k8s.get("databaserole", "database", app)?.status?.applied).toBe(true);
     expect(() => render(ok({ app, notes: [`역할 ${app}`] }), true)).not.toThrow();
     expect(() => render(ok({ notes: [FAKE_SECRETS[0]] }), true)).toThrow("시크릿");
+    expectPlanReadOnly(calls());
+  });
+
+  test("logs는 앱 로그를 그대로 주되, 이 실행이 다룬 시크릿이 섞이면 출력 계층이 결과를 막는다(Connector 3라운드 판단)", () => {
+    const leaked = new Secret("fakevalue-logs-0001");
+    void leaked;
+    const { ctx, calls } = testCtx("read", [kubectlRule(["-n", "app-smoke", "logs", "deploy/smoke", "--tail=200"], { stdout: "boot ok\npassword=fakevalue-logs-0001\n" })]);
+    const text = ctx.k8s.logs("app-smoke", "smoke");
+    expect(text).toContain("boot ok");
+    expect(() => render(ok({ notes: [text] }), false)).toThrow("시크릿");
+    expect(() => render(ok({ notes: ["boot ok"] }), false)).not.toThrow();
     expectPlanReadOnly(calls());
   });
 
@@ -122,6 +161,7 @@ describe("kubectl 어댑터", () => {
       { kind: "Job", metadata: { labels }, spec: { template: { items: [{ kind: "secret" }] } } },
       { kind: "Job", metadata: {} },
       { kind: "Deployment", metadata: { labels } },
+      { kind: "Job", metadata: { labels }, spec: { env: [{ value: new Secret("fakevalue-manifest-01") }] } },
     ];
     for (const m of bad) await expect(applyWith(ctx, (w) => w.k8s.createRestoreObject("database", m))).rejects.toThrow();
     expect(calls().calls).toEqual([]);

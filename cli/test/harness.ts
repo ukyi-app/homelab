@@ -31,10 +31,11 @@ export const REST = "...";
 
 // echoEnv: 스텁이 받은 환경변수 중 이 이름들을 JSON으로 stdout에 낸다.
 // materialize: 스텁이 argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일(github 위임 시험).
-export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string> };
+// echoCwd: 스텁이 실행된 폴더를 stdout에 낸다.
+export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean };
 export type Matcher = string | RegExp;
 export type Rule = { argv: Matcher[]; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
-export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null };
+export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null; cwd: string };
 
 // noStdin: 스텁이 stdin을 읽지 않는다(github 위임처럼 부모 stdin을 넘기는 호출).
 export function rule(argv: Matcher[], resp: Resp | Resp[] = {}, opts: { captureStdin?: boolean; noStdin?: boolean } = {}): Rule {
@@ -125,11 +126,12 @@ function readLedger(dir: string): Call[] {
 
 export type CliRun = { code: number; stdout: string; stderr: string; json: any; calls: Call[]; writes: Call[]; unmatched: Call[] };
 
-export type RunOpts = { env?: Record<string, string>; stdin?: string; tools?: string[]; project?: boolean };
+// extraPath: 스텁 폴더 뒤에 붙일 PATH(실제 래퍼처럼 sed·find·bash가 필요한 시험만). 스텁 도구는 앞에서 가린다.
+export type RunOpts = { env?: Record<string, string>; stdin?: string; tools?: string[]; project?: boolean; extraPath?: string[] };
 
 function baseEnv(s: { dir: string; bin: string; home: string }, opts: RunOpts): Record<string, string> {
   return {
-    PATH: s.bin,
+    PATH: [s.bin, ...(opts.extraPath ?? [])].join(":"),
     HOME: s.home,
     TMPDIR: s.dir,
     HOMELAB_STUB_DIR: s.dir,

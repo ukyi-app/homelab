@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { ReadCtx, Observation, Step, WriteCtx } from "../../src/core/command";
 import { ExecTimeout, PLAN_WRITE_BLOCKED } from "../../src/core/exec";
 import type { Mode } from "../../src/core/result";
+import { revealSecret } from "../../src/core/secret";
 import { REST, applyWith, rule, testCtx } from "../harness";
 
 // 바깥 상태 하나를 흉내 내는 단계. applyCount로 두 번 실행을 잡는다.
@@ -171,7 +172,7 @@ describe("엔진", () => {
   test("비밀번호는 apply 문맥에서만 만든다", async () => {
     const { ctx } = testCtx("apply", []);
     const { value } = await applyWith(ctx, (w) => w.generatePassword());
-    expect(value.length).toBe(40);
+    expect(revealSecret(value)).toMatch(/^[A-Za-z0-9]{40}$/);
   });
 
   test("단계 id가 겹치면 거부", async () => {

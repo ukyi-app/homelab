@@ -11,7 +11,7 @@ import type { InfisicalRead, InfisicalWrite } from "./command";
 import { ExecTimeout, why, type Exec } from "./exec";
 import { PROJECT_ID, SECRET_KEY, fullMatch, hasControl } from "./names";
 import { CliError } from "./result";
-import { MIN_SECRET, Secret } from "./secret";
+import { MIN_SECRET, Secret, revealSecret } from "./secret";
 
 export const INFISICAL_ENV = "prod";
 export const PROJECT_ENV = "HOMELAB_INFISICAL_PROJECT_ID";
@@ -62,9 +62,11 @@ export const argvFor = {
 
 // .env 한 줄로 왕복하고 16자 이상인 값만 받는다(위 실측, 사용자 결정 2026-10-23). 틀리면 이유, 맞으면 null.
 export function valueProblem(value: Secret): string | null {
-  const v = value.reveal();
+  const v = revealSecret(value);
   if (v.length < MIN_SECRET) return `값이 ${MIN_SECRET}자보다 짧다`;
   if (hasControl(v)) return "값에 줄바꿈·탭·제어 문자가 있다";
+  // U+FFFD는 잘못 디코딩된 입력의 흔적이다(바이트 단위 디코딩 함정, #873 3라운드). 받으면 입력과 다른 값이 저장된다.
+  if (v.includes("\uFFFD")) return "값에 깨진 문자(U+FFFD)가 있다";
   if (/^\s|\s$/.test(v)) return "값이 공백으로 시작하거나 끝난다(Infisical CLI가 자른다)";
   if (/^["'`]|["'`]$/.test(v)) return "값이 따옴표로 시작하거나 끝난다(Infisical CLI가 벗긴다)";
   return null;
@@ -80,7 +82,7 @@ export function infisicalRead(exec: Exec, project: ReturnType<typeof projectReso
     if (r.code !== 0 || !r.stdoutSecret) throw new Error(`Infisical ${path} 목록: ${why(r)}`);
     let parsed: unknown;
     try {
-      parsed = JSON.parse(r.stdoutSecret.reveal());
+      parsed = JSON.parse(revealSecret(r.stdoutSecret));
     } catch {
       throw new Error(`Infisical ${path} 목록: JSON이 아니다`);
     }
@@ -121,7 +123,7 @@ export function infisicalWrite(exec: Exec, project: ReturnType<typeof projectRes
       checkKey(key);
       const problem = valueProblem(value);
       if (problem) throw new Error(`Infisical ${path}/${key}: ${problem}`);
-      const line = new Secret(`${key}=${value.reveal()}\n`);
+      const line = new Secret(`${key}=${revealSecret(value)}\n`);
       const r = exec(argvFor.set(project.id(), path), { input: line });
       if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${path}/${key} 쓰기: 시간 초과(결과 미상)`);
       // 성공 표에는 값이 가려져(******) 나오지만 쓰지 않는다.

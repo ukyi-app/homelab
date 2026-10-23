@@ -6,7 +6,8 @@ import { basename, dirname, join } from "node:path";
 
 type Matcher = string | { re: string };
 // materialize: argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일.
-type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string> };
+// echoCwd: 스텁이 실행된 폴더를 stdout에 낸다(git rev-parse --show-toplevel 흉내).
+type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean };
 // noStdin: stdin을 읽지 않는다(위임이 부모 stdin을 넘기는 호출. 열린 stdin을 끝까지 읽으면 멈춘다).
 type Rule = { argv: Matcher[]; rest: boolean; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
 
@@ -33,6 +34,7 @@ const call: Record<string, unknown> = {
   stdinLength: stdin.length,
   stdinSha256: new Bun.CryptoHasher("sha256").update(stdin).digest("hex"),
   rule: index === -1 ? null : index,
+  cwd: process.cwd(),
 };
 if (index !== -1 && rules[index].captureStdin) call.stdin = stdin;
 appendFileSync(join(dir, "ledger.jsonl"), JSON.stringify(call) + "\n");
@@ -58,6 +60,7 @@ if (resp.materialize) {
   }
 }
 if (resp.stdout) process.stdout.write(resp.stdout);
+if (resp.echoCwd) process.stdout.write(`${process.cwd()}\n`);
 // 자식이 받은 환경을 시험이 보게 한다(값이 없으면 null).
 if (resp.echoEnv) process.stdout.write(JSON.stringify(Object.fromEntries(resp.echoEnv.map((k) => [k, process.env[k] ?? null]))));
 if (resp.stderr) process.stderr.write(resp.stderr);

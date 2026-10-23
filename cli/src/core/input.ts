@@ -4,21 +4,30 @@ import { readFileSync, readSync } from "node:fs";
 import { valueProblem } from "./infisical";
 import { Secret } from "./secret";
 
+// 에코 없는 tty 한 줄. 바이트를 Enter까지 모은 뒤 UTF-8로 한 번만 디코딩한다(fatal). 함정(#873 3라운드):
+// 1바이트마다 디코딩하면 한글·이모지가 바이트마다 U+FFFD가 되어 입력과 다른 값이 저장되고 길이 검사도 틀린다.
+export function readHiddenLine(readByte: () => number | null): string {
+  const bytes: number[] = [];
+  for (;;) {
+    const b = readByte();
+    // Enter는 raw 모드에서 \r(0x0d)로 온다. Ctrl-C(0x03)는 취소.
+    if (b === null || b === 0x0d || b === 0x0a) break;
+    if (b === 0x03) throw new Error("입력을 취소했다");
+    bytes.push(b);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+  } catch {
+    throw new Error("입력이 올바른 UTF-8이 아니다");
+  }
+}
+
 function readTtyHidden(): string {
   const stdin = process.stdin as unknown as { setRawMode?: (on: boolean) => void };
   stdin.setRawMode?.(true);
   try {
     const buf = Buffer.alloc(1);
-    let line = "";
-    for (;;) {
-      const n = readSync(0, buf, 0, 1, null);
-      if (n === 0) return line;
-      const ch = buf.toString("utf8");
-      // Enter는 raw 모드에서 \r로 온다. Ctrl-C(\x03)는 취소.
-      if (ch === "\r" || ch === "\n") return line;
-      if (ch === "\x03") throw new Error("입력을 취소했다");
-      line += ch;
-    }
+    return readHiddenLine(() => (readSync(0, buf, 0, 1, null) === 0 ? null : buf[0]));
   } finally {
     stdin.setRawMode?.(false);
   }

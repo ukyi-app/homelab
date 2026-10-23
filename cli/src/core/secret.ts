@@ -9,32 +9,33 @@ export const MIN_SECRET = 16;
 
 const tracked = new Set<string>();
 
+// 원문을 꺼내는 길은 아래 revealSecret 하나다. 클래스에는 원문을 돌려주는 메서드가 없다(#873 3라운드 P1: 공개 reveal()을
+// 명령이 불러 16자 미만 기존 값이 추적 없이 출력·PR 파일로 샜다). 원문은 JS private 필드라 객체 밖에서 읽을 수 없고,
+// revealSecret은 이 모듈에만 있어 명령은 import할 수 없다(정적 시험). 해시·같음 비교만 공개한다.
+let rawOf: (s: Secret) => string;
+
 export class Secret {
   readonly #raw: string;
 
+  static {
+    rawOf = (s) => s.#raw;
+  }
+
   constructor(raw: string) {
     this.#raw = raw;
+    Object.freeze(this);
     if (raw.length < MIN_SECRET) return;
     // JSON 출력에서는 "·\ 등이 이스케이프된 꼴로, kubectl 출력에서는 Secret data의 base64 꼴로 나타난다.
     for (const f of [raw, JSON.stringify(raw).slice(1, -1), Buffer.from(raw).toString("base64")]) tracked.add(f);
   }
 
-  // core 안에서만 쓴다(stdin 넘김, 해시).
-  reveal(): string {
-    return this.#raw;
-  }
-
-  get length(): number {
-    return this.#raw.length;
-  }
-
   // 같은지 볼 때 쓰는 해시 앞부분. rotate.md의 `sha256sum | cut -c1-12`와 같은 길이.
   sha256Prefix(n = 12): string {
-    return new Bun.CryptoHasher("sha256").update(this.#raw).digest("hex").slice(0, n);
+    return new Bun.CryptoHasher("sha256").update(rawOf(this)).digest("hex").slice(0, Math.min(Math.max(n, 1), 12));
   }
 
   equals(other: Secret): boolean {
-    return this.#raw === other.#raw;
+    return other instanceof Secret && rawOf(this) === rawOf(other);
   }
 
   toString(): string {
@@ -45,9 +46,19 @@ export class Secret {
     return "[secret]";
   }
 
+  [Symbol.toPrimitive](): string {
+    return "[secret]";
+  }
+
   [Symbol.for("nodejs.util.inspect.custom")](): string {
     return "[secret]";
   }
+}
+
+// core 안에서만 쓴다(stdin 넘김, JSON 해석, 형식 검사). 명령은 이 모듈을 import할 수 없다.
+export function revealSecret(s: Secret): string {
+  if (!(s instanceof Secret)) throw new Error("Secret이 아니다");
+  return rawOf(s);
 }
 
 export function isSecret(x: unknown): x is Secret {

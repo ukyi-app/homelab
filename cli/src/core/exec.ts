@@ -9,7 +9,7 @@
 // - 직접 stdio(inherit, stdout-to-stderr)는 github 위임만. 위임 stdout-to-stderr는 부모 stdin을 넘긴다.
 // - 값을 내는 호출은 secretStdout으로만, 민감 호출의 stderr 원문은 돌려주지 않는다.
 import { basename } from "node:path";
-import { Secret, containsTracked, isSecret } from "./secret";
+import { Secret, containsTracked, isSecret, revealSecret } from "./secret";
 import { ownedTemp } from "./temp";
 import { classify } from "./writes";
 
@@ -105,7 +105,7 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
       if (opts.secretStdout || isSecret(opts.input)) throw new Error(`stdio ${stdio}에 시크릿 입출력을 함께 쓰지 않는다`);
     }
     const sensitive = Boolean(opts.secretStdout) || isSecret(opts.input) || Boolean(verdict.sensitiveOutput);
-    const input = opts.input === undefined ? undefined : isSecret(opts.input) ? opts.input.reveal() : opts.input;
+    const input = opts.input === undefined ? undefined : isSecret(opts.input) ? revealSecret(opts.input) : opts.input;
     // 입력을 따로 주지 않은 위임 명령은 부모 stdin을 넘긴다(래퍼가 묻는 값과 마지막 yes를 사람이 직접 답한다).
     const stdin = input !== undefined ? new TextEncoder().encode(input) : stdio !== "pipe" ? "inherit" : "ignore";
     let p: ReturnType<typeof Bun.spawnSync>;

@@ -21,8 +21,8 @@ export const PUBLIC_HOST = /[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.ukyi\.app/;
 // 내부 이름(values.schema.json). 클러스터 접두를 붙인 길이와 예약어는 명령이 따로 본다(설계 C.4.4).
 export const INTERNAL_NAME = /[a-z]([a-z0-9-]{0,61}[a-z])?/;
 export const RESERVED_INTERNAL = ["go", "vm-go", "tailscale-operator", "vm-tailscale-operator"];
-// Infisical 키 이름. 앱 차트의 env 이름과 같은 꼴.
-export const SECRET_KEY = /[A-Z][A-Z0-9_]*/;
+// Infisical 키 이름. 앱 차트의 env 이름과 같은 꼴(platform/charts/app/values.schema.json envName, Connector 3라운드).
+export const SECRET_KEY = /[A-Z_][A-Z0-9_]*/;
 export const GIT_SHA = /[0-9a-f]{40}/;
 export const IMAGE_DIGEST = /sha256:[0-9a-f]{64}/;
 // Infisical 프로젝트 ID(UUID).

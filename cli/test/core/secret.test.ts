@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { inspect } from "node:util";
 import { renderHuman, render, OutputBlocked } from "../../src/core/output";
 import { valueProblem } from "../../src/core/infisical";
-import { MIN_SECRET, Secret, containsTracked, newPassword } from "../../src/core/secret";
+import { MIN_SECRET, Secret, containsTracked, newPassword, revealSecret } from "../../src/core/secret";
 import type { Result } from "../../src/core/result";
 
 const base = (extra: Partial<Result> = {}): Result => ({ command: "db add", app: "smoke", mode: "plan", status: "pending", steps: [], notes: [], next: null, ...extra });
@@ -14,7 +14,7 @@ describe("Secret", () => {
     expect(`${s}`).toBe("[secret]");
     expect(JSON.stringify({ s })).toBe('{"s":"[secret]"}');
     expect(inspect(s)).toBe("[secret]");
-    expect(s.reveal()).toBe("fakevalue-secret-1111");
+    expect(revealSecret(s)).toBe("fakevalue-secret-1111");
     expect(containsTracked("x fakevalue-secret-1111 y")).toBe(true);
   });
 
@@ -25,8 +25,8 @@ describe("Secret", () => {
 
   test("생성 비밀번호는 영숫자 40자, 매번 다르다(명령은 apply 문맥의 generatePassword로만 얻는다)", () => {
     const p = newPassword();
-    expect(p.length).toBe(40);
-    expect(/^[A-Za-z0-9]{40}$/.test(p.reveal())).toBe(true);
+    expect(revealSecret(p).length).toBe(40);
+    expect(/^[A-Za-z0-9]{40}$/.test(revealSecret(p))).toBe(true);
     expect(newPassword().equals(p)).toBe(false);
   });
 
@@ -49,7 +49,7 @@ describe("출력 차단", () => {
   });
 
   test("추적 중인 원문이 섞인 문자열은 막고, 어느 단계인지만 알린다", () => {
-    const raw = new Secret("fakevalue-secret-4444").reveal();
+    const raw = revealSecret(new Secret("fakevalue-secret-4444"));
     const r = base({ steps: [{ id: "infisical-password", state: "missing", action: "create", target: "x", detail: `값 ${raw}`, result: "planned" }] });
     let msg = "";
     try {

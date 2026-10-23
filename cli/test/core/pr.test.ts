@@ -21,7 +21,7 @@ const mainAt = (sha = FAKE_SHA): Rule => ghGet(`${R}/git/ref/heads/main`, 200, {
 const notOnMain = (): Rule => ghGet(contents(PATH, FAKE_SHA), 404, {});
 const headMsg = (sha: string, message: string): Rule => ghGet(`${R}/git/commits/${sha}`, 200, { message, tree: { sha: "d".repeat(40) } });
 const compare = (head: string, files: string[]): Rule => ghGet(`${R}/compare/${FAKE_SHA}...${head}`, 200, { files: files.map((filename) => ({ filename })) });
-const openPr = (head: string) => ghResponse(200, [{ number: 12, head: { sha: head } }]);
+const openPr = (head: string, base = "main") => ghResponse(200, [{ number: 12, head: { sha: head }, base: { ref: base } }]);
 
 // apply에서 공통으로 쓰는 쓰기 규칙.
 const writes = (): Rule[] => [
@@ -76,7 +76,7 @@ describe("PR 작성기", () => {
       mainAt(),
       notOnMain(),
       // 전체 읽기·직전 읽기·apply 안 PR 찾기는 없음, 재조회는 PR 7(머리 NEW_COMMIT).
-      ghGet(pulls, [ghResponse(200, []), ghResponse(200, []), ghResponse(200, []), ghResponse(200, [{ number: 7, head: { sha: NEW_COMMIT } }])]),
+      ghGet(pulls, [ghResponse(200, []), ghResponse(200, []), ghResponse(200, []), ghResponse(200, [{ number: 7, head: { sha: NEW_COMMIT }, base: { ref: "main" } }])]),
       headMsg(NEW_COMMIT, "feat(smoke): PostgreSQL 연결\n\nHomelab-CLI: db add"),
       compare(NEW_COMMIT, [PATH]),
       ghGet(contents(PATH, NEW_COMMIT), 200, file(CONTENT)),
@@ -171,7 +171,7 @@ describe("PR 작성기", () => {
       ghGet(`${R}/git/ref/heads/main`, [ghResponse(200, { object: { sha: FAKE_SHA } }), ghResponse(200, { object: { sha: FAKE_SHA } }), ghResponse(200, { object: { sha: B } })]),
       ghGet(contents(LIST, FAKE_SHA), 200, file('["existing"]')),
       ghGet(contents(LIST, B), 200, file('["existing","alpha"]')),
-      ghGet(lpulls, [ghResponse(200, []), ghResponse(200, []), ghResponse(200, []), ghResponse(200, [{ number: 9, head: { sha: NEW_COMMIT } }])]),
+      ghGet(lpulls, [ghResponse(200, []), ghResponse(200, []), ghResponse(200, []), ghResponse(200, [{ number: 9, head: { sha: NEW_COMMIT }, base: { ref: "main" } }])]),
       headMsg(B, "main"),
       headMsg(NEW_COMMIT, "x\n\nHomelab-CLI: app new"),
       ghGet(`${R}/compare/${B}...${NEW_COMMIT}`, 200, { files: [{ filename: LIST }] }),
@@ -201,6 +201,14 @@ describe("PR 작성기", () => {
     expect(r2.status).toBe("same");
     expect(r2.notes.join(" ")).toContain("gh pr close 12");
     expectPlanReadOnly(clean.calls());
+  });
+
+  test("열린 PR의 base가 main이 아니면 같다고 보지 않고 실패(Connector 3라운드)", async () => {
+    const { ctx, calls } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD, "release")])]);
+    const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });
+    expect(r.status).toBe("failed");
+    expect(r.error?.message).toContain("base가 main이 아니다");
+    expectPlanReadOnly(calls());
   });
 
   test("변경 검증: 경로·중복·빈 목록·edit 결과 키", async () => {
