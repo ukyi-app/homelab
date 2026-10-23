@@ -33,7 +33,7 @@
   - VictoriaMetrics single: vmsingle이 `-promscrape.config`로 직접 수집한다. 보존 30일, `-memory.allowedBytes` 절대값. `retention.maxDiskSpaceUsageBytes`는 엔터프라이즈 전용이라 보존 기간으로 제한하고, 단위는 values 주석에 적는다.
   - vmalert: `-configCheckInterval=30s`, 룰은 Git.
   - Alertmanager 0.34.1: 설정은 configMapGenerator 해시로 롤아웃한다.
-  - Grafana: 대시보드는 Git provisioning, 플러그인 없음. 내부 Ingress `grafana`(T08a의 operator).
+  - Grafana: 대시보드는 Git provisioning, 플러그인은 봇 로그 읽기용 VictoriaLogs 데이터소스 하나(v0.33.1, zip sha256 고정. 사용자 결정 2026-10-23, #849). 메트릭·로그 데이터소스는 모두 읽기 전용 vmauth를 거친다(아래 (c)). 내부 Ingress `grafana`(T08a의 operator).
   - VictoriaLogs single + vector: 로그 14일. vector는 root여야 `/var/log/pods`를 읽으므로 privileged ns `observability`에 둔다. vector·VictoriaLogs는 limit에 백로그 여유를 둔다(OOM 결합 루프).
   - node-exporter(systemd 수집 켬) + kube-state-metrics. 호스트 유닛 실패를 node-exporter가 본다.
 - 버전: Alertmanager 0.34.1, 나머지는 이 티켓 시작 때 정해 고정한다(U14).
@@ -50,7 +50,7 @@
 
 - 외부 생존 감시 (D-10, AC-P11). Alertmanager Watchdog → healthchecks.io 새 체크(Period 5분, Grace 5분). healthchecks.io 계정은 재사용하고 체크는 새로 만든다(D-10, D-20).
 - Watchdog 라우트는 `group_wait: 0s`, `group_interval: 1m`, `repeat_interval: 1m`이다. `repeat_interval`만 1m이면 기본 group_interval 5m이 실제 간격이 되어 여유가 Grace 5분뿐이다. receiver `healthchecks`는 `webhook_configs`의 `url_file`, `send_resolved: false`다. healthchecks.io 쪽 통지(이메일, Telegram)는 NUC를 거치지 않는다.
-- Alertmanager webhook이 ping URL로 직접 보내는 구성은 [미검증] U10이다. 안 되면 옛 relay를 가드(연결 없이 반환하면 ping하지 않음)와 함께 작게 둔다. 옛 relay는 그 가드가 없어 dead-man이 영구 초록이 됐다.
+- Alertmanager webhook이 ping URL로 직접 보내는 구성은 동작한다(U10 결과 2026-10-23: 새 체크 초록, relay 없음). 안 됐다면 옛 relay를 가드(연결 없이 반환하면 ping하지 않음)와 함께 작게 둔다. 옛 relay는 그 가드가 없어 dead-man이 영구 초록이 됐다.
 - 옛 healthchecks 체크 `homelab-watchdog`는 T06에서 일시 정지돼 있고 재사용하지 않는다. 새 체크가 초록인 것을 확인한 뒤 옛 체크를 지우고, T06 자격 폐기 표의 `보류(D-10, T08b)` 줄(옛 ping URL. 재분해 전 표시는 `보류(D-10, T08)`)을 닫고 [../approvals.md](../approvals.md)에 남긴다(D-10, D-11 표, D-20). **2026-10-19 실제:** 옛 체크는 T06 중에 사용자가 일시 정지 대신 지웠고, T06 표의 그 줄도 `삭제됨`으로 닫혔다(approvals). 이 티켓은 새 체크만 만든다.
 - 공개 경로 생존 확인용 두 번째 체크는 설계 C.3.7의 선택 항목이고 기본은 두지 않는다.
 
@@ -66,7 +66,7 @@
 - 읽기 전용 계정은 Kubernetes·관측·Argo CD 셋이다(AC-P12, 자리 배정은 명세 §4.4와 설계 E.3). Argo CD 계정은 재분해 전 T07 할 일 7에서 옮겨 왔다(T07 할 일 8에 이관 기록). 세 계정을 한 단계에서 확인한다.
 - (a) Kubernetes: SA `bot-reader`(봇 자리 Application이 `target` ns에 만든다) + ClusterRole `homelab-readonly`(라벨 `homelab.ukyi.app/readonly`) + ClusterRoleBinding. get·list·watch만 준다: pods, deployments, replicasets, statefulsets, daemonsets, jobs, cronjobs, services, ingresses, events, nodes, namespaces, PV·PVC, CNPG clusters·databases·backups, ExternalSecret, Argo CD applications. secrets, configmaps, pods/log, pods/exec와 모든 쓰기는 없다. `view` 기본 역할은 configmaps·로그를 포함하므로 쓰지 않는다.
 - (b) Argo CD: 로컬 계정 `bot-reader`(apiKey만). 정책은 `applications, get`, `applicationsets, get`, `projects, get`이고 sync·exec·logs는 없다. `policy.default`는 비운다. `argocd-cm`·`argocd-rbac-cm` patch(설계 C.3.3, `admin.enabled: "false"`)에 더한다.
-- (c) 관측: Grafana 서비스 계정 `bot-reader`(Viewer). 대시보드 보기와 데이터소스 질의만 한다. 쓰기를 못 하는지는 [미검증] U12다. 안 되면 봇 읽기를 데이터소스 API 앞의 별도 읽기 프록시로 한다.
+- (c) 관측: Grafana 서비스 계정 `bot-reader`(Viewer). 대시보드 보기와 데이터소스 질의만 한다. U12 결과(2026-10-23): Viewer는 대시보드 쓰기는 403이지만 데이터소스 resources·proxy 경로로 임의 경로에 POST할 수 있었다. 그래서 대안대로 메트릭(vmsingle)과 로그(VictoriaLogs) 데이터소스 앞에 읽기 전용 vmauth를 두었다(#842·#849). 봇은 로그를 Grafana의 VictoriaLogs 데이터소스(uid `victorialogs`)로 읽는다.
 - 봇 ns의 NetworkPolicy는 클러스터 안에서 Grafana·Argo CD API만 더 열고 vmsingle·VictoriaLogs·Alertmanager API에는 닿지 않는다(Alertmanager API는 침묵 생성이 가능하다). Kubernetes API는 노드 로컬 경로라 NetworkPolicy로 막을 수 없어 읽기 전용 SA가 경계다.
 - verb·roleRef를 막는 CI 검사(L30)는 전체 `ci`를 만드는 T10에서 본다.
 
@@ -83,9 +83,9 @@
 - 자격: SA 토큰 미마운트, RBAC 없음, hostPath·hostNetwork·호스트 소켓 없음. Secret은 Infisical `/apps/<bot>/worker`의 모델 자격 하나다. 작업자 전용 ClusterSecretStore `infisical-sandbox`(conditions는 `sandbox` ns 하나, `secretsPath` `/apps/<bot>/worker`)로 받는다. ExternalSecret은 `platform/sandbox`의 Git 매니페스트로만 생기고, sandbox 서비스 계정에는 ExternalSecret 생성 권한이 없다. 남는 위험: store identity `eso-homelab`은 Free에 경로 RBAC가 없어 `homelab` 프로젝트의 다른 경로도 읽을 수 있다.
 - 영속 쓰기 공간(D-14, 설계 C.8 격리 행): `sandbox` ns에 작업자 전용 영속 쓰기 공간(`CODEX_HOME`용 PVC 하나)을 둔다. 모델 자격은 봇 전용 구독 계정의 Codex 인증 파일(`auth.json`)이고, Codex가 토큰을 갱신하면 이 파일을 다시 쓴다. ESO 한 방향 전달로는 갱신본을 지키지 못해 이 공간이 필요하다. Infisical `/apps/<bot>/worker`의 값은 첫 시드와 재시드용이고, 작업자는 영속 공간에 파일이 없을 때만 시드를 복사한다. 실제 시드는 T16b 전(모델을 처음 쓰는 단계 전) 사람 작업이다(설계 E9). 이 티켓은 시험 파일로 공간이 유지되는지만 본다. PVC 크기와 백업 여부는 설계에 없어 이 티켓에서 정한다(봇 저장소 `ARCHITECTURE.md` §10 열린 항목).
 - 상주 작업자 자리(D-14, D-15): 작업자는 상주 파드 하나(Deployment replicas 1, 동시성 1)이고 컨테이너 포트는 8080이다. 작업 단위 파드는 두지 않는다. [제안] `strategy: Recreate`. RollingUpdate면 교체 중 두 파드가 같은 `auth.json`을 쓴다(설계 C.8).
-- 네트워크: 기본 거부. egress는 `egress` ns 프록시 파드의 3128 하나뿐이고 DNS(CoreDNS 53)는 열지 않는다. 작업자 egress에서 DNS를 빼는 이유는 CoreDNS가 임의 이름을 공용 DNS에 재귀 질의해 이름에 실은 자격이 허용 목록 밖으로 나갈 수 있어서다. 작업자는 프록시를 고정 ClusterIP로 받는다(프록시 Service의 `spec.clusterIP`를 서비스 대역 안 고정값으로 선언, 작업자 env `HTTPS_PROXY=http://<프록시 ClusterIP>:3128`). 목적지 이름 해석은 프록시가 한다([미검증] U29. 안 되면 그 도구만 프록시 설정을 따로 주거나, `egress` ns에 허용 목록 도메인만 푸는 전용 DNS를 둔다).
+- 네트워크: 기본 거부. egress는 `egress` ns 프록시 파드의 3128 하나뿐이고 DNS(CoreDNS 53)는 열지 않는다. 작업자 egress에서 DNS를 빼는 이유는 CoreDNS가 임의 이름을 공용 DNS에 재귀 질의해 이름에 실은 자격이 허용 목록 밖으로 나갈 수 있어서다. 작업자는 프록시를 고정 ClusterIP로 받는다(프록시 Service의 `spec.clusterIP`를 서비스 대역 안 고정값으로 선언, 작업자 env `HTTPS_PROXY=http://<프록시 ClusterIP>:3128`). 목적지 이름 해석은 프록시가 한다(U29 결과 2026-10-22: DNS 없는 파드의 curl이 `HTTPS_PROXY`만으로 동작. 실제 Codex·git·패키지 관리자는 E9. 안 되면 그 도구만 프록시 설정을 따로 주거나, `egress` ns에 허용 목록 도메인만 푸는 전용 DNS를 둔다).
 - egress 허용 목록(D-15): 프록시는 모델 API, 코드 읽기용 `codeload.github.com`, 패키지 레지스트리만 통과시킨다. `github.com`·`api.github.com`·`gist.github.com`은 넣지 않는다. 작업자에는 GitHub 자격이 없다. 구독 인증(D-14)이 쓰는 모델·인증 호스트 목록은 [미검증]이고 T16b가 실측해 넣는다(설계 E9).
-- 노드 로컬 경로(노드 IP의 6443·10250·22)는 NetworkPolicy로 못 막으므로, 작업자 파드 netns 안에서 init 컨테이너(NET_ADMIN, 그 컨테이너만)가 출력을 셋만 허용한다: loopback(`-o lo`), conntrack `ESTABLISHED,RELATED`, 프록시 ClusterIP:3128로 가는 새 연결. 본 컨테이너는 NET_ADMIN이 없다. 그래서 이 ns의 PSA는 privileged이고 파드는 Git(Argo CD)만 만든다. 이 방식은 [미검증] U13이다. 안 되면 호스트 전용 UID + nft(옛 AIOps 방식)로 물러난다(D-15, 확정(사용자 2026-10-18, T15)).
+- 노드 로컬 경로(노드 IP의 6443·10250·22)는 NetworkPolicy로 못 막으므로, 작업자 파드 netns 안에서 init 컨테이너(NET_ADMIN, 그 컨테이너만)가 출력을 셋만 허용한다: loopback(`-o lo`), conntrack `ESTABLISHED,RELATED`, 프록시 ClusterIP:3128로 가는 새 연결. 본 컨테이너는 NET_ADMIN이 없다. 그래서 이 ns의 PSA는 privileged이고 파드는 Git(Argo CD)만 만든다. 이 방식은 동작한다(U13 결과 2026-10-22 시험 ns, 2026-10-23 실제 작업자). 안 됐다면 호스트 전용 UID + nft(옛 AIOps 방식)로 물러난다(D-15, 확정(사용자 2026-10-18, T15)).
 - 작업 전달은 봇 → 작업자 Service ingress 하나다. 이 허용은 봇 자리 Application에 있고 `platform/sandbox`에는 기본 거부만 있다.
 - 남는 위험(쓰기 유출): 프록시는 CONNECT의 호스트 이름만 보므로 `github.com`을 허용하면 읽기와 쓰기를 가르지 못한다. 그래서 D-15(확정(사용자 2026-10-18, T15))로 코드 읽기를 `codeload.github.com` 압축본만으로 좁혔다(위 허용 목록). 패키지 레지스트리의 게시 API는 이 결정으로 줄지 않는다(설계 C.8).
 
@@ -142,7 +142,7 @@
 - 시나리오 17: NUC 네트워크를 물리적으로 끊거나 전원을 끈다(원격 접속이 끊기므로 현장에서). T08b는 사용자 결정(2026-10-23)으로 파드에서 ping 주소로 가는 443 차단으로 대신했고, 물리 차단은 T13 시나리오 17에서 한다. Period + Grace(10분) 뒤 healthchecks.io가 down으로 바꾸고 NUC를 거치지 않는 경로(이메일, Telegram 연동)로 알리는지, 복구 뒤 up 알림이 오는지 대시보드와 이벤트 기록, 수신 시각으로 본다.
 - 시나리오 6·7 경보 부분: 시험 ns에 없는 키를 가리키는 ExternalSecret을 두고, 또 T09의 시험용 client secret 장애 주입으로 ESO 인증을 잠시 끊어(승인 기록) ExternalSecretNotReady 경보가 Telegram에 도착하는지 본다. 부트스트랩 Secret을 원래 client secret으로 되돌린 뒤 resolved와 시험 ns 삭제를 확인한다.
 - 이탈 경보 발화 시험: AdGuard Home이 tailnet 질의를 받지 못하는 상태를 감시 방식(T08a의 U32 결과)에 맞춰 tailnet 경로만 끊어 만든다. D-11은 (c)라(2026-10-20) NUC는 `tag:nuc`이고 tailnet 기기의 53 접근은 `autogroup:member → tag:nuc:53` 규칙 하나다. 그래서 정책 사본을 남기고 그 규칙을 뺀 정책을 apply한다(승인 기록). ACL을 건드리지 않는 대안은 사람이 sudo로 nftables를 임시로 넣는 것이다: `tailscale0`에서 들어오는 udp·tcp 53을 prerouting priority -400(conntrack·NAT 전)에서 버리고 시험 뒤 지운다(T08a 2026-10-20 무응답 시험과 같은 방식, systemd 타이머로 자동 해제). 그 동안 Tailscale 기기는 공용 서버로 해석한다. 1시간 무질의 뒤 다음 평가 주기 안에 Telegram 경보가 오는지 확인하고, 규칙이나 정책을 되돌린 뒤 resolved를 확인한다. 룰 논리는 단위 시험으로 따로 본다.
-- 핵심 룰: `vmalert-tool unittest`(형식 미검증, U11).
+- 핵심 룰: `vmalert-tool unittest`(U11 결과 2026-10-22: `bun run ci`가 돌린다).
 - 외부 생존 감시: 새 체크가 초록(up)인 것을 healthchecks.io에서 확인한 뒤 옛 `homelab-watchdog`를 지운다. (2026-10-19 T06 중 이미 지워졌다)
 - 읽기 전용 접근(설계 C.8): `kubectl auth can-i --as=system:serviceaccount:bot-slot-probe:bot-reader list pods -A` → yes, 같은 주체로 `get secrets -A`, `get pods --subresource=log -A`, `create deployments -n app-smoke` → no. `argocd admin settings rbac can bot-reader get applications '*/*'` → Yes, `sync` → No(argocd-rbac-cm 오프라인 평가). Grafana 토큰으로 `GET /api/search` → 200, `POST /api/dashboards/db` → 403.
 - 경보 외부 수신자(설계 C.8): `amtool config routes test ... severity=warning` → `bot` 포함, `amtool alert add alertname=BotRouteTest severity=warning` → 시험 수신기 로그 수신 + `alertmanager_notifications_total{integration="webhook"}` 증가 + Telegram도 수신.
