@@ -17,12 +17,11 @@ route:
       repeat_interval: 1m
     # 봇 자리(설계 C.8): 봇이 생기면 아래 네 줄을 함께 켠다(T16b). continue: true는 다음 형제 route를 계속
     # 검사하게 할 뿐, 일치한 자식이 있으면 부모 receiver(telegram)로는 보내지 않는다. 그래서 Telegram 형제 route를 둔다.
-    # T08b 라이브 시험용 임시 켜기. 시험 뒤 되돌림 PR로 다시 주석으로 돌린다.
-    - matchers: ['severity=~"warning|critical"']
-      receiver: bot
-      continue: true
-    - matchers: ['severity=~"warning|critical"']
-      receiver: telegram
+    # - matchers: ['severity=~"warning|critical"']
+    #   receiver: bot
+    #   continue: true
+    # - matchers: ['severity=~"warning|critical"']
+    #   receiver: telegram
 
 receivers:
   - name: telegram
@@ -49,11 +48,6 @@ receivers:
           → {{ .Annotations.runbook }}
           {{- end }}
           {{- end }}
-  - name: bot
-    webhook_configs:
-      # T08b 시험 수신기(bot-slot probe). 비밀이 아니라 url로 둔다. T16b는 봇 Service를 url_file로 넣는다.
-      - url: http://bot-slot-probe-alerts.bot-slot-probe:8081/
-        send_resolved: true
   - name: healthchecks
     webhook_configs:
       # healthchecks.io ping은 POST도 받는다. URL 자체가 자격이라 파일로 읽는다.
