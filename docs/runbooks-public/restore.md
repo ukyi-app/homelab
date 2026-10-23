@@ -207,11 +207,10 @@ Secret·ObjectStore 이름은 `platform/cnpg/cluster`를 따른다(R2 자격 Sec
 
 ```bash
 T1='2026-11-02 10:00:00+09'   # 되돌릴 시각. 마지막 base backup과 WAL 아카이브 범위 안이어야 한다
-SRV=$(kubectl -n database get cluster pg -o jsonpath='{.spec.plugins[?(@.name=="barman-cloud.cloudnative-pg.io")].parameters.serverName}')
-IMG=$(kubectl -n database get cluster pg -o jsonpath='{.spec.imageName}')
-SIZE=$(kubectl -n database get cluster pg -o jsonpath='{.spec.storage.size}')
-BUCKET=$(kubectl -n database get objectstore r2 -o jsonpath='{.spec.configuration.destinationPath}' | sed -E 's#^s3://([^/]+)/.*#\1#')
-PRIMARY=$(kubectl -n database get cluster pg -o jsonpath='{.status.currentPrimary}')
+# 클러스터에서 읽는 값(SRV·IMG·SIZE·BUCKET·PRIMARY)과 임시 클러스터 주 파드(TMP)는 확인 블록 안에서 조회·검증하고
+# $W/vars.env·$W/tmp.env로 넘긴다(블록 밖에서 받으면 조회가 값을 낸 뒤 실패해도 막지 못한다). 값을 쓰는 블록은 use로 읽는다.
+# 두 파일의 값은 따옴표 없는 정규식으로 거른 것만 들어가 읽어도 안전하다.
+use() { . "$W/vars.env"; if [ -f "$W/tmp.env" ]; then . "$W/tmp.env"; fi; }
 dump() { kubectl -n database exec "$TMP" -c postgres -- pg_dump -U postgres -Fc -d "$APP"; }   # 임시 클러스터의 그 DB
 J() { kubectl -n app-$APP exec -i job/restore-$RUN-db -- "$@"; }                                 # 4-1의 앱 역할 복원 Job
 # 복원 Job이 지금 살아 있는지(jobready), 앱 역할로 그 DB에 접속되는지(jobauth <DB>). 표식(ok-auth)보다
@@ -236,14 +235,27 @@ sqlok() { awk -v app="$APP" '
   /^\\(un)?restrict [A-Za-z0-9]+$/ || /^--/ || /^$/ { next }
   { print; bad = 1 } END { exit bad }' "$1"; }
 ( set -euo pipefail; step vars
-  # 검사는 한 줄에 하나. "a && b"의 앞쪽 실패에는 set -e가 멈추지 않는다
-  [ -n "$T1" ]; [ -n "$BUCKET" ]; [ -n "$PRIMARY" ]
-  # SQL·YAML·sed에 들어가는 값의 모양. APP은 앱 차트와 같은 DNS 라벨이다
+  # 조회는 독립 할당으로(실패면 set -e가 멈춘다)
+  SRV=$(kubectl -n database get cluster pg -o jsonpath='{.spec.plugins[?(@.name=="barman-cloud.cloudnative-pg.io")].parameters.serverName}')
+  IMG=$(kubectl -n database get cluster pg -o jsonpath='{.spec.imageName}')
+  SIZE=$(kubectl -n database get cluster pg -o jsonpath='{.spec.storage.size}')
+  DEST=$(kubectl -n database get objectstore r2 -o jsonpath='{.spec.configuration.destinationPath}')
+  BUCKET=$(printf '%s' "$DEST" | sed -E 's#^s3://([^/]+)/.*#\1#')
+  PRIMARY=$(kubectl -n database get cluster pg -o jsonpath='{.status.currentPrimary}')
+  # SQL·YAML·sed에 들어가는 값의 모양. 검사는 한 줄에 하나("a && b"의 앞쪽 실패에는 set -e가 멈추지 않는다).
+  # APP은 앱 차트와 같은 DNS 라벨이다.
   printf '%s' "$APP" | grep -qE '^[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$'
+  printf '%s' "$T1" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}(:?[0-9]{2})?)?$'
   printf '%s' "$SRV" | grep -qE '^[a-z0-9-]+$'
   printf '%s' "$IMG" | grep -qE '^[a-z0-9./_-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$'
   printf '%s' "$SIZE" | grep -qE '^[0-9]+(Mi|Gi|Ti)$'
+  printf '%s' "$BUCKET" | grep -qE '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'
+  printf '%s' "$PRIMARY" | grep -qE '^pg-[0-9]+$'
   kubectl -n database get backups      # T1 앞에 completed base backup이 있는지 눈으로 본다
+  # 모든 확인이 끝난 뒤에만 파일을 바꾼다(실패하면 옛 값도 새 값도 남지 않게 먼저 지운다)
+  rm -f "$W/vars.env"
+  printf "T1='%s'\nSRV='%s'\nIMG='%s'\nSIZE='%s'\nBUCKET='%s'\nPRIMARY='%s'\n" "$T1" "$SRV" "$IMG" "$SIZE" "$BUCKET" "$PRIMARY" > "$W/vars.env.new"
+  mv "$W/vars.env.new" "$W/vars.env"
   touch "$W/ok-vars" )
 [ -f "$W/ok-vars" ] && echo "통과: vars" || echo "멈춤: 값이 비었거나 조회에 실패했다"
 ```
@@ -252,6 +264,7 @@ sqlok() { awk -v app="$APP" '
 
    ```bash
    ( set -euo pipefail; step predump
+     use
      # 같은 RUN으로 다시 돌리면 이름이 겹친다. 파드까지 지운 뒤(foreground) 새로 만든다.
      kubectl -n database delete job restore-$RUN-r2 --ignore-not-found --cascade=foreground --wait=true --timeout=2m
      kubectl create -f - <<YAML
@@ -307,12 +320,16 @@ sqlok() { awk -v app="$APP" '
    [ -f "$W/ok-predump" ] && echo "되돌림 사본 확인" || echo "멈춤: 되돌림 사본을 확인하지 못했다"
    ```
 
-2. **임시 클러스터:** `bootstrap.recovery`로 T1까지 되감는다. WAL 아카이버 plugin을 붙이지 않는다(운영 prefix에 쓰지 않게, 설계 B.8 E6). PVC는 `local-path`(Delete)라 PVC를 지우면 노드의 폴더도 지워진다. `inheritedMetadata`가 실행 id 라벨을 PVC·파드에 물려준다.
+2. **임시 클러스터:** `bootstrap.recovery`로 T1까지 되감는다. 만들기·기다리기·확인이 한 블록이다. 같은 RUN의 임시 클러스터가 이미 있으면(앞 시도가 만든 것) 재사용하지 않고 멈춘다. 그때는 6단계로 그 RUN의 객체를 지우고 새 RUN으로 0.1부터 다시 시작한다(복구가 30분 안에 Ready가 되지 않은 경우도 같다). WAL 아카이버 plugin을 붙이지 않는다(운영 prefix에 쓰지 않게, 설계 B.8 E6). PVC는 `local-path`(Delete)라 PVC를 지우면 노드의 폴더도 지워진다. `inheritedMetadata`가 실행 id 라벨을 PVC·파드에 물려준다.
 
    ```bash
-   ( set -euo pipefail; need run vars
-     # 같은 RUN으로 다시 돌리면 이미 있는 임시 클러스터를 그대로 쓴다(복구는 오래 걸린다). 망가졌으면 6단계로 지우고 RUN을 새로.
-     if kubectl -n database get cluster pg-restore-$RUN >/dev/null 2>&1; then echo "임시 클러스터가 이미 있다: 그대로 쓴다"; else
+   ( set -euo pipefail; step tmp
+     use
+     rm -f "$W/tmp.env"
+     # 같은 RUN의 임시 클러스터가 이미 있으면 재사용하지 않는다. 그 사이 T1·SRV·IMG·SIZE가 바뀌었을 수 있고,
+     # 이미 떠 있는 클러스터의 복구 지점은 바꿀 수 없다. 6단계로 지우고 새 RUN으로 0.1부터 다시 시작한다.
+     if kubectl -n database get cluster pg-restore-$RUN >/dev/null 2>&1; then
+       echo "임시 클러스터 pg-restore-${RUN}이 이미 있다. 재사용하지 않는다: 6단계로 지우고 새 RUN으로 다시 시작한다" >&2; exit 1; fi
      kubectl create -f - <<YAML
    apiVersion: postgresql.cnpg.io/v1
    kind: Cluster
@@ -339,12 +356,12 @@ sqlok() { awk -v app="$APP" '
              barmanObjectName: r2
              serverName: $SRV
    YAML
-     fi
-     kubectl -n database wait --for=condition=Ready cluster/pg-restore-$RUN --timeout=30m )
-   TMP=$(kubectl -n database get cluster pg-restore-$RUN -o jsonpath='{.status.currentPrimary}')
-   ( set -euo pipefail; step tmp
-     [ -n "$TMP" ]
+     kubectl -n database wait --for=condition=Ready cluster/pg-restore-$RUN --timeout=30m
+     TMP=$(kubectl -n database get cluster pg-restore-$RUN -o jsonpath='{.status.currentPrimary}')
+     printf '%s' "$TMP" | grep -qE "^pg-restore-$RUN-[0-9]+\$"
      kubectl -n database exec "$TMP" -c postgres -- psql -U postgres -d "$APP" -v ON_ERROR_STOP=1 -tAc 'select count(*) from <표식 테이블>'
+     printf "TMP='%s'\n" "$TMP" > "$W/tmp.env.new"
+     mv "$W/tmp.env.new" "$W/tmp.env"
      touch "$W/ok-tmp" )
    [ -f "$W/ok-tmp" ] && echo "통과: tmp" || echo "멈춤: 임시 클러스터가 준비되지 않았다"
    ```
@@ -381,6 +398,7 @@ sqlok() { awk -v app="$APP" '
 
    ```bash
    ( set -euo pipefail; step auth
+     use
      # 같은 RUN으로 다시 돌리면 Job 이름이 겹친다(시나리오 10 실측). 파드까지 지운 뒤 새로 만든다.
      kubectl -n app-$APP delete job restore-$RUN-db --ignore-not-found --cascade=foreground --wait=true --timeout=2m
      cat <<'YAML' | sed "s/__APP__/$APP/g; s/__RUN__/$RUN/g; s#__IMG__#$IMG#g" | kubectl create -f -
@@ -448,6 +466,7 @@ sqlok() { awk -v app="$APP" '
 
    ```bash
    ( set -euo pipefail; step list
+     use
      dump | J pg_restore --list > "$W/list"
      [ -s "$W/list" ]
      kubectl -n database exec "$TMP" -c postgres -- psql -U postgres -d "$APP" -v ON_ERROR_STOP=1 -tA -F ' ' -c \
@@ -507,6 +526,7 @@ sqlok() { awk -v app="$APP" '
 
    ```bash
    ( set -euo pipefail; step db
+     use
      # SQL은 표준 입력으로, 값은 psql 변수로(-c에서는 치환되지 않는다). :"x"는 식별자, :'x'는 문자열로 psql이 인용한다.
      q() { kubectl -n database exec -i "$PRIMARY" -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 -tA -v app="$APP" "$@"; }
      jobready
@@ -547,6 +567,7 @@ sqlok() { awk -v app="$APP" '
 
    ```bash
    ( set -euo pipefail; step main
+     use
      jobready
      jobauth "$APP"
      J sh -c 'cat > /tmp/main.list' < "$W/main.list"
@@ -581,6 +602,7 @@ sqlok() { awk -v app="$APP" '
    SQL
    )
    ( set -euo pipefail; step acl
+     use
      jobready
      jobauth "$APP"
      if [ -s "$W/acl.list" ]; then
@@ -608,6 +630,7 @@ sqlok() { awk -v app="$APP" '
 
    ```bash
    ( set -euo pipefail; step verify
+     use
      # 명령 치환은 독립 할당으로(실패면 set -e가 멈춘다) 받은 뒤 비교한다
      ap=$(kubectl -n database get database $APP -o jsonpath='{.status.applied}')
      [ "$ap" = true ]   # 재조정이 다시 만든 DB를 건드리지 않음
