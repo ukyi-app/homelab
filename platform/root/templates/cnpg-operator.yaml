@@ -1,7 +1,9 @@
 {{- /*
-자리: cnpg-operator. 맡은 티켓 T11, wave -6(설계 C.3.1). CNPG operator와 Barman Cloud Plugin. plugin은 cert-manager(-7) 뒤다.
-켜기: values.yaml의 components.cnpgOperator.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
-source와 destination은 자리표시다. 맡은 티켓이 정한다(외부 Helm 차트면 chart와 고정 semver, _helpers.tpl).
+cnpg-operator: CNPG operator와 Barman Cloud Plugin. 맡은 티켓 T11, wave -6(설계 C.3.1). plugin은 cert-manager(-7) 뒤다.
+공식 차트 둘을 한 Application의 두 source로 둔다. 둘 다 외부 차트라 platform/cnpg/operator 디렉터리는 없다.
+plugin은 operator에 서비스 라벨로 자기를 알린다. 둘 사이에 적용 순서는 필요 없다.
+차트 values는 top-level 그대로 넘긴다. 옛 구성은 umbrella 차트 아래로 감싸 값이 조용히 무시됐다(설계 B.8 E6).
+켜기: values.yaml의 components.cnpgOperator.enabled. 꺼져 있으면 아무것도 렌더하지 않는다.
 */}}
 {{- if .Values.components.cnpgOperator.enabled }}
 apiVersion: argoproj.io/v1alpha1
@@ -13,10 +15,47 @@ metadata:
     argocd.argoproj.io/sync-wave: "-6"
 spec:
   project: platform
-  source:
-    repoURL: {{ include "homelab.repoURL" . }}
-    targetRevision: main
-    path: platform/cnpg/operator
+  sources:
+    # 0.29.1(operator 1.30.1)은 2026-10-23 기준 최신(cloudnative-pg.io/charts index, U14). 1.30은 Kubernetes 1.34~1.36,
+    # EOL 약 2026-12라 1.31이 나오면 올린다(설계 C.5.3). in-tree barmanObjectStore는 1.31.0에서 빠진다.
+    - repoURL: https://cloudnative-pg.io/charts
+      chart: cloudnative-pg
+      targetRevision: 0.29.1
+      helm:
+        valuesObject:
+          image:
+            # 멀티 아키텍처 index digest(2026-10-23 ghcr.io에서 확인). 차트가 repository:tag로 이어 붙여 tag에 digest를 함께 둔다.
+            # renovate: image=ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1
+            tag: 1.30.1@sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4d32b5bc07
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            # 2026-10-23 kind 실측 유휴 33Mi, 옛 14일 peak 54.3Mi(설계 P13)의 약 2배.
+            limits:
+              memory: 128Mi
+    # 0.8.1(plugin v0.15.1)은 2026-10-23 기준 최신(같은 index, U14).
+    - repoURL: https://cloudnative-pg.io/charts
+      chart: plugin-barman-cloud
+      targetRevision: 0.8.1
+      helm:
+        valuesObject:
+          image:
+            # renovate: image=ghcr.io/cloudnative-pg/plugin-barman-cloud:v0.15.1
+            tag: v0.15.1@sha256:c75acad19a36e8176cfe2885761ff1b836c6ef977d7257e298c99a28b5c302ef
+          # 인스턴스 파드에 주입되는 sidecar. 차트는 이 값을 ConfigMap 문자열(SIDECAR_IMAGE)로만 넘겨
+          # 이미지 스캐너가 보지 못한다. 그래서 여기서 digest로 고정한다(옛 함정 TD:895).
+          sidecarImage:
+            # renovate: image=ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.15.1
+            tag: v0.15.1@sha256:2287a793a804db751edd0d07d44cd549e357677e98a800eb12e2cf7c0d53f9b0
+          # 차트 기본값은 resources {}다. 이 컨트롤러는 백업을 직접 나르지 않는다(sidecar 몫, platform/cnpg/cluster).
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            # 2026-10-23 kind 실측 유휴 19Mi, 옛 peak 19.3Mi의 약 3배.
+            limits:
+              memory: 64Mi
   destination:
     server: https://kubernetes.default.svc
     namespace: cnpg-system
@@ -24,6 +63,9 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      # CNPG CRD(Cluster 등)가 커서 client-side apply의 last-applied 주석 한도(256KB)를 넘는다.
+      - ServerSideApply=true
     retry:
       {{- include "homelab.retry" . | nindent 6 }}
 {{- end }}

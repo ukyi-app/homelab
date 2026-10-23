@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["backup", "cnpg"],
+  "properties": {
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bucket"],
+      "properties": {
+        "bucket": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" }
+      }
+    },
+    "cnpg": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serverName"],
+      "properties": {
+        "serverName": { "type": "string", "pattern": "^pg-(vm-)?[0-9]{8}$" },
+        "recoverySource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["serverName"],
+          "properties": {
+            "serverName": { "type": "string", "pattern": "^pg-(vm-)?[0-9]{8}$" },
+            "bucket": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" },
+            "credentialsSecret": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" }
+          }
+        }
+      }
+    }
+  }
+}

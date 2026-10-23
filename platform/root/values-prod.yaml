@@ -24,5 +24,14 @@ cluster:
   tailscale:
     prefix: ""
 
-  # T11. CNPG 백업 버킷·serverName·복구 원본. 운영 버킷은 homelab-backups.
-  cnpg: {}
+  # T11. 백업 버킷(T08a가 만든 R2 버킷). CNPG(pg/ prefix)와 영속 Valkey 백업(valkey/<앱>/ prefix)이 함께 읽는다.
+  backup:
+    bucket: homelab-backups
+
+  # T11. CNPG 아카이브 세대와 복구 원본(platform/cnpg/cluster, 설계 C.6.4).
+  # serverName은 s3://<bucket>/pg/<serverName>/을 정한다. 클러스터를 다시 만들거나 복구할 때마다 새 값 pg-<YYYYMMDD>.
+  # 두 primary가 같은 값이면 타임라인이 섞이고 R2에 버저닝이 없어 되돌릴 수 없다.
+  # 빈 NUC 복구 PR만 recoverySource.serverName(지금 이 serverName)을 더하고 serverName을 pg-<복구일>로 바꾼다.
+  # 복구 확인 뒤 정리 PR이 recoverySource를 지운다(남기면 볼륨 유실 때 낡은 아카이브에서 조용히 복구된다).
+  cnpg:
+    serverName: pg-20261023

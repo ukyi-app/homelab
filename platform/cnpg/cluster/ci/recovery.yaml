@@ -1,0 +1,7 @@
+# 빈 NUC 복구 PR의 렌더(설계 C.6.4). recovery + 복구 원본 ObjectStore r2-source.
+backup:
+  bucket: homelab-backups
+cnpg:
+  serverName: pg-20261201
+  recoverySource:
+    serverName: pg-20261023
