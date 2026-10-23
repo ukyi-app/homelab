@@ -1,4 +1,5 @@
-# vmauth: Grafana 데이터소스 앞의 읽기 전용 프록시(vmauth/auth.yaml). vmalert는 쓰기가 필요해 vmsingle에 직접 붙는다.
+# vmauth: Grafana 데이터소스(vmsingle·VictoriaLogs) 앞의 읽기 전용 프록시(vmauth/auth.yaml).
+# vmalert는 쓰기가 필요해 vmsingle에, vector는 VictoriaLogs에 직접 붙는다.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -1,4 +1,5 @@
-# Grafana. 대시보드는 Git provisioning이고 UI 저장은 남지 않는다. 플러그인 없이 둔다(설계 C.3.7).
+# Grafana. 대시보드는 Git provisioning이고 UI 저장은 남지 않는다. 플러그인은 VictoriaLogs 데이터소스 하나만
+# init 컨테이너가 버전 고정으로 넣는다(설계 C.3.7). Grafana 자체 내려받기(preinstall)는 끈 채로 둔다.
 # 사람은 tailnet Ingress(../ingress)로 들어온다.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -25,6 +26,8 @@ spec:
         key: observability/GRAFANA_ADMIN_PASSWORD
 ---
 # 사용자·서비스 계정(봇 Viewer SA, 설계 C.8)이 sqlite DB에 남는다. 대시보드는 Git이 원본이다.
+# 플러그인도 여기 둔다. 풀린 크기 214MB(v0.33.1, 모든 OS용 백엔드 포함, 서명이 파일 전부를 덮어 지울 수 없다).
+# 버전을 바꿀 때는 옛 판 + zip 79MB + 새 판이 잠깐 함께 있어 500MB 남짓이다.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -67,6 +70,65 @@ spec:
         runAsGroup: 472
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # 플러그인을 grafana-data PVC에 넣는다. 표시 파일의 sha256이 맞으면 내려받지 않아 평소 재시작은 GitHub에
+        # 기대지 않는다. 버전을 바꾸는 롤아웃만 GitHub가 필요하고, 그때 받지 못하면 Grafana가 뜨지 않는다(Recreate).
+        # zip을 emptyDir가 아니라 PVC에 받는다. emptyDir sizeLimit을 넘으면 축출 루프가 된다(설계 B.8 E4).
+        # 받기 → sha256 확인 → PVC 안 임시 폴더에 풀기 → 바꿔 넣기 순서라 중간에 끊겨도 반쯤 풀린 판이 남지 않는다.
+        # 표시 파일은 플러그인 폴더 밖에 둔다. 안에 두면 서명 목록에 없는 파일이라 Grafana가 modified로 거부한다.
+        # 서명(MANIFEST.txt)은 Grafana가 로드 때 다시 본다. unsigned 허용 설정은 쓰지 않는다. 파일이 바뀌면
+        # "signature does not match"로 거부되고(실측) 이 init은 다시 받지 않는다. 표시 파일을 지우고 재시작하면 다시 받는다.
+        - name: install-plugins
+          # Grafana와 같은 이미지. Alpine busybox의 unzip·sha256sum과 curl이 들어 있다.
+          image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              dest="/var/lib/grafana/plugins/$PLUGIN_ID"
+              marker="/var/lib/grafana/.plugin-$PLUGIN_ID.sha256"
+              staging=/var/lib/grafana/.plugin-staging
+              # 지난 실패(sha256 틀림, 중단)가 남긴 zip을 건너뛰는 경로에서도 지운다.
+              rm -rf "$staging"
+              if [ -f "$dest/plugin.json" ] && [ "$(cat "$marker" 2>/dev/null)" = "$PLUGIN_SHA256" ]; then
+                echo "$PLUGIN_ID $PLUGIN_VERSION already installed"
+                exit 0
+              fi
+              mkdir -p "$staging/unpacked" /var/lib/grafana/plugins
+              curl -fsSL --retry 3 --connect-timeout 10 --max-time 600 -o "$staging/plugin.zip" \
+                "https://github.com/VictoriaMetrics/victorialogs-datasource/releases/download/v$PLUGIN_VERSION/$PLUGIN_ID-v$PLUGIN_VERSION.zip"
+              echo "$PLUGIN_SHA256  $staging/plugin.zip" | sha256sum -c -
+              unzip -q "$staging/plugin.zip" -d "$staging/unpacked"
+              test -f "$staging/unpacked/$PLUGIN_ID/plugin.json"
+              rm -f "$marker"
+              rm -rf "$dest"
+              mv "$staging/unpacked/$PLUGIN_ID" "$dest"
+              rm -rf "$staging"
+              echo "$PLUGIN_SHA256" > "$marker"
+              echo "$PLUGIN_ID $PLUGIN_VERSION installed"
+          env:
+            - name: PLUGIN_ID
+              value: victoriametrics-logs-datasource
+            # v0.33.1(2026-10-16, 최신 안정판). sha256은 GitHub 릴리스 asset digest이고 받은 파일로 다시 확인했다(2026-10-23).
+            # 릴리스의 checksums 파일은 sha1이라 쓰지 않는다. 버전과 sha256은 함께 바꾼다.
+            - name: PLUGIN_VERSION
+              value: "0.33.1"
+            - name: PLUGIN_SHA256
+              value: 73e7ce379ae9a9ce6fdb978e5d6d43f67029b4c3e4d970f1ca8f7f4617f331c5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
       containers:
         - name: grafana
           # 13.2.4, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
@@ -82,8 +144,8 @@ spec:
               value: "false"
             - name: GF_AUTH_ANONYMOUS_ENABLED
               value: "false"
-            # 12부터 기본 플러그인을 시작 때 내려받는다. 플러그인을 두지 않고, 다운로드가 디스크를 채우던
-            # 부팅·축출 루프(설계 B.8 E4)도 막는다. egress도 막혀 있어 켜 두면 시작이 늦어진다.
+            # 12부터 기본 플러그인을 시작 때 내려받는다. 다운로드가 디스크를 채우던 부팅·축출 루프(설계 B.8 E4)를
+            # 막는다. 필요한 플러그인은 위 init이 버전 고정으로 넣는다.
             - name: GF_PLUGINS_PREINSTALL_DISABLED
               value: "true"
             - name: GF_ANALYTICS_REPORTING_ENABLED
@@ -96,6 +158,12 @@ spec:
               value: "false"
             - name: GF_PATHS_PROVISIONING
               value: /etc/grafana/provisioning
+            # 데이터소스 응답 상한 4 MiB = 4194304 B. 로그 플러그인은 응답의 약 15배를 메모리에 올려(로컬 실측:
+            # 상한 근처 질의 하나 +60Mi), Viewer가 maxLines를 크게 주면 Grafana가 OOM된다(상한 없이 5만 줄 3개 동시 680Mi).
+            # VictoriaLogs에는 결과 크기 상한 플래그가 없다. 클러스터 로그 한 줄 약 680B라 약 6000줄까지 받는다.
+            # 메트릭 데이터소스에도 걸린다. 평소 질의는 0.6MB 아래이고 시계열 1700개 같은 극단 질의만 넘는다(실측).
+            - name: GF_DATAPROXY_RESPONSE_LIMIT
+              value: "4194304"
           ports:
             - name: http
               containerPort: 3000
@@ -103,8 +171,10 @@ spec:
             requests:
               cpu: 50m
               memory: 128Mi
+            # 클러스터 3일 최대 263Mi(플러그인 전). 로그 플러그인 백엔드 프로세스가 약 30Mi를 더하고, 상한 근처 로그 질의는
+            # 2개 동시 406Mi·4개 동시 490Mi(로컬 실측)라 384Mi에서 올린다. 그 이상 동시 질의는 OOM 재시작이 남는 위험이다.
             limits:
-              memory: 384Mi
+              memory: 512Mi
           readinessProbe:
             httpGet:
               path: /api/health
