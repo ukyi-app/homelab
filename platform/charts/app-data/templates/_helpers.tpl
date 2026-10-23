@@ -22,6 +22,11 @@
 {{- if and $v.restoreMode (not $v.persistent) -}}
 {{- fail "valkey.restoreMode는 valkey.persistent: true와 함께 쓴다" -}}
 {{- end -}}
+{{- /* 복원 모드는 running: true를 함께 적을 때만. running 없이 켜 두면 서버가 그대로 돌다가 나중에 재시작될 때
+       appendonly no로 떠 AOF를 무시하고 더 오래된 RDB를 읽는다(마지막 RDB 뒤 쓰기를 잃는다). */ -}}
+{{- if and $v.restoreMode (not (and (hasKey $v "running") $v.running)) -}}
+{{- fail "valkey.restoreMode는 valkey.running: true를 함께 적을 때만 쓴다(복원 3단계, docs/runbooks-public/restore.md 1절)" -}}
+{{- end -}}
 {{- if $v.persistent -}}
 {{- /* 공식 valkey 차트는 릴리스 이름에 valkey가 들어 있으면 접미사 없이 릴리스 이름만 쓴다(앱 차트와 같은 함정). */ -}}
 {{- if contains "valkey" .Release.Name -}}
