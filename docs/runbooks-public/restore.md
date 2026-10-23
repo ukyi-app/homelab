@@ -217,7 +217,8 @@ J() { kubectl -n app-$APP exec -i job/restore-$RUN-db -- "$@"; }                
 # 복원 Job이 지금 살아 있는지(jobready), 앱 역할로 그 DB에 접속되는지(jobauth <DB>). 표식(ok-auth)보다
 # Job 수명(약 2시간)이 짧을 수 있어 DB를 지우거나 쓰는 블록(4-3·4-4·4-5) 안에서 매번 다시 본다.
 jobready() { kubectl -n app-$APP wait --for=condition=ready pod -l job-name=restore-$RUN-db --timeout=60s >/dev/null; }
-jobauth() { [ "$(J psql -d "$1" -v ON_ERROR_STOP=1 -tAc 'select current_user')" = "$APP" ]; }
+# 명령 치환은 독립 할당으로 받아 실패면 멈춘 뒤 비교한다. '[ "$(명령)" = 값 ]'은 명령이 값을 낸 뒤 실패해도 비교만 본다.
+jobauth() { local u; u=$(J psql -d "$1" -v ON_ERROR_STOP=1 -tAc 'select current_user') || return 1; [ "$u" = "$APP" ]; }
 # 그 DB가 지금 있는지(관리자 조회). 0 또는 1만 낸다. 앱 역할 접속은 DB가 없으면 실패하므로 이것으로 길을 나눈다.
 dbn() { printf '%s\n' "select count(*) from pg_database where datname = :'app'" \
   | kubectl -n database exec -i "$PRIMARY" -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 -tA -v app="$APP"; }
@@ -362,9 +363,11 @@ sqlok() { awk -v app="$APP" '
    ( set -euo pipefail; step suspended
      # Deployment가 0으로 줄었고 실제로 0개다. 완료된(Succeeded) <앱>-migrate 파드는 남아 있어도 된다.
      # hook 삭제 정책이 BeforeHookCreation뿐이라 다음 hook 직전에만 지워지고, suspended면 새 hook도 없다.
-     [ "$(kubectl -n app-$APP get deploy $APP -o jsonpath='{.spec.replicas}')" = 0 ]
-     [ "$(kubectl -n app-$APP get deploy $APP -o jsonpath='{.status.replicas}')" = "" ] \
-       || [ "$(kubectl -n app-$APP get deploy $APP -o jsonpath='{.status.replicas}')" = 0 ]
+     # 명령 치환은 독립 할당으로(실패면 set -e가 멈춘다) 받은 뒤 비교한다
+     r=$(kubectl -n app-$APP get deploy $APP -o jsonpath='{.spec.replicas}')
+     [ "$r" = 0 ]
+     sr=$(kubectl -n app-$APP get deploy $APP -o jsonpath='{.status.replicas}')
+     [ "$sr" = "" ] || [ "$sr" = 0 ]
      # 돌고 있거나 뜨려는 앱 파드(마이그레이션 포함)가 없다. Valkey 캐시 파드는 이 라벨이 없다.
      out=$(kubectl -n app-$APP get pods -l homelab.ukyi.app/app=$APP --field-selector=status.phase!=Succeeded,status.phase!=Failed -o name)
      [ -z "$out" ]
@@ -605,10 +608,13 @@ sqlok() { awk -v app="$APP" '
 
    ```bash
    ( set -euo pipefail; step verify
-     [ "$(kubectl -n database get database $APP -o jsonpath='{.status.applied}')" = true ]   # 재조정이 다시 만든 DB를 건드리지 않음
+     # 명령 치환은 독립 할당으로(실패면 set -e가 멈춘다) 받은 뒤 비교한다
+     ap=$(kubectl -n database get database $APP -o jsonpath='{.status.applied}')
+     [ "$ap" = true ]   # 재조정이 다시 만든 DB를 건드리지 않음
      # 앱 역할이 승격되지 않았는지
-     [ "$(kubectl -n database exec "$PRIMARY" -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 -tAc \
-       "select rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls from pg_roles where rolname='$APP'")" = "f|f|f|f|f" ]
+     roles=$(kubectl -n database exec "$PRIMARY" -c postgres -- psql -U postgres -v ON_ERROR_STOP=1 -tAc \
+       "select rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls from pg_roles where rolname='$APP'")
+     [ "$roles" = "f|f|f|f|f" ]
      touch "$W/ok-verify" )
    [ -f "$W/ok-verify" ] && echo "확인 끝" || echo "멈춤: Database 적용이나 역할 권한이 이상하다(재개하지 않는다)"
    ```
