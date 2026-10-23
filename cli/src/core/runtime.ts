@@ -28,6 +28,8 @@ export type RuntimeOpts = {
   ask: (question: string) => string | null;
   progress: (line: string) => void;
   delegate?: boolean;
+  // CLI를 실행한 폴더(github 위임이 원본 checkout을 찾는다). 없으면 process.cwd().
+  cwd?: string;
 };
 
 export type WriteHandle = { w: WriteCtx; revoke: () => void };
@@ -83,7 +85,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
   if (o.delegate) {
     // github apply만 래퍼 하나를 쓰기로 실행한다(쓰기 exec의 delegate 규칙이 래퍼 밖 쓰기를 막는다).
     const writeOnce = () => (o.mode === "apply" ? makeExec("write", { env: o.env, delegate: true, live: () => true }) : null);
-    ctx.github = githubDelegate(makeExec("read", { env: o.env, delegate: true }), writeOnce, o.env, o.json);
+    ctx.github = githubDelegate(makeExec("read", { env: o.env, delegate: true }), writeOnce, o.env, o.json, o.cwd ?? process.cwd());
   }
   return ctx;
 }

@@ -5,6 +5,8 @@
 // 원문 추적(출력·argv의 마지막 방어선)은 16자 이상만 한다. 사용자 결정(2026-10-23, #873 3라운드): 짧은 값을 추적하면
 // 고정 옵션(--expand=false)·JSON 키("mode")와 겹쳐 정상 출력이 깨지고, 경계 조건으로 줄이면 붙은 원문이 샌다.
 // 대신 시크릿 입력은 16자 이상만 받고(MIN_SECRET), 기존의 짧은 값은 Secret 객체로만 들고 출력에 오지 않는 구조로 막는다.
+import { freeze, jsonStringify, strIncludes } from "./intrinsics";
+
 export const MIN_SECRET = 16;
 
 const tracked = new Set<string>();
@@ -23,10 +25,10 @@ export class Secret {
 
   constructor(raw: string) {
     this.#raw = raw;
-    Object.freeze(this);
+    freeze(this);
     if (raw.length < MIN_SECRET) return;
     // JSON 출력에서는 "·\ 등이 이스케이프된 꼴로, kubectl 출력에서는 Secret data의 base64 꼴로 나타난다.
-    for (const f of [raw, JSON.stringify(raw).slice(1, -1), Buffer.from(raw).toString("base64")]) tracked.add(f);
+    for (const f of [raw, jsonStringify(raw).slice(1, -1), Buffer.from(raw).toString("base64")]) tracked.add(f);
   }
 
   // 같은지 볼 때 쓰는 해시 앞부분. rotate.md의 `sha256sum | cut -c1-12`와 같은 길이.
@@ -74,7 +76,7 @@ export function resetTrackedForTests(): void {
 
 // 추적 중인 원문이 text에 들어 있는지. 출력과 argv 검사에 쓴다.
 export function containsTracked(text: string): boolean {
-  for (const raw of tracked) if (text.includes(raw)) return true;
+  for (const raw of tracked) if (strIncludes(text, raw)) return true;
   return false;
 }
 

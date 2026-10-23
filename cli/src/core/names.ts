@@ -1,6 +1,7 @@
 // 입력 값 검증. 셸·파일·API로 넘기는 값은 줄바꿈(CR·LF)과 NUL을 먼저 거부하고 값 전체를 형식과 맞춘다.
 // 함정(#872 리뷰): 줄 단위 검사(grep -q, 앵커 없는 정규식)는 여러 줄 중 한 줄만 맞아도 통과한다.
 // 그래서 fullMatch는 정규식을 ^(?:...)$로 다시 감싸고 m 플래그를 버린다.
+import { jsonStringify } from "./intrinsics";
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
@@ -42,6 +43,6 @@ export function appNameProblem(name: string, opts: { cache?: boolean; persistent
 }
 
 export function repoPathProblem(path: string): string | null {
-  if (!fullMatch(REPO_PATH, path) || path.split("/").some((p) => p === "." || p === "..")) return `저장소 경로가 아니다: ${JSON.stringify(path)}`;
+  if (!fullMatch(REPO_PATH, path) || path.split("/").some((p) => p === "." || p === "..")) return `저장소 경로가 아니다: ${jsonStringify(path)}`;
   return null;
 }

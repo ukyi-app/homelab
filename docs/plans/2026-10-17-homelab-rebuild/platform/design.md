@@ -1276,7 +1276,7 @@ homelab의 필수 검사는 `ci` 하나다(ADR 0003). `ci`는 `bun run ci` 하�
 | Terraform | 문법 오류(P02), GitHub guard 식의 오류 | `terraform fmt -check`, `validate`(자격 없음), `infra/github`의 `terraform test`(mock_provider, guard 음성 시험, C.3.9) |
 | 워크플로 경계(workflow-guard) | 병합 키(environment `automerge` secret)가 `deploy-merge`의 merge job 밖에서 쓰이는 것, environment secret을 쓰는 워크플로의 다른 트리거 | TypeScript 검사 1개(아래) |
 | 경보 룰 | 죽은 알림(L35) | vmalert 룰 단위 시험[미검증: `vmalert-tool unittest` 형식, E4] |
-| CLI | `plan`의 숨은 쓰기(L50) | `bun test`(외부 명령 argv 기록 단언) |
+| CLI | `plan`의 숨은 쓰기(L50), 타입 계약 위반(불투명 Secret에 원문 메서드, 읽기 문맥에 쓰기 함수) | `bun test`(외부 명령 argv 기록 단언), strict `tsc --noEmit`(`cli/tsconfig.json`, TypeScript 7.0.2·`@types/bun` 1.4.3을 `bun install --frozen-lockfile --ignore-scripts`로 `bun.lock` 해시대로 받는다. R37, 사용자 결정 2026-10-23, T12-01b) |
 
 필수 검사에 넣지 않는 것: 외부 레지스트리 조회, 라이브 클러스터 조회, GitHub 설정 대조. 브랜치와 무관하게 모든 PR을 막은 옛 사고(P27, R10) 때문이다. GitHub 설정 대조(`homelab github verify` = `infra/github`의 plan과 guard. E5는 래퍼 `tools/tf-github.sh verify`)는 사람이 E5와 시나리오 15에서 돌린다. CI는 자격이 없어 plan하지 않는다(C.3.9).
 
@@ -1786,6 +1786,8 @@ Pro(identity당 월 $20 연간 / $23 월간)는 RBAC, 버전 이력·PITR, 감�
 
 **`plan`은 읽기 전용이다.** 비밀번호 생성, Infisical 쓰기, 브랜치 push, PR 생성, `kubectl` 변경이 일어나지 않는다. 시험은 외부 명령 argv를 기록하는 PATH 스텁으로 모든 명령을 `plan` 모드로 돌려 쓰기 부명령이 0건임을 단언한다(L50, AC-P13). 쓰기 판정은 읽기 허용 목록이고 목록 밖(모르는 도구·하위 명령 포함)은 쓰기로 본다(`cli/src/core/writes.ts`). 구조(사용자 결정 2026-10-23, T12 #873 3라운드): 명령은 외부 명령을 직접 실행할 수 없고 CLI 공통부가 주는 타입 있는 어댑터만 부른다. 어댑터마다 argv 모양이 고정이라 안전의 근거는 어댑터 모양이고, 쓰기 판정은 마지막 방어선과 시험 원장 집계로 남는다. 읽기 문맥에는 쓰기 함수가 없고, 쓰기 어댑터는 엔진이 단계 실행 한 번마다 새로 만들어 넘긴 뒤 폐기한다. 범용 kubectl 조회에는 Secret·`--raw`·`config view`가 없고(값은 해시·존재만 내는 전용 어댑터), curl은 GHCR 익명 토큰 조회 하나(`-q`로 `.curlrc` 끔), git은 github 위임의 임시 폴더 fresh clone 하나다. 명령의 import 허용 목록과 전역 금지(파일·프로세스·네트워크·환경변수)는 정적 시험이 막는다.
 
+**명령 경계의 위협 모델(사용자 결정 2026-10-23, T12-01b):** 명령 경계(불투명 시크릿 핸들, 정적 import 경계, 타입 있는 어댑터)는 실수로 새는 것을 막는 장치다. 같은 프로세스에서 일부러 전역을 바꾸는 코드는 막지 않는다(명령 코드는 저장소의 리뷰받은 코드다). 싼 보강 둘을 둔다: CLI 공통부는 시작할 때 잡아 둔 내장 함수(`JSON.parse`·`JSON.stringify`·`Object.freeze`·`String.prototype.includes` 등, `cli/src/core/intrinsics.ts`, 진입점의 첫 import)로 시크릿 판정·출력·해석을 하고, 명령 파일의 내장 전역 변경(재할당, 프로토타입, `defineProperty`류, `Object.assign(내장, …)`)은 정적 시험이 막는다.
+
 **재실행 안전:** 여러 시스템의 변경은 원자적 트랜잭션이 아니다. 그래서 각 단계가 실행 직전에 현재 상태를 읽고 이미 된 단계는 건너뛴다(Infisical 키 있음 → 재사용, 파일 같음 → 변경 없음, 같은 브랜치 PR 열림 → 갱신). 변이 호출이 타임아웃이면 재시도하지 않고 상태를 다시 읽는다(B.8 E7). 중복 플래그는 거부한다.
 
 **출력** (목표 예시)
@@ -1812,6 +1814,7 @@ $ homelab db add smoke
 - JSON 키(T12): `mode`는 `plan | apply | read`, `status`는 `same`(변경 없음) `pending`(plan에 차이) `done` `waiting`(apply 뒤 바깥 대기) `failed` `usage`. `steps[].state`는 `missing | differs | same`이고 apply에서는 실행 직전에 읽은 상태다(그래서 재실행의 모든 단계가 `same`, G 시나리오 5). `action`은 `create | update | delete | none`, `result`는 `planned | skipped | applied | waiting | failed | not-run`. 실패에는 `error: {message, next}`, `github *`에는 래퍼 종료 코드 `exitCode`가 붙는다.
 
 - 어떤 출력에도 시크릿 값이 없다. 값의 존재만 보인다. 마지막 변경 시각은 Infisical CLI 0.44.2가 내지 않는다(목록 JSON은 `secretKey`·`secretValue`뿐, 2026-10-23 로컬 가짜 API 실측, T12, lead 결정으로 존재만). 시크릿은 값 감쌈 타입으로만 다니고 stdin으로만 넘긴다. 시크릿 입력은 16자 이상만 받고, 출력 계층은 16자 이상 원문이 섞인 출력을 막는다(짧은 값 추적은 고정 옵션·JSON 키와 겹쳐 뺐다, 사용자 결정 2026-10-23). 명령이 받는 시크릿 핸들은 원문을 꺼내는 메서드가 없는 불투명 객체이고(16자 미만 기존 값의 보호는 이것에 기댄다), 원문 해석은 CLI 공통부 안에서만 한다(T12 #873 3라운드).
+- Infisical CLI 0.44.2는 로그인 사용자의 조회 값을 `$HOME/.infisical/secrets-backup/`에 파일로 남긴다(`infra/README.md` 2절). CLI의 모든 `infisical` 호출은 래퍼(`tools/tf-github.sh`)와 같은 보호를 거친다: 그 폴더를 0500으로 잠그고(남은 파일은 지운다) 실제로 쓰기 불가인지 써 보고 확인한 뒤 실행하고, 호출 뒤 파일이 생겼으면 지우고 실패한다. 경로가 심볼릭 링크면 멈춘다. 이 로컬 폴더 정리는 `plan`에서도 한다(Git·Infisical·클러스터는 바꾸지 않는다, T12-01b #873 리뷰 P1).
 - `homelab logs`는 앱 로그를 그대로 보인다. 앱이 자격을 로그에 쓰지 않는 것은 앱 계약이다(T12 #873 3라운드 판단). CLI는 로그 속 임의 값이 시크릿인지 알 수 없고 추측 마스킹은 놓친 값을 가린 것처럼 보이게 하며, 같은 사람은 kubeconfig로 `kubectl logs`를 직접 본다. 그 실행이 다룬 시크릿(16자 이상)이 로그에 섞이면 출력 계층이 결과 전체를 막는다.
 - 종료 코드(결정 D2, 사용자 2026-10-23, T12): 0 완료·변경 없음·plan(차이가 있어도), 1 실패(원인과 다음 행동 출력), 3 대기(apply 뒤 PR 병합·동기화 대기), 64 사용법 오류(EX_USAGE. 모르는·중복 플래그, 줄바꿈이 낀 값 포함). `homelab github *`만 래퍼 코드 그대로(0 같음, 2 차이, 1 guard·실패).
 - PR 작성(결정 D3, T12): 로컬 체크아웃 없이 GitHub API(`gh api`)로 tree·commit을 만들어 브랜치에 올린다. 브랜치 머리 커밋에 트레일러 `Homelab-CLI:`가 없으면(사람이 push한 커밋) 덮지 않고 멈춘다(lead 결정 2026-10-23). 갱신은 force를 쓰지 않는다: 새 커밋의 부모를 [main 스냅샷, 확인한 브랜치 머리]로 두고 fast-forward로만 옮겨, 확인과 갱신 사이의 사람 push는 GitHub가 422로 거부한다(#873 리뷰, 처음 안의 force 이동을 바꿈). 파일 내용은 그 main 스냅샷에서 다시 계산해 그사이 병합된 변경을 되돌리지 않는다. 열린 PR은 main과 비교하기 전에 먼저 보고, "같음"으로 보려면 머리가 CLI 커밋이고 PR 전체 변경이 그 명령의 파일뿐이어야 한다.

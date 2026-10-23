@@ -32,10 +32,12 @@ export const REST = "...";
 // echoEnv: 스텁이 받은 환경변수 중 이 이름들을 JSON으로 stdout에 낸다.
 // materialize: 스텁이 argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일(github 위임 시험).
 // echoCwd: 스텁이 실행된 폴더를 stdout에 낸다.
-export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean };
+// recordEnv: 스텁이 받은 환경변수 중 이 이름들을 원장의 env에 적는다(stdio를 상속하는 위임 호출의 환경 확인).
+// homeWrite: 스텁이 $HOME 아래에 파일을 쓰려 한다(Infisical 로컬 백업 흉내, force면 권한을 무시하는 파일시스템 흉내).
+export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean; homeWrite?: { path: string; force?: boolean }; recordEnv?: string[] };
 export type Matcher = string | RegExp;
 export type Rule = { argv: Matcher[]; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
-export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null; cwd: string };
+export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null; cwd: string; homeWrite?: "written" | "denied"; env?: Record<string, string | null> };
 
 // noStdin: 스텁이 stdin을 읽지 않는다(github 위임처럼 부모 stdin을 넘기는 호출).
 export function rule(argv: Matcher[], resp: Resp | Resp[] = {}, opts: { captureStdin?: boolean; noStdin?: boolean } = {}): Rule {
@@ -86,9 +88,24 @@ function alive(pid: number): boolean {
   }
 }
 
+// 시험 HOME의 Infisical 백업 폴더는 0500이다(core/infisical-backup.ts). 안에 파일이 남으면(돌연변이 확인 등) 그냥은 못 지우므로
+// 권한을 풀고 다시 지운다.
+function removeTree(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    const open = (d: string) => {
+      chmodSync(d, 0o700);
+      for (const e of readdirSync(d, { withFileTypes: true })) if (e.isDirectory()) open(join(d, e.name));
+    };
+    open(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 for (const name of readdirSync(tmpdir())) {
   const m = name.match(/^homelab-cli-test-(\d+)$/);
-  if (m && Number(m[1]) !== process.pid && !alive(Number(m[1]))) rmSync(join(tmpdir(), name), { recursive: true, force: true });
+  if (m && Number(m[1]) !== process.pid && !alive(Number(m[1]))) removeTree(join(tmpdir(), name));
 }
 
 function stubDir(rules: Rule[], tools?: string[]): { dir: string; bin: string; home: string } {
@@ -127,7 +144,7 @@ function readLedger(dir: string): Call[] {
 export type CliRun = { code: number; stdout: string; stderr: string; json: any; calls: Call[]; writes: Call[]; unmatched: Call[] };
 
 // extraPath: 스텁 폴더 뒤에 붙일 PATH(실제 래퍼처럼 sed·find·bash가 필요한 시험만). 스텁 도구는 앞에서 가린다.
-export type RunOpts = { env?: Record<string, string>; stdin?: string; tools?: string[]; project?: boolean; extraPath?: string[] };
+export type RunOpts = { env?: Record<string, string>; stdin?: string; tools?: string[]; project?: boolean; extraPath?: string[]; cwd?: string };
 
 function baseEnv(s: { dir: string; bin: string; home: string }, opts: RunOpts): Record<string, string> {
   return {
@@ -171,7 +188,7 @@ export async function runCli(args: string[], rules: Rule[], opts: RunOpts = {}):
     }
   }
   const calls = readLedger(s.dir);
-  rmSync(s.dir, { recursive: true, force: true });
+  removeTree(s.dir);
   return { code, stdout, stderr, json, ...summarize(calls) };
 }
 
@@ -183,11 +200,11 @@ export function stubSandbox(rules: Rule[], opts: RunOpts = {}): { env: Record<st
 
 // 같은 프로세스에서 단계·어댑터를 시험할 문맥. makeRuntime으로 실제와 같은 ReadCtx를 만든다(PATH는 스텁 폴더 하나).
 // 쓰기 문맥은 applyWith로만 얻는다(엔진이 Step.apply에 주는 것과 같다).
-export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: ReadCtx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string } {
+export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: ReadCtx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string; home: string } {
   const sb = stubSandbox(rules, opts);
   const progress: string[] = [];
-  const ctx = makeRuntime({ mode, json: false, line: "homelab test", env: sb.env, isTTY: false, ask: () => null, progress: (l) => progress.push(l), delegate: opts.delegate });
-  return { ctx, calls: sb.calls, progress, bin: sb.bin };
+  const ctx = makeRuntime({ mode, json: false, line: "homelab test", env: sb.env, isTTY: false, ask: () => null, progress: (l) => progress.push(l), delegate: opts.delegate, cwd: opts.cwd });
+  return { ctx, calls: sb.calls, progress, bin: sb.bin, home: sb.env.HOME };
 }
 
 // apply 한 번 안에서 fn(w)를 돌린다. fn이 던지면 그 오류를 다시 던진다. 엔진 결과도 돌려준다.

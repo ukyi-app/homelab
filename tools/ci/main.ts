@@ -252,6 +252,23 @@ const steps: Step[] = [
     },
   },
   {
+    name: "cli typecheck",
+    // strict TypeScript(사용자 결정 2026-10-23, T12-01b). bun test는 타입을 보지 않아 타입 계약(불투명 Secret의 메서드 없음,
+    // 읽기 문맥에 쓰기 함수 없음)은 이 단계만 지킨다. 외부 패키지는 typescript·@types/bun 둘이고 bun.lock의 무결성 해시로만 받는다.
+    // --frozen-lockfile: package.json과 lockfile이 어긋나면 실패하고 새로 해석하지 않는다.
+    // --ignore-scripts: 패키지 설치 스크립트를 돌리지 않는다(공급망). TS 7은 플랫폼 바이너리를 optional 의존으로 받아 스크립트가 필요 없다.
+    // tsc는 bun으로 띄운다(bin/tsc의 셔뱅은 node다. node는 .tool-versions에 없다).
+    run: () => {
+      const cfg = JSON.parse(readText("cli/tsconfig.json"));
+      if (cfg.compilerOptions?.strict !== true || cfg.compilerOptions?.noEmit !== true) {
+        return [{ rule: "cli-typecheck", where: "cli/tsconfig.json", message: "compilerOptions.strict·noEmit은 true로 둔다" }];
+      }
+      const install = tool("cli-typecheck", ["bun", "install", "--frozen-lockfile", "--ignore-scripts"]);
+      if (install.length > 0) return install.map((v) => ({ ...v, message: `bun install --frozen-lockfile ${v.message}(bun.lock을 package.json과 같은 커밋에서 갱신한다)` }));
+      return tool("cli-typecheck", ["bun", "node_modules/typescript/bin/tsc", "-p", "cli/tsconfig.json"]);
+    },
+  },
+  {
     name: "temp cleanup",
     // tempDir 폴더가 어떻게 끝나든 지워지는지(lib.ts). 자식 프로세스를 빈 TMPDIR로 돌려 끝난 뒤 남은 것을 센다.
     run: () => {

@@ -9,6 +9,7 @@
 // - 직접 stdio(inherit, stdout-to-stderr)는 github 위임만. 위임 stdout-to-stderr는 부모 stdin을 넘긴다.
 // - 값을 내는 호출은 secretStdout으로만, 민감 호출의 stderr 원문은 돌려주지 않는다.
 import { basename } from "node:path";
+import { guardInfisicalBackup } from "./infisical-backup";
 import { Secret, containsTracked, isSecret, revealSecret } from "./secret";
 import { ownedTemp } from "./temp";
 import { classify } from "./writes";
@@ -58,12 +59,12 @@ function timeoutFor(write: boolean, env: Record<string, string | undefined>, ask
 
 // 함정(옛 tools/lib/exec.ts 실측): git hook 안에서 CLI를 띄우면 GIT_DIR·GIT_WORK_TREE·GIT_INDEX_FILE이 상속돼
 // git -C <다른 곳>이 hook의 저장소를 본다. 자격이 없으면 프롬프트에서 멈추므로 GIT_TERMINAL_PROMPT=0. 판정은 basename.
+// git을 부르는 래퍼(tf-github.sh)도 같다(Connector 4360754437). GIT_CONFIG_COUNT·KEY·VALUE는 설정(core.fsmonitor 등)을
+// 끼워 넣으므로 저장소 변수만이 아니라 GIT_* 전부를 지운다.
 function childEnv(argv0: string, base: Record<string, string | undefined>, opts: ExecOpts): Record<string, string> {
   const env: Record<string, string | undefined> = opts.cleanEnv ? { ...opts.cleanEnv } : { ...base, ...opts.env };
-  if (basename(argv0) === "git") {
-    delete env.GIT_DIR;
-    delete env.GIT_WORK_TREE;
-    delete env.GIT_INDEX_FILE;
+  if (basename(argv0) === "git" || basename(argv0) === "tf-github.sh") {
+    for (const k of Object.keys(env)) if (k.startsWith("GIT_") && !(opts.cleanEnv && k in opts.cleanEnv)) delete env[k];
     env.GIT_TERMINAL_PROMPT = "0";
   }
   const out: Record<string, string> = {};
@@ -108,19 +109,27 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
     const input = opts.input === undefined ? undefined : isSecret(opts.input) ? revealSecret(opts.input) : opts.input;
     // 입력을 따로 주지 않은 위임 명령은 부모 stdin을 넘긴다(래퍼가 묻는 값과 마지막 yes를 사람이 직접 답한다).
     const stdin = input !== undefined ? new TextEncoder().encode(input) : stdio !== "pipe" ? "inherit" : "ignore";
-    let p: ReturnType<typeof Bun.spawnSync>;
-    try {
-      p = Bun.spawnSync(argv, {
-        cwd: opts.cwd,
-        env: childEnv(argv[0], m.env, opts),
-        stdin,
-        stdout: stdio === "pipe" ? "pipe" : stdio === "inherit" ? "inherit" : 2,
-        stderr: stdio === "pipe" ? "pipe" : "inherit",
-        timeout: timeoutFor(verdict.write, m.env, opts.timeoutMs),
-      } as Parameters<typeof Bun.spawnSync>[1]);
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      return { code: null, stdout: "", stderr: sensitive ? "" : (e as Error).message, stderrHidden: sensitive || undefined, notFound: false, errKind: code === "ENOENT" ? "not-found" : "spawn" };
+    const env = childEnv(argv[0], m.env, opts);
+    // 띄우기 실패는 값으로 돌려준다. 그래야 아래 백업 막기의 실패(던짐)와 섞이지 않는다.
+    const spawn = (): ReturnType<typeof Bun.spawnSync> | Error => {
+      try {
+        return Bun.spawnSync(argv, {
+          cwd: opts.cwd,
+          env,
+          stdin,
+          stdout: stdio === "pipe" ? "pipe" : stdio === "inherit" ? "inherit" : 2,
+          stderr: stdio === "pipe" ? "pipe" : "inherit",
+          timeout: timeoutFor(verdict.write, m.env, opts.timeoutMs),
+        } as Parameters<typeof Bun.spawnSync>[1]);
+      } catch (e) {
+        return e as Error;
+      }
+    };
+    // infisical은 어느 어댑터가 부르든 로컬 백업 막기를 거친다(infisical-backup.ts). 폴더는 자식이 받는 HOME 기준이다.
+    const p = basename(argv[0]) === "infisical" ? guardInfisicalBackup(env.HOME, spawn) : spawn();
+    if (p instanceof Error) {
+      const code = (p as NodeJS.ErrnoException).code;
+      return { code: null, stdout: "", stderr: sensitive ? "" : p.message, stderrHidden: sensitive || undefined, notFound: false, errKind: code === "ENOENT" ? "not-found" : "spawn" };
     }
     const stdoutText = p.stdout ? p.stdout.toString() : "";
     const rawErr = p.stderr ? p.stderr.toString() : "";

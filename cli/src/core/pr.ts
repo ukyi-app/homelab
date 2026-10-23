@@ -8,6 +8,7 @@
 // 브랜치 갱신: 머리 커밋에 Homelab-CLI 트레일러가 없으면(사람이 push한 커밋) 멈춘다(lead 결정 2026-10-23).
 // force는 쓰지 않는다(#873 1라운드). 새 커밋의 부모를 [main 스냅샷, 확인한 브랜치 머리]로 두고 fast-forward로만 옮긴다.
 // 확인과 PATCH 사이에 사람이 push하면 새 커밋이 그 push의 자손이 아니라 GitHub가 422로 거부한다.
+import { jsonStringify } from "./intrinsics";
 import type { Observation, ReadCtx, RepoRead, Step, WriteCtx } from "./command";
 import type { Exec } from "./exec";
 import { HOMELAB_REPO, ghGetRaw, ghSend, ok } from "./github";
@@ -76,7 +77,9 @@ function changedFiles(ctx: ReadCtx | WriteCtx, base: string, head: string): stri
   const files = Array.isArray(r.json?.files) ? r.json.files : [];
   // compare는 파일 300개까지 준다. CLI PR은 몇 개뿐이라 그보다 많으면 사람 변경이 섞인 것으로 본다.
   if (files.length >= 300) throw new Error("PR 변경 파일이 300개 이상이다(CLI가 만든 PR이 아니다)");
-  return files.map((f: { filename: string }) => f.filename);
+  // rename은 새 경로가 filename, 원래 경로가 previous_filename이다. 둘 다 센다. 원래 경로를 빼면 명령 밖 파일을 명령의
+  // 경로로 옮긴 PR이 "같음"으로 보이고, 병합하면 원래 파일이 사라진다(Connector 4360396722).
+  return files.flatMap((f: { filename: string; previous_filename?: string }) => (typeof f.previous_filename === "string" ? [f.filename, f.previous_filename] : [f.filename]));
 }
 
 export type FileContents = Record<string, string | null>;
@@ -99,7 +102,7 @@ function snapshot(repo: RepoRead, files: string[], ref: string): FileContents {
 function desiredOf(spec: PrSpec, current: FileContents): FileContents {
   const out = spec.edit({ ...current });
   const keys = Object.keys(out ?? {}).sort();
-  if (JSON.stringify(keys) !== JSON.stringify([...spec.files].sort())) throw new Error("edit()는 files의 파일마다 내용을 하나씩 돌려줘야 한다");
+  if (jsonStringify(keys) !== jsonStringify([...spec.files].sort())) throw new Error("edit()는 files의 파일마다 내용을 하나씩 돌려줘야 한다");
   for (const [path, content] of Object.entries(out)) {
     if (isSecret(content)) throw new Error(`${path}: 파일 내용에 시크릿 객체를 넣으려 했다`);
     if (content !== null && typeof content !== "string") throw new Error(`${path}: 파일 내용은 문자열이나 null이다`);

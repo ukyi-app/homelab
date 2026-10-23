@@ -1,6 +1,7 @@
 // kubectl 어댑터. 사람의 kubeconfig와 현재 context를 그대로 쓴다(자격을 저장하지 않는다).
 // argv는 여기서만 만든다. 리소스는 KINDS 표의 이름뿐이라 범용 조회로 Secret을 읽을 수 없고(#873 2라운드 P1),
 // --raw·config view 같은 원문 출력 옵션은 쓰지 않는다. 모든 호출에 --request-timeout(서버가 멈추면 기본으로 오래 기다린다).
+import { jsonParse, jsonStringify } from "./intrinsics";
 import type { KubeKind, KubeRead, KubeWrite } from "./command";
 import { ExecTimeout, must, why, type Exec, type ExecOpts } from "./exec";
 import { findSecretPath } from "./guard";
@@ -78,14 +79,14 @@ export function kubeRead(exec: Exec): KubeRead {
       if (r.errKind === "timeout") throw new ExecTimeout(`kubectl get ${kind} ${name}: 시간 초과`);
       if (r.code !== 0 && r.notFound) return null;
       must(r, `kubectl get ${kind} ${name}`);
-      return JSON.parse(r.stdout);
+      return jsonParse(r.stdout);
     },
     list(kind, ns, selector) {
       if (ns) checkName("namespace", ns);
       if (selector !== undefined && !SELECTOR.test(selector)) throw new Error("kubectl label selector 형식이 아니다");
       const r = run(exec, [...(ns ? ["-n", ns] : ["-A"]), "get", resource(kind), ...(selector ? ["-l", selector] : []), "-o", "json"]);
       must(r, `kubectl get ${kind}`);
-      return JSON.parse(r.stdout).items ?? [];
+      return jsonParse(r.stdout).items ?? [];
     },
     secretHash(ns, name, key) {
       checkName("namespace", ns);
@@ -96,7 +97,7 @@ export function kubeRead(exec: Exec): KubeRead {
       if (r.code !== 0 && r.notFound) return null;
       if (r.code !== 0 || !r.stdoutSecret) throw new Error(`kubectl get secret ${name}: ${why(r)}`);
       // 요청한 키 하나만 Secret으로 만든다. 같은 Secret의 username(앱 이름 같은 공개 값)은 추적하지 않는다(#873 2라운드 P1).
-      const encoded = JSON.parse(revealSecret(r.stdoutSecret)).data?.[key];
+      const encoded = jsonParse(revealSecret(r.stdoutSecret)).data?.[key];
       if (typeof encoded !== "string") return null;
       return new Secret(Buffer.from(encoded, "base64").toString("utf8")).sha256Prefix(12);
     },
@@ -107,7 +108,7 @@ export function kubeRead(exec: Exec): KubeRead {
       if (r.errKind === "timeout") throw new ExecTimeout(`kubectl get secret ${name}: 시간 초과`);
       if (r.code !== 0 && r.notFound) return { exists: false, keys: [] };
       if (r.code !== 0 || !r.stdoutSecret) throw new Error(`kubectl get secret ${name}: ${why(r)}`);
-      return { exists: true, keys: Object.keys(JSON.parse(revealSecret(r.stdoutSecret)).data ?? {}).sort() };
+      return { exists: true, keys: Object.keys(jsonParse(revealSecret(r.stdoutSecret)).data ?? {}).sort() };
     },
     // 앱 로그를 그대로 돌려준다. 앱이 자격을 로그에 쓰지 않는 것은 앱 계약이다(설계 C.7, Connector 3라운드 판단).
     // CLI는 로그 속 임의 값이 시크릿인지 알 수 없고(추측 마스킹은 놓친 값을 가린 것처럼 보이게 한다), 같은 사람은
@@ -115,10 +116,13 @@ export function kubeRead(exec: Exec): KubeRead {
     logs(ns, deployment, opts = {}) {
       checkName("namespace", ns);
       checkName("Deployment", deployment);
-      if (opts.since !== undefined && !/^[1-9][0-9]*[smh]$/.test(opts.since)) throw new Error("--since 형식이 아니다");
+      // 명령은 일 단위(7d)도 받는다. kubectl은 Go duration이라 d가 없어 시간으로 바꾼다(Connector 4360754457).
+      const m = opts.since === undefined ? null : /^([1-9][0-9]{0,5})([smhd])$/.exec(opts.since);
+      if (opts.since !== undefined && !m) throw new Error("--since 형식이 아니다");
+      const since = m ? (m[2] === "d" ? `${Number(m[1]) * 24}h` : opts.since) : undefined;
       const tail = opts.tail ?? 200;
       if (!Number.isInteger(tail) || tail < 1 || tail > 10_000) throw new Error("tail 범위가 아니다");
-      const r = run(exec, ["-n", ns, "logs", `deploy/${deployment}`, `--tail=${tail}`, ...(opts.since ? [`--since=${opts.since}`] : [])]);
+      const r = run(exec, ["-n", ns, "logs", `deploy/${deployment}`, `--tail=${tail}`, ...(since ? [`--since=${since}`] : [])]);
       return must(r, `kubectl logs ${deployment}`).stdout;
     },
     canI(verb, kind, ns) {
@@ -166,14 +170,17 @@ export function kubeWrite(exec: Exec): KubeWrite {
       const labels = (manifest.metadata as { labels?: Record<string, unknown> } | undefined)?.labels;
       const runId = labels?.[RESTORE_LABEL];
       if (typeof runId !== "string" || !/^[a-z0-9]{1,22}$/.test(runId)) throw new Error(`복원 객체에 라벨 ${RESTORE_LABEL}=<실행 id>가 없다`);
-      const text = JSON.stringify(manifest);
+      const text = jsonStringify(manifest);
       if (hasControl(text)) throw new Error("매니페스트에 제어 문자가 있다");
       must(run(exec, ["-n", ns, "create", "-f", "-"], { input: text }), `kubectl create ${kind}`);
     },
     deleteRestoreObjects(ns, runId) {
       checkName("namespace", ns);
       if (!/^[a-z0-9]{1,22}$/.test(runId)) throw new Error("복원 실행 id 형식이 아니다");
-      must(run(exec, ["-n", ns, "delete", RESTORE_RESOURCES, "-l", `${RESTORE_LABEL}=${runId}`, "--ignore-not-found", "--wait=false"]), "복원 객체 지우기");
+      // 실제로 사라질 때까지 기다린다(Connector 4360754447). 기다리지 않으면 finalizer가 있는 PVC·CNPG Cluster가 terminating으로
+      // 남아 엔진의 실행 뒤 재조회가 성공한 삭제를 실패로 본다. [미검증] --request-timeout(20s)이 긴 대기의 watch를 끊어도
+      // kubectl이 다시 watch해 이어 가는지는 T12-05 운영 실행에서 본다.
+      must(run(exec, ["-n", ns, "delete", RESTORE_RESOURCES, "-l", `${RESTORE_LABEL}=${runId}`, "--ignore-not-found", "--wait=true", "--timeout=300s"], { timeoutMs: 330_000 }), "복원 객체 지우기");
     },
   };
 }

@@ -1,4 +1,6 @@
 // homelab CLI 진입점(설계 C.7). argv → 등록 표 → 파싱 → 실행 → 출력 → 종료 코드(PLAN D2).
+// 첫 import는 intrinsics다(명령 모듈이 평가되기 전에 내장 함수를 잡는다, 정적 시험).
+import "./core/intrinsics";
 import { readSync } from "node:fs";
 import { APPLY_FLAG, GLOBAL_FLAGS, parseInput, usageLine } from "./core/args";
 import type { CommandSpec } from "./core/command";
@@ -127,4 +129,6 @@ async function main(argv: string[]): Promise<number> {
   return EXIT[result.status];
 }
 
-process.exit(await main(process.argv.slice(2)));
+// process.exit()를 부르지 않는다. 파이프·느린 소비자로 낸 출력이 비워지기 전에 끝나 잘린다(Bun 1.4.3 실측: 4MB 중 64KB만 도착).
+// exitCode만 두면 이벤트 루프가 stdout·stderr를 비운 뒤 끝난다(Connector 4360396737).
+process.exitCode = await main(process.argv.slice(2));

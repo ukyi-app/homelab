@@ -7,5 +7,9 @@
     "cli": "bun cli/src/main.ts",
     "cli:build": "bun cli/build.ts",
     "test:cli": "bun test cli/"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.3",
+    "typescript": "7.0.2"
   }
 }
