@@ -1,0 +1,6 @@
+# expect: fail
+# match: valkey.restoreMode는 valkey.running: true를 함께
+# running 없이 복원 모드를 켜 두면 다음 재시작이 appendonly no로 떠 AOF 뒤 쓰기를 잃는다.
+chartVersion: 1.0.0
+valkey: {persistent: true, restoreMode: true}
+backup: {bucket: homelab-backups}

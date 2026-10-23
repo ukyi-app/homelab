@@ -26,6 +26,10 @@ Argo CD는 releaseName이 없으면 Application 이름을 릴리스 이름으로
 {{- if contains "valkey" $name -}}
 {{- fail (printf "캐시 Valkey를 쓰는 앱 이름에 valkey를 넣지 않는다: %s" $name) -}}
 {{- end -}}
+{{- /* 공식 차트의 init 컨테이너 이름이 <앱>-valkey-init이다. 컨테이너 이름은 DNS 라벨(63자)이라 앱 이름은 51자까지. */ -}}
+{{- if gt (len $name) 51 -}}
+{{- fail (printf "캐시 Valkey를 쓰는 앱 이름은 51자까지다(init 컨테이너 %s-valkey-init이 63자를 넘는다): %s" $name $name) -}}
+{{- end -}}
 {{- end -}}
 {{- $name -}}
 {{- end }}

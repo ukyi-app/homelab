@@ -1,0 +1,6 @@
+# expect: fail
+# match: valkey.restoreMode는 valkey.running: true를 함께
+# 서버를 내린 채(running: false) 복원 모드만 켜는 것도 막는다. 복원 모드는 3단계에서 running: true와 함께 켠다.
+chartVersion: 1.0.0
+valkey: {persistent: true, running: false, restoreMode: true}
+backup: {bucket: homelab-backups}
