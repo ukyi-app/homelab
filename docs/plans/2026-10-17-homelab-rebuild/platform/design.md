@@ -1276,7 +1276,7 @@ homelab의 필수 검사는 `ci` 하나다(ADR 0003). `ci`는 `bun run ci` 하�
 | Terraform | 문법 오류(P02), GitHub guard 식의 오류 | `terraform fmt -check`, `validate`(자격 없음), `infra/github`의 `terraform test`(mock_provider, guard 음성 시험, C.3.9) |
 | 워크플로 경계(workflow-guard) | 병합 키(environment `automerge` secret)가 `deploy-merge`의 merge job 밖에서 쓰이는 것, environment secret을 쓰는 워크플로의 다른 트리거 | TypeScript 검사 1개(아래) |
 | 경보 룰 | 죽은 알림(L35) | vmalert 룰 단위 시험[미검증: `vmalert-tool unittest` 형식, E4] |
-| CLI | `plan`의 숨은 쓰기(L50) | `bun test`(외부 명령 argv 기록 단언) |
+| CLI | `plan`의 숨은 쓰기(L50), 타입 계약 위반(불투명 Secret에 원문 메서드, 읽기 문맥에 쓰기 함수) | `bun test`(외부 명령 argv 기록 단언), strict `tsc --noEmit`(`cli/tsconfig.json`, TypeScript 7.0.2·`@types/bun` 1.4.3을 `bun install --frozen-lockfile --ignore-scripts`로 `bun.lock` 해시대로 받는다. R37, 사용자 결정 2026-10-23, T12-01b) |
 
 필수 검사에 넣지 않는 것: 외부 레지스트리 조회, 라이브 클러스터 조회, GitHub 설정 대조. 브랜치와 무관하게 모든 PR을 막은 옛 사고(P27, R10) 때문이다. GitHub 설정 대조(`homelab github verify` = `infra/github`의 plan과 guard. E5는 래퍼 `tools/tf-github.sh verify`)는 사람이 E5와 시나리오 15에서 돌린다. CI는 자격이 없어 plan하지 않는다(C.3.9).
 

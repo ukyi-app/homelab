@@ -137,6 +137,8 @@ jobs:
           echo "$bin" >> "$GITHUB_PATH"
 
       - name: bun run ci
-        # 의존 패키지가 없어 bun install을 하지 않는다(package.json에 dependencies 없음).
+        # npm 패키지(typescript·@types/bun, devDependencies)는 bun run ci의 cli typecheck 단계가 받는다(로컬과 같은 명령, L42).
+        # bun install --frozen-lockfile --ignore-scripts라 bun.lock의 무결성 해시와 다른 내용이나 설치 스크립트는 돌지 않는다.
+        # 캐시는 두지 않는다(매 실행 registry에서 받고 해시로 확인).
         # provider는 Terraform registry에서 받고 .terraform.lock.hcl 해시로 확인한다(-lockfile=readonly).
         run: bun run ci

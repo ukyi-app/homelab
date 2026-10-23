@@ -133,6 +133,16 @@
       "groupName": "terraform"
     },
     {
+      "description": "@types/bun은 런타임 bun(.tool-versions)과 같은 버전으로 둔다. 타입이 런타임보다 앞서면 1.4.3에 없는 API가 cli typecheck를 통과한다. bun과 한 PR로 받는다(bun.lock도 그 PR에서 갱신된다).",
+      "matchDepNames": ["bun", "@types/bun"],
+      "groupName": "bun"
+    },
+    {
+      "description": "cli typecheck의 npm 패키지(typescript·@types/bun)는 package.json에 정확한 버전, bun.lock에 무결성 해시로 고정한다. 범위로 풀지 않는다.",
+      "matchManagers": ["npm"],
+      "rangeStrategy": "pin"
+    },
+    {
       "description": "CI가 받는 도구는 ci.yaml(bun은 deploy-merge.yaml도)에 sha256이 있다. Renovate는 이 값을 못 바꿔 PR의 ci가 sha256 불일치로 실패한다. 그 실패를 신호로 사람이 같은 PR에 sha256 커밋을 더한다(AGENTS.md의 '같은 커밋'은 병합되는 squash 커밋 기준).",
       "matchDepNames": ["actionlint", "bun", "gitleaks", "shellcheck", "kubeconform", "terraform", "hashicorp/terraform"],
       "prBodyNotes": ["ci.yaml의 sha256(bun은 deploy-merge.yaml도)을 새 버전 linux amd64 파일 값으로 바꾸는 커밋을 이 PR에 더한다. 안 하면 ci가 sha256 불일치로 실패한다."]
