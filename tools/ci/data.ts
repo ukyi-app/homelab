@@ -68,3 +68,24 @@ export function checkVendoredCharts(): Violation[] {
   if (seen === 0) out.push({ rule: "vendored-chart", where: "platform/charts", message: "검사한 묶음이 0개다(L40)" });
   return out;
 }
+
+// 앱의 Valkey 배선(설계 C.5.6). 캐시(apps/<앱>의 cache.enabled)와 영속(data/<앱>의 valkey.persistent)은 둘 다
+// 같은 ns에 Service <앱>-valkey와 ExternalSecret <앱>-valkey-auth를 만든다. 둘을 함께 켜면 두 Application이 같은
+// 리소스를 서로 고친다. uses.valkey만 켜면 VALKEY_URL이 없는 Service를 가리킨다.
+export function checkValkeyWiring(): Violation[] {
+  const out: Violation[] = [];
+  const read = (f: string) => (Bun.YAML.parse(readFileSync(join(ROOT, f), "utf8")) ?? {}) as any;
+  const persistent = new Set(gitFiles("data/*/values.yaml").filter((f) => read(f)?.valkey?.persistent === true).map((f) => basename(dirname(f))));
+  for (const f of gitFiles("apps/*/values.yaml")) {
+    const app = basename(dirname(f));
+    const v = read(f);
+    const cache = v?.cache?.enabled === true;
+    if (cache && persistent.has(app)) {
+      out.push({ rule: "valkey-wiring", where: f, message: `캐시(cache.enabled)와 영속(data/${app}의 valkey.persistent)을 함께 켰다. 둘 다 Service ${app}-valkey를 만든다` });
+    }
+    if (v?.uses?.valkey === true && !cache && !persistent.has(app)) {
+      out.push({ rule: "valkey-wiring", where: f, message: `uses.valkey인데 Valkey가 없다(cache.enabled나 data/${app}의 valkey.persistent)` });
+    }
+  }
+  return out;
+}

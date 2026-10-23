@@ -8,7 +8,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { checkAlerting } from "./alerting";
-import { checkSecretPaths, checkVendoredCharts } from "./data";
+import { checkSecretPaths, checkValkeyWiring, checkVendoredCharts } from "./data";
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
 import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkSandbox, checkWorkloads } from "./policy";
 import { kubeconform, renderAll } from "./render";
@@ -353,6 +353,11 @@ const steps: Step[] = [
     name: "vendored charts",
     // 공유 차트에 커밋한 외부 차트 tgz와 Chart.yaml의 버전·sha256 주석(tools/ci/data.ts).
     run: checkVendoredCharts,
+  },
+  {
+    name: "valkey wiring",
+    // 앱마다 캐시와 영속 Valkey 중 하나만, uses.valkey면 그중 하나가 있어야 한다(tools/ci/data.ts).
+    run: checkValkeyWiring,
   },
   {
     name: "alerting",
