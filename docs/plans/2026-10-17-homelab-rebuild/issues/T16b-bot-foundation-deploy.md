@@ -21,7 +21,10 @@
    - Developer Portal에서 앱·봇을 만든다. Public Bot 끔, 서버 설치만, Interactions Endpoint URL 비움(Gateway로 받음), `MESSAGE_CONTENT` 특권 intent 켬.
    - 관리자·MANAGE_THREADS·MENTION_EVERYONE 권한은 주지 않는다. 권한은 서버 역할이 아니라 허용 채널 overwrite로 준다.
    - 봇 토큰과 서버·채널·허용 사용자(owner 1명) ID는 Infisical `/apps/homelab-bot/`에만 둔다. 저장소와 공개 문서에는 쓰지 않는다.
-3. T16a의 계약을 실제 Discord와 플랫폼 읽기 계정에 연결하고 실연동 결과를 낸다. Grafana 질의 템플릿은 실제 Grafana에서 허용 밖 질의가 거부되는지 본다(READ-02). Grafana·Argo CD `bot-reader` 토큰은 설계에 보관 위치가 없어 봇 저장소 `ARCHITECTURE.md` §5가 `/apps/homelab-bot/`의 키 이름(`GRAFANA_READER_TOKEN`, `ARGOCD_READER_TOKEN`)을 제안했다.
+3. T16a의 계약을 실제 Discord와 플랫폼 읽기 계정에 연결하고 실연동 결과를 낸다. Grafana 질의 템플릿은 실제 Grafana에서 허용 밖 질의가 거부되는지 본다(READ-02). Grafana·Argo CD `bot-reader` 토큰은 설계에 보관 위치가 없어 봇 저장소 `ARCHITECTURE.md` §5가 `/apps/homelab-bot/`의 키 이름(`GRAFANA_READER_TOKEN`, `ARGOCD_READER_TOKEN`)을 제안했다. T08b가 넘긴 것(2026-10-23):
+   - Grafana 서비스 계정 `bot-reader`(Viewer)와 Argo CD 로컬 계정 `bot-reader`(apiKey)는 있고 토큰은 없다. 토큰은 이 단계에서 만들어 위 키에 바로 넣는다(화면·파일에 남기지 않는다). Grafana 데이터소스는 읽기 전용 vmauth 뒤에 있어 Viewer 토큰으로 질의는 되고 `delete_series`·import는 막힌다(설계 U12 결과).
+   - 로그는 Grafana의 VictoriaLogs 데이터소스(uid `victorialogs`, 플러그인 v0.33.1)로 `POST /api/ds/query`에 LogsQL을 보내 읽는다(T08b #849, 사용자 결정 2026-10-23). 이 데이터소스도 읽기 전용 vmauth 뒤라 `/insert/*`·삭제 경로는 막혀 있다. Grafana의 데이터소스 응답 상한은 4MiB라 한 질의는 약 6000줄까지다. 실시간 tail(`/select/logsql/tail`)은 열지 않았다. 봇 질의 템플릿의 필드 이름(네임스페이스 등)은 실제 로그로 맞춘다.
+   - 작업자 egress 허용 목록에 npm이 없다(받기와 게시가 같은 호스트라 뺐다, 설계 C.8 쓰기 유출). 봇 작업이 npm 패키지를 받아야 하면 GET 전용 미러를 정한다.
 4. 첫 배포를 아래 순서로 한다(설계 E9).
    - **선행(보안): capability nonce 정규화.** T16a PR #5에서 이월한 지적이다(할 일 6). 봇 저장소 `src/worker.ts`에서 서명에 `=`·`!` 같은 문자를 덧붙인 비정규 base64url이 같은 바이트로 검증되지만 nonce는 새 값으로 소비돼, 30초 안에 같은 작업을 다시 실행할 수 있다. canonical base64url만 받거나 검증된 payload와 서명 바이트로 nonce 키를 만든다. 이 수정이 봇 저장소 main에 병합된 뒤에 아래 1을 시작한다 [제안].
    1. 에이전트: 등록 전에 봇 저장소 워크플로를 템플릿의 `build.yaml`(`app-build@<태그>` 호출)로 맞추는 PR을 먼저 병합한다(설계 E9 선행 조건, 병합은 사람). 플랫폼 CLI(`homelab app add homelab-bot`)로 봇을 등록하고, DB를 추가하고, 시크릿 참조를 선언한다. 값은 넣지 않는다. 봇 values에 `serviceAccountName: bot-reader`를 둔다(설계 C.4.5).
