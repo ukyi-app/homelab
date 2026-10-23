@@ -2,4 +2,4 @@
 chartVersion: 1.0.1
 postgres: { enabled: true }
 # T11 시나리오 4. 영속 Valkey(앱 ns, PVC valkey-data, 매일 R2 백업). 캐시(앱 차트)와 같은 이름이라 캐시를 먼저 끈 뒤 켠다.
-valkey: { persistent: true }
+valkey: { persistent: true, running: false }  # 복원 1단계(restore.md 1절): 서버만 내린다. PVC는 남는다
