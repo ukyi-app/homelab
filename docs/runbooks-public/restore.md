@@ -19,6 +19,7 @@
 
 ```bash
 export KUBECONFIG=~/.kube/homelab.yaml
+set -o pipefail                   # 파이프 왼쪽(pg_dump 등)의 실패를 놓치지 않는다. 없으면 오른쪽이 성공하면 전체가 성공이다
 APP=<앱 이름>
 RUN=$(date +%Y%m%d-%H%M)          # 실행 id. 이름과 라벨에 쓴다
 ```
@@ -218,9 +219,15 @@ kubectl -n database get backups      # T1 앞에 completed base backup이 있는
    kubectl -n database wait --for=condition=ready pod -l job-name=restore-$APP-$RUN-r2 --timeout=5m
    KEY="r2:$BUCKET/pgdump/$APP/pre-restore-$RUN.dump"
    kubectl -n database exec $PRIMARY -c postgres -- pg_dump -U postgres -Fc -d "$APP" \
-     | kubectl -n database exec -i job/restore-$APP-$RUN-r2 -- rclone rcat "$KEY"
-   kubectl -n database exec job/restore-$APP-$RUN-r2 -- rclone size "$KEY"       # 0보다 큰지
+     | kubectl -n database exec -i job/restore-$APP-$RUN-r2 -- rclone rcat "$KEY" \
+     && echo "덤프 올림"                                                            # 0.1의 pipefail로 pg_dump 실패도 여기서 멈춘다
+   # 올린 사본을 끝까지 읽어 본다. 목록(--list)만 보면 앞에 있는 목차만 읽어 잘린 사본도 통과한다.
+   kubectl -n database exec job/restore-$APP-$RUN-r2 -- rclone cat "$KEY" \
+     | kubectl -n database exec -i $PRIMARY -c postgres -- pg_restore -f /dev/null \
+     && echo "되돌림 사본 확인"
    ```
+
+   **"되돌림 사본 확인"이 나오지 않으면 여기서 멈춘다.** 4단계가 지금 DB를 지운다.
 
 2. **임시 클러스터:** `bootstrap.recovery`로 T1까지 되감는다. WAL 아카이버 plugin을 붙이지 않는다(운영 prefix에 쓰지 않게, 설계 B.8 E6). PVC는 `local-path`(Delete)라 PVC를 지우면 노드의 폴더도 지워진다. `inheritedMetadata`가 실행 id 라벨을 PVC·파드에 물려준다.
 
@@ -308,6 +315,7 @@ kubectl -n database get backups      # T1 앞에 completed base backup이 있는
 1. **복구 PR:** `platform/root/values-prod.yaml`의 `cluster.cnpg`에서
    - `recoverySource.serverName`에 지금 Git의 `serverName`을 옮겨 적고,
    - `serverName`을 새 세대 `pg-<복구일 YYYYMMDD>`로 바꾼다.
+   - 영속 Valkey가 있는 앱마다 `data/<앱>/values.yaml`에 `valkey.running: false`, `apps/<앱>/values.yaml`에 `suspended: true`(앱 차트 1.1.0 이상)를 같은 PR에 넣는다. root apply가 ApplicationSet을 바로 동기화하므로, 넣지 않으면 빈 PVC 위의 Valkey와 앱이 먼저 떠 빈 큐로 돌거나 새로 쓴 데이터가 RDB 복원에서 사라진다.
 
    렌더 결과는 `bootstrap.recovery` + 원본 전용 ObjectStore `r2-source`(옛 serverName) + 아카이브 plugin(새 serverName)이다. 새 serverName을 빠뜨리면 렌더가 실패한다(같은 prefix에 두 세대가 섞이면 되돌릴 수 없다). `cnpg.io/skipEmptyWalArchiveCheck` 주석은 쓰지 않는다.
 
@@ -330,6 +338,6 @@ kubectl -n database get backups      # T1 앞에 completed base backup이 있는
    kubectl -n database get backups                          # completed
    ```
 
-5. 영속 Valkey가 있는 앱은 1절로 RDB를 복원한다. 새 PVC는 비어 있으므로 1절 1단계(`running: false`)부터 한다.
+5. 영속 Valkey가 있는 앱은 1절로 RDB를 복원한다. 1단계(`running: false`)는 복구 PR이 이미 했으므로 2단계(복원 Job)부터 한다. 1절 5단계까지 끝나 키 수를 확인한 뒤에 그 앱의 `suspended` 줄을 지우는 PR로 앱을 재개한다.
 6. 앱이 뜬 뒤 시나리오 1·10을 확인한다.
 7. **정리 PR:** `recoverySource`를 지워 렌더 결과를 `initdb`로 되돌린다(새 serverName은 그대로). recovery를 남기면 나중에 볼륨을 잃고 Cluster를 다시 만들 때 옛 아카이브에서 낡은 데이터로 조용히 복구된다. 떠 있는 클러스터에는 영향이 없다(U26).

@@ -2,5 +2,6 @@
 # match: additional properties 'postgresql' not allowed
 # 닫힌 schema. 오타 키는 렌더를 막는다(L04).
 chartVersion: 1.0.0
+postgres: {enabled: true}
 postgresql: {enabled: true}
 backup: {bucket: homelab-backups}

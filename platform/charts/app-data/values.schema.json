@@ -5,6 +5,11 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["chartVersion", "backup"],
+  "anyOf": [
+    { "required": ["postgres"], "properties": { "postgres": { "required": ["enabled"], "properties": { "enabled": { "const": true } } } } },
+    { "required": ["valkey"], "properties": { "valkey": { "required": ["persistent"], "properties": { "persistent": { "const": true } } } } }
+  ],
+  "$comment": "anyOf: 리소스가 없는 데이터 Application을 만들지 않는다. 마지막 리소스 prune 거부 함정(설계 B.8 E2, C.5.5). 폐기는 data/<app> 삭제 PR로 한다.",
   "properties": {
     "chartVersion": {
       "description": "이 앱이 쓰는 차트 태그 data-chart-v<chartVersion>. ApplicationSet data가 읽는다.",

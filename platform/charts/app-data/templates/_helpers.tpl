@@ -27,6 +27,11 @@
 {{- if contains "valkey" .Release.Name -}}
 {{- fail (printf "영속 Valkey를 쓰는 앱 이름에 valkey를 넣지 않는다: %s" .Release.Name) -}}
 {{- end -}}
+{{- /* CronJob 이름은 52자까지다(Job 이름에 11자 접미사가 붙는다). <앱>-valkey-backup이라 앱 이름은 38자까지.
+       이름을 줄이지 않는 이유: ValkeyBackupStale 경보가 valkey-backup으로 찾는다. */ -}}
+{{- if gt (len .Release.Name) 38 -}}
+{{- fail (printf "영속 Valkey를 쓰는 앱 이름은 38자까지다(CronJob %s-valkey-backup이 52자를 넘는다): %s" .Release.Name .Release.Name) -}}
+{{- end -}}
 true
 {{- end -}}
 {{- end }}

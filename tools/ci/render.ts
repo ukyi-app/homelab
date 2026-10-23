@@ -415,7 +415,8 @@ export function renderAll(): RenderResult {
         const imageFile = join(ROOT, "apps", app, "image.yaml");
         const image = (existsSync(imageFile) ? Bun.YAML.parse(readFileSync(imageFile, "utf8")) ?? {} : {}) as Record<string, any>;
         // cacheServer는 차트 내부 값(공식 valkey 차트)이다. 앱 values가 덮으면 이미지·인증·크기를 바꿀 수 있다.
-        const reserved = ["path", "values", "tailnetPrefix", "cacheServer"];
+        // global도 의존 차트로 내려간다(global.imageRegistry가 고정한 이미지 레지스트리를 덮는다).
+        const reserved = ["path", "values", "tailnetPrefix", "cacheServer", "global"];
         const imageKeys = ["repository", "digest", "revision", "hold"];
         const badHuman = Object.keys(human).filter((k) => reserved.includes(k) || imageKeys.includes(k));
         const badImage = Object.keys(image).filter((k) => !imageKeys.includes(k));
@@ -442,8 +443,8 @@ export function renderAll(): RenderResult {
       const where = `data:${app}[${cluster}]`;
       try {
         const human = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) ?? {}) as Record<string, any>;
-        // valkeyServer는 차트 내부 값(공식 valkey 차트)이다. backup은 클러스터 값이라 ApplicationSet이 덮는다.
-        const bad = Object.keys(human).filter((k) => ["path", "values", "backup", "valkeyServer"].includes(k));
+        // valkeyServer·global은 차트 내부 값(공식 valkey 차트로 내려간다)이다. backup은 클러스터 값이라 ApplicationSet이 덮는다.
+        const bad = Object.keys(human).filter((k) => ["path", "values", "backup", "valkeyServer", "global"].includes(k));
         if (bad.length > 0) throw new Error(`data values.yaml에 둘 수 없는 키: ${bad.join(", ")}(생성기 변수·클러스터 값·차트 내부 값)`);
         if (bucket === undefined) throw new Error(`platform/root/values-${cluster}.yaml에 cluster.backup.bucket이 없다`);
         const values = { ...human, backup: { bucket } };
