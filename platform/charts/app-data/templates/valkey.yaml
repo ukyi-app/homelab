@@ -133,7 +133,14 @@ spec:
               args:
                 - |
                   set -eu
-                  valkey-cli -h {{ $name }}-valkey -p 6379 --rdb /work/dump.rdb
+                  # 새 파드는 시작 직후 잠깐(실측 0.25초 안) 상대 NetworkPolicy의 허용 집합에 없어 첫 접속이 거부된다
+                  # (k3s kube-router, T11 시나리오 4). Job 재시도는 새 파드라 같은 창에 다시 걸리므로 여기서 다시 시도한다.
+                  n=0
+                  until valkey-cli -h {{ $name }}-valkey -p 6379 --rdb /work/dump.rdb; do
+                    n=$((n + 1))
+                    [ "$n" -lt 10 ] || exit 1
+                    sleep 2
+                  done
                   test -s /work/dump.rdb
                   sha256sum /work/dump.rdb | cut -d' ' -f1 > /work/dump.sha256
               env:

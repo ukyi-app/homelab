@@ -611,6 +611,7 @@ spec·design-prompt가 깔고 있던 전제와 다르게 가는 것이다. 각 �
 | WaitForFirstConsumer PVC + 파드 없는 sync가 PostSync 훅을 막는다 | `platform/cnpg/prod/basebackup-pvc-warmup.yaml:3-13` | PostSync 훅을 데이터 Application에 두지 않는다 |
 | Valkey RWO PVC + RollingUpdate 교착, 자격을 argv로 넘기면 ps에 노출. 공식 차트는 인증 기본이 꺼져 있고 켜면 `default` 사용자를 반드시 정의해야 한다 | `tools/provision-cache.ts:105`, `platform/cache/prod/backup-cronjob.yaml:60`, [S43] | `deploymentStrategy: Recreate`, `REDISCLI_AUTH` env, `auth.enabled: true` + default 사용자 |
 | `--cascade=orphan`으로 남은 PVC는 Bound라 phase만 보는 감사로 못 잡는다 | `scripts/audit-orphan-pv.sh:6-13` | `data list`는 소비 여부로 판정 |
+| 새 파드는 시작 직후 잠깐 상대 NetworkPolicy의 허용 집합(파드 IP 집합)에 없어 첫 접속이 거부된다. Job 재시도는 새 파드라 같은 창에 다시 걸린다 | T11 시나리오 4(2026-10-23): 영속 Valkey 백업 Job 3회 모두 `Connection refused`, 진단 파드에서 0초 거부·0.25초 뒤 허용(k3s kube-router). kind 로컬 시험에는 이 지연이 없다 | 시작하자마자 같은 클러스터 안 상대에 붙는 컨테이너(백업 스냅샷 등)는 스크립트 안에서 재시도한다(데이터 차트 1.0.1) |
 
 **E7 CLI와 셸**
 
