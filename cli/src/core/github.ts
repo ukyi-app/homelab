@@ -1,7 +1,8 @@
 // gh·curl·git 어댑터. 사람의 gh 로그인을 쓰고 자격을 저장하지 않는다(설계 C.7). argv는 여기서만 만든다.
 // gh api -i로 상태 줄을 함께 받는다. 404에도 gh는 exit 1이지만 상태 줄과 본문을 stdout에 내므로 상태 코드로 판정한다.
 import { jsonParse, jsonStringify } from "./intrinsics";
-import { join } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { GhcrRead, GhRead, GhResponse, GithubDelegate } from "./command";
 import { ExecTimeout, why, type Exec } from "./exec";
 import { findSecretPath } from "./guard";
@@ -102,7 +103,25 @@ export function cloneArgv(work: string): string[] {
   return ["git", ...WRAPPER_GIT_ARGS.map((a) => (a === "core.hooksPath=NOHOOKS" ? `core.hooksPath=${join(work, "nohooks")}` : a)), join(work, "tree")];
 }
 
-export function githubDelegate(readExec: Exec, writeOnce: () => Exec | null, env: Record<string, string | undefined>, json: boolean): GithubDelegate {
+// CLI를 실행한 폴더가 든 checkout의 루트(.git이 폴더든 파일이든). 없으면 null. git을 부르지 않고 경로만 거슬러 본다
+// (읽기 문맥은 git 하위 명령을 쓰기로 막는다). 래퍼에 TF_GITHUB_ORIGIN_ROOT로 넘겨 state 백업이 그 안에 생기지 않게 한다
+// (Connector 4360754428, codex 확인 라운드 P2: 래퍼를 clone 안에서 돌리면 래퍼의 repo_root·origin_root가 둘 다 clone이 된다).
+export function originRoot(cwd: string): string | null {
+  let dir: string;
+  try {
+    dir = realpathSync(cwd);
+  } catch {
+    return null;
+  }
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    const up = dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
+export function githubDelegate(readExec: Exec, writeOnce: () => Exec | null, env: Record<string, string | undefined>, json: boolean, cwd: string): GithubDelegate {
   return {
     run(sub, opts = {}) {
       const exec = sub === "apply" ? writeOnce() : readExec;
@@ -117,7 +136,8 @@ export function githubDelegate(readExec: Exec, writeOnce: () => Exec | null, env
         // 래퍼는 TF_GITHUB_CLONE을 보기 전에 git rev-parse --show-toplevel을 set -e로 실행한다. cwd를 clone으로 두지 않으면
         // 저장소 밖(예: 홈)에서 실행한 CLI가 exit 128로 끝난다(#873 3라운드). 백업 경로 보호의 기준도 이 clone이 된다.
         cwd: join(work, "tree"),
-        env: { TF_GITHUB_CLONE: work },
+        // 상속된 TF_GITHUB_ORIGIN_ROOT는 쓰지 않는다(이 실행의 cwd로만 정한다). GIT_* 제거는 exec가 한다.
+        env: { TF_GITHUB_CLONE: work, TF_GITHUB_ORIGIN_ROOT: originRoot(cwd) ?? undefined },
         timeoutMs: 3_600_000,
       });
       if (r.errKind === "not-found") throw new Error("clone한 main에 tools/tf-github.sh가 없다");

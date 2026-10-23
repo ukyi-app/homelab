@@ -59,12 +59,12 @@ function timeoutFor(write: boolean, env: Record<string, string | undefined>, ask
 
 // 함정(옛 tools/lib/exec.ts 실측): git hook 안에서 CLI를 띄우면 GIT_DIR·GIT_WORK_TREE·GIT_INDEX_FILE이 상속돼
 // git -C <다른 곳>이 hook의 저장소를 본다. 자격이 없으면 프롬프트에서 멈추므로 GIT_TERMINAL_PROMPT=0. 판정은 basename.
+// git을 부르는 래퍼(tf-github.sh)도 같다(Connector 4360754437). GIT_CONFIG_COUNT·KEY·VALUE는 설정(core.fsmonitor 등)을
+// 끼워 넣으므로 저장소 변수만이 아니라 GIT_* 전부를 지운다.
 function childEnv(argv0: string, base: Record<string, string | undefined>, opts: ExecOpts): Record<string, string> {
   const env: Record<string, string | undefined> = opts.cleanEnv ? { ...opts.cleanEnv } : { ...base, ...opts.env };
-  if (basename(argv0) === "git") {
-    delete env.GIT_DIR;
-    delete env.GIT_WORK_TREE;
-    delete env.GIT_INDEX_FILE;
+  if (basename(argv0) === "git" || basename(argv0) === "tf-github.sh") {
+    for (const k of Object.keys(env)) if (k.startsWith("GIT_") && !(opts.cleanEnv && k in opts.cleanEnv)) delete env[k];
     env.GIT_TERMINAL_PROMPT = "0";
   }
   const out: Record<string, string> = {};

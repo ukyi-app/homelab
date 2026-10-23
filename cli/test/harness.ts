@@ -32,11 +32,12 @@ export const REST = "...";
 // echoEnv: 스텁이 받은 환경변수 중 이 이름들을 JSON으로 stdout에 낸다.
 // materialize: 스텁이 argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일(github 위임 시험).
 // echoCwd: 스텁이 실행된 폴더를 stdout에 낸다.
+// recordEnv: 스텁이 받은 환경변수 중 이 이름들을 원장의 env에 적는다(stdio를 상속하는 위임 호출의 환경 확인).
 // homeWrite: 스텁이 $HOME 아래에 파일을 쓰려 한다(Infisical 로컬 백업 흉내, force면 권한을 무시하는 파일시스템 흉내).
-export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean; homeWrite?: { path: string; force?: boolean } };
+export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean; homeWrite?: { path: string; force?: boolean }; recordEnv?: string[] };
 export type Matcher = string | RegExp;
 export type Rule = { argv: Matcher[]; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
-export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null; cwd: string; homeWrite?: "written" | "denied" };
+export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null; cwd: string; homeWrite?: "written" | "denied"; env?: Record<string, string | null> };
 
 // noStdin: 스텁이 stdin을 읽지 않는다(github 위임처럼 부모 stdin을 넘기는 호출).
 export function rule(argv: Matcher[], resp: Resp | Resp[] = {}, opts: { captureStdin?: boolean; noStdin?: boolean } = {}): Rule {
@@ -143,7 +144,7 @@ function readLedger(dir: string): Call[] {
 export type CliRun = { code: number; stdout: string; stderr: string; json: any; calls: Call[]; writes: Call[]; unmatched: Call[] };
 
 // extraPath: 스텁 폴더 뒤에 붙일 PATH(실제 래퍼처럼 sed·find·bash가 필요한 시험만). 스텁 도구는 앞에서 가린다.
-export type RunOpts = { env?: Record<string, string>; stdin?: string; tools?: string[]; project?: boolean; extraPath?: string[] };
+export type RunOpts = { env?: Record<string, string>; stdin?: string; tools?: string[]; project?: boolean; extraPath?: string[]; cwd?: string };
 
 function baseEnv(s: { dir: string; bin: string; home: string }, opts: RunOpts): Record<string, string> {
   return {
@@ -202,7 +203,7 @@ export function stubSandbox(rules: Rule[], opts: RunOpts = {}): { env: Record<st
 export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: ReadCtx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string; home: string } {
   const sb = stubSandbox(rules, opts);
   const progress: string[] = [];
-  const ctx = makeRuntime({ mode, json: false, line: "homelab test", env: sb.env, isTTY: false, ask: () => null, progress: (l) => progress.push(l), delegate: opts.delegate });
+  const ctx = makeRuntime({ mode, json: false, line: "homelab test", env: sb.env, isTTY: false, ask: () => null, progress: (l) => progress.push(l), delegate: opts.delegate, cwd: opts.cwd });
   return { ctx, calls: sb.calls, progress, bin: sb.bin, home: sb.env.HOME };
 }
 

@@ -1,7 +1,8 @@
 // github 위임 어댑터 시험. 04가 github plan·apply·verify를 이 어댑터로 구현한다.
 // 스텁 git clone이 목적지에 tools/tf-github.sh 스텁을 만들고(materialize), 그 래퍼 스텁이 종료 코드를 낸다.
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HOMELAB_URL } from "../../src/core/github";
 import { REST, rule, testCtx } from "../harness";
@@ -61,6 +62,27 @@ describe("github 위임", () => {
     expect(top!.cwd).toMatch(/homelab-cli-github-[^/]+\/tree$/);
     expect(c.some((x) => x.argv.join(" ") === "gh api -i user")).toBe(true);
     expect(code).toBe(1);
+  });
+
+  test("래퍼에 원본 checkout 루트를 넘기고 상속된 GIT_*·TF_GITHUB_ORIGIN_ROOT는 넘기지 않는다(Connector 4360754428·4360754437)", () => {
+    const top = mkdtempSync(join(tmpdir(), "homelab-cli-test-origin-"));
+    mkdirSync(join(top, ".git"));
+    mkdirSync(join(top, "cli", "src"), { recursive: true });
+    const inherited = { GIT_DIR: "/elsewhere/.git", GIT_WORK_TREE: "/elsewhere", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.fsmonitor", GIT_CONFIG_VALUE_0: "touch /tmp/x", TF_GITHUB_ORIGIN_ROOT: "/bogus" };
+    const names = ["TF_GITHUB_ORIGIN_ROOT", "TF_GITHUB_CLONE", "GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_TERMINAL_PROMPT"];
+    const envOf = (cwd: string) => {
+      const { ctx, calls } = testCtx("read", [clone(), rule(["tf-github.sh", "plan"], { recordEnv: names }, { noStdin: true })], { delegate: true, env: inherited, cwd });
+      expect(ctx.github!.run("plan")).toBe(0);
+      return calls().calls.find((x) => x.argv[0] === "tf-github.sh")!.env!;
+    };
+    const inside = envOf(join(top, "cli", "src"));
+    expect(inside.TF_GITHUB_ORIGIN_ROOT).toBe(realpathSync(top));
+    expect(inside.TF_GITHUB_CLONE).toMatch(/homelab-cli-github-/);
+    for (const k of ["GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0"]) expect([k, inside[k]]).toEqual([k, null]);
+    expect(inside.GIT_TERMINAL_PROMPT).toBe("0");
+    // 저장소 밖에서 실행하면 넘기지 않는다(상속된 값도 지운다).
+    const outside = envOf(mkdtempSync(join(tmpdir(), "homelab-cli-test-nogit-")));
+    expect(outside.TF_GITHUB_ORIGIN_ROOT).toBeNull();
   });
 
   test("위임이 아닌 명령에는 github 어댑터가 없다", () => {

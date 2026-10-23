@@ -63,6 +63,14 @@ describe("PR 작성기", () => {
     expect(o.detail).toContain("이 명령 밖 파일 1개");
   });
 
+  test("열린 PR이 명령 밖 파일을 이 명령 경로로 rename했으면 같다고 보지 않는다(previous_filename, Connector 4360396722)", async () => {
+    const renamed = ghGet(`${R}/compare/${FAKE_SHA}...${HEAD}`, 200, { files: [{ filename: PATH, previous_filename: "apps/smoke/values.yaml", status: "renamed" }] });
+    const { ctx } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, CLI_MSG), renamed, ghGet(contents(PATH, HEAD), 200, file(CONTENT))]);
+    const o = await prStep(spec).read(ctx);
+    expect(o.state).toBe("differs");
+    expect(o.wait).toBeUndefined();
+  });
+
   test("열린 PR 머리가 사람 커밋이면 내용이 같아도 plan이 실패한다(같다고 보고하지 않는다)", async () => {
     const { ctx, calls } = testCtx("plan", [mainAt(), notOnMain(), ghGet(pulls, [openPr(HEAD)]), headMsg(HEAD, "사람이 고친 커밋"), compare(HEAD, [PATH]), ghGet(contents(PATH, HEAD), 200, file(CONTENT))]);
     const r = await ctx.engine({ command: "db add", app: "smoke", steps: [prStep(spec)] });

@@ -116,10 +116,13 @@ export function kubeRead(exec: Exec): KubeRead {
     logs(ns, deployment, opts = {}) {
       checkName("namespace", ns);
       checkName("Deployment", deployment);
-      if (opts.since !== undefined && !/^[1-9][0-9]*[smh]$/.test(opts.since)) throw new Error("--since 형식이 아니다");
+      // 명령은 일 단위(7d)도 받는다. kubectl은 Go duration이라 d가 없어 시간으로 바꾼다(Connector 4360754457).
+      const m = opts.since === undefined ? null : /^([1-9][0-9]{0,5})([smhd])$/.exec(opts.since);
+      if (opts.since !== undefined && !m) throw new Error("--since 형식이 아니다");
+      const since = m ? (m[2] === "d" ? `${Number(m[1]) * 24}h` : opts.since) : undefined;
       const tail = opts.tail ?? 200;
       if (!Number.isInteger(tail) || tail < 1 || tail > 10_000) throw new Error("tail 범위가 아니다");
-      const r = run(exec, ["-n", ns, "logs", `deploy/${deployment}`, `--tail=${tail}`, ...(opts.since ? [`--since=${opts.since}`] : [])]);
+      const r = run(exec, ["-n", ns, "logs", `deploy/${deployment}`, `--tail=${tail}`, ...(since ? [`--since=${since}`] : [])]);
       return must(r, `kubectl logs ${deployment}`).stdout;
     },
     canI(verb, kind, ns) {
@@ -174,7 +177,10 @@ export function kubeWrite(exec: Exec): KubeWrite {
     deleteRestoreObjects(ns, runId) {
       checkName("namespace", ns);
       if (!/^[a-z0-9]{1,22}$/.test(runId)) throw new Error("복원 실행 id 형식이 아니다");
-      must(run(exec, ["-n", ns, "delete", RESTORE_RESOURCES, "-l", `${RESTORE_LABEL}=${runId}`, "--ignore-not-found", "--wait=false"]), "복원 객체 지우기");
+      // 실제로 사라질 때까지 기다린다(Connector 4360754447). 기다리지 않으면 finalizer가 있는 PVC·CNPG Cluster가 terminating으로
+      // 남아 엔진의 실행 뒤 재조회가 성공한 삭제를 실패로 본다. [미검증] --request-timeout(20s)이 긴 대기의 watch를 끊어도
+      // kubectl이 다시 watch해 이어 가는지는 T12-05 운영 실행에서 본다.
+      must(run(exec, ["-n", ns, "delete", RESTORE_RESOURCES, "-l", `${RESTORE_LABEL}=${runId}`, "--ignore-not-found", "--wait=true", "--timeout=300s"], { timeoutMs: 330_000 }), "복원 객체 지우기");
     },
   };
 }

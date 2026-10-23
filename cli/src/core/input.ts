@@ -13,10 +13,16 @@ export function readHiddenLine(readByte: () => number | null): string {
     // Enter는 raw 모드에서 \r(0x0d)로 온다. Ctrl-C(0x03)는 취소.
     if (b === null || b === 0x0d || b === 0x0a) break;
     if (b === 0x03) throw new Error("입력을 취소했다");
+    // Backspace(0x08)·Delete(0x7f)는 직전 UTF-8 문자 하나를 지운다(Connector 4360754443). 이어지는 바이트(10xxxxxx)까지 함께 뺀다.
+    if (b === 0x08 || b === 0x7f) {
+      while (bytes.length > 0 && ((bytes.pop() as number) & 0xc0) === 0x80);
+      continue;
+    }
     bytes.push(b);
   }
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+    // ignoreBOM: 기본 디코더는 선두 U+FEFF를 지워 다른 값을 받아들인다. 그대로 두고 valueProblem이 판단한다(codex 확인 라운드).
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new Uint8Array(bytes));
   } catch {
     throw new Error("입력이 올바른 UTF-8이 아니다");
   }

@@ -17,6 +17,12 @@ function detailOf(o: Observation): string {
   return o.wait ? `${o.detail} (${o.wait})` : o.detail;
 }
 
+// --apply는 `--`(뒤는 위치 인자만) 앞에 둔다. 끝에 붙이면 재실행이 위치 인자로 읽어 64로 끝난다(Connector 4360754469).
+export function applyLine(line: string): string {
+  const withApply = line.replace(/ --(?= |$)/, " --apply --");
+  return withApply === line ? `${line} --apply` : withApply;
+}
+
 function planLine(line: string): string {
   return line.replace(/ --apply(?= |$)/, "");
 }
@@ -35,7 +41,7 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
     let next: string | null;
     const custom = plan.next?.(status);
     if (custom !== undefined) next = custom;
-    else if (status === "pending") next = `${ctx.line} --apply`;
+    else if (status === "pending") next = applyLine(ctx.line);
     else if (status === "waiting") next = `대기가 끝나면 확인: ${planLine(ctx.line)}`;
     else if (status === "failed") next = error?.next ?? RERUN;
     else next = null;

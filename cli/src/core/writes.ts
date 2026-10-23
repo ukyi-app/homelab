@@ -78,9 +78,12 @@ function git(args: string[]): Verdict {
   return write(`git ${sub ?? ""}`.trim());
 }
 
-// kubectl 인자가 Secret 리소스를 가리키는지. secret, secrets, Secret, secrets.v1, secret/x, pods,secrets, --raw .../secrets/... 모두.
-export function targetsSecret(positional: string[]): boolean {
-  return positional.some((p) => p.toLowerCase().split(/[,/]/).some((piece) => /^secrets?$/.test(piece.split(".")[0])));
+// kubectl 리소스 인자가 Secret 종류를 가리키는지. 종류 자리만 본다: 첫 인자(secret, Secret, secrets.v1, pods,secrets)와
+// kind/name 꼴의 kind. 이름 자리(앱 이름이 secret인 deploy/secret, get deploy secret)는 Secret이 아니다(Connector 4360396711).
+// kindFirst=false(logs)면 첫 인자도 이름(파드)이라 kind/name 꼴만 본다.
+export function targetsSecret(resources: string[], kindFirst = true): boolean {
+  const secretKind = (k: string) => k.toLowerCase().split(",").some((piece) => /^secrets?$/.test(piece.split(".")[0]));
+  return resources.some((p, i) => (p.includes("/") ? secretKind(p.split("/")[0]) : kindFirst && i === 0 && secretKind(p)));
 }
 
 function kubectl(args: string[]): Verdict {
@@ -89,7 +92,8 @@ function kubectl(args: string[]): Verdict {
   if (args.some((a) => a === "--raw" || a.startsWith("--raw=") || a === "--flatten")) return write("kubectl --raw·--flatten은 쓰지 않는다", true);
   const pos = positionals("kubectl", args);
   const [verb, sub] = pos;
-  const secret = targetsSecret(pos.slice(1));
+  const nestedVerb = verb === "auth" || verb === "config" || verb === "rollout";
+  const secret = targetsSecret(pos.slice(nestedVerb ? 2 : 1), verb !== "logs");
   const simple = ["get", "describe", "explain", "api-resources", "api-versions", "version", "cluster-info", "top", "wait", "events", "logs"];
   if (verb && simple.includes(verb)) return read(`kubectl ${verb}`, secret);
   const nested: Record<string, string[]> = {

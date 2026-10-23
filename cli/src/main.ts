@@ -129,4 +129,6 @@ async function main(argv: string[]): Promise<number> {
   return EXIT[result.status];
 }
 
-process.exit(await main(process.argv.slice(2)));
+// process.exit()를 부르지 않는다. 파이프·느린 소비자로 낸 출력이 비워지기 전에 끝나 잘린다(Bun 1.4.3 실측: 4MB 중 64KB만 도착).
+// exitCode만 두면 이벤트 루프가 stdout·stderr를 비운 뒤 끝난다(Connector 4360396737).
+process.exitCode = await main(process.argv.slice(2));

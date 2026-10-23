@@ -77,7 +77,9 @@ function changedFiles(ctx: ReadCtx | WriteCtx, base: string, head: string): stri
   const files = Array.isArray(r.json?.files) ? r.json.files : [];
   // compare는 파일 300개까지 준다. CLI PR은 몇 개뿐이라 그보다 많으면 사람 변경이 섞인 것으로 본다.
   if (files.length >= 300) throw new Error("PR 변경 파일이 300개 이상이다(CLI가 만든 PR이 아니다)");
-  return files.map((f: { filename: string }) => f.filename);
+  // rename은 새 경로가 filename, 원래 경로가 previous_filename이다. 둘 다 센다. 원래 경로를 빼면 명령 밖 파일을 명령의
+  // 경로로 옮긴 PR이 "같음"으로 보이고, 병합하면 원래 파일이 사라진다(Connector 4360396722).
+  return files.flatMap((f: { filename: string; previous_filename?: string }) => (typeof f.previous_filename === "string" ? [f.filename, f.previous_filename] : [f.filename]));
 }
 
 export type FileContents = Record<string, string | null>;

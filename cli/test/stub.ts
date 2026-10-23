@@ -9,7 +9,7 @@ type Matcher = string | { re: string };
 // echoCwd: 스텁이 실행된 폴더를 stdout에 낸다(git rev-parse --show-toplevel 흉내).
 // homeWrite: $HOME 아래 path에 파일을 쓰려 한다(Infisical CLI의 secrets-backup 흉내). 실패는 무시한다(CLI 0.44.2도 무시).
 //   force면 부모 폴더를 0700으로 바꾼 뒤 쓴다(권한이 듣지 않는 파일시스템 흉내). 결과는 원장의 homeWrite에 적는다.
-type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean; homeWrite?: { path: string; force?: boolean } };
+type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean; homeWrite?: { path: string; force?: boolean }; recordEnv?: string[] };
 // noStdin: stdin을 읽지 않는다(위임이 부모 stdin을 넘기는 호출. 열린 stdin을 끝까지 읽으면 멈춘다).
 type Rule = { argv: Matcher[]; rest: boolean; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
 
@@ -59,6 +59,8 @@ if (index !== -1) {
   writeFileSync(counter, String(n + 1));
   resp = rules[index].responses[Math.min(n, rules[index].responses.length - 1)];
   if (resp.homeWrite) call.homeWrite = homeWrite(resp.homeWrite);
+  // stdio를 상속하는 호출(github 위임)은 stdout을 시험이 못 받으므로 환경을 원장에 적는다.
+  if (resp.recordEnv) call.env = Object.fromEntries(resp.recordEnv.map((k) => [k, process.env[k] ?? null]));
 }
 appendFileSync(join(dir, "ledger.jsonl"), JSON.stringify(call) + "\n");
 

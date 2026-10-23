@@ -33,6 +33,17 @@ function offenders(re: RegExp, allowed: string[]): string[] {
 
 const transpiler = new Bun.Transpiler({ loader: "ts" });
 
+// 주석을 지우고 타입을 벗긴 코드. import /* 주석 */ (변수) 같은 꼴은 scanImports가 경로를 내지 않고 키워드 정규식도
+// 주석 때문에 놓친다(codex 확인 라운드 P2). 변환 결과에는 주석이 없어 `import(`로 드러난다.
+export function stripped(text: string): string {
+  return transpiler.transformSync(text);
+}
+
+// 동적 import는 cli/src 어디에서도 쓰지 않는다(경로가 상수가 아니면 import 허용 목록을 볼 수 없다). 등록 표는 정적 import다.
+export function hasDynamicImport(text: string): boolean {
+  return /\bimport\s*\(/.test(stripped(text)) || /\bimport\s*\(/.test(code(text));
+}
+
 // 문법 단위로 읽은 import 경로(import·export from·동적 import()·require()). 공백 없는 꼴도 잡는다.
 export function importsOf(text: string): string[] {
   return transpiler.scanImports(text).map((i) => i.path);
@@ -45,6 +56,7 @@ const FS_IMPORTERS: Record<string, Set<string> | "any"> = {
   "core/temp.ts": "any",
   "core/infisical-backup.ts": "any",
   "core/version.ts": new Set(["readFileSync"]),
+  "core/github.ts": new Set(["existsSync", "realpathSync"]),
   "core/input.ts": new Set(["readFileSync", "readSync"]),
   "main.ts": new Set(["readSync"]),
 };
@@ -107,9 +119,10 @@ export function commandProblems(file: string, text: string, names: string[] = RE
     if (own && existsSync(join(dir, `${spec.slice(2)}.ts`))) continue;
     bad.push(`import ${spec}`);
   }
-  const g = code(text).match(COMMAND_GLOBALS);
+  const plain = `${code(text)}\n${stripped(text)}`;
+  const g = plain.match(COMMAND_GLOBALS);
   if (g) bad.push(`전역 ${g[0]}`);
-  const w = code(text).match(GLOBAL_WRITE);
+  const w = plain.match(GLOBAL_WRITE);
   if (w) bad.push(`내장 전역 변경 ${w[0].trim()}`);
   return bad;
 }
@@ -185,6 +198,18 @@ describe("소스 규칙", () => {
 
   test("core는 JSON·Object.freeze를 직접 부르지 않고 잡아 둔 함수를 쓴다", () => {
     expect(offenders(/\bJSON\s*\.\s*(parse|stringify)\b|\bObject\.freeze\b/, ["core/intrinsics.ts"]).filter((f) => f.startsWith("core/") || f === "main.ts")).toEqual([]);
+  });
+
+  test("cli/src 어디에도 동적 import가 없다(주석 낀 꼴·변수 경로 포함)", () => {
+    expect(src.filter((p) => hasDynamicImport(readFileSync(p, "utf8"))).map(rel)).toEqual([]);
+  });
+
+  test("동적 import 검사가 주석 낀 꼴과 변수 경로를 잡는다(codex 확인 라운드 P2)", () => {
+    const probe = "async function w(moduleName: string) {\n  const { writeFileSync: save } =\n    await import /* optional loader */ (moduleName);\n  save('/tmp/x', 'y');\n}";
+    expect(hasDynamicImport(probe)).toBe(true);
+    expect(commandProblems("doctor.ts", probe)).toContain("전역 import(");
+    expect(hasDynamicImport("const m = await import(\n// c\n'node:fs');")).toBe(true);
+    expect(hasDynamicImport('import { x } from "./y";\nconst important = 1;')).toBe(false);
   });
 
   test("프로세스·네트워크는 core/exec.ts에서만", () => {
