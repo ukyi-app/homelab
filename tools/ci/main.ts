@@ -238,6 +238,20 @@ const steps: Step[] = [
     run: () => tool("tf-github", ["bash", "tools/tf-github.test.sh"]),
   },
   {
+    name: "cli",
+    // homelab CLI 시험(설계 C.4.6 CLI 행): PATH 스텁으로 plan의 쓰기 부명령 0건, 출력의 시크릿 0, 엔진의 재실행·실패 주입.
+    // 0건 통과는 실패다(B.8 E7: 0건을 처리하고 성공하는 검사는 검사가 아니다).
+    run: () => {
+      const r = run(["bun", "test", "cli/"]);
+      const out = (r.stdout + r.stderr).trim();
+      console.log(out);
+      const pass = Number(out.match(/^\s*(\d+) pass$/m)?.[1] ?? 0);
+      if (r.code !== 0) return [{ rule: "cli", where: "cli/", message: `bun test exit ${r.code}` }];
+      if (pass === 0) return [{ rule: "cli", where: "cli/", message: "통과한 시험이 0건이다" }];
+      return [];
+    },
+  },
+  {
     name: "temp cleanup",
     // tempDir 폴더가 어떻게 끝나든 지워지는지(lib.ts). 자식 프로세스를 빈 TMPDIR로 돌려 끝난 뒤 남은 것을 센다.
     run: () => {

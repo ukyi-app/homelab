@@ -35,6 +35,8 @@ kubeconfig*
 docs/runbooks/
 
 # 로컬 도구
+# homelab CLI 빌드 결과(cli/build.ts). 바이너리는 커밋하지 않는다.
+cli/dist/
 mise.local.toml
 .mise.local.toml
 node_modules/
