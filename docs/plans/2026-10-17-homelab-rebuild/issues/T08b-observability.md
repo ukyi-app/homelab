@@ -37,7 +37,7 @@
   - VictoriaLogs single + vector: 로그 14일. vector는 root여야 `/var/log/pods`를 읽으므로 privileged ns `observability`에 둔다. vector·VictoriaLogs는 limit에 백로그 여유를 둔다(OOM 결합 루프).
   - node-exporter(systemd 수집 켬) + kube-state-metrics. 호스트 유닛 실패를 node-exporter가 본다.
 - 버전: Alertmanager 0.34.1, 나머지는 이 티켓 시작 때 정해 고정한다(U14).
-- 핵심 룰(15개 안팎): Watchdog(항상 발화), TargetDown, KubePodCrashLooping, KubePodNotReady(15분), OOMKilled, NodeMemoryHigh, NodeFilesystemAlmostFull, NodeSystemdUnitFailed, ArgoCDAppDegraded·OutOfSync(30분, `argocd_app_info` 지표), ExternalSecretNotReady(ESO 지표), CNPGClusterNotHealthy, PGBackupStale(마지막 성공 백업 26시간 초과)·WALArchiveFailing, ValkeyBackupStale, KubeJobFailed, AdGuard tailnet 이탈(아래). 룰 작성 규칙 4줄은 설계 B.8 E4다. 룰마다 단위 시험을 둔다(`vmalert-tool unittest`, 형식 [미검증] U11. 안 되면 promtool 형식 또는 시험 경보 수동 확인).
+- 핵심 룰(15개 안팎): Watchdog(항상 발화), TargetDown, KubePodCrashLooping, KubePodNotReady(15분), OOMKilled, NodeMemoryHigh, NodeFilesystemAlmostFull, NodeSystemdUnitFailed, ArgoCDAppDegraded·OutOfSync(30분, `argocd_app_info` 지표), ExternalSecretNotReady(ESO 지표), CNPGClusterNotHealthy, PGBackupStale(마지막 성공 백업 26시간 초과)·WALArchiveFailing, ValkeyBackupStale, KubeJobFailed, AdGuard tailnet 이탈(아래). 룰 작성 규칙 4줄은 설계 B.8 E4다. 룰마다 단위 시험을 둔다(`vmalert-tool unittest`. U11 결과 2026-10-22: 형식이 맞고 `bun run ci`가 돌려 promtool 형식·수동 확인 대안은 쓰지 않았다).
 - Argo CD notifications는 설정하지 않고 지표 경보로 대신한다(옛 webhook 방식이 토큰을 DEBUG 로그로 유출했다).
 
 ### 비AI 알림 (D-10, AC-P11)
