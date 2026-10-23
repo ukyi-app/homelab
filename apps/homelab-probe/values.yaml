@@ -4,8 +4,6 @@ chartVersion: 1.1.0
 kind: web
 port: 8080
 resources: { cpu: 50m, memory: 64Mi }
-# T11 시나리오 10 복원 3단계(restore.md 2절): replicas 0, 마이그레이션 Job 없음. 복원 뒤 이 줄을 지운다.
-suspended: true
 # T11 시나리오 2(PostgreSQL). DB·역할은 data/homelab-probe/가 만든다.
 uses: { postgres: true, valkey: true }
 # 시험 앱 코드에 마이그레이션이 없어 이미지의 bun으로 멱등 DDL만 돈다(Bun.sql은 DATABASE_URL을 읽는다).
