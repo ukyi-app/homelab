@@ -1,0 +1,5 @@
+# expect: fail
+# match: valkey.restoreMode는 valkey.persistent: true와 함께
+chartVersion: 1.0.0
+valkey: {persistent: false, restoreMode: true}
+backup: {bucket: homelab-backups}

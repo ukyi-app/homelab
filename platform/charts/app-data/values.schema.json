@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "homelab data chart values (data/<app>/values.yaml)",
+  "description": "닫힌 schema다(L04). 모르는 키는 렌더를 막는다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["chartVersion", "backup"],
+  "properties": {
+    "chartVersion": {
+      "description": "이 앱이 쓰는 차트 태그 data-chart-v<chartVersion>. ApplicationSet data가 읽는다.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "postgres": {
+      "description": "공유 Cluster pg(ns database)에 앱 이름의 역할(DatabaseRole, DB owner)과 DB(Database)를 만든다(D-05). 비밀번호 원본은 Infisical /apps/<app>/postgres/PASSWORD.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "valkey": {
+      "description": "영속 Valkey(D-06). 앱 ns에 Service <app>-valkey:6379, PVC valkey-data(local-retain 1Gi), 하루 1회 R2 백업 CronJob <app>-valkey-backup.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["persistent"],
+      "properties": {
+        "persistent": { "description": "true면 영속 Valkey를 만든다. 비밀번호 원본은 Infisical /apps/<app>/valkey/PASSWORD.", "type": "boolean" },
+        "running": { "description": "false면 서버만 내린다(복원 1단계, 설계 C.5.6). PVC는 남고 백업 CronJob은 suspend된다. 평소에는 적지 않는다.", "type": "boolean" },
+        "restoreMode": { "description": "true면 appendonly no로 띄워 RDB를 읽는다(복원 3단계). 복원 뒤 false로 되돌린다.", "type": "boolean" }
+      }
+    },
+    "backup": {
+      "description": "ApplicationSet data가 클러스터 값으로 넣는다. 사람이 적지 않는다.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bucket": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" }
+      }
+    },
+    "valkeyServer": {
+      "description": "차트 내부 값(공식 valkey 차트의 values). data values에 적지 않는다. ci가 막는다(tools/ci/render.ts).",
+      "type": "object"
+    },
+    "global": {
+      "description": "Helm이 의존 차트 때문에 넣는 값. 적지 않는다.",
+      "type": "object"
+    }
+  }
+}

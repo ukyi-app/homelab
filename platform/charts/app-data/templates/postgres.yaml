@@ -1,0 +1,74 @@
+{{- if .Values.postgres.enabled }}
+{{- $name := include "data.name" . }}
+# 앱 역할의 비밀번호(설계 C.5.1). 원본은 Infisical /apps/<앱>/postgres/PASSWORD 하나이고, 앱 ns의 연결 Secret
+# (앱 차트 <앱>-db)과 이 Secret이 사본이다. database ns는 store infisical-apps만 쓸 수 있다(conditions).
+# cnpg.io/reload: 값이 바뀌면 CNPG가 바로 ALTER ROLE 한다[S31]. 회전 순서는 docs/runbooks-public/rotate.md.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: pg-role-{{ $name }}
+  namespace: database
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  {{- include "data.externalSecretSpec" . | nindent 2 }}
+  target:
+    name: pg-role-{{ $name }}
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      # template이 없으면 ExternalSecret의 라벨(Argo CD tracking 포함)이 Secret에 복사된다(설계 B.8 E3).
+      type: kubernetes.io/basic-auth
+      metadata:
+        labels:
+          cnpg.io/reload: "true"
+      mergePolicy: Replace
+      data:
+        username: {{ $name }}
+        # ESO 템플릿이다. Helm이 렌더하지 않게 중괄호를 문자열로 낸다.
+        password: {{ "{{ .password }}" | quote }}
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $name }}/postgres/PASSWORD
+---
+# 역할 이름 = 앱 이름 = DB owner. 앱끼리 owner를 공유하지 않는다(L10). reclaim 기본 retain이라 CR이 지워져도 역할이 남는다[S31].
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: {{ $name }}
+  namespace: database
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+  annotations:
+    {{- include "data.protect" . | nindent 4 }}
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  cluster:
+    name: pg
+  name: {{ $name }}
+  login: true
+  passwordSecret:
+    name: pg-role-{{ $name }}
+---
+# DB 이름 = 앱 이름. databaseReclaimPolicy 기본 retain이라 CR이 지워져도 DB가 남는다[S30].
+# 같은 DB를 두 CR이 관리하면 두 번째를 CNPG가 거부한다.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ $name }}
+  namespace: database
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+  annotations:
+    {{- include "data.protect" . | nindent 4 }}
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  cluster:
+    name: pg
+  name: {{ $name }}
+  owner: {{ $name }}
+{{- end }}

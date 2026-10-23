@@ -1,0 +1,60 @@
+# 기본값. 키 설명은 values.schema.json의 description에 있다. chartVersion은 기본값을 두지 않는다.
+postgres:
+  enabled: false
+valkey:
+  persistent: false
+  restoreMode: false
+# ApplicationSet data가 클러스터 값 cluster.backup.bucket으로 채운다(운영 homelab-backups, VM은 전용 버킷). 사람이 적지 않는다.
+backup: {}
+
+# 영속 Valkey(공식 차트 valkey, Chart.yaml의 valkeyServer) 내부 값. data values에 적지 않는다(ci가 막는다).
+# 이미지·인증 모양은 앱 차트의 cacheServer와 같다. 바꿀 때 둘을 함께 바꾼다.
+# 크기는 고정이다(설계 C.5.6 기본값): maxmemory 128mb, memory limit = 128 × 1.5 + 64 = 256Mi.
+valkeyServer:
+  # Service·Deployment 이름이 <앱>-valkey가 된다(앱 차트 연결 Secret의 주소). 앱 이름에 valkey가 들어가면 _helpers.tpl이 막는다.
+  nameOverride: valkey
+  image:
+    registry: docker.io
+    repository: valkey/valkey
+    tag: "9.1.2@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd"
+  serviceAccount:
+    create: false
+    automount: false
+  # PVC(templates/valkey.yaml)와 같은 wave. local-retain은 WaitForFirstConsumer라 PVC를 앞 wave에 두면 파드를 기다리며 멈춘다.
+  workloadAnnotations:
+    argocd.argoproj.io/sync-wave: "1"
+  # RWO PVC를 두 파드가 함께 잡는 RollingUpdate 교착을 피한다(설계 C.5.6).
+  deploymentStrategy: Recreate
+  resources:
+    requests: { cpu: 10m, memory: 256Mi }
+    limits: { memory: 256Mi }
+  initResources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 16Mi }
+  # 기본 probe는 인증 없는 valkey-cli ping이다. NOAUTH 응답도 exit 0이라 프로세스가 답하는지만 본다(9.1.2 실측).
+  readinessProbe:
+    enabled: true
+  dataStorage:
+    enabled: true
+    # PVC는 이 차트가 직접 만든다(templates/valkey.yaml). 서버를 내려도(running: false) PVC가 남아야 해서다.
+    persistentVolumeClaimName: valkey-data
+  auth:
+    enabled: true
+    usersExistingSecret: "{{ .Release.Name }}-valkey-auth"
+    aclUsers:
+      default:
+        permissions: "~* &* +@all"
+        passwordKey: password
+  # RDB save는 Valkey 기본값을 그대로 둔다(설계 C.5.6). noeviction: 메모리가 차면 쓰기 오류로 드러난다.
+  valkeyConfig: |
+    maxmemory 128mb
+    maxmemory-policy noeviction
+    appendonly yes
+    appendfsync everysec
+  # 복원 모드 덮어쓰기(templates/valkey.yaml의 ConfigMap valkey-overrides). init 스크립트가 valkeyConfig 뒤에
+  # /extravalkeyconfigs/*를 이어 붙여 같은 지시어는 뒤의 값이 이긴다. 이 볼륨 이름은 차트가 정한 이름이다.
+  extraSecretValkeyConfigs: true
+  extraVolumes:
+    - name: extravalkeyconfigs-volume
+      configMap:
+        name: valkey-overrides

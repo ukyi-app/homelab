@@ -1,0 +1,6 @@
+# expect: fail
+# match: backup.bucket이 없다
+# 영속 Valkey 백업은 클러스터 버킷이 있어야 한다. ApplicationSet data가 넣는 값이 빠진 경우.
+chartVersion: 1.0.0
+valkey: {persistent: true}
+backup: {}
