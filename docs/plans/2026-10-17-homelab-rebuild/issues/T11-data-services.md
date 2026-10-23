@@ -1,7 +1,7 @@
 # T11 데이터 서비스
 
 - 단계: P2 플랫폼 구축 (재분해 T05 2026-10-18)
-- 상태: 대기
+- 상태: 완료(2026-10-23. 사용자 결정으로 T10 완료 전에 착수(T10은 월요일 Renovate 확인만 남음). 데이터 차트 1.0.0 백업 결함은 1.0.1로 고침, restore.md 2절 남은 P2는 후속 PR)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T08a, T09, T10
   - T08a: cert-manager와 R2 백업 버킷 `homelab-backups`(lifecycle 포함).
@@ -74,6 +74,20 @@
   - 시나리오 10: 두 번째 DB는 손 PR `data/homelab-probe2/values.yaml`(DB만). `homelab db restore` 대신 `restore.md`의 C.5.7 단계를 사람이 `kubectl`로 따른다(복원 리소스는 GitOps 밖) → G의 확인.
 - `kubectl -n database get backups`로 첫 base backup `completed`를 본다.
 - 복원 뒤 `kubectl -n database get cluster,job,pvc -l homelab.ukyi.app/restore=<실행 id>` → 0개.
+- 확인한 항목(2026-10-23, 기록은 `approvals.md`의 같은 날 행):
+  - 버전과 배치: CNPG operator 1.30.1(차트 0.29.1), Barman Cloud Plugin v0.15.1(차트 0.8.1), Cluster `pg` PostgreSQL 18.6, ObjectStore `r2`(serverName `pg-20261023`, 14일), 데이터 차트 `data-chart-v1.0.0`→`v1.0.1`, 앱 차트 `app-chart-v1.1.0`(캐시 Valkey, `suspended`). 첫 base backup `pg-daily-20261023025059` completed, WAL 아카이브 실패 0.
+  - 확인 경로: 시험 앱 `homelab-probe`에 `/healthz/db`·`/healthz/cache`가 없어 앱 저장소에 더했다(요청마다 새 접속, 사용자 승인). 마이그레이션은 앱 코드 없이 이미지의 `bun -e`로 멱등 DDL을 돈다.
+  - 시나리오 2 통과: 앱 PR을 데이터 PR보다 먼저 병합해 마이그레이션 Job이 역할 없음(`auth_failed`)으로 실패하고, 데이터 PR 병합 뒤 같은 sync 작업이 retry로 성공했다. 역할·DB status(U15), owner, `/healthz/db` 200.
+  - 시나리오 3 통과: PVC 없음, `allkeys-lru`, 인증 없는 `PING` NOAUTH, 다른 ns에서 6379 불통(DNS 대조 성공), `/healthz/cache` 200.
+  - 시나리오 4 통과(U18): 캐시를 끈 PR 뒤 영속 Valkey PR(같은 이름이라 둘로 나눔). 데이터 차트 1.0.0의 백업 Job은 새 파드의 첫 접속이 NetworkPolicy 반영 전에 거부돼 3회 모두 실패했다(정기 백업도 매일 실패할 결함). 1.0.1(스냅샷 재시도)로 고친 뒤 R2 업로드·sha256 대조, restore.md 1절대로 서버 내림 → 복원 Job → 복원 모드 → AOF 켜기 → 평상시, 표식 키가 돌아오고 백업 뒤 키는 없음, 재시작 뒤 AOF에서 같은 키 수.
+  - 시나리오 8 통과(U17): rotate.md 3c대로 DB 쪽 동기화 3초 뒤 역할 적용, 앱 재시작 뒤 `/healthz/db` 200, 옛 값 새 접속 실패, 새 접속 중단 약 17~20초. 이미 열린 연결은 유지된다.
+  - 시나리오 9 통과: 앱 폴더를 지운 PR 뒤 Application NotFound, Database·DatabaseRole·영속 Valkey PVC·Infisical 키 유지, 표식 행·키 그대로. revert PR로 다시 등록한 뒤 같은 표식 행.
+  - 시나리오 10 통과(U16, U26): DB만 있는 `homelab-probe2`는 앱 ns 없이 동기화됐다. restore.md 2절대로 R2에서 임시 Cluster를 T1로 복원(94초), 앱 멈춤, DB를 지우고 앱 역할로 복원, ACL 원본과 같음. probe는 T1 상태(T1 뒤 스키마·테이블 없음), probe2의 T1 뒤 쓰기는 남음. 임시 Cluster·PVC·Job 0개, R2 되돌림 사본 삭제. 임시 Cluster에서 bootstrap을 initdb로 바꾸는 patch가 거부되지 않았다(U26, kubectl 경로).
+  - 4단계 중 한 번, 앱 역할 확인(4-1·4-2)을 앱 멈춤 확인보다 먼저 돌려 표식이 지워졌고 DB 삭제 블록이 아무것도 하지 않고 멈췄다. 순서대로 다시 돌려 통과했다(런북 개선은 후속).
+- 후속(이 티켓 밖으로 넘김):
+  - restore.md 2절 리뷰 P2 넷(확장 소유자, 파괴 직전 Job 접속 재확인, 확장 구성 객체 ACL, 하이픈 든 확장 이름)과 시나리오 10 실측의 실행 순서·재실행 개선: 후속 PR.
+  - 공유 클러스터에서 다른 앱 역할도 남의 DB에 CONNECT할 수 있다(PostgreSQL 기본 PUBLIC CONNECT, 테이블 권한은 없음). 데이터 차트에서 막을지 T13 전에 정한다.
+  - 시작하자마자 같은 클러스터 안 상대에 붙는 앱(마이그레이션 Job 포함)은 첫 접속 거부를 재시도해야 한다(설계 B.8 E6). 앱 계약(앱 템플릿 README)에 적을지 T12·T13에서 본다.
 - 이 단계에서 확인할 미검증 항목: U15(`DatabaseRole` 필드와 status), U16(Barman Cloud Plugin v0.15.1 + R2 새 클러스터 복원), U17(비밀번호 변경 뒤 열린 연결 유지), U18(Valkey RDB 복원 절차), U26(복원 시험의 임시 Cluster에서 `bootstrap`을 `initdb`로 바꾸는 변경이 거부되지 않는지). 결과가 틀리면 설계 부록 1의 "틀리면" 열대로 간다.
 
 ## 되돌리는 방법
