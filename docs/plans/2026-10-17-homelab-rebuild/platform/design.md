@@ -1554,7 +1554,7 @@ spec:
 
 앱은 어느 쪽이든 `VALKEY_URL` env 하나로 붙는다(공유 차트가 배선). 앱 이름 한도는 캐시 51자(공식 차트의 init 컨테이너 `<app>-valkey-init`이 63자 안), 영속 38자(CronJob `<app>-valkey-backup`이 52자 안)다. 차트가 렌더를 막는다(T11).
 
-**영속 Valkey 복원 절차** (U18 로컬 확인 2026-10-23, T11. 실행 명령은 `docs/runbooks-public/restore.md` 1절. 클러스터에서는 시나리오 4가 처음이다)
+**영속 Valkey 복원 절차** (U18 로컬 확인과 운영 시나리오 4 통과 2026-10-23, T11. 실행 명령은 `docs/runbooks-public/restore.md` 1절)
 
 1. PR로 `data/<app>/values.yaml`에 `valkey.running: false`(서버 Deployment를 내리고 PVC는 남기고 백업 CronJob은 suspend). Helm condition은 부정을 못 해 `suspend: true` 대신 이 이름이다. selfHeal 때문에 `kubectl scale`은 되돌려진다(B.8 E2).
 2. 복원 Job이 PVC를 마운트해 R2의 RDB를 `dump.rdb`로 두고 `appendonlydir`을 비운다(AOF가 켜져 있으면 시작 때 AOF가 우선한다[S41]). 이 Job은 Git에 두지 않고 CLI(또는 `restore.md`를 따르는 사람)가 `kubectl`로 만드는 일회성 객체이고, 끝나면 지우고 0개를 확인한다(C.5.7의 "복원 리소스는 GitOps 밖이다").
