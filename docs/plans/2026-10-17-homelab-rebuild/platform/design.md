@@ -1032,7 +1032,7 @@ receivers:
 | 대상 | 방식 | 위치 | 일정 | 보존 | 복원 |
 |---|---|---|---|---|---|
 | PostgreSQL(공유 클러스터) | Barman Cloud Plugin: base backup + WAL 연속 아카이브[S33][S35]. in-tree `barmanObjectStore`는 1.31.0에서 제거 예정이라 처음부터 plugin[S36] | R2 버킷 `homelab-backups`의 `pg/` prefix, serverName `pg-<YYYYMMDD>`(클러스터 세대). 둘 다 클러스터별 values의 값이고 VM은 전용 버킷·serverName(E8) | 매일 03:00 KST(ScheduledBackup은 UTC라 `0 0 18 * * *`) | 14일(ObjectStore `retentionPolicy`) | C.5.7. 복원은 항상 새 클러스터로 한다[S32] |
-| 영속 Valkey | `BGSAVE` 뒤 `valkey-cli --rdb`로 받아 업로드(옛 방식과 공식 문서가 맞음)[S41][S42] | 같은 버킷 `valkey/<app>/` | 매일 03:30 KST(CronJob은 노드 TZ) | 14일(R2 lifecycle, prefix `valkey/` 명시) | C.5.6 |
+| 영속 Valkey | `valkey-cli --rdb`로 받아 업로드하고 되읽어 sha256 대조(옛 방식과 공식 문서가 맞음. `--rdb`가 서버에 RDB를 새로 만들게 해 따로 `BGSAVE`하지 않는다)[S41][S42] | 같은 버킷 `valkey/<app>/` | 매일 03:30 KST(CronJob `timeZone: Asia/Seoul`로 노드 TZ에 기대지 않는다) | 14일(R2 lifecycle, prefix `valkey/` 명시) | C.5.6 |
 | AdGuard | 없음(Git 시드가 원본) | 해당 없음 | 해당 없음 | 해당 없음 | 재배포 |
 | Infisical 값 | 분기마다 `prod` 환경 암호화 내보내기를 복구 자산으로(Free에 PITR·버전 이력 없음[S01][S03]) | 저장소 밖 두 곳 | 분기 1회(사람) | 최근 2부 | C.6.4 |
 
@@ -1526,9 +1526,9 @@ spec:
 | 상황 | 일어나는 일 | 보호 장치 (근거) |
 |---|---|---|
 | `homelab app remove smoke`(PR 병합) | `apps/smoke/` 삭제 → Application `smoke` cascade 삭제 → Deployment, Service, Ingress, 캐시 Valkey, 앱 ns ExternalSecret과 그 Secret(Owner 정책으로 GC[S23]) 삭제. ns는 남는다(CreateNamespace로 만든 ns는 Argo CD가 추적하지 않음[S67]) | 데이터는 다른 Application(`smoke-data`)이라 건드리지 않는다 |
-| 누군가 `data/smoke/`를 지움 | Application `smoke-data` 삭제 시도 | `Database`·`DatabaseRole`·Valkey PVC·`Cluster`·`ObjectStore`에 `Prune=false,Delete=false`[S67]. Valkey 차트 `keepPvc: true`는 `helm.sh/resource-policy: keep`이고[S43] Argo CD는 이것을 `Delete=false`로 다룬다[S76]. reclaim `retain`[S30][S31]. StorageClass `local-retain`이라 PVC가 지워져도 PV가 남는다 |
+| 누군가 `data/smoke/`를 지움 | Application `smoke-data` 삭제 시도 | `Database`·`DatabaseRole`·Valkey PVC·`Cluster`·`ObjectStore`에 `Prune=false,Delete=false`[S67]. Valkey PVC는 공식 차트의 `keepPvc` 대신 데이터 차트가 직접 렌더해 같은 보호 주석을 붙인다(서버를 내려도 남게, T11). reclaim `retain`[S30][S31]. StorageClass `local-retain`이라 PVC가 지워져도 PV가 남는다 |
 | ApplicationSet `data` 자체가 지워짐 | 하위 Application cascade 시도 | 위와 같은 리소스 단위 보호 |
-| `homelab data purge smoke --confirm smoke` | 사전 확인: `apps/smoke/` 없음, 마지막 성공 백업이 앱 삭제 뒤, 지울 목록 출력. **PR 1**(`purge: prepare`): 보호 주석 제거, reclaim `delete`, `keepPvc: false`. 병합·동기화 확인. **PR 2**: `data/smoke/` 삭제 → cascade로 CR·PVC 삭제 → CNPG가 DB·역할 DROP. 끝에 Infisical `/apps/smoke` 키 삭제를 한 번 더 확인받고 지운다 | 두 PR 모두 사람 승인. 같은 revision에 `ensure: absent`와 역할 제거를 넣지 않는다(B.8 E6). 역할이 객체를 소유하면 DROP ROLE이 Terminating에서 재시도한다[S31] |
+| `homelab data purge smoke --confirm smoke` | 사전 확인: `apps/smoke/` 없음, 마지막 성공 백업이 앱 삭제 뒤, 지울 목록 출력. **PR 1**(`purge: prepare`): 보호 주석 제거, reclaim `delete`. 병합·동기화 확인. **PR 2**: `data/smoke/` 삭제 → cascade로 CR·PVC 삭제 → CNPG가 DB·역할 DROP. 끝에 Infisical `/apps/smoke` 키 삭제를 한 번 더 확인받고 지운다 | 두 PR 모두 사람 승인. 같은 revision에 `ensure: absent`와 역할 제거를 넣지 않는다(B.8 E6). 역할이 객체를 소유하면 DROP ROLE이 Terminating에서 재시도한다[S31] |
 
 - 비워질 수 있는 Application을 일부러 만들지 않는다. 앱 Application은 늘 Deployment를 갖고, 데이터 Application은 PR 2에서 통째로 지운다(마지막 리소스 prune 거부 함정 회피, B.8 E2).
 - 폐기 뒤에도 그 DB는 base backup 안에 보존 기간(14일) 동안 남는다. 완전 삭제는 보존 기간이 지나야 끝난다.
@@ -1536,38 +1536,38 @@ spec:
 
 #### C.5.6 Valkey (D-06)
 
-공식 차트 `valkey` 0.12.0(appVersion 9.1.2)을 subchart로 쓴다[S43]. valkey-operator는 스스로 "not ready for production use"라고 밝히고[S44], Bitnami 무료 카탈로그는 2025-08-28 뒤 사실상 멈췄다[S45]. 단일 인스턴스로 시작하고 Sentinel·Cluster는 두지 않는다.
+공식 차트 `valkey` 0.12.0(appVersion 9.1.2)을 subchart로 쓴다[S43]. 앱 차트(1.1.0)는 `cacheServer`, 데이터 차트(1.0.0)는 `valkeyServer`라는 이름으로 넣고, CI·Argo CD가 외부 저장소를 받지 않게 tgz를 커밋한다(공식 index digest와 sha256을 Chart.yaml 주석에 적고 `tools/ci/data.ts`가 대조, T11). valkey-operator는 스스로 "not ready for production use"라고 밝히고[S44], Bitnami 무료 카탈로그는 2025-08-28 뒤 사실상 멈췄다[S45]. 단일 인스턴스로 시작하고 Sentinel·Cluster는 두지 않는다.
 
 | 항목 | 캐시 (기본) | 영속 (작업 큐 등) |
 |---|---|---|
-| 선언 위치 | `apps/<app>/values.yaml`의 `cache:`. 앱 차트가 렌더해 앱과 함께 생기고 사라진다 | `data/<app>/values.yaml`의 `valkey: {persistent: true}`. 데이터 차트가 렌더해 앱 삭제 뒤에도 남는다 |
-| 메모리 | `maxmemory` 기본 64mb(16~1024), limit = maxmemory × 1.5 + 64Mi(옛 기본값 `2d2054a:tools/provision-cache.ts:36`, 산식 `:53`) | 같은 산식, 기본 128mb |
+| 선언 위치 | `apps/<app>/values.yaml`의 `cache: {enabled: true}`(`uses.valkey: true`와 함께). 앱 차트가 렌더해 앱과 함께 생기고 사라진다 | `data/<app>/values.yaml`의 `valkey: {persistent: true}`. 데이터 차트가 렌더해 앱 삭제 뒤에도 남는다 |
+| 메모리 | `maxmemory` 64mb, limit = maxmemory × 1.5 + 64Mi = 160Mi(옛 기본값 `2d2054a:tools/provision-cache.ts:36`, 산식 `:53`). subchart 값은 템플릿으로 계산할 수 없어 1.1.0은 크기 고정이다(16~1024 조절은 차트를 바꿀 때) | 같은 산식, 128mb, 256Mi(고정) |
 | eviction | `allkeys-lru` | `noeviction`(Valkey 기본값[S47]). 메모리가 차면 쓰기 오류로 드러난다 |
-| 저장 | `dataStorage.enabled: false`, `save ""`, `appendonly no` | `dataStorage.enabled: true`(`local-retain` 1Gi), `keepPvc: true`, `appendonly yes`, `appendfsync everysec`, RDB `save` 기본 유지[S41] |
+| 저장 | `dataStorage.enabled: false`, `save ""`, `appendonly no` | PVC `valkey-data`(`local-retain` 1Gi)는 데이터 차트가 직접 렌더하고 보호 주석을 붙인다(서버를 내려도 남게). `appendonly yes`, `appendfsync everysec`, RDB `save` 기본 유지[S41] |
 | 배포 전략 | `Recreate` | `Recreate`(RWO PVC를 두 파드가 함께 잡는 RollingUpdate 교착 회피) |
 | 인증 | `auth.enabled: true`, `default` 사용자 비밀번호는 ESO Secret. 차트는 인증을 켜면 `default` 사용자를 반드시 정의해야 한다[S43] | 같음 |
-| 접근 | NetworkPolicy: 같은 ns의 앱 파드만 6379 | 같음 + 백업 Job |
-| 백업 | 없음 | 하루 1회 `BGSAVE` → `valkey-cli --rdb` → R2 `valkey/<app>/`, 14일. RDB는 만든 뒤 바뀌지 않아 실행 중 복사가 안전하다[S41][S42]. 자격은 argv가 아니라 `REDISCLI_AUTH` env |
+| 접근 | 앱 차트 NetworkPolicy(같은 ns만) | 데이터 차트의 Valkey 정책(같은 ns → 6379, egress 없음)과 백업 Job 정책(Valkey 6379, DNS, 인터넷 443). 앱을 지워 앱 차트 정책이 사라져도 남는다 |
+| 백업 | 없음 | CronJob `<app>-valkey-backup` 하루 1회 `valkey-cli --rdb` → rclone으로 R2 `valkey/<app>/dump-<UTC 시각>.rdb`, 되읽어 sha256 대조, 14일(lifecycle). 자격은 argv가 아니라 `REDISCLI_AUTH` env. R2 자격은 앱 store에서 절대 키 `/platform/backup/*`(U06, T11) |
 | 유실 허용 | 전부(재생성) | 프로세스·노드 재시작 약 1초(AOF everysec[S41]), 디스크 유실 최대 24시간(하루 1회 RDB) |
 | 앱 삭제 시 | 함께 삭제 | 보존(C.5.5) |
 
 앱은 어느 쪽이든 `VALKEY_URL` env 하나로 붙는다(공유 차트가 배선).
 
-**영속 Valkey 복원 절차** (목표 예시, **[미검증]** 공식 RDB 복원 절차 문서가 없어 시나리오 4에서 확정)
+**영속 Valkey 복원 절차** (U18 로컬 확인 2026-10-23, T11. 실행 명령은 `docs/runbooks-public/restore.md` 1절. 클러스터에서는 시나리오 4가 처음이다)
 
-1. PR로 `data/<app>/values.yaml`에 `valkey.suspend: true`(replicas 0). selfHeal 때문에 `kubectl scale`은 되돌려진다(B.8 E2).
+1. PR로 `data/<app>/values.yaml`에 `valkey.running: false`(서버 Deployment를 내리고 PVC는 남기고 백업 CronJob은 suspend). Helm condition은 부정을 못 해 `suspend: true` 대신 이 이름이다. selfHeal 때문에 `kubectl scale`은 되돌려진다(B.8 E2).
 2. 복원 Job이 PVC를 마운트해 R2의 RDB를 `dump.rdb`로 두고 `appendonlydir`을 비운다(AOF가 켜져 있으면 시작 때 AOF가 우선한다[S41]). 이 Job은 Git에 두지 않고 CLI(또는 `restore.md`를 따르는 사람)가 `kubectl`로 만드는 일회성 객체이고, 끝나면 지우고 0개를 확인한다(C.5.7의 "복원 리소스는 GitOps 밖이다").
-3. 복원 모드(`appendonly no`)로 시작해 RDB를 읽고 키 수를 확인한다.
+3. PR로 `running: true`와 `restoreMode: true`(`appendonly no`)를 함께 넣어 새 파드가 RDB를 읽게 하고 키 수를 확인한다. AOF를 켠 채 `appendonlydir`만 지우면 Valkey 9.1.2는 RDB를 읽지 않고 빈 데이터로 시작해 빈 AOF를 만든다(U18 실측). 그래서 이 단계가 필요하다.
 4. `CONFIG SET appendonly yes`로 AOF를 다시 만들고 `INFO persistence`에서 rewrite 완료를 확인한다.
-5. PR로 `suspend: false`와 복원 모드를 끈다.
+5. PR로 `running`·`restoreMode` 줄을 지운다. ConfigMap만 바뀌므로 파드를 한 번 지워 AOF에서 같은 키 수로 뜨는지 본다.
 
 #### C.5.7 공유 PostgreSQL에서 특정 앱만 복원 (시나리오 10)
 
 CNPG 복원은 제자리가 아니라 항상 새 클러스터를 만든다[S32]. 공유 클러스터 안의 DB 하나만 되돌리는 공식 절차는 없다. 그래서 `homelab db restore <app> --to <시각>`(목표 UX)이 아래를 단계별로 확인하며 한다.
 
-1. **되돌림용 덤프:** 현재 DB를 `pg_dump -Fc`로 R2 `pgdump/<app>/pre-restore-<시각>`에 남긴다(Job, 클러스터와 같은 PostgreSQL 이미지, `PGUSER` 명시).
+1. **되돌림용 덤프:** 현재 DB를 `pg_dump -Fc`로 R2 `pgdump/<app>/pre-restore-<시각>`에 남긴다. 주 파드 안 `postgres` 로컬 접속으로 덤프해 도우미 Job(rclone, 실행 id 라벨)의 `rclone rcat`으로 바로 올린다(T11. 5432 네트워크를 쓰지 않고 사람 기기에 데이터가 남지 않는다). `pgdump/`에는 lifecycle이 없어 확인 뒤 손으로 지운다.
 2. **임시 클러스터:** `pg-restore-<app>-<시각>`을 `bootstrap.recovery`(ObjectStore, `recoveryTarget.targetTime`)로 만든다[S32]. 이 클러스터에는 WAL 아카이버 plugin을 붙이지 않는다(운영 prefix에 쓰지 않게, B.8 E6).
-3. **앱 멈춤:** PR로 `apps/<app>/values.yaml`에 `suspended: true`(replicas 0). 사람 승인.
+3. **앱 멈춤:** PR로 `apps/<app>/values.yaml`에 `suspended: true`(앱 차트 1.1.0. replicas 0, 마이그레이션 Job도 렌더하지 않아 복원 중 스키마를 바꾸지 않는다). 사람 승인.
 4. **덤프·복원:** 빈 DB에 복원한다. 공유 클러스터에서 앱이 멈춘 것을 확인하고 `DROP DATABASE <app> WITH (FORCE)`(남은 연결을 끊고 지운다[S216]) → `CREATE DATABASE <app> OWNER <앱 역할>`(Database 리소스와 같은 설정) → 임시 클러스터에서 그 DB만 덤프해 소유자를 보존한 채 복원한다: `kubectl exec <임시 주 파드> -- pg_dump -Fc <app> | kubectl exec -i <pg 주 파드> -- pg_restore -d <app>`(둘 다 파드 안 `postgres` 로컬 접속, `--clean` 없이). `--clean`만 쓰면 덤프에 있는 객체만 지워 T1 뒤에 만든 스키마·테이블이 남는다[S215]. 빈 DB라 앱 역할이 아닌 역할의 객체(확장 등)도 덤프 그대로 돌아온다. CNPG Database 리소스는 그대로 두며, 재조정이 다시 만든 DB를 건드리지 않는지는 E6에서 확인한다(형식 미검증).
 5. **앱 재개:** PR로 `suspended: false`.
 6. **정리:** 임시 Cluster와 그 PVC, 1·4단계 Job을 지우고 모두 없는지 확인한다(옛 드릴의 고아·PVC 재사용 거짓 PASS 함정). 확인은 아래 라벨로 `kubectl -n database get cluster,job,pvc -l homelab.ukyi.app/restore=<실행 id>` → 0개.
@@ -1578,7 +1578,7 @@ CNPG 복원은 제자리가 아니라 항상 새 클러스터를 만든다[S32].
 - AppProject `data`의 허용 kind(C.3.3)에 Job·Cluster를 넣지 않는다. 어느 Application도 이 객체를 소유하지 않으므로(Argo CD 추적 주석 없음) selfHeal이 되돌리거나 prune이 지우는 대상이 아니다. 같은 이유로 Argo CD가 대신 치워 주지도 않는다.
 - 필요한 kubeconfig 권한: 사람의 kubeconfig(C.2, 현재 cluster-admin)로 `database` ns의 `clusters.postgresql.cnpg.io`·`jobs` create·get·delete, `persistentvolumeclaims` get·delete, Valkey 복원이면 앱 ns의 `jobs` create·get·delete. 봇 읽기 계정(C.8)과 CI에는 이 권한이 없다.
 - 객체 이름은 실행마다 고유하게(`pg-restore-<app>-<시각>`, `restore-<app>-<시각>`) 하고 라벨 `homelab.ukyi.app/restore=<실행 id>`를 붙인다. 임시 Cluster는 `inheritedMetadata`로 그 라벨을 PVC 등 자기가 만드는 객체에 물려준다(옛 구성이 같은 필드로 PVC·Service에 주석을 물려줌, `2d2054a:platform/cnpg/prod/cluster.yaml:124-129`). 6단계 정리 확인과, 중간 실패로 남은 객체를 `homelab data list`가 보여 주는 기준이 이 라벨이다.
-- `database` ns의 NetworkPolicy는 앱 ns에서 오는 5432만 받으므로(C.5.1), 이 라벨을 단 Job이 같은 ns의 `pg-rw`와 임시 클러스터 5432에 닿는 허용 규칙을 플랫폼 정책에 미리 둔다(E6에서 확인).
+- `database` ns의 NetworkPolicy는 앱 ns에서 오는 5432만 받는다(C.5.1). 그래서 덤프·복원은 Job의 5432 접속이 아니라 `kubectl exec` 파이프(파드 안 로컬 접속)로 하고, 허용 규칙을 따로 두지 않는다(T11).
 - 3·5단계(앱 멈춤·재개)만 Git PR이다. 앱 replicas는 selfHeal 때문에 `kubectl scale`로 바꿀 수 없다(B.8 E2).
 
 앱별 정기 논리 덤프(옛 `pgdump-hedge`)는 기본으로 두지 않는다. 복원 속도가 중요해지면 D-05의 전용 Cluster 조건으로 다시 본다.
@@ -2615,10 +2615,10 @@ design-prompt §9의 시나리오 1~17이다. **상태는 모두 "설계상 기�
 | U12 | Grafana Viewer 서비스 계정은 대시보드·데이터소스 질의만 하고 쓰기는 못 한다 **결과(2026-10-23, T08b):** 반만 맞다. 대시보드 쓰기는 403이지만 데이터소스 resources·proxy 경로로 임의 경로에 POST할 수 있어 직결이면 vmsingle `delete_series`·import, VictoriaLogs `/insert/*`(실측 저장됨)에 닿는다. 대안(읽기 프록시)을 택해 두 데이터소스 앞에 vmauth를 두었다(C.3.7, #842·#849). 그 뒤 Viewer 토큰으로 `GET /api/search` 200, `POST /api/dashboards/db` 403, 메트릭·로그 질의 200, 쓰기 경로 400·403 | 봇 읽기를 데이터소스 API 앞의 별도 읽기 프록시로 | E4b | C.8 |
 | U13 | 작업자 파드 netns 안 init 방화벽(NET_ADMIN)이 노드 로컬 경로(노드 IP의 6443·10250·22)와 DNS(53)까지 막고, 새 출력 연결은 프록시 ClusterIP:3128만 남긴다. loopback(`-o lo`)과 conntrack `ESTABLISHED,RELATED` 허용으로 봇 → 작업자 Service 요청의 응답과 파드 안 통신은 지나간다 **결과(2026-10-22 시험 ns, 2026-10-23 실제 작업자, T08b):** 그렇다. API 서버·노드 6443·10250·22·공유기·tailnet 주소·Infisical 직접·DNS가 모두 실패하고 loopback·봇 자리 시험 파드의 요청 응답은 성공했다. 본 컨테이너의 `iptables -F`는 실패한다. 이 k3s의 kube-router netpol도 노드 IP·`10.43.0.1`을 막았지만 구현 의존이라 init 방화벽을 그대로 둔다(C.8) | 호스트 전용 UID + nft로 물러난다(D-15, 확정(사용자 2026-10-18, T15)) | E4b | C.8 |
 | U14 | cert-manager, Traefik, 관측 차트들, egress 프록시의 현재 안정 버전 **결과(관측·egress 프록시, 2026-10-22~23, T08b):** vmsingle·vmalert·vmauth v1.154.1, VictoriaLogs v1.53.0, Alertmanager 0.34.1, Grafana 13.2.4, VictoriaLogs 데이터소스 플러그인 v0.33.1(zip sha256 고정), vector 0.60.0, node-exporter v1.12.1, kube-state-metrics v2.20.0, egress 프록시 Envoy distroless-v1.40.0. 이미지는 digest로 고정했다 | E4 시작 때 정해 고정 | E4a, E4b | C.3.1 |
-| U15 | CNPG 1.30의 `DatabaseRole` 필드 이름과 `Database`·`DatabaseRole` status 필드 | 1.30 API 문서대로 차트 수정 | E6 | C.5.3 |
+| U15 | CNPG 1.30의 `DatabaseRole` 필드 이름과 `Database`·`DatabaseRole` status 필드 **결과(2026-10-23, T11, 소스만):** CNPG v1.30.1 `api/v1/databaserole_types.go`와 kubeconform 스키마(datreeio 고정 커밋)가 같다. spec `cluster.name`(불변)·`name`·`login`·`passwordSecret.name`·`databaseRoleReclaimPolicy`, status `applied`·`message`·`observedGeneration`·`secretResourceVersion`·`conditions`. 데이터 차트가 이 이름으로 렌더한다. 실제 status는 시나리오 2에서 본다 | 1.30 API 문서대로 차트 수정 | E6 | C.5.3 |
 | U16 | Barman Cloud Plugin v0.15.1 + R2에서 새 클러스터 복원이 된다(이슈 #411 열림). 2026-10-23 kind + S3 호환 저장소에서는 env endpoint 설정으로 백업·새 serverName 복구가 됐다(T11). R2와 Object Read & Write 토큰의 HeadBucket은 아직 | checksum env 추가, 안 되면 다른 S3 호환 저장소 검토 | E6, 시나리오 10 | C.3.8 |
 | U17 | PostgreSQL 비밀번호 변경 뒤 이미 열린 연결이 유지된다 | 회전 때 중단 시간 증가. 무중단이면 역할 두 개 교대 | E6, 시나리오 8 | C.6.5 |
-| U18 | Valkey RDB 복원 절차(AOF가 켜져 있을 때), ACL 상태의 `valkey-cli --rdb` 필요 권한 | 복원 절차 수정 | E6, 시나리오 4 | C.5.6 |
+| U18 | Valkey RDB 복원 절차(AOF가 켜져 있을 때), ACL 상태의 `valkey-cli --rdb` 필요 권한 **결과(2026-10-23, T11, 로컬 podman, valkey 9.1.2):** C.5.6 절차대로 된다. `appendonlydir`을 남기면 AOF가 이기고, 지우고 `appendonly yes`로 시작하면 RDB를 무시하고 빈 데이터로 시작한다(그래서 복원 모드가 필수). `appendonly no`로 읽고 `CONFIG SET appendonly yes` 뒤 재시작하면 키가 그대로다. `--rdb`에는 `sync`·`replconf`가 필요하다(없으면 NOPERM). 백업 Job과 복원 Job 스크립트를 로컬 S3(`rclone serve s3`)로 돌려 왕복을 확인했다. 클러스터·R2는 시나리오 4 | 복원 절차 수정 | E6, 시나리오 4 | C.5.6 |
 | U19 | 공유기가 AdGuard 정지 때 보조 DNS(`1.1.1.1`)로 C.3.6의 AC-P6 판정 기준 안에 넘어간다. 옛 실측은 반대 방향이다: 응답 없이 버려진 질의에서 넘어가는 문턱이 높아 페이지 로드 지연·간헐 실패가 났다(`2d2054a:platform/adguard/prod/adguardhome.yaml:33-39`, ratelimit 드롭이라 정지 때와 다를 수 있음) **결과(2026-10-20, T08a): 반증.** AdGuard 정지 중 공유기 경유 질의 30회 중 26회 시간 초과(복구 뒤 4회 정상), NUC 무응답 시험 11회 모두 시간 초과. 이 공유기는 보조로 넘어가지 않는다. AC-P6 LAN 불합격을 사용자가 한계로 승인했다(런북 `nuc-dns-outage.md`). | 측정값을 기록하고 시나리오 14를 실패로 둔 뒤, 사용자가 한계로 승인하거나 D-08 재검토 | E4a, 시나리오 14 | C.3.6, F D-08 |
 | U20 | 호스팅형 Renovate App의 현재 이용 조건이 이 용도에 맞다 **결과(2026-10-21, T10): 통과(조건부).** Mend Community Cloud는 무료이고 public·private 저장소 수 제한이 없다. 제한(org당 동시 job 1개, 활성 저장소 4시간마다, runner 1 vCPU·3GB·15GB, job 30분, Merge Confidence 워크플로·헬프데스크 없음)은 주 1회 일정·자동 병합 없음인 이 용도에 걸리지 않는다[S231][S234]. 조건 둘: 무료 서비스는 as-is이고 유료 플랜이 나중에 더해질 수 있다[S233]. 호스팅 App의 Contents·Workflows·statuses 쓰기[S232](실제 설치에는 `members`·`packages` read가 더 있다, approvals 2026-10-21 20:54 행)는 저장소·org secret 0과 environment 제한으로만 안전하다(B.8 E5 Renovate 행). 둘 중 하나가 깨지면 "틀리면" 열로 간다 | self-hosted Renovate를 별도 저장소 Actions로(homelab과 분리) | E5 | F D-18 |
 | U21 | Codex Connector가 Draft PR이나 특정 작성자(배포 App) PR의 자동 리뷰를 건너뛸 수 있다 **결과(2026-10-21 관측, T10): 통과.** homelab은 Codex 자동 리뷰가 켜져 있다(#819 요약 댓글 "Review trigger: PR opened", 안내 "Open a pull request for review / Mark a draft as ready / @codex review"). 그래도 배포 App PR 5건(#805·#807·#811·#816·#818, 가장 오래 열린 #811 2분 10초)과 시험 App PR #810(10분)에 반응·리뷰 0, Draft #808·#809는 Draft인 11분 동안 반응 0(ready 뒤 요청에만 응답). Draft·App 작성 PR은 자동 리뷰 대상이 아니다. 근거는 관측과 요약 댓글 문구뿐이고 공식 문서는 없다 | 배포 PR에도 리뷰가 달리는 것을 감수하거나 D-26에서 설치 범위 축소 | E5 | F D-26 |

@@ -8,6 +8,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { checkAlerting } from "./alerting";
+import { checkSecretPaths, checkValkeyWiring, checkVendoredCharts } from "./data";
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
 import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkSandbox, checkWorkloads } from "./policy";
 import { kubeconform, renderAll } from "./render";
@@ -345,8 +346,18 @@ const steps: Step[] = [
       const r = renderAll();
       for (const t of r.targets) console.log(`렌더: ${t.origin}`);
       for (const s of r.skipped) console.log(`외부 차트(렌더하지 않음): ${s}`);
-      return [...r.violations, ...checkAll(r.docs), ...kubeconform(r.targets)];
+      return [...r.violations, ...checkAll(r.docs), ...checkSecretPaths(r.docs), ...kubeconform(r.targets)];
     },
+  },
+  {
+    name: "vendored charts",
+    // 공유 차트에 커밋한 외부 차트 tgz와 Chart.yaml의 버전·sha256 주석(tools/ci/data.ts).
+    run: checkVendoredCharts,
+  },
+  {
+    name: "valkey wiring",
+    // 앱마다 캐시와 영속 Valkey 중 하나만, uses.valkey면 그중 하나가 있어야 한다(tools/ci/data.ts).
+    run: checkValkeyWiring,
   },
   {
     name: "alerting",
@@ -401,6 +412,7 @@ const steps: Step[] = [
         "readonly-rbac": checkReadonlyRbac,
         ingress: checkIngress,
         sandbox: checkSandbox,
+        "secret-path": checkSecretPaths,
       };
       const out: Violation[] = [];
       const covered = new Set<string>();
@@ -418,7 +430,9 @@ const steps: Step[] = [
         }
         // # ns: 렌더한 Application의 destination namespace(render.ts가 Doc.ns로 넘기는 값)를 흉내 낸다.
         const ns = header(text, "ns");
-        const docs = parseAll(text).map((obj) => ({ origin: `fixture:${basename(f)}`, obj, ns }));
+        // # origin: 렌더 출처(render.ts의 Doc.origin)를 흉내 낸다. 출처로 허용을 가르는 검사(secret-path)용.
+        const origin = header(text, "origin") ?? `fixture:${basename(f)}`;
+        const docs = parseAll(text).map((obj) => ({ origin, obj, ns }));
         const got = fn(docs);
         if (expect === "pass" && got.length > 0) out.push({ rule: "fixture", where: f, message: `대조군이 걸렸다: ${got.map(fmt).join("; ")}` });
         if (expect === "fail") {

@@ -1,0 +1,7 @@
+# expect: fail
+# match: valkey.running은 valkey.persistent: true와 함께
+# running만 켜면 PVC 없이 서버가 emptyDir로 떠 영속이 아니다.
+chartVersion: 1.0.0
+postgres: {enabled: true}
+valkey: {persistent: false, running: true}
+backup: {bucket: homelab-backups}

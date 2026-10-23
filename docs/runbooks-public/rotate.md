@@ -131,6 +131,78 @@ App Connection은 owner 계정의 fine-grained PAT다(리소스 소유자 `ukyi-
 4. 3절 4번의 `updated_at`이 Sync 재실행 뒤인지 본다.
 5. 옛 PAT를 폐기한다. 폐기 뒤에도 4번이 그대로면 끝이다.
 
+## 3c. 앱 DB 비밀번호 (T11, 시나리오 8)
+
+원본은 Infisical `homelab`/`prod`의 `/apps/<앱>/postgres/PASSWORD` 하나다. 사본은 `database` ns의 역할 Secret `pg-role-<앱>`(데이터 차트, `cnpg.io/reload` 라벨)과 앱 ns의 연결 Secret `<앱>-db`(앱 차트 `DATABASE_URL`) 둘이다. 3~6단계 사이에 옛 값으로 새 연결을 여는 파드는 실패한다. 이미 열린 연결이 유지되는지는 U17로 이 순서에서 잰다.
+
+```bash
+export KUBECONFIG=~/.kube/homelab.yaml
+APP=<앱 이름>
+h() { kubectl -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64 -d | sha256sum | cut -c1-12; }   # 값 대신 해시 앞부분
+h database pg-role-$APP password; h app-$APP $APP-db DATABASE_URL                                      # 전
+```
+
+1. 새 값을 비밀번호 관리자에서 만들고(32자 이상, 영숫자) Infisical UI에서 바꾼다. 옛 값은 같은 폴더에 `PASSWORD_PREVIOUS`로 먼저 옮겨 둔다. CLI의 `secrets set KEY=VALUE`는 값이 명령행 인자라 쓰지 않는다.
+2. `database` ns를 먼저 동기화한다. CNPG가 Secret 변경을 보고 바로 `ALTER ROLE` 한다[S31].
+
+   ```bash
+   kubectl -n database annotate externalsecret pg-role-$APP force-sync="$(date +%s)" --overwrite
+   kubectl -n database get externalsecret pg-role-$APP          # SecretSynced
+   h database pg-role-$APP password                              # 전과 다름
+   kubectl -n database get secret pg-role-$APP -o jsonpath='{.metadata.resourceVersion}{"\n"}'
+   kubectl -n database get databaserole $APP -o jsonpath='{.status.applied} {.status.secretResourceVersion} {.status.message}{"\n"}'
+   # applied=true, secretResourceVersion이 바로 위 Secret의 resourceVersion과 같으면 적용됐다
+   ```
+
+3. U17: 이 시점에 앱이 계속 `/healthz/db` 200인지 본다(열린 연결 유지). 연결 풀이 새 연결을 열면 실패할 수 있다.
+4. 앱 ns를 동기화하고 앱을 다시 띄운다. env는 파드를 다시 만들어야 바뀐다. Argo CD는 `rollout restart`가 더하는 주석을 되돌리지 않는다(Git에 없는 필드라 비교하지 않는다).
+
+   ```bash
+   kubectl -n app-$APP annotate externalsecret $APP-db force-sync="$(date +%s)" --overwrite
+   h app-$APP $APP-db DATABASE_URL                               # 전과 다름
+   kubectl -n app-$APP rollout restart deploy/$APP
+   kubectl -n app-$APP rollout status deploy/$APP
+   kubectl -n app-$APP port-forward deploy/$APP 18080:8080 &
+   curl -sf -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/healthz/db    # 200
+   kill %1
+   ```
+
+5. 옛 값으로 새 접속이 실패하는지 본다(시나리오 8). 옛 값은 Infisical UI에서 비밀번호 관리자로만 옮기고, 화면에 띄우지 않고 표준 입력으로 넘긴다.
+
+   ```bash
+   PRIMARY=$(kubectl -n database get cluster pg -o jsonpath='{.status.currentPrimary}')
+   read -rs OLD; printf '%s' "$OLD" | kubectl -n database exec -i $PRIMARY -c postgres -- sh -c \
+     'IFS= read -r PGPASSWORD || true; export PGPASSWORD; psql "host=127.0.0.1 user='"$APP"' dbname='"$APP"' sslmode=require" -tAc "select 1"'; unset OLD
+   # password authentication failed
+   # 127.0.0.1: database ns의 5432 기본 거부(앱 ns만 허용)를 거치지 않는 TCP 비밀번호 접속이다. 로컬 소켓은 peer라 비밀번호를 안 본다.
+   ```
+
+6. `PASSWORD_PREVIOUS`를 지운다.
+
+중단 없이 바꿔야 하면 역할 두 개를 번갈아 쓰는 방식이 있다(설계 C.6.5, 선택). 지금은 두지 않았다.
+
+## 3d. Valkey 비밀번호 (T11)
+
+원본은 `/apps/<앱>/valkey/PASSWORD` 하나다. 사본은 같은 앱 ns의 두 Secret이다: 서버용 `<앱>-valkey-auth`(캐시는 앱 차트, 영속은 데이터 차트)와 앱 연결용 `<앱>-valkey-url`(`VALKEY_URL`). 서버는 시작 때 ACL 파일을 만들므로 다시 띄워야 새 값이 적용된다. 그동안(수 초) 앱은 Valkey 오류를 낸다. 영속 Valkey는 AOF everysec라 재시작 손실이 약 1초다.
+
+1. 3c 1단계처럼 Infisical 값을 바꾼다(옛 값은 `PASSWORD_PREVIOUS`).
+2. 두 ExternalSecret을 동기화한다.
+
+   ```bash
+   kubectl -n app-$APP annotate externalsecret $APP-valkey-auth $APP-valkey-url force-sync="$(date +%s)" --overwrite
+   h app-$APP $APP-valkey-auth password; h app-$APP $APP-valkey-url VALKEY_URL     # 둘 다 전과 다름
+   ```
+
+3. 서버, 그다음 앱을 다시 띄운다.
+
+   ```bash
+   kubectl -n app-$APP rollout restart deploy/$APP-valkey && kubectl -n app-$APP rollout status deploy/$APP-valkey
+   kubectl -n app-$APP rollout restart deploy/$APP && kubectl -n app-$APP rollout status deploy/$APP
+   ```
+
+4. 앱 `/healthz/cache`가 200인지 본다(3c 4단계의 port-forward). 영속 Valkey면 다음 백업 Job도 새 값으로 도는지 수동 Job 하나로 본다([restore.md](restore.md) 1절 0단계).
+5. `PASSWORD_PREVIOUS`를 지운다.
+
 ## 4. 아직 채우지 않은 절
 
 설계 C.6.5 표의 순서를 따른다. 자격을 만드는 티켓이 이 문서에 절을 더한다.
@@ -139,4 +211,3 @@ App Connection은 owner 계정의 fine-grained PAT다(리소스 소유자 `ukyi-
 |---|---|
 | 플랫폼 토큰(터널, Tailscale operator OAuth, Telegram 봇, healthchecks ping URL), Grafana·AdGuard 관리자 | T08a, T08b |
 | Terraform 자격(`homelab-admin`의 R2 state 키, Cloudflare 토큰, Tailscale OAuth) | T08a |
-| DB·Valkey 비밀번호 | T11 |

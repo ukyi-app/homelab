@@ -60,7 +60,7 @@ components:
 
   # T11. appset-data(ApplicationSet data), wave 0
   appsetData:
-    enabled: false
+    enabled: true
 
   # T08b. bot-slot(봇 자리, 설계 C.8), wave 1
   botSlot:

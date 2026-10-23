@@ -1,0 +1,13 @@
+# expect: fail
+# match: cache.enabled는 uses.valkey: true와 함께
+# 캐시를 켜도 앱에 VALKEY_URL이 없으면 쓸 수 없다.
+chartVersion: 1.1.0
+kind: web
+port: 8080
+resources: {cpu: 10m, memory: 32Mi}
+cache: {enabled: true}
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

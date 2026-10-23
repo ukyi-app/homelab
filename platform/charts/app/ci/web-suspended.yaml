@@ -1,0 +1,15 @@
+# 시험 values: DB 복원 중 멈춘 앱(설계 C.5.7 3단계). replicas 0, 마이그레이션 Job 없음.
+chartVersion: 1.1.0
+kind: web
+port: 8080
+resources: { cpu: 50m, memory: 64Mi }
+uses:
+  postgres: true
+migration:
+  command: ["./migrate", "up"]
+suspended: true
+repository: ghcr.io/ukyi-app/app
+digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+revision: 0123456789abcdef0123456789abcdef01234567
+hold: false
+tailnetPrefix: ""

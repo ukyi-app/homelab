@@ -1,0 +1,6 @@
+# expect: fail
+# match: backup/bucket
+# 버킷 이름은 R2 규칙(소문자·숫자·-, 3~63자)대로.
+chartVersion: 1.0.0
+valkey: {persistent: true}
+backup: {bucket: "s3://homelab-backups"}

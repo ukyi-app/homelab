@@ -1,0 +1,8 @@
+# 시험 values: DB와 영속 Valkey(시나리오 4 모양).
+chartVersion: 1.0.0
+postgres:
+  enabled: true
+valkey:
+  persistent: true
+backup:
+  bucket: homelab-backups

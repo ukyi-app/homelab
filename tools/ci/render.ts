@@ -29,7 +29,10 @@ export function kubeVersion(): string {
 
 function helmTemplate(release: string, chartDir: string, namespace: string | undefined, valueFiles: string[]): { ok: boolean; out: string } {
   // --include-crds: Argo CD는 skipCrds 기본값이 false라 차트의 crds/도 적용한다.
-  const args = ["helm", "template", release, chartDir, "--include-crds", "--kube-version", kubeVersion()];
+  // --skip-tests: Argo CD는 helm.sh/hook: test 리소스를 hook으로 보지만 맞는 단계가 없어 적용하지 않는다
+  // (v3.5.5 gitops-engine/pkg/sync/hook/helm/type.go는 pre/post-install·upgrade만 단계로 바꾼다). 공식 valkey 차트의
+  // 시험 Pod가 그 예다. 렌더에 남기면 클러스터에 생기지 않는 Pod를 정책이 검사한다.
+  const args = ["helm", "template", release, chartDir, "--include-crds", "--skip-tests", "--kube-version", kubeVersion()];
   if (namespace) args.push("--namespace", namespace);
   for (const f of valueFiles) args.push("-f", f);
   const r = run(args);
@@ -158,6 +161,41 @@ APPSET_RENDERERS.apps = (set) => {
   }
   return true;
 };
+
+// ApplicationSet data(platform/appsets/data/files/applicationset.yaml). 아래 6.이 그 Application을 대신 렌더한다.
+APPSET_RENDERERS.data = (set) => {
+  const gens: any[] = set.spec?.generators ?? [];
+  const files = (gens[0]?.git?.files ?? []).map((f: any) => f.path).join(",");
+  if (gens.length !== 1 || files !== "data/*/values.yaml" || gens[0].git?.values?.app !== "{{ .path.basename }}") {
+    return "생성기가 data/*/values.yaml git 생성기 하나(values.app = 디렉터리 이름)가 아니다";
+  }
+  const t = set.spec?.template ?? {};
+  const src = t.spec?.source ?? {};
+  if (
+    t.metadata?.name !== "{{ .values.app }}-data" ||
+    t.spec?.destination?.namespace !== "app-{{ .values.app }}" ||
+    src.path !== "platform/charts/app-data" ||
+    src.targetRevision !== "data-chart-v{{ .chartVersion }}" ||
+    JSON.stringify(src.helm) !== '{"releaseName":"{{ .values.app }}"}' ||
+    t.spec?.sources !== undefined
+  ) {
+    return "템플릿 이름·ns·source가 render.ts의 데이터 렌더(<앱>-data, 릴리스 <앱>, platform/charts/app-data@data-chart-v<chartVersion>)와 다르다";
+  }
+  if (!String(set.spec?.templatePatch ?? "").includes('omit . "path" "values" "backup" | toYaml')) {
+    return "templatePatch의 값 합치기가 render.ts와 다르다";
+  }
+  return true;
+};
+
+// 클러스터 값 파일의 백업 버킷(cluster.backup.bucket). ApplicationSet data가 데이터 values에 넣는 값과 같다.
+function clusterBuckets(clusterFiles: string[]): [string, string | undefined][] {
+  return clusterFiles.map((vf) => {
+    const cluster = vf.replace(/^platform\/root\/values-/, "").replace(/\.yaml$/, "");
+    const v = Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) as any;
+    const bucket = v?.cluster?.backup?.bucket;
+    return [cluster, typeof bucket === "string" ? bucket : undefined];
+  });
+}
 
 export function renderAll(): RenderResult {
   const res: RenderResult = { targets: [], docs: [], violations: [], skipped: [] };
@@ -376,7 +414,9 @@ export function renderAll(): RenderResult {
         const human = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) ?? {}) as Record<string, any>;
         const imageFile = join(ROOT, "apps", app, "image.yaml");
         const image = (existsSync(imageFile) ? Bun.YAML.parse(readFileSync(imageFile, "utf8")) ?? {} : {}) as Record<string, any>;
-        const reserved = ["path", "values", "tailnetPrefix"];
+        // cacheServer는 차트 내부 값(공식 valkey 차트)이다. 앱 values가 덮으면 이미지·인증·크기를 바꿀 수 있다.
+        // global도 의존 차트로 내려간다(global.imageRegistry가 고정한 이미지 레지스트리를 덮는다).
+        const reserved = ["path", "values", "tailnetPrefix", "cacheServer", "global"];
         const imageKeys = ["repository", "digest", "revision", "hold"];
         const badHuman = Object.keys(human).filter((k) => reserved.includes(k) || imageKeys.includes(k));
         const badImage = Object.keys(image).filter((k) => !imageKeys.includes(k));
@@ -385,6 +425,31 @@ export function renderAll(): RenderResult {
         const values: Record<string, any> = { ...human, ...image, tailnetPrefix: prefix };
         const chartDir = pathAtRevision(`app-chart-v${values.chartVersion}`, "platform/charts/app", tmp);
         const vfile = join(tmp, `app-${app}-${cluster}.json`);
+        writeFileSync(vfile, JSON.stringify(values));
+        const r = helmTemplate(app, chartDir, `app-${app}`, [vfile]);
+        if (!r.ok) fail(where, r.out.trim());
+        else add(where, r.out, `app-${app}`);
+      } catch (e) {
+        fail(where, (e as Error).message);
+      }
+    }
+  }
+
+  // 6. 등록된 데이터(data/<앱>/values.yaml). ApplicationSet data(platform/appsets/data/files/applicationset.yaml)와
+  //    같게 values.yaml + 클러스터 백업 버킷을 values로, 릴리스 이름은 앱 이름, 차트는 그 앱의 태그로 렌더한다.
+  for (const vf of gitFiles("data/*/values.yaml")) {
+    const app = basename(dirname(vf));
+    for (const [cluster, bucket] of clusterBuckets(clusterFiles)) {
+      const where = `data:${app}[${cluster}]`;
+      try {
+        const human = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) ?? {}) as Record<string, any>;
+        // valkeyServer·global은 차트 내부 값(공식 valkey 차트로 내려간다)이다. backup은 클러스터 값이라 ApplicationSet이 덮는다.
+        const bad = Object.keys(human).filter((k) => ["path", "values", "backup", "valkeyServer", "global"].includes(k));
+        if (bad.length > 0) throw new Error(`data values.yaml에 둘 수 없는 키: ${bad.join(", ")}(생성기 변수·클러스터 값·차트 내부 값)`);
+        if (bucket === undefined) throw new Error(`platform/root/values-${cluster}.yaml에 cluster.backup.bucket이 없다`);
+        const values = { ...human, backup: { bucket } };
+        const chartDir = pathAtRevision(`data-chart-v${values.chartVersion}`, "platform/charts/app-data", tmp);
+        const vfile = join(tmp, `data-${app}-${cluster}.json`);
         writeFileSync(vfile, JSON.stringify(values));
         const r = helmTemplate(app, chartDir, `app-${app}`, [vfile]);
         if (!r.ok) fail(where, r.out.trim());

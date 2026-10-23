@@ -82,6 +82,27 @@
         "valkey": { "description": "true면 env VALKEY_URL(같은 ns의 Service <app>-valkey:6379).", "type": "boolean" }
       }
     },
+    "cache": {
+      "description": "캐시 Valkey(설계 C.5.6). enabled면 같은 ns에 Service <app>-valkey:6379(PVC 없음, allkeys-lru, maxmemory 64mb)를 앱과 함께 만든다. uses.valkey와 함께 쓴다. 비밀번호 원본은 Infisical /apps/<app>/valkey/PASSWORD.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "suspended": {
+      "description": "true면 replicas 0, 마이그레이션 Job 없음. DB 복원 동안만 쓴다(설계 C.5.7, docs/runbooks-public/restore.md).",
+      "type": "boolean"
+    },
+    "cacheServer": {
+      "description": "차트 내부 값(공식 valkey 차트의 values). 앱 values에 적지 않는다. ci가 막는다(tools/ci/render.ts).",
+      "type": "object"
+    },
+    "global": {
+      "description": "Helm이 의존 차트 때문에 넣는 값. 적지 않는다.",
+      "type": "object"
+    },
     "migration": {
       "description": "있으면 Argo CD Sync hook Job으로 매 sync마다 실행한다(D-22). 멱등이어야 한다.",
       "type": "object",

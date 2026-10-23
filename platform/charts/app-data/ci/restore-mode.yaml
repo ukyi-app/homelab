@@ -1,0 +1,8 @@
+# 시험 values: 복원 3단계(appendonly no로 RDB를 읽는다).
+chartVersion: 1.0.0
+valkey:
+  persistent: true
+  running: true
+  restoreMode: true
+backup:
+  bucket: homelab-backups

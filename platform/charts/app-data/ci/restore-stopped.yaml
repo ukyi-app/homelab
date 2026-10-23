@@ -1,0 +1,7 @@
+# 시험 values: 복원 1단계(서버 내림). PVC·백업 CronJob(suspend)만 남는다.
+chartVersion: 1.0.0
+valkey:
+  persistent: true
+  running: false
+backup:
+  bucket: homelab-backups

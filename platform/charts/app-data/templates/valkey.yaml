@@ -1,0 +1,282 @@
+{{- if include "data.persistentValkey" . }}
+{{- $name := include "data.name" . }}
+{{- $running := ternary .Values.valkey.running true (hasKey .Values.valkey "running") }}
+{{- $bucket := required "backup.bucket이 없다(ApplicationSet data가 클러스터 값 cluster.backup.bucket으로 넣는다)" .Values.backup.bucket }}
+# 영속 Valkey의 데이터(설계 C.5.6). 서버(valkeyServer)와 따로 둬 running: false에서도 남는다.
+# local-retain이라 PVC가 지워져도 노드의 폴더(PV)가 남는다.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valkey-data
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+  annotations:
+    {{- include "data.protect" . | nindent 4 }}
+    # 서버 Deployment와 같은 wave. WaitForFirstConsumer라 앞 wave면 Pending을 기다리며 멈춘다(platform/sandbox 실측).
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-retain
+  resources:
+    requests:
+      storage: 1Gi
+---
+# 서버 default 사용자와 백업 Job의 비밀번호. 원본은 앱 차트 연결 Secret과 같은 /apps/<앱>/valkey/PASSWORD다.
+# 서버는 시작 때 이 값으로 ACL 파일을 만든다. 값을 바꾸면 Valkey 파드를 다시 띄운다(설계 C.6.5).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ $name }}-valkey-auth
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  {{- include "data.externalSecretSpec" . | nindent 2 }}
+  target:
+    name: {{ $name }}-valkey-auth
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $name }}/valkey/PASSWORD
+---
+# 복원 모드(설계 C.5.6 3단계). appendonly yes인 채 AOF를 지우고 dump.rdb만 두면 Valkey 9.1.2는 RDB를 읽지 않고
+# 빈 데이터로 시작해 빈 AOF를 새로 만든다(U18 로컬 실측). 그래서 RDB를 읽을 때만 appendonly no로 띄운다.
+# 이 ConfigMap이 바뀌어도 파드는 다시 뜨지 않는다. 복원 모드는 running: false → true로 새 파드가 뜰 때 함께 켠다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valkey-overrides
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+data:
+  overrides.conf: |
+    {{- if .Values.valkey.restoreMode }}
+    appendonly no
+    {{- else }}
+    # 덮어쓸 설정 없음
+    {{- end }}
+---
+# R2 백업 자격(설계 C.3.8). 앱 ns는 플랫폼 store를 못 써서 앱 store에서 절대 경로로 읽는다(ESO는 /로 시작하는 키에
+# secretsPath를 붙이지 않는다, v2.13.0 providers/v1/infisical/client.go). 이 경로는 tools/ci/data.ts가
+# 데이터 차트와 platform/cnpg에서만 허용한다. 남는 위험: 이 ns가 버킷 전체를 읽고 쓸 수 있다(F D-06).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ $name }}-valkey-backup-r2
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  {{- include "data.externalSecretSpec" . | nindent 2 }}
+  target:
+    name: {{ $name }}-valkey-backup-r2
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+  data:
+    {{- range list "R2_ACCESS_KEY_ID" "R2_SECRET_ACCESS_KEY" "R2_ENDPOINT" }}
+    - secretKey: {{ . }}
+      remoteRef:
+        key: /platform/backup/{{ . }}
+    {{- end }}
+---
+# 하루 1회 RDB를 R2 valkey/<앱>/로(설계 C.3.8). 보존 14일은 R2 lifecycle(infra/cloudflare, prefix valkey/)이 맡는다.
+# 이름에 valkey-backup을 넣는다. ValkeyBackupStale 경보가 이 이름으로 찾는다(platform/observability/stack/vmalert/rules/platform.yaml).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}-valkey-backup
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # 03:30 KST. 노드 TZ에 기대지 않게 적는다. PostgreSQL base backup(03:00 KST)과 겹치지 않는다.
+  schedule: "30 3 * * *"
+  timeZone: Asia/Seoul
+  # 서버를 내린 동안(복원 중)은 돌지 않는다. 경보는 마지막 성공 시각으로 보므로 복원이 길면 울릴 수 있다.
+  suspend: {{ not $running }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            {{- include "data.labels" . | nindent 12 }}
+            homelab.ukyi.app/role: valkey-backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            {{- include "data.podSecurity" . | nindent 12 }}
+          initContainers:
+            # 스냅샷. --rdb는 서버에 복제용 RDB를 새로 만들게 해 받는다. 그래서 따로 BGSAVE하지 않는다.
+            # 필요한 ACL은 sync·replconf다(U18 로컬 실측). 비밀번호는 argv가 아니라 REDISCLI_AUTH env로.
+            - name: snapshot
+              image: {{ printf "%s/%s:%s" .Values.valkeyServer.image.registry .Values.valkeyServer.image.repository .Values.valkeyServer.image.tag }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  valkey-cli -h {{ $name }}-valkey -p 6379 --rdb /work/dump.rdb
+                  test -s /work/dump.rdb
+                  sha256sum /work/dump.rdb | cut -d' ' -f1 > /work/dump.sha256
+              env:
+                - name: REDISCLI_AUTH
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $name }}-valkey-auth
+                      key: password
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits: { memory: 32Mi }
+              securityContext:
+                {{- include "data.containerSecurity" . | nindent 16 }}
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+          containers:
+            # 업로드 뒤 되읽어 sha256을 대조한다. 크기만 보면 전송 중 잘림을 못 잡는다(옛 cache-backup).
+            - name: upload
+              image: docker.io/rclone/rclone:1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  key="r2:${BUCKET}/valkey/{{ $name }}/dump-$(date -u +%Y%m%dT%H%M%SZ).rdb"
+                  rclone copyto /work/dump.rdb "$key"
+                  remote="$(rclone cat "$key" | sha256sum | cut -d' ' -f1)"
+                  if [ "$remote" != "$(cat /work/dump.sha256)" ]; then
+                    echo "업로드 사본의 sha256이 다르다: $key" >&2
+                    exit 1
+                  fi
+                  echo "올림: $key"
+              env:
+                - name: BUCKET
+                  value: {{ $bucket | quote }}
+                - name: HOME
+                  value: /tmp
+                - name: RCLONE_CONFIG_R2_TYPE
+                  value: s3
+                - name: RCLONE_CONFIG_R2_PROVIDER
+                  value: Cloudflare
+                - name: RCLONE_CONFIG_R2_REGION
+                  value: auto
+                # 버킷 전용 Object Read & Write 토큰은 버킷 조회·생성을 거부한다. 확인을 끄지 않으면 rclone이
+                # "버킷 없음"으로 보고 CreateBucket(403)을 시도한다(옛 cache-backup 실측).
+                - name: RCLONE_CONFIG_R2_NO_CHECK_BUCKET
+                  value: "true"
+                {{- range list "ACCESS_KEY_ID" "SECRET_ACCESS_KEY" "ENDPOINT" }}
+                - name: RCLONE_CONFIG_R2_{{ . }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $name }}-valkey-backup-r2
+                      key: R2_{{ . }}
+                {{- end }}
+              resources:
+                requests: { cpu: 10m, memory: 64Mi }
+                limits: { memory: 64Mi }
+              securityContext:
+                {{- include "data.containerSecurity" . | nindent 16 }}
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            # RDB 크기는 maxmemory(128mb)를 넘지 않는다.
+            - name: work
+              emptyDir:
+                sizeLimit: 256Mi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 16Mi
+---
+# 앱을 지워도(시나리오 9) 남는 Valkey 파드를 가린다. 앱 차트의 기본 거부 정책은 앱과 함께 사라진다.
+# NetworkPolicy는 허용의 합집합이라 앱이 있는 동안은 앱 차트 정책(같은 ns 전부)도 함께 적용된다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-valkey
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: valkey
+      app.kubernetes.io/instance: {{ $name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 6379
+  # 서버는 밖으로 나갈 일이 없다.
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-valkey-backup
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      homelab.ukyi.app/role: valkey-backup
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: valkey
+              app.kubernetes.io/instance: {{ $name }}
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # R2(인터넷 443). 사설 대역과 tailnet은 뺀다(앱 차트와 같은 이유, 설계 C.4.5 "tailnet 차단").
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - protocol: TCP
+          port: 443
+{{- end }}

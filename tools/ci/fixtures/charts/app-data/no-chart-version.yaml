@@ -1,0 +1,5 @@
+# expect: fail
+# match: missing property 'chartVersion'
+# 태그를 고르는 값이라 기본값이 없다.
+postgres: {enabled: true}
+backup: {bucket: homelab-backups}

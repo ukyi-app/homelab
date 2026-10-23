@@ -1,0 +1,7 @@
+# 시험 values: DB만(시나리오 2·10 모양). 릴리스 이름 app-data, ns app-app-data로 렌더한다(tools/ci/render.ts).
+# backup은 ApplicationSet data가 클러스터 값으로 넣는 값이다.
+chartVersion: 1.0.0
+postgres:
+  enabled: true
+backup:
+  bucket: homelab-backups

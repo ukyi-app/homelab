@@ -1,0 +1,7 @@
+# expect: fail
+# match: anyOf
+# 리소스가 없는 데이터 Application은 마지막 리소스 prune 거부로 OutOfSync에 묶인다(설계 B.8 E2).
+chartVersion: 1.0.0
+postgres: {enabled: false}
+valkey: {persistent: false}
+backup: {bucket: homelab-backups}
