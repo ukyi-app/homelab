@@ -1,0 +1,4 @@
+# bun test 설정. cli 시험마다 시크릿 추적 목록을 비운다(cli/test/setup.ts).
+# 실행 파일(cli/build.ts)은 --no-compile-autoload-bunfig로 이 파일을 읽지 않는다.
+[test]
+preload = ["./cli/test/setup.ts"]

@@ -141,8 +141,9 @@ describe("소스 규칙", () => {
     expect(offenders(/\b(writeExecOf|registerWriteExec)\b/, ["core/runtime-internal.ts", "core/runtime.ts", "core/pr.ts"])).toEqual([]);
   });
 
-  test("시크릿 원문 해석(revealSecret)은 core 안에서만", () => {
+  test("시크릿 원문 해석(revealSecret)은 core 안에서만, 추적 초기화는 시험 전용", () => {
     expect(src.filter((p) => !rel(p).startsWith("core/") && /\brevealSecret\b/.test(body(p))).map(rel)).toEqual([]);
+    expect(offenders(/\bresetTrackedForTests\b/, ["core/secret.ts"])).toEqual([]);
   });
 
   test("exitCode는 github 하위 명령만", () => {

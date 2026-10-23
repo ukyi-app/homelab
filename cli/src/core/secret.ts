@@ -65,6 +65,13 @@ export function isSecret(x: unknown): x is Secret {
   return x instanceof Secret;
 }
 
+// 시험 전용: 시험마다 추적 목록을 비운다(cli/test/setup.ts의 beforeEach). 함정(#873 CI 실패, 2026-10-23): 추적 목록은
+// 프로세스 전역이라 bun test가 파일을 한 프로세스에서 돌리면 앞 시험의 가짜 시크릿("a" 16자)이 뒤 시험의 가짜 SHA("a" 40자)를
+// 시크릿으로 오인하게 했다. 실행 순서에 따라서만 드러났다. 명령은 이 모듈을 import할 수 없다(정적 시험).
+export function resetTrackedForTests(): void {
+  tracked.clear();
+}
+
 // 추적 중인 원문이 text에 들어 있는지. 출력과 argv 검사에 쓴다.
 export function containsTracked(text: string): boolean {
   for (const raw of tracked) if (text.includes(raw)) return true;

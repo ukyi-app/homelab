@@ -41,7 +41,8 @@ describe("Infisical 어댑터", () => {
       await expect(applyWith(ctx, (w) => w.infisical.setValue("/apps/smoke", "TOKEN", new Secret(v)))).rejects.toThrow();
     }
     expect(calls().calls).toEqual([]);
-    expect(valueProblem(new Secret("a".repeat(16)))).toBeNull();
+    // 가짜 SHA("a"·"b"… 40자)와 겹치지 않는 값을 쓴다(추적 문자열이 argv의 SHA에 들어 있으면 시크릿으로 오인된다).
+    expect(valueProblem(new Secret("fakevalue-sixteen"))).toBeNull();
     // 깨진 디코딩의 흔적(U+FFFD)은 거부한다.
     expect(valueProblem(new Secret("abcdefghijklmno\uFFFD\uFFFD"))).toContain("U+FFFD");
   });
