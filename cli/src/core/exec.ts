@@ -111,11 +111,11 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
     const stdin = input !== undefined ? new TextEncoder().encode(input) : stdio !== "pipe" ? "inherit" : "ignore";
     const env = childEnv(argv[0], m.env, opts);
     // 띄우기 실패는 값으로 돌려준다. 그래야 아래 백업 막기의 실패(던짐)와 섞이지 않는다.
-    const spawn = (): ReturnType<typeof Bun.spawnSync> | Error => {
+    const spawn = (childEnvFinal: Record<string, string>): ReturnType<typeof Bun.spawnSync> | Error => {
       try {
         return Bun.spawnSync(argv, {
           cwd: opts.cwd,
-          env,
+          env: childEnvFinal,
           stdin,
           stdout: stdio === "pipe" ? "pipe" : stdio === "inherit" ? "inherit" : 2,
           stderr: stdio === "pipe" ? "pipe" : "inherit",
@@ -125,8 +125,8 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
         return e as Error;
       }
     };
-    // infisical은 어느 어댑터가 부르든 로컬 백업 막기를 거친다(infisical-backup.ts). 폴더는 자식이 받는 HOME 기준이다.
-    const p = basename(argv[0]) === "infisical" ? guardInfisicalBackup(env.HOME, spawn) : spawn();
+    // infisical은 어느 어댑터가 부르든 로컬 백업 막기를 거친다(infisical-backup.ts). 자식 HOME은 막은 폴더와 같은 실제 경로다.
+    const p = basename(argv[0]) === "infisical" ? guardInfisicalBackup(env.HOME, (home) => spawn({ ...env, HOME: home })) : spawn(env);
     if (p instanceof Error) {
       const code = (p as NodeJS.ErrnoException).code;
       return { code: null, stdout: "", stderr: sensitive ? "" : p.message, stderrHidden: sensitive || undefined, notFound: false, errKind: code === "ENOENT" ? "not-found" : "spawn" };

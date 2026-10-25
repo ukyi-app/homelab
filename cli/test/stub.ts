@@ -30,7 +30,8 @@ function matches(rule: Rule): boolean {
 }
 
 function homeWrite(w: { path: string; force?: boolean }): "written" | "denied" {
-  const p = join(process.env.HOME ?? "/nonexistent", w.path);
+  // Infisical처럼 HOME 문자열에 이어 붙인다(path.join은 link/..를 링크를 보기 전에 지운다, #876 리뷰).
+  const p = `${process.env.HOME ?? "/nonexistent"}/${w.path}`;
   try {
     mkdirSync(dirname(p), { recursive: true });
     if (w.force) chmodSync(dirname(p), 0o700);
