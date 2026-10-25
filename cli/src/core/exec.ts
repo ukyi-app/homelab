@@ -26,6 +26,8 @@ export type ExecOpts = {
   cleanEnv?: Record<string, string>;
   // read exec에서 git clone을 허용할 core 임시 폴더. argv 마지막이 그 아래여야 한다.
   cloneInto?: string;
+  // 민감 호출은 stderr 원문을 버린다. 판정에 필요한 오류는 core 고정 정규식으로 이름만 돌려받는다(예 비밀번호 거부).
+  signals?: Record<string, RegExp>;
 };
 
 export type ExecResult = {
@@ -38,6 +40,8 @@ export type ExecResult = {
   // kubectl API의 NotFound 응답(Error from server (NotFound))만. 인증 플러그인의 "not found" 같은 다른 오류는 아니다.
   notFound: boolean;
   errKind?: "not-found" | "timeout" | "spawn";
+  // opts.signals 중 stdout·stderr에 맞은 이름.
+  signals?: string[];
 };
 
 export type Exec = (argv: string[], opts?: ExecOpts) => ExecResult;
@@ -141,6 +145,7 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
       notFound: basename(argv[0]) === "kubectl" && KUBE_NOT_FOUND.test(rawErr),
     };
     if (sensitive) result.stderrHidden = true;
+    if (opts.signals) result.signals = Object.entries(opts.signals).filter(([, re]) => re.test(rawErr) || re.test(stdoutText)).map(([k]) => k);
     if (opts.secretStdout) result.stdoutSecret = new Secret(stdoutText);
     if ((p as { exitedDueToTimeout?: boolean }).exitedDueToTimeout) result.errKind = "timeout";
     return result;
@@ -163,4 +168,45 @@ export function must(r: ExecResult, what: string): ExecResult {
   if (r.errKind === "timeout") throw new ExecTimeout(`${what}: 시간 초과(결과 미상)`);
   if (r.code !== 0) throw new Error(`${what}: ${why(r)}`);
   return r;
+}
+
+// port-forward 하나를 백그라운드로 띄워 로컬 포트를 읽고, 그 포트로 curl 하나를 한 뒤 끝낸다(03 D7 헬스 확인).
+// 비동기 프로세스라 makeExec 밖의 이 모양 전용 함수로 둔다. argv는 core가 만들고(kubectl.ts), 쓰기 문맥이 살아 있을 때만 돈다.
+// port-forward는 NetworkPolicy를 거치지 않는다(T11 손 절차와 같음).
+export type Forward = (forwardArgs: string[], path: string, timeoutMs?: number) => Promise<number>;
+
+const FORWARDING = /Forwarding from 127\.0\.0\.1:([0-9]{1,5}) ->/;
+
+export function makeForward(exec: Exec, m: { env: Record<string, string | undefined>; live: () => boolean }): Forward {
+  return async (forwardArgs, path, timeoutMs = 15_000) => {
+    if (!m.live()) throw new Error(`${PLAN_WRITE_BLOCKED}: 끝난 apply의 쓰기 문맥을 다시 썼다(Step.apply 밖)`);
+    const argv = ["kubectl", ...forwardArgs];
+    if (argv[1] !== "-n" || !argv.includes("port-forward")) throw new Error("port-forward argv 모양이 아니다");
+    for (const a of argv) if (containsTracked(a) || a.includes("\0")) throw new Error("port-forward 인자에 쓸 수 없는 값이 있다");
+    const p = Bun.spawn(argv, { env: childEnv("kubectl", m.env, {}), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    try {
+      const reader = p.stdout.getReader();
+      const deadline = Date.now() + Math.min(timeoutMs, timeoutFor(false, m.env));
+      let text = "";
+      let port: string | undefined;
+      while (!port) {
+        const left = deadline - Date.now();
+        if (left <= 0) throw new ExecTimeout("port-forward: 로컬 포트를 받지 못했다(시간 초과)");
+        const chunk = await Promise.race([reader.read(), Bun.sleep(left).then(() => null)]);
+        if (chunk === null) continue;
+        if (chunk.done) throw new Error("port-forward가 포트를 알리기 전에 끝났다");
+        text += new TextDecoder().decode(chunk.value);
+        port = FORWARDING.exec(text)?.[1];
+      }
+      reader.releaseLock();
+      const r = exec(["curl", "-q", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-m", "10", `http://127.0.0.1:${port}${path}`]);
+      if (r.errKind === "timeout") throw new ExecTimeout("헬스 확인: 시간 초과");
+      const code = Number(r.stdout.trim());
+      if (!Number.isInteger(code)) throw new Error(`헬스 확인: 응답 코드를 읽지 못했다(${why(r)})`);
+      return code;
+    } finally {
+      p.kill();
+      await p.exited;
+    }
+  };
 }

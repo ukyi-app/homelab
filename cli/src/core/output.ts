@@ -19,12 +19,19 @@ export function secretProblem(r: Result): string | null {
   return containsTracked(rest) ? "단계 밖(notes·next·error)" : null;
 }
 
+// 바깥 입력(앱 로그)을 그대로 터미널에 내면 escape 문자로 화면·클립보드를 조작할 수 있다. 줄바꿈·탭 밖의 C0·DEL·C1은
+// \x1b 꼴 글자로 바꾼다(JSON에도 같은 값을 둔다. 사람이 jq -r로 볼 때도 같다).
+export function safeBody(text: string): string {
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
+}
+
 export function renderJson(r: Result): string {
   const doc: Record<string, unknown> = { schema: SCHEMA, command: r.command };
   if (r.app !== undefined) doc.app = r.app;
   doc.mode = r.mode;
   doc.status = r.status;
   doc.steps = r.steps;
+  if (r.body !== undefined) doc.body = safeBody(r.body);
   doc.notes = r.notes;
   doc.next = r.next;
   if (r.error) doc.error = r.error;
@@ -52,6 +59,10 @@ export function renderHuman(r: Result): string {
     const label = r.mode === "apply" || (r.mode === "read" && s.result === "failed") ? SUFFIX[s.result] : undefined;
     lines.push(`  ${String(i + 1).padStart(num)} ${s.target}${" ".repeat(col - width(s.target))}   ${s.detail}${label ? ` (${label})` : ""}`);
   });
+  if (r.body !== undefined) {
+    const b = safeBody(r.body);
+    lines.push(b.endsWith("\n") ? b.slice(0, -1) : b);
+  }
   for (const n of r.notes) lines.push(`주의: ${n}`);
   if (r.error) lines.push(`실패: ${r.error.message}`);
   lines.push(`다음: ${r.next ?? "없음"}`);

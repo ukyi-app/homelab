@@ -48,9 +48,9 @@ describe("#873 남은 지적", () => {
 
   test("logs --since의 일 단위는 kubectl이 받는 시간 단위로 바꾼다(Connector 4360754457)", () => {
     const { ctx, calls } = testCtx("read", [kubectlRule(["-n", "app-smoke", "logs", "deploy/smoke", "--tail=200", "--since=168h"], { stdout: "ok\n" }), kubectlRule(["-n", "app-smoke", "logs", "deploy/smoke", "--tail=200", "--since=30m"], { stdout: "ok\n" })]);
-    expect(ctx.k8s.logs("app-smoke", "smoke", { since: "7d" })).toBe("ok\n");
-    expect(ctx.k8s.logs("app-smoke", "smoke", { since: "30m" })).toBe("ok\n");
-    expect(() => ctx.k8s.logs("app-smoke", "smoke", { since: "7w" })).toThrow("--since");
+    expect(ctx.k8s.logs("app-smoke", { deployment: "smoke" }, { since: "7d" })).toBe("ok\n");
+    expect(ctx.k8s.logs("app-smoke", { deployment: "smoke" }, { since: "30m" })).toBe("ok\n");
+    expect(() => ctx.k8s.logs("app-smoke", { deployment: "smoke" }, { since: "7w" })).toThrow("--since");
     expect(calls().unmatched).toEqual([]);
   });
 
@@ -77,6 +77,6 @@ describe("#873 남은 지적", () => {
     expect(classify(["kubectl", "logs", "secret/x"]).sensitiveOutput).toBe(true);
     // 어댑터로: 앱 이름 secret의 로그를 읽을 수 있다.
     const { ctx } = testCtx("read", [kubectlRule(["-n", "app-secret", "logs", "deploy/secret", "--tail=200"], { stdout: "ok\n" })]);
-    expect(ctx.k8s.logs("app-secret", "secret")).toBe("ok\n");
+    expect(ctx.k8s.logs("app-secret", { deployment: "secret" })).toBe("ok\n");
   });
 });

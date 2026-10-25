@@ -32,9 +32,10 @@ export const REST = "...";
 // echoEnv: 스텁이 받은 환경변수 중 이 이름들을 JSON으로 stdout에 낸다.
 // materialize: 스텁이 argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일(github 위임 시험).
 // echoCwd: 스텁이 실행된 폴더를 stdout에 낸다.
+// holdMs: stdout을 낸 뒤 이만큼 살아 있는다(port-forward 흉내). writeLastArg: argv 마지막 경로에 이 내용을 쓴다(래퍼 --plan-json 흉내).
 // recordEnv: 스텁이 받은 환경변수 중 이 이름들을 원장의 env에 적는다(stdio를 상속하는 위임 호출의 환경 확인).
 // homeWrite: 스텁이 $HOME 아래에 파일을 쓰려 한다(Infisical 로컬 백업 흉내, force면 권한을 무시하는 파일시스템 흉내).
-export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean; homeWrite?: { path: string; force?: boolean }; recordEnv?: string[] };
+export type Resp = { stdout?: string; stderr?: string; code?: number; sleepMs?: number; echoEnv?: string[]; materialize?: Record<string, string>; echoCwd?: boolean; homeWrite?: { path: string; force?: boolean }; recordEnv?: string[]; holdMs?: number; writeLastArg?: string };
 export type Matcher = string | RegExp;
 export type Rule = { argv: Matcher[]; responses: Resp[]; captureStdin?: boolean; noStdin?: boolean };
 export type Call = { argv: string[]; stdinLength: number; stdinSha256: string; stdin?: string; rule: number | null; cwd: string; homeWrite?: "written" | "denied"; env?: Record<string, string | null> };
@@ -154,6 +155,8 @@ function baseEnv(s: { dir: string; bin: string; home: string }, opts: RunOpts): 
     HOMELAB_STUB_DIR: s.dir,
     // 타임아웃 주입 시험이 오래 기다리지 않게 한다. 스텁의 sleepMs를 이보다 길게 주면 시간 초과다.
     HOMELAB_TEST_TIMEOUT_MS: "3000",
+    // 기다림 어댑터(waitSecret·forceSync·waitAof)의 간격을 줄인다.
+    HOMELAB_TEST_POLL_MS: "20",
     ...(opts.project === false ? {} : { HOMELAB_INFISICAL_PROJECT_ID: FAKE_PROJECT }),
     ...opts.env,
   };
@@ -200,10 +203,10 @@ export function stubSandbox(rules: Rule[], opts: RunOpts = {}): { env: Record<st
 
 // 같은 프로세스에서 단계·어댑터를 시험할 문맥. makeRuntime으로 실제와 같은 ReadCtx를 만든다(PATH는 스텁 폴더 하나).
 // 쓰기 문맥은 applyWith로만 얻는다(엔진이 Step.apply에 주는 것과 같다).
-export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean } = {}): { ctx: ReadCtx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string; home: string } {
+export function testCtx(mode: Mode, rules: Rule[], opts: RunOpts & { delegate?: boolean; wrapper?: boolean; isTTY?: boolean; ask?: (q: string) => string | null } = {}): { ctx: ReadCtx; calls: () => ReturnType<typeof summarize>; progress: string[]; bin: string; home: string } {
   const sb = stubSandbox(rules, opts);
   const progress: string[] = [];
-  const ctx = makeRuntime({ mode, json: false, line: "homelab test", env: sb.env, isTTY: false, ask: () => null, progress: (l) => progress.push(l), delegate: opts.delegate, cwd: opts.cwd });
+  const ctx = makeRuntime({ mode, json: false, line: "homelab test", env: sb.env, isTTY: opts.isTTY ?? false, ask: opts.ask ?? (() => null), progress: (l) => progress.push(l), delegate: opts.delegate, wrapper: opts.wrapper, cwd: opts.cwd });
   return { ctx, calls: sb.calls, progress, bin: sb.bin, home: sb.env.HOME };
 }
 

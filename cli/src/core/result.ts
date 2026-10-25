@@ -28,6 +28,8 @@ export type Result = {
   error?: { message: string; next: string };
   // 사람용 출력의 머리. 없으면 모드에 맞는 기본 머리.
   title?: string;
+  // 단계 뒤에 보일 여러 줄 원문(Plan.body).
+  body?: string;
   // github 하위 명령(kind delegate)만 쓴다. 래퍼 코드 그대로(0 같음, 2 차이, 1 guard·실패).
   exitCode?: number;
 };

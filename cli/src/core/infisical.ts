@@ -59,7 +59,33 @@ export const argvFor = {
   list: (project: string, path: string) => ["infisical", "secrets", ...base(project, path), "-o", "json", "--include-imports=false", "--expand=false", "--secret-overriding=false"],
   set: (project: string, path: string) => ["infisical", "secrets", "set", "--file", "/dev/stdin", ...base(project, path), "--type", "shared"],
   remove: (project: string, path: string, key: string) => ["infisical", "secrets", "delete", key, ...base(project, path), "--type", "shared"],
+  folders: (project: string, parent: string) => ["infisical", "secrets", "folders", "get", "--path", parent, "--env", INFISICAL_ENV, "--projectId", project, "-o", "json", "--silent"],
+  createFolder: (project: string, parent: string, name: string) => ["infisical", "secrets", "folders", "create", "--name", name, "--path", parent, "--env", INFISICAL_ENV, "--projectId", project, "--silent"],
 };
+
+// /apps/x/postgres → [["/", "apps"], ["/apps", "x"], ["/apps/x", "postgres"]]. 바깥부터 만든다.
+function folderPieces(path: string): [string, string][] {
+  const parts = path.split("/").filter(Boolean);
+  return parts.map((name, i) => [i === 0 ? "/" : `/${parts.slice(0, i).join("/")}`, name]);
+}
+
+// 폴더 목록 JSON에서 이름만. [미검증] 0.44.2 실제 서버의 -o json 모양: 배열의 각 항목에 name이 있다고 보고, 다르면 던진다(T12-05).
+function folderNames(exec: Exec, project: string, parent: string): string[] {
+  const r = exec(argvFor.folders(project, parent));
+  if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${parent} 폴더 목록: 시간 초과`);
+  if (r.code !== 0) throw new Error(`Infisical ${parent} 폴더 목록: ${why(r)}`);
+  let parsed: unknown;
+  try {
+    parsed = jsonParse(r.stdout.trim() || "[]");
+  } catch {
+    throw new Error(`Infisical ${parent} 폴더 목록: JSON이 아니다`);
+  }
+  if (!Array.isArray(parsed)) throw new Error(`Infisical ${parent} 폴더 목록: 배열이 아니다`);
+  return parsed.map((f) => {
+    if (typeof (f as { name?: unknown })?.name !== "string") throw new Error(`Infisical ${parent} 폴더 목록: 모양이 다르다`);
+    return (f as { name: string }).name;
+  });
+}
 
 // .env 한 줄로 왕복하고 16자 이상인 값만 받는다(위 실측, 사용자 결정 2026-10-23). 틀리면 이유, 맞으면 null.
 export function valueProblem(value: Secret): string | null {
@@ -98,6 +124,11 @@ export function infisicalRead(exec: Exec, project: ReturnType<typeof projectReso
     return { keys: keys.sort(), value };
   };
   return {
+    folderExists(path) {
+      checkFolder(path);
+      const [parent, name] = folderPieces(path).at(-1)!;
+      return folderNames(exec, project.id(), parent).includes(name);
+    },
     has(path, key) {
       checkKey(key);
       return readFolder(path).keys.includes(key);
@@ -129,6 +160,15 @@ export function infisicalWrite(exec: Exec, project: ReturnType<typeof projectRes
       if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${path}/${key} 쓰기: 시간 초과(결과 미상)`);
       // 성공 표에는 값이 가려져(******) 나오지만 쓰지 않는다.
       if (r.code !== 0) throw new Error(`Infisical ${path}/${key} 쓰기: ${why(r)}`);
+    },
+    createFolder(path) {
+      checkFolder(path);
+      for (const [parent, name] of folderPieces(path)) {
+        if (folderNames(exec, project.id(), parent).includes(name)) continue;
+        const r = exec(argvFor.createFolder(project.id(), parent, name));
+        if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${parent}/${name} 폴더 만들기: 시간 초과(결과 미상)`);
+        if (r.code !== 0) throw new Error(`Infisical ${parent}/${name} 폴더 만들기: ${why(r)}`);
+      }
     },
     removeKey(path, key) {
       checkFolder(path);

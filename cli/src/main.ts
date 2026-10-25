@@ -107,7 +107,7 @@ async function main(argv: string[]): Promise<number> {
 
   const mode: Mode = cmd.kind === "change" ? (input.apply ? "apply" : "plan") : cmd.kind === "delegate" && cmd.delegateMode === "apply" ? "apply" : "read";
   const line = ["homelab", ...argv.filter((a) => a !== "--json")].map(quote).join(" ");
-  const ctx = makeRuntime({ mode, json, line, env: { ...process.env }, isTTY: Boolean(process.stdin.isTTY), ask, progress: (l) => writeStderr(`${l}\n`), delegate: cmd.kind === "delegate" });
+  const ctx = makeRuntime({ mode, json, line, env: { ...process.env }, isTTY: Boolean(process.stdin.isTTY), ask, progress: (l) => writeStderr(`${l}\n`), delegate: cmd.kind === "delegate", wrapper: cmd.wrapper === "plan-json" });
 
   let result: Result;
   try {

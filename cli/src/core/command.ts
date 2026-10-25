@@ -31,7 +31,20 @@ export type KubeKind =
   | "scheduledbackup"
   | "database"
   | "databaserole"
-  | "event";
+  | "event"
+  | "clustersecretstore"
+  | "node"
+  | "objectstore";
+
+// 로그 대상. 앱 Deployment 또는 Job(마이그레이션·복원·백업).
+export type LogTarget = { deployment: string } | { job: string };
+
+// 복원 실행 기록 ConfigMap 이름(03, restore.md의 $W를 클러스터에 둔 것). 범용 ConfigMap 조회는 없다.
+export type RestoreRecordName = "restore-pg" | "restore-vk" | "restore-check";
+export type RestoreRecord = { run: string; data: Record<string, string>; resourceVersion: string };
+
+// 파드 템플릿이 참조하는 Secret들의 resourceVersion이 템플릿 주석과 같은지(값은 읽지 않는다).
+export type PodSecrets = { current: boolean; rolledOut: boolean; secrets: string[] };
 
 export type KubeRead = {
   // 없으면 null. 그 밖의 실패(인증·연결)는 던진다.
@@ -39,24 +52,48 @@ export type KubeRead = {
   list(kind: KubeKind, ns: string | null, selector?: string): any[];
   // Secret 키 값의 sha256 앞 12자. 그 키 값만 Secret으로 만든다. 없으면 null.
   secretHash(ns: string, name: string, key: string): string | null;
-  // Secret이 있는지와 키 이름만.
-  secretExists(ns: string, name: string): { exists: boolean; keys: string[] };
-  logs(ns: string, deployment: string, opts?: { since?: string; tail?: number }): string;
+  // Secret이 있는지, 키 이름, resourceVersion(값 아님).
+  secretExists(ns: string, name: string): { exists: boolean; keys: string[]; resourceVersion: string | null };
+  // 그 키 값이 needle 원문이나 URL 인코딩 꼴을 품는지(DATABASE_URL 등). Secret·키가 없으면 null.
+  secretEmbeds(ns: string, name: string, key: string, needle: Secret): boolean | null;
+  // 2초마다 다시 보며 기다린다. 맞으면 true, 시간 초과면 false. timeoutSec ≤ 300.
+  waitSecret(ns: string, name: string, key: string, want: { hash: string } | { embeds: Secret }, timeoutSec: number): boolean;
+  // kubectl wait --for=jsonpath. jsonpath는 {.status.x.y} 꼴만. 시간 초과면 false, 대상이 없으면 던진다. timeoutSec ≤ 600.
+  waitFor(kind: KubeKind, ns: string, name: string, jsonpath: string, value: string, timeoutSec: number): boolean;
+  // kubectl wait --for=condition. jobPods는 그 Job의 파드들. timeoutSec ≤ 1800.
+  waitCondition(kind: KubeKind, ns: string, target: { name: string } | { jobPods: string }, cond: "Ready" | "ready" | "complete", timeoutSec: number): boolean;
+  podSecretsCurrent(ns: string, deployment: string): PodSecrets;
+  restoreRecord(ns: string, name: RestoreRecordName): RestoreRecord | null;
+  logs(ns: string, target: LogTarget, opts?: { since?: string; tail?: number; previous?: boolean; container?: string }): string;
   canI(verb: "get" | "list" | "create" | "delete" | "patch", kind: KubeKind, ns: string): boolean;
   rolloutStatus(ns: string, deployment: string, timeoutSec?: number): boolean;
   currentContext(): string | null;
 };
 
 export type KubeWrite = {
-  // ExternalSecret 즉시 동기화(force-sync annotation, rotate.md 0절).
-  forceSync(ns: string, externalSecret: string): void;
+  // ExternalSecret 즉시 동기화(force-sync annotation, rotate.md 0절). waitSec이 있으면 refreshTime·Ready까지 기다리고,
+  // 넘으면 ExecTimeout(엔진이 재조회). waitSec ≤ 120.
+  forceSync(ns: string, externalSecret: string, opts?: { waitSec?: number }): void;
   rolloutRestart(ns: string, deployment: string): void;
+  // 참조 Secret의 resourceVersion 해시를 템플릿 주석 homelab.ukyi.app/secrets-rv에 쓴다(바뀌었을 때만 재시작이 일어난다).
+  restartForSecrets(ns: string, deployment: string): void;
+  restoreRecordCreate(ns: string, name: RestoreRecordName, run: string, data: Record<string, string>): "created" | "exists";
+  // 첫 op가 test /data/run = run이라 남의 실행 기록이면 API 서버가 거부한다. 값 null은 그 키를 지운다.
+  restoreRecordUpdate(ns: string, name: RestoreRecordName, run: string, set: Record<string, string | null>): void;
+  restoreRecordDelete(ns: string, name: RestoreRecordName, run: string): void;
+  // 라벨이 이 실행인 객체 하나만 지우고 사라질 때까지 기다린다.
+  deleteRestoreObject(ns: string, kind: "job" | "cluster", name: string, runId: string): void;
+  createJobFromCronJob(ns: string, cronjob: string, jobName: string, runId: string): void;
+  // data purge 전용. PVC가 묶인 PV(storageClass local-retain, claimRef 확인)의 reclaim을 Delete로.
+  setPvReclaimDelete(ns: string, pvc: string): void;
   // GitOps 밖 일회성 복원 객체(C.5.7). 라벨 homelab.ukyi.app/restore 필수, 어디에도 Secret이 있으면 거부.
   createRestoreObject(ns: string, manifest: Record<string, unknown>): void;
   deleteRestoreObjects(ns: string, runId: string): void;
 };
 
 export type InfisicalRead = {
+  // 폴더가 있는지(부모 폴더 목록에서 이름으로).
+  folderExists(path: string): boolean;
   has(path: string, key: string): boolean;
   listKeys(path: string): string[];
   // 불투명한 값. 명령은 열어 볼 수 없고 setValue로 넘기기만 한다.
@@ -70,6 +107,50 @@ export type InfisicalWrite = {
   // 16자 이상, .env 한 줄로 왕복하는 값만(infisical.ts 실측 주석).
   setValue(path: string, key: string, value: Secret): void;
   removeKey(path: string, key: string): void;
+  // 없는 조각만 바깥부터 만든다(/apps/x/postgres면 /apps → /apps/x → /apps/x/postgres).
+  createFolder(path: string): void;
+};
+
+export type WebRead = {
+  // 공개 host의 응답 코드(status 공개 줄). host는 <이름>.ukyi.app만.
+  publicStatus(host: string, path: string): number;
+};
+
+// 파드 안 작업(쓰기 문맥만). 셸·SQL 텍스트는 core 상수이고 명령은 이름과 Secret만 넘긴다.
+export type PgWrite = {
+  // 앱 역할로 primary에 로그인해 본다(rotate.md 3c 5). 비밀번호는 stdin.
+  passwordCheck(app: string, password: Secret): "accepted" | "rejected";
+};
+
+export type ValkeyCommand = "PING" | "DBSIZE" | "CONFIG GET appendonly" | "CONFIG SET appendonly yes" | "INFO persistence";
+
+export type ValkeyWrite = {
+  // deploy/<deployment>(이름은 -valkey로 끝난다)에 <deployment>-auth Secret의 password로 인증해 명령 하나(restore.md 0.3).
+  cli(ns: string, deployment: string, cmd: ValkeyCommand): string;
+  // AOF가 켜지고 다시 쓰기가 끝날 때까지. 맞으면 true, 시간 초과 false. timeoutSec ≤ 300.
+  waitAof(ns: string, deployment: string, timeoutSec: number): boolean;
+  // 주어진 비밀번호로 PING(rotate.md 3d). WRONGPASS·NOAUTH면 rejected.
+  authCheck(ns: string, deployment: string, password: Secret): "accepted" | "rejected";
+};
+
+export type HttpWrite = {
+  // port-forward로 앱 파드에 붙어 헬스 경로의 응답 코드. 경로는 셋만.
+  appStatus(ns: string, deployment: string, port: number, path: "/healthz" | "/healthz/db" | "/healthz/cache"): Promise<number>;
+};
+
+// app new(04)의 GitHub 쓰기. 본문·경로는 core 고정.
+export type AppRepoWrite = {
+  createFromTemplate(app: string): void;
+  setRepoSettings(app: string): void;
+  enableVulnReporting(app: string): void;
+  setForkPrApproval(app: string): void;
+};
+
+// 래퍼 plan JSON(tools/tf-github.sh plan --plan-json)의 변경 목록. 0·2가 아니면 changes null.
+export type PlanChanges = {
+  exitCode: number;
+  sha: string | null;
+  changes: { address: string; mode: "managed" | "data"; actions: string[]; importing: boolean }[] | null;
 };
 
 export type GhResponse = { status: number; json: any };
@@ -103,6 +184,7 @@ export type ToolsRead = {
 // github 하위 명령(kind delegate)만 받는다. main을 core 임시 폴더로 fresh clone하고 그 안의 tools/tf-github.sh를 부른다.
 export type GithubDelegate = {
   run(sub: "plan" | "verify" | "apply", opts?: { allowDestroy?: boolean }): number;
+  planChanges(): PlanChanges;
 };
 
 export type Observation = {
@@ -116,6 +198,9 @@ export type Observation = {
   next?: string;
   // same이지만 알려 둘 것. 실패로 세지 않고 "주의:" 줄로 보인다(전체 읽기 한 번만).
   warn?: string;
+  // same이고 바깥을 기다리는데, 기다리는 동안 뒤 단계를 돌리면 안 될 때(예 "PR #12(앱 멈춤) 병합 대기").
+  // apply는 이 단계에서 멈추고 waiting(3), 뒤 단계는 not-run이다. plan은 뒤 단계도 읽어 보인다. same이 아니면 엔진이 거부한다.
+  hold?: string;
 };
 
 export type ReadCtx = {
@@ -129,7 +214,8 @@ export type ReadCtx = {
   repo: RepoRead;
   ghcr: GhcrRead;
   tools: ToolsRead;
-  // kind delegate 명령에만 있다.
+  web: WebRead;
+  // kind delegate 명령과 wrapper 표시 명령(app new)에만 있다.
   github?: GithubDelegate;
   engine(plan: Plan): Promise<Result>;
   // 진행 줄. stderr로 간다(stdout은 결과 하나만).
@@ -147,6 +233,15 @@ export type WriteCtx = {
   generatePassword(): Secret;
   // stdin(파이프) 또는 tty(에코 없음)에서 시크릿 한 개. 16자 이상만.
   readSecretInput(prompt: string): Secret;
+  // tty에서 한 줄(보임)을 받아 expected와 같으면 true. tty가 아니면 false(파이프로 대신 답할 수 없다).
+  confirm(question: string, expected: string): boolean;
+  web: WebRead;
+  pg: PgWrite;
+  valkey: ValkeyWrite;
+  http: HttpWrite;
+  // wrapper 표시 명령(app new)에만 있다.
+  github?: { apply(): number };
+  appRepo?: AppRepoWrite;
   progress(line: string): void;
 };
 
@@ -167,6 +262,8 @@ export type Plan = {
   steps: Step[];
   notes?: string[];
   title?: string;
+  // 단계 줄 뒤에 그대로 보일 여러 줄 원문(logs). 제어 문자는 출력 계층이 바꾼다.
+  body?: string;
   // 없으면 엔진의 기본 다음 행동(pending이면 같은 명령에 --apply).
   next?: (status: Status) => string | null;
 };
@@ -180,6 +277,8 @@ export type CommandSpec = {
   kind: Kind;
   // delegate만: 래퍼가 상태를 바꾸는지(github apply).
   delegateMode?: "read" | "apply";
+  // change 명령이 래퍼 plan JSON과 apply, 앱 저장소 쓰기를 쓴다(app new). ctx.github·w.github·w.appRepo가 생긴다.
+  wrapper?: "plan-json";
   args: ArgSpec[];
   flags: FlagSpec[];
   // 자리표시(아직 구현 전) 명령이면 담당 티켓. 구현하면 지운다.

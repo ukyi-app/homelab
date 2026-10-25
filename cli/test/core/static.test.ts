@@ -56,7 +56,7 @@ const FS_IMPORTERS: Record<string, Set<string> | "any"> = {
   "core/temp.ts": "any",
   "core/infisical-backup.ts": "any",
   "core/version.ts": new Set(["readFileSync"]),
-  "core/github.ts": new Set(["existsSync", "realpathSync"]),
+  "core/github.ts": new Set(["existsSync", "readFileSync", "realpathSync"]),
   "core/input.ts": new Set(["readFileSync", "readSync"]),
   "main.ts": new Set(["readSync"]),
 };
@@ -87,7 +87,7 @@ export function fsProblems(file: string, text: string): string[] {
 }
 
 // 명령 파일이 import할 수 있는 것: core의 문맥·정의 모듈과 같은 접두의 자기 도우미(.ts, 확장자 없이)뿐.
-const COMMAND_IMPORTS = new Set(["../core/command", "../core/names", "../core/result", "../core/pr", "../core/command-info"]);
+const COMMAND_IMPORTS = new Set(["../core/command", "../core/names", "../core/result", "../core/pr", "../core/command-info", "../core/values"]);
 // 명령 파일에서 쓰면 안 되는 전역(외부 명령·네트워크·파일·환경변수·출력의 우회로).
 const COMMAND_GLOBALS = /\b(Bun|process|fetch|require|globalThis|eval|Deno|XMLHttpRequest|WebSocket|navigator|console|Function)\b|\bimport\s*\(/;
 // 내장 전역을 바꾸는 꼴: 재할당·복합 대입·delete, 프로토타입 접근, defineProperty류, Object.assign(내장, …), global·self 경유.

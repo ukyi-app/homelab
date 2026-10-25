@@ -93,6 +93,8 @@ export type PrSpec = {
   // 이 PR이 다루는 파일. edit는 이 파일들의 현재 내용(없으면 null)을 받아 원하는 내용(지우려면 null)을 같은 키로 돌려준다.
   files: string[];
   edit(current: FileContents): FileContents;
+  // 바뀌는 파일마다 사람용 요약(예 "uses.postgres: false → true"). 있으면 plan detail에 붙인다(설계 D 5번 상자, 02 R8).
+  describe?(path: string, before: string | null, after: string | null): string;
 };
 
 function snapshot(repo: RepoRead, files: string[], ref: string): FileContents {
@@ -113,6 +115,13 @@ function desiredOf(spec: PrSpec, current: FileContents): FileContents {
 }
 
 const sameContents = (a: FileContents, b: FileContents) => Object.keys(a).every((k) => a[k] === b[k]);
+
+// main 대비 바뀌는 파일의 요약. 요약에도 값이 섞이면 출력 계층이 막는다.
+function summaryOf(spec: PrSpec, current: FileContents, desired: FileContents): string {
+  if (!spec.describe) return "";
+  const parts = spec.files.filter((f) => current[f] !== desired[f]).map((f) => `${f}: ${spec.describe!(f, current[f], desired[f])}`);
+  return parts.length ? `; ${parts.join("; ")}` : "";
+}
 
 export function prStep(spec: PrSpec): Step {
   if (spec.files.length === 0) throw new Error("PR에 넣을 파일이 없다");
@@ -142,10 +151,10 @@ export function prStep(spec: PrSpec): Step {
       }
       const onBranch = sameContents(desired, snapshot(ctx.repo, spec.files, pr.headSha));
       if (extra.length === 0 && onBranch) return { state: "same", action: "none", detail: `PR #${pr.number} 열림, 내용 같음`, wait: `PR #${pr.number} 검토·병합 대기` };
-      return { state: "differs", action: "update", detail: `PR #${pr.number} 갱신 (브랜치 ${branch}${extra.length ? `, 이 명령 밖 파일 ${extra.length}개를 뺀다` : ""})` };
+      return { state: "differs", action: "update", detail: `PR #${pr.number} 갱신 (브랜치 ${branch}${extra.length ? `, 이 명령 밖 파일 ${extra.length}개를 뺀다` : ""})${summaryOf(spec, current, desired)}` };
     }
     if (onMain) return { state: "same", action: "none", detail: "main과 같음 (PR 필요 없음)" };
-    return { state: "missing", action: "create", detail: `새로 (브랜치 ${branch})` };
+    return { state: "missing", action: "create", detail: `새로 (브랜치 ${branch})${summaryOf(spec, current, desired)}` };
   };
 
   const apply = async (w: WriteCtx): Promise<void> => {
