@@ -53,10 +53,21 @@ homelab.ukyi.app/chart: app-data-{{ .Chart.Version }}
 
 {{/*
 Argo CD가 지우지 않는 데이터 리소스(설계 C.5.5). revert·data/<앱> 삭제·ApplicationSet 삭제 모두에서 남는다.
-폐기는 이 주석을 지우는 PR이 먼저다(purge PR 1).
+폐기는 purge: true로 이 주석을 지우는 PR이 먼저다(purge PR 1). 그 PR이 병합·동기화돼 살아 있는 리소스에서 주석이
+빠진 것을 본 뒤에만 data/<앱> 삭제 PR(purge PR 2)을 낸다. 같은 PR에 넣으면 주석이 남은 채 삭제가 시작돼 리소스가 남는다.
 */}}
 {{- define "data.protect" -}}
+{{- if not .Values.purge }}
 argocd.argoproj.io/sync-options: Prune=false,Delete=false
+{{- end }}
+{{- end }}
+
+{{/*
+CNPG reclaim(Database databaseReclaimPolicy, DatabaseRole databaseRoleReclaimPolicy). 기본 retain이라 CR이 지워져도
+DB·역할이 남는다[S30][S31]. purge: true일 때만 delete로 바꿔 PR 2의 CR 삭제가 DROP까지 가게 한다.
+*/}}
+{{- define "data.reclaim" -}}
+{{- ternary "delete" "retain" (.Values.purge | default false) }}
 {{- end }}
 
 {{- define "data.externalSecretSpec" -}}

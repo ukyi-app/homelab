@@ -3,7 +3,8 @@
 {{- $running := ternary .Values.valkey.running true (hasKey .Values.valkey "running") }}
 {{- $bucket := required "backup.bucket이 없다(ApplicationSet data가 클러스터 값 cluster.backup.bucket으로 넣는다)" .Values.backup.bucket }}
 # 영속 Valkey의 데이터(설계 C.5.6). 서버(valkeyServer)와 따로 둬 running: false에서도 남는다.
-# local-retain이라 PVC가 지워져도 노드의 폴더(PV)가 남는다.
+# local-retain이라 PVC가 지워져도 노드의 폴더(PV)가 남는다. purge: true도 PV reclaim은 바꾸지 못한다(StorageClass 값,
+# 차트 밖). 폴더까지 지우려면 PR 2 전에 PV reclaim을 Delete로 바꾼다(homelab data purge가 한다, 설계 C.5.5).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
