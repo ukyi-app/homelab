@@ -80,8 +80,8 @@ describe("github 위임", () => {
     expect(inside.TF_GITHUB_CLONE).toMatch(/homelab-cli-github-/);
     for (const k of ["GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0"]) expect([k, inside[k]]).toEqual([k, null]);
     expect(inside.GIT_TERMINAL_PROMPT).toBe("0");
-    // 저장소 밖에서 실행하면 넘기지 않는다(상속된 값도 지운다).
-    const outside = envOf(mkdtempSync(join(tmpdir(), "homelab-cli-test-nogit-")));
+    // 저장소 밖에서 실행하면 넘기지 않는다(상속된 값도 지운다). 임시 폴더는 위쪽에 .git이 있을 수 있어(/tmp/.git, #876 리뷰) /를 쓴다.
+    const outside = envOf("/");
     expect(outside.TF_GITHUB_ORIGIN_ROOT).toBeNull();
   });
 

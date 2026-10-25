@@ -19,7 +19,7 @@ homelab doctor                    # 도구·로그인·kubectl context
 - 개발 실행: `bun run cli -- doctor`. 시험: `bun test cli/`(필수 검사 `bun run ci`의 `cli` 단계가 같은 것을 돈다).
 - 타입 검사: `bun run ci --only "cli typecheck"`(strict `tsc`, `cli/tsconfig.json`). 이 단계가 `bun install --frozen-lockfile --ignore-scripts`로 `typescript`·`@types/bun`을 받는다. 버전을 바꾸면 `bun install`로 `bun.lock`을 같은 커밋에서 갱신한다. `@types/bun`은 `.tool-versions`의 bun과 같은 버전이다.
 - Infisical을 쓰는 명령은 `HOMELAB_INFISICAL_PROJECT_ID`(homelab 프로젝트 ID)를 읽는다. 없으면 tty에서 한 번 묻는다. 값은 저장소에 두지 않는다.
-- `infisical`을 부를 때마다 `~/.infisical/secrets-backup/`을 0500으로 잠그고(남은 파일은 지운다) 호출 뒤 파일이 0개인지 본다. 권한이 듣지 않는 파일시스템(또는 root)이면 실행하지 않고 멈춘다. CLI 0.44.2가 조회 값을 그 폴더에 남기기 때문이다(`tools/tf-github.sh`와 같은 방식).
+- `infisical`을 부를 때마다 `~/.infisical/secrets-backup/`을 0500으로 잠그고(남은 파일은 지운다) 호출 뒤 파일이 0개인지 본다. 권한이 듣지 않는 파일시스템(또는 root)이면 실행하지 않고 멈춘다. 잠긴 폴더를 다시 열지 않고(남은 파일은 폴더째 바꾼다), `.`·`..`가 든 HOME은 거부한다. CLI 0.44.2가 조회 값을 그 폴더에 남기기 때문이다(`tools/tf-github.sh`와 같은 방식).
 
 ## 동작 규칙
 
