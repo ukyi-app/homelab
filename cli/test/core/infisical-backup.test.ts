@@ -146,6 +146,52 @@ describe("Infisical 로컬 백업 막기", () => {
     expect(readdirSync(join(home, ".infisical"))).toEqual(["secrets-backup"]);
   });
 
+  test("새 폴더 만들기가 실패하면 기존 잠긴 폴더를 옮기지 않는다(#877 리뷰 P2-1)", () => {
+    const home = testCtx("plan", []).home;
+    const dir = join(home, BACKUP);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "old.json"), "old");
+    chmodSync(dir, 0o500);
+    const enospc = { mkdirLocked: (p: string) => { if (p.includes(".new-")) throw Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }); mkdirSync(p, { mode: 0o500 }); }, removeTree: (p: string) => { throw new Error(`쓰이면 안 된다 ${p}`); } };
+    let ran = false;
+    expect(() => guardInfisicalBackup(home, () => (ran = true), enospc)).toThrow("기존 폴더는 그대로 잠겨 있다");
+    expect(ran).toBe(false);
+    expect(mode(dir)).toBe(0o500);
+    expect(readdirSync(dir)).toEqual(["old.json"]);
+    expect(readdirSync(join(home, ".infisical"))).toEqual(["secrets-backup"]);
+  });
+
+  test("이전 실행이 옮긴 직후 끊겨 경로가 없으면, 남은 것을 지우기 전에 잠긴 경로부터 세운다(#877 리뷰 P2-1)", () => {
+    const home = testCtx("plan", []).home;
+    const base = join(home, ".infisical");
+    mkdirSync(join(base, "secrets-backup.stale-1-x"), { recursive: true });
+    writeFileSync(join(base, "secrets-backup.stale-1-x", "old.json"), "old");
+    const failing = { mkdirLocked: (p: string) => mkdirSync(p, { mode: 0o500 }), removeTree: () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); } };
+    expect(() => guardInfisicalBackup(home, () => "ok", failing)).toThrow("백업 경로는 잠겨 있다");
+    // 오류 문구가 참이다: 경로가 있고 잠겨 있다.
+    expect(mode(join(home, BACKUP))).toBe(0o500);
+    expect(readdirSync(join(home, BACKUP))).toEqual([]);
+    expect(guardInfisicalBackup(home, () => "ok")).toBe("ok");
+    expect(readdirSync(base)).toEqual(["secrets-backup"]);
+  });
+
+  test("stale 이름의 심볼릭 링크는 링크만 지우고 HOME 밖 폴더 권한을 바꾸지 않는다(#877 리뷰 P2-2)", () => {
+    const home = testCtx("plan", []).home;
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "homelab-cli-test-outside-")));
+    mkdirSync(join(outside, "sub"), { mode: 0o750 });
+    chmodSync(join(outside, "sub"), 0o750);
+    chmodSync(outside, 0o555);
+    mkdirSync(join(home, ".infisical"));
+    symlinkSync(outside, join(home, ".infisical", "secrets-backup.stale-9-link"));
+    try {
+      expect(guardInfisicalBackup(home, () => "ok")).toBe("ok");
+      expect([mode(outside), mode(join(outside, "sub"))]).toEqual([0o555, 0o750]);
+      expect(readdirSync(join(home, ".infisical"))).toEqual(["secrets-backup"]);
+    } finally {
+      chmodSync(outside, 0o755);
+    }
+  });
+
   test("HOME이 없거나 상대 경로면 띄우지 않고 실패한다", () => {
     let ran = false;
     expect(() => guardInfisicalBackup(undefined, () => (ran = true))).toThrow(CliError);
