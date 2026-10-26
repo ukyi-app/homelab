@@ -705,7 +705,7 @@ YAML
    [ -f "$W/ok-list" ] && { cat -v "$W/ext"; [ -s "$W/ext" ] || echo "확장 없음"; }
    ```
 
-   **4-3. DB 다시 만들기.** 여기서 지금 DB를 지운다. 앞의 확인(되돌림 사본, 임시 클러스터, 앱 멈춤, 앱 역할 접속, 목록)이 하나라도 없으면 시작하지 않는다. 지우기 직전에 다시 보는 것: 잠금이 이 실행의 것인지(`step`), 4-4·4-5가 쓸 목록·SQL이 4-2가 검증한 그대로인지(없어지거나 바뀌었으면 DROP 뒤가 아니라 여기서 멈춘다), 임시 클러스터가 지금도 이 실행의 복원 원본이고 덤프가 끝까지 읽히는지, 앱이 지금도 멈춰 있는지(표식 뒤 다른 PR로 다시 떴을 수 있다), 복원 Job이 살아 있고 앱 역할로 접속되는지. 표식(`ok-auth`)은 남아도 Job은 약 2시간(`sleep 7000`, `activeDeadlineSeconds: 7200`) 뒤 끝나므로, 4-1 뒤 오래 지났으면 지운 뒤에야 4-4에서 멈출 수 있다. 확장은 원본 소유자로 만든다. `postgres` 소유는 `postgres`가, 앱 역할 소유(trusted)는 앱 역할(복원 Job)이 만든다.
+   **4-3. DB 다시 만들기.** 여기서 지금 DB를 지운다. 앞의 확인(되돌림 사본, 임시 클러스터, 앱 멈춤, 앱 역할 접속, 목록)이 하나라도 없으면 시작하지 않는다. 지우기 직전에 다시 보는 것: 잠금이 이 실행의 것인지(`step`), 4-4·4-5가 쓸 목록·SQL이 4-2가 검증한 그대로인지(없어지거나 바뀌었으면 DROP 뒤가 아니라 여기서 멈춘다), 임시 클러스터가 지금도 이 실행의 복원 원본이고 덤프가 끝까지 읽히는지, 앱이 지금도 멈춰 있는지(표식 뒤 다른 PR로 다시 떴을 수 있다), 복원 Job이 살아 있고 앱 역할로 접속되는지. 표식(`ok-auth`)은 남아도 Job은 약 2시간(`sleep 7000`, `activeDeadlineSeconds: 7200`) 뒤 끝나므로, 4-1 뒤 오래 지났으면 지운 뒤에야 4-4에서 멈출 수 있다. 확장은 원본 소유자로 만든다. `postgres` 소유는 `postgres`가, 앱 역할 소유(trusted)는 앱 역할(복원 Job)이 만든다. 다시 만든 DB는 PUBLIC CONNECT 기본값이라 데이터 차트 hook과 같은 ACL(PUBLIC CONNECT 없음, 앱 역할과 `cnpg_metrics_exporter`만 CONNECT)로 되돌리고 확인한다.
 
    ```bash
    ( set -euo pipefail; step db
@@ -742,6 +742,11 @@ YAML
      dbown=$(printf '%s\n' "select pg_get_userbyid(datdba) from pg_database where datname = :'app'" | q)
      if [ -z "$dbown" ]; then printf '%s\n' 'CREATE DATABASE :"app" OWNER :"app"' | q
      elif [ "$dbown" != "$APP" ]; then echo "DB owner가 앱 역할이 아니다" >&2; exit 1; fi
+     # 다시 만든 DB는 PUBLIC CONNECT 기본값이다(DB 권한은 덤프에 없다). 데이터 차트 hook(pg-acl, 1.0.3)은 sync 때만 돌아
+     # 복원 뒤 저절로 다시 돌지 않는다. 그래서 같은 SQL을 여기서 넣는다. 바꿀 때 차트 templates/postgres.yaml과 함께.
+     printf '%s\n' 'REVOKE CONNECT ON DATABASE :"app" FROM PUBLIC;' 'GRANT CONNECT ON DATABASE :"app" TO :"app", cnpg_metrics_exporter;' | q
+     pub=$(printf '%s\n' "select has_database_privilege('public', current_database(), 'CONNECT')" | q -d "$APP")
+     [ "$pub" = f ] || { echo "PUBLIC CONNECT가 남았다" >&2; exit 1; }
      # 이제 DB가 있다. 앱 역할 소유 확장을 만들기 전에 앱 역할 접속을 본다.
      jobauth "$APP"
      # 확장은 덤프의 SQL을 실행하지 않고 원본의 스키마·버전·소유자로 만든다.
@@ -778,7 +783,7 @@ YAML
    - **앱 역할 소유 객체:** 앱 역할로 넣는다. GRANT·REVOKE는 객체 소유자만 할 수 있어 앱 역할로는 자기 객체 권한만 바뀐다.
    - **`postgres` 소유 객체(확장에 딸린 객체):** 앱 역할은 바꿀 수 없다(원본에서 운영자가 바꾼 권한이 여기 온다). 덤프에서 SQL 텍스트만 만들고(`pg_restore -f -`, 실행하지 않는다), 모든 줄이 `GRANT`·`REVOKE`와 pg_restore가 붙이는 고정 머리(`SET`, `search_path` 비우기, `\restrict`)뿐인지 본 뒤에만 `postgres`로 넣는다. GRANT·REVOKE는 사용자 코드를 실행하지 않으므로 슈퍼유저 문맥에서 덤프를 실행하는 문제(위 "복원은 앱 역할로 한다")가 생기지 않는다. 다른 문장이 섞이면 넣지 않고 멈춘다.
 
-   그다음 임시 클러스터(원본)와 복원본의 ACL(확장에 딸린 객체 포함)이 같은지 본다. 두 조회는 각각 성공과 결과가 비어 있지 않음을 확인한 뒤 비교한다(조회가 둘 다 실패해 빈 출력끼리 비교하면 "같음"이 된다). 결과에는 늘 `public` 스키마 줄이 있어 비지 않는다.
+   그다음 임시 클러스터(원본)와 복원본의 ACL(확장에 딸린 객체 포함)이 같은지 본다. DB 단위 권한(CONNECT)은 DB별 덤프에 없어(`--create` 없이 뜬다) 대조하지 않는다. 원본이 데이터 차트 1.0.3 전 시점이면 PUBLIC CONNECT가 남아 있어 대조하면 늘 다르다. 그 값은 4-3이 차트와 같게 두고 확인한다. 두 조회는 각각 성공과 결과가 비어 있지 않음을 확인한 뒤 비교한다(조회가 둘 다 실패해 빈 출력끼리 비교하면 "같음"이 된다). 결과에는 늘 `public` 스키마 줄이 있어 비지 않는다.
 
    ```bash
    ACL_SQL=$(cat <<'SQL'

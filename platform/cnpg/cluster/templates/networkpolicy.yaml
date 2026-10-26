@@ -35,6 +35,29 @@ spec:
         - protocol: TCP
           port: 5432
 ---
+# 데이터 차트의 PUBLIC CONNECT hook Job(라벨 homelab.ukyi.app/role: pg-acl, platform/charts/app-data/templates/postgres.yaml).
+# 앱 역할 자격이 있는 database ns에서 돌아 위 앱 ns 규칙에 들지 않는다. 5432와 Cluster pg만 연다(임시 복원 Cluster는 아니다).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-from-acl-job
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: pg
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              homelab.ukyi.app/role: pg-acl
+      ports:
+        - protocol: TCP
+          port: 5432
+---
 # operator가 인스턴스 관리자(8000)로 상태를 읽고 명령한다. 막으면 Cluster가 healthy가 되지 않는다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
