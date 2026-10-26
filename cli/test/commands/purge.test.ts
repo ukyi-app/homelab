@@ -17,9 +17,10 @@ const dataText = "chartVersion: 1.0.1\npostgres: { enabled: true }\n";
 const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z");
 const empty = JSON.stringify({ items: [] });
 
-function planRules(opts: { backupAfter?: boolean } = {}): Rule[] {
+function planRules(opts: { backupAfter?: boolean; noNs?: boolean } = {}): Rule[] {
   const gone = { metadata: { name: `data-purge-${APP}`, labels: { "homelab.ukyi.app/restore": "seed" }, resourceVersion: "1", creationTimestamp: ago(2.5) }, data: { run: "seed" } };
   return [
+    kubectlRule(["get", "namespaces", NS, "-o", "json"], opts.noNs ? notFound : { stdout: JSON.stringify({ metadata: { name: NS } }) }),
     ...["deployments.apps", "statefulsets.apps", "cronjobs.batch", "jobs.batch", "pods"].map((r) => kubectlRule(["-n", NS, "get", r, "-o", "json"], { stdout: empty })),
     kubectlRule(["-n", "database", "get", "configmaps", `data-purge-${APP}`, "-o", "json"], { stdout: JSON.stringify(gone) }),
     ghGet(contents(`data/${APP}`), 200, [{ type: "file", path: DATA, name: "values.yaml" }]),
@@ -52,6 +53,15 @@ describe("data purge: plan(PATH 스텁)", () => {
     expect(r.json.next).toBe(`homelab data purge ${APP} --confirm ${APP} --apply`);
     expect(r.json.steps.find((x: { id: string }) => x.id === "secrets").detail).toContain("PR 2 뒤 키 삭제");
     expect(r.calls.some((c) => c.argv[0] === "infisical")).toBe(false);
+    expect(r.json.notes).toContain(`앱 ns(${NS})와 Infisical 폴더는 남는다(키만 지운다).`);
+  });
+
+  test("T12-05 F8: 앱 ns가 없으면(PostgreSQL 전용) 남는 것에 ns를 말하지 않는다", async () => {
+    const r = await runCli(["data", "purge", APP, "--json"], planRules({ noNs: true }));
+    expect(r.code).toBe(0);
+    expectPlanReadOnly(r);
+    expect(r.json.notes).toContain("Infisical 폴더는 남는다(키만 지운다).");
+    expect(r.json.notes.join(" ")).not.toContain("앱 ns");
   });
 
   test("앱 삭제 뒤 백업이 없으면 실패", async () => {
@@ -119,6 +129,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
 
     const r1 = await runIn(w, cmd, "apply", { app: APP }, flags);
     expect(r1.status).toBe("waiting");
+    expect(r1.notes).toContain(`앱 ns(${NS})와 Infisical 폴더는 남는다(키만 지운다).`);
     expect(w.openPrs().map((p) => p.head)).toEqual([`cli/data-purge-${APP}`]);
     // PR 1은 purge: true와 차트 1.0.2만 바꾸고 주석은 둔다
     const branch = w.commits.get(w.refs.get(`cli/data-purge-${APP}`)!)!.files.get(DATA)!;
@@ -679,6 +690,9 @@ describe("data purge: 흐름(가짜 세계)", () => {
     const w = pgOnlyWorld();
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
+    // T12-05 F8: 앱 ns가 없으니 남는 것은 Infisical 폴더뿐이다
+    expect(r.notes).toContain("Infisical 폴더는 남는다(키만 지운다).");
+    expect(r.notes.join(" ")).not.toContain("앱 ns");
     expect(w.records.get(`database/data-purge-${APP}`)!.created).toBe("2026-10-26T00:00:00Z");
     expect(w.writes).toEqual([`recordCreate database/data-purge-${APP}`]);
     expect(w.openPrs()).toEqual([]);

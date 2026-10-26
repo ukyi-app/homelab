@@ -51,6 +51,38 @@ function history(ctx: ReadCtx, app: string, path: string): Image[] {
   return out;
 }
 
+// 배포 App이 image.yaml에 마지막으로 올린 이미지. 배포 PR 제목(app-build deploy-pr의 "deploy(<앱>): <revision 12자>")을
+// squash 병합한 커밋을 최근 HISTORY개에서 찾는다. 없으면 null. 안내에만 쓰고(--release 뒤 할 일) 판정에는 쓰지 않는다.
+function latestDeploy(ctx: ReadCtx, app: string, path: string): Image | null {
+  const r = ctx.gh.get(`repos/ukyi-app/homelab/commits?path=${path}&sha=main&per_page=${HISTORY}`);
+  if (r.status !== 200 || !Array.isArray(r.json)) throw new Error(`${path} 기록을 읽지 못했다(HTTP ${r.status})`);
+  const c = r.json.find((x: any) => typeof x?.sha === "string" && fullMatch(GIT_SHA, x.sha) && typeof x?.commit?.message === "string" && x.commit.message.startsWith(`deploy(${app}): `));
+  if (!c) return null;
+  const text = ctx.repo.readFile(path, c.sha);
+  return text === null ? null : parseImage(text, app);
+}
+
+// --release는 hold만 풀고 이미지는 그대로 둔다(T12-05 F4: 옛 이미지에 새 헬스 경로가 없었다). 롤백한 옛 이미지가 다음 빌드까지
+// 남으니 그 사실과, 최신 배포가 아니면 --to <최신> 뒤 --release를 알린다. 기록을 못 읽어도 해제 자체는 막지 않는다.
+function releaseHints(ctx: ReadCtx, app: string, path: string, current: Image): { notes: string[]; next?: string } {
+  const notes = [`--release는 hold만 푼다. 이미지는 지금 것(revision ${current.revision.slice(0, 7)})이 그대로 남고 다음 빌드의 배포 PR부터 바뀐다`];
+  let latest: Image | null;
+  try {
+    latest = latestDeploy(ctx, app, path);
+  } catch (e) {
+    notes.push(`최신 배포 이미지와 비교하지 못했다(${(e as Error).message})`);
+    return { notes };
+  }
+  if (latest === null) {
+    notes.push(`최신 배포 이미지와 비교하지 못했다(최근 ${HISTORY}개 기록에 배포 App 커밋이 없다)`);
+    return { notes };
+  }
+  if (latest.digest === current.digest) return { notes };
+  const rev = latest.revision.slice(0, 12);
+  notes.push(`지금 이미지는 최신 배포(revision ${rev})가 아니다. 최신으로 가려면 --to ${rev}로 먼저 되돌린 뒤 --release한다. 지금 이미지 그대로 풀려면 homelab rollback ${app} --release --apply`);
+  return { notes, next: `homelab rollback ${app} --to ${rev} --apply 뒤 homelab rollback ${app} --release --apply` };
+}
+
 export default defineCommand({
   path: ["rollback"],
   summary: "이미지 롤백·해제 PR",
@@ -85,6 +117,8 @@ export default defineCommand({
         if (v.status === 404 || !v.json.some((x: { name?: string }) => x?.name === target!.digest)) problem = { state: "missing", action: "none", detail: `GHCR에 ${target.digest.slice(0, 19)}…가 없다(지워졌거나 최근 100개 밖)`, next: "다른 revision을 고른다" };
       }
     }
+
+    const hints = release && current !== null ? releaseHints(ctx, app, path, current) : { notes: [] };
 
     const steps: Step[] = [
       {
@@ -129,6 +163,13 @@ export default defineCommand({
         },
       }),
     ];
-    return ctx.engine({ command: "rollback", app, steps });
+    return ctx.engine({
+      command: "rollback",
+      app,
+      steps,
+      notes: hints.notes,
+      // 최신이 아니면 plan(해제 전)과 이미 해제된 상태 모두 --to <최신>이 다음 행동이다. 대기·실패는 엔진 기본.
+      next: (status) => (hints.next !== undefined && (status === "pending" || status === "same") ? hints.next : (undefined as unknown as string | null)),
+    });
   },
 });
