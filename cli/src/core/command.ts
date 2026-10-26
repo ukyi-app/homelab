@@ -226,6 +226,8 @@ export type ToolsRead = {
   version(tool: ToolName): { found: boolean; ok: boolean; output: string };
   ghAuthOk(): boolean;
   infisicalLogin(): "ok" | "missing" | "no";
+  // PATH에서 먼저 잡히는 homelab(없으면 null)과 지금 실행 중인 파일, 둘이 같은 파일인지(링크를 따라간 뒤).
+  selfOnPath(): { first: string | null; running: string; same: boolean };
 };
 
 // github 하위 명령(kind delegate)만 받는다. main을 core 임시 폴더로 fresh clone하고 그 안의 tools/tf-github.sh를 부른다.
