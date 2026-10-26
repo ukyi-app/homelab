@@ -1,0 +1,60 @@
+# 파드 대역에서 노드 밖으로 나가는 forward를 NetworkPolicy와 상관없이 조인다(설계 B.8 E5, T13 할 일 9).
+# 새 파드는 시작 직후 약 1초 동안 kube-router가 NetworkPolicy를 아직 붙이지 않아 egress가 모두 열린다.
+# 이 규칙은 대역으로 고르므로 파드가 생기는 순간부터 걸린다.
+#
+# 이 파일은 그대로 쓰지 않는다. host/lib.sh render_egress가 앞에 클러스터 값 define(NODE_IP, POD_CIDR,
+# SERVICE_CIDR, UPSTREAM_DNS)을 붙여 /etc/homelab/egress.nft로 쓰고, homelab-egress.service가 올린다.
+#
+# 따로 둔 표다. k3s(flannel, kube-router, kube-proxy)는 iptables-nft의 ip filter·nat 표를 쓰고,
+# k3s-killall.sh와 재시작은 그 표만 다시 쓴다. 같은 hook의 다른 표끼리는 accept가 끝이 아니고 drop만
+# 끝이라, 여기의 drop은 그쪽 accept와 상관없이 이긴다. 반대로 여기의 accept는 NetworkPolicy의 drop을 풀지 않는다.
+#
+# 노드 자신으로 가는 길은 FORWARD가 아니라 INPUT이라 여기서 막지 않는다(B.8 E4, 노드 OUTPUT도 그대로).
+# 파드 -> 노드 IP(kube API 6443, kubelet 10250, sshd 등)와 노드의 tailnet 주소가 그렇다.
+#
+# 체인은 위에서부터 보고 처음 맞는 accept·drop에서 끝난다. 허용은 모두 drop보다 앞에 둔다.
+
+# 처음 올릴 때와 다시 올릴 때 모두 한 트랜잭션으로 통째 바꾼다. nft -f는 파일 전체를 원자적으로 적용하므로
+# 다시 올리는 동안 규칙이 빈 순간이 없다. 첫 줄은 표가 없을 때 delete가 실패하지 않게 만든다.
+table inet homelab_egress
+delete table inet homelab_egress
+
+table inet homelab_egress {
+	# 공개 대역이 아닌 곳: LAN 사설 대역, tailnet(CGNAT), link-local, loopback.
+	# 443·7844 허용에서만 뺀다. 이 대역을 따로 drop하지 않는 까닭은 10.0.0.0/8이 파드·서비스 대역을
+	# 품고 있어서다(B.8 E4). 대역 허용을 먼저 두고 나머지는 마지막 drop이 받는다.
+	set nonpublic {
+		type ipv4_addr
+		flags interval
+		elements = { 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 }
+	}
+
+	chain forward {
+		type filter hook forward priority filter; policy accept;
+		# 파드 대역에서 나온 패킷만 본다. 그 밖(LAN에서 hostPort로 들어오는 요청 등)은 지나간다.
+		ip saddr $POD_CIDR jump pod_egress
+	}
+
+	chain pod_egress {
+		# 들어온 연결의 반환. 없으면 svclb·hostPort로 들어온 요청에 파드가 답하지 못한다.
+		ct state established,related counter accept
+		# 파드끼리, 파드 -> Service. Service IP는 보통 PREROUTING에서 파드 IP로 바뀐 뒤 여기 온다.
+		ip daddr { $POD_CIDR, $SERVICE_CIDR } counter accept
+		# kube API(모든 컨트롤러)·kubelet(vmsingle 수집). 지금은 노드 IP가 로컬 주소라 INPUT으로 가서
+		# 이 줄에 오지 않는다(tools/host-egress.test.sh --netns에서 카운터 0). 경로가 FORWARD로 바뀌어도
+		# 클러스터가 끊기지 않게 drop보다 앞에 둔다.
+		ip daddr $NODE_IP tcp dport { 6443, 10250 } counter accept
+		# CoreDNS(노드 resolv.conf)와 AdGuard bootstrap_dns의 업스트림. 목록은 host/versions.env
+		# NODE_UPSTREAM_DNS 하나에서 오고, ci가 AdGuard 설정과 대조한다. 이 두 리졸버로는 어느 파드든
+		# 평문 DNS를 쓸 수 있다(AdGuard 우회, 남는 한계).
+		ip daddr $UPSTREAM_DNS meta l4proto { tcp, udp } th dport 53 counter accept
+		# 공개 HTTPS. R2, Infisical, GitHub, Telegram, healthchecks, Tailscale control·DERP 모두 여기다.
+		ip daddr != @nonpublic tcp dport 443 counter accept
+		# cloudflared 터널. 443만으로는 터널이 서지 않는다(http2로 바꿔도 7844 TCP).
+		ip daddr != @nonpublic meta l4proto { tcp, udp } th dport 7844 counter accept
+		# Tailscale direct(UDP 41641)·STUN(3478)은 열지 않는다. 프록시는 DERP 443으로 붙는다.
+		# 무엇이 막혔는지 journalctl -k -g homelab-egress로 본다. 로그 폭주를 막으려고 분당 10건만 남긴다.
+		limit rate 10/minute burst 20 packets log prefix "homelab-egress drop: "
+		counter drop
+	}
+}

@@ -10,9 +10,18 @@ shopt -s inherit_errexit
 HOST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # host/etc/ 안에서 경로를 클러스터 값으로 바꾸는 유일한 자리표시(networkd drop-in 디렉터리).
 IFACE_TOKEN='@NODE_IFACE@'
-CLUSTER_KEYS="NODE_NAME NODE_IP NODE_IFACE TAILNET_JOIN KUBE_CONTEXT"
+CLUSTER_KEYS="NODE_NAME NODE_IP NODE_IFACE TAILNET_JOIN KUBE_CONTEXT POD_CIDR SERVICE_CIDR"
 COMMON_KEYS="INSTALL_K3S_VERSION TIMEZONE NODE_UPSTREAM_DNS"
 NODE_MAGICDNS=""
+# 파드 egress 규칙(install.sh --egress). 표 이름은 k3s·Tailscale의 표와 겹치지 않게 따로 둔다.
+# 표 이름과 경로는 host/egress/의 두 파일에도 글자로 있다. 바꾸면 셋을 함께 바꾼다.
+# shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
+EGRESS_TABLE=homelab_egress
+# shellcheck disable=SC2034
+EGRESS_RULES=/etc/homelab/egress.nft
+EGRESS_UNIT_NAME=homelab-egress.service
+# shellcheck disable=SC2034
+EGRESS_UNIT="/etc/systemd/system/${EGRESS_UNIT_NAME}"
 
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
@@ -77,6 +86,10 @@ load_cluster() {
   [[ "$NODE_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "NODE_IP가 IPv4가 아니다: ${NODE_IP}"
   [[ "$NODE_IFACE" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || die "NODE_IFACE 형식이 아니다: ${NODE_IFACE}"
   [[ "$KUBE_CONTEXT" =~ ^[a-z0-9][-a-z0-9.]*$ ]] || die "KUBE_CONTEXT 형식이 아니다: ${KUBE_CONTEXT}"
+  for key in POD_CIDR SERVICE_CIDR; do
+    [[ "${!key}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]] \
+      || die "${key}가 IPv4 CIDR이 아니다: ${!key}"
+  done
   case "$TAILNET_JOIN" in
     true | false) ;;
     *) die "TAILNET_JOIN은 true 또는 false다: ${TAILNET_JOIN}" ;;
@@ -219,4 +232,50 @@ link_state_file() {
 # NODE_IFACE에 붙은 IPv4 주소 목록(접두 길이 없이).
 iface_ipv4s() {
   ip -o -4 addr show dev "$NODE_IFACE" 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4 }'
+}
+
+# IPv4 주소를 정수로 낸다. 형식이 아니면 1로 끝난다.
+ipv4_int() {
+  local a b c d
+  [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  a="${BASH_REMATCH[1]}" b="${BASH_REMATCH[2]}" c="${BASH_REMATCH[3]}" d="${BASH_REMATCH[4]}"
+  [ "$a" -le 255 ] && [ "$b" -le 255 ] && [ "$c" -le 255 ] && [ "$d" -le 255 ] || return 1
+  printf '%d' $(((a << 24) | (b << 16) | (c << 8) | d))
+}
+
+# cidr_within <바깥 CIDR> <주소 또는 CIDR>: 둘째가 첫째 안에 통째로 들어가면 0.
+cidr_within() {
+  local onet olen inet ilen o i mask
+  onet="${1%/*}" olen="${1#*/}"
+  inet="${2%/*}" ilen=32
+  case "$2" in */*) ilen="${2#*/}" ;; esac
+  [[ "$olen" =~ ^[0-9]+$ ]] && [[ "$ilen" =~ ^[0-9]+$ ]] || return 1
+  [ "$olen" -le 32 ] && [ "$ilen" -le 32 ] && [ "$ilen" -ge "$olen" ] || return 1
+  o="$(ipv4_int "$onet")" || return 1
+  i="$(ipv4_int "$inet")" || return 1
+  mask=$(((0xffffffff << (32 - olen)) & 0xffffffff))
+  [ $((o & mask)) -eq $((i & mask)) ]
+}
+
+# 파드 egress 규칙(host/egress/egress.nft) 앞에 클러스터 값을 nft define으로 붙여 낸다.
+# 규칙 본문은 글자 치환을 하지 않고 nft 변수만 쓴다. 그래서 렌더 결과를 nft -c로 그대로 확인할 수 있다.
+# install.sh가 이 출력을 EGRESS_RULES로 쓰고, verify.sh가 같은 출력과 라이브 파일을 대조한다.
+render_egress() {
+  local d dns=""
+  # LAN이 10.0.0.0/8이면 노드 IP가 파드·서비스 대역 안에 들 수 있다(B.8 E4). 그러면 대역 허용이
+  # LAN 호스트까지 열고, k3s 자체도 경로가 꼬인다.
+  if cidr_within "$POD_CIDR" "$NODE_IP" || cidr_within "$SERVICE_CIDR" "$NODE_IP"; then
+    die "NODE_IP ${NODE_IP}가 POD_CIDR ${POD_CIDR}나 SERVICE_CIDR ${SERVICE_CIDR} 안에 있다"
+  fi
+  for d in $NODE_UPSTREAM_DNS; do
+    ipv4_int "$d" >/dev/null || die "NODE_UPSTREAM_DNS에 IPv4가 아닌 값이 있다: ${d}"
+    dns+="${dns:+, }${d}"
+  done
+  printf '# host/install.sh --egress가 쓴 파일이다. 고치려면 Git의 원본을 고치고 다시 실행한다.\n'
+  printf '# 원본: host/egress/egress.nft, 값: host/clusters/%s.env, host/versions.env\n' "$CLUSTER"
+  printf 'define NODE_IP = %s\n' "$NODE_IP"
+  printf 'define POD_CIDR = %s\n' "$POD_CIDR"
+  printf 'define SERVICE_CIDR = %s\n' "$SERVICE_CIDR"
+  printf 'define UPSTREAM_DNS = { %s }\n\n' "$dns"
+  cat "$HOST_DIR/egress/egress.nft"
 }

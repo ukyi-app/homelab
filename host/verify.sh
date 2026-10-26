@@ -3,7 +3,8 @@
 #
 # 사용: host/verify.sh --cluster <이름> [--identity]
 #   기본        정체성, 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 k3s-config.yaml,
-#               serving cert SAN, local-retain StorageClass, kubeconfig 권한.
+#               serving cert SAN, local-retain StorageClass, 파드 egress 유닛·규칙 파일·대역,
+#               kubeconfig 권한.
 #   --identity  정체성만 본다. 파괴 명령(삭제, 복구, 제거) 앞에서 대상 클러스터를 확인할 때 쓴다.
 #
 # kubeconfig는 KUBECONFIG가 있으면 그것, 없으면 ~/.kube/<KUBE_CONTEXT>.yaml(install.sh가 씀)이다.
@@ -134,6 +135,49 @@ check_storageclass() {
   fi
 }
 
+# 파드 egress 규칙(install.sh --egress). 커널의 nft 표는 root만 읽어서 여기서는 그 바로 앞까지 본다:
+# 유닛이 켜져 있고 active(= 마지막 nft -f가 성공), 깔린 파일이 Git 렌더와 같고, 규칙이 고르는 대역이
+# 라이브 클러스터의 대역과 같다. 대역이 다르면 규칙은 성공한 채 아무 파드에도 걸리지 않는다.
+check_egress() {
+  local en act want d pod svc
+  # 꺼져 있거나 없으면 0이 아닌 값으로 끝나지만 상태 글자(disabled, inactive)는 낸다. 그 글자를 본다.
+  en="$(systemctl is-enabled "$EGRESS_UNIT_NAME" 2>/dev/null || true)"
+  act="$(systemctl is-active "$EGRESS_UNIT_NAME" 2>/dev/null || true)"
+  if [ "$en" = "enabled" ] && [ "$act" = "active" ]; then
+    ok "${EGRESS_UNIT_NAME} enabled, active"
+  else
+    bad "${EGRESS_UNIT_NAME}가 enabled·active가 아니다(${en:-없음}, ${act:-없음}). sudo host/install.sh --cluster ${CLUSTER} --egress"
+  fi
+
+  want="$(render_egress)"
+  if [ ! -r "$EGRESS_RULES" ]; then
+    bad "${EGRESS_RULES}가 없다"
+  elif d="$(diff <(printf '%s\n' "$want") "$EGRESS_RULES")"; then
+    ok "${EGRESS_RULES}가 host/egress/egress.nft 렌더 결과와 같다"
+  else
+    bad "${EGRESS_RULES}가 Git 렌더와 다르다(< Git, > 라이브). install.sh --egress를 다시 실행한다:"$'\n'"${d}"
+  fi
+  if cmp -s "$HOST_DIR/egress/${EGRESS_UNIT_NAME}" "$EGRESS_UNIT"; then
+    ok "${EGRESS_UNIT}가 Git과 같다"
+  else
+    bad "${EGRESS_UNIT}가 없거나 host/egress/${EGRESS_UNIT_NAME}와 다르다"
+  fi
+
+  pod="$(kc get node "$NODE_NAME" -o jsonpath='{.spec.podCIDR}')" || pod=""
+  if [ -n "$pod" ] && cidr_within "$POD_CIDR" "$pod"; then
+    ok "노드 podCIDR ${pod}가 POD_CIDR ${POD_CIDR} 안에 있다"
+  else
+    bad "노드 podCIDR '${pod:-없음}'가 POD_CIDR ${POD_CIDR} 밖이다. egress 규칙이 파드에 걸리지 않는다"
+  fi
+  svc="$(kc -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}')" || svc=""
+  if [ -n "$svc" ] && cidr_within "$SERVICE_CIDR" "$svc"; then
+    ok "kubernetes Service ${svc}가 SERVICE_CIDR ${SERVICE_CIDR} 안에 있다"
+  else
+    bad "kubernetes Service IP '${svc:-없음}'가 SERVICE_CIDR ${SERVICE_CIDR} 밖이다"
+  fi
+  printf '     사람 확인: sudo nft list table inet %s (커널 규칙은 root만 읽는다. install.sh --egress가 적용 직후 모양을 확인했다)\n' "$EGRESS_TABLE"
+}
+
 # kubeconfig에는 cluster-admin 자격이 있다.
 check_kubeconfig_mode() {
   local m
@@ -170,7 +214,7 @@ main() {
     return 0
   fi
 
-  require_cmds openssl timeout tr stat diff
+  require_cmds openssl timeout tr stat diff cmp systemctl
   resolve_magicdns
   K3S_CFG="$(render_k3s_config)"
   check_ready
@@ -178,6 +222,7 @@ main() {
   check_node_args
   check_san
   check_storageclass
+  check_egress
   check_kubeconfig_mode
 
   if [ "$FAILS" -gt 0 ]; then

@@ -21,11 +21,11 @@
 
 이 문서의 여러 줄짜리 명령은 모두 한 단계라도 실패하면 멈추게 적는다. 대화형 셸에 줄을 붙여 넣으면 앞 명령이 실패해도 다음 줄이 돌기 때문이다. 그래서 `&&`로 잇거나 `set -euo pipefail`을 건 별도 bash(`bash -euo pipefail <<'EOF'`)로 돌린다. 블록이 실패하면 다음 블록으로 가지 않는다.
 
-새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깔고, 작업 사본이 없으면 만든다(Ubuntu 26.04 기준). `openssh-server`는 `host/install.sh --host-config`가 sshd 설정을 검사(`sshd -t`)하는 데 필요하다. 최소 설치나 VM에는 없을 수 있다.
+새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깔고, 작업 사본이 없으면 만든다(Ubuntu 26.04 기준). `openssh-server`는 `host/install.sh --host-config`가 sshd 설정을 검사(`sshd -t`)하는 데 필요하고, `nftables`(`nft`)는 `--egress`가 파드 egress 규칙을 올리는 데 필요하다. 최소 설치나 VM에는 없을 수 있다.
 
 ```bash
 sudo apt-get update \
-  && sudo apt-get install -y git jq curl gnupg openssh-server \
+  && sudo apt-get install -y git jq curl gnupg openssh-server nftables \
   && { [ -d ~/homelab/.git ] || git clone https://github.com/ukyi-app/homelab ~/homelab; } \
   && cd ~/homelab
 ```
@@ -105,6 +105,7 @@ tailnet에 이미 있으면 건너뛴다.
 host/preflight.sh --cluster <이름> --before \
   && sudo host/install.sh --cluster <이름> --host-config \
   && host/preflight.sh --cluster <이름> --after \
+  && sudo host/install.sh --cluster <이름> --egress \
   && sudo host/install.sh --cluster <이름> --k3s \
   && host/verify.sh --cluster <이름>
 ```
@@ -112,8 +113,9 @@ host/preflight.sh --cluster <이름> --before \
 - `--before`: 노드 IP와 인터페이스, k3s 잔여 경로(`/var/lib/rancher/k3s`, `/var/lib/rancher/k3s-storage`, `/etc/rancher/k3s`) 부재.
 - `--host-config`: `host/etc/` drop-in 복사, 스왑 끄기, 타임존, `tailscale set --accept-dns=false`(`TAILNET_JOIN=true`일 때), resolv.conf, networkd drop-in 적용. **이때 클러스터 인터페이스가 약 2초 끊긴다.** 원격 세션이 잠깐 멈췄다 돌아오는 것이 정상이다.
 - `--after`: 스왑 없음, 타임존, resolved 스텁 꺼짐, resolv.conf가 loopback·tailnet·자기 주소 아님, 링크가 DHCP DNS를 거부.
+- `--egress`: 파드 egress 규칙(1.1절)을 `/etc/homelab/egress.nft`로 렌더하고 `homelab-egress.service`(k3s보다 먼저 뜸)로 올린다. k3s보다 먼저 두어 첫 파드부터 규칙 아래서 뜬다.
 - `--k3s`: `host/versions.env`의 `INSTALL_K3S_VERSION` 고정 설치(채널 없음), `host/k3s-config.yaml`을 렌더해 `/etc/rancher/k3s/config.yaml`(0600)로 씀, `local-retain` StorageClass를 자동 배포 매니페스트로 둠, kubeconfig를 `~/.kube/<KUBE_CONTEXT>.yaml`(0600)로 씀.
-- `verify`: 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 config, serving cert SAN, `local-retain`.
+- `verify`: 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 config, serving cert SAN, `local-retain`, egress 유닛·규칙 파일·대역.
 - `--k3s`가 중간에 실패하면 `/etc/rancher/k3s`가 남아 `--before`가 막힌다. `--k3s`를 그대로 다시 실행하거나, `k3s-uninstall.sh`로 지우고 잔여 경로가 없는지 본 뒤 1부터 다시 한다.
 
 이후 `kubectl`은 이 kubeconfig로 부른다.
@@ -126,6 +128,141 @@ kubectl config current-context
 파괴적인 명령 전에는 `host/verify.sh --cluster <이름> --identity`로 context와 노드 이름이 맞는지 본다. VM 검증 기간에는 두 클러스터가 함께 있다.
 
 운영자 기기에서 tailnet으로 쓰려면 이 파일을 복사하고 `server`를 `https://<MagicDNS 이름>:6443`으로 바꾼다. 그 이름은 k3s SAN에 들어 있다. 저장소와 Infisical에는 두지 않는다.
+
+### 1.1 파드 egress 규칙(노드 nftables)
+
+새 파드는 시작 직후 약 1초 동안 NetworkPolicy가 붙기 전이라 egress가 모두 열린다(설계 B.8 E5). `--egress`는 그 틈을 노드에서 막는다. 파드 대역(`POD_CIDR`)에서 노드 밖으로 나가는 forward만 보고, 아래 허용이 아니면 버린다. 노드 자신의 트래픽은 건드리지 않는다. 규칙 원본은 `host/egress/egress.nft`, 값은 `host/clusters/<이름>.env`(`NODE_IP`, `POD_CIDR`, `SERVICE_CIDR`)와 `host/versions.env`(`NODE_UPSTREAM_DNS`)다.
+
+| 허용(순서대로) | 쓰는 곳 |
+|---|---|
+| 들어온 연결의 반환(`ct established,related`), 파드·서비스 대역 | svclb·hostPort 응답, 파드끼리, DNS·DB·Valkey |
+| `NODE_IP` TCP 6443·10250 | kube API, kubelet 수집(지금 경로에서는 INPUT이라 이 줄에 오지 않는다) |
+| `NODE_UPSTREAM_DNS`(1.1.1.1·9.9.9.9) UDP·TCP 53 | CoreDNS 업스트림, AdGuard bootstrap |
+| 공개 TCP 443, 공개 TCP·UDP 7844 | R2·Infisical·GitHub·Telegram·Tailscale DERP, cloudflared 터널 |
+
+그 밖은 모두 버린다: tailnet `100.64.0.0/10`, LAN 사설 대역, link-local, 공개 대역의 443·7844 밖 포트. Tailscale direct(UDP 41641)·STUN(3478)도 열지 않아 Tailscale 프록시는 DERP 443으로만 붙는다.
+
+**이미 도는 클러스터에 켜기.** k3s를 다시 시작하지 않는다. 0.0의 main 확인 블록을 먼저 돌린다.
+
+```bash
+sudo host/install.sh --cluster <이름> --egress \
+  && host/verify.sh --cluster <이름>
+```
+
+`--egress`는 렌더한 규칙을 `nft -c`로 먼저 검사하고, 올린 뒤 커널의 표 모양(forward hook, 파드 대역만 넘김, 첫 줄 established, 끝 줄 drop)을 확인하고 표를 출력한다. 다시 실행하면 `reload`로 표를 통째 바꾼다(규칙이 빈 순간 없음).
+
+**되돌리기(한 명령).** 유닛을 끄고 표와 파일을 지운다. 그 뒤는 NetworkPolicy만 남은 이전 상태이고 `verify`는 egress 항목에서 실패한다. 작업 사본에 커밋 안 한 변경이 있어도 막지 않는다.
+
+```bash
+sudo host/install.sh --cluster <이름> --egress-off
+```
+
+**적용 뒤 확인.** 이미 맺힌 연결은 `established`로 계속 통과하므로, 그대로 두면 확인이 헛통과한다. 새 연결을 만들게 cloudflared와 Tailscale 프록시 하나를 다시 띄운 뒤 본다. cloudflared가 다시 붙는 몇 초 동안 공개 URL이 끊긴다.
+
+```bash
+bash -euo pipefail <<'EOF'
+export KUBECONFIG=~/.kube/<KUBE_CONTEXT>.yaml   # prod는 homelab, vm은 homelab-vm
+kubectl -n cloudflared rollout restart deploy/cloudflared
+kubectl -n cloudflared rollout status deploy/cloudflared --timeout=180s
+# Tailscale 프록시 하나(StatefulSet이 다시 만든다). VM은 vm- 접두
+kubectl -n tailscale delete "$(kubectl -n tailscale get pods -o name | grep '^pod/ts-grafana-')"
+# 새 base backup(R2 443)
+kubectl -n database create -f - <<YAML
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata: { name: egress-check-$(date +%Y%m%d%H%M), namespace: database }
+spec: { cluster: { name: pg }, method: plugin, pluginConfiguration: { name: barman-cloud.cloudnative-pg.io } }
+YAML
+# Telegram 시험 경보(Alertmanager -> api.telegram.org 443). 휴대폰에 2분 안에 와야 한다
+kubectl -n observability exec deploy/alertmanager -c alertmanager -- \
+  amtool alert add alertname=EgressCheck severity=warning --alertmanager.url=http://localhost:9093
+echo "다시 띄움·백업·시험 경보 보냄"
+EOF
+```
+
+그다음 아래를 본다. 사람 기기가 필요한 둘(Telegram 수신, tailnet UI)만 사람이 보고, 나머지는 읽기 명령이라 누가 봐도 된다.
+
+| 항목 | 확인 | 통과 |
+|---|---|---|
+| 공개 URL(터널 7844) | `curl -s -o /dev/null -w '%{http_code}\n' https://edge-probe.ukyi.app/`(prod. VM은 E8 VM 격리 5번의 port-forward 확인) | `200`, cloudflared 로그에 `Registered tunnel connection` |
+| 클러스터 DNS(53) | 아래 시험 파드의 `cluster-dns` 줄, `kubectl -n kube-system logs deploy/coredns --since=10m` | 해석 성공, 업스트림 `i/o timeout` 없음 |
+| Argo CD 동기화(GitHub 443) | 2분 뒤 3절의 `Synced/Healthy` 줄 | 모든 Application `Synced/Healthy` |
+| R2 백업(443) | `kubectl -n database get backups`, `kubectl -n database get cluster pg -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")].status}'` | `egress-check-*`가 `completed`, `True` |
+| Alertmanager → Telegram(443) | 휴대폰 | `EgressCheck` 2분 안 수신 |
+| tailnet UI(DERP) | 운영자 기기에서 `grafana` tailnet 주소 열기, `tailscale ping grafana` | 열림, `via DERP(...)`(direct가 아니어도 정상) |
+| 막힌 연결 | `journalctl -k -g homelab-egress --since '-15min'` | 위 경로의 목적지가 없다. 있으면 그 목적지·포트를 보고 판단한다 |
+| 커널 규칙 | `sudo nft list table inet homelab_egress` | 허용 줄의 카운터가 오른다(6443·10250 줄은 0이 정상) |
+
+**시작 즉시 연결하는 시험 파드.** NetworkPolicy가 없는 임시 ns에서 파드가 뜨자마자 연결한다. 그 ns에는 정책이 없으므로 결과는 노드 규칙만의 효과이고, 1초 공백 동안의 상태와 같다. 막혔다고 나온 대상이 원래 닫힌 포트라서가 아님을 보이려고, 같은 대상에 노드에서 먼저 연결해 본다(대조).
+
+```bash
+bash -euo pipefail <<'EOF'
+export KUBECONFIG=~/.kube/<KUBE_CONTEXT>.yaml   # prod는 homelab, vm은 homelab-vm
+. host/clusters/<이름>.env
+LAN_GW="${NODE_IP%.*}.1"
+# tailnet 대상(Argo CD 프록시)은 실행 때 얻는다. 저장소에 Tailscale IP를 두지 않는다. VM은 tailnet 밖이라 건너뛴다
+TS_IP=""
+if [ "$TAILNET_JOIN" = true ]; then
+  TS_IP="$(tailscale status --json | jq -r '.Peer[] | select((.DNSName // "") | startswith("argocd.")) | .TailscaleIPs[] | select(startswith("100."))')"
+  test -n "$TS_IP"
+fi
+# 대조: 노드에서는 열린다
+for t in "$LAN_GW 80" "$LAN_GW 443" "1.1.1.1 80" "github.com 22" ${TS_IP:+"$TS_IP 443"}; do
+  nc -z -w 3 $t || { echo "대조 실패(노드에서도 닫힘): $t"; exit 1; }
+done
+kubectl create namespace egress-probe
+kubectl label namespace egress-probe pod-security.kubernetes.io/enforce=restricted
+sed -e "s/@LAN_GW@/$LAN_GW/g" -e "s/@NODE_IP@/$NODE_IP/g" -e "s/@TS_IP@/$TS_IP/g" <<'YAML' | kubectl -n egress-probe apply -f -
+apiVersion: v1
+kind: Pod
+metadata: { name: probe }
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext: { runAsNonRoot: true, runAsUser: 65532, seccompProfile: { type: RuntimeDefault } }
+  containers:
+    - name: probe
+      image: docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70
+      securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+      command: [sh, -c]
+      args:
+        - |
+          c() { if nc -z -w 3 "$3" "$4" 2>/dev/null; then g=open; else g=blocked; fi
+                [ "$g" = "$1" ] && echo "ok   $g $2 $3:$4" || echo "FAIL $g(기대 $1) $2 $3:$4"; }
+          # dig +short는 실패도 ";;" 줄로 stdout에 낸다. IPv4 답만 성공으로 센다. 셋째 인자가 없으면 클러스터 DNS다.
+          d() { if dig +time=3 +tries=1 +short ${3:+"$3"} github.com | grep -qE '^[0-9.]+$'; then g=open; else g=blocked; fi
+                [ "$g" = "$1" ] && echo "ok   $g $2" || echo "FAIL $g(기대 $1) $2"; }
+          c blocked lan-gw @LAN_GW@ 80
+          c blocked lan-gw @LAN_GW@ 443
+          [ -z "@TS_IP@" ] || c blocked tailnet @TS_IP@ 443
+          c blocked public-80 1.1.1.1 80
+          c open public-443 1.1.1.1 443
+          d open cluster-dns
+          c blocked public-22 github.com 22
+          c open tunnel-7844 region1.v2.argotunnel.com 7844
+          d open upstream-dns @1.1.1.1
+          d blocked other-dns @8.8.8.8
+          c open node-api-input @NODE_IP@ 6443
+YAML
+kubectl -n egress-probe wait --for=jsonpath='{.status.phase}'=Succeeded pod/probe --timeout=180s
+# grep -q를 파이프 끝에 두지 않는다. 먼저 끝난 grep이 앞 명령을 SIGPIPE로 죽여 pipefail이 결과를 뒤집는다.
+out="$(kubectl -n egress-probe logs probe)"
+printf '%s\n' "$out"
+if grep -q '^FAIL' <<<"$out"; then echo "egress 시험 실패"; exit 1; fi
+kubectl delete namespace egress-probe
+echo "egress 시험 통과"
+EOF
+```
+
+첫 줄(`lan-gw`)은 컨테이너가 시작하자마자 나간다. `node-api-input`이 열리는 것은 정상이다(아래 한계 1). 실패하면 ns가 남으니 본 뒤 `kubectl delete namespace egress-probe`로 지운다.
+
+**남는 한계.**
+
+1. 파드 → 노드 자신은 INPUT 경로라 이 규칙 밖이다. 1초 공백 동안 새 파드는 노드 IP의 열린 포트(sshd 22, kube API 6443, kubelet 10250)와 노드의 tailnet 주소에 닿는다. NetworkPolicy도 이 경로를 막지 못한다(설계 B.8 E4). 각 포트의 인증은 남는다.
+2. 업스트림 DNS 53(1.1.1.1·9.9.9.9)은 모든 파드에 열려 있다. AdGuard를 거치지 않는 평문 DNS와 그 위의 유출 경로가 남는다.
+3. 공개 443·7844는 모든 파드에 열려 있다(정상 정책도 대부분 공개 443을 연다).
+4. Tailscale 프록시는 DERP로만 붙는다(direct·STUN 막음). 지연이 늘 수 있다. 공개 UDP 443(QUIC)도 막혀 TCP로 넘어간다.
+5. 부팅 때 규칙이 못 올라와도 k3s는 뜬다(fail-open, 유닛에 `Requires`를 두지 않음). 그때는 NetworkPolicy만 남은 이전 상태이고 `verify`가 유닛 상태로 잡는다.
 
 ## 2. Argo CD 설치와 root
 
@@ -192,7 +329,7 @@ kubectl apply -f platform/root/root-<이름>.yaml
 bash -euo pipefail <<'EOF'
 export KUBECONFIG=~/.kube/<KUBE_CONTEXT>.yaml   # prod는 homelab, vm은 homelab-vm
 host/preflight.sh --cluster <이름> --after      # 스왑, 타임존, resolved 스텁, resolv.conf, 링크가 DHCP DNS 거부(drop-in 로드)
-host/verify.sh --cluster <이름>                 # 노드 Ready, k3s 버전, node-args, SAN, local-retain
+host/verify.sh --cluster <이름>                 # 노드 Ready, k3s 버전, node-args, SAN, local-retain, egress
 kubectl -n argocd get applications
 # 모든 Application이 Synced·Healthy
 test "$(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.status.sync.status}/{.status.health.status}{"\n"}{end}' | sort -u)" = "Synced/Healthy"
