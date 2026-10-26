@@ -1,0 +1,7 @@
+# expect: fail
+# cluster: vm
+# match: VM 격리 4번: cluster.tailscale.prefix는 "vm-"다
+# 운영과 같은 빈 접두. VM의 argocd·tailscale-operator가 운영 이름과 겹쳐 -1이 붙는다.
+cluster:
+  tailscale:
+    prefix: ""

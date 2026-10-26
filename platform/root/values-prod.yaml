@@ -35,3 +35,10 @@ cluster:
   # 복구 확인 뒤 정리 PR이 recoverySource를 지운다(남기면 볼륨 유실 때 낡은 아카이브에서 조용히 복구된다).
   cnpg:
     serverName: pg-20261023
+
+  # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈추는 값(values-vm.yaml의 같은 블록에 쓰는 법).
+  # 운영은 비워 둔다. 빈 값이면 root가 ApplicationSet에 넘기지 않아 렌더가 이 블록이 없을 때와 같다.
+  # 빈 NUC 복구는 지금 restore.md 3절 1단계대로 apps/·data/ values를 쓴다(운영이 곧 복구 대상이라).
+  restore:
+    suspendedApps: []
+    valkey: {}

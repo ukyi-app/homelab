@@ -1,7 +1,47 @@
 {{- /*
-리소스를 만들지 않는 확인용 템플릿.
-root는 클러스터 값 파일(values-prod.yaml 또는 values-vm.yaml)을 helm.valueFiles로 읽어야 한다.
-빠지면 구성 요소가 클러스터 값 없이 렌더된다. 그래서 cluster.name이 없으면 렌더를 실패시킨다.
+리소스를 만들지 않는 확인용 템플릿. 여기서 렌더가 실패하면 CI도, 그 클러스터 root의 Argo CD sync도 멈춘다
+(자식 Application이 하나도 바뀌지 않는다). 클러스터 값 전체를 한 번에 보는 곳은 root뿐이라 여기 둔다.
+
+1. root는 클러스터 값 파일(values-prod.yaml 또는 values-vm.yaml)을 helm.valueFiles로 읽어야 한다.
+   빠지면 구성 요소가 클러스터 값 없이 렌더된다. 그래서 cluster.name이 없으면 렌더를 실패시킨다.
+2. root-<클러스터>는 cluster.name이 그 클러스터인 값만 읽는다. Argo CD는 Application 이름을 Helm 릴리스 이름으로
+   쓴다(v3.5.5 reposerver helmTemplate). values-vm.yaml을 운영 값으로 통째로 덮으면 이름까지 prod라 3을 비켜 가므로
+   여기서 잡는다. 손 확인 명령(helm template root ...)은 릴리스가 root라 건너뛴다.
+3. 운영이 아닌 클러스터(VM)는 운영 외부 상태에 쓰지 않는 값이어야 한다(E8 VM 격리 2·3·4번, T13 할 일 8).
+   빈 값은 각 구성 요소의 required가 막지만, 운영 값을 그대로 둔 실수나 모양이 틀린 자리값은 거기서 통과한다.
+   운영 값은 차트 루트의 values-prod.yaml을 .Files로 읽어 비교에만 쓴다. 운영 렌더에서는 이 블록이 돌지 않아
+   운영 렌더는 그대로다(운영 접두는 빈 값이라 "비면 실패"를 걸 수 없는 것도 이 때문에 따로 둔다).
+   클러스터 이름 분기는 리소스를 내지 않는 이 검사에만 둔다. 구성 요소 매니페스트는 받은 값만 쓴다(E8 VM 격리 1번).
 */}}
 {{- $cluster := .Values.cluster | default dict }}
-{{- $_ := required "cluster.name is missing: render root with values-<cluster>.yaml (helm.valueFiles or -f)" $cluster.name }}
+{{- $name := required "cluster.name is missing: render root with values-<cluster>.yaml (helm.valueFiles or -f)" $cluster.name | toString }}
+{{- if and (hasPrefix "root-" .Release.Name) (ne .Release.Name (printf "root-%s" $name)) }}
+{{- fail (printf "%s Application이 cluster.name %q인 값 파일을 읽었다. root-<클러스터>는 values-<클러스터>.yaml만 읽는다" .Release.Name $name) }}
+{{- end }}
+{{- if ne $name "prod" }}
+{{- $prod := get (.Files.Get "values-prod.yaml" | fromYaml) "cluster" | default dict }}
+{{- $prodProject := dig "infisical" "projectSlug" "" $prod | toString }}
+{{- $prodBucket := dig "backup" "bucket" "" $prod | toString }}
+{{- $prodServer := dig "cnpg" "serverName" "" $prod | toString }}
+{{- if not (and $prodProject $prodBucket $prodServer) }}
+{{- fail "values-prod.yaml의 cluster.infisical.projectSlug·backup.bucket·cnpg.serverName을 읽지 못했다(VM 격리 비교 기준)" }}
+{{- end }}
+{{- $prefix := dig "tailscale" "prefix" "" $cluster | toString }}
+{{- if ne $prefix (printf "%s-" $name) }}
+{{- fail (printf "VM 격리 4번: cluster.tailscale.prefix는 %q다(지금 %q). 운영 tailnet 이름과 겹치면 -1이 붙고 되돌아가지 않는다" (printf "%s-" $name) $prefix) }}
+{{- end }}
+{{- $project := dig "infisical" "projectSlug" "" $cluster | toString }}
+{{- $env := dig "infisical" "environmentSlug" "" $cluster | toString }}
+{{- /* slug는 조직 접두가 붙은 값이라(values-prod.yaml 주석) 끝이 homelab-dev인지 본다. */}}
+{{- if or (eq $project $prodProject) (not (regexMatch "^([a-z0-9-]+-)?homelab-dev$" $project)) (ne $env "dev") }}
+{{- fail (printf "VM 격리 2번: cluster.infisical은 homelab-dev 프로젝트의 dev 환경이다(지금 %q/%q, 운영 %q)" $project $env $prodProject) }}
+{{- end }}
+{{- $bucket := dig "backup" "bucket" "" $cluster | toString }}
+{{- if eq $bucket $prodBucket }}
+{{- fail (printf "VM 격리 3번: cluster.backup.bucket이 운영 버킷(%q)과 같다. VM은 전용 버킷에만 아카이브한다" $prodBucket) }}
+{{- end }}
+{{- $server := dig "cnpg" "serverName" "" $cluster | toString }}
+{{- if or (eq $server $prodServer) (not (regexMatch (printf "^pg-%s-[0-9]{8}$" $name) $server)) }}
+{{- fail (printf "VM 격리 3번: cluster.cnpg.serverName은 pg-%s-<YYYYMMDD>이고 운영(%q)과 달라야 한다(지금 %q). 두 primary가 같은 prefix에 쓰면 타임라인이 섞이고 되돌릴 수 없다" $name $prodServer $server) }}
+{{- end }}
+{{- end }}

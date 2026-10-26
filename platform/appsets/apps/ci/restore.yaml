@@ -1,0 +1,7 @@
+# 복구 멈춤 주입(suspendedApps) 렌더. 운영·VM 값은 평소 빈 목록이라 root 렌더로는 이 길을 지나지 않는다.
+# 본문의 값 합치기 줄이 바뀌면 복구 때가 아니라 여기서 실패한다.
+tailscale:
+  prefix: vm-
+suspendedApps:
+  - homelab-smoke
+  - homelab-smoke2

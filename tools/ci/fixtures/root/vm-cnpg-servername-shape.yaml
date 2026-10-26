@@ -1,0 +1,7 @@
+# expect: fail
+# cluster: vm
+# match: VM 격리 3번: cluster.cnpg.serverName은 pg-vm-<YYYYMMDD>
+# 날짜 없는 자리값.
+cluster:
+  cnpg:
+    serverName: pg-vm-test

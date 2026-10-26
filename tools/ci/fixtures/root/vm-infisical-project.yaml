@@ -1,0 +1,7 @@
+# expect: fail
+# cluster: vm
+# match: VM 격리 2번: cluster.infisical은 homelab-dev 프로젝트의 dev 환경이다
+# 운영 프로젝트 slug. eso-homelab-dev가 거부되기 전에 렌더에서 멈춘다.
+cluster:
+  infisical:
+    projectSlug: ukyi-homelab

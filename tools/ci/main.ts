@@ -42,6 +42,17 @@ function helmErrors(stderr: string): string[] {
   return errs;
 }
 
+// 음성 fixture의 helm 실패가 기대한 오류만인지. 다른 오류가 섞이면 대상 검사가 사라져도 fixture가 실패로 남는다.
+function unexpectedFailure(f: string, r: { code: number; stderr: string }, match: string): Violation[] {
+  if (r.code === 0) return [{ rule: "fixture", where: f, message: "렌더가 성공했다. 막아야 할 values다" }];
+  const errs = helmErrors(r.stderr);
+  const out: Violation[] = [];
+  if (!errs.some((e) => e.includes(match))) out.push({ rule: "fixture", where: f, message: `기대한 오류(${match})가 없다: ${errs.join(" / ")}` });
+  const other = errs.filter((e) => !e.includes(match));
+  if (other.length > 0) out.push({ rule: "fixture", where: f, message: `기대하지 않은 오류: ${other.join(" / ")}` });
+  return out;
+}
+
 // YAML로 읽히는 파일은 구조로(흐름 매핑 {kind: Secret} 포함), Helm 템플릿처럼 읽히지 않는 파일은 원문으로 본다.
 const SECRET_KIND = /^\s*(-\s+)?["']?kind["']?\s*:\s*["']?Secret["']?\s*(#.*)?$/m;
 // 흐름 매핑 안의 kind: Secret({apiVersion: v1, kind: Secret, ...}). 파싱되지 않는 템플릿에서 쓴다.
@@ -417,20 +428,35 @@ const steps: Step[] = [
           continue;
         }
         const r = run(["helm", "template", chart, chartDir, "--namespace", `app-${chart}`, "-f", f]);
-        if (r.code === 0) {
-          out.push({ rule: "fixture", where: f, message: "렌더가 성공했다. 막아야 할 values다" });
-          continue;
-        }
-        // 오류가 모두 기대한 것이어야 한다. 다른 오류가 섞이면 대상 검사가 사라져도 fixture가 실패로 남는다.
-        const errs = helmErrors(r.stderr);
-        if (!errs.some((e) => e.includes(match))) out.push({ rule: "fixture", where: f, message: `기대한 오류(${match})가 없다: ${errs.join(" / ")}` });
-        const other = errs.filter((e) => !e.includes(match));
-        if (other.length > 0) out.push({ rule: "fixture", where: f, message: `기대하지 않은 오류: ${other.join(" / ")}` });
+        out.push(...unexpectedFailure(f, r, match));
       }
       for (const c of gitFiles(":(glob)platform/charts/*/Chart.yaml").map((p) => basename(dirname(p)))) {
         if (!files.some((f) => basename(dirname(f)) === c)) out.push({ rule: "fixture", where: `platform/charts/${c}`, message: "음성 values fixture가 없다(tools/ci/fixtures/charts/<차트>/)" });
       }
       console.log(`chart fixture ${files.length}개`);
+      return out;
+    },
+  },
+  {
+    name: "root fixtures",
+    // root 클러스터 값의 음성 값(tools/ci/fixtures/root/*.yaml). 머리 주석 # cluster: <클러스터>의 values-<클러스터>.yaml 위에
+    // 얹어 root-<클러스터>로 렌더하면 실패해야 한다. VM 격리 단언(platform/root/templates/cluster-check.yaml)이 빠지면 드러난다.
+    run: () => {
+      const out: Violation[] = [];
+      const files = gitFiles("tools/ci/fixtures/root/*.yaml");
+      for (const f of files) {
+        const text = readText(f);
+        const cluster = header(text, "cluster");
+        const match = header(text, "match");
+        if (header(text, "expect") !== "fail" || !match || !cluster || !existsSync(join(ROOT, `platform/root/values-${cluster}.yaml`))) {
+          out.push({ rule: "fixture", where: f, message: "머리 주석 # expect: fail, # cluster:(values-<클러스터>.yaml이 있는 이름), # match:(기대 오류 문구 일부)가 필요하다" });
+          continue;
+        }
+        const r = run(["helm", "template", `root-${cluster}`, "platform/root", "--namespace", "argocd", "-f", `platform/root/values-${cluster}.yaml`, "-f", f]);
+        out.push(...unexpectedFailure(f, r, match));
+      }
+      if (files.length === 0) out.push({ rule: "fixture", where: "tools/ci/fixtures/root", message: "root 음성 fixture가 없다(VM 격리 단언)" });
+      console.log(`root fixture ${files.length}개`);
       return out;
     },
   },

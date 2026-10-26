@@ -1,2 +1,4 @@
 # root가 cluster.backup.bucket을 넘긴다(platform/root/templates/appset-data.yaml). 여기 기본값을 두지 않는다.
 backup: {}
+# 복구 동안 이 클러스터에서만 멈출 영속 Valkey(앱 이름 → stopped | restoreMode). root가 비어 있지 않은 cluster.restore.valkey만 넘긴다.
+valkeyRestore: {}

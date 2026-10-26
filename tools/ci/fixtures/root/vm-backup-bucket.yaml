@@ -1,0 +1,7 @@
+# expect: fail
+# cluster: vm
+# match: VM 격리 3번: cluster.backup.bucket이 운영 버킷
+# 운영 버킷. VM CNPG·영속 Valkey 백업이 운영 아카이브 옆에 쓴다.
+cluster:
+  backup:
+    bucket: homelab-backups

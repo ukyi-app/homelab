@@ -939,6 +939,7 @@ podman rm -f pgm
    - `recoverySource.serverName`에 지금 Git의 `serverName`을 옮겨 적고,
    - `serverName`을 새 세대 `pg-<복구일 YYYYMMDD>`로 바꾼다.
    - 영속 Valkey가 있는 앱마다 `data/<앱>/values.yaml`에 `valkey.running: false`, `apps/<앱>/values.yaml`에 `suspended: true`(앱 차트 1.1.0 이상)를 같은 PR에 넣는다. root apply가 ApplicationSet을 바로 동기화하므로, 넣지 않으면 빈 PVC 위의 Valkey와 앱이 먼저 떠 빈 큐로 돌거나 새로 쓴 데이터가 RDB 복원에서 사라진다.
+   - **VM 시험(시나리오 13)은 위 두 값을 공용 `apps/`·`data/` values에 넣지 않는다**(운영 앱·Valkey도 멈춘다). `platform/root/values-vm.yaml`의 `cluster.restore`에 `suspendedApps: [<앱>]`와 `valkey: {<앱>: stopped}`를 넣는다. 1절 3단계(복원 모드로 올림)는 `valkey: {<앱>: restoreMode}`, 1절 5단계와 아래 5단계의 앱 재개는 그 항목을 지우는 values-vm PR이다. 공용 values를 고치는 CLI(`homelab cache restore`·`db restore`)는 VM에 쓰지 않는다.
 
    렌더 결과는 `bootstrap.recovery` + 원본 전용 ObjectStore `r2-source`(옛 serverName) + 아카이브 plugin(새 serverName)이다. 새 serverName을 빠뜨리면 렌더가 실패한다(같은 prefix에 두 세대가 섞이면 되돌릴 수 없다). `cnpg.io/skipEmptyWalArchiveCheck` 주석은 쓰지 않는다.
 

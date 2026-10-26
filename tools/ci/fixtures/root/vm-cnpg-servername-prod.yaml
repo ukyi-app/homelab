@@ -1,0 +1,7 @@
+# expect: fail
+# cluster: vm
+# match: VM 격리 3번: cluster.cnpg.serverName은 pg-vm-<YYYYMMDD>
+# 운영 serverName 모양(pg-<날짜>). 버킷이 달라도 VM 세대라는 표시가 없으면 받지 않는다.
+cluster:
+  cnpg:
+    serverName: pg-20261023

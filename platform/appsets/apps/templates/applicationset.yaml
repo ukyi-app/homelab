@@ -1,7 +1,12 @@
 {{- /*
 ApplicationSet 본문은 files/applicationset.yaml에 그대로 둔다. Argo CD의 Go 템플릿({{ .values.app }} 등)을
-Helm이 렌더하지 않게 하려는 것이다. Helm은 클러스터 값 자리표시 하나만 바꾼다.
+Helm이 렌더하지 않게 하려는 것이다. Helm은 클러스터 값 자리표시만 바꾼다.
 운영 접두는 빈 문자열이라 required를 쓸 수 없다. 키가 있는지로 확인한다.
+
+복구 동안 멈출 앱(suspendedApps)이 있으면 templatePatch의 값 합치기 줄을 files/restore-patch.tpl로 바꿔 그 앱에만
+suspended: true를 넣는다. 없으면(운영) 본문을 그대로 내므로 렌더가 이 기능 전과 같다.
+바꿀 줄은 본문에 정확히 한 번 있어야 한다. 본문을 고쳐 줄이 달라지면 주입이 조용히 빠지지 않게 실패한다.
+tools/ci/render.ts가 같은 전개를 재현한다(APPSET_RENDERERS.apps, 5.). 하나를 바꾸면 함께 바꾼다.
 */}}
 {{- if not (hasKey (.Values.tailscale | default dict) "prefix") }}
 {{- fail "tailscale.prefix is required (root passes cluster.tailscale.prefix; prod \"\", vm \"vm-\")" }}
@@ -10,4 +15,19 @@ Helm이 렌더하지 않게 하려는 것이다. Helm은 클러스터 값 자리
 {{- if not (regexMatch "^[a-z0-9-]*$" $prefix) }}
 {{- fail (printf "tailscale.prefix %q는 소문자·숫자·-만" $prefix) }}
 {{- end }}
-{{ .Files.Get "files/applicationset.yaml" | replace "__TAILNET_PREFIX__" (quote $prefix) }}
+{{- $body := .Files.Get "files/applicationset.yaml" | replace "__TAILNET_PREFIX__" (quote $prefix) }}
+{{- with .Values.suspendedApps }}
+{{- $names := list }}
+{{- range . }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" (toString .)) }}
+{{- fail (printf "suspendedApps의 %q는 앱 이름(apps/<앱>)이어야 한다" (toString .)) }}
+{{- end }}
+{{- $names = append $names (quote .) }}
+{{- end }}
+{{- $line := `            {{- omit . "path" "values" "tailnetPrefix" | toYaml | nindent 8 }}` }}
+{{- if ne (len (splitList $line $body)) 2 }}
+{{- fail "files/applicationset.yaml의 templatePatch에 값 합치기 줄이 한 번 있어야 한다(suspendedApps 주입 자리)" }}
+{{- end }}
+{{- $body = replace $line ($.Files.Get "files/restore-patch.tpl" | replace "__SUSPENDED_APPS__" (join " " $names) | trimSuffix "\n") $body }}
+{{- end }}
+{{ $body }}

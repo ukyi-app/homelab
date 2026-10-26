@@ -1,0 +1,6 @@
+# expect: fail
+# cluster: prod
+# match: root-prod Application이 cluster.name "vm"인 값 파일을 읽었다
+# 반대 방향. 운영 root가 VM 값을 읽으면 운영이 homelab-dev와 VM 버킷을 쓴다.
+cluster:
+  name: vm
