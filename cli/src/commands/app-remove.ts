@@ -9,6 +9,8 @@ import { parseYaml } from "../core/values";
 
 const same = (detail: string): Observation => ({ state: "same", action: "none", detail });
 const KNOWN = ["image.yaml", "values.yaml"];
+const BOT_SLOT = "platform/bot-slot/values.yaml";
+const botTarget = (text: string | null) => (text === null ? undefined : (parseYaml(text) as { target?: { app?: string } } | null)?.target?.app);
 
 export default defineCommand({
   path: ["app", "remove"],
@@ -38,9 +40,7 @@ export default defineCommand({
         id: "bot-slot",
         target: "platform/bot-slot/values.yaml target",
         async read(c) {
-          const text = c.repo.readFile("platform/bot-slot/values.yaml", c.repo.mainSha());
-          const target = text === null ? undefined : (parseYaml(text) as { target?: { app?: string } } | null)?.target?.app;
-          if (target !== app) return same("이 앱이 아니다");
+          if (botTarget(c.repo.readFile(BOT_SLOT, c.repo.mainSha())) !== app) return same("이 앱이 아니다");
           return { state: "differs", action: "none", detail: "bot-slot target이 이 앱이다", next: "먼저 platform/bot-slot/values.yaml의 target을 시험 값으로 되돌리고 probe: true를 켜는 PR을 병합한다(설계 C.8 콜드스타트)" };
         },
       },
@@ -49,9 +49,14 @@ export default defineCommand({
         app,
         title: `app remove: ${app}`,
         body: `homelab app remove가 만든 PR이다(설계 C.5.5). apps/${app}/를 지워 Application ${app}과 워크로드를 없앤다. 데이터(data/${app}, DB·영속 Valkey·Infisical 키)는 남는다. 목록: homelab data list, 폐기: homelab data purge ${app} --confirm ${app}`,
-        files,
-        edit: () => Object.fromEntries(files.map((f) => [f, null])),
-        describe: () => "삭제",
+        // bot-slot은 PR 계산 때의 main에서도 본다(읽기만, 바뀌지 않아 tree에 안 들어간다). 확인 단계 뒤 그사이 target이 이 앱으로
+        // 바뀌었으면 삭제 PR을 만들지 않는다(#890 1라운드 P2-3).
+        files: [...files, BOT_SLOT],
+        edit: (cur) => {
+          if (botTarget(cur[BOT_SLOT]) === app) throw new Error(`그사이 main의 bot-slot target이 ${app}이 됐다. 먼저 target을 시험 값으로 되돌리고 probe: true를 켜는 PR을 병합한다(설계 C.8)`);
+          return { ...Object.fromEntries(files.map((f) => [f, null])), [BOT_SLOT]: cur[BOT_SLOT] };
+        },
+        describe: (path) => (path === BOT_SLOT ? "그대로" : "삭제"),
       }),
     ];
     const notes: string[] = [];

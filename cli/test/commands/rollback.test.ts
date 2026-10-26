@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { matches } from "../../src/commands/rollback";
-import { expectPlanReadOnly, ghGet, ghResponse, runCli, type Rule } from "../harness";
-import { APP_HEAD, DIGEST, MAIN, OLD_DIGEST, OLD_REV, R, contentsPath, fileJson, homelab, imageYaml, noPr, prCreate, prOpen, pullsPath } from "../fixtures/app-add-world/world";
+import { expectPlanReadOnly, ghGet, ghResponse, ghSend, runCli, type Rule } from "../harness";
+import { APP_HEAD, DIGEST, MAIN, NEW_COMMIT, OLD_DIGEST, OLD_REV, R, contentsPath, fileJson, homelab, imageYaml, noPr, prCreate, prOpen, pullsPath } from "../fixtures/app-add-world/world";
 
 const APP = "memo";
 const P = `apps/${APP}/image.yaml`;
@@ -67,6 +67,59 @@ describe("rollback", () => {
     const r = await runCli(["rollback", APP, "--release", "--json"], rules);
     expect(r.code).toBe(0);
     expect(r.json.steps.find((s: any) => s.id === "pr").detail).toContain(`${APP_HEAD.slice(0, 7)} hold true → ${APP_HEAD.slice(0, 7)} hold false`);
+  });
+
+  // #892 1라운드 P2: 전체 읽기·직전 읽기 뒤 apply의 main 스냅샷이 이미 원하는 내용(hold false)이 된 경합.
+  // main 조회 순서: 명령 시작, 전체 읽기, 직전 읽기(MAIN) → apply, 재조회(MAIN2).
+  function raceWorld(openPrAtStart: boolean): Rule[] {
+    const MAIN2 = "6".repeat(40);
+    const HEAD12 = "5".repeat(40);
+    const released = imageYaml(APP, DIGEST, APP_HEAD, false);
+    const stale = imageYaml(APP, OLD_DIGEST, OLD_REV, true);
+    const commitMsg = (sha: string) => ghGet(`${R}/git/commits/${sha}`, 200, { message: "x\n\nHomelab-CLI: rollback", tree: { sha: "d".repeat(40) } });
+    const pr = (head: string) => ghResponse(200, [{ number: 12, head: { sha: head }, base: { ref: "main" } }]);
+    return [
+      ghGet(`${R}/git/ref/heads/main`, [...Array(3).fill(ghResponse(200, { object: { sha: MAIN } })), ghResponse(200, { object: { sha: MAIN2 } })]),
+      ghGet(contentsPath(P), 200, fileJson(imageYaml(APP, DIGEST, APP_HEAD, true))),
+      ghGet(contentsPath(P, MAIN2), 200, fileJson(released)),
+      ghGet(pullsPath(`deploy/${APP}`), 200, []),
+      ...(openPrAtStart
+        ? [
+            ghGet(pullsPath(BRANCH), [pr(HEAD12), pr(HEAD12), pr(HEAD12), pr(HEAD12), pr(NEW_COMMIT)]),
+            commitMsg(HEAD12),
+            commitMsg(NEW_COMMIT),
+            ghGet(`${R}/compare/${MAIN}...${HEAD12}`, 200, { files: [{ filename: P }] }),
+            ghGet(`${R}/compare/${MAIN2}...${NEW_COMMIT}`, 200, { files: [] }),
+            ghGet(contentsPath(P, HEAD12), 200, fileJson(stale)),
+            ghGet(`${R}/git/ref/heads/${BRANCH}`, 200, { object: { sha: HEAD12 } }),
+          ]
+        : [noPr(BRANCH), ghGet(`${R}/git/ref/heads/${BRANCH}`, 404, {})]),
+      ghGet(`${R}/git/commits/${MAIN2}`, 200, { message: "main", tree: { sha: "f".repeat(40) } }),
+      ghSend("POST", `${R}/git/trees`, 201, { sha: "e".repeat(40) }),
+      ghSend("POST", `${R}/git/commits`, 201, { sha: NEW_COMMIT }),
+      ghSend("PATCH", `${R}/git/refs/heads/${BRANCH}`, 200, {}),
+      ghSend("PATCH", `${R}/pulls/12`, 200, {}),
+    ];
+  }
+
+  test("빈 변경 경합 + 열린 CLI PR: 그 브랜치를 main tree 그대로의 커밋으로 옮기고 '닫는다'를 notes에(#892 1라운드 P2)", async () => {
+    const r = await runCli(["rollback", APP, "--release", "--apply", "--json"], raceWorld(true));
+    expect(r.code).toBe(0);
+    expect(r.unmatched).toEqual([]);
+    // tree는 만들지 않고 main tree를 그대로 쓴다. 부모는 [새 main, PR 머리], force 없음.
+    expect(r.calls.some((c) => c.argv.includes(`${R}/git/trees`))).toBe(false);
+    const commit = JSON.parse(r.calls.find((c) => c.argv.includes(`${R}/git/commits`) && c.argv.includes("POST"))!.stdin!);
+    expect([commit.tree, commit.parents]).toEqual(["f".repeat(40), ["6".repeat(40), "5".repeat(40)]]);
+    expect(JSON.parse(r.calls.find((c) => c.argv.includes(`${R}/git/refs/heads/${BRANCH}`))!.stdin!)).toEqual({ sha: NEW_COMMIT, force: false });
+    expect(r.calls.some((c) => c.argv.includes(`${R}/pulls/12`))).toBe(true);
+    expect(r.json.notes.join(" ")).toContain("PR #12은 이제 필요 없다. 닫는다: gh pr close 12");
+  });
+
+  test("빈 변경 경합 + PR 없음: 아무것도 쓰지 않는다(브랜치·PR을 새로 만들지 않는다)", async () => {
+    const r = await runCli(["rollback", APP, "--release", "--apply", "--json"], raceWorld(false));
+    expect(r.code).toBe(0);
+    expect(r.unmatched).toEqual([]);
+    expect(r.writes).toEqual([]);
   });
 
   test("GitHub 조회 실패(403)를 '지워졌다'·'배포 PR 없음'으로 읽지 않는다(#884 P2-5 같은 부류)", async () => {
