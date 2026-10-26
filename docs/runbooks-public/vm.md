@@ -10,6 +10,7 @@
 |---|---|---|
 | libvirt 도메인(VM) | `homelab-vm` | 1·6절 |
 | libvirt 네트워크 | `homelab-vm`, 브리지 `virbr-hlvm`, 192.168.122.0/24, NAT 출구 = `prod.env`의 `NODE_IFACE` | 1·6절 |
+| 격리 nft 표 | `inet homelab_vm`(VM 동안만, NUC 재부팅하면 사라진다) | 1.2, 6절 |
 | VM MAC → 주소 | `52:54:00:13:00:10` → `192.168.122.10`(DHCP 예약) | `vm.env`의 `NODE_IP` |
 | VM 노드 이름·인터페이스 | `vm-node`, `enp1s0` | `vm.env`의 `NODE_NAME`·`NODE_IFACE` |
 | 크기 | vCPU 4, 메모리 16 GiB, 디스크 80 GiB(qcow2, 쓴 만큼만 찬다) | 1.4 |
@@ -27,11 +28,14 @@
 **네트워크 근거.**
 
 - **NAT라 NUC 본체 설정을 바꾸지 않는다.** 라우팅 NAT라 Wi-Fi(`wlo1`)에서도 되고 브리지를 만들지 않는다. libvirt NAT는 밖에서 VM으로 새 연결을 넘기지 않아 VM은 NUC에서만 닿는다. 그래서 운영자 기기의 LAN 접근 대신 NUC에서 SSH·kubeconfig·port-forward로 확인한다(설계 E8 VM 위치).
-- **출구를 NUC의 LAN 인터페이스로 묶는다(`<forward mode='nat' dev=…>`).** 묶지 않으면 VM이 100.64.0.0/10으로 보낸 패킷이 NUC의 tailscale0로 라우팅되고, libvirt masquerade가 출발지를 NUC의 tailnet 주소로 바꾼다. 그러면 VM이 tailnet에서 NUC(`tag:nuc`)로 보이고, ACL의 `tag:nuc → tag:k8s:443`으로 운영 내부 UI에 닿는다. 설계 E8 VM 격리 4번이 막으려는 길이다. `dev`를 주면 libvirt가 그 인터페이스 밖으로 나가는 VM forward를 거부한다. 1.5에서 확인한다.
-- **운영 nftables(P4)와 겹치지 않는다.** P4 규칙은 forward에서 출발지 10.42.0.0/16만 거른다. VM 트래픽은 VM 안 flannel이 파드 주소를 VM 노드 주소로 바꾼 뒤 나오므로 NUC에서 출발지가 192.168.122.10이라 그 규칙에 걸리지 않는다. libvirt 규칙은 `virbr-hlvm`을 지나는 패킷만 보므로 운영 파드 트래픽(cni0 → wlo1)에 닿지 않는다.
+- **VM에서 나가는 길은 공개 인터넷 하나다.** VM에는 운영 DB 사본과 시험 자격이 올라간다. 그 VM이 운영 NUC(SSH 22, k3s API 6443 등), LAN, tailnet에 닿으면 E8 VM 격리 4번이 막으려는 길이 NUC 안에서 다시 열린다. 막는 장치는 둘이다.
+  - **NAT 출구를 NUC의 LAN 인터페이스로 묶는다(`<forward mode='nat' dev=…>`).** 묶지 않으면 VM이 100.64.0.0/10으로 보낸 패킷이 NUC의 tailscale0로 라우팅되고(NUC의 `lookup 52`는 forward 패킷에도 걸린다), libvirt masquerade가 출발지를 NUC의 tailnet 주소로 바꾼다. 그러면 VM이 tailnet에서 NUC(`tag:nuc`)로 보이고, ACL의 `tag:nuc → tag:k8s:443`으로 운영 내부 UI에 닿는다.
+  - **격리 nft 표 `inet homelab_vm`(1.2).** `dev`는 다른 인터페이스로 넘기는 forward만 묶는다. VM에서 NUC 자신(브리지 주소, LAN 주소, tailnet 주소)으로 가는 연결은 호스트 INPUT이라 그대로 닿는다(libvirt NAT는 호스트와 게스트 사이를 막지 않는다). 공유기와 LAN 기기는 그 LAN 인터페이스로 나가므로 NAT로 허용된다. 그래서 `virbr-hlvm`에서 들어온 것은 INPUT에서 DHCP(udp 68→67)와 NUC가 시작한 연결의 응답만 받고, forward에서는 사설 대역·100.64.0.0/10·169.254.0.0/16과 IPv6를 버린다. 남는 것은 공개 인터넷(apt, GitHub, ghcr, R2, Infisical, Tailscale 제어·DERP, Cloudflare)이다. NUC에서 VM으로 여는 관리 연결(SSH, kubectl, port-forward)은 NUC의 OUTPUT과 그 응답이라 막히지 않는다.
+  - 표는 `host/`가 아니라 이 런북이 VM을 만들 때 올리고 지울 때 내린다. 운영 영구 설정이 아니라서 NUC가 재부팅되면 사라진다. 그때는 VM을 켜기 전에 다시 올린다(1.5).
+- **운영 nftables(P4)와 겹치지 않는다.** P4 규칙(`homelab_egress`)은 forward에서 출발지 10.42.0.0/16만 거른다. VM 트래픽은 VM 안 flannel이 파드 주소를 VM 노드 주소로 바꾼 뒤 나오므로 NUC에서 출발지가 192.168.122.10이라 그 규칙에 걸리지 않는다. `homelab_vm`과 libvirt 규칙은 `virbr-hlvm`에서 들어온 패킷만 보므로 운영 파드 트래픽(cni0 → wlo1)에 닿지 않는다.
 - **192.168.122.0/24를 공개 저장소에 적어도 된다.** libvirt가 모든 호스트에 같은 값으로 까는 기본 NAT 대역이고 NUC 안에서만 쓰인다. LAN·tailnet 주소가 아니라 위치나 신원을 드러내지 않는다(D-23). MAC 접두 52:54:00은 QEMU 기본이다.
 - 같은 대역을 쓰는 libvirt `default` 네트워크는 1.2에서 내리고 지운다. 둘이 함께 뜨지 못한다.
-- host-config 전 VM의 DNS는 DHCP가 주는 192.168.122.1(libvirt dnsmasq)이다. NUC의 servicelb가 노드 :53을 AdGuard로 DNAT하므로 실제로는 운영 AdGuard가 답할 수 있다(추측). host-config 뒤에는 1.1.1.1·9.9.9.9로 바로 간다. 시나리오 14(AdGuard 정지)와 겹쳐 돌리지 않는다.
+- **VM은 첫 부팅부터 공용 DNS(`host/versions.env`의 `NODE_UPSTREAM_DNS`)를 쓴다(1.3).** DHCP가 주는 192.168.122.1은 쓰지 않는다. NUC의 servicelb(AdGuard LoadBalancer)가 노드의 :53을 목적지 가림 없이 AdGuard 파드로 DNAT하므로, 그 주소로 보낸 질의는 dnsmasq가 아니라 `virbr-hlvm → cni0` forward가 되고 libvirt 출구 제한과 격리 표가 버린다. 그러면 host-config 전의 apt·git이 이름 해석에서 멈춘다.
 
 ## 1. 만들기 (NUC, sudo)
 
@@ -118,6 +122,47 @@ EOF
 
 `<host>`가 DHCP 예약이다. k3s의 node-ip는 설치 때만 정해지므로 VM 주소가 바뀌면 k3s가 뜨지 못한다. 예약 주소는 범위(`.100`~`.254`) 밖에 두어 다른 임대와 겹치지 않는다.
 
+다음은 격리 표다(근거는 0절). 다시 실행해도 같은 표 하나로 바뀐다. NUC가 재부팅된 뒤 VM을 켜기 전에도 이 블록을 다시 돌린다.
+
+```bash
+bash -euo pipefail <<'EOF'
+f="$(mktemp)"; trap 'rm -f "$f"' EXIT
+cat >"$f" <<'NFT'
+# 앞 두 줄: 있으면 지우고 새로 만든다(한 트랜잭션이라 다시 올려도 표는 하나)
+table inet homelab_vm
+delete table inet homelab_vm
+table inet homelab_vm {
+	# VM이 닿으면 안 되는 목적지: 사설 LAN, tailnet(CGNAT), link-local
+	set blocked4 {
+		type ipv4_addr
+		flags interval
+		elements = { 10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 }
+	}
+	# VM → NUC 자신. DHCP와 NUC가 연 관리 연결의 응답만 받는다. 브리지·LAN·tailnet 주소 모두 여기로 온다
+	chain input {
+		type filter hook input priority filter - 10; policy accept;
+		iifname != "virbr-hlvm" return
+		ct state established,related accept
+		udp sport 68 udp dport 67 accept
+		counter drop
+	}
+	# VM → 다른 곳. 사설·tailnet·link-local과 IPv6를 버린다. servicelb DNAT로 파드 주소가 된 것도 여기서 버려진다
+	chain forward {
+		type filter hook forward priority filter - 10; policy accept;
+		iifname != "virbr-hlvm" return
+		ct state established,related accept
+		meta nfproto ipv6 counter drop
+		ip daddr @blocked4 counter drop
+	}
+}
+NFT
+sudo nft -c -f "$f"
+sudo nft -f "$f"
+sudo nft list table inet homelab_vm >/dev/null
+echo "격리 표 올림"
+EOF
+```
+
 ### 1.3 이미지·디스크·seed
 
 이미지는 버전 디렉터리와 sha256으로 고정한다. 이 sha256은 2026-10-26에 `SHA256SUMS`를 Ubuntu 클라우드 이미지 서명 키(`D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81`, 패키지 `ubuntu-keyring`의 `ubuntu-cloudimage-keyring.gpg`)로 검증해 옮겼다. 그 디렉터리가 미러에서 빠지면 새 `release-*`의 `SHA256SUMS`를 같은 키로 검증하고 이 두 값을 PR로 고친다.
@@ -140,17 +185,27 @@ read -rs -p '한 번 더: ' pw2 </dev/tty; echo
 [ -n "$pw1" ] && [ "$pw1" = "$pw2" ] || { echo "비었거나 둘이 다르다"; exit 1; }
 PW_HASH="$(printf '%s' "$pw1" | openssl passwd -6 -stdin)"; unset pw1 pw2
 SSH_PUB="$(head -n 1 "$pub")"
-export PW_HASH SSH_PUB
+# 첫 부팅의 노드 DNS. 운영과 같은 공용 DNS다(0절: DHCP가 주는 192.168.122.1은 servicelb DNAT로 막힌다)
+UPSTREAM_DNS="$(. host/versions.env && echo "$NODE_UPSTREAM_DNS")"
+[ -n "$UPSTREAM_DNS" ] || { echo "host/versions.env의 NODE_UPSTREAM_DNS가 비었다"; exit 1; }
+export PW_HASH SSH_PUB UPSTREAM_DNS
 # 사용자 ubuntu는 sudo 그룹(비밀번호 sudo)이다. 클라우드 이미지 기본 사용자의 NOPASSWD sudo는 쓰지 않는다.
+# DNS는 전역(resolved.conf.d)에만 둔다. netplan nameservers로 링크에 두면 preflight --after가 "링크가 DNS를
+# 받고 있다"로 멈춘다. 파일 이름을 host/etc와 같게 해 host-config가 저장소 파일(스텁 끔 포함)로 덮어쓴다.
+# 스텁은 여기서 끄지 않는다. 끄면 host-config가 resolv.conf를 바꾸기 전까지 127.0.0.53이 답하지 않는다.
 # JSON은 YAML이라 cloud-config로 읽힌다. 값을 jq가 넣어 따옴표·특수 문자가 깨지지 않는다
 { echo '#cloud-config'
   jq -n '{hostname: "vm-node", ssh_pwauth: false, disable_root: true,
           users: [{name: "ubuntu", groups: ["sudo"], shell: "/bin/bash", lock_passwd: false,
-                   hashed_passwd: env.PW_HASH, ssh_authorized_keys: [env.SSH_PUB]}]}'
+                   hashed_passwd: env.PW_HASH, ssh_authorized_keys: [env.SSH_PUB]}],
+          write_files: [{path: "/etc/systemd/resolved.conf.d/10-k3s-node.conf", permissions: "0644",
+                         content: "# vm.md 1.3의 첫 부팅 값. host/install.sh --host-config가 저장소 파일로 덮어쓴다\n[Resolve]\nDNS=\(env.UPSTREAM_DNS)\n"}],
+          runcmd: [["systemctl", "restart", "systemd-resolved"]]}'
 } >"$w/user-data"
 printf 'instance-id: homelab-vm-%s\nlocal-hostname: vm-node\n' "$(date +%Y%m%d%H%M%S)" >"$w/meta-data"
 # MAC으로 찾아 enp1s0으로 이름을 고정한다. netplan ID가 곧 10-netplan-enp1s0.network 이름이고,
-# host/etc의 networkd drop-in 디렉터리가 그 이름에 묶인다(vm.env NODE_IFACE)
+# host/etc의 networkd drop-in 디렉터리가 그 이름에 묶인다(vm.env NODE_IFACE).
+# use-dns: false: DHCP가 주는 DNS(192.168.122.1)를 첫 부팅부터 받지 않는다. host/etc의 drop-in과 같은 값이다
 cat >"$w/network-config" <<'NET'
 version: 2
 ethernets:
@@ -159,6 +214,8 @@ ethernets:
       macaddress: "52:54:00:13:00:10"
     set-name: enp1s0
     dhcp4: true
+    dhcp4-overrides:
+      use-dns: false
 NET
 cloud-localds --network-config="$w/network-config" "$w/seed.iso" "$w/user-data" "$w/meta-data"
 # 뒷받침 파일 없는 독립 qcow2로 만든다. 받은 이미지는 블록 끝에서 지운다
@@ -174,6 +231,8 @@ seed는 VM을 지울 때까지 붙여 둔다. 떼면 다음 부팅에 cloud-init
 
 ```bash
 bash -euo pipefail <<'EOF'
+# 격리 표 없이 VM을 켜면 VM이 첫 부팅부터 NUC·LAN·tailnet에 닿는다
+sudo nft list table inet homelab_vm >/dev/null 2>&1 || { echo "격리 표 inet homelab_vm이 없다. 1.2의 표 블록을 먼저 돌린다"; exit 1; }
 # osinfo-db(0.20250606)에 ubuntu26.04가 없어 24.04에서 파생된 일반 항목 linux2024를 쓴다.
 # q35 + virtio NIC라 인터페이스가 enp1s0이고, network-config가 MAC으로 같은 이름을 고정한다.
 # --autostart를 주지 않는다. 임시 VM이 NUC 재부팅 뒤 저절로 자원을 쓰지 않게 한다
@@ -210,18 +269,59 @@ st="$(vmssh 'cloud-init status --wait' || true)"
 grep -qx 'status: done' <<<"$st" || { echo "cloud-init: ${st}"; exit 1; }
 test "$(vmssh hostname)" = vm-node
 grep -qF ' 192.168.122.10/24 ' <<<"$(vmssh 'ip -4 -o addr show dev enp1s0')"
-# 격리: VM에서 tailnet 주소로 가는 길이 막혀야 한다(0절 NAT 출구). 100.100.100.100은 NUC의 tailscaled가 답하는 주소다
-if vmssh "timeout 5 bash -c '</dev/tcp/100.100.100.100/53'" 2>/dev/null; then
-  echo "VM이 tailnet 주소에 닿는다. 1.2의 forward dev를 본다"; exit 1
-fi
-# 밖으로는 나가야 한다
-vmssh 'curl -fsS -o /dev/null --max-time 10 https://github.com'
+# DNS: 전역은 NODE_UPSTREAM_DNS, enp1s0 링크는 비어 있어야 한다(DHCP DNS를 받지 않음, 1.3)
+want="$(. host/versions.env && echo "$NODE_UPSTREAM_DNS")"
+dns="$(vmssh resolvectl dns)"
+grep -qxF "Global: ${want}" <<<"$dns" || { echo "VM 전역 DNS가 ${want}가 아니다: ${dns}"; exit 1; }
+grep -Eqx 'Link [0-9]+ \(enp1s0\):' <<<"$dns" || { echo "enp1s0 링크가 DNS를 받고 있다: ${dns}"; exit 1; }
+vmssh 'getent hosts github.com' >/dev/null
 echo "VM 준비 통과"
 EOF
 ```
 
+**격리 확인.** VM에서 NUC 자신(SSH 22, k3s API 6443을 브리지·LAN·tailnet 주소로), LAN(공유기), tailnet(운영 `tag:k8s` 기기, MagicDNS 주소)이 모두 막히고 공개 인터넷만 열려야 한다. 대상마다 먼저 NUC에서 열리는지(기준선) 본다. NUC에서도 닫혀 있으면 VM에서 닫힌 것이 차단 때문인지 가를 수 없어 멈춘다. tailnet 주소는 화면에 내지 않는다(작업 기록에 남지 않게). VM을 다시 켤 때마다 돌린다.
+
+```bash
+bash -euo pipefail <<'EOF'
+vmssh() { ssh -n -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" -o StrictHostKeyChecking=accept-new ubuntu@192.168.122.10 "$@"; }
+nuc_ip="$(. host/clusters/prod.env && echo "$NODE_IP")"
+gw="$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "via") print $(i + 1) }' | head -n 1)"
+ts_self="$(tailscale ip -4 | head -n 1)"
+# ACL이 tag:nuc → tag:k8s:443을 연다. 격리가 없으면 VM이 NUC 신원으로 닿는 바로 그 길이다
+ts_k8s="$(tailscale status --json | jq -r '[.Peer[] | select(.Online and ((.Tags // []) | index("tag:k8s"))) | .TailscaleIPs[] | select(startswith("100."))][0] // empty')"
+[ -n "$gw" ] && [ -n "$ts_self" ] && [ -n "$ts_k8s" ] || { echo "공유기나 tailnet 시험 대상을 찾지 못했다"; exit 1; }
+names=("NUC 브리지 SSH" "NUC 브리지 k3s API" "NUC LAN SSH" "NUC LAN k3s API" "NUC tailnet SSH"
+  "LAN 공유기" "tailnet tag:k8s 기기" "MagicDNS 주소")
+addrs=("192.168.122.1:22" "192.168.122.1:6443" "${nuc_ip}:22" "${nuc_ip}:6443" "${ts_self}:22"
+  "${gw}:80" "${ts_k8s}:443" "100.100.100.100:53")
+for i in "${!addrs[@]}"; do
+  a="${addrs[$i]}"
+  timeout 5 bash -c "</dev/tcp/${a%:*}/${a##*:}" 2>/dev/null \
+    || { echo "기준선 실패: NUC에서도 '${names[$i]}'에 닿지 않아 차단을 가를 수 없다"; exit 1; }
+done
+# VM 쪽은 SSH 한 번으로 모두 본다. 막힌 대상은 버려지므로 각 5초 뒤 closed다. SSH가 실패하면 여기서 멈춘다
+out="$(ssh -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" ubuntu@192.168.122.10 bash -s -- "${addrs[@]}" <<'R'
+for a in "$@"; do
+  if timeout 5 bash -c "</dev/tcp/${a%:*}/${a##*:}" 2>/dev/null; then echo open; else echo closed; fi
+done
+R
+)"
+mapfile -t res <<<"$out"
+[ "${#res[@]}" -eq "${#addrs[@]}" ] || { echo "VM 쪽 결과 수가 다르다"; exit 1; }
+fail=0
+for i in "${!addrs[@]}"; do
+  if [ "${res[$i]}" = closed ]; then echo "막힘  ${names[$i]}"; else echo "열림  ${names[$i]}"; fail=1; fi
+done
+# 공개 인터넷은 열려 있어야 한다(이름 해석 포함). && 왼쪽의 실패는 set -e가 보지 않으므로 줄을 나눈다
+vmssh 'curl -fsS -o /dev/null --max-time 10 https://github.com'
+echo "열림  공개 인터넷(github.com)"
+[ "$fail" -eq 0 ] || { echo "VM이 막혀야 할 곳에 닿는다. 1.2의 격리 표와 forward dev를 본다"; exit 1; }
+echo "격리 확인 통과"
+EOF
+```
+
 - **콘솔:** `sudo virsh console homelab-vm`(나가기 `Ctrl+]`), 사용자 `ubuntu`와 1.3의 비밀번호.
-- **NUC가 재부팅됐으면:** `sudo virsh net-start homelab-vm && sudo virsh start homelab-vm`. 둘 다 autostart가 꺼져 있다.
+- **NUC가 재부팅됐으면:** 격리 표가 사라졌다. 1.2의 격리 표 블록 → `sudo virsh net-start homelab-vm && sudo virsh start homelab-vm` → 위 격리 확인 순서로 한다. 네트워크와 VM은 autostart가 꺼져 있다.
 
 ## 2. VM 안 호스트 단계
 
@@ -291,6 +391,8 @@ if info="$(sudo virsh net-info homelab-vm 2>/dev/null)"; then
   if grep -Eq '^Active:[[:space:]]+yes' <<<"$info"; then sudo virsh net-destroy homelab-vm; fi
   sudo virsh net-undefine homelab-vm
 fi
+# 격리 표는 VM이 없어진 뒤에 내린다(먼저 내리면 그사이 VM이 NUC·LAN·tailnet에 닿는다)
+if sudo nft list table inet homelab_vm >/dev/null 2>&1; then sudo nft delete table inet homelab_vm; fi
 rm -f "$HOME/.kube/homelab-vm.yaml"
 EOF
 ```
@@ -335,7 +437,9 @@ for b in virbr-hlvm virbr0; do
   if ip link show "$b" >/dev/null 2>&1; then echo "브리지가 남았다: ${b}"; left=1; fi
 done
 # 출력을 먼저 받는다. grep -q가 일찍 끝나면 쓰는 쪽이 SIGPIPE로 죽고 pipefail이 "없음"으로 읽는다
-if grep -q libvirt <<<"$(sudo nft list tables)"; then echo "libvirt nft 테이블이 남았다"; left=1; fi
+tables="$(sudo nft list tables)"
+if grep -q libvirt <<<"$tables"; then echo "libvirt nft 테이블이 남았다"; left=1; fi
+if grep -qx 'table inet homelab_vm' <<<"$tables"; then echo "격리 표 inet homelab_vm이 남았다"; left=1; fi
 if grep -q LIBVIRT <<<"$(sudo iptables-save)"; then echo "libvirt iptables 체인이 남았다(재부팅하면 사라진다)"; left=1; fi
 if [ -e "$HOME/.kube/homelab-vm.yaml" ]; then echo "VM kubeconfig가 남았다"; left=1; fi
 test "$left" -eq 0
