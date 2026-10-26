@@ -2,10 +2,9 @@
 // 스텁 git clone이 목적지에 tools/tf-github.sh 스텁을 만들고(materialize), 그 래퍼 스텁이 종료 코드를 낸다.
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HOMELAB_URL } from "../../src/core/github";
-import { REST, rule, testCtx } from "../harness";
+import { REST, rule, testCtx, testRoot } from "../harness";
 
 const clone = (code = 0) => rule(["git", REST], { code, materialize: { "tools/tf-github.sh": "stub" } });
 
@@ -73,7 +72,7 @@ describe("github 위임", () => {
   });
 
   test("래퍼에 원본 checkout 루트를 넘기고 상속된 GIT_*·TF_GITHUB_ORIGIN_ROOT는 넘기지 않는다(Connector 4360754428·4360754437)", () => {
-    const top = mkdtempSync(join(tmpdir(), "homelab-cli-test-origin-"));
+    const top = mkdtempSync(join(testRoot(), "origin-"));
     mkdirSync(join(top, ".git"));
     mkdirSync(join(top, "cli", "src"), { recursive: true });
     const inherited = { GIT_DIR: "/elsewhere/.git", GIT_WORK_TREE: "/elsewhere", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.fsmonitor", GIT_CONFIG_VALUE_0: "touch /tmp/x", TF_GITHUB_ORIGIN_ROOT: "/bogus" };

@@ -2,11 +2,10 @@
 // 하나라도 어긋나면 DROP·복원 호출이 0건인지 본다. 파드 안 명령은 PATH 스텁이다(실제 동작은 T12-05·2a 로컬 시험).
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ExecTimeout } from "../../src/core/exec";
 import { ACL_SQL, DB_JOB_SCRIPT, EXT_SQL, PG_RESTORE_DRAINED, buildLists, parseExt, sqlProblems } from "../../src/core/pgrestore";
-import { REST, applyWith, kubectlRule, rule, sha256, testCtx, type Call, type Rule } from "../harness";
+import { REST, applyWith, kubectlRule, rule, sha256, testCtx, testRoot, type Call, type Rule } from "../harness";
 
 const RUNBOOK = readFileSync(join(import.meta.dir, "..", "..", "..", "docs", "runbooks-public", "restore.md"), "utf8");
 
@@ -233,7 +232,7 @@ describe("#885 리뷰 1라운드", () => {
   });
 
   test("P2 소진 셸: 입력을 다 읽지 않고 끝나는 pg_restore 앞의 생산자가 SIGPIPE로 죽지 않고, pg_restore 실패 코드는 그대로", () => {
-    const dir = mkdtempSync(join(tmpdir(), "homelab-cli-test-drain-"));
+    const dir = mkdtempSync(join(testRoot(), "drain-"));
     // 가짜 pg_restore: 앞 10바이트만 읽고 목록을 낸 뒤 끝낸다(--list의 실제 동작과 같은 모양). FAIL이면 3.
     writeFileSync(join(dir, "pg_restore"), '#!/bin/sh\nhead -c 10 >/dev/null\necho "list"\n[ "$FAIL" = 1 ] && exit 3\nexit 0\n');
     chmodSync(join(dir, "pg_restore"), 0o755);
