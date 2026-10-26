@@ -137,6 +137,7 @@ function listPrStep(app: string): Step {
       "",
       `병합 뒤 \`homelab app new ${app} --apply\`를 다시 실행하면 템플릿으로 public 저장소를 만들고 보안 설정을 켠 뒤 \`homelab github apply\`로 \`app-main\`을 건다(설계 C.7).`,
       "병합부터 저장소 하드닝까지는 `homelab github plan`·`verify`가 guard 2·8로 exit 1인 것이 정상이다(docs/runbooks-public/github.md 2절).",
+      "이 PR의 필수 `ci`는 mock 시험이라 실제 org를 읽지 않고, 통과해야 병합한다. guard 8로 실패하면 저장소가 없어서가 아니라 시험 문제다.",
     ].join("\n"),
     files: [LIST],
     edit: (cur) => ({ [LIST]: addApp(cur[LIST], app) }),
@@ -260,6 +261,7 @@ export default defineCommand({
         notes: [
           `PR 병합 뒤 같은 명령을 다시 --apply하면 저장소 생성 → 보안 설정 → app-main 적용을 이어 한다`,
           "병합부터 저장소 하드닝까지 homelab github plan·verify는 guard 2·8로 exit 1이 정상이다. 병합 뒤 바로 다시 실행한다(런북 github.md 2절)",
+          "목록 PR의 필수 ci는 mock 시험이라 실제 org를 읽지 않는다. ci가 guard 8로 실패하면 정상인 틈이 아니라 시험 문제다",
         ],
       });
     }

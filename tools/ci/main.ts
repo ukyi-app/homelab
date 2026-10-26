@@ -559,6 +559,17 @@ const steps: Step[] = [
           console.log((r.stdout + r.stderr).trim());
           if (r.code !== 0) out.push({ rule: "terraform-test", where: root, message: `terraform test exit ${r.code}` });
         }
+        // app new의 목록 PR 모양(app-repos.json에 이름 하나만 더하고 시험은 그대로)으로 한 번 더 돈다. 시험이 목록 이름을
+        // 손으로 적어 두면 그 PR의 필수 ci가 guard 8에서 깨진다(T13 #923). 고치는 것은 임시 사본뿐이다.
+        if (root === "infra/github") {
+          const list = join(dst, "app-repos.json");
+          writeFileSync(list, `${JSON.stringify([...JSON.parse(readFileSync(list, "utf8")), "ci-app-new-probe"].sort(), null, 2)}\n`);
+          const r = run(["terraform", `-chdir=${dst}`, "test", "-no-color"], { env });
+          if (r.code !== 0) {
+            console.log((r.stdout + r.stderr).trim());
+            out.push({ rule: "terraform-test", where: root, message: `app-repos.json에 앱 하나를 더한 사본에서 terraform test exit ${r.code}(시험이 목록을 손으로 적었다)` });
+          } else console.log("app-repos.json에 앱 하나를 더한 사본: 통과");
+        }
       }
       return out;
     },
