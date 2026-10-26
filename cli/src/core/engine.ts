@@ -135,6 +135,9 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
     }
     changed = true;
     if (timedOut) notes.push(`${s.id}: 시간 초과 뒤 다시 읽어 반영된 것을 확인했다`);
+    // 실행 뒤 재조회의 warn도 올린다(전체 읽기의 warn만 올리면 apply 도중 생긴 할 일, 예 "PR #n은 이제 필요 없다, 닫는다"가
+    // 사라진다, #892 1라운드 P2). 전체 읽기에서 같은 줄을 이미 올렸으면 두 번 쓰지 않는다.
+    if (after.warn && !notes.includes(`${s.target}: ${after.warn}`)) notes.push(`${s.target}: ${after.warn}`);
     if (after.hold) {
       reports[i].result = "waiting";
       reports[i].detail = `${seen.detail} (${after.hold})`;

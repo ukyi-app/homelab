@@ -178,9 +178,13 @@ export function prStep(spec: PrSpec): Step {
     // 이 스냅샷과 같은 파일은 넣지 않는다. 명령이 PR 시점 확인용으로 읽기만 하는 파일(02 데이터 values·bot-slot)이 없으면
     // null → null이고, 그것을 넣으면 없는 경로의 삭제라 GitHub가 tree를 거부한다(#890 1라운드 P2-4). base_tree가 나머지를 지킨다.
     const tree = spec.files.filter((path) => desired[path] !== current[path]).map((path) => (desired[path] === null ? { path, mode: "100644", type: "blob", sha: null } : { path, mode: "100644", type: "blob", content: desired[path] }));
-    // 읽은 뒤 그사이 main이 원하는 내용이 됐으면 쓸 것이 없다. 엔진의 재조회가 "main과 같음"을 확인한다.
-    if (tree.length === 0) return;
-    const treeSha = ok(ghSend(exec, "POST", `repos/${HOMELAB_REPO}/git/trees`, { base_tree: baseTree, tree }), "tree 만들기").json?.sha;
+    // 읽은 뒤 그사이 main이 원하는 내용이 됐으면 바꿀 파일이 없다. 그래도 열린 CLI PR이 있으면 그 브랜치를 main tree 그대로의
+    // 커밋으로 옮겨 PR 변경을 0으로 만든다. 그냥 돌아가면 옛 내용의 PR이 열린 채 남고, 병합하면 그 옛 내용이 들어간다
+    // (#892 1라운드 P2: rollback --release가 옛 이미지·hold true의 PR을 남기고 갱신했다고 알렸다). 재조회가 "PR #n은 이제
+    // 필요 없다, 닫는다"를 warn으로 내고 엔진이 notes에 올린다. PR이 없으면(브랜치만 남았어도) 쓸 것이 없다.
+    const stalePr = tree.length === 0 && head !== null ? openPr(w, branch) : null;
+    if (tree.length === 0 && stalePr === null) return;
+    const treeSha = tree.length === 0 ? baseTree : ok(ghSend(exec, "POST", `repos/${HOMELAB_REPO}/git/trees`, { base_tree: baseTree, tree }), "tree 만들기").json?.sha;
     const message = `${spec.title}\n\n${TRAILER}: ${spec.command}`;
     const parents = head ? [base, head] : [base];
     const commit = ok(ghSend(exec, "POST", `repos/${HOMELAB_REPO}/git/commits`, { message, tree: treeSha, parents }), "커밋 만들기").json?.sha;
