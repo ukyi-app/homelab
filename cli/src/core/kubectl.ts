@@ -76,6 +76,19 @@ export function referencedSecrets(template: any): string[] {
   return [...names].sort();
 }
 
+// ESO가 동기화 때 status.syncedResourceVersion에 쓰는 값(v2.13.0 ctrlutil.GetResourceVersion):
+// "<generation>-" + sha3-224(fmt.Sprintf("%+v", struct{annotations, labels})). Go는 map을 키 순서로 map[k:v k:v]로 찍는다.
+// ESO 시험 벡터로 꼴을 맞췄다(adapters-t12.test.ts).
+export function goStringMap(m: Record<string, string> | undefined | null): string {
+  const keys = Object.keys(m ?? {}).sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+  return `map[${keys.map((k) => `${k}:${(m as Record<string, string>)[k]}`).join(" ")}]`;
+}
+
+export function esSyncVersion(meta: { generation?: number; annotations?: Record<string, string>; labels?: Record<string, string> }): string {
+  const text = `{annotations:${goStringMap(meta.annotations)} labels:${goStringMap(meta.labels)}}`;
+  return `${meta.generation ?? 0}-${new Bun.CryptoHasher("sha3-224").update(text).digest("hex")}`;
+}
+
 function secretsHash(pairs: string[]): string {
   return new Bun.CryptoHasher("sha256").update(pairs.join("\n")).digest("hex").slice(0, 16);
 }
@@ -131,7 +144,10 @@ export function parseRecord(doc: any, name: string): RestoreRecord {
   }
   const rv = doc?.metadata?.resourceVersion;
   if (typeof rv !== "string" || !RV.test(rv)) throw new Error(`복원 기록 ${name}: resourceVersion을 읽지 못했다`);
-  return { run, data: { ...data }, resourceVersion: rv };
+  // 만들기 전 검사(restoreRecordCreate)에는 uid가 없다. 지우기는 uid가 있어야 한다.
+  const uid = doc?.metadata?.uid;
+  if (uid !== undefined && (typeof uid !== "string" || !/^[0-9a-f-]{8,64}$/.test(uid))) throw new Error(`복원 기록 ${name}: uid 형식이 아니다`);
+  return { run, data: { ...data }, resourceVersion: rv, uid: uid ?? "" };
 }
 
 export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
@@ -347,21 +363,21 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       checkName("namespace", ns);
       checkName("ExternalSecret", externalSecret);
       if (o.waitSec !== undefined) checkTimeout(o.waitSec, 120);
-      // 이번 요청 뒤의 동기화를 가르는 표지: ESO는 동기화할 때 status.syncedResourceVersion을 generation과 annotation·label 해시로
-      // 쓴다(v2.13.0 ctrlutil.GetResourceVersion). annotate 전 값과 달라졌으면 이 annotation 뒤에 동기화한 것이다.
-      // refreshTime은 초 단위라 같은 초의 이전 동기화와 구별하지 못한다(Connector 4372999902). 값은 ms+난수라 늘 바뀐다.
-      const before = o.waitSec === undefined ? null : r.get("externalsecret", ns, externalSecret);
-      if (o.waitSec !== undefined && !before) throw new Error(`ExternalSecret ${externalSecret}이 없다`);
+      // 이번 요청의 동기화를 가르는 표지: ESO는 동기화를 마치면 status.syncedResourceVersion에 그때의 메타데이터 버전
+      // (generation + annotation·label 해시, esSyncVersion)을 쓴다. 이번 annotation이 든 지금 메타데이터의 버전과 같아져야 끝이다.
+      // "이전 값과 다름"만 보면 앞선 요청의 완료를 이번 것으로 인정한다(#880 2라운드). refreshTime은 초 단위라 쓰지 않는다.
+      // 값은 ms+난수라 늘 바뀐다(같으면 해시가 안 바뀌어 ESO가 동기화하지 않는다).
       const stamp = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(2))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
       must(run(exec, ["-n", ns, "annotate", KINDS.externalsecret, externalSecret, `force-sync=${stamp}`, "--overwrite"]), `force-sync ${externalSecret}`);
       if (o.waitSec === undefined) return;
-      const prev = before.status?.syncedResourceVersion;
       const deadline = Date.now() + o.waitSec * 1000;
       for (;;) {
         const es = r.get("externalsecret", ns, externalSecret);
-        const synced = es?.status?.syncedResourceVersion;
-        const ready = (es?.status?.conditions ?? []).some((c: any) => c?.type === "Ready" && c?.status === "True");
-        if (ready && typeof synced === "string" && synced !== "" && synced !== prev) return;
+        if (!es) throw new Error(`ExternalSecret ${externalSecret}이 없다`);
+        // 읽을 때마다 지금 메타데이터로 계산한다. 그사이 누가 더 annotate했으면 그 뒤의 동기화를 기다린다(그것도 이번 요청 뒤다).
+        const want = esSyncVersion(es.metadata ?? {});
+        const ready = (es.status?.conditions ?? []).some((c: any) => c?.type === "Ready" && c?.status === "True");
+        if (ready && es.status?.syncedResourceVersion === want) return;
         if (Date.now() + pollMs > deadline) throw new ExecTimeout(`ExternalSecret ${externalSecret}: 동기화 대기 시간 초과`);
         Bun.sleepSync(pollMs);
       }
@@ -414,7 +430,17 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       checkName("namespace", ns);
       checkRecord(name);
       checkRun(runId);
-      must(run(exec, ["-n", ns, "delete", "configmaps", "-l", `${RESTORE_LABEL}=${runId}`, `--field-selector=metadata.name=${name}`, "--wait=true"]), `복원 기록 ${name} 지우기`);
+      // 이 실행의 기록인지 본 그 객체(uid)만 지운다(#880 2라운드 P2). 라벨 셀렉터 삭제는 kubectl이 목록을 본 뒤 이름으로 지워,
+      // 그사이 같은 이름으로 생긴 다른 실행의 잠금을 지운다. 남의 기록이거나 없으면 아무것도 하지 않는다(전과 같음).
+      const cur = r.restoreRecord(ns, name);
+      if (!cur || cur.run !== runId) return;
+      const uid = cur.uid;
+      if (!uid) throw new Error(`복원 기록 ${name}의 uid를 읽지 못했다`);
+      const body = jsonStringify({ kind: "DeleteOptions", apiVersion: "v1", preconditions: { uid } });
+      const x = run(exec, ["delete", "--raw", `/api/v1/namespaces/${ns}/configmaps/${name}`, "-f", "-"], { input: body, secretStdout: true, signals: { conflict: /Precondition failed|\(Conflict\)/ } });
+      if (x.errKind === "timeout") throw new ExecTimeout(`복원 기록 ${name} 지우기: 시간 초과(결과 미상)`);
+      if (x.signals?.includes("conflict")) throw new Error(`복원 기록 ${name}이 확인 뒤 다른 실행의 것으로 바뀌었다. 지우지 않았다`);
+      if (x.code !== 0 && !x.notFound) throw new Error(`복원 기록 ${name} 지우기: ${why(x)}`);
     },
     deleteRestoreObject(ns, kind, name, runId) {
       checkName("namespace", ns);
