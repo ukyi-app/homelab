@@ -1559,8 +1559,8 @@ spec:
 1. PR로 `data/<app>/values.yaml`에 `valkey.running: false`(서버 Deployment를 내리고 PVC는 남기고 백업 CronJob은 suspend). Helm condition은 부정을 못 해 `suspend: true` 대신 이 이름이다. selfHeal 때문에 `kubectl scale`은 되돌려진다(B.8 E2).
 2. 복원 Job이 PVC를 마운트해 R2의 RDB를 `dump.rdb`로 두고 `appendonlydir`을 비운다(AOF가 켜져 있으면 시작 때 AOF가 우선한다[S41]). 이 Job은 Git에 두지 않고 CLI(또는 `restore.md`를 따르는 사람)가 `kubectl`로 만드는 일회성 객체이고, 끝나면 지우고 0개를 확인한다(C.5.7의 "복원 리소스는 GitOps 밖이다"). 같은 PVC에는 한 번에 파드 하나만 쓴다(`ReadWriteOnce`는 같은 노드의 여러 파드를 막지 않는다). 그래서 Job 이름은 실행 id와 무관하게 앱마다 `restore-vk` 하나이고(API 서버의 이름 유일성이 잠금), 만들기 직전에 그 PVC를 마운트하는 끝나지 않은 파드·Job이 있으면 멈춘다(T11 #872 뒤 후속).
 3. PR로 `running: true`와 `restoreMode: true`(`appendonly no`)를 함께 넣어 새 파드가 RDB를 읽게 하고 키 수를 확인한다. AOF를 켠 채 `appendonlydir`만 지우면 Valkey 9.1.2는 RDB를 읽지 않고 빈 데이터로 시작해 빈 AOF를 만든다(U18 실측). 그래서 이 단계가 필요하다.
-4. `CONFIG SET appendonly yes`로 AOF를 다시 만들고 `INFO persistence`에서 rewrite 완료를 확인한다.
-5. PR로 `running`·`restoreMode` 줄을 지운다. ConfigMap만 바뀌므로 `kubectl rollout restart`로 서버를 다시 띄워 AOF에서 같은 키 수로 뜨는지 본다. 파드를 직접 지우지 않는다. `Recreate`의 "옛 파드가 끝난 뒤 새 파드" 보장은 Deployment 업데이트에만 있고, 파드를 지우면 ReplicaSet이 옛 파드가 끝나기 전에 새 파드를 만든다(로컬 kind 1.37 실측 약 14초 겹침, T11).
+4. `CONFIG SET appendonly yes`로 AOF를 다시 만들고 `INFO persistence`에서 rewrite 완료를 확인한다. 완료는 `aof_enabled:1`·`aof_rewrite_in_progress:0`·**`aof_rewrite_scheduled:0`**·`aof_last_bgrewrite_status:ok`가 함께일 때다. RDB 저장 중에 켜면 Valkey 9.1.2는 첫 AOF 생성을 예약만 해 앞의 셋이 맞는데 `scheduled:1`이고, 이때 다시 띄우면 데이터가 비거나 옛 상태로 돌아간다(로컬 실측 2026-10-26).
+5. PR로 `running`·`restoreMode` 줄을 지운다. ConfigMap만 바뀌므로 `kubectl rollout restart`로 서버를 다시 띄워 AOF에서 다시 읽히는지 본다. PR을 기다리는 동안 서버가 다시 떴을 수 있어(복원 모드면 `appendonly no`로 돌아간다), 다시 띄우기 직전에 `appendonly`·AOF 상태를 다시 보고 다르면 4단계부터 한다. 데이터 확인은 고정 키 수 비교가 아니라 키가 0개가 아니고 만료 없는 표식 키가 있는지다(TTL 만료·앱 쓰기 허용, 0개면 멈춘다). 파드를 직접 지우지 않는다. `Recreate`의 "옛 파드가 끝난 뒤 새 파드" 보장은 Deployment 업데이트에만 있고, 파드를 지우면 ReplicaSet이 옛 파드가 끝나기 전에 새 파드를 만든다(로컬 kind 1.37 실측 약 14초 겹침, T11).
 
 #### C.5.7 공유 PostgreSQL에서 특정 앱만 복원 (시나리오 10)
 
