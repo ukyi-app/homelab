@@ -21,11 +21,11 @@
 
 이 문서의 여러 줄짜리 명령은 모두 한 단계라도 실패하면 멈추게 적는다. 대화형 셸에 줄을 붙여 넣으면 앞 명령이 실패해도 다음 줄이 돌기 때문이다. 그래서 `&&`로 잇거나 `set -euo pipefail`을 건 별도 bash(`bash -euo pipefail <<'EOF'`)로 돌린다. 블록이 실패하면 다음 블록으로 가지 않는다.
 
-새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깔고, 작업 사본이 없으면 만든다(Ubuntu 26.04 기준). `openssh-server`는 `host/install.sh --host-config`가 sshd 설정을 검사(`sshd -t`)하는 데 필요하고, `nftables`(`nft`)는 `--egress`가 파드 egress 규칙을 올리는 데 필요하다. 최소 설치나 VM에는 없을 수 있다.
+새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깔고, 작업 사본이 없으면 만든다(Ubuntu 26.04 기준). `openssh-server`는 `host/install.sh --host-config`가 sshd 설정을 검사(`sshd -t`)하는 데 필요하고, `nftables`(`nft`)는 `--egress`가 파드 egress 규칙을 올리는 데, `bind9-dnsutils`(`dig`)는 `--k3s`를 다시 돌려 재시작한 뒤 클러스터 DNS를 확인하는 데 필요하다. 최소 설치나 VM에는 없을 수 있다.
 
 ```bash
 sudo apt-get update \
-  && sudo apt-get install -y git jq curl gnupg openssh-server nftables \
+  && sudo apt-get install -y git jq curl gnupg openssh-server nftables bind9-dnsutils \
   && { [ -d ~/homelab/.git ] || git clone https://github.com/ukyi-app/homelab ~/homelab; } \
   && cd ~/homelab
 ```
@@ -114,7 +114,7 @@ host/preflight.sh --cluster <이름> --before \
 - `--host-config`: `host/etc/` drop-in 복사, 스왑 끄기, 타임존, `tailscale set --accept-dns=false`(`TAILNET_JOIN=true`일 때), resolv.conf, networkd drop-in 적용. **이때 클러스터 인터페이스가 약 2초 끊긴다.** 원격 세션이 잠깐 멈췄다 돌아오는 것이 정상이다.
 - `--after`: 스왑 없음, 타임존, resolved 스텁 꺼짐, resolv.conf가 loopback·tailnet·자기 주소 아님, 링크가 DHCP DNS를 거부.
 - `--egress`: 파드 egress 규칙(1.1절)을 `/etc/homelab/egress.nft`로 렌더하고 `homelab-egress.service`(k3s보다 먼저 뜸)로 올린다. k3s보다 먼저 두어 첫 파드부터 규칙 아래서 뜬다.
-- `--k3s`: `host/versions.env`의 `INSTALL_K3S_VERSION` 고정 설치(채널 없음), `host/k3s-config.yaml`을 렌더해 `/etc/rancher/k3s/config.yaml`(0600)로 씀, `local-retain` StorageClass를 자동 배포 매니페스트로 둠, kubeconfig를 `~/.kube/<KUBE_CONTEXT>.yaml`(0600)로 씀.
+- `--k3s`: `host/versions.env`의 `INSTALL_K3S_VERSION` 고정 설치(채널 없음), `host/k3s-config.yaml`을 렌더해 `/etc/rancher/k3s/config.yaml`(0600)로 씀, `local-retain` StorageClass를 자동 배포 매니페스트로 둠, kubeconfig를 `~/.kube/<KUBE_CONTEXT>.yaml`(0600)로 씀. 이미 깔린 k3s에 다시 돌려 config 값이 바뀌면 이전 config를 `/var/lib/homelab/backup/k3s-config.<시각>.yaml`(root 0600)에 두고 경로를 출력한다. 같은 버전에서 tls-san만 바뀌면 설치 스크립트 없이 config만 바꿔 재시작한다(1절 끝).
 - `verify`: 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 config, serving cert SAN, `local-retain`, egress 유닛·규칙 파일·대역·커널 표. 커널 표는 `sudo -n nft`로 읽는다. 앞 단계의 sudo 자격이 남아 있으면 그대로 읽고, 없으면 실패 없이 **종료 코드 2(미검증)** 로 끝난다. 2는 통과가 아니다.
 - `--k3s`가 중간에 실패하면 `/etc/rancher/k3s`가 남아 `--before`가 막힌다. `--k3s`를 그대로 다시 실행하거나, `k3s-uninstall.sh`로 지우고 잔여 경로가 없는지 본 뒤 1부터 다시 한다.
 
@@ -129,13 +129,28 @@ kubectl config current-context
 
 운영자 기기에서 tailnet으로 쓰려면 이 파일을 복사하고 `server`를 `https://<MagicDNS 이름>:6443`으로 바꾼다. 그 이름은 설치 때의 MagicDNS 이름으로 k3s SAN에 들어간다. 저장소와 Infisical에는 두지 않는다.
 
-설치 뒤 Tailscale 기기 이름을 바꾸면(prod는 2026-10-26 `nuc-pro`로 바꿈) 옛 MagicDNS 이름은 더 풀리지 않고, 새 이름은 아직 SAN에 없어 x509 오류가 난다. `--k3s`를 다시 돌리면 새 이름이 인증서에 더해진다. node-name·node-ip는 그대로라 통과하고, tls-san 차이를 출력한 뒤 config를 새로 써 k3s를 한 번 재시작한다(API 몇 초, 컨테이너는 계속 돈다). k3s는 재시작 뒤 설정 SAN 가운데 인증서에 없는 이름을 기존 SAN에 더해 다시 서명하고 옛 SAN은 지우지 않는다. 그래서 옛 MagicDNS 이름도 인증서에 남는다(무해하다. 근거는 `host/install.sh` `check_install_time_keys` 주석). 0.0의 main 확인 블록 뒤에 돌린다.
+설치 뒤 Tailscale 기기 이름을 바꾸면(prod는 2026-10-26 `nuc-pro`로 바꿈) 옛 MagicDNS 이름은 더 풀리지 않고, 새 이름은 아직 SAN에 없어 x509 오류가 난다. `--k3s`를 다시 돌리면 새 이름이 인증서에 더해진다. k3s는 재시작 뒤 설정 SAN 가운데 인증서에 없는 이름을 기존 SAN에 더해 다시 서명하고 옛 SAN은 지우지 않는다. 그래서 옛 MagicDNS 이름도 인증서에 남는다(무해하다. 근거는 `host/install.sh` `check_install_time_keys` 주석).
+
+`--k3s`가 고르는 경로:
+
+- **같은 k3s 버전에서 tls-san만 바뀜(이 경우):** 공식 설치 스크립트를 부르지 않는다. 이전 config를 백업하고, 새 config를 임시 파일에 쓴 뒤 `mv`로 바꾸고, `systemctl restart k3s`(180초 상한) → `/readyz` → 클러스터 DNS(kube-dns Service로 `kubernetes.default`를 물어 kubernetes Service IP가 나오는지)와 Service(그 IP의 443)를 60초까지 확인한다. iptables 규칙은 건드리지 않고, 유닛이 `KillMode=process`라 컨테이너는 계속 돈다. 그래도 재시작 동안의 데이터 경로 영향은 재지 않았으니 아래 확인을 한다.
+- **그 밖의 값이나 k3s 버전이 바뀜:** 지금처럼 설치 스크립트를 강제 재시작으로 부른다. 설치 스크립트는 재시작 전에 `KUBE-`·`flannel`이 든 iptables 줄을 지우고 복원한다(k3s v1.36.5+k3s1 `install.sh:1150-1163`). k3s가 다시 만들 때까지 Service·DNS 통신이 끊길 수 있다. 재시작 뒤 같은 DNS·Service 확인을 한다.
+
+0.0의 main 확인 블록 뒤에 돌린다.
 
 ```bash
-sudo host/install.sh --cluster <이름> --k3s       # tls-san 차이 출력, config 새로 씀, k3s 재시작, /readyz 대기
+sudo host/install.sh --cluster <이름> --k3s       # 경로, tls-san 차이, 백업 경로 출력 → 재시작 → /readyz → 클러스터 DNS·Service 확인
 sudo -v && host/verify.sh --cluster <이름>        # node-args·SAN ok
 openssl s_client -connect <NODE_IP>:6443 -noservername </dev/null 2>/dev/null \
   | openssl x509 -noout -ext subjectAltName       # 새 MagicDNS 이름이 있다. 출력에 tailnet 이름이 있어 공개 기록에 붙이지 않는다
+curl -s -o /dev/null -w '%{http_code}\n' https://edge-probe.ukyi.app/   # prod 공개 URL(터널) 200. VM은 E8 VM 격리 5번의 port-forward 확인
+```
+
+**되돌리기:** `--k3s`가 출력한 백업을 제자리로 놓고 재시작한다. Git을 되돌려 `--k3s`를 다시 돌리는 것으로는 돌아가지 않는다(렌더가 그때의 `tailscale status`에서 MagicDNS 이름을 다시 읽는다). 인증서에 더한 새 이름은 남지만 무해하다.
+
+```bash
+sudo install -m 0600 -o root -g root /var/lib/homelab/backup/k3s-config.<시각>.yaml /etc/rancher/k3s/config.yaml \
+  && sudo systemctl restart k3s
 ```
 
 그다음 운영자 기기 kubeconfig의 `server`를 `https://<새 MagicDNS 이름>:6443`으로 바꾼다. `--k3s`를 다시 돌리기 전에 급히 붙어야 하면 같은 cluster 항목에 `tls-server-name: <NODE_NAME>`(인증서에 있는 이름, prod는 `nuc-15-pro`)을 더하면 통과한다(2026-10-26 NUC에서 tailnet 주소로 `/readyz` 확인). SAN을 맞춘 뒤에는 지운다(둬도 동작한다).
