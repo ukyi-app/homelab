@@ -1,5 +1,6 @@
 [
   "files",
   "homelab-bot",
-  "homelab-probe"
+  "homelab-probe",
+  "homelab-smoke"
 ]
