@@ -475,6 +475,9 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
       const owner = q(pod, "select pg_get_userbyid(datdba) from pg_database where datname = :'app'\n", { app });
       if (owner === "") q(pod, 'CREATE DATABASE :"app" OWNER :"app"\n', { app });
       else if (owner !== app) throw new Error("DB owner가 앱 역할이 아니다");
+      // 다시 만든 DB는 PUBLIC CONNECT 기본값이다. 데이터 차트 hook(pg-acl)은 sync 때만 돌아 복원 뒤 다시 돌지 않는다(restore.md 4-3).
+      q(pod, 'REVOKE CONNECT ON DATABASE :"app" FROM PUBLIC;\nGRANT CONNECT ON DATABASE :"app" TO :"app", cnpg_metrics_exporter;\n', { app });
+      if (q(pod, "select has_database_privilege('public', current_database(), 'CONNECT')\n", {}, app) !== "f") throw new Error("PUBLIC CONNECT가 남았다");
       jobAuth(app, run, app);
       return dropped ? "recreated" : "created";
     },

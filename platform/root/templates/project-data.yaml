@@ -39,9 +39,13 @@ spec:
       kind: NetworkPolicy
     - group: ""
       kind: ServiceAccount
+    # 데이터 차트 1.0.3의 PUBLIC CONNECT PostSync hook(database ns의 pg-acl-<앱>) 하나 때문이다(설계 C.5.3).
+    # 복원 Job은 여전히 GitOps 밖이다. Argo CD 추적 표시가 없어 이 허용이 있어도 selfHeal·prune 대상이 아니다(설계 C.5.7).
+    - group: batch
+      kind: Job
     # ReplicaSet·Pod는 차트가 만들지 않지만 UI 리소스 트리와 Argo CD 파드 로그에 필요하다(project-apps.yaml과 같은 이유).
-    # Job·Cluster는 넣지 않는다. 복원 객체는 GitOps 밖이다(설계 C.5.7). 그래서 백업 CronJob이 만든 Job은
-    # 트리에 안 보인다. 백업 확인은 kubectl -n app-<앱> get jobs와 ValkeyBackupStale 경보로 한다.
+    # Cluster는 넣지 않는다. 임시 복원 Cluster는 GitOps 밖이다(설계 C.5.7). 백업 확인은 kubectl -n app-<앱> get jobs와
+    # ValkeyBackupStale 경보로 한다.
     - group: apps
       kind: ReplicaSet
     - group: ""

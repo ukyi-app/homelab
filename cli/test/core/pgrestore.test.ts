@@ -93,7 +93,7 @@ const aclsu = "GRANT ALL ON FUNCTION public.f() TO smoke;\n";
 const fixed = { ext: `${ext}\n`, main: lists.main, acl: lists.acl, aclsu };
 const inSha = sha256(JSON.stringify([fixed.ext, fixed.main, fixed.acl, fixed.aclsu]));
 
-type World = { run?: string; replicas?: number; livePods?: number; inputs?: Partial<typeof fixed> & { sha?: string }; dropped?: boolean; dbCount?: string; srcTarget?: string; r2Have?: string; tmp?: string | null; current?: string; bucket?: string | null; storeBucket?: string };
+type World = { run?: string; replicas?: number; livePods?: number; inputs?: Partial<typeof fixed> & { sha?: string }; dropped?: boolean; dbCount?: string; srcTarget?: string; publicConnect?: string; r2Have?: string; tmp?: string | null; current?: string; bucket?: string | null; storeBucket?: string };
 
 function rules(w: World = {}): Rule[] {
   const i = { ...fixed, ...w.inputs };
@@ -136,6 +136,7 @@ function rules(w: World = {}): Rule[] {
     psql(["-v", "e=pgcrypto", "-v", "v=1.3"], { stdout: "t\n" }),
     psql(["-d", "smoke", "-q", "-o", "/dev/null"], {}),
     psql(["-d", "smoke", "-q"], { stdout: "schema|public|-\n" }),
+    psql(["-d", "smoke"], { stdout: `${w.publicConnect ?? "f"}\n` }),
     psql([REST], {}),
     rule(["kubectl", "-n", "database", "exec", "-i", TMP, "-c", "postgres", "--request-timeout=20s", "--", "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-tA", "-d", "smoke", "-F", " "], { stdout: `${ext}\n` }),
     rule(["kubectl", "-n", "database", "exec", "-i", TMP, "-c", "postgres", "--request-timeout=20s", "--", "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-tA", "-d", "smoke", "-q"], { stdout: "schema|public|-\n" }),
@@ -287,6 +288,19 @@ describe("4-3·4-4·4-5 파괴 단계 앞 확인", () => {
     const dropIdx = c.indexOf(drops(c)[0]);
     expect(markIdx).toBeGreaterThan(-1);
     expect(dropIdx).toBeGreaterThan(markIdx);
+  });
+
+  test("다시 만든 DB의 PUBLIC CONNECT를 막고(차트 hook과 같은 SQL) 남았으면 멈춘다", async () => {
+    const revoke = sha256('REVOKE CONNECT ON DATABASE :"app" FROM PUBLIC;\nGRANT CONNECT ON DATABASE :"app" TO :"app", cnpg_metrics_exporter;\n');
+    const { ctx, calls } = testCtx("apply", rules());
+    await applyWith(ctx, (w) => w.pgRestore.recreateDatabase("smoke", RUN, v));
+    const c = calls().calls;
+    const createIdx = c.findIndex((x) => x.stdinSha256 === sha256('CREATE DATABASE :"app" OWNER :"app"\n'));
+    const revokeIdx = c.findIndex((x) => x.stdinSha256 === revoke);
+    expect(createIdx).toBeGreaterThan(-1);
+    expect(revokeIdx).toBeGreaterThan(createIdx);
+    const left = testCtx("apply", rules({ publicConnect: "t" }));
+    await expect(applyWith(left.ctx, (w) => w.pgRestore.recreateDatabase("smoke", RUN, v))).rejects.toThrow("PUBLIC CONNECT");
   });
 
   const cases: [string, World][] = [
