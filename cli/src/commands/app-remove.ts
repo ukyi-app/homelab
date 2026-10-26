@@ -26,7 +26,8 @@ export default defineCommand({
         id: "files",
         target: `apps/${app}/`,
         async read(c) {
-          const r = c.gh.get(`repos/ukyi-app/homelab/contents/apps/${app}?ref=${main}`);
+          // 시작 때 스냅샷이 아니라 읽는 그때의 main을 본다(apply 직전 재조회가 그사이 더해진 파일을 잡게).
+          const r = c.gh.get(`repos/ukyi-app/homelab/contents/apps/${app}?ref=${c.repo.mainSha()}`);
           if (r.status === 404) return same("없음(이미 지웠다)");
           if (r.status !== 200 || !Array.isArray(r.json)) throw new Error(`apps/${app} 목록: HTTP ${r.status}`);
           const extra = r.json.map((e: { name?: string }) => String(e?.name)).filter((n: string) => !KNOWN.includes(n));
@@ -37,7 +38,7 @@ export default defineCommand({
         id: "bot-slot",
         target: "platform/bot-slot/values.yaml target",
         async read(c) {
-          const text = c.repo.readFile("platform/bot-slot/values.yaml", main);
+          const text = c.repo.readFile("platform/bot-slot/values.yaml", c.repo.mainSha());
           const target = text === null ? undefined : (parseYaml(text) as { target?: { app?: string } } | null)?.target?.app;
           if (target !== app) return same("이 앱이 아니다");
           return { state: "differs", action: "none", detail: "bot-slot target이 이 앱이다", next: "먼저 platform/bot-slot/values.yaml의 target을 시험 값으로 되돌리고 probe: true를 켜는 PR을 병합한다(설계 C.8 콜드스타트)" };

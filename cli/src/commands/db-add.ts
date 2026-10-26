@@ -37,9 +37,21 @@ export function dbValues(current: string | null, latestChart: string): string | 
   return edit(current, HEADER, { ...(current === null ? { chartVersion: latestChart } : {}), postgres: { ...(now.postgres ?? {}), enabled: true } });
 }
 
+// 앱 차트 app.env와 같은 규칙(platform/charts/app/templates/_helpers.tpl): PORT(web)·DATABASE_URL(uses.postgres)·
+// VALKEY_URL(uses.valkey)은 차트가 넣고, env 키와 secrets는 그것들과도 서로도 겹치면 렌더가 막힌다(#884 2라운드 P2-4).
+// 병합할 수 없는 PR을 만들지 않게 쓰기 전에 멈춘다. 덮거나 조용히 빼지 않는다.
+function envProblem(v: Record<string, any>): string | null {
+  const names = [...(v.kind === "web" ? ["PORT"] : []), ...(v.uses?.postgres ? ["DATABASE_URL"] : []), ...(v.uses?.valkey ? ["VALKEY_URL"] : []), ...Object.keys(v.env ?? {}), ...(Array.isArray(v.secrets) ? v.secrets : [])];
+  const dup = names.filter((n, i) => names.indexOf(n) !== i);
+  return dup.length ? `env 이름 ${[...new Set(dup)].join(", ")}가 두 번 나온다(차트가 넣는 PORT·DATABASE_URL·VALKEY_URL, values env, secrets가 겹친다). 겹치는 쪽을 정리한 뒤 다시 실행한다` : null;
+}
+
 export function appUsesPostgres(current: string): string | null {
   const now = obj(current);
-  return edit(current, "", { uses: { ...(now.uses ?? {}), postgres: true } });
+  const out = edit(current, "", { uses: { ...(now.uses ?? {}), postgres: true } });
+  const problem = out === null ? null : envProblem(obj(out));
+  if (problem) throw new Error(problem);
+  return out;
 }
 
 function latestData(ctx: ReadCtx): string {
