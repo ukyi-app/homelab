@@ -276,7 +276,7 @@ egress_on() {
   fi
 
   log "[3/3] 커널 규칙 확인"
-  # verify.sh와 같은 판정이다: 표 해시 = 렌더, forward·input hook, 파드 출발 조건, 필수 허용, 끝 drop.
+  # verify.sh와 같은 판정이다: 표 해시 = 렌더, flags 없음(dormant 아님), 체인·규칙·nonpublic이 렌더와 같음.
   js="$(nft -j list table inet "$EGRESS_TABLE")" || die "커널에 table inet ${EGRESS_TABLE}가 없다"
   problems="$(egress_kernel_problems <<<"$js")"
   [ -z "$problems" ] \
@@ -390,12 +390,13 @@ write_user_kubeconfig() {
 # iptables-save | grep -v KUBE- | grep -iv flannel | iptables-restore로 Service DNAT·kube-router·flannel
 # 규칙을 지운다(k3s v1.36.5+k3s1 install.sh:1150-1163). k3s가 다시 만들 때까지 Service·DNS 통신이 끊길 수 있다.
 # 같은 버전이면 바이너리·유닛·env가 그대로라 설치 스크립트가 할 일이 재시작뿐이다.
+# 인자는 config_pairs exact 출력이다. 빈 값·따옴표가 다른 키를 tls-san만의 변경으로 읽지 않는다.
 san_only_change() {
   local new_pairs="$1" old_pairs ver
   [ -e "$K3S_CONFIG" ] && [ -x "$K3S_BIN" ] || return 1
   ver="$("$K3S_BIN" --version 2>/dev/null)" || return 1
   [[ "$ver" == *"$INSTALL_K3S_VERSION"* ]] || return 1
-  old_pairs="$(config_pairs <"$K3S_CONFIG")" || return 1
+  old_pairs="$(config_pairs exact <"$K3S_CONFIG")" || return 1
   [ "$old_pairs" != "$new_pairs" ] || return 1
   [ "$(grep -v $'^--tls-san\t' <<<"$old_pairs" || true)" = "$(grep -v $'^--tls-san\t' <<<"$new_pairs" || true)" ]
 }
@@ -426,29 +427,52 @@ write_k3s_config() {
 }
 
 # shellcheck disable=SC2016  # $1·$2는 안쪽 bash가 펼친다(값을 명령 글자에 넣지 않는다)
-tcp_open() { timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$1" "$2" 2>/dev/null; }
+tcp_open() { timeout "${3:-3}" bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$1" "$2" 2>/dev/null; }
+
+# 지금 시각(밀리초). EPOCHREALTIME의 소수점 글자는 로케일을 따를 수 있어 숫자만 남긴다.
+now_ms() {
+  local t="${EPOCHREALTIME//[!0-9]/}"
+  printf '%d' $((10#$t / 1000))
+}
+
+# left_s <기한(밀리초)> [<상한 초>]: 기한까지 남은 시간을 timeout·sleep이 받는 초로 낸다. 지났으면 1로 끝난다.
+# 0을 내지 않는다. timeout 0은 "상한 없음"이다.
+left_s() {
+  local ms=$(($1 - $(now_ms)))
+  [ "$ms" -gt 0 ] || return 1
+  if [ -n "${2:-}" ] && [ "$ms" -gt $(($2 * 1000)) ]; then ms=$(($2 * 1000)); fi
+  printf '%d.%03d' $((ms / 1000)) $((ms % 1000))
+}
 
 # 재시작 뒤 데이터 경로를 본다. 노드에서 kube-dns Service로 묻고(Service DNAT -> CoreDNS 파드) 그 답이
 # kubernetes Service IP와 같고, 그 IP의 443이 열린다(Service DNAT -> 노드 6443). 규칙이 다시 맞춰지는 동안
-# 잠깐 실패할 수 있어 NET_CHECK_MAX초까지 다시 본다. 공개 URL은 클러스터마다 달라 런북에서 사람이 본다.
+# 잠깐 실패할 수 있어 NET_CHECK_MAX초까지 다시 본다. 공개 URL·파드의 새 외부 연결은 런북에서 사람이 본다.
+# NET_CHECK_MAX는 Service 조회부터 마지막 재시도까지 전체 기한이다. 호출마다 남은 시간만큼 timeout을 건다.
+# 옛 판은 sleep만 세어, /readyz 뒤 API가 멈추면 kubectl get svc가 끝없이 기다려 되돌리기 안내까지 가지 못했다.
 check_cluster_net() {
-  local dns api got="" i=0
-  dns="$("$K3S_BIN" kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}')" \
-    || die "kube-dns Service를 읽지 못했다. 되돌리기: $(rollback_hint)"
-  api="$("$K3S_BIN" kubectl -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}')" \
-    || die "kubernetes Service를 읽지 못했다. 되돌리기: $(rollback_hint)"
-  until got="$(dig +short +time=2 +tries=1 "@${dns}" kubernetes.default.svc.cluster.local A 2>/dev/null)" \
-    && [ "$got" = "$api" ] && tcp_open "$api" 443; do
-    [ "$i" -lt "$NET_CHECK_MAX" ] \
+  local dns api got="" start end left
+  start="$(now_ms)"
+  end=$((start + NET_CHECK_MAX * 1000))
+  if ! left="$(left_s "$end")" \
+    || ! dns="$(timeout "$left" "$K3S_BIN" kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}')"; then
+    die "kube-dns Service를 ${NET_CHECK_MAX}초 안에 읽지 못했다. 되돌리기: $(rollback_hint)"
+  fi
+  if ! left="$(left_s "$end")" \
+    || ! api="$(timeout "$left" "$K3S_BIN" kubectl -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}')"; then
+    die "kubernetes Service를 ${NET_CHECK_MAX}초 안에 읽지 못했다. 되돌리기: $(rollback_hint)"
+  fi
+  until left="$(left_s "$end" 2)" \
+    && got="$(timeout "$left" dig +short +time=2 +tries=1 "@${dns}" kubernetes.default.svc.cluster.local A 2>/dev/null)" \
+    && [ "$got" = "$api" ] && left="$(left_s "$end" 3)" && tcp_open "$api" 443 "$left"; do
+    left="$(left_s "$end" 2)" \
       || die "재시작 뒤 클러스터 DNS(${dns})나 Service(${api}:443)가 ${NET_CHECK_MAX}초 안에 돌아오지 않았다(DNS 답: ${got:-없음}). 되돌리기: $(rollback_hint)"
-    sleep 2
-    i=$((i + 2))
+    sleep "$left"
   done
-  echo "    클러스터 DNS ${dns} -> kubernetes.default = ${api}, ${api}:443 연결(${i}초)"
+  echo "    클러스터 DNS ${dns} -> kubernetes.default = ${api}, ${api}:443 연결($((($(now_ms) - start) / 1000))초)"
 }
 
 k3s_install() {
-  local cfg pairs url installer f ver i restart=false path=installer
+  local cfg pairs exact url installer f ver i restart=false path=installer
 
   log "확인"
   # 2번이 끝났는지 다시 본다. 실패하면 3번으로 가지 않는다(C.3.2).
@@ -472,10 +496,12 @@ k3s_install() {
 
   # 재시작은 설정 값이 바뀔 때만 한다. 주석만 바뀐 config는 쓰기만 하고 재시작하지 않는다(k3s는 시작할 때만
   # config를 읽는다). 설치 스크립트는 바이너리·유닛·env 해시가 그대로면 재시작하지 않아, 값이 바뀌면 강제한다.
-  if [ -e "$K3S_CONFIG" ] && [ "$(config_pairs <"$K3S_CONFIG")" != "$pairs" ]; then
+  # 비교는 config_pairs exact로 한다. 정렬·따옴표 벗김 판은 빈 값·"0600"과 0600 차이를 같다고 읽는다.
+  exact="$(config_pairs exact <<<"$cfg")"
+  if [ -e "$K3S_CONFIG" ] && [ "$(config_pairs exact <"$K3S_CONFIG")" != "$exact" ]; then
     restart=true
     require_cmds dig systemctl
-    if san_only_change "$pairs"; then path=config-only; fi
+    if san_only_change "$exact"; then path=config-only; fi
   fi
   if [ "$path" = config-only ]; then
     echo "    경로: tls-san만 바뀌었다(k3s ${INSTALL_K3S_VERSION} 그대로). 설치 스크립트 없이 config만 바꾸고 재시작한다"
@@ -508,7 +534,12 @@ k3s_install() {
 
   if [ "$path" = config-only ]; then
     log "k3s 재시작(설치 스크립트 없이)"
-    # 설치 스크립트를 부르지 않아 iptables 규칙을 지우지 않는다. 유닛이 KillMode=process라 컨테이너는 계속 돈다.
+    # 설치 스크립트의 KUBE-·flannel 일괄 제거는 피한다. 유닛이 KillMode=process라 컨테이너는 계속 돈다.
+    # 그래도 iptables가 그대로인 것은 아니다. k3s가 시작할 때 flannel v0.28.4가 자기 체인 FLANNEL-POSTRTG(nat)·
+    # FLANNEL-FWD(filter)를 비우고(go-iptables ClearChain = -F) 별도 goroutine이 다시 채운다
+    # (pkg/trafficmngr/iptables/iptables.go CreateIP4Chain·setupAndEnsureIP4Tables). 그 틈에 시작한 파드의
+    # 새 외부 연결은 MASQUERADE를 놓칠 수 있다. 맺힌 연결은 conntrack에 남은 NAT로 이어진다. FORWARD 영향은
+    # 나머지 규칙에 달린다. 틈의 길이는 재지 않았다. 그래서 런북이 재시작 뒤 새 파드의 외부 연결을 본다.
     # 유닛이 Type=notify, TimeoutStartSec=0이라 시작 통지가 안 오면 restart가 끝나지 않는다. 상한을 둔다.
     timeout "$RESTART_WAIT_MAX" systemctl restart k3s.service \
       || die "systemctl restart k3s가 ${RESTART_WAIT_MAX}초 안에 끝나지 않았거나 실패했다. journalctl -u k3s를 본다. 되돌리기: $(rollback_hint)"
@@ -549,6 +580,9 @@ k3s_install() {
   echo "    kubeconfig: ${KUBECONFIG_OUT} (context ${KUBE_CONTEXT}, 0600)"
   if [ -n "$K3S_BACKUP" ]; then
     echo "    되돌리기: $(rollback_hint)"
+  fi
+  if [ "$restart" = true ]; then
+    echo "    재시작했다. 노드 확인은 파드의 새 외부 연결(flannel MASQUERADE)을 보지 않는다: docs/runbooks-public/bootstrap.md 1절 \"재시작 뒤 새 파드의 새 외부 연결\""
   fi
   echo "    다음: KUBECONFIG=${KUBECONFIG_OUT} host/verify.sh --cluster ${CLUSTER} (sudo 없이)"
 }

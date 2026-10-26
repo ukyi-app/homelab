@@ -168,30 +168,72 @@ render_k3s_config() {
 # k3s가 config를 플래그로 바꾸는 방식(목록은 항목마다 플래그 하나)과 같은 모양이라
 # 라이브 k3s.io/node-args 어노테이션과 바로 비교할 수 있다. 모르는 형식 줄은 BAD로 낸다.
 # yq를 쓰지 않는다. NUC의 yq는 개인 mise 설치라 root PATH와 새 호스트에 있다고 볼 수 없다.
+#
+# 값이 빈 키(key: "" 또는 항목 없는 key:)도 "--키<TAB>"로 낸다. k3s는 빈 값도 --키=로 넘겨 키가 없을 때의
+# 기본값과 다르다(cluster-domain: ""는 cluster.local이 아니다). 옛 판은 이 줄을 버려 재시작 판단이 틀렸다.
+#
+# config_pairs exact: install.sh가 재시작할지 고를 때 쓴다. 따옴표를 벗기지 않고 파일 순서를 지킨다.
+# "0600"과 0600은 YAML에서 문자열과 8진수 정수라 k3s에 다른 값이 가고, 목록은 뒤 항목이 앞 항목을 덮을 수 있다.
+# 주석과 빈 줄만 빼므로, 두 config의 exact 출력이 같으면 k3s가 받는 값도 같다.
 config_pairs() {
-  awk '
-    function clean(v) {
-      sub(/[[:space:]]+#.*$/, "", v)
+  if [ "${1:-}" = exact ]; then
+    config_pairs_awk 1
+  else
+    config_pairs_awk 0 | LC_ALL=C sort
+  fi
+}
+
+config_pairs_awk() {
+  awk -v exact="$1" '
+    # 한 줄 스칼라. 따옴표 안의 #은 주석이 아니다. 닫히지 않은 따옴표, 닫은 뒤 주석 밖 글자는 bad.
+    function scalar(v,   q, i, n, c) {
+      bad = 0
       sub(/^[[:space:]]+/, "", v)
-      sub(/[[:space:]]+$/, "", v)
-      if (v ~ /^".*"$/) v = substr(v, 2, length(v) - 2)
+      q = substr(v, 1, 1)
+      if (q != "\"" && q != "'\''") {
+        sub(/[[:space:]]+#.*$/, "", v)
+        sub(/[[:space:]]+$/, "", v)
+        return v
+      }
+      n = length(v)
+      for (i = 2; i <= n; i++) {
+        c = substr(v, i, 1)
+        if (q == "\"" && c == "\\") { i++; continue }
+        if (c == q) {
+          if (q == "'\''" && substr(v, i + 1, 1) == q) { i++; continue }
+          break
+        }
+      }
+      if (i > n || substr(v, i + 1) !~ /^([[:space:]]+#.*)?[[:space:]]*$/) { bad = 1; return "" }
+      v = substr(v, 1, i)
+      if (!exact && q == "\"") v = substr(v, 2, length(v) - 2)
       return v
     }
+    # 값 없이 끝난 키: 다음 줄이 목록 항목이 아니면 빈 값이다.
+    function flush() { if (pend != "") print "--" pend "\t"; pend = "" }
     /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
     /^[a-z0-9-]+:/ {
+      flush()
       key = $0; sub(/:.*/, "", key)
-      val = $0; sub(/^[^:]*:/, "", val); val = clean(val)
-      if (val != "") print "--" key "\t" val
+      raw = $0; sub(/^[^:]*:/, "", raw)
+      list = ""
+      if (raw ~ /^[[:space:]]*(#.*)?$/) { pend = key; list = key; next }
+      val = scalar(raw)
+      if (bad || raw !~ /^[[:space:]]/) { print "BAD\t" $0; next }
+      print "--" key "\t" val
       next
     }
     /^[[:space:]]+-[[:space:]]/ {
-      if (key == "") { print "BAD\t" $0; next }
-      item = $0; sub(/^[[:space:]]+-[[:space:]]+/, "", item)
-      print "--" key "\t" clean(item)
+      pend = ""
+      raw = $0; sub(/^[[:space:]]+-/, "", raw)
+      val = scalar(raw)
+      if (list == "" || bad) { print "BAD\t" $0; next }
+      print "--" list "\t" val
       next
     }
-    { print "BAD\t" $0 }
-  ' | LC_ALL=C sort
+    { flush(); list = ""; print "BAD\t" $0 }
+    END { flush() }
+  '
 }
 
 # k3s.io/node-args 어노테이션(JSON 배열)을 config_pairs와 같은 모양으로 바꾼다.
@@ -307,6 +349,19 @@ egress_rule_counts() {
   '
 }
 
+# 렌더 결과(stdin)의 체인별 로그 규칙(limit rate N/단위 burst M packets log prefix "...")을 nft JSON 모양으로 낸다.
+# {"체인":[{"limit":{...}},{"log":{...}}]}. 커널 판정이 로그 자리를 이 값과 정확히 대조한다.
+egress_log_rules() {
+  sed -n -E \
+    -e 's/^[[:space:]]*chain ([a-z_]+) \{.*/C \1/p' \
+    -e 's/^[[:space:]]*limit rate ([0-9]+)\/([a-z]+) burst ([0-9]+) packets log prefix "([^"]*)"$/L \1 \2 \3 \4/p' \
+    | awk '$1 == "C" { c = $2; next } $1 == "L" { p = $0; sub(/^L [^ ]+ [^ ]+ [^ ]+ /, "", p); print c "\t" $2 "\t" $3 "\t" $4 "\t" p }' \
+    | jq -R -s -c '
+      [split("\n")[] | select(length > 0) | split("\t")
+        | {key: .[0], value: [{limit: {rate: (.[1] | tonumber), burst: (.[3] | tonumber), per: .[2]}}, {log: {prefix: .[4]}}]}]
+      | from_entries'
+}
+
 # 커널의 egress 표를 nft JSON으로 낸다. root면 nft로, 아니면 sudo -n(비밀번호를 묻지 않는다)으로 읽는다.
 # 0: 읽음, 1: 읽을 권한은 있는데 표가 없거나 nft가 실패, 2: 권한이 없어 읽지 못함(미검증).
 # 커널 nft 표는 root만 읽는다. 일반 사용자에게 nft 권한을 주지 않는다(쓰기와 같은 권한이다).
@@ -320,83 +375,98 @@ egress_kernel_json() {
 }
 
 # 커널 표(stdin, egress_kernel_json 출력)를 지금 Git 렌더와 대조해 문제를 한 줄씩 낸다. 빈 출력이 통과다.
-# 표 comment의 해시가 렌더 해시와 같아야 한다(파일만 바꾸고 reload를 빠뜨리면 여기서 걸린다). 올린 뒤
-# 누가 규칙·원소를 지우거나 끼워 넣은 것은 체인별 규칙 수와 아래 모양 검사로 잡는다.
+# 표 comment의 해시가 렌더 해시와 같아야 한다(파일만 바꾸고 reload를 빠뜨리면 여기서 걸린다). 해시는 올린 뒤
+# 규칙을 바꿔도 따라 바뀌지 않는다. 그래서 체인마다 규칙을 자리별로 렌더의 규칙과 정확히 대조한다. 허용 verdict나
+# 대역 포함만 보면 끝 drop이 남은 채 그 앞 로그 규칙을 counter accept로 바꾼 것, 클러스터 대역을 10.0.0.0/8로
+# 넓힌 것이 통과했다(#919 리뷰). 주소는 구간으로 바꿔 비교한다. nft는 인접 CIDR을 합쳐 올리므로
+# (10.42.0.0/16 + 10.43.0.0/16 -> 10.42.0.0/15) 합친 것은 같게, 넓힌 것은 다르게 읽는다.
+# 표 flags도 본다. dormant는 규칙을 그대로 둔 채 base chain을 떼어 표 전체를 끈다.
+# 아래 want는 host/egress/egress.nft의 규칙 줄과 하나씩 짝이다. 규칙을 바꾸면 둘을 함께 고친다. 줄 수가
+# 어긋나면 여기서 실패하고, 실제 nft 출력과의 대조는 tools/host-egress.test.sh(--netns 포함)가 한다.
 egress_kernel_problems() {
-  local js rendered hash counts nonpublic dns
+  local js rendered hash counts logs nonpublic dns
   js="$(cat)"
   rendered="$(render_egress)" || exit 1
   hash="$(sed -n 's/^[[:space:]]*comment "\(sha256:[0-9a-f]*\)"$/\1/p' <<<"$rendered")"
   counts="$(egress_rule_counts <<<"$rendered")"
-  nonpublic="$(sed -n 's/^[[:space:]]*elements = { \(.*\) }$/\1/p' <<<"$rendered" | tr -d ' ' | tr ',' '\n' | jq -R . | jq -cs 'sort')"
+  logs="$(egress_log_rules <<<"$rendered")"
+  nonpublic="$(sed -n 's/^[[:space:]]*elements = { \(.*\) }$/\1/p' <<<"$rendered" | tr -d ' ' | tr ',' '\n' | jq -R . | jq -cs .)"
   # shellcheck disable=SC2086  # 공백으로 나눈 목록이다
-  dns="$(printf '%s\n' $NODE_UPSTREAM_DNS | jq -R . | jq -cs 'sort')"
+  dns="$(printf '%s\n' $NODE_UPSTREAM_DNS | jq -R . | jq -cs .)"
   jq -r --arg hash "$hash" --arg pod "$POD_CIDR" --arg svc "$SERVICE_CIDR" --arg node "$NODE_IP" \
-    --argjson counts "$counts" --argjson nonpublic "$nonpublic" --argjson dns "$dns" '
-    def noc: map(select(has("counter") | not));
-    def verdicts: [.[] | to_entries[0].key | select(IN("accept", "drop", "jump", "goto", "return", "reject", "queue"))];
-    def ipint: split(".") | map(tonumber) | .[0] * 16777216 + .[1] * 65536 + .[2] * 256 + .[3];
-    def pfx($s): ($s | split("/")) as $p | {prefix: {addr: $p[0], len: ($p[1] | tonumber)}};
-    def covers($outer; $inner):
-      ($outer.prefix.len) as $ol | ($inner.prefix.len) as $il | pow(2; 32 - $ol) as $b
-      | $il >= $ol and ((($outer.prefix.addr | ipint) / $b | floor) == (($inner.prefix.addr | ipint) / $b | floor));
-    def vals: if type == "object" and has("set") then .set else [.] end;
+    --argjson counts "$counts" --argjson logs "$logs" --argjson nonpublic "$nonpublic" --argjson dns "$dns" '
+    def ipint: if type == "string" and test("^[0-9]+([.][0-9]+){3}$")
+      then split(".") | map(tonumber) | .[0] * 16777216 + .[1] * 65536 + .[2] * 256 + .[3] else null end;
+    # 주소 원소 하나 -> [첫 주소, 끝 주소]. 모르는 꼴은 숫자가 아닌 쌍이라 어떤 기대와도 같지 않다.
+    def span:
+      if type == "string" then ipint as $a | [$a, $a]
+      elif type == "object" and has("prefix") and (.prefix.addr | ipint) != null then
+        pow(2; 32 - .prefix.len) as $b | ((((.prefix.addr | ipint) / $b) | floor) * $b) as $f | [$f, $f + $b - 1]
+      elif type == "object" and has("range") then [(.range[0] | ipint), (.range[1] | ipint)]
+      else [null, tojson] end;
+    # 주소 하나나 익명 set -> 겹치거나 맞닿은 구간을 합친 목록
+    def spans: [(if type == "object" and has("set") then .set[] else . end) | span] | sort
+      | reduce .[] as $x ([]; (length - 1) as $i
+          | if $i >= 0 and (.[$i][1] | type) == "number" and ($x[0] | type) == "number" and $x[0] <= .[$i][1] + 1
+            then .[$i][1] = ([.[$i][1], $x[1]] | max) else . + [$x] end);
+    def addr: . == {payload: {protocol: "ip", field: "daddr"}} or . == {payload: {protocol: "ip", field: "saddr"}};
+    # 같은 뜻이면 같은 값: counter는 뺀다(세기만 한다). 주소는 구간 목록, 나머지 set·목록은 정렬.
+    def canon: map(select(has("counter") | not))
+      | map(if has("match") then .match |= (.left as $l | .right |= (
+          if ($l | addr) and ((type == "string" and startswith("@")) | not) then {spans: spans}
+          elif type == "object" and has("set") then {set: (.set | sort)}
+          elif type == "array" then sort
+          else . end)) else . end);
     def ip($f): {payload: {protocol: "ip", field: $f}};
-    def m($op; $left): [.[] | .match? // empty | select(.op == $op and .left == $left) | .right];
-    def estab: (m("in"; {ct: {key: "state"}}) == [["established", "related"]]) and (verdicts == ["accept"]);
-    def node_api: (m("=="; ip("daddr")) == [$node])
-      and (m("=="; {payload: {protocol: "tcp", field: "dport"}}) | map(vals | sort)) == [[6443, 10250]]
-      and verdicts == ["accept"] and length == 3;
-    def cluster_bands:
-      if length == 2 and verdicts == ["accept"] and (m("=="; ip("daddr")) | length) == 1
-      then (m("=="; ip("daddr"))[0] | vals) as $r
-        | all(pfx($pod), pfx($svc); . as $i | any($r[]; type == "object" and has("prefix") and covers(.; $i)))
-      else false end;
-    def upstream_dns: (m("=="; ip("daddr")) | map(vals | sort)) == [$dns]
-      and (m("=="; {meta: {key: "l4proto"}}) | map(vals | sort)) == [["tcp", "udp"]]
-      and m("=="; {payload: {protocol: "th", field: "dport"}}) == [53] and verdicts == ["accept"] and length == 4;
-    def public_443: m("!="; ip("daddr")) == ["@nonpublic"]
-      and m("=="; {payload: {protocol: "tcp", field: "dport"}}) == [443] and verdicts == ["accept"] and length == 3;
-    def public_7844: m("!="; ip("daddr")) == ["@nonpublic"]
-      and (m("=="; {meta: {key: "l4proto"}}) | map(vals | sort)) == [["tcp", "udp"]]
-      and m("=="; {payload: {protocol: "th", field: "dport"}}) == [7844] and verdicts == ["accept"] and length == 4;
-    def only_drop: . == [{drop: null}];
-    def middle_ok: verdicts == ["accept"] or (verdicts == [] and any(.[]; has("log")));
+    def eq($l; $r): {match: {op: "==", left: $l, right: $r}};
+    def ne($l; $r): {match: {op: "!=", left: $l, right: $r}};
+    def pfx($s): ($s | split("/")) as $p | {prefix: {addr: $p[0], len: ($p[1] | tonumber)}};
+    def r_accept: {accept: null};
+    def w_estab: ["established 반환", [{match: {op: "in", left: {ct: {key: "state"}}, right: ["established", "related"]}}, r_accept]];
+    def w_node: ["노드 6443·10250", [eq(ip("daddr"); $node), eq({payload: {protocol: "tcp", field: "dport"}}; {set: [6443, 10250]}), r_accept]];
+    def w_log($ch): ["verdict 없는 로그", ($logs[$ch] // [{"렌더에 로그 줄이 없다": null}])];
+    def w_drop: ["끝 drop", [{drop: null}]];
+    def want: {
+      forward: [["파드 대역 출발 -> pod_egress", [eq(ip("saddr"); pfx($pod)), {jump: {target: "pod_egress"}}]]],
+      input: [["lo 밖 파드 대역 출발 -> pod_to_node",
+        [ne({meta: {key: "iifname"}}; "lo"), eq(ip("saddr"); pfx($pod)), {jump: {target: "pod_to_node"}}]]],
+      pod_egress: [w_estab,
+        ["파드·서비스 대역", [eq(ip("daddr"); {set: [pfx($pod), pfx($svc)]}), r_accept]],
+        w_node,
+        ["업스트림 DNS 53", [eq(ip("daddr"); {set: $dns}), eq({meta: {key: "l4proto"}}; {set: ["tcp", "udp"]}),
+          eq({payload: {protocol: "th", field: "dport"}}; 53), r_accept]],
+        ["공개 TCP 443", [ne(ip("daddr"); "@nonpublic"), eq({payload: {protocol: "tcp", field: "dport"}}; 443), r_accept]],
+        ["공개 7844", [ne(ip("daddr"); "@nonpublic"), eq({meta: {key: "l4proto"}}; {set: ["tcp", "udp"]}),
+          eq({payload: {protocol: "th", field: "dport"}}; 7844), r_accept]],
+        w_log("pod_egress"), w_drop],
+      pod_to_node: [w_estab, w_node, w_log("pod_to_node"), w_drop]
+    };
     (.nftables // []) as $n
     | [$n[] | .table? // empty] as $t
     | [$n[] | .chain? // empty] as $c
     | [$n[] | .set? // empty | select(.name == "nonpublic")] as $s
-    | def rules($ch): [$n[] | .rule? // empty | select(.chain == $ch) | .expr | noc];
-      def body($ch; $need): rules($ch) as $r
-        | (if ($r | length) < 2 then "\($ch): 규칙이 \($r | length)개다" else empty end),
-          (if ($r | length) >= 2 and ($r[0] | estab | not) then "\($ch): 첫 규칙이 ct state established,related accept가 아니다" else empty end),
-          (if ($r | length) >= 2 and ($r[-1] | only_drop | not) then "\($ch): 끝 규칙이 drop이 아니다" else empty end),
-          (if ($r | length) >= 2 and ([$r[1:-1][] | middle_ok] | all | not) then "\($ch): drop 앞에 accept·log가 아닌 규칙이 있다" else empty end),
-          ($need[] as [$name, $ok] | if $ok then empty else "\($ch): 필수 허용이 없다: \($name)" end);
+    | def rules($ch): [$n[] | .rule? // empty | select(.chain == $ch) | .expr];
+      def body($ch): rules($ch) as $r | want[$ch] as $w
+        | (if ($r | length) == ($w | length) then empty else "\($ch): 규칙 수 \($r | length), 렌더 \($w | length)" end),
+          (range(0; [($r | length), ($w | length)] | min) as $i
+            | if ($r[$i] | canon) == ($w[$i][1] | canon) then empty
+              else "\($ch): \($i + 1)번째 규칙이 렌더의 \($w[$i][0]) 규칙과 다르다: \($r[$i] | map(select(has("counter") | not)) | tojson)" end);
+    (if (want | map_values(length)) == $counts then empty
+      else "판정의 기대 규칙(host/lib.sh egress_kernel_problems)이 렌더(host/egress/egress.nft)와 어긋난다. 둘을 함께 고친다" end),
     (if ($t | length) == 0 then "표 inet homelab_egress가 없다" else empty end),
     (if ($t | length) == 1 and $t[0].comment != $hash
       then "표 해시가 지금 렌더와 다르다(커널 \($t[0].comment // "없음"), 렌더 \($hash)). 파일만 바꾸고 reload를 빠뜨렸거나 다른 규칙이 올라와 있다"
       else empty end),
+    (if ($t | length) == 1 and ($t[0].flags // [] | if type == "array" then . else [.] end | length) > 0
+      then "표 flags가 \($t[0].flags | tojson)다(렌더에는 없다). dormant면 규칙이 남아 있어도 표 전체가 패킷을 보지 않는다"
+      else empty end),
     (if ($t | length) == 0 then empty else (
-      (if ([$c[] | select(.hook != null) | "\(.name)/\(.hook)/\(.type)/\(.policy)"] | sort) == ["forward/forward/filter/accept", "input/input/filter/accept"]
-        then empty else "base chain이 forward·input(filter, policy accept) 둘이 아니다" end),
+      ([$c[] | select(.hook != null) | "\(.name)/\(.hook)/\(.type)/\(.prio)/\(.policy)"] | sort) as $b
+      | (if $b == ["forward/forward/filter/0/accept", "input/input/filter/0/accept"] then empty
+         else "base chain이 forward·input(filter, priority 0, policy accept) 둘이 아니다: \($b | join(", "))" end),
       (if ([$c[] | .name] | sort) == ($counts | keys | sort) then empty else "체인 목록이 렌더와 다르다: \([$c[] | .name] | sort | join(","))" end),
-      ($counts | to_entries[] | . as $e | rules($e.key) | length as $k
-        | if $k == $e.value then empty else "\($e.key): 규칙 수 \($k), 렌더 \($e.value)" end),
-      (if rules("forward") == [[{match: {op: "==", left: ip("saddr"), right: pfx($pod)}}, {jump: {target: "pod_egress"}}]]
-        then empty else "forward: 파드 대역(\($pod)) 출발만 pod_egress로 넘기는 규칙 하나가 아니다" end),
-      (if rules("input") == [[{match: {op: "!=", left: {meta: {key: "iifname"}}, right: "lo"}},
-                              {match: {op: "==", left: ip("saddr"), right: pfx($pod)}}, {jump: {target: "pod_to_node"}}]]
-        then empty else "input: lo 밖의 파드 대역(\($pod)) 출발만 pod_to_node로 넘기는 규칙 하나가 아니다" end),
-      body("pod_egress"; [
-        ["파드·서비스 대역", any(rules("pod_egress")[]; cluster_bands)],
-        ["노드 6443·10250", any(rules("pod_egress")[]; node_api)],
-        ["업스트림 DNS 53", any(rules("pod_egress")[]; upstream_dns)],
-        ["공개 TCP 443", any(rules("pod_egress")[]; public_443)],
-        ["공개 7844", any(rules("pod_egress")[]; public_7844)]
-      ]),
-      body("pod_to_node"; [["노드 6443·10250", any(rules("pod_to_node")[]; node_api)]]),
-      (if ($s | length) == 1 and ([$s[0].elem[] | if type == "object" then "\(.prefix.addr)/\(.prefix.len)" else . end] | sort) == $nonpublic
+      (want | keys_unsorted[] as $ch | body($ch)),
+      (if ($s | length) == 1 and ({set: $s[0].elem} | spans) == ({set: ($nonpublic | map(pfx(.)))} | spans)
         then empty else "set nonpublic 원소가 렌더와 다르다" end)
     ) end)
   ' <<<"$js"

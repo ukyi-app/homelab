@@ -559,6 +559,22 @@ const steps: Step[] = [
           console.log((r.stdout + r.stderr).trim());
           if (r.code !== 0) out.push({ rule: "terraform-test", where: root, message: `terraform test exit ${r.code}` });
         }
+        // app new의 목록 PR 모양(app-repos.json에 이름 하나만 더하고 시험은 그대로)으로 한 번 더 돈다. 시험이 목록 이름을
+        // 손으로 적어 두면 그 PR의 필수 ci가 guard 8에서 깨진다(T13 #923). 고치는 것은 임시 사본뿐이다.
+        // 더할 이름은 목록에 없는 것으로 고른다. 이미 있는 이름을 또 넣으면 mock 응답에는 둘, toset인 기대 집합에는 하나라
+        // 정상 목록이 guard 8에 걸린다(#924 리뷰).
+        if (root === "infra/github") {
+          const list = join(dst, "app-repos.json");
+          const names: string[] = JSON.parse(readFileSync(list, "utf8"));
+          let extra = "ci-app-new-probe";
+          for (let i = 2; names.includes(extra); i++) extra = `ci-app-new-probe-${i}`;
+          writeFileSync(list, `${JSON.stringify([...names, extra].sort(), null, 2)}\n`);
+          const r = run(["terraform", `-chdir=${dst}`, "test", "-no-color"], { env });
+          if (r.code !== 0) {
+            console.log((r.stdout + r.stderr).trim());
+            out.push({ rule: "terraform-test", where: root, message: `app-repos.json에 ${extra}를 더한 사본에서 terraform test exit ${r.code}(목록만 고친 app new PR의 ci가 이렇게 실패한다. 위 출력에서 어느 run·guard인지 본다)` });
+          } else console.log(`app-repos.json에 ${extra}를 더한 사본: 통과`);
+        }
       }
       return out;
     },

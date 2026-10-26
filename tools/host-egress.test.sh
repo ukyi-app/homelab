@@ -287,6 +287,88 @@ verify_tests() {
   done
 }
 
+# egress_kernel_problems를 nft JSON으로 직접 시험한다. ci에는 nft가 없어 --netns가 보는 실제 커널 대신,
+# 운영 렌더를 nft 1.1.6에 올려 받은 `nft -j list table` 출력을 fixture로 두고 고친다(해시·nonpublic만 채운다).
+# 클러스터 대역 두 /16은 nft가 /15 하나로 합친 그대로다. egress.nft 규칙을 바꾸면 이 fixture도 다시 받는다.
+kernel_json_tests() {
+  local hash np base row want desc mut out
+  copy_host kj
+  fake_env kj tkj NODE_IP=192.168.117.15 POD_CIDR=10.42.0.0/16 SERVICE_CIDR=10.43.0.0/16
+  sed -i -E 's|^NODE_UPSTREAM_DNS=.*$|NODE_UPSTREAM_DNS="1.1.1.1 9.9.9.9"|' "$TMP/kj/host/versions.env"
+  hash="$(render kj tkj | sed -n 's/^[[:space:]]*comment "\(sha256:[0-9a-f]*\)"$/\1/p')"
+  # nonpublic의 CGNAT 대역 글자는 gitleaks tailscale-ip 룰이 접두 길이 없이 잡는다. 렌더 줄에서 만든다.
+  np="$(render kj tkj | sed -n 's/^[[:space:]]*elements = { \(.*\) }$/\1/p' | tr -d ' ' | tr ',' '\n' \
+    | jq -R 'split("/") | {prefix: {addr: .[0], len: (.[1] | tonumber)}}' | jq -cs .)"
+  base="$(jq -c --arg h "$hash" --argjson np "$np" \
+    '(.nftables[] | select(.table) | .table.comment) = $h | (.nftables[] | select(.set) | .set.elem) = $np' <<'JSON'
+{"nftables":[{"metainfo":{"version":"1.1.6","release_name":"Commodore Bullmoose #7","json_schema_version":1}},
+{"table":{"family":"inet","name":"homelab_egress","handle":2,"comment":"@HASH@"}},
+{"chain":{"family":"inet","table":"homelab_egress","name":"forward","handle":1,"type":"filter","hook":"forward","prio":0,"policy":"accept"}},
+{"chain":{"family":"inet","table":"homelab_egress","name":"input","handle":2,"type":"filter","hook":"input","prio":0,"policy":"accept"}},
+{"chain":{"family":"inet","table":"homelab_egress","name":"pod_to_node","handle":3}},
+{"chain":{"family":"inet","table":"homelab_egress","name":"pod_egress","handle":4}},
+{"set":{"family":"inet","name":"nonpublic","table":"homelab_egress","type":"ipv4_addr","handle":5,"flags":["interval"],"elem":"@NONPUBLIC@"}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"forward","handle":6,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":{"prefix":{"addr":"10.42.0.0","len":16}}}},{"jump":{"target":"pod_egress"}}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"input","handle":7,"expr":[{"match":{"op":"!=","left":{"meta":{"key":"iifname"}},"right":"lo"}},{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":{"prefix":{"addr":"10.42.0.0","len":16}}}},{"jump":{"target":"pod_to_node"}}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_to_node","handle":8,"expr":[{"match":{"op":"in","left":{"ct":{"key":"state"}},"right":["established","related"]}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_to_node","handle":10,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":"192.168.117.15"}},{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":{"set":[6443,10250]}}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_to_node","handle":11,"expr":[{"limit":{"rate":10,"burst":20,"per":"minute"}},{"log":{"prefix":"homelab-egress node drop: "}}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_to_node","handle":12,"expr":[{"counter":{"packets":0,"bytes":0}},{"drop":null}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_egress","handle":13,"expr":[{"match":{"op":"in","left":{"ct":{"key":"state"}},"right":["established","related"]}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_egress","handle":15,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":{"set":[{"prefix":{"addr":"10.42.0.0","len":15}}]}}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_egress","handle":17,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":"192.168.117.15"}},{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":{"set":[6443,10250]}}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_egress","handle":20,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":{"set":["1.1.1.1","9.9.9.9"]}}},{"match":{"op":"==","left":{"meta":{"key":"l4proto"}},"right":{"set":["tcp","udp"]}}},{"match":{"op":"==","left":{"payload":{"protocol":"th","field":"dport"}},"right":53}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_egress","handle":21,"expr":[{"match":{"op":"!=","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":"@nonpublic"}},{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":443}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_egress","handle":23,"expr":[{"match":{"op":"!=","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":"@nonpublic"}},{"match":{"op":"==","left":{"meta":{"key":"l4proto"}},"right":{"set":["tcp","udp"]}}},{"match":{"op":"==","left":{"payload":{"protocol":"th","field":"dport"}},"right":7844}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_egress","handle":24,"expr":[{"limit":{"rate":10,"burst":20,"per":"minute"}},{"log":{"prefix":"homelab-egress drop: "}}]}},
+{"rule":{"family":"inet","table":"homelab_egress","chain":"pod_egress","handle":25,"expr":[{"counter":{"packets":0,"bytes":0}},{"drop":null}]}}]}
+JSON
+  )"
+  # 변형(jq): r(체인; 자리)는 그 체인 몇 번째(0부터) 규칙의 expr, setr은 그것을 바꾼다. bands는 클러스터 대역 값을 바꾼다.
+  # shellcheck disable=SC2016  # jq 변수다
+  local defs='def ridx($c): [.nftables | to_entries[] | select(.value.rule.chain? == $c) | .key];
+    def r($c; $i): .nftables[ridx($c)[$i]].rule.expr;
+    def setr($c; $i; $v): .nftables[ridx($c)[$i]].rule.expr = $v;
+    def bands($v): walk(if . == {set: [{prefix: {addr: "10.42.0.0", len: 15}}]} then $v else . end);'
+  local -a cases=(
+    "|fixture 그대로(nft가 합친 /15)|."
+    "|클러스터 대역을 두 /16으로(합치기 전 꼴)|bands({set: [{prefix: {addr: \"10.43.0.0\", len: 16}}, {prefix: {addr: \"10.42.0.0\", len: 16}}]})"
+    "|클러스터 대역을 range로|bands({set: [{range: [\"10.42.0.0\", \"10.43.255.255\"]}]})"
+    "|counter가 없는 규칙(세기만 다름)|walk(if type == \"array\" then map(select(type != \"object\" or (has(\"counter\") | not))) else . end)"
+    "표 flags가 [\"dormant\"]다|표를 dormant로 끔|(.nftables[] | select(.table) | .table.flags) = [\"dormant\"]"
+    "표 flags가 \"dormant\"다|flags가 배열 아닌 글자|(.nftables[] | select(.table) | .table.flags) = \"dormant\""
+    "pod_to_node: 3번째 규칙이 렌더의 verdict 없는 로그 규칙과 다르다|pod_to_node 로그 자리를 counter accept로|setr(\"pod_to_node\"; 2; [{counter: {packets: 0, bytes: 0}}, {accept: null}])"
+    "pod_egress: 7번째 규칙이 렌더의 verdict 없는 로그 규칙과 다르다|pod_egress 로그 자리를 counter accept로|setr(\"pod_egress\"; 6; [{counter: {packets: 0, bytes: 0}}, {accept: null}])"
+    "pod_egress: 7번째 규칙이 렌더의 verdict 없는 로그 규칙과 다르다|pod_egress 로그 뒤에 accept를 붙임|setr(\"pod_egress\"; 6; r(\"pod_egress\"; 6) + [{accept: null}])"
+    "pod_egress: 7번째 규칙이 렌더의 verdict 없는 로그 규칙과 다르다|로그 rate를 바꿈|setr(\"pod_egress\"; 6; [{limit: {rate: 1000, burst: 20, per: \"second\"}}, {log: {prefix: \"homelab-egress drop: \"}}])"
+    "pod_egress: 2번째 규칙이 렌더의 파드·서비스 대역 규칙과 다르다|클러스터 대역을 10.0.0.0/8로 넓힘|bands({prefix: {addr: \"10.0.0.0\", len: 8}})"
+    "pod_egress: 2번째 규칙이 렌더의 파드·서비스 대역 규칙과 다르다|클러스터 대역을 /14로 넓힘(인접 확대)|bands({set: [{prefix: {addr: \"10.40.0.0\", len: 14}}]})"
+    "pod_egress: 2번째 규칙이 렌더의 파드·서비스 대역 규칙과 다르다|클러스터 대역에 다른 대역을 더함|bands({set: [{prefix: {addr: \"10.42.0.0\", len: 15}}, {prefix: {addr: \"10.99.0.0\", len: 24}}]})"
+    "pod_egress: 2번째 규칙이 렌더의 파드·서비스 대역 규칙과 다르다|클러스터 대역을 파드 대역만으로 좁힘|bands({set: [{prefix: {addr: \"10.42.0.0\", len: 16}}]})"
+    "pod_to_node: 2번째 규칙이 렌더의 노드 6443·10250 규칙과 다르다|노드 허용에 22를 더함|setr(\"pod_to_node\"; 1; r(\"pod_to_node\"; 1) | (.[1].match.right.set += [22]))"
+    "pod_egress: 4번째 규칙이 렌더의 업스트림 DNS 53 규칙과 다르다|업스트림 DNS에 8.8.8.8을 더함|setr(\"pod_egress\"; 3; r(\"pod_egress\"; 3) | (.[0].match.right.set += [\"8.8.8.8\"]))"
+    "pod_egress: 5번째 규칙이 렌더의 공개 TCP 443 규칙과 다르다|공개 443에서 nonpublic 조건을 뺌|setr(\"pod_egress\"; 4; r(\"pod_egress\"; 4) | .[1:])"
+    "base chain이 forward·input(filter, priority 0, policy accept) 둘이 아니다|forward priority를 바꿈|(.nftables[] | select(.chain.name? == \"forward\") | .chain.prio) = -300"
+    "set nonpublic 원소가 렌더와 다르다|nonpublic에서 LAN 대역을 뺌|(.nftables[] | select(.set) | .set.elem) |= map(select(.prefix.addr != \"192.168.0.0\"))"
+  )
+  for row in "${cases[@]}"; do
+    IFS='|' read -r want desc mut <<<"$row"
+    out="$(jq -c "${defs} ${mut}" <<<"$base" | (
+      # shellcheck source=../host/lib.sh
+      . "$TMP/kj/host/lib.sh"
+      load_cluster tkj
+      egress_kernel_problems
+    ) 2>&1)" || { fail "커널 판정 ${desc}: 실행 실패: ${out}"; continue; }
+    if [ -z "$want" ]; then
+      if [ -z "$out" ]; then pass "커널 판정 통과: ${desc}"; else fail "커널 판정 ${desc}: 통과여야 한다:"$'\n'"${out}"; fi
+    elif grep -qF -- "$want" <<<"$out"; then
+      pass "커널 판정 실패: ${desc}"
+    else
+      fail "커널 판정 ${desc}: '${want}'가 없다:"$'\n'"${out:-출력 없음}"
+    fi
+  done
+}
+
 # resolve_magicdns: 실제 MagicDNS 이름의 첫 라벨을 TAILNET_DEVICE_NAME(비면 NODE_NAME)과 대조한다.
 # 옛 기기가 남아 -1이 붙은 재등록은 계속 잡고, 일부러 바꾼 이름은 값 파일로 받아들인다.
 device_name_tests() {
@@ -514,11 +596,29 @@ vexpect() { # vexpect <기대 종료 코드> <설명> <host 사본> [<출력에 
 handle() { nft -a list chain inet homelab_egress "$1" | awk -v re="$2" "\$0 ~ re { print \$NF }"; }
 vexpect 0 "규칙이 지금 렌더대로" /host
 nft delete rule inet homelab_egress pod_egress handle "$(handle pod_egress "th dport 53")"
-vexpect 1 "DNS 허용 규칙을 지움" /host "필수 허용이 없다: 업스트림 DNS 53"; nft -f "$R"
+vexpect 1 "DNS 허용 규칙을 지움" /host "pod_egress: 규칙 수 7, 렌더 8"; nft -f "$R"
 nft delete rule inet homelab_egress pod_to_node handle "$(handle pod_to_node " drop # handle")"
-vexpect 1 "pod_to_node의 drop을 지움" /host "pod_to_node: 끝 규칙이 drop이 아니다"; nft -f "$R"
+vexpect 1 "pod_to_node의 drop을 지움" /host "pod_to_node: 규칙 수 3, 렌더 4"; nft -f "$R"
 nft insert rule inet homelab_egress pod_to_node tcp dport 22 accept
 vexpect 1 "pod_to_node 앞에 22 허용을 끼움" /host "pod_to_node: 규칙 수 5"; nft -f "$R"
+# 규칙 수·끝 drop·해시가 그대로인 변경(#919 리뷰). 먼저 실제로 열리는지 보여 판정이 잡아야 하는 상태임을 확인한다.
+nft add table inet homelab_egress "{ flags dormant; }"
+expect pass "dormant: 표가 꺼져 공개 22가 열림" pod tcp 203.0.113.10 22
+vexpect 1 "표를 dormant로 끔(규칙은 그대로)" /host "표 flags가 [\"dormant\"]다"
+nft add table inet homelab_egress
+expect drop "dormant를 풂: 공개 22 다시 막힘" pod tcp 203.0.113.10 22
+vexpect 0 "dormant를 풂(flags 없이 add table)" /host
+nft replace rule inet homelab_egress pod_to_node handle "$(handle pod_to_node "log prefix")" counter accept
+expect pass "pod_to_node 로그 자리를 accept로: 노드 sshd가 열림" pod tcp "$NODE_IP" 22
+vexpect 1 "pod_to_node 로그 자리를 counter accept로 바꿈" /host "pod_to_node: 3번째 규칙이 렌더의 verdict 없는 로그 규칙과 다르다"; nft -f "$R"
+nft replace rule inet homelab_egress pod_egress handle "$(handle pod_egress "log prefix")" counter accept
+expect pass "pod_egress 로그 자리를 accept로: 공개 80이 열림" pod tcp 203.0.113.10 80
+vexpect 1 "pod_egress 로그 자리를 counter accept로 바꿈" /host "pod_egress: 7번째 규칙이 렌더의 verdict 없는 로그 규칙과 다르다"; nft -f "$R"
+nft replace rule inet homelab_egress pod_egress handle "$(handle pod_egress "ip daddr [{] 10[.]")" ip daddr 10.0.0.0/8 counter accept
+expect pass "클러스터 대역을 10/8로 넓힘: 10.0.0.5:443이 열림" pod tcp 10.0.0.5 443
+vexpect 1 "클러스터 대역을 10.0.0.0/8로 넓힘" /host "pod_egress: 2번째 규칙이 렌더의 파드·서비스 대역 규칙과 다르다"; nft -f "$R"
+nft replace rule inet homelab_egress pod_egress handle "$(handle pod_egress "ip daddr [{] 10[.]")" ip daddr "{ 10.42.0.0/16, 10.43.0.0/16, 10.99.0.0/24 }" counter accept
+vexpect 1 "클러스터 대역에 다른 대역을 더함" /host "pod_egress: 2번째 규칙이 렌더의 파드·서비스 대역 규칙과 다르다"; nft -f "$R"
 nft delete element inet homelab_egress nonpublic "{ 192.168.0.0/16 }"
 vexpect 1 "nonpublic에서 LAN 대역을 뺌" /host "set nonpublic"; nft -f "$R"
 nft delete table inet homelab_egress
@@ -557,6 +657,7 @@ case "${1:-}" in
   "")
     render_tests
     verify_tests
+    kernel_json_tests
     device_name_tests
     upstream_tests
     ;;

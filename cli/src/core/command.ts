@@ -26,6 +26,7 @@ export type KubeKind =
   | "networkpolicy"
   | "externalsecret"
   | "application"
+  | "applicationset"
   | "cluster"
   | "backup"
   | "scheduledbackup"

@@ -26,6 +26,7 @@ export const KINDS: Record<KubeKind, string> = {
   networkpolicy: "networkpolicies.networking.k8s.io",
   externalsecret: "externalsecrets.external-secrets.io",
   application: "applications.argoproj.io",
+  applicationset: "applicationsets.argoproj.io",
   cluster: "clusters.postgresql.cnpg.io",
   backup: "backups.postgresql.cnpg.io",
   scheduledbackup: "scheduledbackups.postgresql.cnpg.io",
