@@ -72,6 +72,16 @@ describe("secret set", () => {
     expect(lost.json.error.message).toContain("시간 초과 뒤 다시 읽었지만");
   }, SLOW);
 
+  test("차트·values env와 같은 키 이름(web의 PORT, env 키)은 쓰기 전에 멈추고 stdin을 읽지 않는다(#884 2라운드 P2-4)", async () => {
+    const values = "chartVersion: 1.1.0\nkind: web\nport: 8080\nresources: { cpu: 50m, memory: 64Mi }\nenv: { LOG_LEVEL: info }\n";
+    for (const key of ["PORT", "LOG_LEVEL"]) {
+      const r = await runCli(["secret", "set", APP, key, "--apply", "--json"], world({ list: [listed()], values }), { stdin: `${FAKE_SECRETS[0]}\n` });
+      expect(r.code).toBe(1);
+      expect(r.json.steps[0].id).toBe("env-name");
+      expect(r.writes).toEqual([]);
+    }
+  });
+
   test("등록된 앱의 secrets에 키가 없으면 알리고, 끝나면 secret sync로 안내", async () => {
     const values = "chartVersion: 1.1.0\nkind: web\nport: 8080\nresources: { cpu: 50m, memory: 64Mi }\n";
     const r = await runCli(["secret", "set", APP, "API_TOKEN", "--apply", "--json"], world({ list: [listed(), listed(), listed(FAKE_SECRETS[0])], values }), { stdin: `${FAKE_SECRETS[0]}\n` });

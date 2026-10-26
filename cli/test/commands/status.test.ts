@@ -12,7 +12,8 @@ const get = (ns: string, res: string, name: string, x: unknown | null) => kubect
 const READY = { conditions: [{ type: "Ready", status: "True" }] };
 const synced = { status: { sync: { status: "Synced", revision: MAIN }, health: { status: "Healthy" } } };
 
-type Opts = { esReady?: boolean; infisicalKeys?: Record<string, string>; migrate?: "ok" | "failed"; http?: number; argo?: unknown };
+const READY_POD = { metadata: {}, status: { phase: "Running", conditions: [{ type: "Ready", status: "True" }], containerStatuses: [{ imageID: `ghcr.io/ukyi-app/${APP}@${DIGEST}` }] } };
+type Opts = { esList?: string[]; pods?: unknown[]; esReady?: boolean; infisicalKeys?: Record<string, string>; migrate?: "ok" | "failed"; http?: number; argo?: unknown };
 function world(o: Opts = {}): Rule[] {
   const es = (name: string, ns = NS) => ({ metadata: { name, namespace: ns }, status: name === `${APP}-app` && o.esReady === false ? { conditions: [{ type: "Ready", status: "False", reason: "SecretSyncedError" }] } : READY });
   return [
@@ -21,8 +22,8 @@ function world(o: Opts = {}): Rule[] {
     ghGet(pullsPath(`deploy/${APP}`), 200, []),
     get("argocd", "applications.argoproj.io", APP, "argo" in o ? o.argo : synced),
     get("argocd", "applications.argoproj.io", `${APP}-data`, synced),
-    kubectlRule(["-n", NS, "get", "pods", "-l", `homelab.ukyi.app/app=${APP}`, "-o", "json"], json({ items: [{ metadata: {}, status: { conditions: [{ type: "Ready", status: "True" }], containerStatuses: [{ imageID: `ghcr.io/ukyi-app/${APP}@${DIGEST}` }] } }] })),
-    kubectlRule(["-n", NS, "get", "externalsecrets.external-secrets.io", "-o", "json"], json({ items: [es(`${APP}-app`), es(`${APP}-db`), es(`${APP}-valkey-url`)] })),
+    kubectlRule(["-n", NS, "get", "pods", "-l", `homelab.ukyi.app/app=${APP}`, "-o", "json"], json({ items: o.pods ?? [READY_POD] })),
+    kubectlRule(["-n", NS, "get", "externalsecrets.external-secrets.io", "-o", "json"], json({ items: (o.esList ?? [`${APP}-app`, `${APP}-db`, `${APP}-valkey-url`]).map((n) => es(n)) })),
     get("database", "externalsecrets.external-secrets.io", `pg-role-${APP}`, es(`pg-role-${APP}`, "database")),
     ...folders({ "/apps": [APP] }),
     infisicalList(`/apps/${APP}`, o.infisicalKeys ?? { API_TOKEN: FAKE_SECRETS[0] }),
@@ -95,6 +96,21 @@ describe("status <app>", () => {
     const b = await runCli(["status", APP, "--json"], noCron);
     expect(b.code).toBe(1);
     expect(b.json.steps.find((s: any) => s.id === "valkey").state).toBe("missing");
+  });
+
+  test("values가 선언한 앱 ExternalSecret(<app>-app)이 없으면 0/0 Ready로 보지 않는다(#884 2라운드 P2-6)", async () => {
+    const r = await runCli(["status", APP, "--json"], world({ esList: [`${APP}-db`, `${APP}-valkey-url`] }));
+    expect(r.code).toBe(1);
+    const s = r.json.steps.find((x: any) => x.id === "secrets");
+    expect(s.state).toBe("differs");
+    expect(s.detail).toContain(`${APP}-app`);
+  });
+
+  test("끝난 파드(퇴거된 옛 ReplicaSet 파드 Failed)는 준비 집계에서 뺀다(Connector 4373412611)", async () => {
+    const evicted = { metadata: {}, status: { phase: "Failed", reason: "Evicted", conditions: [{ type: "Ready", status: "False" }], containerStatuses: [] } };
+    const r = await runCli(["status", APP, "--json"], world({ pods: [READY_POD, evicted] }));
+    expect(r.code).toBe(0);
+    expect(r.json.steps.find((x: any) => x.id === "pods").detail).toBe("1/1 Ready, imageID = image.yaml");
   });
 
   test("등록 안 된 앱은 app add로 안내하고 클러스터를 읽지 않는다", async () => {
