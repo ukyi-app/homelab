@@ -40,6 +40,8 @@ export class World {
   duringDrop?: () => Promise<void>;
   // 복원 객체를 만든 직후에 부른다(lease를 쥔 순간에 다른 호출이 그 단계를 끝낸 경우를 흉내 낸다).
   onCreate?: (m: Obj) => void;
+  // 객체를 읽을 때마다 부른다(단계 사이에 다른 호출의 변경을 끼워 넣는다).
+  onGet?: (kind: string, ns: string | null, name: string) => void;
 
   constructor(files: Record<string, string>) {
     const sha = nextSha();
@@ -150,7 +152,7 @@ export class World {
       });
     };
     const k8s = {
-      get: (kind: string, ns: string | null, name: string) => w.obj(kind, ns, name) ?? null,
+      get: (kind: string, ns: string | null, name: string) => (w.onGet?.(kind, ns, name), w.obj(kind, ns, name) ?? null),
       list: (kind: string, ns: string | null, selector?: string) => [...w.objects].filter(([k, v]) => k.split("/")[0] === kind && (ns === null || k.split("/")[1] === ns) && matches(v, selector)).map(([, v]) => v),
       restoreRecord(ns: string, name: string) {
         const r = w.records.get(`${ns}/${name}`);

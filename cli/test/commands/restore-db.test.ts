@@ -256,6 +256,49 @@ describe("db restore: 흐름(가짜 세계)", () => {
     expect(w.writes).toEqual([]);
   });
 
+  test("r2 P1-1: 사전 검사 뒤 다른 --to의 잠금이 생기면 이어받지 않는다(쓰기·DROP 0건)", async () => {
+    const w = dbWorld(APP);
+    // B(11:00)가 target-time을 지난 직후, A(10:00)가 잠금을 만들고 준비까지 끝낸 상태를 넣는다
+    let n = 0;
+    w.onGet = (kind) => {
+      if (kind !== "objectstore" || ++n !== 2) return;
+      w.records.set(`${NS}/restore-pg`, { run: "20261026000000aaaaaa", data: { to: T1_NORMAL, srv: "pg-20261023", img: `ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:${"a".repeat(64)}`, size: "8Gi" } });
+    };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: "2026-10-20T11:00:00+09:00" });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toMatch(/잠금의 시각|요청과 다르다/);
+    expect(w.writes).toEqual([]);
+    expect(dropped(w)).toBe(0);
+  });
+
+  test("r2 P1-1: 호출 중에 잠금이 다른 실행으로 바뀌면 그 뒤 단계는 쓰지 않는다", async () => {
+    const w = await readyToDrop();
+    // db 단계 lease를 쥔 순간, 기록이 같은 시각의 다른 실행으로 바뀌었다(사람이 지우고 다시 만든 경우)
+    w.onCreate = (m) => {
+      if (m.metadata?.annotations?.["homelab.ukyi.app/lease"] !== "db restore db") return;
+      w.onCreate = undefined;
+      const old = w.records.get(`${NS}/restore-pg`)!;
+      w.records.set(`${NS}/restore-pg`, { run: "20261026000000bbbbbb", data: { ...old.data } });
+    };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("이 호출이 받아들인 것");
+    expect(dropped(w)).toBe(0);
+  });
+
+  test("r2 P1-1: 같은 실행의 잠금 시각이 호출 중에 바뀌면 그 뒤 단계는 쓰지 않는다", async () => {
+    const w = await readyToDrop();
+    w.onCreate = (m) => {
+      if (m.metadata?.annotations?.["homelab.ukyi.app/lease"] !== "db restore db") return;
+      w.onCreate = undefined;
+      w.records.get(`${NS}/restore-pg`)!.data.to = "2026-10-20 02:00:00+00";
+    };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("요청");
+    expect(dropped(w)).toBe(0);
+  });
+
   test("다른 --to로 진행 중인 복원이 있으면 쓰기 없이 멈춘다", async () => {
     const w = dbWorld(APP);
     await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });

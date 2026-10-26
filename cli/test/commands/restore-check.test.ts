@@ -25,7 +25,7 @@ describe("db restore-check: plan(PATH 스텁)", () => {
     expect(r.code).toBe(0);
     expectPlanReadOnly(r);
     expect(r.json.status).toBe("pending");
-    expect(r.json.steps.map((s: { id: string }) => s.id)).toEqual(["backups", "lock", "tmp", "contents", "cleanup"]);
+    expect(r.json.steps.map((s: { id: string }) => s.id)).toEqual(["previous", "backups", "lock", "tmp", "contents", "cleanup"]);
   });
 });
 
@@ -76,6 +76,37 @@ describe("db restore-check: 흐름(가짜 세계)", () => {
     expect(r.status).toBe("failed");
     expect(r.error!.message).toContain("probe2");
     expect(w.records.size).toBe(1);
+  });
+
+  test("r2 P1-2: Ready 뒤 DB 확인에서 실패한 시험도 재실행은 그 Cluster를 다시 쓰지 않는다(바뀐 Cluster로 성공하지 않는다)", async () => {
+    const w = checkWorld();
+    w.tmpDbs = new Set(["probe"]);
+    expect((await runIn(w, cmd, "apply", {})).status).toBe("failed");
+    expect(w.records.get("database/restore-check")!.data["ok.tmp"]).toBe("1");
+    // 사람이 같은 이름 Cluster를 다른 원본으로 바꾸고 DB 이름만 맞췄다
+    w.tmpDbs = new Set(["probe", "probe2"]);
+    w.writes = [];
+    const again = await runIn(w, cmd, "apply", {});
+    expect(again.status).toBe("failed");
+    expect(again.error!.next).toContain("--abort");
+    expect(w.writes).toEqual([]);
+    expect(w.records.size).toBe(1);
+    expect((await runIn(w, cmd, "apply", {}, { abort: true })).status).toBe("done");
+    w.writes = [];
+    expect((await runIn(w, cmd, "apply", {})).status).toBe("done");
+    expect(w.writes).toContain("pg createTmpCluster");
+  });
+
+  test("확인까지 끝나고 정리만 실패한 시험은 다음 호출이 정리를 잇는다", async () => {
+    const w = checkWorld();
+    w.fail.set("deleteRestoreObjects database", new Error("delete 실패(주입)"));
+    expect((await runIn(w, cmd, "apply", {})).status).toBe("failed");
+    expect(w.records.get("database/restore-check")!.data["ok.contents"]).toBe("1");
+    w.writes = [];
+    const again = await runIn(w, cmd, "apply", {});
+    expect(again.status).toBe("done");
+    expect(w.writes).not.toContain("pg createTmpCluster");
+    expect(w.records.size).toBe(0);
   });
 
   test("base backup이 26시간보다 오래됐으면 시작하지 않는다", async () => {

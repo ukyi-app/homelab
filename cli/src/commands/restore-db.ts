@@ -50,10 +50,12 @@ function dependents(step: string): string[] {
   return [...out];
 }
 
-type Names = { app: string; ns: string; appsFile: string; dataFile: string; dbJob: (run: string) => string; r2Job: (run: string) => string; tmp: (run: string) => string };
+// inv: 이 호출이 받아들인 실행. to는 요청한 시각(--finish·--abort는 null), run은 처음 받아들인 기록의 실행 id.
+// 쓰기마다 지금 기록이 이것과 같은지 본다. 사전 검사 뒤 다른 --to의 기록이 생겨도 이어받지 않는다(#886 r2 P1-1).
+type Names = { app: string; ns: string; appsFile: string; dataFile: string; dbJob: (run: string) => string; r2Job: (run: string) => string; tmp: (run: string) => string; inv: { to: string | null; run: string | null } };
 
-function namesOf(app: string): Names {
-  return { app, ns: `app-${app}`, appsFile: `apps/${app}/values.yaml`, dataFile: `data/${app}/values.yaml`, dbJob: (r) => `restore-${r}-db`, r2Job: (r) => `restore-${r}-r2`, tmp: (r) => `pg-restore-${r}` };
+function namesOf(app: string, to: string | null): Names {
+  return { app, ns: `app-${app}`, appsFile: `apps/${app}/values.yaml`, dataFile: `data/${app}/values.yaml`, dbJob: (r) => `restore-${r}-db`, r2Job: (r) => `restore-${r}-r2`, tmp: (r) => `pg-restore-${r}`, inv: { to, run: null } };
 }
 
 function values(ctx: ReadCtx | WriteCtx, path: string): any | null {
@@ -67,6 +69,9 @@ const ok = (r: RestoreRecord | null, step: string) => r?.data[`ok.${step}`] === 
 function mine(w: WriteCtx, n: Names): RestoreRecord {
   const r = record(w, n);
   if (!r) throw new Error(`실행 기록 ${n.ns}/${RECORD}이 없다`);
+  if (n.inv.to !== null && r.data.to !== n.inv.to) throw new Error(`멈춤: 잠금의 시각(${r.data.to})이 요청(${n.inv.to})과 다르다. 다른 호출의 복원을 이어받지 않는다`);
+  if (n.inv.run === null) n.inv.run = r.run;
+  else if (n.inv.run !== r.run) throw new Error(`멈춤: 잠금의 실행이 이 호출이 받아들인 것(${n.inv.run})이 아니다(${r.run})`);
   return r;
 }
 
@@ -341,9 +346,16 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
       target: `잠금 ${n.ns}/${RECORD}`,
       async read(ctx) {
         const r = record(ctx, n);
+        if (r && r.data.to !== to!.t1) return { state: "differs", action: "none", detail: `잠금의 시각(${r.data.to})이 요청과 다르다(실행 ${r.run})`, next: `같은 --to로 잇거나 homelab db restore ${app} --finish 또는 --abort` };
+        if (r && n.inv.run !== null && r.run !== n.inv.run) return { state: "differs", action: "none", detail: `잠금의 실행이 이 호출이 받아들인 것이 아니다(${r.run})`, next: "다시 실행해 상태를 읽는다" };
         return r ? same(`실행 ${r.run}`) : { state: "missing", action: "create", detail: "없음 → 새 실행, 값 고정(T1·serverName·이미지·크기)" };
       },
       async apply(w) {
+        // 그사이 생긴 기록이면 만들지 않고 대조만 한다(시각이 다르면 mine이 멈춘다, 같으면 그 실행을 받아들인다).
+        if (record(w, n)) {
+          mine(w, n);
+          return;
+        }
         const pg = w.k8s.get("cluster", "database", "pg");
         const v = { to: to!.t1, srv: srvOf(pg) ?? "", img: pg?.spec?.imageName ?? "", size: pg?.spec?.storage?.size ?? "" };
         // 조회한 값을 런북 fit 정규식으로 본 뒤에만 기록한다(core도 매니페스트를 만들 때 다시 본다).
@@ -351,6 +363,7 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         const run = newRunId();
         if (runObjects(w, n, run).length) throw new Error("실행 id가 겹친다. 다시 실행한다");
         if (w.k8s.restoreRecordCreate(n.ns, RECORD, run, v) === "exists") throw new Error("그사이 다른 실행이 잠금을 잡았다. 다시 실행해 상태를 읽는다");
+        n.inv.run = run;
       },
     },
     stepOf(n, "predump", "되돌림 사본(1단계)", "R2 pgdump/<앱>/pre-restore-<실행>.dump 끝까지 읽힘", "지금 DB 덤프 → R2, 끝까지 읽기(한 실행에 한 번, 덮어쓰지 않음)", async (w, r) => {
@@ -647,7 +660,7 @@ export default defineCommand({
     if (!finish && !abort && toFlag === undefined) throw new UsageError("--to <시각>이 필요하다(오프셋 필수, 예 2026-11-02T10:00:00+09:00)");
     const to = toFlag === undefined ? null : normalizeTo(toFlag);
     if (toFlag !== undefined && !to) throw new UsageError("--to: 없는 날짜·시각이다");
-    const n = namesOf(app);
+    const n = namesOf(app, to?.t1 ?? null);
     return ctx.engine({
       command: "db restore",
       app,
