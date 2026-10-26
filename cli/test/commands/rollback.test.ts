@@ -53,6 +53,46 @@ describe("rollback", () => {
     expect(open.writes).toEqual([]);
   });
 
+  // T12-05 F4: 기록 = [롤백 커밋(C0), 배포 App 커밋(C1, NOW = APP_HEAD), 그 전 배포(C2)]. 최신 배포는 C1의 이미지다.
+  function releaseWorld(current: string, commits: Rule): Rule[] {
+    return world(current, [noPr(BRANCH)]).map((x) => (String(x.argv.at(-1)).includes("/commits?path=") ? commits : x));
+  }
+  const C0 = "5".repeat(40);
+  const deployLog = ghGet(`${R}/commits?path=${P}&sha=main&per_page=30`, 200, [
+    { sha: C0, commit: { message: `rollback: ${APP} → ${OLD_REV.slice(0, 7)} (#9)` } },
+    { sha: C1, commit: { message: `deploy(${APP}): ${APP_HEAD.slice(0, 12)} (#8)\n\ndigest ${DIGEST}` } },
+    { sha: C2, commit: { message: `deploy(${APP}): ${OLD_REV.slice(0, 12)} (#7)` } },
+  ]);
+
+  test("T12-05 F4: --release는 hold만 푼다고 알리고, 최신 배포가 아니면 --to <최신> 뒤 --release를 next로", async () => {
+    const r = await runCli(["rollback", APP, "--release", "--json"], releaseWorld(BACK, deployLog));
+    expect(r.code).toBe(0);
+    expectPlanReadOnly(r);
+    expect(r.json.notes[0]).toBe(`--release는 hold만 푼다. 이미지는 지금 것(revision ${OLD_REV.slice(0, 7)})이 그대로 남고 다음 빌드의 배포 PR부터 바뀐다`);
+    expect(r.json.notes[1]).toContain(`최신 배포(revision ${APP_HEAD.slice(0, 12)})가 아니다`);
+    expect(r.json.next).toBe(`homelab rollback ${APP} --to ${APP_HEAD.slice(0, 12)} --apply 뒤 homelab rollback ${APP} --release --apply`);
+    // 최신 배포 커밋 하나만 읽는다(롤백 커밋·그 전 배포는 읽지 않는다)
+    const read = r.calls.map((c) => c.argv.at(-1));
+    expect(read).toContain(contentsPath(P, C1));
+    expect(read).not.toContain(contentsPath(P, C2));
+  });
+
+  test("T12-05 F4: 지금 이미지가 최신 배포면 안내 한 줄만, next는 해제 apply", async () => {
+    const r = await runCli(["rollback", APP, "--release", "--json"], releaseWorld(imageYaml(APP, DIGEST, APP_HEAD, true), deployLog));
+    expect(r.code).toBe(0);
+    expectPlanReadOnly(r);
+    expect(r.json.notes).toEqual([`--release는 hold만 푼다. 이미지는 지금 것(revision ${APP_HEAD.slice(0, 7)})이 그대로 남고 다음 빌드의 배포 PR부터 바뀐다`]);
+    expect(r.json.next).toBe(`homelab rollback ${APP} --release --apply`);
+  });
+
+  test("T12-05 F4: 기록을 못 읽어도 해제는 막지 않고 비교하지 못했다고 알린다", async () => {
+    const r = await runCli(["rollback", APP, "--release", "--json"], releaseWorld(BACK, ghGet(`${R}/commits?path=${P}&sha=main&per_page=30`, 403, { message: "Forbidden" })));
+    expect(r.code).toBe(0);
+    expect(r.json.status).toBe("pending");
+    expect(r.json.notes[1]).toBe("최신 배포 이미지와 비교하지 못했다(apps/memo/image.yaml 기록을 읽지 못했다(HTTP 403))");
+    expect(r.json.next).toBe(`homelab rollback ${APP} --release --apply`);
+  });
+
   test("--release는 PR 계산 때의 main 이미지에서 hold만 푼다(시작 뒤 병합된 롤백을 되돌리지 않는다, #884 P2-2)", async () => {
     const MAIN2 = "6".repeat(40);
     const later = imageYaml(APP, DIGEST, APP_HEAD, true);
@@ -79,6 +119,7 @@ describe("rollback", () => {
     const commitMsg = (sha: string) => ghGet(`${R}/git/commits/${sha}`, 200, { message: "x\n\nHomelab-CLI: rollback", tree: { sha: "d".repeat(40) } });
     const pr = (head: string) => ghResponse(200, [{ number: 12, head: { sha: head }, base: { ref: "main" } }]);
     return [
+      ghGet(`${R}/commits?path=${P}&sha=main&per_page=30`, 200, []),
       ghGet(`${R}/git/ref/heads/main`, [...Array(3).fill(ghResponse(200, { object: { sha: MAIN } })), ghResponse(200, { object: { sha: MAIN2 } })]),
       ghGet(contentsPath(P), 200, fileJson(imageYaml(APP, DIGEST, APP_HEAD, true))),
       ghGet(contentsPath(P, MAIN2), 200, fileJson(released)),

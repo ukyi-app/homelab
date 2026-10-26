@@ -19,13 +19,15 @@ const deploy = (mark: string | null, ready = true): Resp => ({
   }),
 });
 
-function world(o: { secret: Resp[]; deploy: Resp[]; patchCode?: number; rollout?: number }): Rule[] {
+const notFound = (what: string): Resp => ({ code: 1, stderr: `Error from server (NotFound): ${what} not found\n` });
+
+function world(o: { secret: Resp[]; deploy: Resp[]; patchCode?: number; rollout?: number; values?: string; es?: Resp[] }): Rule[] {
   return [
-    ...homelab({ [`apps/${APP}/values.yaml`]: VALUES }),
+    ...homelab({ [`apps/${APP}/values.yaml`]: o.values ?? VALUES }),
     ...folders({ "/apps": [APP] }),
     infisicalList(`/apps/${APP}`, { API_TOKEN: FAKE_SECRETS[0] }),
     // 스텁의 메타데이터는 고정이라 그 메타데이터의 동기화 버전을 ESO가 썼다고 둔다(core forceSync의 완료 판정).
-    kubectlRule(["-n", NS, "get", "externalsecrets.external-secrets.io", `${APP}-app`, "-o", "json"], { stdout: JSON.stringify({ metadata: ES_META, status: { syncedResourceVersion: esSyncVersion(ES_META), conditions: [{ type: "Ready", status: "True" }] } }) }),
+    kubectlRule(["-n", NS, "get", "externalsecrets.external-secrets.io", `${APP}-app`, "-o", "json"], o.es ?? { stdout: JSON.stringify({ metadata: ES_META, status: { syncedResourceVersion: esSyncVersion(ES_META), conditions: [{ type: "Ready", status: "True" }] } }) }),
     kubectlRule(["-n", NS, "get", "secret", `${APP}-app`, "-o", "json"], o.secret),
     kubectlRule(["-n", NS, "get", "deployments.apps", APP, "-o", "json"], o.deploy),
     kubectlRule(["-n", NS, "get", "secrets", `${APP}-app`, "-o", "jsonpath={.metadata.resourceVersion}"], { stdout: "101" }),
@@ -70,6 +72,41 @@ describe("secret sync", () => {
     expect(again.code).toBe(0);
     expect(again.json.steps.find((s: any) => s.id === "sync").result).toBe("skipped");
     expect(again.writes.map((c) => c.argv[3])).toEqual(["patch"]);
+  });
+
+  // T12-05 F3: app add PR(secrets 추가) 병합 직후 Argo CD가 아직 반영하지 않으면 ExternalSecret이 없다. 앱이 이미 떠 있는 경우와
+  // 새 앱이라 Deployment도 아직 없는 경우 모두 실패가 아니라 대기다.
+  for (const shape of ["앱 있음", "새 앱(Deployment 없음)"] as const) {
+    test(`T12-05 F3: Argo CD 반영 전(ExternalSecret 없음, ${shape})이면 대기(3), 쓰기 0, 다시 치면 잇는다`, async () => {
+      const es = [notFound(`externalsecrets.external-secrets.io "${APP}-app"`)];
+      const deployResp = shape === "앱 있음" ? [deploy(null)] : [notFound(`deployments.apps "${APP}"`)];
+      const before = world({ es, secret: [notFound(`secrets "${APP}-app"`)], deploy: deployResp });
+      const plan = await runCli(["secret", "sync", APP, "--json"], before);
+      expect(plan.code).toBe(0);
+      expectPlanReadOnly(plan);
+      expect(plan.json.status).toBe("pending");
+      expect(plan.json.notes.join(" ")).toContain("Argo CD가 values의 secrets를 반영해 ExternalSecret을 만들기를 기다림");
+
+      const r = await runCli(["secret", "sync", APP, "--apply", "--json"], before);
+      expect(r.code).toBe(3);
+      expect(r.json.status).toBe("waiting");
+      expect(r.json.steps.map((x: any) => x.result)).toEqual(["skipped", "skipped", "waiting", "not-run"]);
+      expect(r.json.next).toBe(`Argo CD가 values의 secrets를 반영해 ExternalSecret을 만들기를 기다림. 끝나면 다시: homelab secret sync ${APP} --apply`);
+      expect(r.writes).toEqual([]);
+
+      // Argo CD가 반영한 뒤 같은 명령: 동기화·재시작으로 끝난다
+      const old = secret("old-value-1234567890");
+      const again = await runCli(["secret", "sync", APP, "--apply", "--json"], world({ secret: [old, old, secret(FAKE_SECRETS[0])], deploy: [deploy(null), deploy(null), deploy(null), deploy(MARK)] }));
+      expect(again.code).toBe(0);
+      expect(again.json.status).toBe("done");
+    });
+  }
+
+  test("T12-05 F3: values에 secrets가 없으면 대기가 아니라 그대로 실패(1)하고 쓰지 않는다", async () => {
+    const r = await runCli(["secret", "sync", APP, "--apply", "--json"], world({ values: VALUES.replace("secrets: [API_TOKEN]\n", ""), es: [notFound(`externalsecrets.external-secrets.io "${APP}-app"`)], secret: [notFound(`secrets "${APP}-app"`)], deploy: [deploy(null)] }));
+    expect(r.code).toBe(1);
+    expect(r.json.error.next).toBe(`homelab secret set ${APP} <KEY> 뒤 homelab app add ${APP}`);
+    expect(r.writes).toEqual([]);
   });
 
   test("Infisical에 없는 키가 있으면 secret set으로 안내하고 쓰지 않는다", async () => {

@@ -7,7 +7,7 @@ import { defineCommand, type Observation, type Step } from "../core/command";
 import { APP_NAME } from "../core/names";
 import { parseYaml } from "../core/values";
 
-const same = (detail: string): Observation => ({ state: "same", action: "none", detail });
+const same = (detail: string, extra: Partial<Observation> = {}): Observation => ({ state: "same", action: "none", detail, ...extra });
 
 export default defineCommand({
   path: ["secret", "sync"],
@@ -46,7 +46,9 @@ export default defineCommand({
         id: "sync",
         target: `ExternalSecret ${ns}/${es}`,
         async read(c) {
-          if (c.k8s.get("externalsecret", ns, es) === null) return { state: "missing", action: "none", detail: "없음(Argo CD 동기화 전?)", next: `homelab status ${app}` };
+          // values의 secrets는 main에 있는데 ExternalSecret이 없으면 Argo CD가 아직 반영하지 않은 것이다(T12-05 F3). 실패가 아니라
+          // 대기로 멈추고 다시 치면 잇는다. secrets가 없거나 등록 전이면 앞 확인 단계가 먼저 실패한다.
+          if (c.k8s.get("externalsecret", ns, es) === null) return same("없음", { hold: "Argo CD가 values의 secrets를 반영해 ExternalSecret을 만들기를 기다림" });
           const stale = keys.filter((k) => c.k8s.secretHash(ns, es, k) !== c.infisical.valueHash(folder, k));
           return stale.length === 0 ? same("Secret이 Infisical과 같음") : { state: "differs", action: "update", detail: `다른 키 ${stale.length}개 → force-sync` };
         },
@@ -59,6 +61,8 @@ export default defineCommand({
         id: "restart",
         target: `Deployment ${ns}/${app}`,
         async read(c) {
+          // 앞 단계가 ExternalSecret을 기다리는 동안은 새 앱이면 Deployment도 아직 없다. 그 읽기 실패로 전체 읽기를 막지 않는다.
+          if (c.k8s.get("externalsecret", ns, es) === null) return { state: "differs", action: "update", detail: "ExternalSecret이 생긴 뒤 확인" };
           const p = c.k8s.podSecretsCurrent(ns, app);
           if (p.current && p.rolledOut) return same("파드가 지금 Secret으로 떠 있음");
           return { state: "differs", action: "update", detail: p.current ? "rollout 진행 중" : "파드가 옛 Secret → 재시작" };

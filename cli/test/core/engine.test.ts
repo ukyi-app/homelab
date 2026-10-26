@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ReadCtx, Observation, Step, WriteCtx } from "../../src/core/command";
 import { ExecTimeout, PLAN_WRITE_BLOCKED } from "../../src/core/exec";
-import type { Mode } from "../../src/core/result";
+import { CliError, type Mode } from "../../src/core/result";
 import { revealSecret } from "../../src/core/secret";
 import { REST, applyWith, rule, testCtx } from "../harness";
 
@@ -119,6 +119,54 @@ describe("엔진", () => {
     const r = await ctxFor("plan").engine({ command: "t", steps: [broken, fakeStep("b", world)] });
     expect(r.status).toBe("failed");
     expect(r.steps[1].result).toBe("planned");
+  });
+
+  // 전체 읽기에서는 hold, 그 뒤 읽기에서는 holds[1](없으면 대기 풀림)을 내는 확인 단계.
+  function holdOnce(holds: [string, string?]): Step {
+    let reads = 0;
+    return {
+      id: "sync",
+      target: "대상 sync",
+      async read(): Promise<Observation> {
+        const h = reads++ === 0 ? holds[0] : holds[1];
+        return h ? { state: "same", action: "none", detail: "반영 중", hold: h } : { state: "same", action: "none", detail: "반영됨" };
+      },
+    };
+  }
+
+  test("T12-05 F7: 전체 읽기의 대기가 apply 직전 읽기에서 풀렸으면 그 주의를 내지 않는다", async () => {
+    const world = { b: false };
+    const r = await ctxFor("apply").engine({ command: "t", steps: [holdOnce(["동기화 대기"]), fakeStep("b", world)], notes: ["고정 주의"] });
+    expect(r.status).toBe("done");
+    expect(r.notes).toEqual(["고정 주의"]);
+    // plan은 전체 읽기 한 번뿐이라 그 대기를 그대로 알린다
+    const p = await ctxFor("plan").engine({ command: "t", steps: [holdOnce(["동기화 대기"]), fakeStep("b", { b: false })] });
+    expect(p.notes).toEqual(["대상 sync: 동기화 대기. 뒤 단계는 대기가 끝난 뒤 실행한다"]);
+  });
+
+  test("T12-05 F7: apply 직전 읽기에서도 대기면 주의는 지금 문구로 한 줄 남고 waiting", async () => {
+    const world = { b: false };
+    const b = fakeStep("b", world);
+    const r = await ctxFor("apply").engine({ command: "t", steps: [holdOnce(["동기화 대기(1/2)", "동기화 대기(2/2)"]), b] });
+    expect(r.status).toBe("waiting");
+    expect(r.notes).toEqual(["대상 sync: 동기화 대기(2/2). 뒤 단계는 대기가 끝난 뒤 실행한다"]);
+    expect(b.applyCount).toBe(0);
+  });
+
+  test("T12-05 F9: 원인을 아는 실패(CliError)는 읽기·apply 어디서 나든 그 다음 행동을 next로 쓴다", async () => {
+    const login = () => new CliError("Infisical /apps/x 목록: Infisical 로그인이 만료됐거나 거부됐다", "infisical login 뒤 같은 명령을 다시 실행한다");
+    const readFails: Step = { id: "x", target: "x", read: async () => { throw login(); }, apply: async () => {} };
+    for (const mode of ["plan", "apply"] as const) {
+      const r = await ctxFor(mode).engine({ command: "t", steps: [readFails] });
+      expect(r.error?.next).toBe("infisical login 뒤 같은 명령을 다시 실행한다");
+    }
+    const applyFails: Step = { id: "y", target: "y", read: async () => ({ state: "missing", action: "delete", detail: "키 1개" }), apply: async () => { throw login(); } };
+    const r = await ctxFor("apply").engine({ command: "t", steps: [applyFails] });
+    expect(r.status).toBe("failed");
+    expect(r.error?.next).toBe("infisical login 뒤 같은 명령을 다시 실행한다");
+    // 그 밖의 실패는 그대로 단계 자리의 기본 문구다
+    const plain: Step = { id: "z", target: "z", read: async () => { throw new Error("읽기 실패"); }, apply: async () => {} };
+    expect((await ctxFor("plan").engine({ command: "t", steps: [plain] })).error?.next).toBe("원인을 고친 뒤 다시: homelab test");
   });
 
   test("read 문맥에는 쓰기 함수가 없다(쓰기 어댑터는 apply 문맥에만 존재, 3라운드 구조)", async () => {

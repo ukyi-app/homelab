@@ -9,7 +9,7 @@
 //   줄바꿈이 있으면 다음 줄이 다른 키가 된다. 그래서 setValue가 값 전체 형식을 먼저 본다.
 import { jsonParse } from "./intrinsics";
 import type { InfisicalRead, InfisicalWrite } from "./command";
-import { ExecTimeout, why, type Exec } from "./exec";
+import { ExecTimeout, why, type Exec, type ExecResult } from "./exec";
 import { PROJECT_ID, SECRET_KEY, fullMatch, hasControl } from "./names";
 import { CliError } from "./result";
 import { MIN_SECRET, Secret, revealSecret } from "./secret";
@@ -18,6 +18,18 @@ export const INFISICAL_ENV = "prod";
 export const PROJECT_ENV = "HOMELAB_INFISICAL_PROJECT_ID";
 // /apps/<앱>, /apps/<앱>/postgres 같은 폴더 경로.
 const FOLDER = /\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*/;
+
+// 로그인 만료·인증 거부(T12-05 F9). 값이 실릴 수 있는 호출은 오류 원문을 버리므로, 고정 정규식에 맞았는지(이름)만 받는다
+// (exec signals). 원문은 계속 버린다. 0.44.2 바이너리 문구(strings 실측 2026-10-26): "Your login session has expired.
+// Please run [infisical login]", "You must be logged in ... run [infisical login]", "we couldn't find your logged in details,
+// try running [infisical login]". API가 토큰을 거부하면 오류 줄에 [status-code=401]이나 Unauthorized가 실린다.
+// 함정: signals는 stdout도 본다. 성공한 목록의 stdout은 값이라 맞을 수 있으니 실패(exit ≠ 0)일 때만 판정한다.
+const LOGIN_SIGNALS = { login: /\[infisical login\]|status-code=401\b|\bUnauthorized\b/ };
+export const LOGIN_NEXT = "infisical login 뒤 같은 명령을 다시 실행한다";
+
+function loginExpired(r: ExecResult, what: string): void {
+  if (r.code !== 0 && r.signals?.includes("login")) throw new CliError(`${what}: Infisical 로그인이 만료됐거나 거부됐다`, LOGIN_NEXT);
+}
 
 // 프로젝트 ID 정하기. lead 결정(2026-10-23): 환경변수, 없고 tty면 한 번 묻기, 아니면 실패 + 다음 행동. 값은 저장소에 두지 않는다.
 export type ProjectSource = { env: Record<string, string | undefined>; isTTY: boolean; ask: (q: string) => string | null };
@@ -72,8 +84,9 @@ function folderPieces(path: string): [string, string][] {
 // 폴더 목록 JSON에서 이름만. 실측(0.44.2 바이너리 + 가짜 API, #880 리뷰, packages/cmd/folder.go): 항목은
 // {folderId, folderName, folderPath}이고 빈 목록은 null이다. 그 밖의 모양이면 던진다.
 function folderNames(exec: Exec, project: string, parent: string): string[] {
-  const r = exec(argvFor.folders(project, parent));
+  const r = exec(argvFor.folders(project, parent), { signals: LOGIN_SIGNALS });
   if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${parent} 폴더 목록: 시간 초과`);
+  loginExpired(r, `Infisical ${parent} 폴더 목록`);
   if (r.code !== 0) throw new Error(`Infisical ${parent} 폴더 목록: ${why(r)}`);
   let parsed: unknown;
   try {
@@ -106,8 +119,9 @@ export function infisicalRead(exec: Exec, project: ReturnType<typeof projectReso
   // 다른 키의 값은 Secret으로도 남기지 않고 버린다(필요 없는 값을 들고 다니지 않는다).
   const readFolder = (path: string, want?: string): { keys: string[]; value: Secret | null } => {
     checkFolder(path);
-    const r = exec(argvFor.list(project.id(), path), { secretStdout: true });
+    const r = exec(argvFor.list(project.id(), path), { secretStdout: true, signals: LOGIN_SIGNALS });
     if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${path} 목록: 시간 초과`);
+    loginExpired(r, `Infisical ${path} 목록`);
     if (r.code !== 0 || !r.stdoutSecret) throw new Error(`Infisical ${path} 목록: ${why(r)}`);
     let parsed: unknown;
     try {
@@ -160,8 +174,9 @@ export function infisicalWrite(exec: Exec, project: ReturnType<typeof projectRes
       const problem = valueProblem(value);
       if (problem) throw new Error(`Infisical ${path}/${key}: ${problem}`);
       const line = new Secret(`${key}=${revealSecret(value)}\n`);
-      const r = exec(argvFor.set(project.id(), path), { input: line });
+      const r = exec(argvFor.set(project.id(), path), { input: line, signals: LOGIN_SIGNALS });
       if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${path}/${key} 쓰기: 시간 초과(결과 미상)`);
+      loginExpired(r, `Infisical ${path}/${key} 쓰기`);
       // 성공 표에는 값이 가려져(******) 나오지만 쓰지 않는다.
       if (r.code !== 0) throw new Error(`Infisical ${path}/${key} 쓰기: ${why(r)}`);
     },
@@ -169,16 +184,18 @@ export function infisicalWrite(exec: Exec, project: ReturnType<typeof projectRes
       checkFolder(path);
       for (const [parent, name] of folderPieces(path)) {
         if (folderNames(exec, project.id(), parent).includes(name)) continue;
-        const r = exec(argvFor.createFolder(project.id(), parent, name));
+        const r = exec(argvFor.createFolder(project.id(), parent, name), { signals: LOGIN_SIGNALS });
         if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${parent}/${name} 폴더 만들기: 시간 초과(결과 미상)`);
+        loginExpired(r, `Infisical ${parent}/${name} 폴더 만들기`);
         if (r.code !== 0) throw new Error(`Infisical ${parent}/${name} 폴더 만들기: ${why(r)}`);
       }
     },
     removeKey(path, key) {
       checkFolder(path);
       checkKey(key);
-      const r = exec(argvFor.remove(project.id(), path, key));
+      const r = exec(argvFor.remove(project.id(), path, key), { signals: LOGIN_SIGNALS });
       if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${path}/${key} 삭제: 시간 초과(결과 미상)`);
+      loginExpired(r, `Infisical ${path}/${key} 삭제`);
       if (r.code !== 0) throw new Error(`Infisical ${path}/${key} 삭제: ${why(r)}`);
     },
   };

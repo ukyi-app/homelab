@@ -5,9 +5,14 @@
 // Step.read는 ReadCtx(쓰기 함수 없음), Step.apply는 그 apply만의 WriteCtx를 받는다.
 import type { Observation, Plan, ReadCtx, WriteCtx } from "./command";
 import { ExecTimeout } from "./exec";
-import type { Result, Status, StepReport } from "./result";
+import { CliError, type Result, type Status, type StepReport } from "./result";
 
 const RERUN = "같은 명령을 다시 실행하면 된 단계는 건너뛰고 이어 간다";
+
+// 원인을 아는 실패(CliError, 예 Infisical 로그인 만료)는 그 다음 행동을 그대로 쓴다. 아니면 단계 자리의 기본 문구.
+const nextOf = (e: unknown, fallback: string): string => (e instanceof CliError ? e.next : fallback);
+
+const holdNote = (target: string, hold: string) => `${target}: ${hold}. 뒤 단계는 대기가 끝난 뒤 실행한다`;
 
 function normalize(o: Observation): Observation {
   // hold는 "이 단계는 됐고 바깥을 기다린다"다. 아직 안 된 단계가 뒤를 막으려면 그 단계가 실패해야 한다.
@@ -39,6 +44,8 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
   }
   const reports: StepReport[] = plan.steps.map((s) => ({ id: s.id, target: s.target, state: "missing", action: "none", detail: "", result: "not-run" }));
   const notes = [...(plan.notes ?? [])];
+  // 전체 읽기에서 올린 대기 주의(단계 번호 → 줄). apply가 그 단계를 다시 읽어 대기가 풀렸으면 지운다(T12-05 F7).
+  const heldNotes = new Map<number, string>();
 
   const finish = (status: Status, error?: { message: string; next: string }, held?: string): Result => {
     let next: string | null;
@@ -64,14 +71,17 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
       const o = normalize(await s.read(ctx));
       reports[i] = { ...reports[i], state: o.state, action: o.action, detail: detailOf(o), result: ctx.mode === "apply" ? "not-run" : o.state === "same" ? "skipped" : "planned" };
       if (o.warn) notes.push(`${s.target}: ${o.warn}`);
-      if (o.hold) notes.push(`${s.target}: ${o.hold}. 뒤 단계는 대기가 끝난 뒤 실행한다`);
+      if (o.hold) {
+        notes.push(holdNote(s.target, o.hold));
+        heldNotes.set(i, notes.at(-1)!);
+      }
       if (!s.apply && o.state !== "same") {
         reports[i].result = "failed";
         blocked ??= { message: `${s.target}: ${o.detail}`, next: o.next ?? `원인을 고친 뒤 다시: ${planLine(ctx.line)}` };
       }
     } catch (e) {
       reports[i] = { ...reports[i], detail: "읽지 못함", result: "failed" };
-      blocked ??= { message: `${s.target}: ${(e as Error).message}`, next: `원인을 고친 뒤 다시: ${planLine(ctx.line)}` };
+      blocked ??= { message: `${s.target}: ${(e as Error).message}`, next: nextOf(e, `원인을 고친 뒤 다시: ${planLine(ctx.line)}`) };
     }
   }
   if (blocked) return finish("failed", blocked);
@@ -87,9 +97,16 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
       seen = normalize(await s.read(ctx));
     } catch (e) {
       reports[i] = { ...reports[i], detail: "읽지 못함", result: "failed" };
-      return finish("failed", { message: `${s.target}: ${(e as Error).message}`, next: RERUN });
+      return finish("failed", { message: `${s.target}: ${(e as Error).message}`, next: nextOf(e, RERUN) });
     }
     reports[i] = { ...reports[i], state: seen.state, action: seen.action, detail: detailOf(seen) };
+    // 전체 읽기 뒤 대기가 풀렸으면(예 Argo CD 동기화 완료) 그때의 주의는 이제 틀린 말이다. 아직 대기면 지금 문구로 바꾼다.
+    const stale = heldNotes.get(i);
+    const at = stale === undefined ? -1 : notes.indexOf(stale);
+    if (at >= 0) {
+      if (seen.state === "same" && seen.hold) notes[at] = holdNote(s.target, seen.hold);
+      else notes.splice(at, 1);
+    }
     if (seen.state === "same" && seen.hold) {
       reports[i].result = "waiting";
       return finish("waiting", undefined, seen.hold);
@@ -117,7 +134,7 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
     } catch (e) {
       if (!(e instanceof ExecTimeout)) {
         reports[i].result = "failed";
-        return finish("failed", { message: `${s.target}: ${(e as Error).message}`, next: `원인을 고친 뒤 다시: ${ctx.line}` });
+        return finish("failed", { message: `${s.target}: ${(e as Error).message}`, next: nextOf(e, `원인을 고친 뒤 다시: ${ctx.line}`) });
       }
       timedOut = true;
     }
@@ -126,7 +143,7 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
       after = normalize(await s.read(ctx));
     } catch (e) {
       reports[i].result = "failed";
-      return finish("failed", { message: `${s.target}: 실행 뒤 상태를 읽지 못했다(결과 미상): ${(e as Error).message}`, next: RERUN });
+      return finish("failed", { message: `${s.target}: 실행 뒤 상태를 읽지 못했다(결과 미상): ${(e as Error).message}`, next: nextOf(e, RERUN) });
     }
     if (after.state !== "same") {
       reports[i].result = "failed";

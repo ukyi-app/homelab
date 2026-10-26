@@ -524,6 +524,18 @@ function steps(n: Names, dataFiles: string[]): Step[] {
   ];
 }
 
+// 폐기 뒤 남는 것. 앱 ns가 없는 데이터(PostgreSQL 전용, T12-05 probe2)에는 ns를 말하지 않는다(F8). 조사는 앱 이름이 아니라
+// "ns"에 붙여 이름의 발음과 상관없이 맞게 한다. ns를 읽지 못하면 있다고 보고 말한다(안내 문구일 뿐이고 단계 읽기가 실패를 보인다).
+function leftNote(ctx: ReadCtx, n: Names): string {
+  let hasNs = true;
+  try {
+    hasNs = ctx.k8s.get("namespace", null, n.ns) !== null;
+  } catch {
+    // 위 주석대로 있다고 본다.
+  }
+  return hasNs ? `앱 ns(${n.ns})와 Infisical 폴더는 남는다(키만 지운다).` : "Infisical 폴더는 남는다(키만 지운다).";
+}
+
 export default defineCommand({
   path: ["data", "purge"],
   summary: "데이터 폐기(C.5.5). --apply와 --confirm <app> 둘 다 있어야 실행",
@@ -548,7 +560,7 @@ export default defineCommand({
         command: "data purge",
         app,
         steps: steps(n, dataFiles),
-        notes: ["폐기 뒤에도 그 DB는 base backup 안에 보존 기간(14일) 동안 남는다.", `앱 ns app-${app}과 Infisical 폴더는 남는다(키만 지운다).`],
+        notes: ["폐기 뒤에도 그 DB는 base backup 안에 보존 기간(14일) 동안 남는다.", leftNote(ctx, n)],
         next: (status) => (status === "pending" ? `homelab data purge ${app} --confirm ${app} --apply` : (undefined as unknown as string | null)),
       });
     };
