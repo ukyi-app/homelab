@@ -40,7 +40,8 @@ export type KubeKind =
 export type LogTarget = { deployment: string } | { job: string };
 
 // 복원 실행 기록 ConfigMap 이름(03, restore.md의 $W를 클러스터에 둔 것). 범용 ConfigMap 조회는 없다.
-export type RestoreRecordName = "restore-pg" | "restore-vk" | "restore-check" | "data-purge";
+// data-purge-<app>는 database ns에만 둔다(앱 ns가 없는 PostgreSQL 전용 데이터도 있다).
+export type RestoreRecordName = "restore-pg" | "restore-vk" | "restore-check" | `data-purge-${string}`;
 // created: API 서버가 정한 metadata.creationTimestamp(클러스터 시계). 만들기 전 검사에서는 "".
 export type RestoreRecord = { run: string; data: Record<string, string>; resourceVersion: string; uid: string; created: string };
 
@@ -134,7 +135,11 @@ export type ValkeyWrite = {
   authCheck(ns: string, deployment: string, password: Secret): "accepted" | "rejected";
   // 복원 표식 키 homelab:restore:<run>. 값은 실행 id(비밀 아님), 만료 없음. set·del은 성공이면 true, exists는 있으면 true.
   // 키 수만으로는 "복원 키가 다 사라지고 앱이 새 키를 썼다"를 못 가린다. 복원 직후 넣은 이 키가 재시작 뒤에도 있어야 한다.
+  // run은 CLI 실행 id 또는 손 런북의 RUN(YYYYMMDD-HHMMSS-hex) 꼴이다.
   marker(ns: string, deployment: string, run: string, op: "set" | "exists" | "del"): boolean;
+  // 있는 표식 키 전부의 id(homelab:restore:* 고정 패턴, valkey-cli --scan). 복원 중 정기 백업이 표식을 R2로 가져가
+  // 다른 실행의 복원에서 돌아올 수 있다. 꼴이 다른 키가 있으면 실패다(셀 수 없다).
+  markers(ns: string, deployment: string): string[];
 };
 
 // 공유 PostgreSQL 앱 DB 복원(restore.md 2절, 03 2부). 흐름·SQL·매니페스트는 core가 갖는다. 명령은 순서(단계)와 표식만 정한다.

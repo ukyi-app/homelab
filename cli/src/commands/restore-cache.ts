@@ -159,11 +159,12 @@ function acceptEmpty(w: WriteCtx, n: Names, flag: boolean): boolean {
   return true;
 }
 
-// 앱 키 수(복원 표식 키는 뺀다)와 표식 유무.
+// 앱 키 수와 이 실행의 표식 유무. 표식 키는 이 실행 것만이 아니라 homelab:restore:* 전부 뺀다. 복원 중(running: true)
+// 정기 백업이 돌면 표식이 R2 백업에 들어가고, 그 백업을 다른 실행으로 복원하면 옛 표식이 돌아온다(#891 r2 P2).
 function appKeys(w: WriteCtx, n: Names, run: string): { appendonly: string; keys: number; marker: boolean } {
   const s = valkeyServer(w, n);
-  const marker = w.valkey.marker(n.ns, n.server, run, "exists");
-  return { appendonly: s.appendonly, keys: s.dbsize - (marker ? 1 : 0), marker };
+  const ids = w.valkey.markers(n.ns, n.server);
+  return { appendonly: s.appendonly, keys: s.dbsize - ids.length, marker: ids.includes(run) };
 }
 
 // 표식 키가 없으면 복원한 데이터가 그대로라는 근거가 없다. 키 수로는 "복원 키가 다 사라지고 앱이 새 키를 썼다"를 못 가린다.
@@ -438,7 +439,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
         if (s.appendonly !== "no") throw new Error(`복원 모드가 아니다(appendonly ${s.appendonly}). restoreMode가 반영됐는지 본다`);
         // RDB를 읽은 직후 표식 키를 넣는다. 재시작 뒤 이 키가 있어야 복원한 데이터가 AOF로 이어진 것이다(#889 r2 6).
         const run = mine(w, n).run;
-        const keys = s.dbsize - (w.valkey.marker(n.ns, n.server, run, "exists") ? 1 : 0);
+        const keys = s.dbsize - w.valkey.markers(n.ns, n.server).length;
         w.valkey.marker(n.ns, n.server, run, "set");
         mark(w, n, { "ok.loaded": "1", dbsize: String(keys), marker: "1" });
       },
@@ -542,10 +543,11 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
       async apply(w) {
         const r = mine(w, n);
         const run = r.run;
-        if (has(r, "marker")) {
-          w.valkey.marker(n.ns, n.server, run, "del");
-          mark(w, n, { marker: null });
-        }
+        // 이 실행의 표식과, 백업에서 돌아온 옛 실행의 표식을 함께 지운다. 남기면 다음 백업이 또 가져간다.
+        for (const id of w.valkey.markers(n.ns, n.server)) w.valkey.marker(n.ns, n.server, id, "del");
+        const markersLeft = w.valkey.markers(n.ns, n.server);
+        if (markersLeft.length) throw new Error(`복원 표식 키가 남았다(${markersLeft.map((x) => `homelab:restore:${x}`).join(", ")})`);
+        if (has(r, "marker")) mark(w, n, { marker: null });
         w.k8s.deleteRestoreObjects(n.ns, run);
         const left = runObjects(w, n, r);
         if (left.length) throw new Error(`이 실행의 객체가 남았다(${left.join(", ")})`);

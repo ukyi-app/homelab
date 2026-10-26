@@ -5,7 +5,7 @@ import { entries, isArray, jsonParse, jsonStringify, strIncludes } from "./intri
 import type { KubeKind, KubeRead, KubeWrite, LogTarget, RestoreRecord, RestoreRecordName } from "./command";
 import { ExecTimeout, must, why, type Exec, type ExecOpts } from "./exec";
 import { findSecretPath } from "./guard";
-import { hasControl } from "./names";
+import { APP_NAME, fullMatch, hasControl } from "./names";
 import { Secret, isSecret, revealSecret } from "./secret";
 
 const REQUEST_TIMEOUT = "--request-timeout=20s";
@@ -42,7 +42,7 @@ export type KubeOpts = { pollMs?: number };
 const POLL_MS = 2_000;
 const SECRETS_RV = "homelab.ukyi.app/secrets-rv";
 const RV = /^[0-9]{1,20}$/;
-const RECORD_NAMES = new Set<RestoreRecordName>(["restore-pg", "restore-vk", "restore-check", "data-purge"]);
+const RECORD_NAMES = new Set<string>(["restore-pg", "restore-vk", "restore-check"]);
 const RECORD_KEY = /^[a-z0-9][a-z0-9.-]{0,62}$/;
 const RUN_ID = /^[a-z0-9]{1,22}$/;
 const JSONPATH = /^\{\.status(\.[A-Za-z][A-Za-z0-9]*)+\}$/;
@@ -52,8 +52,12 @@ function checkTimeout(sec: number, max: number): void {
   if (!Number.isInteger(sec) || sec < 1 || sec > max) throw new Error(`기다림은 1~${max}초다`);
 }
 
-function checkRecord(name: string): void {
-  if (!RECORD_NAMES.has(name as RestoreRecordName)) throw new Error("복원 기록 이름은 restore-pg·restore-vk·restore-check·data-purge만");
+// 고정 이름 셋과, database ns의 data-purge-<앱 이름> 꼴 하나. 그 밖의 ConfigMap은 받지 않는다.
+function checkRecord(ns: string, name: string): void {
+  if (RECORD_NAMES.has(name)) return;
+  const app = name.startsWith("data-purge-") ? name.slice("data-purge-".length) : null;
+  if (app !== null && ns === "database" && fullMatch(APP_NAME, app)) return;
+  throw new Error("복원 기록 이름은 restore-pg·restore-vk·restore-check와 database ns의 data-purge-<앱>만");
 }
 
 function checkRun(runId: string): void {
@@ -295,7 +299,7 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
     },
     restoreRecord(ns, name) {
       checkName("namespace", ns);
-      checkRecord(name);
+      checkRecord(ns, name);
       const r = run(exec, ["-n", ns, "get", "configmaps", name, "-o", "json"]);
       if (r.errKind === "timeout") throw new ExecTimeout(`복원 기록 ${name}: 시간 초과`);
       if (r.code !== 0 && r.notFound) return null;
@@ -351,7 +355,7 @@ const CORE_KEYS = /^(in\.|dropped$|tmp$|bucket$)/;
 // allowCore는 pgrestore.ts만 true로 부른다(in.*·dropped).
 export function updateRecord(exec: Exec, r: KubeRead, ns: string, name: RestoreRecordName, runId: string, set: Record<string, string | null>, allowCore: boolean): void {
   checkName("namespace", ns);
-  checkRecord(name);
+  checkRecord(ns, name);
   checkRun(runId);
   const cur = r.restoreRecord(ns, name);
   if (!cur || cur.run !== runId) throw new Error(`복원 기록 ${name}이 이 실행(${runId})의 것이 아니다`);
@@ -422,7 +426,7 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
     },
     restoreRecordCreate(ns, name, runId, data) {
       checkName("namespace", ns);
-      checkRecord(name);
+      checkRecord(ns, name);
       checkRun(runId);
       for (const k of Object.keys(data)) if (CORE_KEYS.test(k)) throw new Error(`복원 기록 ${k}는 core만 쓴다`);
       const body = { ...data, run: runId };
@@ -444,7 +448,7 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
     },
     restoreRecordDelete(ns, name, runId) {
       checkName("namespace", ns);
-      checkRecord(name);
+      checkRecord(ns, name);
       checkRun(runId);
       // 이 실행의 기록인지 본 그 객체(uid)만 지운다(#880 2라운드 P2). 라벨 셀렉터 삭제는 kubectl이 목록을 본 뒤 이름으로 지워,
       // 그사이 같은 이름으로 생긴 다른 실행의 잠금을 지운다. 남의 기록이거나 없으면 아무것도 하지 않는다(전과 같음).

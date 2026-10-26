@@ -8,7 +8,7 @@
 import { defineCommand, type Observation, type ReadCtx, type Step, type WriteCtx } from "../core/command";
 import { APP_NAME, newRunId } from "../core/names";
 import { prStep } from "../core/pr";
-import { UsageError } from "../core/result";
+import { UsageError, type Result } from "../core/result";
 import { parseYaml, setTopLevel } from "../core/values";
 
 const REPO = "repos/ukyi-app/homelab";
@@ -26,7 +26,11 @@ const PG_KEEP_MS = 14 * 86_400_000;
 // 앱이 쓰기를 멈춘 시각은 Git 삭제 커밋이 아니라 이 명령이 클러스터에서 앱 워크로드가 없음을 본 시각이다. Argo CD가 늦거나
 // 멈추면 커밋 뒤 몇 시간이라도 앱이 쓴다(#889 r1 P1-2). 없음을 본 직후 기록 data-purge를 만들고, 그 creationTimestamp(API
 // 서버 시계)보다 뒤에 시작한 백업만 인정한다. 백업 시각도 클러스터 시계라 이 기기와의 시계 차이가 끼지 않는다(#889 r2 P2-5).
-const RECORD = "data-purge";
+// 기록은 앱마다 database ns의 data-purge-<app>다. 앱 ns가 없는 PostgreSQL 전용 데이터도 같은 자리에 둔다. 앱이 없어도 사람이
+// DB에 쓸 수 있고(시나리오 10의 probe2) DB가 등록 커밋보다 늦게 생길 수 있어, 등록 시각만으로는 판단하지 않는다(#889 r3 P1-2).
+// database ns는 CNPG가 있어 늘 있고 restore-check 기록도 그 ns에 있다.
+const REC_NS = "database";
+const recordName = (app: string) => `data-purge-${app}` as const;
 
 const hasTrue = (o: any, type: string) => (o?.status?.conditions ?? []).some((c: any) => c?.type === type && c?.status === "True");
 
@@ -45,6 +49,7 @@ function lastBackupStart(ctx: ReadCtx, ns: string, cronjob: string): string | nu
 }
 
 const same = (detail: string, extra: Partial<Observation> = {}): Observation => ({ state: "same", action: "none", detail, ...extra });
+const SEEN = "앱 워크로드가 보인다";
 
 const live = (p: any) => p?.status?.phase !== "Succeeded" && p?.status?.phase !== "Failed";
 
@@ -60,21 +65,30 @@ function dataPod(p: any, app: string): boolean {
 function appWorkloads(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   const own = (o: any) => o?.metadata?.labels?.["homelab.ukyi.app/app"] === n.app || o?.metadata?.labels?.["app.kubernetes.io/name"] === n.app;
   const out: string[] = [];
+  // 앱 ns가 없으면 목록은 비어 있다(앱이 처음부터 없거나 지워졌다). 앱 Application이 남아 있으면 곧 다시 띄울 수 있다.
+  if (ctx.k8s.get("application", "argocd", n.app)) out.push(`application/${n.app}`);
   for (const kind of ["deployment", "statefulset", "cronjob", "job"] as const) {
     for (const o of ctx.k8s.list(kind, n.ns)) if (own(o) || (kind === "deployment" && o?.metadata?.name === n.app)) out.push(`${kind}/${o?.metadata?.name}`);
   }
   for (const p of ctx.k8s.list("pod", n.ns)) if (live(p) && (own(p) || !dataPod(p, n.app))) out.push(`pod/${p?.metadata?.name}`);
+  // 모든 워크로드 읽기가 여기를 지난다(전용 엔진, 사전 읽기, 재조회, 쓰기 뒤 재조회, guarded 안 확인). 본 것은 잊지 않는다(#893 r2).
+  for (const x of out) n.seen.add(x);
   return out;
+}
+
+// 지금 보이는 워크로드, 없으면 이 실행에서 앞서 본 것. 한 번 보면 그 뒤 읽기는 사라졌어도 본 것으로 판정한다(#893 r2 A).
+function observed(ctx: ReadCtx | WriteCtx, n: Names): string[] {
+  const left = appWorkloads(ctx, n);
+  return left.length ? left : [...n.seen];
 }
 
 // 기록된 "앱 워크로드 없음" 확인 시각(기록의 creationTimestamp). 지금 기준(앱 삭제·데이터 등록)보다 앞이면 옛 실행의 것이라
 // 쓰지 않는다. 확인 뒤 워크로드가 다시 보이면 writes-stopped가 기록을 지운다(#889 r2 P1-3).
 function goneAt(ctx: ReadCtx | WriteCtx, n: Names, removed: number): string | null {
-  const t = ctx.k8s.restoreRecord(n.ns, RECORD)?.created;
+  const t = ctx.k8s.restoreRecord(REC_NS, recordName(n.app))?.created;
   return typeof t === "string" && Number.isFinite(Date.parse(t)) && Date.parse(t) > removed ? t : null;
 }
 
-const nsExists = (ctx: ReadCtx | WriteCtx, n: Names) => !!ctx.k8s.get("namespace", null, n.ns);
 
 // 백업 시각 t가 보존 기간 안인지. 문제면 그 설명.
 function staleness(t: string, keepMs: number): string | null {
@@ -84,7 +98,8 @@ function staleness(t: string, keepMs: number): string | null {
   return null;
 }
 
-type Names = { app: string; ns: string; dataFile: string };
+// seen: 이 실행에서 한 번이라도 본 앱 워크로드(메모리, 쓰기 아님). 어느 읽기에서 봤든 apply가 끝날 때 기록을 무효화한다.
+type Names = { app: string; ns: string; dataFile: string; seen: Set<string> };
 
 function values(ctx: ReadCtx | WriteCtx, path: string): any | null {
   const text = ctx.repo.readFile(path);
@@ -110,7 +125,7 @@ function listDir(ctx: ReadCtx, dir: string): string[] {
   });
 }
 
-type Baseline = { date: string; removed: number; what: string; appHistory: boolean } | { problem: string };
+type Baseline = { date: string; removed: number; what: string } | { problem: string };
 
 function commitDates(ctx: ReadCtx, path: string, perPage: number): string[] | { problem: string } {
   const r = ctx.gh.get(`${REPO}/commits?path=${encodeURIComponent(path)}&sha=main&per_page=${perPage}`);
@@ -153,9 +168,8 @@ function baseline(ctx: ReadCtx, app: string): Baseline {
   if ("problem" in reg) return reg;
   const removed = apps.length > 0 ? Date.parse(apps[0]) : Number.NEGATIVE_INFINITY;
   const registered = Date.parse(reg.date);
-  const appHistory = apps.length > 0;
-  if (removed >= registered) return { date: apps[0], removed, what: "앱 삭제", appHistory };
-  return { date: reg.date, removed: registered, what: appHistory ? "데이터 재등록(앱 삭제 뒤)" : "데이터 등록(앱 이력 없음)", appHistory };
+  if (removed >= registered) return { date: apps[0], removed, what: "앱 삭제" };
+  return { date: reg.date, removed: registered, what: apps.length > 0 ? "데이터 재등록(앱 삭제 뒤)" : "데이터 등록(앱 이력 없음)" };
 }
 
 const protectedOf = (o: any) => /Delete=false|Prune=false/.test(String(o?.metadata?.annotations?.[PROTECT] ?? ""));
@@ -214,55 +228,115 @@ function afterPr(detail: string): Observation {
   return { state: "missing", action: "none", detail };
 }
 
+// 워크로드를 보면 종료 기록은 거짓이 됐다. 지우고 멈춘다. 사라진 뒤 다시 실행하면 그때부터 새로 잰다.
+function invalidate(w: WriteCtx, n: Names, left: string[]): never {
+  const r = w.k8s.restoreRecord(REC_NS, recordName(n.app));
+  if (r) w.k8s.restoreRecordDelete(REC_NS, recordName(n.app), r.run);
+  throw new Error(`앱 워크로드가 있다(${left.join(", ")})${r ? ". 폐기 확인 기록을 지웠다" : ""}. kubectl -n ${n.ns} get deploy,sts,cronjob,job,pod --show-labels로 보고, 사라진 뒤 다시 실행한다`);
+}
+
+function seen(ctx: ReadCtx, n: Names, left: string[]): Observation {
+  const r = ctx.k8s.restoreRecord(REC_NS, recordName(n.app));
+  return { state: "differs", action: r ? "delete" : "none", detail: `${SEEN}(${left.join(", ")})${r ? " → 폐기 확인 기록이 무효가 된다. 지우고" : ""} 멈춘다` };
+}
+
+// 클러스터에서 앱 워크로드와 기록만 본다(GitHub·Infisical·백업 조회 없음). apply 때 본 엔진보다 먼저 따로 돈다(#893 r1 P1-2).
+// 본 엔진의 사전 읽기는 다른 서비스 하나만 실패해도 apply 전에 돌아가 무효화가 돌지 않는다.
+function workloadStep(n: Names): Step {
+  return {
+    id: "workloads",
+    target: `앱 워크로드(${n.ns})`,
+    async read(ctx) {
+      const left = observed(ctx, n);
+      return left.length ? seen(ctx, n, left) : same("없음");
+    },
+    async apply(w) {
+      // 읽을 때 봤으면 지금 사라졌어도 무효화한다(그사이 썼을 수 있다).
+      const left = appWorkloads(w, n);
+      invalidate(w, n, left.length ? left : ["읽을 때 본 워크로드"]);
+    },
+  };
+}
+
+// PR 2 전 단계(백업 확인·PR·PV)는 읽을 때마다 워크로드를 먼저 본다. 보이면 same으로 넘기지 않고 기록 삭제로 판정하고, apply에서
+// 지운 뒤 실패한다(#893 r1 P1-1). 확인만 하는 단계의 실패는 read에서 던진다. 그 단계에 apply가 생겨도 엔진이 apply 전에 막게.
+// 쓰는 단계는 쓰기 직전에 한 번 더 본다.
+function guarded(n: Names, step: Step): Step {
+  const check = !step.apply;
+  return {
+    ...step,
+    async read(ctx) {
+      if (values(ctx, n.dataFile) === null) return step.read(ctx);
+      const left = observed(ctx, n);
+      if (left.length) return seen(ctx, n, left);
+      const o = await step.read(ctx);
+      if (check && o.state !== "same") throw new Error(o.next ? `${o.detail}. ${o.next}` : o.detail);
+      return o;
+    },
+    async apply(w, o) {
+      // 읽을 때 봤으면 지금 사라졌어도 무효화한다. 쓰는 단계는 쓰기 직전에 다시 본다.
+      const left = appWorkloads(w, n);
+      if (o.detail.startsWith(SEEN) || left.length) invalidate(w, n, left.length ? left : ["읽을 때 본 워크로드"]);
+      if (!step.apply) throw new Error(o.detail);
+      await step.apply(w, o);
+      // 쓴 직후에도 본다. 엔진의 쓰기 뒤 재조회가 워크로드를 보면 그냥 실패할 뿐 기록을 지우지 못한다.
+      const after = appWorkloads(w, n);
+      if (after.length) invalidate(w, n, after);
+    },
+  };
+}
+
+// 이 실행에서 워크로드를 봤을 때 마지막에 도는 단계. 지금 없어도 지운다. 기록이 없으면 할 일 없음.
+function dropRecord(n: Names, list: string): Step {
+  return {
+    id: "record-invalidated",
+    target: `기록 ${REC_NS}/${recordName(n.app)}`,
+    async read(ctx) {
+      const r = ctx.k8s.restoreRecord(REC_NS, recordName(n.app));
+      return r ? { state: "differs", action: "delete", detail: `이 실행에서 앱 워크로드를 봤다(${list}) → 폐기 확인 기록이 무효가 된다` } : same("기록 없음(무효)");
+    },
+    async apply(w) {
+      const r = w.k8s.restoreRecord(REC_NS, recordName(n.app));
+      if (r) w.k8s.restoreRecordDelete(REC_NS, recordName(n.app), r.run);
+    },
+  };
+}
+
 function steps(n: Names, dataFiles: string[]): Step[] {
   const app = n.app;
+  const g = (step: Step) => guarded(n, step);
   return [
+    workloadStep(n),
     {
       id: "app-removed",
       target: `앱 ${app}`,
       async read(ctx) {
         if (listDir(ctx, `apps/${app}`).length > 0) return { state: "differs", action: "none", detail: `apps/${app}/가 아직 있다`, next: `homelab app remove ${app}` };
-        if (ctx.k8s.get("application", "argocd", app)) return { state: "differs", action: "none", detail: `Application ${app}이 아직 있다(삭제 동기화 대기)`, next: `homelab status ${app}` };
-        // 앱 워크로드는 writes-stopped가 본다. 여기서 막으면 쓰기 단계에 닿지 못해 옛 종료 기록을 지울 수 없다(#889 r2 P1-3).
-        return same("앱 삭제됨");
+        // Application과 앱 워크로드는 writes-stopped가 본다. 여기서 막으면 쓰기 단계에 닿지 못해 옛 종료 기록을 지울 수 없다(#889 r2 P1-3).
+        return same("main에서 앱 삭제됨");
       },
     },
-    {
+    g({
       id: "writes-stopped",
       target: "앱 쓰기가 멈춘 시각",
       async read(ctx) {
         if (values(ctx, n.dataFile) === null) return same("PR 2 뒤");
+        const r = ctx.k8s.restoreRecord(REC_NS, recordName(app));
         const base = baseline(ctx, app);
         // 기준을 못 정하면 뒤의 backup 단계가 멈춘다. 여기서는 기록하지 않는다.
         if ("problem" in base) return same("기준 시각 확인은 백업 단계에서");
-        // 앱 없이 PostgreSQL만 등록한 데이터는 앱 ns가 없다(ApplicationSet data는 CreateNamespace를 켜지 않는다). 앱 이력도 없으면
-        // 쓴 앱이 처음부터 없어 데이터 등록 시각만으로 본다(#889 r2 P2-4). ns가 없는데 앱 이력이 있으면 언제 멈췄는지 모른다.
-        if (!nsExists(ctx, n)) {
-          if (!base.appHistory) return same(`${n.ns} 없음, 앱 이력 없음(데이터 등록 시각만으로 본다)`);
-          return { state: "differs", action: "none", detail: `${n.ns}이 없는데 앱 이력이 있다(앱 쓰기가 멈춘 시각을 알 수 없다)`, next: `kubectl get ns ${n.ns}와 apps/${app} 이력을 손으로 확인한다` };
-        }
-        const r = ctx.k8s.restoreRecord(n.ns, RECORD);
-        const left = appWorkloads(ctx, n);
-        if (left.length) return { state: "differs", action: r ? "delete" : "none", detail: `앱 워크로드가 있다(${left.join(", ")})${r ? " → 종료 기록을 지우고" : ""} 멈춘다` };
         const at = goneAt(ctx, n, base.removed);
         if (at) return same(`앱 워크로드 없음 확인 ${at}`);
-        return { state: r ? "differs" : "missing", action: "create", detail: `앱 워크로드 없음을 지금 다시 보고 ${n.ns}/${RECORD}를 새로 만든다(그 생성 시각이 기준)` };
+        return { state: r ? "differs" : "missing", action: "create", detail: `앱 워크로드 없음을 지금 다시 보고 ${REC_NS}/${recordName(app)}을 새로 만든다(그 생성 시각이 기준)` };
       },
       async apply(w) {
-        if (!nsExists(w, n)) throw new Error(`${n.ns}이 없는데 앱 이력이 있다. kubectl get ns ${n.ns}와 apps/${app} 이력을 손으로 확인한다`);
-        const r = w.k8s.restoreRecord(n.ns, RECORD);
-        // 앱 워크로드를 보면 옛 종료 기록은 거짓이 됐다. 지우고 멈춘다. 사라진 뒤 다시 실행하면 그때부터 새로 잰다.
-        const left = appWorkloads(w, n);
-        if (left.length) {
-          if (r) w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
-          throw new Error(`앱 워크로드가 있다(${left.join(", ")})${r ? ". 종료 기록을 지웠다" : ""}. kubectl -n ${n.ns} get deploy,sts,cronjob,job,pod --show-labels로 보고, 사라진 뒤 다시 실행한다`);
-        }
-        // 기록 시각은 API 서버가 정한다. 옛 기록(기준보다 앞)은 지우고 새로 만든다.
-        if (r) w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
-        if (w.k8s.restoreRecordCreate(n.ns, RECORD, newRunId(), {}) === "exists") throw new Error("그사이 다른 실행이 기록을 만들었다. 다시 실행한다");
+        const r = w.k8s.restoreRecord(REC_NS, recordName(app));
+        // 워크로드는 guarded가 바로 앞에서 봤다. 기록 시각은 API 서버가 정한다. 옛 기록(기준보다 앞)은 지우고 새로 만든다.
+        if (r) w.k8s.restoreRecordDelete(REC_NS, recordName(app), r.run);
+        if (w.k8s.restoreRecordCreate(REC_NS, recordName(app), newRunId(), {}) === "exists") throw new Error("그사이 다른 실행이 기록을 만들었다. 다시 실행한다");
       },
-    },
-    {
+    }),
+    g({
       id: "backup",
       target: "앱 삭제 뒤 백업",
       async read(ctx) {
@@ -274,14 +348,13 @@ function steps(n: Names, dataFiles: string[]): Step[] {
         const base = baseline(ctx, app);
         if ("problem" in base) return { state: "differs", action: "none", detail: base.problem, next: "GitHub 이력을 확인한 뒤 다시 실행한다(기준 시각 없이는 백업을 판단하지 않는다)" };
         const { date, removed, what } = base;
-        // 앱 ns·앱 이력이 없으면 쓴 앱이 없다. 데이터 등록 시각만 기준이다(writes-stopped와 같은 판단).
-        const noApp = !base.appHistory && !nsExists(ctx, n);
-        const gone = noApp ? null : goneAt(ctx, n, removed);
-        // 앞 단계(writes-stopped)가 apply에서 기록한 뒤 다시 읽힌다. plan과 첫 읽기에서는 아직 없다.
-        if (!noApp && !gone) return same("앱 워크로드 없음을 기록한 뒤, 그 뒤에 시작한 백업을 본다");
-        const since = gone ? Math.max(removed, Date.parse(gone)) : removed;
+        const gone = goneAt(ctx, n, removed);
+        // 앞 단계(writes-stopped)가 apply에서 기록한 뒤 다시 읽힌다. plan과 첫 읽기에서는 아직 없다. apply 중에 여기까지 왔는데
+        // 없으면 앞 단계가 기록하지 않은 것이라 통과시키지 않고 멈춘다(hold는 plan에서는 알림으로만 보인다).
+        if (!gone) return same("앱 워크로드 없음을 기록한 뒤, 그 뒤에 시작·완료한 백업을 본다", { hold: "폐기 확인 기록이 아직 없다" });
+        const since = Math.max(removed, Date.parse(gone));
         const after = (t: unknown) => typeof t === "string" && Number.isFinite(Date.parse(t)) && Date.parse(t) > since;
-        const basis = gone ? `${what}(${date})·앱 워크로드 없음 확인(${gone}) 뒤` : `${what}(${date}) 뒤(앱 ns·앱 이력 없음)`;
+        const basis = `${what}(${date})·폐기 확인(${gone}) 뒤`;
         const wait = { state: "differs" as const, action: "none" as const, next: "다음 정기 백업(PostgreSQL 03:00, Valkey 03:30 KST)이 성공한 뒤 다시 실행한다" };
         const lacks: string[] = [];
         if (data.postgres?.enabled === true) {
@@ -306,8 +379,8 @@ function steps(n: Names, dataFiles: string[]): Step[] {
         if (lacks.length) return { ...wait, detail: `${basis} ${lacks.join("·")}이 없다` };
         return same(`${basis} 백업 있음`);
       },
-    },
-    {
+    }),
+    g({
       id: "inventory",
       target: "지울 데이터",
       async read(ctx) {
@@ -318,8 +391,8 @@ function steps(n: Names, dataFiles: string[]): Step[] {
         if (data.valkey?.persistent === true) items.push(`영속 Valkey PVC valkey-data와 PV, CronJob ${app}-valkey-backup`);
         return same(items.length ? items.join(", ") : "데이터 리소스 없음");
       },
-    },
-    {
+    }),
+    g({
       id: "chart",
       target: `데이터 차트 ${PURGE_CHART}`,
       async read(ctx) {
@@ -329,8 +402,8 @@ function steps(n: Names, dataFiles: string[]): Step[] {
         if (r.status === 200) return same(`태그 data-chart-v${PURGE_CHART} 있음`);
         return { state: "missing", action: "none", detail: `태그 data-chart-v${PURGE_CHART}가 없다(purge 값은 ${PURGE_CHART}부터)`, next: "데이터 차트 1.0.2 태그가 생긴 뒤 다시 실행한다" };
       },
-    },
-    holdUntilMerged(
+    }),
+    g(holdUntilMerged(
       "pr-prepare",
       prStep({
         command: "data purge",
@@ -351,8 +424,8 @@ function steps(n: Names, dataFiles: string[]): Step[] {
           return { [n.dataFile]: setTopLevel(text, { chartVersion: semverAtLeast(v?.chartVersion, PURGE_CHART) ? v.chartVersion : PURGE_CHART, purge: true }) };
         },
       }),
-    ),
-    {
+    )),
+    g({
       id: "prepared",
       target: "보호 주석·reclaim 반영",
       async read(ctx) {
@@ -365,8 +438,8 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       async apply() {
         throw new Error("PR 1이 아직 병합되지 않았다");
       },
-    },
-    {
+    }),
+    g({
       id: "pv-reclaim",
       target: `PV(${n.ns}/valkey-data)`,
       async read(ctx) {
@@ -385,8 +458,8 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       async apply(w) {
         w.k8s.setPvReclaimDelete(n.ns, "valkey-data");
       },
-    },
-    holdUntilMerged(
+    }),
+    g(holdUntilMerged(
       "pr-delete",
       prStep({
         command: "data purge delete",
@@ -396,7 +469,7 @@ function steps(n: Names, dataFiles: string[]): Step[] {
         files: dataFiles,
         edit: (cur) => Object.fromEntries(Object.keys(cur).map((k) => [k, null])),
       }),
-    ),
+    )),
     {
       id: "gone",
       target: "남은 데이터 리소스",
@@ -413,10 +486,13 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       id: "secrets",
       target: `Infisical /apps/${app}`,
       async read(ctx) {
+        // PR 2가 병합되고 리소스가 사라지기 전에는 Infisical을 부르지 않는다. 그 조회가 실패하면 사전 읽기 전체가 막혀 앞 단계의
+        // 무효화도 돌지 않는다(#893 r1 P1-2). 그때까지는 뒤 단계의 "예정"일 뿐이다.
+        if (values(ctx, n.dataFile) !== null) return afterPr("PR 2 뒤 키 삭제(앱 이름을 다시 친 뒤)");
+        if (remaining(ctx, n).length) return afterPr("데이터 리소스가 사라진 뒤 키 삭제(앱 이름을 다시 친 뒤)");
         const keys = secretKeys(ctx, app);
         if (keys.length === 0) return same("키 없음");
         const list = keys.map((k) => `${k.path}/${k.key}`).join(", ");
-        if (values(ctx, n.dataFile) !== null) return afterPr(`PR 2 뒤 키 ${keys.length}개(${list}) 삭제(앱 이름을 다시 친 뒤)`);
         return { state: "differs", action: "delete", detail: `키 ${keys.length}개(${list}) → 앱 이름을 다시 친 뒤 지움` };
       },
       async apply(w) {
@@ -429,16 +505,16 @@ function steps(n: Names, dataFiles: string[]): Step[] {
     },
     {
       id: "record-removed",
-      target: `기록 ${n.ns}/${RECORD}`,
+      target: `기록 ${REC_NS}/${recordName(app)}`,
       async read(ctx) {
-        const r = ctx.k8s.restoreRecord(n.ns, RECORD);
+        const r = ctx.k8s.restoreRecord(REC_NS, recordName(app));
         if (!r) return same("없음");
         if (values(ctx, n.dataFile) !== null) return afterPr("PR 2 뒤 지움");
         return { state: "differs", action: "delete", detail: `실행 ${r.run} 기록 지움` };
       },
       async apply(w) {
-        const r = w.k8s.restoreRecord(n.ns, RECORD);
-        if (r) w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
+        const r = w.k8s.restoreRecord(REC_NS, recordName(app));
+        if (r) w.k8s.restoreRecordDelete(REC_NS, recordName(app), r.run);
       },
     },
   ];
@@ -455,15 +531,45 @@ export default defineCommand({
     const confirm = input.flags.confirm;
     if (confirm !== undefined && confirm !== app) throw new UsageError("--confirm 값이 앱 이름과 다르다");
     if (input.apply && confirm === undefined) throw new UsageError(`--apply에는 --confirm ${app}이 함께 있어야 한다`);
-    const n: Names = { app, ns: `app-${app}`, dataFile: `data/${app}/values.yaml` };
-    const listed = listDir(ctx, `data/${app}`);
-    const dataFiles = listed.length ? listed : [n.dataFile];
-    return ctx.engine({
-      command: "data purge",
-      app,
-      steps: steps(n, dataFiles),
-      notes: ["폐기 뒤에도 그 DB는 base backup 안에 보존 기간(14일) 동안 남는다.", `앱 ns app-${app}과 Infisical 폴더는 남는다(키만 지운다).`],
-      next: (status) => (status === "pending" ? `homelab data purge ${app} --confirm ${app} --apply` : (undefined as unknown as string | null)),
-    });
+    const n: Names = { app, ns: `app-${app}`, dataFile: `data/${app}/values.yaml`, seen: new Set() };
+    const main = async (): Promise<Result> => {
+      // apply면 본 엔진 전에 워크로드만 보는 실행을 따로 돌린다. GitHub·Infisical·백업 조회의 실패와 상관없이 무효화가 돈다.
+      if (input.apply) {
+        const pre = await ctx.engine({ command: "data purge", app, steps: [workloadStep(n)] });
+        if (pre.status === "failed") return pre;
+      }
+      const listed = listDir(ctx, `data/${app}`);
+      const dataFiles = listed.length ? listed : [n.dataFile];
+      return ctx.engine({
+        command: "data purge",
+        app,
+        steps: steps(n, dataFiles),
+        notes: ["폐기 뒤에도 그 DB는 base backup 안에 보존 기간(14일) 동안 남는다.", `앱 ns app-${app}과 Infisical 폴더는 남는다(키만 지운다).`],
+        next: (status) => (status === "pending" ? `homelab data purge ${app} --confirm ${app} --apply` : (undefined as unknown as string | null)),
+      });
+    };
+    if (!input.apply) return main();
+    // 본 엔진이 어떻게 끝나든(성공·실패·예외·대기) 이 실행에서 워크로드를 봤으면 마지막에 기록을 지우고 실패로 끝낸다(#893 r2).
+    // 엔진은 사전 읽기 실패·쓰기 뒤 재조회 실패에서 apply를 부르지 않고 돌아간다. 그 관측을 여기서 받는다.
+    let result: Result | undefined;
+    let thrown: unknown;
+    try {
+      result = await main();
+    } catch (e) {
+      thrown = e;
+    }
+    if (n.seen.size === 0) {
+      if (thrown !== undefined) throw thrown;
+      return result!;
+    }
+    const list = [...n.seen].join(", ");
+    const inv = await ctx.engine({ command: "data purge", app, steps: [dropRecord(n, list)] });
+    const next =
+      inv.status === "failed"
+        ? `폐기 확인 기록을 지우지 못했다(${inv.error?.message ?? "원인 미상"}). kubectl -n ${REC_NS} delete configmap ${recordName(app)}로 지운 뒤, 워크로드가 사라지면 다시 실행한다`
+        : `kubectl -n ${n.ns} get deploy,sts,cronjob,job,pod --show-labels로 보고, 사라진 뒤 다시 실행한다(그때부터 새로 잰다)`;
+    const message = `${result?.error ? `${result.error.message}. ` : ""}이 실행에서 앱 워크로드를 봤다(${list}). ${inv.status === "failed" ? "폐기 확인 기록을 지우지 못했다" : "폐기 확인 기록을 지웠다"}${thrown !== undefined ? `. 본 실행은 예외로 끝났다: ${(thrown as Error)?.message ?? String(thrown)}` : ""}`;
+    const base = result ?? inv;
+    return { ...base, status: "failed", steps: [...(result?.steps ?? []), ...inv.steps], notes: [...base.notes, ...(result ? inv.notes : [])], next, error: { message, next } };
   },
 });
