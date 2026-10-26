@@ -3,11 +3,10 @@
 import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { guardInfisicalBackup } from "../../src/core/infisical-backup";
 import { CliError } from "../../src/core/result";
 import { Secret } from "../../src/core/secret";
-import { FAKE_PROJECT, FAKE_SECRETS, applyWith, expectNoSecrets, infisicalList, infisicalSet, rule, testCtx } from "../harness";
+import { FAKE_PROJECT, FAKE_SECRETS, applyWith, expectNoSecrets, infisicalList, infisicalSet, rule, testCtx, testRoot } from "../harness";
 import { argvFor } from "../../src/core/infisical";
 
 const BACKUP = ".infisical/secrets-backup";
@@ -79,7 +78,7 @@ describe("Infisical 로컬 백업 막기", () => {
   });
 
   test("HOME에 링크 뒤 ..가 있으면 띄우지 않고 실패한다. 링크만 있으면 실제 경로를 막고 자식 HOME도 그 경로다(#876 리뷰 P2-1)", () => {
-    const top = realpathSync(mkdtempSync(join(tmpdir(), "homelab-cli-test-home-")));
+    const top = realpathSync(mkdtempSync(join(testRoot(), "home-")));
     mkdirSync(join(top, "actual", "child"), { recursive: true });
     mkdirSync(join(top, "lexical"));
     symlinkSync(join(top, "actual", "child"), join(top, "lexical", "link"));
@@ -177,7 +176,7 @@ describe("Infisical 로컬 백업 막기", () => {
 
   test("stale 이름의 심볼릭 링크는 링크만 지우고 HOME 밖 폴더 권한을 바꾸지 않는다(#877 리뷰 P2-2)", () => {
     const home = testCtx("plan", []).home;
-    const outside = realpathSync(mkdtempSync(join(tmpdir(), "homelab-cli-test-outside-")));
+    const outside = realpathSync(mkdtempSync(join(testRoot(), "outside-")));
     mkdirSync(join(outside, "sub"), { mode: 0o750 });
     chmodSync(join(outside, "sub"), 0o750);
     chmodSync(outside, 0o555);

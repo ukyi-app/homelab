@@ -3,10 +3,11 @@
 // 시크릿 원문 해석은 정해진 파일만 쓴다. import는 문법 단위로 읽는다(Bun.Transpiler.scanImports, #873 3라운드 P2:
 // 공백 없는 import와 .js 도우미가 정규식 검사를 빠져나갔다).
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { CommandSpec } from "../../src/core/command";
 import { REGISTRY } from "../../src/registry";
+import { testRoot } from "../harness";
 
 const SRC = join(import.meta.dir, "..", "..", "src");
 const TEST = join(import.meta.dir, "..");
@@ -296,10 +297,18 @@ describe("명령 파일", () => {
     expect(missingPlanTests(await commandFiles(), join(TEST, "commands"))).toEqual([]);
   });
 
+  // 시험 폴더는 fixture로 따로 만든다. 함정: 실제 commands 폴더로 보면 db-add 시험이 생기는 순간(#884) 이 자기 확인이 깨진다.
   test("검사가 두 단어 명령의 구현을 놓치지 않는다(자리표시를 지운 db-add로 확인)", async () => {
     const entries = await commandFiles();
     const dbAdd = entries.find((e) => e.cmd.path.join(" ") === "db add");
     expect(dbAdd).toBeDefined();
-    expect(missingPlanTests([{ file: dbAdd!.file, cmd: { ...dbAdd!.cmd, placeholder: undefined } }], join(TEST, "commands"))).toEqual(["db-add"]);
+    const one = [{ file: dbAdd!.file, cmd: { ...dbAdd!.cmd, placeholder: undefined } }];
+    const dir = mkdtempSync(join(testRoot(), "static-"));
+    expect(missingPlanTests([{ file: dbAdd!.file, cmd: { placeholder: "T12-02" } }], dir)).toEqual([]);
+    expect(missingPlanTests(one, dir)).toEqual(["db-add"]);
+    writeFileSync(join(dir, "db-add.test.ts"), "test(\"plan\", () => {});\n");
+    expect(missingPlanTests(one, dir)).toEqual(["db-add"]);
+    writeFileSync(join(dir, "db-add.test.ts"), "expectPlanReadOnly(r);\n");
+    expect(missingPlanTests(one, dir)).toEqual([]);
   });
 });

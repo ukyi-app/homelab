@@ -4,7 +4,7 @@
 //   사람의 실제 gh·kubectl·infisical·kubeconfig에 닿을 길이 없다.
 // - testCtx: 같은 프로세스에서 Ctx를 만들어 단계·어댑터를 직접 부른다. exec는 같은 스텁 PATH를 쓴다.
 import { expect } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ReadCtx, WriteCtx } from "../src/core/command";
@@ -15,6 +15,7 @@ import { argvFor as infisicalArgv } from "../src/core/infisical";
 import { kubectlArgv } from "../src/core/kubectl";
 import type { Mode, Result } from "../src/core/result";
 import { classify } from "../src/core/writes";
+import { removeTree } from "./remove-tree";
 
 const MAIN = join(import.meta.dir, "..", "src", "main.ts");
 const STUB = join(import.meta.dir, "stub.ts");
@@ -76,44 +77,28 @@ function shq(v: string): string {
   return `'${v.replaceAll("'", `'\\''`)}'`;
 }
 
-// 스텁 폴더는 프로세스별 뿌리(homelab-cli-test-<pid>) 아래에 둔다. 함정(bun 1.4.3 실측): bun test에서는
-// process.on("exit")·beforeExit가 돌지 않는다. 그래서 runCli는 끝나자마자 자기 폴더를 지우고, testCtx 폴더는
-// 다음 실행이 장치를 불러올 때 죽은 프로세스의 뿌리째 지운다.
-const ROOT_PREFIX = "homelab-cli-test-";
-const root = join(tmpdir(), `${ROOT_PREFIX}${process.pid}`);
+// 스텁 폴더는 실행마다 mkdtemp로 만든 뿌리(homelab-cli-test-run-*) 아래에 두고, 이 실행이 만든 뿌리만 지운다.
+// 함정: 예전에는 PID 이름의 뿌리를 두고 죽은 PID의 것을 지웠는데, /tmp를 나눠 쓰는 다른 PID 네임스페이스의
+// 살아 있는 실행도 kill(pid, 0)이 ESRCH라 남의 스텁·원장·HOME을 지웠다(#880 3라운드, 간헐 실패).
+// 함정(bun 1.4.3 실측): bun test에서는 process.on("exit")·beforeExit가 돌지 않는다. 그래서 runCli는 끝나자마자
+// 자기 폴더를 지우고, 뿌리는 preload(setup.ts)의 afterAll이 지운다. --bail 실패 종료·신호에서는 afterAll도 돌지 않으므로
+// 그 경우는 실행 감싸개(cli/test/run.ts)가 전용 TMPDIR째 회수한다. 남의 것은 어느 쪽도 건드리지 않는다.
+let root: string | null = null;
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+export function testRoot(): string {
+  root ??= mkdtempSync(join(tmpdir(), "homelab-cli-test-run-"));
+  return root;
 }
 
-// 시험 HOME의 Infisical 백업 폴더는 0500이다(core/infisical-backup.ts). 안에 파일이 남으면(돌연변이 확인 등) 그냥은 못 지우므로
-// 권한을 풀고 다시 지운다.
-function removeTree(dir: string): void {
-  try {
-    rmSync(dir, { recursive: true, force: true });
-  } catch {
-    const open = (d: string) => {
-      chmodSync(d, 0o700);
-      for (const e of readdirSync(d, { withFileTypes: true })) if (e.isDirectory()) open(join(d, e.name));
-    };
-    open(dir);
-    rmSync(dir, { recursive: true, force: true });
-  }
+export function removeTestRoot(): void {
+  if (root === null) return;
+  removeTree(root);
+  root = null;
 }
 
-for (const name of readdirSync(tmpdir())) {
-  const m = name.match(/^homelab-cli-test-(\d+)$/);
-  if (m && Number(m[1]) !== process.pid && !alive(Number(m[1]))) removeTree(join(tmpdir(), name));
-}
 
 function stubDir(rules: Rule[], tools?: string[]): { dir: string; bin: string; home: string } {
-  mkdirSync(root, { recursive: true });
-  const dir = mkdtempSync(join(root, "s-"));
+  const dir = mkdtempSync(join(testRoot(), "s-"));
   const bin = join(dir, "bin");
   const home = join(dir, "home");
   mkdirSync(bin);
