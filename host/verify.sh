@@ -11,8 +11,8 @@
 # 없어 실패하고, 이름만 같은 다른 클러스터면 노드 이름에서 멈춘다(옛 assert-cluster-identity.sh를 줄임).
 #
 # 플래그 문자열이나 Git만 보면 "그렇게 설치할 것이다"만 증명된다. 여기서는 라이브 노드 객체,
-# 어노테이션, 실제로 내주는 인증서를 본다. tls-san, node-name, node-ip는 설치 때만 정해지므로
-# 그 차이가 이 검사의 값이다.
+# 어노테이션, 실제로 내주는 인증서를 본다. node-name, node-ip는 설치 때만 정해지고, tls-san은 config를
+# 바꾼 뒤 재시작해야 인증서에 들어가므로 그 차이가 이 검사의 값이다.
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -89,8 +89,9 @@ check_node_args() {
   fi
 }
 
-# 실제로 6443에서 내주는 인증서의 SAN을 본다. SNI로 이름을 보내면 k3s가 그 이름을 인증서에
-# 더할 수 있어(동적 SAN) 검사가 스스로 통과를 만들 수 있다. SNI 없이 접속한다.
+# 실제로 6443에서 내주는 인증서의 SAN을 본다. tls-san-security(기본 true)를 끄면 SNI로 보낸 이름을 k3s가
+# 인증서에 더해(동적 SAN) 검사가 스스로 통과를 만들 수 있다. 켜져 있어도 기대지 않고 SNI 없이 접속한다.
+# 렌더 SAN이 인증서에 모두 있는지만 본다. 인증서에는 config에서 뺀 옛 이름이 남을 수 있다.
 # 부분 일치로 보지 않는다. 짧은 이름이 빠져도 FQDN 항목에 걸려 통과하던 옛 자리다.
 check_san() {
   local pem sans tokens want s missing="" n
@@ -114,7 +115,7 @@ check_san() {
   if [ -z "$missing" ]; then
     ok "serving cert SAN에 tls-san $(grep -c . <<<"$want")개가 모두 있다"
   else
-    bad "serving cert에 없는 SAN:${missing}. 설치 뒤 추가는 serving cert 재발급이 필요하다"
+    bad "serving cert에 없는 SAN:${missing}. config의 tls-san이 바뀌었으면 sudo host/install.sh --cluster ${CLUSTER} --k3s로 config를 쓰고 k3s를 재시작한다"
   fi
 }
 

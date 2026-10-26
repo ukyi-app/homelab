@@ -486,7 +486,7 @@ spec·design-prompt가 깔고 있던 전제와 다르게 가는 것이다. 각 �
 | 노드 DNS 순환 세 갈래: CNI portmap DNAT가 노드의 :53 질의를 AdGuard 파드로 끌어감, 노드 → 공유기 → AdGuard 교착, tailscale `~.`가 노드 질의를 MagicDNS로 | `infra/k3s-bootstrap/host-preflight.sh:12-21`, `host-config/etc/systemd/resolved.conf.d/10-k3s-node.conf:23-31`, TD:1139-1164 | resolved 스텁 끔 + `DNS=1.1.1.1 9.9.9.9`, 링크 `UseDNS=false`, `tailscale set --accept-dns=false`, preflight로 확인 |
 | `FallbackDNS=`는 `DNS=`가 있으면 쓰이지 않는다. 공유기를 1순위로 두면 AdGuard 장애마다 질의당 약 5초 지연 | `resolved.conf.d/10-k3s-node.conf:32-44` | 폴백은 `DNS=`의 두 번째 항목 |
 | networkd drop-in은 설치만으로 적용되지 않고 `networkctl reconfigure`가 필요하며, 그때 노드 IPv4가 약 2초 사라진다. drop-in 파일명이 `wlo1`에 묶여 유선으로 옮기면 조용히 무효 | `infra/k3s-bootstrap/host-config.sh:243-262`, TD:2404-2439, `host-config/etc/systemd/network/10-netplan-wlo1.network.d/10-k3s-node.conf:19-22` | 적용 스크립트가 reconfigure 뒤 IP 복귀를 기다림. 인터페이스 이름을 핀 파일 변수로 |
-| `--tls-san`·`--node-name`·`--node-ip`는 설치 때만 정할 수 있고, 노드명을 바꾸면 hostPath PV nodeAffinity가 깨진다. 노드 IP는 공유기 DHCP 예약이 전제다 | `infra/k3s-bootstrap/versions.env:66-91` | 값은 클러스터별 `host/clusters/<이름>.env`에 두고 `host/k3s-config.yaml`로 렌더해 고정(C.3.2), preflight가 IP 예약 상태 확인(사람 체크) |
+| `--node-name`·`--node-ip`는 설치 때만 정할 수 있고, 노드명을 바꾸면 hostPath PV nodeAffinity가 깨진다. 노드 IP는 공유기 DHCP 예약이 전제다. `--tls-san`은 설치 뒤에도 바꿀 수 있다: config를 바꾸고 재시작하면 서빙 인증서에 더해지고, 기존 SAN은 지워지지 않는다(옛 주석 "사후 추가는 serving cert 삭제 후 재생성"은 고정 k3s에서 틀림, 2026-10-26 확인) | `infra/k3s-bootstrap/versions.env:66-91`, k3s v1.36.5+k3s1 `pkg/cluster/https.go:52-80`, dynamiclistener e4a1908ede0d `listener.go:288-298`·`factory/gen.go:65-120, 195-241` | 값은 클러스터별 `host/clusters/<이름>.env`에 두고 `host/k3s-config.yaml`로 렌더(C.3.2), preflight가 IP 예약 상태 확인(사람 체크). `install.sh --k3s`는 node-name·node-ip만 기존 config와 같은지 고정하고, tls-san 차이는 출력한 뒤 재시작으로 반영한다. 뺀 이름은 인증서에 남는다 |
 | CronJob은 노드 TZ, CNPG ScheduledBackup은 operator TZ(UTC). Ubuntu 26.04에는 `/etc/timezone`이 없다 | TD:246-250, TD:1121-1137 | `timedatectl`로 Asia/Seoul, 백업 일정은 UTC로 표기 |
 | sshd_config.d는 먼저 읽힌 값이 이긴다 | TD:1104-1119 | 하드닝 파일은 `10-` 접두 |
 | NVMe ASPM L1이 유휴 때 correctable 에러를 폭주시킨다(열화로 오독) | TD:162-191 | tmpfiles drop-in 유지 |
@@ -818,7 +818,7 @@ kubelet-arg:
 | 옛 하위 항목 | 판정 | 새 자리와 이유 |
 |---|---|---|
 | `versions.env` | 단순화해서 가져옴 | 두 층으로 나눈다. 공통 `host/versions.env`(k3s 버전, 타임존, 노드 업스트림 DNS)와 클러스터별 `host/clusters/<이름>.env`(노드 이름·IP, 인터페이스, TLS SAN. `prod.env`, `vm.env`). bulk 국면 장치와 룰 리터럴 등식은 버린다(`versions.env:136-169`) |
-| `k3s-install.sh` | 가져옴 | 플래그 계약(traefik·metrics-server 끔, servicelb 유지, secrets-encryption, kubelet 예약, IP·이름·SAN 고정, kubeconfig 0600, 버전 고정)을 config 파일로 옮긴다(`k3s-install.sh:56-102`). 단 local-storage는 켠다(아래) |
+| `k3s-install.sh` | 가져옴 | 플래그 계약(traefik·metrics-server 끔, servicelb 유지, secrets-encryption, kubelet 예약, IP·이름 고정과 SAN 명시(SAN 변경은 재시작으로 반영, B.8 E2), kubeconfig 0600, 버전 고정)을 config 파일로 옮긴다(`k3s-install.sh:56-102`). 단 local-storage는 켠다(아래) |
 | `host-config.sh` + resolved·networkd drop-in, `accept-dns=false`, resolv.conf 심링크 | 가져옴 | 노드 DNS 순환 방어(B.8 E2) |
 | journald·sshd·tmpfiles drop-in, 스왑 제거, 타임존 | 가져옴 | H4, H6 |
 | `host-preflight.sh`, `host-up.sh`, `verify-cluster.sh` | 단순화해서 가져옴 | preflight·install·verify 세 스크립트. 순서가 계약이고, sudo가 필요한 단계는 파이프라인에 넣지 않는다(`host-up.sh:5-14`) |

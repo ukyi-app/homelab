@@ -231,17 +231,35 @@ host_config() {
 
 # --------------------------------------------------------------------------------- --k3s
 
-# node-name, node-ip, tls-san은 설치 때만 정할 수 있다. 이미 깔린 config와 이 셋이 다르면
-# 다시 설치해도 반영되지 않고(노드 재등록, serving cert 재발급 필요) hostPath PV의 nodeAffinity가
-# 깨질 수 있다. 그때는 멈추고 사람이 k3s-uninstall.sh부터 다시 한다.
+# node-name, node-ip는 설치 때만 정할 수 있다. 이미 깔린 config와 다르면 노드가 새로 등록돼 hostPath PV의
+# nodeAffinity가 깨질 수 있다. 그때는 멈추고 사람이 k3s-uninstall.sh부터 다시 한다.
+#
+# tls-san은 바꿀 수 있다. 바뀌면 config가 달라져 아래에서 k3s를 재시작하고, k3s v1.36.5+k3s1의 dynamiclistener
+# (e4a1908ede0d)가 재시작 뒤 첫 연결에서 인증서에 없는 설정 SAN을 기존 SAN에 더해 다시 서명한다
+# (k3s pkg/cluster/https.go:52-80, dynamiclistener listener.go:288-298, factory/gen.go:195-241).
+# 기존 SAN은 지우지 않는다(k3s가 FilterExisting을 켜지 않는다, gen.go:65-120). 그래서 config에서 뺀 이름도
+# 인증서에 남는다. 지우려면 k3s-serving Secret과 dynamic-cert.json을 함께 지우고 재시작해야 한다.
 check_install_time_keys() {
   # grep -E는 \t를 탭으로 읽지 않는다. 진짜 탭 문자를 넣는다.
-  local new_cfg="$1" filter=$'^--(node-name|node-ip|tls-san)\t' old new
+  local new_cfg="$1" filter=$'^--(node-name|node-ip)\t' old new added removed
   [ -e "$K3S_CONFIG" ] || return 0
   old="$(config_pairs <"$K3S_CONFIG" | grep -E "$filter" || true)"
   new="$(config_pairs <<<"$new_cfg" | grep -E "$filter" || true)"
   [ "$old" = "$new" ] \
-    || die "기존 ${K3S_CONFIG}와 node-name/node-ip/tls-san이 다르다. 설치 뒤에는 바꿀 수 없다. k3s-uninstall.sh와 잔여 경로 삭제 뒤 preflight --before부터 다시 한다"
+    || die "기존 ${K3S_CONFIG}와 node-name/node-ip가 다르다. 설치 뒤에는 바꿀 수 없다(노드 재등록, hostPath PV nodeAffinity). k3s-uninstall.sh와 잔여 경로 삭제 뒤 preflight --before부터 다시 한다"
+
+  old="$(config_pairs <"$K3S_CONFIG" | awk -F '\t' '$1 == "--tls-san" { print $2 }')"
+  new="$(config_pairs <<<"$new_cfg" | awk -F '\t' '$1 == "--tls-san" { print $2 }')"
+  added="$(comm -13 <(printf '%s\n' "$old" | sed '/^$/d' | LC_ALL=C sort -u) <(printf '%s\n' "$new" | sed '/^$/d' | LC_ALL=C sort -u))"
+  removed="$(comm -23 <(printf '%s\n' "$old" | sed '/^$/d' | LC_ALL=C sort -u) <(printf '%s\n' "$new" | sed '/^$/d' | LC_ALL=C sort -u))"
+  [ -n "$added" ] || [ -n "$removed" ] || return 0
+  echo "    tls-san이 바뀐다. config가 달라져 k3s를 재시작하고, 재시작 뒤 더한 이름이 서빙 인증서에 들어간다:"
+  # 옛 MagicDNS 전체 이름은 mask가 모른다(지금 이름만 안다). tailnet 이름이 출력에 남지 않게 따로 가린다.
+  { sed -e '/^$/d' -e 's/^/      + /' <<<"$added"; sed -e '/^$/d' -e 's/^/      - /' <<<"$removed"; } \
+    | sed -E 's/\.[a-z0-9-]+\.ts\.net$/.<tailnet>.ts.net/'
+  if [ -n "$removed" ]; then
+    echo "    뺀 이름은 인증서에 남는다(k3s는 서빙 인증서의 SAN을 지우지 않는다). 남아도 서버 CA 키 없이는 그 이름으로 흉내 낼 수 없다"
+  fi
 }
 
 write_user_kubeconfig() {
@@ -313,7 +331,7 @@ k3s_install() {
   install -d -m 0755 /etc/rancher /etc/rancher/k3s
   printf '%s' "$cfg" >"$TMPD/config.yaml"
   # 설치 스크립트는 바이너리·유닛·env 파일 해시가 그대로면 k3s를 재시작하지 않는다. config.yaml은
-  # 그 해시에 없어서, 다시 실행해 config만 바뀌면 재시작을 강제해야 새 값이 적용된다.
+  # 그 해시에 없어서, 다시 실행해 config만 바뀌면 재시작을 강제해야 새 값이 적용된다(tls-san 변경 포함).
   restart=false
   if [ -e "$K3S_CONFIG" ] && ! cmp -s "$TMPD/config.yaml" "$K3S_CONFIG"; then
     restart=true
@@ -384,4 +402,5 @@ main() {
   esac
 }
 
-main "$@"
+# tools/host-k3s.test.sh가 check_install_time_keys만 쓰려고 source한다. 그때는 main을 돌리지 않는다.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
