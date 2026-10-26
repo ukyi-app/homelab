@@ -65,7 +65,7 @@
     - `db restore-check`: 최신 base backup으로 임시 Cluster를 만들어 Database CR 2개의 DB를 확인한 뒤 정리하고 기록을 지웠다.
     - `github apply`: 변경 없음, exit 0(apply 전 state 백업은 저장소 밖). 뒤 `github verify` 0.
     - `app remove` PR #905: Application·Deployment가 사라지고 데이터(DB, 영속 Valkey)는 남았다. 재실행 `same`, `data list`에 `homelab-probe`·`homelab-probe2`.
-  - 읽기 명령: `doctor` exit 0, `status homelab-probe`·`status --platform`, `data list`(#894 뒤 exit 0), `github plan` exit 0(변경 없음), `github verify`. `logs`는 이번 운영 기록에 출력이 남지 않아 `bun test`로만 확인했다.
+  - 읽기 명령: `doctor` exit 0, `status homelab-probe`·`status --platform`, `data list`(#894 뒤 exit 0), `github plan` exit 0(변경 없음), `github verify`. `logs homelab-probe` exit 0(앱 로그 0줄, 과거 로그는 Grafana 안내), `logs homelab-probe --job migrate` exit 0(`migrate ok` 한 줄), `--json`은 `homelab-cli/v1`·`same`.
   - `github verify` = 래퍼: 같은 main에서 `homelab github verify`와 바로 뒤 `tools/tf-github.sh verify`가 둘 다 exit 0.
   - `app new`: `plan`으로 템플릿 `app-main` active, 같은 이름 저장소 없음, `app-repos.json` PR 계획까지 봤다(아무것도 쓰지 않음). app_main 생성만인지의 판정(래퍼 `plan --plan-json`)은 목록 병합 뒤 단계라 `bun test`가 본다. 실제 생성은 T13 시나리오 1이다.
   - 등록·데이터 정리: `app remove` 뒤 `data purge`를 둘 다 돌렸다(실행 직전 사용자 재승인). 첫 실행은 앱 워크로드 없음을 보고 폐기 확인 기록(`database/data-purge-<app>`)을 남긴 뒤, 그 뒤 백업이 없어 exit 1로 멈췄다. 온디맨드 백업(CNPG `Backup`, Valkey 백업 Job) → PR 1 #906·#907(`purge: true`, 데이터 차트 1.0.2) → PR 2 #909·#910(`data/<app>/` 삭제) → Infisical 키 삭제(터미널에서 앱 이름을 다시 친 뒤). 끝에 `data list`에 둘 다 없고 두 purge 재실행은 `same`이었다. 마지막 스냅샷에서 두 앱의 Infisical 키 0개, DB·Valkey 데이터 없음, 폐기 확인 기록 0개. 설계대로 남긴 것: 빈 앱 ns, 빈 Infisical 폴더, R2 백업(보존 기간 동안).
