@@ -47,6 +47,15 @@ export default defineCommand({
     const notes: string[] = [];
     const values = ctx.repo.readFile(`apps/${app}/values.yaml`, ctx.repo.mainSha());
     const registered = values !== null;
+    const v = (values === null ? null : parseYaml(values)) as { kind?: string; uses?: { postgres?: boolean; valkey?: boolean }; env?: Record<string, string> } | null;
+    // 차트가 넣는 env(PORT·DATABASE_URL·VALKEY_URL)나 values env와 같은 이름이면 app add가 secrets에 넣는 순간 렌더가
+    // 막힌다(#884 2라운드 P2-4). 쓰기 전에 멈춘다. 등록 전이면 차트가 넣을 수 있는 이름만 알린다.
+    const taken = v ? [...(v.kind === "web" ? ["PORT"] : []), ...(v.uses?.postgres ? ["DATABASE_URL"] : []), ...(v.uses?.valkey ? ["VALKEY_URL"] : []), ...Object.keys(v.env ?? {})] : [];
+    if (taken.includes(key)) {
+      const blocked: Step = { id: "env-name", target: `env 이름 ${key}`, read: async () => ({ state: "differs", action: "none", detail: "차트·values env가 이미 쓰는 이름이다", next: `다른 키 이름을 쓰거나 apps/${app}/values.yaml의 env에서 ${key}를 뺀다` }) };
+      return ctx.engine({ command: "secret set", app, steps: [blocked, step] });
+    }
+    if (!registered && ["PORT", "DATABASE_URL", "VALKEY_URL"].includes(key)) notes.push(`${key}는 차트가 넣을 수 있는 env 이름이다(web의 PORT, --postgres의 DATABASE_URL, Valkey의 VALKEY_URL). 그 기능을 켜면 등록이 막힌다`);
     if (registered) {
       const list = (parseYaml(values) as { secrets?: unknown } | null)?.secrets;
       if (!Array.isArray(list) || !list.includes(key)) notes.push(`apps/${app}/values.yaml secrets에 ${key}가 없어 앱에 들어가지 않는다. 더하기: homelab app add ${app}`);

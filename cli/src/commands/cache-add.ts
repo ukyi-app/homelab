@@ -17,6 +17,15 @@ const CACHE_MIN_CHART = "1.1.0";
 
 const cmp = (a: string, b: string) => a.split(".").map(Number).reduce((d, n, i) => d || n - Number(b.split(".")[i]), 0);
 
+// 앱 차트 app.env와 같은 규칙(platform/charts/app/templates/_helpers.tpl): PORT(web)·DATABASE_URL(uses.postgres)·
+// VALKEY_URL(uses.valkey)은 차트가 넣고, env 키와 secrets는 그것들과도 서로도 겹치면 렌더가 막힌다(#884 2라운드 P2-4).
+// 병합할 수 없는 PR을 만들지 않게 쓰기 전에 멈춘다. 덮거나 조용히 빼지 않는다.
+function envProblem(v: Record<string, any>): string | null {
+  const names = [...(v.kind === "web" ? ["PORT"] : []), ...(v.uses?.postgres ? ["DATABASE_URL"] : []), ...(v.uses?.valkey ? ["VALKEY_URL"] : []), ...Object.keys(v.env ?? {}), ...(Array.isArray(v.secrets) ? v.secrets : [])];
+  const dup = names.filter((n, i) => names.indexOf(n) !== i);
+  return dup.length ? `env 이름 ${[...new Set(dup)].join(", ")}가 두 번 나온다(차트가 넣는 PORT·DATABASE_URL·VALKEY_URL, values env, secrets가 겹친다). 겹치는 쪽을 정리한 뒤 다시 실행한다` : null;
+}
+
 function canon(v: unknown): string {
   const sort = (x: unknown): unknown => (Array.isArray(x) ? x.map(sort) : x && typeof x === "object" ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, sort((x as Obj)[k])])) : x);
   return JSON.stringify(sort(v)) ?? "undefined";
@@ -37,14 +46,26 @@ function edit(text: string | null, header: string, edits: Obj): string | null {
   return setTopLevel(text ?? header, changed);
 }
 
+function checked(text: string | null): string | null {
+  const problem = text === null ? null : envProblem(obj(text));
+  if (problem) throw new Error(problem);
+  return text;
+}
+
 export function cacheOn(current: string, latestApp: string): string | null {
   const now = obj(current);
   const chart = typeof now.chartVersion === "string" && cmp(now.chartVersion, CACHE_MIN_CHART) < 0 ? latestApp : now.chartVersion;
-  return edit(current, "", { chartVersion: chart, uses: { ...(now.uses ?? {}), valkey: true }, cache: { ...(now.cache ?? {}), enabled: true } });
+  return checked(edit(current, "", { chartVersion: chart, uses: { ...(now.uses ?? {}), valkey: true }, cache: { ...(now.cache ?? {}), enabled: true } }));
 }
 
+// 꺼진 캐시(cache: { enabled: false })는 캐시가 아니다. 키 존재로 보면 이미 영속인 앱의 연결(uses.valkey)을 지운다
+// (#884 2라운드 P2-1, Connector 4373412607).
+export const cacheEnabled = (text: string | null) => obj(text).cache?.enabled === true;
+
 // 단계 A(T11 #859): 캐시 서버와 VALKEY_URL을 함께 끈다. uses가 비면 키째 지운다.
+// PR 계산 때 main에서 캐시가 이미 꺼졌으면 그대로 둔다(그사이 누가 껐다. 재실행이 단계 B를 고른다).
 export function cacheOff(current: string): string | null {
+  if (!cacheEnabled(current)) return current;
   const now = obj(current);
   const uses = { ...(now.uses ?? {}) };
   delete uses.valkey;
@@ -57,9 +78,11 @@ export function persistentData(current: string | null, latestData: string): stri
   return edit(current, HEADER, { ...(current === null ? { chartVersion: latestData } : {}), valkey: { ...(now.valkey ?? {}), persistent: true } });
 }
 
+// 단계 B. PR 계산 때 main에 그사이 캐시가 켜졌으면 멈춘다(시작 때의 단계 선택이 낡았다, #884 2라운드 P2-2).
 export function usesValkey(current: string): string | null {
+  if (cacheEnabled(current)) throw new Error("그사이 main에 캐시 Valkey가 켜졌다. 같은 명령을 다시 실행해 단계를 다시 고른다");
   const now = obj(current);
-  return edit(current, "", { uses: { ...(now.uses ?? {}), valkey: true } });
+  return checked(edit(current, "", { uses: { ...(now.uses ?? {}), valkey: true } }));
 }
 
 function latest(ctx: ReadCtx, prefix: "app-chart-v" | "data-chart-v"): string {
@@ -114,6 +137,8 @@ export default defineCommand({
     const persistent = input.flags.persistent === true;
     const problem = appNameProblem(app, persistent ? { persistent: true } : { cache: true });
     if (problem) throw new UsageError(problem);
+    // 데이터 차트도 영속 Valkey 앱 이름의 valkey를 막는다. core appNameProblem은 캐시에서만 본다(#884 2라운드 P2-3).
+    if (persistent && app.includes("valkey")) throw new UsageError("영속 Valkey를 쓰는 앱 이름에 valkey를 넣지 않는다(데이터 차트가 렌더를 막는다)");
     const appPath = `apps/${app}/values.yaml`;
     const dataPath = `data/${app}/values.yaml`;
     const main = ctx.repo.mainSha();
@@ -140,8 +165,12 @@ export default defineCommand({
           app,
           title: `cache add: ${app}`,
           body: `homelab cache add가 만든 PR이다(설계 C.5.6). ${app} ns에 캐시 Valkey(PVC 없음, allkeys-lru)와 VALKEY_URL을 켠다.`,
-          files: [appPath],
-          edit: (cur) => ({ [appPath]: cur[appPath] === null ? null : cacheOn(cur[appPath], appChart) }),
+          // 데이터 파일이 있으면 함께 읽어(내용 그대로) PR 계산 때 영속 Valkey가 그사이 켜졌는지 본다.
+          files: dataNow === null ? [appPath] : [appPath, dataPath],
+          edit: (cur) => {
+            if (obj(cur[dataPath] ?? null).valkey?.persistent === true) throw new Error("그사이 main에 영속 Valkey가 켜졌다(캐시와 함께 둘 수 없다)");
+            return { [appPath]: cur[appPath] === null ? null : cacheOn(cur[appPath], appChart), ...(dataNow === null ? {} : { [dataPath]: cur[dataPath] }) };
+          },
           describe: (_p, before, after) => `cache.enabled ${obj(before).cache?.enabled === true} → ${obj(after).cache?.enabled === true}${obj(before).chartVersion !== obj(after).chartVersion ? `, chart ${obj(after).chartVersion}` : ""}`,
         }),
       ];
@@ -149,7 +178,7 @@ export default defineCommand({
     }
 
     // 영속: 단계 A(캐시가 켜져 있음) 또는 B.
-    if (obj(appNow).cache !== undefined) {
+    if (cacheEnabled(appNow)) {
       const steps: Step[] = [
         registered,
         prStep({

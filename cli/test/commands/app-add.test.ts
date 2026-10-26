@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { attestationMatches, passwordStep } from "../../src/commands/app-add";
 import { appValues, dataValues, describeFile, imageText, parseImage } from "../../src/commands/app-add-values";
 import { argvFor as infArgv } from "../../src/core/infisical";
-import { FAKE_PROJECT, FAKE_SECRETS, applyWith, expectNoSecrets, expectPlanReadOnly, ghGet, infisicalSet, runCli, testCtx, type Rule } from "../harness";
+import { FAKE_PROJECT, FAKE_SECRETS, applyWith, expectNoSecrets, expectPlanReadOnly, ghGet, ghResponse, infisicalSet, kubectlRule, runCli, testCtx, type Rule } from "../harness";
 import { APP_HEAD, DIGEST, appRepo, attestation, chartTags, createFolder, folders, homelab, imageYaml, infisicalList, noPr, prCreate, prOpen } from "../fixtures/app-add-world/world";
 
 // 타임아웃 주입(스텁 5초 지연 > exec 상한 3초)이 든 시험은 3초를 넘는다. bun 기본 시험 제한(5초)에 걸리지 않게 늘린다.
@@ -18,13 +18,15 @@ const wantData = dataValues(null, FLAGS, "1.0.1")!;
 const wantImage = imageText({ repository: `ghcr.io/ukyi-app/${APP}`, digest: DIGEST, revision: APP_HEAD, hold: false });
 const done = { [P.values]: wantValues, [P.image]: wantImage, [P.data]: wantData };
 
+// --cache=persistent의 캐시 정리 대기(cache-gone)가 읽는 앱 Application. 기본은 캐시 리소스 없음.
+const argo = (resources: { kind: string; name: string }[] = []) => kubectlRule(["-n", "argocd", "get", "applications.argoproj.io", APP, "-o", "json"], { stdout: JSON.stringify({ status: { resources } }) });
 const pg = `/apps/${APP}/postgres`;
 const vk = `/apps/${APP}/valkey`;
 const allFolders = () => folders({ "/apps": [APP], [`/apps/${APP}`]: ["postgres", "valkey"] });
 
 // 다 된 상태: main에 세 파일, Infisical에 두 비밀번호(값은 가짜 시크릿).
 function doneWorld(): Rule[] {
-  return [...homelab(done), ...chartTags(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, { PASSWORD: FAKE_SECRETS[0] }), infisicalList(vk, { PASSWORD: FAKE_SECRETS[1] }), noPr(BRANCH)].flat();
+  return [...homelab(done), ...chartTags(), argo(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, { PASSWORD: FAKE_SECRETS[0] }), infisicalList(vk, { PASSWORD: FAKE_SECRETS[1] }), noPr(BRANCH)].flat();
 }
 
 // 새 앱: main에 아무것도 없고 폴더는 있지만 비밀번호는 없다. 비밀번호 목록은 [전체 읽기, 직전 읽기, apply 안, 재조회] 순서.
@@ -33,7 +35,7 @@ function newWorld(opts: { setCode?: number; setSleep?: number; tree?: number } =
   const has = (v: string) => ({ stdout: JSON.stringify([{ secretKey: "PASSWORD", secretValue: v }]) });
   return [
     ...homelab({ [P.values]: null, [P.image]: null, [P.data]: null }),
-    ...chartTags(),
+    ...chartTags(), argo(),
     ...appRepo(APP),
     ...allFolders(),
     infisicalList(`/apps/${APP}`, {}),
@@ -108,7 +110,7 @@ describe("app add", () => {
   });
 
   test("재실행: 비밀번호가 이미 있으면 재사용하고 PR로 이어 간다", async () => {
-    const rules = [...homelab({ [P.values]: null, [P.image]: null, [P.data]: null }), ...chartTags(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, { PASSWORD: FAKE_SECRETS[0] }), infisicalList(vk, { PASSWORD: FAKE_SECRETS[1] }), ...prCreate(BRANCH, "app add", done)];
+    const rules = [...homelab({ [P.values]: null, [P.image]: null, [P.data]: null }), ...chartTags(), argo(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, { PASSWORD: FAKE_SECRETS[0] }), infisicalList(vk, { PASSWORD: FAKE_SECRETS[1] }), ...prCreate(BRANCH, "app add", done)];
     const r = await runCli([...ARGS, "--apply", "--json"], rules);
     expect(r.code).toBe(3);
     expect(r.calls.some((c) => c.argv[0] === "infisical" && c.argv[2] === "set")).toBe(false);
@@ -131,7 +133,7 @@ describe("app add", () => {
   });
 
   test("열린 PR이 같은 내용이면 same + 대기, 새 커밋 없음", async () => {
-    const rules = [...homelab({ [P.values]: null, [P.image]: null, [P.data]: null }), ...chartTags(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, { PASSWORD: FAKE_SECRETS[0] }), infisicalList(vk, { PASSWORD: FAKE_SECRETS[1] }), ...prOpen(BRANCH, "app add", done)];
+    const rules = [...homelab({ [P.values]: null, [P.image]: null, [P.data]: null }), ...chartTags(), argo(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, { PASSWORD: FAKE_SECRETS[0] }), infisicalList(vk, { PASSWORD: FAKE_SECRETS[1] }), ...prOpen(BRANCH, "app add", done)];
     const r = await runCli([...ARGS, "--apply", "--json"], rules);
     expect(r.code).toBe(3);
     expect(r.json.steps.every((s: any) => s.state === "same")).toBe(true);
@@ -139,7 +141,7 @@ describe("app add", () => {
   });
 
   test("private 저장소·익명 pull 불가·provenance 불일치·이미지 없음은 아무것도 쓰기 전에 멈춘다", async () => {
-    const base = (o: Parameters<typeof appRepo>[1]) => [...homelab({ [P.values]: null, [P.image]: null, [P.data]: null }), ...chartTags(), ...appRepo(APP, o), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, {}), infisicalList(vk, {}), noPr(BRANCH)];
+    const base = (o: Parameters<typeof appRepo>[1]) => [...homelab({ [P.values]: null, [P.image]: null, [P.data]: null }), ...chartTags(), argo(), ...appRepo(APP, o), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, {}), infisicalList(vk, {}), noPr(BRANCH)];
     for (const [o, id] of [
       [{ visibility: "private" }, "app-repo"],
       [{ anon: 401 }, "ghcr-anon"],
@@ -167,7 +169,7 @@ describe("app add", () => {
   });
 
   test("이미 등록된 앱(image.yaml 있음)은 HEAD 이미지를 찾지 않는다", async () => {
-    const rules = [...homelab({ [P.values]: wantValues, [P.image]: imageYaml(APP, DIGEST, "9".repeat(40)), [P.data]: wantData }), ...chartTags(), ...appRepo(APP, { built: false }), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, { PASSWORD: FAKE_SECRETS[0] }), infisicalList(vk, { PASSWORD: FAKE_SECRETS[1] }), noPr(BRANCH)];
+    const rules = [...homelab({ [P.values]: wantValues, [P.image]: imageYaml(APP, DIGEST, "9".repeat(40)), [P.data]: wantData }), ...chartTags(), argo(), ...appRepo(APP, { built: false }), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, { PASSWORD: FAKE_SECRETS[0] }), infisicalList(vk, { PASSWORD: FAKE_SECRETS[1] }), noPr(BRANCH)];
     const r = await runCli([...ARGS, "--json"], rules);
     expect(r.code).toBe(0);
     expectPlanReadOnly(r);
@@ -177,11 +179,53 @@ describe("app add", () => {
 
   test("영속 요청인데 캐시가 켜져 있으면 cache add --persistent로 안내한다", async () => {
     const cached = appValues(null, { postgres: false, cache: "cache" }, { secrets: [], latestChart: "1.1.0" })!;
-    const rules = [...homelab({ [P.values]: cached, [P.image]: wantImage, [P.data]: null }), ...chartTags(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, {}), infisicalList(vk, {}), noPr(BRANCH)];
+    const rules = [...homelab({ [P.values]: cached, [P.image]: wantImage, [P.data]: null }), ...chartTags(), argo(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(pg, {}), infisicalList(vk, {}), noPr(BRANCH)];
     const r = await runCli(["app", "add", APP, "--cache=persistent", "--json"], rules);
     expect(r.code).toBe(1);
     expect(r.json.error.next).toBe(`homelab cache add ${APP} --persistent`);
     expectPlanReadOnly(r);
+  });
+
+  test("Infisical 키가 차트 env(PORT)와 겹치면 쓰기 전에 멈춘다(#884 2라운드 P2-4)", async () => {
+    const rules = newWorld().map((x) => (x.argv.join(" ") === infArgv.list(FAKE_PROJECT, `/apps/${APP}`).join(" ") ? infisicalList(`/apps/${APP}`, { PORT: FAKE_SECRETS[0] }) : x));
+    const r = await runCli([...ARGS, "--apply", "--json"], rules);
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).toContain("PORT");
+    expect(r.writes).toEqual([]);
+    expectNoSecrets(r);
+  });
+
+  test("기존 worker에 --public·--internal을 붙이지 않는다(#884 2라운드 P2-5)", async () => {
+    const worker = "chartVersion: 1.1.0\nkind: worker\nresources: { cpu: 50m, memory: 64Mi }\nprobes: { readiness: { command: [true] } }\n";
+    for (const flag of [["--public", "memo.ukyi.app"], ["--internal", "memo"]]) {
+      const rules = [...homelab({ [P.values]: worker, [P.image]: wantImage, [P.data]: null }), ...chartTags(), argo(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), noPr(BRANCH)];
+      const r = await runCli(["app", "add", APP, ...flag, "--apply", "--json"], rules);
+      expect(r.code).toBe(1);
+      expect(r.json.error.message).toContain("worker");
+      expect(r.writes).toEqual([]);
+    }
+  });
+
+  test("--cache=persistent: 앱 Application에 캐시 서버가 남아 있으면 대기(3), 비밀번호·PR not-run(Connector 4373412609)", async () => {
+    const rules = newWorld().map((x) => (x.argv.includes("applications.argoproj.io") ? argo([{ kind: "Deployment", name: `${APP}-valkey` }]) : x));
+    const r = await runCli([...ARGS, "--apply", "--json"], rules);
+    expect(r.code).toBe(3);
+    const byId = Object.fromEntries(r.json.steps.map((s: any) => [s.id, s.result]));
+    expect(byId["cache-gone"]).toBe("waiting");
+    expect([byId["infisical-postgres"], byId.pr]).toEqual(["not-run", "not-run"]);
+    expect(r.writes).toEqual([]);
+  });
+
+  test("PR 계산 때의 main에 그사이 캐시가 켜졌으면 영속 등록 PR을 만들지 않는다(#884 2라운드 P2-2)", async () => {
+    const cached = appValues(null, { postgres: false, cache: "cache" }, { secrets: [], latestChart: "1.1.0" })!;
+    const MAIN2 = "8".repeat(40);
+    const rules = newWorld().flatMap((x) => (x.argv.join(" ").endsWith("git/ref/heads/main") && x.argv.join(" ").includes("repos/ukyi-app/homelab/")
+      ? [ghGet("repos/ukyi-app/homelab/git/ref/heads/main", [ghResponse(200, { object: { sha: "a".repeat(40) } }), ghResponse(200, { object: { sha: MAIN2 } })]), ghGet(`repos/ukyi-app/homelab/contents/${P.values}?ref=${MAIN2}`, 200, { type: "file", encoding: "base64", content: Buffer.from(cached).toString("base64") }), ghGet(`repos/ukyi-app/homelab/contents/${P.image}?ref=${MAIN2}`, 404, {}), ghGet(`repos/ukyi-app/homelab/contents/${P.data}?ref=${MAIN2}`, 404, {})]
+      : [x]));
+    const r = await runCli(["app", "add", APP, "--cache=persistent", "--json"], rules);
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).toContain("그사이 main에 캐시 Valkey가 켜졌다");
+    expect(r.writes).toEqual([]);
   });
 
   test("사용법: 이름 한도·내부 이름 예약어는 64", async () => {
@@ -189,6 +233,10 @@ describe("app add", () => {
     expect((await runCli(["app", "add", "my-valkey", "--cache"], [])).code).toBe(64);
     expect((await runCli(["app", "add", APP, "--internal", "go"], [])).code).toBe(64);
     expect((await runCli(["app", "add", APP, "--cache", "--cache"], [])).code).toBe(64);
+    // 영속에서도 이름의 valkey 금지(데이터 차트 data.persistentValkey, #884 2라운드 P2-3).
+    const r = await runCli(["app", "add", "my-valkey", "--cache=persistent", "--apply"], []);
+    expect(r.code).toBe(64);
+    expect(r.calls).toEqual([]);
   });
 
   test("비밀번호 단계: 폴더가 없으면 바깥부터 만들고 쓴다", async () => {

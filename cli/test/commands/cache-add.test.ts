@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { cacheOff, cacheOn, persistentData, usesValkey } from "../../src/commands/cache-add";
-import { FAKE_SECRETS, expectNoSecrets, expectPlanReadOnly, infisicalSet, kubectlRule, runCli, type Rule } from "../harness";
-import { chartTags, folders, homelab, infisicalList, noPr, prCreate, prOpen } from "../fixtures/app-add-world/world";
+import { FAKE_SECRETS, expectNoSecrets, expectPlanReadOnly, ghGet, ghResponse, infisicalSet, kubectlRule, runCli, type Rule } from "../harness";
+import { MAIN, R, chartTags, contentsPath, fileJson, folders, homelab, infisicalList, noPr, prCreate, prOpen } from "../fixtures/app-add-world/world";
 
 // 타임아웃 주입(스텁 5초 지연 > exec 상한 3초)이 든 시험은 3초를 넘는다. bun 기본 시험 제한(5초)에 걸리지 않게 늘린다.
 const SLOW = 20_000;
@@ -101,8 +101,50 @@ describe("cache add --persistent(캐시 → 영속, PR 둘)", () => {
     expect(r.writes).toEqual([]);
   });
 
-  test("이름 한도: 영속 38자, 캐시 51자·valkey 금지", async () => {
+  test("이름 한도: 영속 38자, 캐시 51자, valkey 금지는 캐시·영속 둘 다(#884 2라운드 P2-3)", async () => {
     expect((await runCli(["cache", "add", "a".repeat(39), "--persistent"], [])).code).toBe(64);
     expect((await runCli(["cache", "add", "x-valkey"], [])).code).toBe(64);
+    const r = await runCli(["cache", "add", "my-valkey", "--persistent", "--apply"], []);
+    expect(r.code).toBe(64);
+    expect(r.calls).toEqual([]);
+  });
+
+  test("꺼진 캐시(cache: { enabled: false })가 적힌 영속 앱은 전환 대상이 아니다: 연결을 지우지 않고 모두 same(#884 2라운드 P2-1, Connector 4373412607)", async () => {
+    const disabled = `${ON}cache: { enabled: false }\n`;
+    const rendered = [{ kind: "Deployment", name: APP }, { kind: "ExternalSecret", name: `${APP}-valkey-url` }];
+    const r = await runCli(["cache", "add", APP, "--persistent", "--apply", "--json"], [...homelab({ [A]: disabled, [D]: DATA }), ...chartTags(), argoApp(rendered), ...fold(), infisicalList(VK, [has]), noPr(BRANCH)]);
+    expect(r.code).toBe(0);
+    expect(r.json.steps.map((s: any) => s.id)).toEqual(["registered", "cache-gone", "infisical-password", "pr"]);
+    expect(r.json.steps.every((s: any) => s.state === "same")).toBe(true);
+    expect(r.writes).toEqual([]);
+  });
+
+  test("PR 계산 때의 main에서 단계 전제를 다시 본다: 그사이 캐시가 켜졌으면 영속 PR을 만들지 않는다(#884 2라운드 P2-2)", async () => {
+    const MAIN2 = "7".repeat(40);
+    const rules = [
+      // 명령 시작은 MAIN(캐시 꺼짐 → 단계 B), PR 계산은 MAIN2(그사이 캐시 등록이 병합됨).
+      ghGet(`${R}/git/ref/heads/main`, [ghResponse(200, { object: { sha: MAIN } }), ghResponse(200, { object: { sha: MAIN2 } })]),
+      ghGet(contentsPath(A), 200, fileJson(OFF)),
+      ghGet(contentsPath(D), 404, {}),
+      ghGet(contentsPath(A, MAIN2), 200, fileJson(CACHED)),
+      ghGet(contentsPath(D, MAIN2), 404, {}),
+      ...chartTags(),
+      argoApp([{ kind: "Deployment", name: APP }]),
+      ...fold(),
+      infisicalList(VK, [has]),
+      noPr(BRANCH),
+    ];
+    const r = await runCli(["cache", "add", APP, "--persistent", "--apply", "--json"], rules);
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).toContain("그사이 main에 캐시 Valkey가 켜졌다");
+    expect(r.writes).toEqual([]);
+  });
+
+  test("env 이름 충돌(values env.VALKEY_URL)은 쓰기 전에 멈춘다(#884 2라운드 P2-4)", async () => {
+    const withEnv = `${BASE}env: { VALKEY_URL: redis://x }\n`;
+    const r = await runCli(["cache", "add", APP, "--apply", "--json"], [...homelab({ [A]: withEnv, [D]: null }), ...chartTags(), ...fold(), infisicalList(VK, {}), noPr(BRANCH)]);
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).toContain("VALKEY_URL");
+    expect(r.writes).toEqual([]);
   });
 });
