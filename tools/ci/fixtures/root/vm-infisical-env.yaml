@@ -1,0 +1,7 @@
+# expect: fail
+# cluster: vm
+# match: VM 격리 2번: cluster.infisical은 homelab-dev 프로젝트의 dev 환경이다
+# 프로젝트는 맞고 환경만 운영 이름.
+cluster:
+  infisical:
+    environmentSlug: prod

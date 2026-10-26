@@ -1,0 +1,6 @@
+# expect: fail
+# cluster: vm
+# match: root-vm Application이 cluster.name "prod"인 값 파일을 읽었다
+# values-vm.yaml을 운영 값으로 통째로 덮은 실수. 이름까지 prod라 VM 격리 단언을 비켜 가므로 릴리스 이름으로 잡는다.
+cluster:
+  name: prod
