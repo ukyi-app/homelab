@@ -1,8 +1,6 @@
 // data purge: 한 실행에서 본 워크로드를 잊지 않는지(#893 r2 재현 A·B·C)와 두 probe의 정상 폐기.
 // 엔진에 넘기는 단계의 read를 가로채 그 읽기 때만 파드를 넣고 뺀다(codex 재현과 같은 방식).
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Observation, ReadCtx, Step } from "../../src/core/command";
 import cmd from "../../src/commands/purge";
 import { World, runIn } from "../fixtures/rotate-world/world";
@@ -11,7 +9,24 @@ const APP = "homelab-probe";
 const NS = `app-${APP}`;
 const DATA = `data/${APP}/values.yaml`;
 const REC = `database/data-purge-${APP}`;
-const ROOT = join(import.meta.dir, "../../..");
+// 두 probe의 values 사본(main afc20c0, PR 1 전). 저장소 파일을 읽으면 purge PR 1·2가 그 파일을 바꾸고 지울 때 ci가 깨진다(#906).
+const PROBE_VALUES: Record<string, string> = {
+  "homelab-probe": [
+    "# T11 시나리오 2. 공유 Cluster pg에 역할·DB homelab-probe(비밀번호 원본 /apps/homelab-probe/postgres/PASSWORD).",
+    "chartVersion: 1.0.1",
+    "postgres: { enabled: true }",
+    "# T11 시나리오 4. 영속 Valkey(앱 ns, PVC valkey-data, 매일 R2 백업). 캐시(앱 차트)와 같은 이름이라 캐시를 먼저 끈 뒤 켠다.",
+    "valkey: { persistent: true }",
+    "",
+  ].join("\n"),
+  "homelab-probe2": [
+    "# T11 시나리오 10(한 앱만 복원)의 두 번째 DB. 앱 없이 DB만 둔다(비밀번호 원본 /apps/homelab-probe2/postgres/PASSWORD).",
+    "# homelab-probe를 T1로 되돌리는 동안 이 DB의 T1 뒤 쓰기가 남는지 본다.",
+    "chartVersion: 1.0.0",
+    "postgres: { enabled: true }",
+    "",
+  ].join("\n"),
+};
 const run = (w: World, mode: "plan" | "apply" = "apply") => runIn(w, cmd, mode, { app: APP }, mode === "apply" ? { confirm: APP } : {});
 
 // PR 1이 반영된 PG·영속 Valkey 세계(purge: true, reclaim delete, PV Retain)
@@ -230,7 +245,7 @@ describe("data purge: 한 실행의 관측 표시(#893 r2)", () => {
   });
 });
 
-describe("data purge: 두 probe의 정상 폐기(저장소의 실제 values)", () => {
+describe("data purge: 두 probe의 정상 폐기(values 사본)", () => {
   beforeAll(() => setSystemTime(new Date("2026-10-26T12:00:00Z")));
   afterAll(() => setSystemTime());
 
@@ -240,7 +255,7 @@ describe("data purge: 두 probe의 정상 폐기(저장소의 실제 values)", (
       const data = `data/${app}/values.yaml`;
       const rec = `database/data-purge-${app}`;
       const persistent = app === "homelab-probe";
-      const w = new World({ [data]: readFileSync(join(ROOT, data), "utf8") });
+      const w = new World({ [data]: PROBE_VALUES[app] });
       w.tags.add("data-chart-v1.0.2");
       w.strictNamespaces = true;
       w.put("namespace", null, "database", { metadata: { name: "database" } });
