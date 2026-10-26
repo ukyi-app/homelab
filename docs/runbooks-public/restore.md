@@ -75,10 +75,11 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
 
 **왜 복원 모드가 필요한가:** `appendonly yes`인 채 시작하면 AOF가 RDB보다 이긴다. AOF 디렉터리를 지우고 `dump.rdb`만 두어도 Valkey 9.1.2는 RDB를 읽지 않고 빈 데이터로 시작해 빈 AOF를 새로 만든다(U18 로컬 실측, 2026-10-23). 그래서 RDB는 `appendonly no`(복원 모드)로 읽고, 읽은 뒤 실행 중에 AOF를 켠다.
 
-**데이터 확인은 키 수 고정 비교가 아니다.** 복원 뒤에도 TTL 만료와 앱의 정상 쓰기로 키 수는 바뀐다. 그래서 3·4·5단계는 "키가 0개가 아니다"를 보고, 운영자가 아는 표식 키가 있으면 그 키가 있는지도 본다. 표식 키는 복원한 데이터에 있는, 만료 시간이 없는 키 하나다(3단계가 TTL 없음을 확인한다). 이름만 쓰고 값은 보지 않는다. 그런 키를 모르면 `MARK`를 비워 둔다. 그때는 키 수만 보고 확인마다 경고 한 줄을 낸다(표식 키를 필수로 두면 그런 키가 없는 앱은 복원할 수 없다). 0개가 되거나 표식 키를 적었는데 없으면 멈추고 원인을 본다(재시작 뒤 빈 데이터, 아래 4단계의 함정). 복원 직후 키 수(`$W/vk-dbsize`)는 참고로만 보여 준다.
+**데이터 확인은 키 수 고정 비교가 아니라 검증 키로 한다.** 복원 뒤에도 TTL 만료와 앱의 정상 쓰기로 키 수는 바뀐다. 그리고 앱은 복원 중에도 돌아(1단계) 키를 새로 쓰므로, 키 수가 0이 아니라는 것만으로는 복원한 데이터가 남았는지 알 수 없다(재시작 때 다 사라져도 앱이 키 하나를 쓰면 0이 아니다). 그래서 3단계가 RDB를 읽은 직후 이 실행의 검증 키 `homelab:restore:<실행 id>`(값 `1`, 비밀 아님, 만료 없음)를 직접 쓴다. 4·5단계는 그 키가 있어야 통과한다. 재시작 뒤 없으면 빈 데이터나 옛 AOF로 뜬 것이다. 6단계에서 지운다. 키 이름은 앱의 키 공간에 잠깐 보인다. 키가 0개가 아닌지와, 운영자가 아는 만료 없는 앱 표식 키(`MARK`, 모르면 비워 둔다)가 있는지도 함께 본다. 복원 직후 키 수(`$W/vk-dbsize`)는 참고로만 보여 준다.
 
 ```bash
-MARK=''    # 운영자가 아는 만료 없는 표식 키. 모르면 비워 둔다(키 수만 본다)
+MARK=''    # 운영자가 아는 만료 없는 앱 표식 키(선택). 모르면 비워 둔다
+VKEY="homelab:restore:$RUN"   # 3단계가 쓰는 이 실행의 검증 키. 같은 RUN의 재시도는 같은 키를 쓴다
 # 숫자 하나인지. valkey-cli가 오류 문구를 내도 걸린다.
 num() { case $1 in ''|*[!0-9]*) return 1 ;; esac; }
 # CONFIG GET appendonly의 값(둘째 줄).
@@ -89,13 +90,12 @@ vkaof() { local a; a=$(vk CONFIG GET appendonly) || return 1; printf '%s\n' "$a"
 # INFO 줄 끝에는 CR이 있다.
 aofok() { printf '%s\n' "$1" | tr -d '\r' | awk -F: '{ v[$1] = $2 } END { exit !(v["aof_enabled"] == "1" &&
   v["aof_rewrite_in_progress"] == "0" && v["aof_rewrite_scheduled"] == "0" && v["aof_last_bgrewrite_status"] == "ok") }'; }
-# 데이터가 살아 있는지: 키가 0개가 아니고, 표식 키를 적었으면 그 키가 있다. 아니면 지금 값을 알리고 실패한다.
-vkdata() { local n m=-; n=$(vk DBSIZE) || return 1
+# 지금 데이터가 이 복원의 것인지: 키가 0개가 아니고, 검증 키가 있고, 표식 키를 적었으면 그 키도 있다.
+# 아니면 지금 값을 알리고 실패한다. 3단계가 검증 키를 쓰기 전에는 부르지 않는다.
+vkdata() { local n v m=-; n=$(vk DBSIZE) || return 1; v=$(vk EXISTS "$VKEY") || return 1
   if [ -n "${MARK:-}" ]; then m=$(vk EXISTS "$MARK") || return 1; fi
-  if num "$n" && [ "$n" -gt 0 ] && { [ -z "${MARK:-}" ] || [ "$m" = 1 ]; }; then
-    [ -n "${MARK:-}" ] || echo "경고: 표식 키 없이 키 수(${n}개)만 봤다. 데이터 내용은 확인하지 않았다" >&2
-    return 0; fi
-  echo "키 수 $(printf '%s' "$n" | cat -v), 표식 키 $(printf '%s' "$m" | cat -v)(적었으면 1이어야 한다). 복원 직후 키 수 $(cat "$W/vk-dbsize" 2>/dev/null || echo '?')" >&2
+  if num "$n" && [ "$n" -gt 0 ] && [ "$v" = 1 ] && { [ -z "${MARK:-}" ] || [ "$m" = 1 ]; }; then return 0; fi
+  echo "키 수 $(printf '%s' "$n" | cat -v), 검증 키 $(printf '%s' "$v" | cat -v)(1이어야 한다), 표식 키 $(printf '%s' "$m" | cat -v)(적었으면 1). 복원 직후 키 수 $(cat "$W/vk-dbsize" 2>/dev/null || echo '?')" >&2
   return 1; }
 ```
 
@@ -205,23 +205,30 @@ vkdata() { local n m=-; n=$(vk DBSIZE) || return 1
    [ $? -eq 0 ] && echo "복원 Job 끝" || echo "멈춤: 복원 Job을 만들지 못했거나 끝나지 않았다. 'kubectl -n app-$APP get job,pod -L homelab.ukyi.app/restore'로 앞 Job을 본다"
    ```
 
-3. **복원 모드로 올림(PR):** `running: true`와 `restoreMode: true`를 함께. 새 파드가 `appendonly no`로 떠 RDB를 읽는다. 키가 있는지, 표식 키를 적었으면 그 키가 있고 만료 시간이 없는지 보고, 복원 직후 키 수를 적어 둔다. 다시 돌리면 4·5단계 표식도 지운다(그 뒤 단계를 다시 한다).
+3. **복원 모드로 올림(PR):** `running: true`와 `restoreMode: true`를 함께. 새 파드가 `appendonly no`로 떠 RDB를 읽는다. 키가 있는지, 표식 키를 적었으면 그 키가 있고 만료 시간이 없는지 보고, 복원 직후 키 수를 적어 둔 뒤 검증 키를 쓴다. 다시 돌리면 검증 키를 다시 쓰고 4·5단계 표식도 지운다(그 뒤 단계를 다시 한다). 4단계가 "검증 키 0"으로 멈추면(복원 모드인 채 서버가 다시 떠 RDB를 다시 읽었다) 이 단계부터 다시 한다.
 
    ```bash
    ( set -euo pipefail
    rm -f "$W/ok-vk-loaded" "$W/ok-vk-aof" "$W/ok-vk-reloaded"
    kubectl -n app-$APP rollout status deploy/$APP-valkey --timeout=5m
    a=$(vkaof); [ "$a" = no ] || { echo "복원 모드가 아니다(appendonly $(printf '%s' "$a" | cat -v)). restoreMode가 반영됐는지 본다" >&2; exit 1; }
-   vkdata
+   # 다시 돌릴 때는 앞에서 쓴 검증 키가 남아 있을 수 있어 그 키를 빼고 센다.
+   n=$(vk DBSIZE); v=$(vk EXISTS "$VKEY")
+   if num "$n" && [ "$v" = 1 ]; then n=$((n - 1)); fi
+   if ! num "$n" || [ "$n" -eq 0 ]; then echo "키가 0개다(키 수 $(printf '%s' "$n" | cat -v)). 받은 RDB가 비었거나 읽히지 않았다" >&2; exit 1; fi
    if [ -n "${MARK:-}" ]; then
+     m=$(vk EXISTS "$MARK"); [ "$m" = 1 ] || { echo "표식 키가 없다" >&2; exit 1; }
      t=$(vk TTL "$MARK"); [ "$t" = -1 ] || { echo "표식 키에 만료 시간이 있다(TTL $(printf '%s' "$t" | cat -v)). 만료 시간이 없는 키를 고르거나 비워 둔다" >&2; exit 1; }
    fi
-   n=$(vk DBSIZE); num "$n"; printf '%s\n' "$n" > "$W/vk-dbsize"
+   printf '%s\n' "$n" > "$W/vk-dbsize"
+   r=$(vk SET "$VKEY" 1); [ "$r" = OK ] || { printf '%s\n' "$r" | cat -v >&2; exit 1; }
+   t=$(vk TTL "$VKEY"); [ "$t" = -1 ] || { echo "검증 키의 TTL이 $(printf '%s' "$t" | cat -v)다" >&2; exit 1; }
+   vkdata
    touch "$W/ok-vk-loaded" )
    [ -f "$W/ok-vk-loaded" ] && echo "복원 모드로 읽음: 키 $(cat "$W/vk-dbsize")개" || echo "멈춤: 복원 모드로 읽지 못했거나 키가 0개이거나 적은 표식 키가 없다(위)"
    ```
 
-4. **AOF 다시 켜기:** 실행 중에 켜면 지금 데이터로 AOF base를 새로 쓴다. 켜기 전에 데이터를 본다(빈 데이터를 AOF로 굳히지 않게). rewrite가 시작됐고(`aof_rewrites`는 rewrite가 시작될 때 오른다), 진행·예약 중이 아니고 성공했을 때(`aofok`)만 끝난다. 예약 상태(위 함정)는 RDB 저장이 끝난 뒤 rewrite가 시작될 때까지 기다린다. 10분 안에 끝나지 않으면 멈춘다. 다시 돌려도 된다(이미 켜져 있으면 `CONFIG SET`은 아무것도 바꾸지 않고 상태만 다시 본다).
+4. **AOF 다시 켜기:** 실행 중에 켜면 지금 데이터로 AOF base를 새로 쓴다. 켜기 전에 데이터(검증 키 포함)를 본다(빈 데이터를 AOF로 굳히지 않게). `CONFIG SET appendonly yes`는 그 자리에서 rewrite를 시작하거나(`aof_rewrite_in_progress:1`) 예약한다(`aof_rewrite_scheduled:1`, 위 함정). 그래서 진행·예약이 모두 0이고 성공했을 때(`aofok`) 그 rewrite가 끝난 것이다. 예약 상태는 RDB 저장이 끝난 뒤 rewrite가 시작될 때까지 기다린다. 10분 안에 끝나지 않으면 멈춘다. 다시 돌려도 된다. 이미 켜져 있으면(예: 서버가 AOF 설정으로 다시 떠 AOF를 읽었다) `CONFIG SET`은 아무것도 바꾸지 않고 상태만 다시 본다. `aof_rewrites` 같은 횟수는 보지 않는다(서버가 다시 뜨면 0으로 돌아간다).
 
    ```bash
    ( set -euo pipefail
@@ -232,20 +239,19 @@ vkdata() { local n m=-; n=$(vk DBSIZE) || return 1
    i=0
    while :; do
      info=$(vk INFO persistence)
-     rw=$(printf '%s\n' "$info" | tr -d '\r' | sed -n 's/^aof_rewrites://p')
-     if aofok "$info" && num "$rw" && [ "$rw" -ge 1 ]; then break; fi
+     if aofok "$info"; then break; fi
      i=$((i + 1)); [ "$i" -lt 120 ] || { echo "AOF rewrite가 10분 안에 끝나지 않았다" >&2
        printf '%s\n' "$info" | tr -d '\r' | grep -E '^(aof_|rdb_bgsave_in_progress)' | cat -v >&2; exit 1; }
      sleep 5
    done
    vkdata
    touch "$W/ok-vk-aof" )
-   [ -f "$W/ok-vk-aof" ] && echo "AOF 다 씀" || echo "멈춤: AOF를 켜지 못했거나 rewrite가 끝나지 않았다(위). 데이터가 없으면 켜지 않았다"
+   [ -f "$W/ok-vk-aof" ] && echo "AOF 다 씀" || echo "멈춤: AOF를 켜지 못했거나 rewrite가 끝나지 않았다(위). 데이터가 없으면 켜지 않았다. 검증 키만 0이면 3단계부터 다시 한다"
    ```
 
-5. **복원 모드 끄기(PR):** `restoreMode`와 `running` 줄을 지운다. ConfigMap만 바뀌고 파드는 그대로다(실행 중 설정은 이미 AOF on). 병합 뒤 서버를 한 번 다시 띄워 AOF에서 다시 읽히는지 본다(키가 0개가 아닌지, 표식 키를 적었으면 있는지).
+5. **복원 모드 끄기(PR):** `restoreMode`와 `running` 줄을 지운다. ConfigMap만 바뀌고 파드는 그대로다(실행 중 설정은 이미 AOF on). 병합 뒤 서버를 한 번 다시 띄워 AOF에서 다시 읽히는지 본다(검증 키가 있는지, 키가 0개가 아닌지, 표식 키를 적었으면 있는지). 검증 키가 없으면 앱이 새로 쓴 키가 있어도 멈춘다.
 
-   **PR을 기다리는 동안 서버가 다시 떴을 수 있다.** 복원 모드 설정으로 다시 떴으면 `appendonly no`로 돌아가 AOF가 없는 상태다. 그대로 다시 띄우면 데이터가 비거나 옛 상태로 돌아간다. 그래서 다시 띄우기 직전에 ConfigMap에 복원 모드가 없는지, 실행 중 `appendonly`가 yes인지, AOF가 다 쓰였는지(`aofok`), 데이터가 있는지를 다시 본다. `appendonly`나 AOF 상태가 다르면 블록이 4단계 표식을 지우고 멈춘다. 그때는 4단계부터 다시 하고 이 블록을 다시 돌린다. 데이터가 없으면(0개, 또는 적은 표식 키가 없음) 다시 띄우지 않고 멈춘다. 원인(언제 다시 떴는지, 파드 로그)을 본 뒤 1단계(서버 내림)부터 다시 한다.
+   **PR을 기다리는 동안 서버가 다시 떴을 수 있다.** 복원 모드 설정으로 다시 떴으면 `appendonly no`로 돌아가 AOF가 없는 상태다. 그대로 다시 띄우면 데이터가 비거나 옛 상태로 돌아간다. 그래서 다시 띄우기 직전에 ConfigMap에 복원 모드가 없는지, 실행 중 `appendonly`가 yes인지, AOF가 다 쓰였는지(`aofok`), 데이터가 있는지를 다시 본다. `appendonly`나 AOF 상태가 다르면 블록이 4단계 표식을 지우고 멈춘다. 그때는 4단계부터 다시 하고 이 블록을 다시 돌린다. 데이터가 없으면(검증 키 없음, 0개, 또는 적은 표식 키 없음) 다시 띄우지 않고 멈춘다. 원인(언제 다시 떴는지, 파드 로그)을 본 뒤 1단계(서버 내림)부터 다시 한다.
 
    다시 띄우기는 `rollout restart`(Deployment 업데이트)로 한다. 파드를 직접 지우지 않는다. `Recreate`가 "옛 파드가 모두 끝난 뒤 새 파드를 만든다"를 보장하는 것은 Deployment 업데이트 때뿐이다. 파드를 지우면 ReplicaSet이 옛 파드가 끝나기(Terminating) 전에 새 파드를 만들어, 두 서버가 같은 PVC의 AOF·RDB를 함께 쓴다(로컬 kind 1.37 실측: 직접 삭제는 약 14초 겹침, `rollout restart`는 겹침 없음). Argo CD는 `rollout restart`가 더하는 주석을 되돌리지 않는다(Git에 없는 필드라 비교하지 않는다, rotate.md와 같다).
 
@@ -275,9 +281,10 @@ vkdata() { local n m=-; n=$(vk DBSIZE) || return 1
    kubectl -n app-$APP get cronjob $APP-valkey-backup   # SUSPEND False
    ```
 
-6. **정리:** 이 실행의 Job(수동 백업·복원의 모든 시도)을 라벨로 지우고 0.2의 확인이 0개인지 본다.
+6. **정리:** 3단계가 쓴 검증 키를 지우고, 이 실행의 Job(수동 백업·복원의 모든 시도)을 라벨로 지우고 0.2의 확인이 0개인지 본다. 검증 키는 서버가 떠 있을 때만 지울 수 있다(중간에 그만둔 실행이면 다음에 서버가 뜬 뒤 지운다).
 
    ```bash
+   vk DEL "$VKEY"                                    # 1(지움) 또는 0(이미 없음)
    kubectl -n app-$APP delete job -l homelab.ukyi.app/restore=$RUN
    kubectl -n app-$APP get job,pvc -l homelab.ukyi.app/restore=$RUN    # No resources
    ```
