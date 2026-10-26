@@ -20,6 +20,25 @@ const VALKEY_KEEP_MS = 14 * 86_400_000;
 const VALKEY_MARGIN_MS = 2 * 86_400_000;
 // 이 기기와 클러스터의 시계 차이로 보는 범위. 이보다 미래의 성공 시각은 믿지 않는다.
 const CLOCK_SKEW_MS = 3_600_000;
+// 앱 삭제 커밋 뒤에도 ApplicationSet·Argo CD가 앱 파드를 지울 때까지 몇 분은 쓰기가 들어올 수 있다. 그 창과 겹쳐 시작한
+// 백업은 인정하지 않는다(#883 Connector P1). 정기 백업이 하루 한 번이라 1시간 여유는 다음 날 백업으로 채워진다.
+const REMOVAL_SETTLE_MS = 3_600_000;
+
+const hasTrue = (o: any, type: string) => (o?.status?.conditions ?? []).some((c: any) => c?.type === type && c?.status === "True");
+
+// 그 앱의 백업 CronJob이 만든(정기·수동 모두 ownerReferences가 CronJob) 성공한 Job 중 가장 늦게 시작한 것의 시작 시각.
+// 완료 시각(lastSuccessfulTime)이 아니라 시작 시각을 본다. 스냅샷(initContainer의 valkey-cli --rdb)은 Job 시작 뒤, 업로드 전에
+// 찍히므로 완료가 기준보다 늦어도 스냅샷은 기준 전일 수 있다. 시작이 기준 뒤면 스냅샷도 기준 뒤다.
+function lastBackupStart(ctx: ReadCtx, ns: string, cronjob: string): string | null {
+  let best: string | null = null;
+  for (const j of ctx.k8s.list("job", ns)) {
+    const owned = (j?.metadata?.ownerReferences ?? []).some((o: any) => o?.kind === "CronJob" && o?.name === cronjob);
+    const t = j?.status?.startTime;
+    if (!owned || !hasTrue(j, "Complete") || typeof t !== "string" || !Number.isFinite(Date.parse(t))) continue;
+    if (best === null || Date.parse(t) > Date.parse(best)) best = t;
+  }
+  return best;
+}
 
 const same = (detail: string, extra: Partial<Observation> = {}): Observation => ({ state: "same", action: "none", detail, ...extra });
 
@@ -183,14 +202,15 @@ function steps(n: Names, dataFiles: string[]): Step[] {
           if (!ok) lacks.push("completed base backup");
         }
         if (data.valkey?.persistent === true) {
-          const t = ctx.k8s.get("cronjob", n.ns, `${app}-valkey-backup`)?.status?.lastSuccessfulTime;
-          if (!after(t)) lacks.push("Valkey 백업");
+          // 성공 Job은 successfulJobsHistoryLimit 1이라 마지막 하나만 남는다. 그 Job이 없으면(지워졌거나 실패만 있음) 판단하지 않는다.
+          const t = lastBackupStart(ctx, n.ns, `${app}-valkey-backup`);
+          if (t === null || Date.parse(t) <= removed + REMOVAL_SETTLE_MS) lacks.push(`${what} 1시간 뒤에 시작한 Valkey 백업(마지막 성공 Job 시작 ${t ?? "없음"})`);
           else {
             // 성공 이력만으로는 객체가 R2에 남아 있다는 증거가 아니다. 백업이 멈춘 채 14일이 지나면 복구할 객체가 없다(#883 r3 P1-1).
             const age = Date.now() - Date.parse(t);
-            if (age < -CLOCK_SKEW_MS) return { state: "differs", action: "none", detail: `Valkey 마지막 성공 백업(${t})이 지금보다 미래다(시계를 믿을 수 없다)`, next: "이 기기와 클러스터의 시각을 맞춘 뒤 다시 실행한다" };
+            if (age < -CLOCK_SKEW_MS) return { state: "differs", action: "none", detail: `Valkey 마지막 성공 백업 시작(${t})이 지금보다 미래다(시계를 믿을 수 없다)`, next: "이 기기와 클러스터의 시각을 맞춘 뒤 다시 실행한다" };
             if (age > VALKEY_KEEP_MS - VALKEY_MARGIN_MS) {
-              return { state: "differs", action: "none", detail: `Valkey 마지막 성공 백업(${t})이 12일보다 오래됐다(R2는 14일 뒤 지운다)`, next: `kubectl -n ${n.ns} get cronjob ${app}-valkey-backup로 suspend·실패를 보고, 새 백업이 성공한 뒤 다시 실행한다` };
+              return { state: "differs", action: "none", detail: `Valkey 마지막 성공 백업 시작(${t})이 12일보다 오래됐다(R2는 14일 뒤 지운다)`, next: `kubectl -n ${n.ns} get cronjob ${app}-valkey-backup로 suspend·실패를 보고, 새 백업이 성공한 뒤 다시 실행한다` };
             }
           }
         }

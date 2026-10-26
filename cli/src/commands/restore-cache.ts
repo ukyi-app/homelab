@@ -139,6 +139,13 @@ function gatedPr(n: Names, id: string, pre: string | null, done: string, step: S
   };
 }
 
+// 키 수가 같기를 요구하지 않는다. 복원 모드로 올린 뒤 사람이 PR을 병합할 때까지 앱이 돌며 키를 바꾸고 TTL 키도 만료된다.
+// 같기를 요구하면 정상 변경을 손실로 보고, touched 때문에 --abort도 안 돼 실행이 갇힌다(#883 Connector P2).
+// 실제로 아는 실패는 빈 데이터로 뜨는 것(U18)이라, 앞에서 키가 있었는데 0개가 되면 멈춘다.
+function emptied(before: number, after: number): boolean {
+  return before > 0 && after === 0;
+}
+
 function valkeyServer(w: WriteCtx, n: Names): { appendonly: string; dbsize: number } {
   const ao = w.valkey.cli(n.ns, n.server, "CONFIG GET appendonly").trim().split(/\s+/).at(-1) ?? "";
   const size = Number(w.valkey.cli(n.ns, n.server, "DBSIZE").trim());
@@ -414,7 +421,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         w.valkey.cli(n.ns, n.server, "CONFIG SET appendonly yes");
         if (!w.valkey.waitAof(n.ns, n.server, 300)) throw new Error("AOF rewrite가 300초 안에 끝나지 않았다");
         const s = valkeyServer(w, n);
-        if (s.dbsize !== want) throw new Error(`키 수가 바뀌었다(${want} → ${s.dbsize})`);
+        if (emptied(want, s.dbsize)) throw new Error(`키가 0개가 됐다(복원 직후 ${want}개)`);
         mark(w, n, { "ok.aof": "1" });
       },
     },
@@ -441,7 +448,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
       target: "AOF에서 다시 읽음",
       async read(ctx) {
         const r = record(ctx, n);
-        if (has(r, "ok.reloaded")) return same(`키 ${r!.data.dbsize}개 그대로`);
+        if (has(r, "ok.reloaded")) return same(`키 ${r!.data["dbsize.after"] ?? r!.data.dbsize}개(복원 직후 ${r!.data.dbsize}개)`);
         if (!has(r, "ok.aof")) return later("복원 모드 끄기 PR 병합 뒤 rollout restart·키 수 확인");
         const v = values(ctx, n.dataFile)?.valkey ?? {};
         const argo = ctx.k8s.get("application", "argocd", `${n.app}-data`);
@@ -453,15 +460,22 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         return synced ? { state: "differs", action: "update", detail: "rollout restart → appendonly yes·키 수 확인" } : same("PR 병합 대기 또는 반영 대기", { hold: "Argo CD 반영 대기(복원 모드 끄기)" });
       },
       async apply(w) {
-        const want = Number(mine(w, n).data.dbsize);
+        // ok.aof는 그때의 서버 프로세스 이야기다. 복원 모드 끄기 PR을 기다리는 동안 서버가 재시작됐으면 ConfigMap이 아직
+        // appendonly no라 AOF가 꺼진 채 RDB로 떠 있고, 디스크의 AOF는 그 전 것이다. 그대로 재시작하면 옛 AOF를 읽어 그사이
+        // 쓰기를 잃는다(#883 Connector P1). 재시작 직전에 지금 서버를 보고, 꺼졌으면 표식을 지워 다음 실행이 AOF부터 다시 켜게 한다.
+        const pre = valkeyServer(w, n);
+        if (pre.appendonly !== "yes" || !w.valkey.waitAof(n.ns, n.server, 60)) {
+          mark(w, n, { "ok.aof": null });
+          throw new Error(`지금 서버의 AOF가 켜져 있지 않거나 rewrite가 끝나지 않았다(appendonly ${pre.appendonly}, 그사이 재시작됐을 수 있다). 다시 실행하면 AOF부터 다시 켠다`);
+        }
         // 파드를 직접 지우지 않는다. Deployment 업데이트만 옛 파드가 끝난 뒤 새 파드를 띄운다(로컬 kind 실측 약 14초 겹침).
         w.k8s.rolloutRestart(n.ns, n.server);
         if (!w.k8s.rolloutStatus(n.ns, n.server, 300)) throw new Error("Valkey rollout이 끝나지 않았다");
         const s = valkeyServer(w, n);
         if (s.appendonly !== "yes") throw new Error(`appendonly ${s.appendonly}다(복원 모드가 남아 있다)`);
-        if (s.dbsize !== want) throw new Error(`키 수가 바뀌었다(${want} → ${s.dbsize})`);
+        if (emptied(pre.dbsize, s.dbsize)) throw new Error(`재시작 뒤 키가 0개다(직전 ${pre.dbsize}개). AOF에서 읽지 못했다`);
         if (w.k8s.get("cronjob", n.ns, n.cronjob)?.spec?.suspend !== false) throw new Error(`CronJob ${n.cronjob}이 아직 suspend다`);
-        mark(w, n, { "ok.reloaded": "1" });
+        mark(w, n, { "ok.reloaded": "1", "dbsize.after": String(s.dbsize) });
       },
     },
     {
@@ -497,7 +511,7 @@ function finishSteps(n: Names): Step[] {
         if (!has(r, "ok.cleanup")) return { state: "differs", action: "none", detail: `실행 ${r.run}이 끝나지 않았다`, next: `homelab cache restore ${n.app} --apply로 끝까지 잇거나 --abort` };
         const left = runObjects(ctx, n, r);
         if (left.length) return { state: "differs", action: "none", detail: `실행 ${r.run}의 객체가 남아 있다(${left.join(", ")})`, next: `kubectl -n ${n.ns} get job,pod -l ${LABEL}=${r.run}로 보고 끝난 뒤 다시` };
-        return same(`실행 ${r.run} 끝남(키 ${r.data.dbsize}개)`);
+        return same(`실행 ${r.run} 끝남(키 ${r.data["dbsize.after"] ?? r.data.dbsize}개)`);
       },
     },
     {

@@ -63,6 +63,14 @@ describe("data purge: plan(PATH 스텁)", () => {
   });
 });
 
+// 백업 CronJob이 만든 성공 Job 하나(successfulJobsHistoryLimit 1이라 마지막 것만 남는다). start는 Job 시작 시각.
+function valkeyBackup(w: World, start: string, opts: { complete?: boolean; owner?: string } = {}) {
+  w.put("job", NS, "gone-valkey-backup-1", {
+    metadata: { name: "gone-valkey-backup-1", ownerReferences: [{ kind: "CronJob", name: opts.owner ?? `${APP}-valkey-backup` }] },
+    status: { startTime: start, conditions: [{ type: opts.complete === false ? "Failed" : "Complete", status: "True" }] },
+  });
+}
+
 function purgeWorld(): World {
   const w = new World({ [DATA]: "chartVersion: 1.0.1\n# 사람이 쓴 주석\npostgres: { enabled: true }\nvalkey: { persistent: true }\n" });
   const protect = { "argocd.argoproj.io/sync-options": "Prune=false,Delete=false" };
@@ -72,7 +80,8 @@ function purgeWorld(): World {
   w.put("pv", null, "pvc-9", { metadata: { name: "pvc-9" }, spec: { storageClassName: "local-retain", persistentVolumeReclaimPolicy: "Retain", claimRef: { namespace: NS, name: "valkey-data" } } });
   w.put("application", "argocd", `${APP}-data`, { metadata: { name: `${APP}-data` } });
   w.put("backup", "database", "b1", { spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-21T18:00:00Z" } });
-  w.put("cronjob", NS, `${APP}-valkey-backup`, { status: { lastSuccessfulTime: "2026-10-21T18:30:00Z" } });
+  w.put("cronjob", NS, `${APP}-valkey-backup`, { status: { lastSuccessfulTime: "2026-10-21T18:31:00Z" } });
+  valkeyBackup(w, "2026-10-21T18:30:00Z");
   w.tags.add("data-chart-v1.0.2");
   w.setValue(`/apps/${APP}/postgres`, "PASSWORD", "x".repeat(20));
   w.setValue(`/apps/${APP}/valkey`, "PASSWORD", "y".repeat(20));
@@ -187,7 +196,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
     expect(r.error!.message).toContain("데이터 등록(앱 이력 없음)(2026-10-22T00:00:00Z) 뒤");
     expect(w.openPrs()).toEqual([]);
     w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-23T18:00:00Z";
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-23T18:30:00Z";
+    valkeyBackup(w, "2026-10-23T18:30:00Z");
     expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
 
     const long = purgeWorld();
@@ -239,16 +248,16 @@ describe("data purge: 흐름(가짜 세계)", () => {
     w.history.set(`apps/${APP}/values.yaml`, [{ date: "2026-10-01T00:00:00Z", status: "removed" }]);
     w.history.set(DATA, [{ date: "2026-09-01T00:00:00Z", status: "added" }]);
     w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-25T18:00:00Z";
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-02T18:30:00Z";
+    valkeyBackup(w, "2026-10-02T18:30:00Z");
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
     expect(r.error!.message).toContain("12일보다 오래됐다");
     expect(w.openPrs()).toEqual([]);
     expect(w.writes).toEqual([]);
     // 경계: 12일 안이면 통과, 12일을 넘으면 멈춘다
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-14T00:00:01Z";
+    valkeyBackup(w, "2026-10-14T00:00:01Z");
     expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-13T23:59:59Z";
+    valkeyBackup(w, "2026-10-13T23:59:59Z");
     expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
   });
 
@@ -278,11 +287,51 @@ describe("data purge: 흐름(가짜 세계)", () => {
 
   test("r3 P1-1: 마지막 성공 시각이 지금보다 미래면(시계를 믿을 수 없다) 멈춘다", async () => {
     const w = purgeWorld();
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-27T00:00:00Z";
+    valkeyBackup(w, "2026-10-27T00:00:00Z");
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
     expect(r.error!.message).toContain("미래");
     expect(w.openPrs()).toEqual([]);
+  });
+
+  test("Connector P1: 앱 삭제 전에 시작해 삭제 뒤 끝난 백업(스냅샷은 삭제 전)은 인정하지 않는다", async () => {
+    // 앱 삭제 10/20 00:00(World.removalDate). 23:59에 시작한 Job이 스냅샷을 찍고 00:05에 업로드를 마쳤다
+    const w = purgeWorld();
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-20T00:05:00Z";
+    valkeyBackup(w, "2026-10-19T23:59:00Z");
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("1시간 뒤에 시작한 Valkey 백업");
+    expect(w.openPrs()).toEqual([]);
+    expect(w.writes).toEqual([]);
+    // 삭제 직후(Argo CD가 앱 파드를 지우는 창)에 시작한 것도 아니다
+    valkeyBackup(w, "2026-10-20T00:30:00Z");
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+    valkeyBackup(w, "2026-10-20T01:00:00Z");
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+    expect(w.openPrs()).toEqual([]);
+    // 1시간이 지난 뒤 시작한 백업이 생기면 진행한다
+    valkeyBackup(w, "2026-10-20T01:00:01Z");
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
+    expect(w.openPrs().map((p) => p.head)).toEqual([`cli/data-purge-${APP}`]);
+  });
+
+  test("Connector P1: 성공한 백업 Job을 확인할 수 없으면 완료 시각이 새로워도 멈춘다", async () => {
+    const cases: [string, (w: World) => void][] = [
+      ["Job 이력 없음", (w) => w.objects.delete(`job/${NS}/gone-valkey-backup-1`)],
+      ["실패한 Job뿐", (w) => valkeyBackup(w, "2026-10-25T18:30:00Z", { complete: false })],
+      ["다른 CronJob의 Job", (w) => valkeyBackup(w, "2026-10-25T18:30:00Z", { owner: "other-valkey-backup" })],
+      ["시작 시각 없음", (w) => delete w.obj("job", NS, "gone-valkey-backup-1")!.status.startTime],
+    ];
+    for (const [what, change] of cases) {
+      const w = purgeWorld();
+      w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-25T18:31:00Z";
+      change(w);
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect([what, r.status]).toEqual([what, "failed"]);
+      expect(w.openPrs()).toEqual([]);
+      expect(w.writes).toEqual([]);
+    }
   });
 
   test("PR 1 뒤 Database CR이 없으면 반영으로 보지 않고 PR 2를 열지 않는다", async () => {

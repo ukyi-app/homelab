@@ -439,6 +439,117 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     noNewJob(w);
   });
 
+  // 복원 모드로 떠 키 5개를 읽고 AOF를 켠 뒤, 복원 모드 끄기 PR(903)이 열린 상태.
+  async function toNormalPr(): Promise<{ w: World; vk: { appendonly: boolean; aof: boolean; keys: number } }> {
+    const w = restoreWorld();
+    const vk = w.valkeys.get(`${NS}/${APP}-valkey`)!;
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(900);
+    w.objects.delete(`deployment/${NS}/${APP}-valkey`);
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = true;
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(901);
+    w.put("deployment", NS, `${APP}-valkey`, { metadata: { generation: 2 }, spec: { replicas: 1 }, status: { observedGeneration: 2, updatedReplicas: 1, readyReplicas: 1 } });
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = false;
+    vk.appendonly = false;
+    vk.aof = false;
+    vk.keys = 5;
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("waiting");
+    expect(w.records.get(`${NS}/restore-vk`)!.data["ok.aof"]).toBe("1");
+    expect(w.openPrs().map((p) => p.head)).toEqual([`cli/cache-restore-normal-${APP}`]);
+    return { w, vk };
+  }
+  function mergeNormal(w: World) {
+    w.merge(902);
+    const clean = { chartVersion: "1.0.1", valkey: { persistent: true } };
+    const argo = w.obj("application", "argocd", `${APP}-data`)!;
+    argo.spec.source.helm.valuesObject = clean;
+    argo.status.sync.comparedTo.source.helm.valuesObject = clean;
+  }
+
+  test("Connector P1: 복원 모드 끄기 PR을 기다리는 동안 서버가 재시작돼 AOF가 꺼졌으면 재시작하지 않고 AOF부터 다시 켠다", async () => {
+    const { w, vk } = await toNormalPr();
+    // 복원 모드 ConfigMap 그대로 재시작: appendonly no로 RDB를 읽고 뜬다
+    vk.appendonly = false;
+    vk.aof = false;
+    mergeNormal(w);
+    w.writes = [];
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("AOF부터 다시 켠다");
+    expect(w.writes).not.toContain(`rolloutRestart ${NS}/${APP}-valkey`);
+    expect(w.records.get(`${NS}/restore-vk`)!.data["ok.aof"]).toBeUndefined();
+    // 다음 실행: AOF를 다시 켜고(rewrite) 그 뒤에야 재시작한다
+    w.writes = [];
+    const again = await runIn(w, cmd, "apply", { app: APP });
+    expect(again.status).toBe("done");
+    const on = w.writes.indexOf(`valkey appendonly ${NS}/${APP}-valkey`);
+    const restart = w.writes.indexOf(`rolloutRestart ${NS}/${APP}-valkey`);
+    expect(on).toBeGreaterThanOrEqual(0);
+    expect(restart).toBeGreaterThan(on);
+    // rewrite가 끝나지 않은(aof_enabled는 됐지만 진행 중) 서버도 재시작하지 않는다
+    const b = await toNormalPr();
+    b.vk.aof = false;
+    mergeNormal(b.w);
+    b.w.writes = [];
+    expect((await runIn(b.w, cmd, "apply", { app: APP })).status).toBe("failed");
+    expect(b.w.writes).not.toContain(`rolloutRestart ${NS}/${APP}-valkey`);
+  });
+
+  test("Connector P2: 복원 뒤 앱이 키를 바꿔도(추가·만료) 정상 완료하고, 0개가 되면 멈춘다", async () => {
+    const { w, vk } = await toNormalPr();
+    vk.keys = 9;
+    mergeNormal(w);
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("done");
+    expect(w.records.get(`${NS}/restore-vk`)!.data["dbsize.after"]).toBe("9");
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("same");
+    expect((await runIn(w, cmd, "apply", { app: APP }, { finish: true })).status).toBe("done");
+
+    // 재시작 뒤 빈 데이터(AOF에서 못 읽음)는 멈춘다
+    const e = await toNormalPr();
+    mergeNormal(e.w);
+    const restart = e.w.restart.bind(e.w);
+    e.w.restart = (id: string) => {
+      restart(id);
+      e.vk.keys = 0;
+    };
+    const f = await runIn(e.w, cmd, "apply", { app: APP });
+    expect(f.status).toBe("failed");
+    expect(f.error!.message).toContain("키가 0개");
+    expect(e.w.records.get(`${NS}/restore-vk`)!.data["ok.reloaded"]).toBeUndefined();
+  });
+
+  test("Connector P2: AOF를 켜는 사이 키가 줄어도 통과하고, 0개가 되면 멈춘다", async () => {
+    for (const [keys, want] of [[3, "waiting"], [0, "failed"]] as const) {
+      const w = restoreWorld();
+      const vk = w.valkeys.get(`${NS}/${APP}-valkey`)!;
+      await runIn(w, cmd, "apply", { app: APP });
+      w.merge(900);
+      w.objects.delete(`deployment/${NS}/${APP}-valkey`);
+      w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = true;
+      await runIn(w, cmd, "apply", { app: APP });
+      w.merge(901);
+      w.put("deployment", NS, `${APP}-valkey`, { metadata: { generation: 2 }, spec: { replicas: 1 }, status: { observedGeneration: 2, updatedReplicas: 1, readyReplicas: 1 } });
+      vk.appendonly = false;
+      vk.aof = false;
+      vk.keys = 5;
+      // loaded가 키 5개를 적은 뒤, CONFIG SET appendonly yes 사이에 앱이 키를 바꾼다
+      let on = false;
+      Object.defineProperty(vk, "appendonly", {
+        get: () => on,
+        set: (v: boolean) => {
+          if (v && !on) vk.keys = keys;
+          on = v;
+        },
+      });
+      const r = await runIn(w, cmd, "apply", { app: APP });
+      expect([keys, r.status]).toEqual([keys, want]);
+      if (keys === 0) expect(w.records.get(`${NS}/restore-vk`)!.data["ok.aof"]).toBeUndefined();
+      else expect(w.records.get(`${NS}/restore-vk`)!.data["ok.aof"]).toBe("1");
+    }
+  });
+
   test("--abort: 복원 Job 전이면 기록을 지우고, 복원 Job 뒤면 거부한다", async () => {
     const w = restoreWorld();
     await runIn(w, cmd, "apply", { app: APP });
