@@ -152,7 +152,7 @@ describe("secret sync", () => {
   const SECRET_GONE = [notFound(`secrets "${APP}-app"`)];
   const DEPLOY_GONE = notFound(`deployments.apps "${APP}"`);
   const STUCK_NEXT = `kubectl -n argocd get application ${APP} -o yaml로 원인(status.conditions·operationState)을 보고, 고친 뒤 명시 sync한다(Argo CD가 다시 시도하지 않는다). 그 뒤 같은 명령을 다시 실행한다`;
-  const APPSET_NEXT = `kubectl -n argocd get applicationset apps -o yaml로 status.conditions를 보고 원인(보통 apps/${APP}/ 파일)을 고친다. ApplicationSet이 60초 안에 다시 만들므로 명시 sync는 필요 없다. 그 뒤 같은 명령을 다시 실행한다`;
+  const APPSET_NEXT = `kubectl -n argocd get applicationset apps -o yaml로 status.conditions를 보고 원인(보통 apps/${APP}/ 파일)을 고친다. ApplicationSet이 스스로 다시 만들므로(생성 오류 뒤에는 최대 3분) 명시 sync는 필요 없다. 그 뒤 같은 명령을 다시 실행한다`;
   async function expectWaiting(rules: Rule[], hold: string) {
     const plan = await runCli(["secret", "sync", APP, "--json"], rules);
     expect(plan.code).toBe(0);
@@ -238,6 +238,57 @@ describe("secret sync", () => {
 
   // #913 r2 기존: 첫 배포는 ExternalSecret(wave 0)이 먼저 생기고 Deployment(wave 2)는 마이그레이션 Job(wave 1) 뒤다.
   // 그 사이는 반영 중이라 대기다. Deployment 부재로 전체 읽기가 실패하던(failed/1) 것을 되돌리면 이 시험이 실패한다.
+  // #925 r1 P2-1: InvalidSpecError·UnknownError는 비교 전 검증(refreshAppConditions)에서 나와 comparedTo를 바꾸지 않는다.
+  // comparedTo 불일치를 먼저 보면(되돌리면) 이 오류가 있어도 "새 source를 비교하기를 기다림"만 반복한다.
+  describe("#925 r1 P2-1: 비교 전 설정 검증 오류", () => {
+    const shapes: [string, object | undefined][] = [["comparedTo 없음(첫 Application)", undefined], ["comparedTo가 옛 source", noSecrets]];
+    for (const type of ["InvalidSpecError", "UnknownError"]) {
+      for (const [shape, compared] of shapes) {
+        test(`${type} + ${shape}: 실패(1), 설정 원인 확인 안내, 쓰기 0`, async () => {
+          const app: Resp = { stdout: JSON.stringify({ spec: { source: withSecrets }, status: { sync: { status: "Unknown", ...(compared ? { comparedTo: { source: compared } } : {}) }, conditions: [{ type, message: "application repo is not permitted in project 'apps'" }] } }) };
+          await expectFailed(world({ es: ES_GONE, app: [app], secret: SECRET_GONE, deploy: [deploy(null)] }), `ExternalSecret 없음, 앱 Application ${type}`, `kubectl -n argocd get application ${APP} -o yaml로 status.conditions(${type})를 보고 AppProject·저장소·대상 설정을 고친다. 고치면 Argo CD가 다시 조정한다. 그 뒤 같은 명령을 다시 실행한다`);
+        });
+      }
+    }
+  });
+
+  // #925 r1 P2-2: 첫 배포에서 Deployment가 두 조회 사이에 생긴다(NotFound → NotFound → 있음). 없음을 확정하기 전에 다시 보지 않으면
+  // (되돌리면) 정상 첫 배포가 실패(1)로 끝난다. 응답은 Deployment 조회 순서대로다(UNTIL_DONE 주석).
+  describe("#925 r1 P2-2: Deployment가 조회 사이에 생김", () => {
+    const GONE = notFound(`deployments.apps "${APP}"`);
+    const rules = (app: Resp, deployResp: Resp[]) => world({ app: [app], secret: [secret(FAKE_SECRETS[0])], deploy: deployResp });
+
+    test("argo는 없음(동기화 중) → restart 읽기에서 없음 → 다시 보니 있음: plan은 대기 표시, apply는 이어서 끝난다", async () => {
+      const running = application({ sync: "OutOfSync", op: { phase: "Running", retryCount: 0 } });
+      // argo 없음, podSecrets 없음, 다시 봄 있음, podSecrets 다시 읽음
+      const plan = await runCli(["secret", "sync", APP, "--json"], rules(running, [GONE, GONE, deploy(null)]));
+      expect(plan.code).toBe(0);
+      expect(plan.json.status).toBe("pending");
+      expect(plan.json.steps.find((x: any) => x.id === "restart").detail).toBe("파드가 옛 Secret → 재시작");
+      expectPlanReadOnly(plan);
+      // 전체 읽기 4번 뒤 apply: argo(있음) → restart → 표식 → 실행 뒤 restart
+      const r = await runCli(["secret", "sync", APP, "--apply", "--json"], rules(running, [GONE, GONE, deploy(null), deploy(null), deploy(null), deploy(null), deploy(null), deploy(MARK)]));
+      expect(r.code).toBe(0);
+      expect(r.json.status).toBe("done");
+      expect(r.writes.map((c) => c.argv[3])).toEqual(["patch"]);
+    });
+
+    test("argo가 없음을 본 뒤 Application이 Synced로 읽힘(그사이 생기고 끝남): 실패가 아니라 다시 보고 이어 간다", async () => {
+      const plan = await runCli(["secret", "sync", APP, "--json"], rules(application({}), [GONE, deploy(null)]));
+      expect(plan.code).toBe(0);
+      expect(plan.json.steps.find((x: any) => x.id === "argo").detail).toBe("ExternalSecret·Deployment 있음");
+      expectPlanReadOnly(plan);
+      // 전체 읽기: argo 없음 → 다시 봄 있음 → 처음부터 있음, restart. apply: argo, restart, 표식, 실행 뒤 restart
+      const r = await runCli(["secret", "sync", APP, "--apply", "--json"], rules(application({}), [GONE, deploy(null), deploy(null), deploy(null), deploy(null), deploy(null), deploy(null), deploy(MARK)]));
+      expect(r.code).toBe(0);
+      expect(r.json.status).toBe("done");
+    });
+
+    test("다시 봐도 없으면 그대로 실패(1)(Synced인데 없음)", async () => {
+      await expectFailed(rules(application({}), [GONE]), "Deployment 없음, 앱 Application은 Synced", STUCK_NEXT);
+    });
+  });
+
   describe("#913 r2: 첫 배포 wave 0 뒤 Deployment 전", () => {
     const esOnly = (app: Resp) => world({ app: [app], secret: [secret(FAKE_SECRETS[0])], deploy: [DEPLOY_GONE] });
 

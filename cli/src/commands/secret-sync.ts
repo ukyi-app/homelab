@@ -57,7 +57,8 @@ export default defineCommand({
         state: "missing",
         action: "none",
         detail: `${missing}, ApplicationSet apps ErrorOccurred(${typeof err.reason === "string" ? err.reason : "이유 없음"})`,
-        next: `kubectl -n argocd get applicationset apps -o yaml로 status.conditions를 보고 원인(보통 apps/${app}/ 파일)을 고친다. ApplicationSet이 60초 안에 다시 만들므로 명시 sync는 필요 없다. 그 뒤 같은 명령을 다시 실행한다`,
+        // 생성 오류 뒤 다음 조정은 60초 폴링이 아니라 3분 뒤다(v3.5.5 ReconcileRequeueOnValidationError).
+        next: `kubectl -n argocd get applicationset apps -o yaml로 status.conditions를 보고 원인(보통 apps/${app}/ 파일)을 고친다. ApplicationSet이 스스로 다시 만들므로(생성 오류 뒤에는 최대 3분) 명시 sync는 필요 없다. 그 뒤 같은 명령을 다시 실행한다`,
       };
     };
     // what(ExternalSecret 또는 Deployment)이 아직 없을 때: Argo CD가 반영 중이면 대기(3), 끝났는데 없으면 실패(1).
@@ -66,24 +67,43 @@ export default defineCommand({
       if (a === null) return appsetOr(c, `${what} 없음`, same("앱 Application 없음", { hold: "ApplicationSet이 앱 Application을 만들기를 기다림" }));
       if (!covers(a.spec?.source)) return appsetOr(c, `${what} 없음`, same("values의 secrets 반영 전", { hold: "ApplicationSet이 values의 secrets를 앱 Application에 넣기를 기다림" }));
       const st = a.status ?? {};
-      // conditions·sync·operationState는 컨트롤러가 한 번의 조정에서 함께 쓴다. comparedTo.source가 지금 spec.source와 다르면
-      // 새 source(차트 버전·values)를 아직 조정하지 않은 것이라, 남은 SyncError·Failed는 옛 source의 것이다(Argo CD도 이 차이를
-      // "spec 바뀜"으로 본다, v3.5.5 state.go specEqualsCompareTo). 비교가 실패해도 comparedTo는 새 source로 쓰이므로(같은 파일
-      // CompareAppState, 저장소 오류 유예 동안만 예외) 깨진 새 차트도 유예 뒤에는 아래 ComparisonError로 실패한다.
+      const conditions: any[] = Array.isArray(st.conditions) ? st.conditions : [];
+      // InvalidSpecError·UnknownError는 조정마다 비교 전에 다시 쓴다(v3.5.5 refreshAppConditions: 프로젝트·저장소·대상 권한
+      // 검증). 이 오류면 컨트롤러가 CompareAppState 전에 끝나 comparedTo가 바뀌지 않으므로 아래 비교보다 먼저 본다(#925 r1 P2-1).
+      const spec = conditions.find((x) => x?.type === "InvalidSpecError" || x?.type === "UnknownError");
+      if (spec) {
+        return {
+          state: "missing",
+          action: "none",
+          detail: `${what} 없음, 앱 Application ${spec.type}`,
+          next: `kubectl -n argocd get application ${app} -o yaml로 status.conditions(${spec.type})를 보고 AppProject·저장소·대상 설정을 고친다. 고치면 Argo CD가 다시 조정한다. 그 뒤 같은 명령을 다시 실행한다`,
+        };
+      }
+      // 나머지 conditions·sync·operationState는 한 번의 조정에서 비교 결과와 함께 쓴다. comparedTo.source가 지금 spec.source와
+      // 다르면 새 source(차트 버전·values)를 아직 비교하지 않은 것이라, 남은 SyncError·Failed는 옛 source의 것이다(Argo CD도 이
+      // 차이를 "spec 바뀜"으로 본다, v3.5.5 state.go specEqualsCompareTo). 비교가 실패해도 comparedTo는 새 source로 쓰이므로(같은
+      // 파일 CompareAppState, 저장소 오류 유예 동안만 예외) 깨진 새 차트도 유예 뒤에는 아래 ComparisonError로 실패한다.
       if (!sameJson(a.spec?.source, st.sync?.comparedTo?.source)) return same("새 source 비교 전", { hold: "Argo CD가 새 source를 비교하기를 기다림" });
-      const err = (Array.isArray(st.conditions) ? st.conditions : []).find((x: any) => typeof x?.type === "string" && x.type.endsWith("Error"));
+      const err = conditions.find((x) => typeof x?.type === "string" && x.type.endsWith("Error"));
       if (err) return stuck(`${what} 없음, 앱 Application ${err.type}`);
       const op = st.operationState;
       if (op?.phase === "Running") return same(`동기화 진행 중(재시도 ${op.retryCount ?? 0}회)`, { hold: "Argo CD 동기화가 끝나기를 기다림" });
       // 자동 동기화는 마지막 동기화가 지금 revision·source(전체)로 한 것이면 다시 하지 않는다(v3.5.5 alreadyAttemptedSync).
       // 차트 버전이나 다른 값만 바뀌어도 새 시도다. secrets 키가 같다는 것으로는 가를 수 없다(#913 r2 P2-1).
-      // 결과가 없는 끝난 동기화도 시도한 것으로 본다(같은 함수). sync.revision을 모르면 source만 본다. 모르는 값을 "다름"으로
-      // 읽으면 재시도 소진(r1 P2-1)이 대기로 되돌아간다.
+      // 결과가 없는 끝난 동기화도 시도한 것으로 본다(같은 함수). Argo CD는 revision 비교 여부를 내부 값(newRevisionHasChanges)으로
+      // 정하는데 CLI는 그 값을 볼 수 없어, sync.revision이 있을 때만 revision을 비교한다(같은 알고리즘은 아니다). 모르는 값을
+      // "다름"으로 읽으면 재시도 소진(r1 P2-1)이 대기로 되돌아간다.
       const sameRev = (r: unknown) => typeof st.sync?.revision !== "string" || r === st.sync.revision;
       const attempted = op ? (op.syncResult ? sameRev(op.syncResult.revision) && sameJson(a.spec?.source, op.syncResult.source) : ["Succeeded", "Failed", "Error"].includes(op.phase)) : false;
       if (attempted && (op.phase === "Failed" || op.phase === "Error")) return stuck(`${what} 없음, 동기화 ${op.phase}(재시도 ${op.retryCount ?? 0}회 뒤 멈춤)`);
       if (st.sync?.status === "Synced") return stuck(`${what} 없음, 앱 Application은 Synced`);
       return same("동기화 전", { hold: "Argo CD가 지금 source로 동기화를 시작하기를 기다림" });
+    };
+    // 지금 없는 것과 그때의 판정.
+    const observe = (c: ReadCtx): { missing: { kind: "externalsecret" | "deployment"; name: string } | null; o: Observation } => {
+      if (c.k8s.get("externalsecret", ns, es) === null) return { missing: { kind: "externalsecret", name: es }, o: judge(c, "ExternalSecret") };
+      if (c.k8s.get("deployment", ns, app) === null) return { missing: { kind: "deployment", name: app }, o: judge(c, "Deployment") };
+      return { missing: null, o: same("ExternalSecret·Deployment 있음") };
     };
 
     const steps: Step[] = [
@@ -114,9 +134,11 @@ export default defineCommand({
         id: "argo",
         target: `Argo CD ${app}`,
         async read(c) {
-          if (c.k8s.get("externalsecret", ns, es) === null) return judge(c, "ExternalSecret");
-          if (c.k8s.get("deployment", ns, app) === null) return judge(c, "Deployment");
-          return same("ExternalSecret·Deployment 있음");
+          const first = observe(c);
+          if (first.missing === null || first.o.state === "same") return first.o;
+          // 실패 판정은 "없음"을 본 뒤에 읽은 Argo CD 상태에 기댄다. 조회는 원자적이지 않아 그사이 생겼을 수 있다(첫 배포의
+          // wave가 진행되면 없음 → Synced로 읽힌다, #925 r1 P2-2). 실패로 끝내기 전에 그 객체를 다시 보고, 생겼으면 한 번 더 본다.
+          return c.k8s.get(first.missing.kind, ns, first.missing.name) === null ? first.o : observe(c).o;
         },
       },
       {
@@ -143,10 +165,11 @@ export default defineCommand({
           let p: ReturnType<ReadCtx["k8s"]["podSecretsCurrent"]>;
           try {
             p = c.k8s.podSecretsCurrent(ns, app);
-          } catch (e) {
-            // Deployment가 없어서 난 실패만 바꾼다. 다른 읽기 실패(시간 초과 등)는 그대로 올린다.
+          } catch {
+            // Deployment가 없어서 난 실패만 바꾼다. 다시 보니 있으면(두 조회 사이에 생김, #925 r1 P2-2) 한 번 더 읽고, 그때의
+            // 실패(시간 초과 등)는 그대로 올린다.
             if (c.k8s.get("deployment", ns, app) === null) return { state: "differs", action: "update", detail: "Deployment가 생긴 뒤 확인" };
-            throw e;
+            p = c.k8s.podSecretsCurrent(ns, app);
           }
           if (p.current && p.rolledOut) return same("파드가 지금 Secret으로 떠 있음");
           return { state: "differs", action: "update", detail: p.current ? "rollout 진행 중" : "파드가 옛 Secret → 재시작" };
