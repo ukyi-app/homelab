@@ -89,7 +89,10 @@ export function valkeyWrite(exec: Exec, k8s: KubeRead, pollMs: number): ValkeyWr
       for (;;) {
         const info = cli(ns, deployment, "INFO persistence");
         const field = (k: string) => new RegExp(`^${k}:(\\S+)`, "m").exec(info)?.[1];
-        if (field("aof_enabled") === "1" && field("aof_rewrite_in_progress") === "0" && field("aof_last_bgrewrite_status") === "ok") return true;
+        // 예약(aof_rewrite_scheduled:1)도 끝나지 않은 것이다. RDB 저장 중에 AOF를 켜면 Valkey 9.1.2는 첫 AOF 생성을 예약만 하고
+        // 나머지 값은 끝난 것처럼 보인다(aof.c startAppendOnly). 그때 재시작하면 옛 AOF나 빈 데이터로 뜬다(#889 r1 P1-1).
+        // 값이 없으면(필드 이름이 바뀐 버전) 끝났다고 보지 않는다.
+        if (field("aof_enabled") === "1" && field("aof_rewrite_in_progress") === "0" && field("aof_rewrite_scheduled") === "0" && field("aof_last_bgrewrite_status") === "ok") return true;
         if (Date.now() + pollMs > deadline) return false;
         Bun.sleepSync(pollMs);
       }

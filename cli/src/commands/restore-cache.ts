@@ -146,6 +146,22 @@ function emptied(before: number, after: number): boolean {
   return before > 0 && after === 0;
 }
 
+// 0개를 본 실행은 기록에 suspect.empty를 남긴다. 재실행이 빈 서버의 0개를 새 기준으로 받아 성공으로 넘어가지 않게 한다
+// (#889 r1 P1-3). 앱이 정상적으로 다 지웠거나 TTL로 모두 만료됐으면(#889 r1 P2) 사람이 보고 --accept-empty로 받아들인다.
+// 플래그는 이 표식이 있을 때만 쓰인다(미리 붙여 두어 검사를 끄지 못하게).
+function emptyAccepted(w: WriteCtx, n: Names, flag: boolean): boolean {
+  const r = mine(w, n);
+  if (has(r, "empty.accepted")) return true;
+  if (!flag || !has(r, "suspect.empty")) return false;
+  mark(w, n, { "empty.accepted": "1" });
+  return true;
+}
+
+function suspectEmpty(w: WriteCtx, n: Names, message: string): never {
+  mark(w, n, { "suspect.empty": "1" });
+  throw new Error(`${message}. 데이터를 확인하고, 비어 있는 것이 정상이면 같은 명령에 --accept-empty를 붙여 다시 한다`);
+}
+
 function valkeyServer(w: WriteCtx, n: Names): { appendonly: string; dbsize: number } {
   const ao = w.valkey.cli(n.ns, n.server, "CONFIG GET appendonly").trim().split(/\s+/).at(-1) ?? "";
   const size = Number(w.valkey.cli(n.ns, n.server, "DBSIZE").trim());
@@ -238,7 +254,7 @@ function jobFinished(w: WriteCtx, n: Names): string {
   return got;
 }
 
-function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
+function mainSteps(n: Names, object: string, backupFirst: boolean, acceptEmpty: boolean): Step[] {
   const app = n.app;
   const steps: Step[] = [
     {
@@ -421,7 +437,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         w.valkey.cli(n.ns, n.server, "CONFIG SET appendonly yes");
         if (!w.valkey.waitAof(n.ns, n.server, 300)) throw new Error("AOF rewrite가 300초 안에 끝나지 않았다");
         const s = valkeyServer(w, n);
-        if (emptied(want, s.dbsize)) throw new Error(`키가 0개가 됐다(복원 직후 ${want}개)`);
+        if (emptied(want, s.dbsize) && !emptyAccepted(w, n, acceptEmpty)) suspectEmpty(w, n, `키가 0개가 됐다(복원 직후 ${want}개)`);
         mark(w, n, { "ok.aof": "1" });
       },
     },
@@ -463,17 +479,24 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         // ok.aof는 그때의 서버 프로세스 이야기다. 복원 모드 끄기 PR을 기다리는 동안 서버가 재시작됐으면 ConfigMap이 아직
         // appendonly no라 AOF가 꺼진 채 RDB로 떠 있고, 디스크의 AOF는 그 전 것이다. 그대로 재시작하면 옛 AOF를 읽어 그사이
         // 쓰기를 잃는다(#883 Connector P1). 재시작 직전에 지금 서버를 보고, 꺼졌으면 표식을 지워 다음 실행이 AOF부터 다시 켜게 한다.
+        const r0 = mine(w, n);
+        // 앞 실행이 0개를 봤으면 받아들이기 전에는 다시 재시작하지 않는다.
+        if (has(r0, "suspect.empty") && !emptyAccepted(w, n, acceptEmpty)) suspectEmpty(w, n, "앞 실행이 키 0개를 봤다");
         const pre = valkeyServer(w, n);
         if (pre.appendonly !== "yes" || !w.valkey.waitAof(n.ns, n.server, 60)) {
           mark(w, n, { "ok.aof": null });
           throw new Error(`지금 서버의 AOF가 켜져 있지 않거나 rewrite가 끝나지 않았다(appendonly ${pre.appendonly}, 그사이 재시작됐을 수 있다). 다시 실행하면 AOF부터 다시 켠다`);
         }
+        // 첫 재시작 전 키 수를 기준으로 고정한다. 실패 뒤 재실행이 지금(이미 빈 서버)의 값을 기준으로 삼지 않게 한다.
+        const base = r0.data["dbsize.pre"] !== undefined ? Number(r0.data["dbsize.pre"]) : pre.dbsize;
+        if (!Number.isInteger(base) || base < 0) throw new Error("실행 기록의 dbsize.pre 형식이 아니다");
+        if (r0.data["dbsize.pre"] === undefined) mark(w, n, { "dbsize.pre": String(pre.dbsize) });
         // 파드를 직접 지우지 않는다. Deployment 업데이트만 옛 파드가 끝난 뒤 새 파드를 띄운다(로컬 kind 실측 약 14초 겹침).
         w.k8s.rolloutRestart(n.ns, n.server);
         if (!w.k8s.rolloutStatus(n.ns, n.server, 300)) throw new Error("Valkey rollout이 끝나지 않았다");
         const s = valkeyServer(w, n);
         if (s.appendonly !== "yes") throw new Error(`appendonly ${s.appendonly}다(복원 모드가 남아 있다)`);
-        if (emptied(pre.dbsize, s.dbsize)) throw new Error(`재시작 뒤 키가 0개다(직전 ${pre.dbsize}개). AOF에서 읽지 못했다`);
+        if (emptied(base, s.dbsize) && !emptyAccepted(w, n, acceptEmpty)) suspectEmpty(w, n, `재시작 뒤 키가 0개다(첫 재시작 전 ${base}개). AOF에서 읽지 못했을 수 있다`);
         if (w.k8s.get("cronjob", n.ns, n.cronjob)?.spec?.suspend !== false) throw new Error(`CronJob ${n.cronjob}이 아직 suspend다`);
         mark(w, n, { "ok.reloaded": "1", "dbsize.after": String(s.dbsize) });
       },
@@ -609,6 +632,7 @@ export default defineCommand({
   flags: [
     { name: "object", kind: "value", valueName: "dump-<UTC>.rdb|latest", pattern: OBJECT, help: "R2 valkey/<app>/의 객체(기본 latest)" },
     { name: "backup-first", kind: "bool", help: "복원 전에 지금 상태를 수동 백업한다(0단계)" },
+    { name: "accept-empty", kind: "bool", help: "앞 실행이 키 0개를 보고 멈춘 뒤, 비어 있는 것이 정상임을 확인했을 때만" },
     { name: "finish", kind: "bool", help: "끝난 복원의 실행 기록을 지운다" },
     { name: "abort", kind: "bool", help: "복원 Job 전이면 그만두고 서버를 다시 올린다" },
   ],
@@ -617,13 +641,13 @@ export default defineCommand({
     const finish = input.flags.finish === true;
     const abort = input.flags.abort === true;
     if (finish && abort) throw new UsageError("--finish와 --abort는 함께 쓰지 않는다");
-    if ((finish || abort) && (input.flags.object !== undefined || input.flags["backup-first"] !== undefined)) throw new UsageError("--finish·--abort에는 --object·--backup-first를 쓰지 않는다");
+    if ((finish || abort) && (input.flags.object !== undefined || input.flags["backup-first"] !== undefined || input.flags["accept-empty"] !== undefined)) throw new UsageError("--finish·--abort에는 --object·--backup-first·--accept-empty를 쓰지 않는다");
     const n: Names = { app, ns: `app-${app}`, server: `${app}-valkey`, cronjob: `${app}-valkey-backup`, dataFile: `data/${app}/values.yaml` };
     const object = (input.flags.object as string | undefined) ?? "latest";
     return ctx.engine({
       command: "cache restore",
       app,
-      steps: finish ? finishSteps(n) : abort ? abortSteps(n) : mainSteps(n, object, input.flags["backup-first"] === true),
+      steps: finish ? finishSteps(n) : abort ? abortSteps(n) : mainSteps(n, object, input.flags["backup-first"] === true, input.flags["accept-empty"] === true),
       notes: finish ? [] : abort ? [`열린 PR(cli/cache-restore-${app}, cli/cache-restore-mode-${app})이 있으면 닫는다(병합하지 않는다).`] : ["서버를 내린 동안 앱은 Valkey 오류를 낸다. 복원하면 백업 시각 뒤에 쓴 키는 사라진다."],
       next: finish || abort ? undefined : (status) => (status === "done" || status === "same" ? `homelab cache restore ${app} --finish` : KEEP),
     });

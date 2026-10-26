@@ -393,14 +393,23 @@ describe("파드 안 작업", () => {
   const vk = (words: string[], resp: { stdout?: string; stderr?: string; code?: number } | { stdout: string }[]) => rule(["kubectl", "-n", "app-smoke", "exec", "-i", "deploy/smoke-valkey", "--request-timeout=20s", "--", "sh", "-c", VALKEY_CLI, "sh", ...words], resp);
 
   test("valkey.cli: 정해진 명령만, 인증은 Secret 값을 stdin으로. waitAof", async () => {
-    const info = (inProgress: string) => `# Persistence\r\naof_enabled:1\r\naof_rewrite_in_progress:${inProgress}\r\naof_last_bgrewrite_status:ok\r\n`;
-    const { ctx, calls } = testCtx("apply", [auth, vk(["DBSIZE"], { stdout: "42\n" }), vk(["INFO", "persistence"], [{ stdout: info("1") }, { stdout: info("0") }])]);
+    const info = (inProgress: string, scheduled = "0") => `# Persistence\r\naof_enabled:1\r\naof_rewrite_in_progress:${inProgress}\r\naof_rewrite_scheduled:${scheduled}\r\naof_last_bgrewrite_status:ok\r\n`;
+    const { ctx, calls } = testCtx("apply", [auth, vk(["DBSIZE"], { stdout: "42\n" }), vk(["INFO", "persistence"], [{ stdout: info("1") }, { stdout: info("0", "1") }, { stdout: info("0") }])]);
     expect((await applyWith(ctx, (w) => w.valkey.cli("app-smoke", "smoke-valkey", "DBSIZE"))).value).toBe("42\n");
     expect(calls().calls.find((c) => c.argv.includes("DBSIZE"))!.stdinSha256).toBe(sha256(FAKE_SECRETS[1]));
     expect((await applyWith(ctx, (w) => w.valkey.waitAof("app-smoke", "smoke-valkey", 5))).value).toBe(true);
     await expect(applyWith(ctx, (w) => w.valkey.cli("app-smoke", "smoke-valkey", "FLUSHALL" as never))).rejects.toThrow("다섯");
     await expect(applyWith(ctx, (w) => w.valkey.cli("app-smoke", "smoke", "PING"))).rejects.toThrow("-valkey");
     expectNoSecrets(calls(), FAKE_SECRETS);
+  });
+
+  test("valkey.waitAof: rewrite 예약(aof_rewrite_scheduled:1)이 남거나 그 값이 없으면 끝나지 않은 것이다(#889 r1 P1-1)", async () => {
+    const scheduled = "# Persistence\r\naof_enabled:1\r\naof_rewrite_in_progress:0\r\naof_rewrite_scheduled:1\r\naof_last_bgrewrite_status:ok\r\n";
+    const missing = "# Persistence\r\naof_enabled:1\r\naof_rewrite_in_progress:0\r\naof_last_bgrewrite_status:ok\r\n";
+    for (const stdout of [scheduled, missing]) {
+      const { ctx } = testCtx("apply", [auth, vk(["INFO", "persistence"], { stdout })]);
+      expect((await applyWith(ctx, (w) => w.valkey.waitAof("app-smoke", "smoke-valkey", 1))).value).toBe(false);
+    }
   });
 
   test("valkey.authCheck: WRONGPASS·NOAUTH면 rejected", async () => {

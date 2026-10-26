@@ -520,6 +520,94 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     expect(e.w.records.get(`${NS}/restore-vk`)!.data["ok.reloaded"]).toBeUndefined();
   });
 
+  test("r1 P1-3: 재시작 뒤 0개로 멈춘 실행은 재실행해도 성공으로 넘어가지 않는다(두 번째 실행까지)", async () => {
+    const { w, vk } = await toNormalPr();
+    mergeNormal(w);
+    const restart = w.restart.bind(w);
+    w.restart = (id: string) => {
+      restart(id);
+      vk.keys = 0;
+    };
+    const first = await runIn(w, cmd, "apply", { app: APP });
+    expect(first.status).toBe("failed");
+    const rec = () => w.records.get(`${NS}/restore-vk`)!.data;
+    expect(rec()["suspect.empty"]).toBe("1");
+    expect(rec()["dbsize.pre"]).toBe("5");
+    // 두 번째 실행: 빈 서버(pre 0)를 새 기준으로 받지 않고, 다시 재시작하지도 않는다
+    w.writes = [];
+    const second = await runIn(w, cmd, "apply", { app: APP });
+    expect(second.status).toBe("failed");
+    expect(second.error!.message).toContain("--accept-empty");
+    expect(w.writes).not.toContain(`rolloutRestart ${NS}/${APP}-valkey`);
+    expect(rec()["ok.reloaded"]).toBeUndefined();
+    expect(rec()["ok.cleanup"]).toBeUndefined();
+    expect((await runIn(w, cmd, "apply", { app: APP }, { finish: true })).status).toBe("failed");
+    expect(w.records.size).toBe(1);
+  });
+
+  test("r1 P1-3: 첫 재시작 뒤 확인 전에 끊긴 실행도 재실행이 첫 재시작 전 키 수로 본다", async () => {
+    const { w, vk } = await toNormalPr();
+    mergeNormal(w);
+    const dep = w.deploys.get(`${NS}/${APP}-valkey`)!;
+    const restart = w.restart.bind(w);
+    w.restart = (id: string) => {
+      restart(id);
+      vk.keys = 0;
+      dep.rolledOut = false;
+    };
+    // rollout이 끝나지 않아 키 수 확인 전에 멈춘다(빈 데이터 표식은 아직 없다)
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("failed");
+    expect(w.records.get(`${NS}/restore-vk`)!.data["suspect.empty"]).toBeUndefined();
+    expect(w.records.get(`${NS}/restore-vk`)!.data["dbsize.pre"]).toBe("5");
+    w.restart = (id: string) => {
+      restart(id);
+      vk.keys = 0;
+      dep.rolledOut = true;
+    };
+    dep.rolledOut = true;
+    const again = await runIn(w, cmd, "apply", { app: APP });
+    expect(again.status).toBe("failed");
+    expect(again.error!.message).toContain("첫 재시작 전 5개");
+    expect(w.records.get(`${NS}/restore-vk`)!.data["ok.reloaded"]).toBeUndefined();
+  });
+
+  test("r1 P2-5: 키가 정상적으로 0개가 됐으면 사람이 --accept-empty로 받아들여 끝낸다(표식 없이는 쓰이지 않는다)", async () => {
+    // 복원 모드 PR 대기 중 앱이 키를 모두 지웠고, 서버가 재시작돼 AOF를 다시 켜야 하는 경로(리뷰 재현)
+    const { w, vk } = await toNormalPr();
+    vk.keys = 0;
+    vk.appendonly = false;
+    vk.aof = false;
+    mergeNormal(w);
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("failed");
+    const fail = await runIn(w, cmd, "apply", { app: APP });
+    expect(fail.status).toBe("failed");
+    expect(fail.error!.message).toContain("--accept-empty");
+    expect(w.records.get(`${NS}/restore-vk`)!.data["suspect.empty"]).toBe("1");
+    const ok = await runIn(w, cmd, "apply", { app: APP }, { "accept-empty": true });
+    expect(ok.status).toBe("done");
+    expect(w.records.get(`${NS}/restore-vk`)!.data["empty.accepted"]).toBe("1");
+    // 받아들인 뒤에는 플래그 없이도 same, --finish로 정리된다
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("same");
+    expect((await runIn(w, cmd, "apply", { app: APP }, { finish: true })).status).toBe("done");
+    expect(w.records.size).toBe(0);
+
+    // 표식 없이 미리 붙인 --accept-empty는 검사를 끄지 않는다
+    const e = await toNormalPr();
+    mergeNormal(e.w);
+    const restart = e.w.restart.bind(e.w);
+    e.w.restart = (id: string) => {
+      restart(id);
+      e.vk.keys = 0;
+    };
+    const pre = await runIn(e.w, cmd, "apply", { app: APP }, { "accept-empty": true });
+    expect(pre.status).toBe("failed");
+    expect(e.w.records.get(`${NS}/restore-vk`)!.data["empty.accepted"]).toBeUndefined();
+    // --finish·--abort와는 함께 쓰지 않는다
+    for (const f of [{ finish: true as const }, { abort: true as const }]) {
+      await expect(runIn(e.w, cmd, "apply", { app: APP }, { ...f, "accept-empty": true })).rejects.toThrow("--accept-empty");
+    }
+  });
+
   test("Connector P2: AOF를 켜는 사이 키가 줄어도 통과하고, 0개가 되면 멈춘다", async () => {
     for (const [keys, want] of [[3, "waiting"], [0, "failed"]] as const) {
       const w = restoreWorld();

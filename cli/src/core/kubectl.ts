@@ -42,7 +42,7 @@ export type KubeOpts = { pollMs?: number };
 const POLL_MS = 2_000;
 const SECRETS_RV = "homelab.ukyi.app/secrets-rv";
 const RV = /^[0-9]{1,20}$/;
-const RECORD_NAMES = new Set<RestoreRecordName>(["restore-pg", "restore-vk", "restore-check"]);
+const RECORD_NAMES = new Set<RestoreRecordName>(["restore-pg", "restore-vk", "restore-check", "data-purge"]);
 const RECORD_KEY = /^[a-z0-9][a-z0-9.-]{0,62}$/;
 const RUN_ID = /^[a-z0-9]{1,22}$/;
 const JSONPATH = /^\{\.status(\.[A-Za-z][A-Za-z0-9]*)+\}$/;
@@ -53,7 +53,7 @@ function checkTimeout(sec: number, max: number): void {
 }
 
 function checkRecord(name: string): void {
-  if (!RECORD_NAMES.has(name as RestoreRecordName)) throw new Error("복원 기록 이름은 restore-pg·restore-vk·restore-check만");
+  if (!RECORD_NAMES.has(name as RestoreRecordName)) throw new Error("복원 기록 이름은 restore-pg·restore-vk·restore-check·data-purge만");
 }
 
 function checkRun(runId: string): void {

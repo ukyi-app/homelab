@@ -40,7 +40,7 @@ export type KubeKind =
 export type LogTarget = { deployment: string } | { job: string };
 
 // 복원 실행 기록 ConfigMap 이름(03, restore.md의 $W를 클러스터에 둔 것). 범용 ConfigMap 조회는 없다.
-export type RestoreRecordName = "restore-pg" | "restore-vk" | "restore-check";
+export type RestoreRecordName = "restore-pg" | "restore-vk" | "restore-check" | "data-purge";
 export type RestoreRecord = { run: string; data: Record<string, string>; resourceVersion: string; uid: string };
 
 // 파드 템플릿이 참조하는 Secret들의 resourceVersion이 템플릿 주석과 같은지(값은 읽지 않는다).

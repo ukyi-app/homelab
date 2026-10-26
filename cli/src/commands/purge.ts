@@ -6,7 +6,7 @@
 // Application만 지운다. 그래서 PR 2는 동기화를 확인한 다음 실행에서만 연다(같은 PR에 넣지 않는다, 데이터 차트 _helpers.tpl).
 // 상태 저장소 없이 이어지도록 단계마다 main 파일과 살아 있는 리소스를 읽어 어디까지 왔는지 판단한다.
 import { defineCommand, type Observation, type ReadCtx, type Step, type WriteCtx } from "../core/command";
-import { APP_NAME } from "../core/names";
+import { APP_NAME, newRunId } from "../core/names";
 import { prStep } from "../core/pr";
 import { UsageError } from "../core/result";
 import { parseYaml, setTopLevel } from "../core/values";
@@ -20,9 +20,14 @@ const VALKEY_KEEP_MS = 14 * 86_400_000;
 const VALKEY_MARGIN_MS = 2 * 86_400_000;
 // 이 기기와 클러스터의 시계 차이로 보는 범위. 이보다 미래의 성공 시각은 믿지 않는다.
 const CLOCK_SKEW_MS = 3_600_000;
-// 앱 삭제 커밋 뒤에도 ApplicationSet·Argo CD가 앱 파드를 지울 때까지 몇 분은 쓰기가 들어올 수 있다. 그 창과 겹쳐 시작한
-// 백업은 인정하지 않는다(#883 Connector P1). 정기 백업이 하루 한 번이라 1시간 여유는 다음 날 백업으로 채워진다.
-const REMOVAL_SETTLE_MS = 3_600_000;
+// CNPG ObjectStore r2의 retentionPolicy 14d(platform/cnpg/cluster/templates/objectstore.yaml). CR이 남아도 객체는 지워졌을 수 있다.
+// Valkey와 같은 2일 여유를 둔다(#889 r1 P1-4).
+const PG_KEEP_MS = 14 * 86_400_000;
+// 앱이 쓰기를 멈춘 시각은 Git 삭제 커밋이 아니라 이 명령이 클러스터에서 앱 워크로드가 없음을 본 시각이다. Argo CD가 늦거나
+// 멈추면 커밋 뒤 몇 시간이라도 앱이 쓴다(#889 r1 P1-2). 그 시각을 기록 data-purge에 남기고 그 뒤에 시작한 백업만 인정한다.
+// 기록 시각은 이 기기 시계, 백업 시각은 클러스터 시계라 5분을 더 둔다.
+const RECORD = "data-purge";
+const GONE_SKEW_MS = 5 * 60_000;
 
 const hasTrue = (o: any, type: string) => (o?.status?.conditions ?? []).some((c: any) => c?.type === type && c?.status === "True");
 
@@ -41,6 +46,41 @@ function lastBackupStart(ctx: ReadCtx, ns: string, cronjob: string): string | nu
 }
 
 const same = (detail: string, extra: Partial<Observation> = {}): Observation => ({ state: "same", action: "none", detail, ...extra });
+
+const live = (p: any) => p?.status?.phase !== "Succeeded" && p?.status?.phase !== "Failed";
+
+// 데이터 차트가 띄우는 파드: Valkey 서버(서브차트 라벨), 백업 CronJob·수동 백업·복원 Job의 파드. 앱이 쓰지 않는다.
+function dataPod(p: any, app: string): boolean {
+  const l = p?.metadata?.labels ?? {};
+  if (l["app.kubernetes.io/name"] === "valkey" && l["app.kubernetes.io/instance"] === app) return true;
+  const job = l["batch.kubernetes.io/job-name"] ?? l["job-name"];
+  return typeof job === "string" && (job.startsWith(`${app}-valkey-backup-`) || /^backup-[a-z0-9]{1,22}-[0-9a-f]{4}$/.test(job) || job === "restore-vk");
+}
+
+// 앱 ns에 남은 앱 워크로드. 앱 차트 라벨이 붙은 것과, 데이터 차트 것으로 알아볼 수 없는 살아 있는 파드(누가 쓰는지 모른다).
+function appWorkloads(ctx: ReadCtx | WriteCtx, n: Names): string[] {
+  const own = (o: any) => o?.metadata?.labels?.["homelab.ukyi.app/app"] === n.app || o?.metadata?.labels?.["app.kubernetes.io/name"] === n.app;
+  const out: string[] = [];
+  for (const kind of ["deployment", "statefulset", "cronjob", "job"] as const) {
+    for (const o of ctx.k8s.list(kind, n.ns)) if (own(o) || (kind === "deployment" && o?.metadata?.name === n.app)) out.push(`${kind}/${o?.metadata?.name}`);
+  }
+  for (const p of ctx.k8s.list("pod", n.ns)) if (live(p) && (own(p) || !dataPod(p, n.app))) out.push(`pod/${p?.metadata?.name}`);
+  return out;
+}
+
+// 기록된 "앱 워크로드 없음" 확인 시각. 지금 기준(앱 삭제·데이터 등록)보다 앞이면 옛 실행의 것이라 쓰지 않는다.
+function goneAt(ctx: ReadCtx | WriteCtx, n: Names, removed: number): string | null {
+  const t = ctx.k8s.restoreRecord(n.ns, RECORD)?.data["gone.at"];
+  return typeof t === "string" && Number.isFinite(Date.parse(t)) && Date.parse(t) > removed ? t : null;
+}
+
+// 백업 시각 t가 보존 기간 안인지. 문제면 그 설명.
+function staleness(t: string, keepMs: number): string | null {
+  const age = Date.now() - Date.parse(t);
+  if (age < -CLOCK_SKEW_MS) return "지금보다 미래다(시계를 믿을 수 없다)";
+  if (age > keepMs - VALKEY_MARGIN_MS) return `${Math.round((keepMs - VALKEY_MARGIN_MS) / 86_400_000)}일보다 오래됐다(보존 ${Math.round(keepMs / 86_400_000)}일 뒤 지워진다)`;
+  return null;
+}
 
 type Names = { app: string; ns: string; dataFile: string };
 
@@ -180,7 +220,31 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       async read(ctx) {
         if (listDir(ctx, `apps/${app}`).length > 0) return { state: "differs", action: "none", detail: `apps/${app}/가 아직 있다`, next: `homelab app remove ${app}` };
         if (ctx.k8s.get("application", "argocd", app)) return { state: "differs", action: "none", detail: `Application ${app}이 아직 있다(삭제 동기화 대기)`, next: `homelab status ${app}` };
-        return same("앱 삭제됨");
+        const left = appWorkloads(ctx, n);
+        if (left.length) return { state: "differs", action: "none", detail: `앱 워크로드가 남아 있다(${left.join(", ")})`, next: `kubectl -n ${n.ns} get deploy,sts,cronjob,job,pod --show-labels로 보고, 사라진 뒤 다시 실행한다` };
+        return same("앱 삭제됨, 앱 워크로드 없음");
+      },
+    },
+    {
+      id: "writes-stopped",
+      target: "앱 쓰기가 멈춘 시각",
+      async read(ctx) {
+        if (values(ctx, n.dataFile) === null) return same("PR 2 뒤");
+        const base = baseline(ctx, app);
+        // 기준을 못 정하면 뒤의 backup 단계가 멈춘다. 여기서는 기록하지 않는다.
+        if ("problem" in base) return same("기준 시각 확인은 백업 단계에서");
+        const at = goneAt(ctx, n, base.removed);
+        if (at) return same(`앱 워크로드 없음 확인 ${at}`);
+        return { state: "missing", action: "create", detail: `앱 워크로드 없음을 지금 다시 보고 그 시각을 ${n.ns}/${RECORD}에 기록` };
+      },
+      async apply(w) {
+        // 기록 직전에 지금 클러스터를 본다. 기록 시각이 곧 "이 뒤에 시작한 백업만"의 기준이다.
+        const left = appWorkloads(w, n);
+        if (left.length) throw new Error(`앱 워크로드가 남아 있다(${left.join(", ")})`);
+        const at = new Date(Date.now()).toISOString();
+        const r = w.k8s.restoreRecord(n.ns, RECORD);
+        if (r) w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "gone.at": at });
+        else if (w.k8s.restoreRecordCreate(n.ns, RECORD, newRunId(), { "gone.at": at }) === "exists") throw new Error("그사이 다른 실행이 기록을 만들었다. 다시 실행한다");
       },
     },
     {
@@ -195,27 +259,35 @@ function steps(n: Names, dataFiles: string[]): Step[] {
         const base = baseline(ctx, app);
         if ("problem" in base) return { state: "differs", action: "none", detail: base.problem, next: "GitHub 이력을 확인한 뒤 다시 실행한다(기준 시각 없이는 백업을 판단하지 않는다)" };
         const { date, removed, what } = base;
-        const after = (t: unknown) => typeof t === "string" && Date.parse(t) > removed;
+        const gone = goneAt(ctx, n, removed);
+        // 앞 단계(writes-stopped)가 apply에서 기록한 뒤 다시 읽힌다. plan과 첫 읽기에서는 아직 없다.
+        if (!gone) return same("앱 워크로드 없음을 기록한 뒤, 그 뒤에 시작한 백업을 본다");
+        const since = Math.max(removed, Date.parse(gone) + GONE_SKEW_MS);
+        const after = (t: unknown) => typeof t === "string" && Number.isFinite(Date.parse(t)) && Date.parse(t) > since;
+        const basis = `${what}(${date})·앱 워크로드 없음 확인(${gone}) 뒤`;
+        const wait = { state: "differs" as const, action: "none" as const, next: "다음 정기 백업(PostgreSQL 03:00, Valkey 03:30 KST)이 성공한 뒤 다시 실행한다" };
         const lacks: string[] = [];
         if (data.postgres?.enabled === true) {
-          const ok = ctx.k8s.list("backup", "database").some((b) => b?.spec?.cluster?.name === "pg" && b?.status?.phase === "completed" && after(b?.status?.stoppedAt));
-          if (!ok) lacks.push("completed base backup");
+          const done = ctx.k8s.list("backup", "database").filter((b) => b?.spec?.cluster?.name === "pg" && b?.status?.phase === "completed" && after(b?.status?.stoppedAt));
+          const t = done.map((b) => b.status.stoppedAt as string).sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+          if (!t) lacks.push("completed base backup");
+          else {
+            const bad = staleness(t, PG_KEEP_MS);
+            if (bad) return { ...wait, detail: `${basis}의 마지막 base backup(${t})이 ${bad}` };
+          }
         }
         if (data.valkey?.persistent === true) {
           // 성공 Job은 successfulJobsHistoryLimit 1이라 마지막 하나만 남는다. 그 Job이 없으면(지워졌거나 실패만 있음) 판단하지 않는다.
           const t = lastBackupStart(ctx, n.ns, `${app}-valkey-backup`);
-          if (t === null || Date.parse(t) <= removed + REMOVAL_SETTLE_MS) lacks.push(`${what} 1시간 뒤에 시작한 Valkey 백업(마지막 성공 Job 시작 ${t ?? "없음"})`);
+          if (!after(t)) lacks.push(`시작한 Valkey 백업(마지막 성공 Job 시작 ${t ?? "없음"})`);
           else {
             // 성공 이력만으로는 객체가 R2에 남아 있다는 증거가 아니다. 백업이 멈춘 채 14일이 지나면 복구할 객체가 없다(#883 r3 P1-1).
-            const age = Date.now() - Date.parse(t);
-            if (age < -CLOCK_SKEW_MS) return { state: "differs", action: "none", detail: `Valkey 마지막 성공 백업 시작(${t})이 지금보다 미래다(시계를 믿을 수 없다)`, next: "이 기기와 클러스터의 시각을 맞춘 뒤 다시 실행한다" };
-            if (age > VALKEY_KEEP_MS - VALKEY_MARGIN_MS) {
-              return { state: "differs", action: "none", detail: `Valkey 마지막 성공 백업 시작(${t})이 12일보다 오래됐다(R2는 14일 뒤 지운다)`, next: `kubectl -n ${n.ns} get cronjob ${app}-valkey-backup로 suspend·실패를 보고, 새 백업이 성공한 뒤 다시 실행한다` };
-            }
+            const bad = staleness(t!, VALKEY_KEEP_MS);
+            if (bad) return { ...wait, detail: `Valkey 마지막 성공 백업 시작(${t})이 ${bad}`, next: `kubectl -n ${n.ns} get cronjob ${app}-valkey-backup로 suspend·실패를 보고, 새 백업이 성공한 뒤 다시 실행한다` };
           }
         }
-        if (lacks.length) return { state: "differs", action: "none", detail: `${what}(${date}) 뒤 ${lacks.join("·")}이 없다`, next: "다음 정기 백업(PostgreSQL 03:00, Valkey 03:30 KST) 뒤 다시 실행한다" };
-        return same(`${what}(${date}) 뒤 백업 있음`);
+        if (lacks.length) return { ...wait, detail: `${basis} ${lacks.join("·")}이 없다` };
+        return same(`${basis} 백업 있음`);
       },
     },
     {
@@ -336,6 +408,20 @@ function steps(n: Names, dataFiles: string[]): Step[] {
           throw new Error("확인하지 않았다(터미널에서 앱 이름을 다시 쳐야 지운다)");
         }
         for (const k of keys) w.infisical.removeKey(k.path, k.key);
+      },
+    },
+    {
+      id: "record-removed",
+      target: `기록 ${n.ns}/${RECORD}`,
+      async read(ctx) {
+        const r = ctx.k8s.restoreRecord(n.ns, RECORD);
+        if (!r) return same("없음");
+        if (values(ctx, n.dataFile) !== null) return afterPr("PR 2 뒤 지움");
+        return { state: "differs", action: "delete", detail: `실행 ${r.run} 기록 지움` };
+      },
+      async apply(w) {
+        const r = w.k8s.restoreRecord(n.ns, RECORD);
+        if (r) w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
       },
     },
   ];
