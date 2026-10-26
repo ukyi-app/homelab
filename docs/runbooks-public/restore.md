@@ -75,10 +75,10 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
 
 **왜 복원 모드가 필요한가:** `appendonly yes`인 채 시작하면 AOF가 RDB보다 이긴다. AOF 디렉터리를 지우고 `dump.rdb`만 두어도 Valkey 9.1.2는 RDB를 읽지 않고 빈 데이터로 시작해 빈 AOF를 새로 만든다(U18 로컬 실측, 2026-10-23). 그래서 RDB는 `appendonly no`(복원 모드)로 읽고, 읽은 뒤 실행 중에 AOF를 켠다.
 
-**데이터 확인은 키 수 고정 비교가 아니다.** 복원 뒤에도 TTL 만료와 앱의 정상 쓰기로 키 수는 바뀐다. 그래서 3·4·5단계는 "키가 0개가 아니고 표식 키가 있다"를 본다. 표식 키는 복원한 데이터에 있는, 만료 시간이 없는 키 하나다(3단계가 TTL 없음을 확인한다). 이름만 쓰고 값은 보지 않는다. 0개가 되거나 표식 키가 없으면 멈추고 원인을 본다(재시작 뒤 빈 데이터, 아래 4단계의 함정). 복원 직후 키 수(`$W/vk-dbsize`)는 참고로만 보여 준다.
+**데이터 확인은 키 수 고정 비교가 아니다.** 복원 뒤에도 TTL 만료와 앱의 정상 쓰기로 키 수는 바뀐다. 그래서 3·4·5단계는 "키가 0개가 아니다"를 보고, 운영자가 아는 표식 키가 있으면 그 키가 있는지도 본다. 표식 키는 복원한 데이터에 있는, 만료 시간이 없는 키 하나다(3단계가 TTL 없음을 확인한다). 이름만 쓰고 값은 보지 않는다. 그런 키를 모르면 `MARK`를 비워 둔다. 그때는 키 수만 보고 확인마다 경고 한 줄을 낸다(표식 키를 필수로 두면 그런 키가 없는 앱은 복원할 수 없다). 0개가 되거나 표식 키를 적었는데 없으면 멈추고 원인을 본다(재시작 뒤 빈 데이터, 아래 4단계의 함정). 복원 직후 키 수(`$W/vk-dbsize`)는 참고로만 보여 준다.
 
 ```bash
-MARK=<표식 키>
+MARK=''    # 운영자가 아는 만료 없는 표식 키. 모르면 비워 둔다(키 수만 본다)
 # 숫자 하나인지. valkey-cli가 오류 문구를 내도 걸린다.
 num() { case $1 in ''|*[!0-9]*) return 1 ;; esac; }
 # CONFIG GET appendonly의 값(둘째 줄).
@@ -89,10 +89,13 @@ vkaof() { local a; a=$(vk CONFIG GET appendonly) || return 1; printf '%s\n' "$a"
 # INFO 줄 끝에는 CR이 있다.
 aofok() { printf '%s\n' "$1" | tr -d '\r' | awk -F: '{ v[$1] = $2 } END { exit !(v["aof_enabled"] == "1" &&
   v["aof_rewrite_in_progress"] == "0" && v["aof_rewrite_scheduled"] == "0" && v["aof_last_bgrewrite_status"] == "ok") }'; }
-# 데이터가 살아 있는지: 키가 0개가 아니고 표식 키가 있다. 아니면 지금 값을 알리고 실패한다.
-vkdata() { local n m; n=$(vk DBSIZE) || return 1; m=$(vk EXISTS "$MARK") || return 1
-  if num "$n" && [ "$n" -gt 0 ] && [ "$m" = 1 ]; then return 0; fi
-  echo "키 수 $(printf '%s' "$n" | cat -v), 표식 키 $(printf '%s' "$m" | cat -v)(1이어야 한다). 복원 직후 키 수 $(cat "$W/vk-dbsize" 2>/dev/null || echo '?')" >&2
+# 데이터가 살아 있는지: 키가 0개가 아니고, 표식 키를 적었으면 그 키가 있다. 아니면 지금 값을 알리고 실패한다.
+vkdata() { local n m=-; n=$(vk DBSIZE) || return 1
+  if [ -n "${MARK:-}" ]; then m=$(vk EXISTS "$MARK") || return 1; fi
+  if num "$n" && [ "$n" -gt 0 ] && { [ -z "${MARK:-}" ] || [ "$m" = 1 ]; }; then
+    [ -n "${MARK:-}" ] || echo "경고: 표식 키 없이 키 수(${n}개)만 봤다. 데이터 내용은 확인하지 않았다" >&2
+    return 0; fi
+  echo "키 수 $(printf '%s' "$n" | cat -v), 표식 키 $(printf '%s' "$m" | cat -v)(적었으면 1이어야 한다). 복원 직후 키 수 $(cat "$W/vk-dbsize" 2>/dev/null || echo '?')" >&2
   return 1; }
 ```
 
@@ -202,7 +205,7 @@ vkdata() { local n m; n=$(vk DBSIZE) || return 1; m=$(vk EXISTS "$MARK") || retu
    [ $? -eq 0 ] && echo "복원 Job 끝" || echo "멈춤: 복원 Job을 만들지 못했거나 끝나지 않았다. 'kubectl -n app-$APP get job,pod -L homelab.ukyi.app/restore'로 앞 Job을 본다"
    ```
 
-3. **복원 모드로 올림(PR):** `running: true`와 `restoreMode: true`를 함께. 새 파드가 `appendonly no`로 떠 RDB를 읽는다. 키가 있고 표식 키가 있으며 만료 시간이 없는지 보고, 복원 직후 키 수를 적어 둔다. 다시 돌리면 4·5단계 표식도 지운다(그 뒤 단계를 다시 한다).
+3. **복원 모드로 올림(PR):** `running: true`와 `restoreMode: true`를 함께. 새 파드가 `appendonly no`로 떠 RDB를 읽는다. 키가 있는지, 표식 키를 적었으면 그 키가 있고 만료 시간이 없는지 보고, 복원 직후 키 수를 적어 둔다. 다시 돌리면 4·5단계 표식도 지운다(그 뒤 단계를 다시 한다).
 
    ```bash
    ( set -euo pipefail
@@ -210,10 +213,12 @@ vkdata() { local n m; n=$(vk DBSIZE) || return 1; m=$(vk EXISTS "$MARK") || retu
    kubectl -n app-$APP rollout status deploy/$APP-valkey --timeout=5m
    a=$(vkaof); [ "$a" = no ] || { echo "복원 모드가 아니다(appendonly $(printf '%s' "$a" | cat -v)). restoreMode가 반영됐는지 본다" >&2; exit 1; }
    vkdata
-   t=$(vk TTL "$MARK"); [ "$t" = -1 ] || { echo "표식 키에 만료 시간이 있다(TTL $(printf '%s' "$t" | cat -v)). 만료 시간이 없는 키를 고른다" >&2; exit 1; }
+   if [ -n "${MARK:-}" ]; then
+     t=$(vk TTL "$MARK"); [ "$t" = -1 ] || { echo "표식 키에 만료 시간이 있다(TTL $(printf '%s' "$t" | cat -v)). 만료 시간이 없는 키를 고르거나 비워 둔다" >&2; exit 1; }
+   fi
    n=$(vk DBSIZE); num "$n"; printf '%s\n' "$n" > "$W/vk-dbsize"
    touch "$W/ok-vk-loaded" )
-   [ -f "$W/ok-vk-loaded" ] && echo "복원 모드로 읽음: 키 $(cat "$W/vk-dbsize")개" || echo "멈춤: 복원 모드로 읽지 못했거나 데이터·표식 키가 없다(위)"
+   [ -f "$W/ok-vk-loaded" ] && echo "복원 모드로 읽음: 키 $(cat "$W/vk-dbsize")개" || echo "멈춤: 복원 모드로 읽지 못했거나 키가 0개이거나 적은 표식 키가 없다(위)"
    ```
 
 4. **AOF 다시 켜기:** 실행 중에 켜면 지금 데이터로 AOF base를 새로 쓴다. 켜기 전에 데이터를 본다(빈 데이터를 AOF로 굳히지 않게). rewrite가 시작됐고(`aof_rewrites`는 rewrite가 시작될 때 오른다), 진행·예약 중이 아니고 성공했을 때(`aofok`)만 끝난다. 예약 상태(위 함정)는 RDB 저장이 끝난 뒤 rewrite가 시작될 때까지 기다린다. 10분 안에 끝나지 않으면 멈춘다. 다시 돌려도 된다(이미 켜져 있으면 `CONFIG SET`은 아무것도 바꾸지 않고 상태만 다시 본다).
@@ -238,9 +243,9 @@ vkdata() { local n m; n=$(vk DBSIZE) || return 1; m=$(vk EXISTS "$MARK") || retu
    [ -f "$W/ok-vk-aof" ] && echo "AOF 다 씀" || echo "멈춤: AOF를 켜지 못했거나 rewrite가 끝나지 않았다(위). 데이터가 없으면 켜지 않았다"
    ```
 
-5. **복원 모드 끄기(PR):** `restoreMode`와 `running` 줄을 지운다. ConfigMap만 바뀌고 파드는 그대로다(실행 중 설정은 이미 AOF on). 병합 뒤 서버를 한 번 다시 띄워 AOF에서 다시 읽히는지 본다(키가 0개가 아니고 표식 키가 있는지).
+5. **복원 모드 끄기(PR):** `restoreMode`와 `running` 줄을 지운다. ConfigMap만 바뀌고 파드는 그대로다(실행 중 설정은 이미 AOF on). 병합 뒤 서버를 한 번 다시 띄워 AOF에서 다시 읽히는지 본다(키가 0개가 아닌지, 표식 키를 적었으면 있는지).
 
-   **PR을 기다리는 동안 서버가 다시 떴을 수 있다.** 복원 모드 설정으로 다시 떴으면 `appendonly no`로 돌아가 AOF가 없는 상태다. 그대로 다시 띄우면 데이터가 비거나 옛 상태로 돌아간다. 그래서 다시 띄우기 직전에 ConfigMap에 복원 모드가 없는지, 실행 중 `appendonly`가 yes인지, AOF가 다 쓰였는지(`aofok`), 데이터가 있는지를 다시 본다. `appendonly`나 AOF 상태가 다르면 블록이 4단계 표식을 지우고 멈춘다. 그때는 4단계부터 다시 하고 이 블록을 다시 돌린다. 데이터가 없으면(0개, 표식 키 없음) 다시 띄우지 않고 멈춘다. 원인(언제 다시 떴는지, 파드 로그)을 본 뒤 1단계(서버 내림)부터 다시 한다.
+   **PR을 기다리는 동안 서버가 다시 떴을 수 있다.** 복원 모드 설정으로 다시 떴으면 `appendonly no`로 돌아가 AOF가 없는 상태다. 그대로 다시 띄우면 데이터가 비거나 옛 상태로 돌아간다. 그래서 다시 띄우기 직전에 ConfigMap에 복원 모드가 없는지, 실행 중 `appendonly`가 yes인지, AOF가 다 쓰였는지(`aofok`), 데이터가 있는지를 다시 본다. `appendonly`나 AOF 상태가 다르면 블록이 4단계 표식을 지우고 멈춘다. 그때는 4단계부터 다시 하고 이 블록을 다시 돌린다. 데이터가 없으면(0개, 또는 적은 표식 키가 없음) 다시 띄우지 않고 멈춘다. 원인(언제 다시 떴는지, 파드 로그)을 본 뒤 1단계(서버 내림)부터 다시 한다.
 
    다시 띄우기는 `rollout restart`(Deployment 업데이트)로 한다. 파드를 직접 지우지 않는다. `Recreate`가 "옛 파드가 모두 끝난 뒤 새 파드를 만든다"를 보장하는 것은 Deployment 업데이트 때뿐이다. 파드를 지우면 ReplicaSet이 옛 파드가 끝나기(Terminating) 전에 새 파드를 만들어, 두 서버가 같은 PVC의 AOF·RDB를 함께 쓴다(로컬 kind 1.37 실측: 직접 삭제는 약 14초 겹침, `rollout restart`는 겹침 없음). Argo CD는 `rollout restart`가 더하는 주석을 되돌리지 않는다(Git에 없는 필드라 비교하지 않는다, rotate.md와 같다).
 
@@ -949,6 +954,6 @@ podman rm -f pgm
    kubectl -n database get backups                          # completed
    ```
 
-5. 영속 Valkey가 있는 앱은 1절로 RDB를 복원한다. 1단계(`running: false`)는 복구 PR이 이미 했으므로 2단계(복원 Job)부터 한다. 1절 5단계까지 끝나 데이터(키 0개 아님, 표식 키)를 확인한 뒤에 그 앱의 `suspended` 줄을 지우는 PR로 앱을 재개한다.
+5. 영속 Valkey가 있는 앱은 1절로 RDB를 복원한다. 1단계(`running: false`)는 복구 PR이 이미 했으므로 2단계(복원 Job)부터 한다. 1절 5단계까지 끝나 데이터(키 0개 아님, 표식 키를 적었으면 그 키)를 확인한 뒤에 그 앱의 `suspended` 줄을 지우는 PR로 앱을 재개한다.
 6. 앱이 뜬 뒤 시나리오 1·10을 확인한다.
 7. **정리 PR:** `recoverySource`를 지워 렌더 결과를 `initdb`로 되돌린다(새 serverName은 그대로). recovery를 남기면 나중에 볼륨을 잃고 Cluster를 다시 만들 때 옛 아카이브에서 낡은 데이터로 조용히 복구된다. 떠 있는 클러스터에는 영향이 없다(U26).
