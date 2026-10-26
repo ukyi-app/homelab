@@ -10,9 +10,20 @@ shopt -s inherit_errexit
 HOST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # host/etc/ 안에서 경로를 클러스터 값으로 바꾸는 유일한 자리표시(networkd drop-in 디렉터리).
 IFACE_TOKEN='@NODE_IFACE@'
-CLUSTER_KEYS="NODE_NAME NODE_IP NODE_IFACE TAILNET_JOIN KUBE_CONTEXT"
+CLUSTER_KEYS="NODE_NAME NODE_IP NODE_IFACE TAILNET_JOIN KUBE_CONTEXT POD_CIDR SERVICE_CIDR"
+# 비워 둘 수 있는 클러스터 값. TAILNET_DEVICE_NAME이 비면 NODE_NAME을 쓴다.
+OPTIONAL_KEYS="TAILNET_DEVICE_NAME"
 COMMON_KEYS="INSTALL_K3S_VERSION TIMEZONE NODE_UPSTREAM_DNS"
 NODE_MAGICDNS=""
+# 파드 egress 규칙(install.sh --egress). 표 이름은 k3s·Tailscale의 표와 겹치지 않게 따로 둔다.
+# 표 이름과 경로는 host/egress/의 두 파일에도 글자로 있다. 바꾸면 셋을 함께 바꾼다.
+# shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
+EGRESS_TABLE=homelab_egress
+# shellcheck disable=SC2034
+EGRESS_RULES=/etc/homelab/egress.nft
+EGRESS_UNIT_NAME=homelab-egress.service
+# shellcheck disable=SC2034
+EGRESS_UNIT="/etc/systemd/system/${EGRESS_UNIT_NAME}"
 
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
@@ -57,7 +68,7 @@ load_cluster() {
   [ -f "$file" ] || die "클러스터 값 파일이 없다: ${file}"
   # 부르는 셸 환경에 같은 이름이 남아 있으면 env 파일에서 빠진 키가 조용히 채워진다. 먼저 지운다.
   # shellcheck disable=SC2086
-  unset $COMMON_KEYS $CLUSTER_KEYS
+  unset $COMMON_KEYS $CLUSTER_KEYS $OPTIONAL_KEYS
   # shellcheck source=versions.env
   . "$HOST_DIR/versions.env"
   # shellcheck source=clusters/prod.env
@@ -74,9 +85,16 @@ load_cluster() {
     || die "INSTALL_K3S_VERSION 형식이 아니다: ${INSTALL_K3S_VERSION} (예: v1.36.5+k3s1. 채널 이름 금지)"
   [[ "$NODE_NAME" =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$ ]] \
     || die "NODE_NAME이 DNS 라벨이 아니다: ${NODE_NAME}"
+  TAILNET_DEVICE_NAME="${TAILNET_DEVICE_NAME:-$NODE_NAME}"
+  [[ "$TAILNET_DEVICE_NAME" =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$ ]] \
+    || die "TAILNET_DEVICE_NAME이 DNS 라벨이 아니다(MagicDNS 전체 이름이 아니라 첫 라벨만 둔다): ${TAILNET_DEVICE_NAME}"
   [[ "$NODE_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "NODE_IP가 IPv4가 아니다: ${NODE_IP}"
   [[ "$NODE_IFACE" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || die "NODE_IFACE 형식이 아니다: ${NODE_IFACE}"
   [[ "$KUBE_CONTEXT" =~ ^[a-z0-9][-a-z0-9.]*$ ]] || die "KUBE_CONTEXT 형식이 아니다: ${KUBE_CONTEXT}"
+  for key in POD_CIDR SERVICE_CIDR; do
+    [[ "${!key}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]] \
+      || die "${key}가 IPv4 CIDR이 아니다: ${!key}"
+  done
   case "$TAILNET_JOIN" in
     true | false) ;;
     *) die "TAILNET_JOIN은 true 또는 false다: ${TAILNET_JOIN}" ;;
@@ -87,17 +105,17 @@ tailscale_self_json() {
   tailscale status --self --peers=false --json 2>/dev/null
 }
 
-# TAILNET_JOIN=true면 NODE_MAGICDNS를 채운다. 이름은 env 파일에 두지 않고(tailnet 이름 비공개)
-# 실행 때마다 얻는다. 첫 라벨이 NODE_NAME과 다르면 TLS SAN, tailnet kubectl, 이름으로 하는 ssh
-# 확인이 어긋난다. 콘솔에 옛 기기가 남아 있으면 새 등록 이름에 -1이 붙고, 옛 기기를 나중에
-# 지워도 이름이 되돌아가지 않는다(C.3.2 0번).
+# TAILNET_JOIN=true면 NODE_MAGICDNS를 채운다. 전체 이름은 env 파일에 두지 않고(tailnet 이름 비공개)
+# 실행 때마다 얻는다. 첫 라벨은 TAILNET_DEVICE_NAME(비면 NODE_NAME)과 같아야 한다. 다르면 TLS SAN,
+# tailnet kubectl, 이름으로 하는 ssh 확인이 어긋난다. 콘솔에 옛 기기가 남아 있으면 새 등록 이름에 -1이
+# 붙고, 옛 기기를 나중에 지워도 이름이 되돌아가지 않는다(C.3.2 0번). 그 사고를 이 비교가 잡는다.
 resolve_magicdns() {
   local js state name
   NODE_MAGICDNS=""
   [ "$TAILNET_JOIN" = "true" ] || return 0
   require_cmds tailscale jq
   js="$(tailscale_self_json)" \
-    || die "tailscale status가 실패했다. C.3.2 0번(sudo tailscale up --hostname=${NODE_NAME})을 먼저 한다"
+    || die "tailscale status가 실패했다. C.3.2 0번(sudo tailscale up --hostname=${TAILNET_DEVICE_NAME})을 먼저 한다"
   state="$(jq -r '.BackendState // ""' <<<"$js")"
   [ "$state" = "Running" ] || die "Tailscale 상태가 Running이 아니다(${state:-알 수 없음}). C.3.2 0번을 먼저 한다"
   name="$(jq -r '.Self.DNSName // "" | rtrimstr(".")' <<<"$js")"
@@ -105,8 +123,8 @@ resolve_magicdns() {
     *.*) ;;
     *) die "MagicDNS 이름을 얻지 못했다. tailnet에서 MagicDNS가 켜져 있는지 본다" ;;
   esac
-  [ "${name%%.*}" = "$NODE_NAME" ] \
-    || die "Tailscale 기기 이름의 첫 라벨(${name%%.*})이 NODE_NAME(${NODE_NAME})과 다르다. 콘솔에서 옛 기기와 -1 접미를 확인한다(C.3.2 0번)"
+  [ "${name%%.*}" = "$TAILNET_DEVICE_NAME" ] \
+    || die "Tailscale 기기 이름의 첫 라벨(${name%%.*})이 TAILNET_DEVICE_NAME(${TAILNET_DEVICE_NAME})과 다르다. 콘솔에서 옛 기기와 -1 접미를 확인한다(C.3.2 0번). 이름을 일부러 바꿨으면 host/clusters/${CLUSTER}.env의 TAILNET_DEVICE_NAME을 고친다"
   NODE_MAGICDNS="$name"
 }
 
@@ -219,4 +237,167 @@ link_state_file() {
 # NODE_IFACE에 붙은 IPv4 주소 목록(접두 길이 없이).
 iface_ipv4s() {
   ip -o -4 addr show dev "$NODE_IFACE" 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4 }'
+}
+
+# IPv4 주소를 정수로 낸다. 형식이 아니면 1로 끝난다.
+ipv4_int() {
+  local a b c d
+  [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  a="${BASH_REMATCH[1]}" b="${BASH_REMATCH[2]}" c="${BASH_REMATCH[3]}" d="${BASH_REMATCH[4]}"
+  [ "$a" -le 255 ] && [ "$b" -le 255 ] && [ "$c" -le 255 ] && [ "$d" -le 255 ] || return 1
+  printf '%d' $(((a << 24) | (b << 16) | (c << 8) | d))
+}
+
+# cidr_within <바깥 CIDR> <주소 또는 CIDR>: 둘째가 첫째 안에 통째로 들어가면 0.
+cidr_within() {
+  local onet olen inet ilen o i mask
+  onet="${1%/*}" olen="${1#*/}"
+  inet="${2%/*}" ilen=32
+  case "$2" in */*) ilen="${2#*/}" ;; esac
+  [[ "$olen" =~ ^[0-9]+$ ]] && [[ "$ilen" =~ ^[0-9]+$ ]] || return 1
+  [ "$olen" -le 32 ] && [ "$ilen" -le 32 ] && [ "$ilen" -ge "$olen" ] || return 1
+  o="$(ipv4_int "$onet")" || return 1
+  i="$(ipv4_int "$inet")" || return 1
+  mask=$(((0xffffffff << (32 - olen)) & 0xffffffff))
+  [ $((o & mask)) -eq $((i & mask)) ]
+}
+
+# 해시 자리표시(@EGRESS_HASH@)를 남긴 렌더. 해시는 이 글자 전체의 sha256이다.
+egress_unhashed() {
+  local d dns=""
+  # LAN이 10.0.0.0/8이면 노드 IP가 파드·서비스 대역 안에 들 수 있다(B.8 E4). 그러면 대역 허용이
+  # LAN 호스트까지 열고, k3s 자체도 경로가 꼬인다.
+  if cidr_within "$POD_CIDR" "$NODE_IP" || cidr_within "$SERVICE_CIDR" "$NODE_IP"; then
+    die "NODE_IP ${NODE_IP}가 POD_CIDR ${POD_CIDR}나 SERVICE_CIDR ${SERVICE_CIDR} 안에 있다"
+  fi
+  for d in $NODE_UPSTREAM_DNS; do
+    ipv4_int "$d" >/dev/null || die "NODE_UPSTREAM_DNS에 IPv4가 아닌 값이 있다: ${d}"
+    dns+="${dns:+, }${d}"
+  done
+  printf '# host/install.sh --egress가 쓴 파일이다. 고치려면 Git의 원본을 고치고 다시 실행한다.\n'
+  printf '# 원본: host/egress/egress.nft, 값: host/clusters/%s.env, host/versions.env\n' "$CLUSTER"
+  printf 'define NODE_IP = %s\n' "$NODE_IP"
+  printf 'define POD_CIDR = %s\n' "$POD_CIDR"
+  printf 'define SERVICE_CIDR = %s\n' "$SERVICE_CIDR"
+  printf 'define UPSTREAM_DNS = { %s }\n\n' "$dns"
+  cat "$HOST_DIR/egress/egress.nft"
+}
+
+# 파드 egress 규칙(host/egress/egress.nft) 앞에 클러스터 값을 nft define으로 붙이고 표 comment에
+# 렌더 해시를 넣어 낸다. 규칙 본문은 nft 변수만 쓰므로 렌더 결과를 nft -c로 그대로 확인할 수 있다.
+# install.sh가 이 출력을 EGRESS_RULES로 쓰고, verify.sh가 같은 출력과 라이브 파일·커널 표를 대조한다.
+render_egress() {
+  local t h
+  # 부르는 쪽이 if 안이면 errexit이 꺼져 있다. 렌더 실패를 직접 끝낸다(die는 서브셸만 끝낸다).
+  t="$(egress_unhashed)" || exit 1
+  [[ "$t" == *'comment "@EGRESS_HASH@"'* ]] || die "host/egress/egress.nft에 comment \"@EGRESS_HASH@\"가 없다"
+  h="sha256:$(printf '%s\n' "$t" | sha256sum | cut -d ' ' -f 1)"
+  printf '%s\n' "${t//@EGRESS_HASH@/"$h"}"
+}
+
+# 렌더 결과(stdin)의 체인별 규칙 줄 수를 {"체인":수} JSON으로 낸다. 주석·빈 줄·base chain 선언 줄은 세지 않는다.
+egress_rule_counts() {
+  awk '
+    /^[[:space:]]*chain [a-z_]+ \{/ { c = $2; n[c] = 0; order[++k] = c; next }
+    c == "" { next }
+    /^[[:space:]]*}/ { c = ""; next }
+    /^[[:space:]]*(#|$)/ || /^[[:space:]]*type [a-z]+ hook / { next }
+    { n[c]++ }
+    END { printf "{"; for (i = 1; i <= k; i++) printf "%s\"%s\":%d", (i > 1 ? "," : ""), order[i], n[order[i]]; print "}" }
+  '
+}
+
+# 커널의 egress 표를 nft JSON으로 낸다. root면 nft로, 아니면 sudo -n(비밀번호를 묻지 않는다)으로 읽는다.
+# 0: 읽음, 1: 읽을 권한은 있는데 표가 없거나 nft가 실패, 2: 권한이 없어 읽지 못함(미검증).
+# 커널 nft 표는 root만 읽는다. 일반 사용자에게 nft 권한을 주지 않는다(쓰기와 같은 권한이다).
+egress_kernel_json() {
+  local -a nft=(nft)
+  if [ "$(id -u)" -ne 0 ]; then
+    sudo -n true 2>/dev/null || return 2
+    nft=(sudo -n nft)
+  fi
+  "${nft[@]}" -j list table inet "$EGRESS_TABLE" 2>/dev/null || return 1
+}
+
+# 커널 표(stdin, egress_kernel_json 출력)를 지금 Git 렌더와 대조해 문제를 한 줄씩 낸다. 빈 출력이 통과다.
+# 표 comment의 해시가 렌더 해시와 같아야 한다(파일만 바꾸고 reload를 빠뜨리면 여기서 걸린다). 올린 뒤
+# 누가 규칙·원소를 지우거나 끼워 넣은 것은 체인별 규칙 수와 아래 모양 검사로 잡는다.
+egress_kernel_problems() {
+  local js rendered hash counts nonpublic dns
+  js="$(cat)"
+  rendered="$(render_egress)" || exit 1
+  hash="$(sed -n 's/^[[:space:]]*comment "\(sha256:[0-9a-f]*\)"$/\1/p' <<<"$rendered")"
+  counts="$(egress_rule_counts <<<"$rendered")"
+  nonpublic="$(sed -n 's/^[[:space:]]*elements = { \(.*\) }$/\1/p' <<<"$rendered" | tr -d ' ' | tr ',' '\n' | jq -R . | jq -cs 'sort')"
+  # shellcheck disable=SC2086  # 공백으로 나눈 목록이다
+  dns="$(printf '%s\n' $NODE_UPSTREAM_DNS | jq -R . | jq -cs 'sort')"
+  jq -r --arg hash "$hash" --arg pod "$POD_CIDR" --arg svc "$SERVICE_CIDR" --arg node "$NODE_IP" \
+    --argjson counts "$counts" --argjson nonpublic "$nonpublic" --argjson dns "$dns" '
+    def noc: map(select(has("counter") | not));
+    def verdicts: [.[] | to_entries[0].key | select(IN("accept", "drop", "jump", "goto", "return", "reject", "queue"))];
+    def ipint: split(".") | map(tonumber) | .[0] * 16777216 + .[1] * 65536 + .[2] * 256 + .[3];
+    def pfx($s): ($s | split("/")) as $p | {prefix: {addr: $p[0], len: ($p[1] | tonumber)}};
+    def covers($outer; $inner):
+      ($outer.prefix.len) as $ol | ($inner.prefix.len) as $il | pow(2; 32 - $ol) as $b
+      | $il >= $ol and ((($outer.prefix.addr | ipint) / $b | floor) == (($inner.prefix.addr | ipint) / $b | floor));
+    def vals: if type == "object" and has("set") then .set else [.] end;
+    def ip($f): {payload: {protocol: "ip", field: $f}};
+    def m($op; $left): [.[] | .match? // empty | select(.op == $op and .left == $left) | .right];
+    def estab: (m("in"; {ct: {key: "state"}}) == [["established", "related"]]) and (verdicts == ["accept"]);
+    def node_api: (m("=="; ip("daddr")) == [$node])
+      and (m("=="; {payload: {protocol: "tcp", field: "dport"}}) | map(vals | sort)) == [[6443, 10250]]
+      and verdicts == ["accept"] and length == 3;
+    def cluster_bands:
+      if length == 2 and verdicts == ["accept"] and (m("=="; ip("daddr")) | length) == 1
+      then (m("=="; ip("daddr"))[0] | vals) as $r
+        | all(pfx($pod), pfx($svc); . as $i | any($r[]; type == "object" and has("prefix") and covers(.; $i)))
+      else false end;
+    def upstream_dns: (m("=="; ip("daddr")) | map(vals | sort)) == [$dns]
+      and (m("=="; {meta: {key: "l4proto"}}) | map(vals | sort)) == [["tcp", "udp"]]
+      and m("=="; {payload: {protocol: "th", field: "dport"}}) == [53] and verdicts == ["accept"] and length == 4;
+    def public_443: m("!="; ip("daddr")) == ["@nonpublic"]
+      and m("=="; {payload: {protocol: "tcp", field: "dport"}}) == [443] and verdicts == ["accept"] and length == 3;
+    def public_7844: m("!="; ip("daddr")) == ["@nonpublic"]
+      and (m("=="; {meta: {key: "l4proto"}}) | map(vals | sort)) == [["tcp", "udp"]]
+      and m("=="; {payload: {protocol: "th", field: "dport"}}) == [7844] and verdicts == ["accept"] and length == 4;
+    def only_drop: . == [{drop: null}];
+    def middle_ok: verdicts == ["accept"] or (verdicts == [] and any(.[]; has("log")));
+    (.nftables // []) as $n
+    | [$n[] | .table? // empty] as $t
+    | [$n[] | .chain? // empty] as $c
+    | [$n[] | .set? // empty | select(.name == "nonpublic")] as $s
+    | def rules($ch): [$n[] | .rule? // empty | select(.chain == $ch) | .expr | noc];
+      def body($ch; $need): rules($ch) as $r
+        | (if ($r | length) < 2 then "\($ch): 규칙이 \($r | length)개다" else empty end),
+          (if ($r | length) >= 2 and ($r[0] | estab | not) then "\($ch): 첫 규칙이 ct state established,related accept가 아니다" else empty end),
+          (if ($r | length) >= 2 and ($r[-1] | only_drop | not) then "\($ch): 끝 규칙이 drop이 아니다" else empty end),
+          (if ($r | length) >= 2 and ([$r[1:-1][] | middle_ok] | all | not) then "\($ch): drop 앞에 accept·log가 아닌 규칙이 있다" else empty end),
+          ($need[] as [$name, $ok] | if $ok then empty else "\($ch): 필수 허용이 없다: \($name)" end);
+    (if ($t | length) == 0 then "표 inet homelab_egress가 없다" else empty end),
+    (if ($t | length) == 1 and $t[0].comment != $hash
+      then "표 해시가 지금 렌더와 다르다(커널 \($t[0].comment // "없음"), 렌더 \($hash)). 파일만 바꾸고 reload를 빠뜨렸거나 다른 규칙이 올라와 있다"
+      else empty end),
+    (if ($t | length) == 0 then empty else (
+      (if ([$c[] | select(.hook != null) | "\(.name)/\(.hook)/\(.type)/\(.policy)"] | sort) == ["forward/forward/filter/accept", "input/input/filter/accept"]
+        then empty else "base chain이 forward·input(filter, policy accept) 둘이 아니다" end),
+      (if ([$c[] | .name] | sort) == ($counts | keys | sort) then empty else "체인 목록이 렌더와 다르다: \([$c[] | .name] | sort | join(","))" end),
+      ($counts | to_entries[] | . as $e | rules($e.key) | length as $k
+        | if $k == $e.value then empty else "\($e.key): 규칙 수 \($k), 렌더 \($e.value)" end),
+      (if rules("forward") == [[{match: {op: "==", left: ip("saddr"), right: pfx($pod)}}, {jump: {target: "pod_egress"}}]]
+        then empty else "forward: 파드 대역(\($pod)) 출발만 pod_egress로 넘기는 규칙 하나가 아니다" end),
+      (if rules("input") == [[{match: {op: "!=", left: {meta: {key: "iifname"}}, right: "lo"}},
+                              {match: {op: "==", left: ip("saddr"), right: pfx($pod)}}, {jump: {target: "pod_to_node"}}]]
+        then empty else "input: lo 밖의 파드 대역(\($pod)) 출발만 pod_to_node로 넘기는 규칙 하나가 아니다" end),
+      body("pod_egress"; [
+        ["파드·서비스 대역", any(rules("pod_egress")[]; cluster_bands)],
+        ["노드 6443·10250", any(rules("pod_egress")[]; node_api)],
+        ["업스트림 DNS 53", any(rules("pod_egress")[]; upstream_dns)],
+        ["공개 TCP 443", any(rules("pod_egress")[]; public_443)],
+        ["공개 7844", any(rules("pod_egress")[]; public_7844)]
+      ]),
+      body("pod_to_node"; [["노드 6443·10250", any(rules("pod_to_node")[]; node_api)]]),
+      (if ($s | length) == 1 and ([$s[0].elem[] | if type == "object" then "\(.prefix.addr)/\(.prefix.len)" else . end] | sort) == $nonpublic
+        then empty else "set nonpublic 원소가 렌더와 다르다" end)
+    ) end)
+  ' <<<"$js"
 }

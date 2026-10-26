@@ -3,11 +3,16 @@
 #
 # 사용:
 #   sudo host/install.sh --cluster <이름> --host-config
+#   sudo host/install.sh --cluster <이름> --egress
 #   sudo host/install.sh --cluster <이름> --k3s
+#   sudo host/install.sh --cluster <이름> --egress-off   (되돌리기: 파드 egress 규칙을 끄고 지운다)
 #
 # 순서가 계약이다: preflight --before -> install --host-config -> preflight --after
-#   -> install --k3s -> verify. 두 sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
+#   -> install --egress -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
 #   sudo는 비밀번호를 묻는 대화형 단계이고, 사람이 단계마다 결과를 보고 넘어간다(옛 host-up.sh:5-14).
+#   --egress를 --k3s보다 먼저 두는 까닭: 첫 파드부터 규칙 아래서 뜬다. 이미 도는 클러스터에는 --egress만
+#   따로 실행해도 된다(k3s를 다시 시작하지 않는다). --host-config에 넣지 않은 까닭: 그 단계는 networkd를
+#   재구성해 링크가 끊길 수 있고 끄는 짝이 없다. egress는 켜고 끄는 한 쌍이 되돌리기 한 명령이어야 한다.
 # 각 모드는 확인을 모두 먼저 하고, 하나라도 실패하면 아무것도 바꾸지 않고 멈춘다.
 # 실패를 파이프나 || true로 삼키지 않는다. 옛 bootstrap.sh는 helm 실패를 삼키고 성공을 찍었다(L21).
 #
@@ -26,7 +31,7 @@ TARGETS=""
 NET_DROPINS=""
 KUBECONFIG_OUT=""
 
-usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--k3s"; }
+usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--egress|--k3s|--egress-off"; }
 cleanup() { [ -z "$TMPD" ] || rm -rf "$TMPD"; }
 trap cleanup EXIT
 
@@ -229,6 +234,83 @@ host_config() {
   log "호스트 설정 완료. 다음: host/preflight.sh --cluster ${CLUSTER} --after"
 }
 
+# ------------------------------------------------------------------------------ --egress
+
+egress_on() {
+  local rules js problems
+
+  log "확인"
+  require_cmds nft systemctl install sha256sum
+  # 노드 IP 허용과 대역 검사가 이 값에서 온다. 다른 호스트의 값 파일로 돌리면 여기서 멈춘다.
+  grep -qxF -- "$NODE_IP" <<<"$(iface_ipv4s)" \
+    || die "노드 IP ${NODE_IP}가 ${NODE_IFACE}에 없다. --cluster 값이 이 호스트의 것인지 본다"
+  rules="$(render_egress)"
+  printf '%s\n' "$rules" >"$TMPD/egress.nft"
+  # -c는 같은 트랜잭션을 커널에 검사만 시킨다. 문법·커널 지원이 틀리면 아무것도 바꾸기 전에 멈춘다.
+  nft -c -f "$TMPD/egress.nft" || die "nft -c가 렌더한 규칙을 거부했다. 아무것도 바꾸지 않았다"
+  echo "    렌더한 값: node ${NODE_IP}, pod ${POD_CIDR}, service ${SERVICE_CIDR}, dns ${NODE_UPSTREAM_DNS}"
+
+  log "[1/3] 규칙·유닛 파일 쓰기"
+  install -d -m 0755 -o root -g root "$(dirname "$EGRESS_RULES")"
+  install -m 0644 -o root -g root "$TMPD/egress.nft" "$EGRESS_RULES"
+  install -m 0644 -o root -g root "$HOST_DIR/egress/${EGRESS_UNIT_NAME}" "$EGRESS_UNIT"
+  echo "    ${EGRESS_RULES}"
+  echo "    ${EGRESS_UNIT}"
+
+  log "[2/3] ${EGRESS_UNIT_NAME} 켜기"
+  systemctl daemon-reload
+  systemctl enable "$EGRESS_UNIT_NAME"
+  # restart를 쓰지 않는다. ExecStop이 표를 지운 뒤 다시 올려서 그 사이 규칙이 빈다.
+  # 켜져 있으면 reload가 파일로 표를 통째 바꾼다(빈 순간 없음).
+  if systemctl is-active --quiet "$EGRESS_UNIT_NAME"; then
+    systemctl reload "$EGRESS_UNIT_NAME"
+  else
+    systemctl start "$EGRESS_UNIT_NAME"
+  fi
+
+  log "[3/3] 커널 규칙 확인"
+  # verify.sh와 같은 판정이다: 표 해시 = 렌더, forward·input hook, 파드 출발 조건, 필수 허용, 끝 drop.
+  js="$(nft -j list table inet "$EGRESS_TABLE")" || die "커널에 table inet ${EGRESS_TABLE}가 없다"
+  problems="$(egress_kernel_problems <<<"$js")"
+  [ -z "$problems" ] \
+    || die "커널의 table inet ${EGRESS_TABLE}가 렌더와 다르다. 끄기: sudo host/install.sh --cluster ${CLUSTER} --egress-off"$'\n'"${problems}"
+  nft list table inet "$EGRESS_TABLE"
+
+  log "파드 egress 규칙 적용 완료"
+  echo "    막힌 연결: journalctl -k -g homelab-egress (분당 10건까지 기록)"
+  echo "    되돌리기: sudo host/install.sh --cluster ${CLUSTER} --egress-off"
+  echo "    다음: k3s가 없으면 --k3s, 이미 돌면 host/verify.sh --cluster ${CLUSTER} (sudo 없이)"
+}
+
+egress_off() {
+  local dir
+
+  log "확인"
+  require_cmds nft systemctl
+
+  log "[1/2] ${EGRESS_UNIT_NAME} 끄고 지우기"
+  if [ -e "$EGRESS_UNIT" ]; then
+    # --now가 ExecStop으로 표를 지운다.
+    systemctl disable --now "$EGRESS_UNIT_NAME"
+  fi
+  # 유닛이 없었거나 ExecStop이 실패했어도 표가 남지 않게 한 번 더 본다.
+  if nft list table inet "$EGRESS_TABLE" >/dev/null 2>&1; then
+    nft delete table inet "$EGRESS_TABLE"
+  fi
+  rm -f "$EGRESS_UNIT" "$EGRESS_RULES"
+  dir="$(dirname "$EGRESS_RULES")"
+  if [ -d "$dir" ]; then rmdir --ignore-fail-on-non-empty "$dir"; fi
+  systemctl daemon-reload
+
+  log "[2/2] 확인"
+  if nft list table inet "$EGRESS_TABLE" >/dev/null 2>&1; then
+    die "table inet ${EGRESS_TABLE}가 아직 있다"
+  fi
+  log "파드 egress 규칙을 껐다"
+  echo "    지금은 NetworkPolicy만 남았다. 새 파드는 시작 직후 약 1초 동안 egress가 열린다(설계 B.8 E5)."
+  echo "    host/verify.sh는 egress 항목에서 실패한다. 다시 켜기: sudo host/install.sh --cluster ${CLUSTER} --egress"
+}
+
 # --------------------------------------------------------------------------------- --k3s
 
 # node-name, node-ip는 설치 때만 정할 수 있다. 이미 깔린 config와 다르면 노드가 새로 등록돼 hostPath PV의
@@ -384,7 +466,7 @@ main() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --cluster) [ "$#" -ge 2 ] || usage; cluster="$2"; shift 2 ;;
-      --host-config | --k3s) [ -z "$mode" ] || usage; mode="$1"; shift ;;
+      --host-config | --egress | --egress-off | --k3s) [ -z "$mode" ] || usage; mode="$1"; shift ;;
       *) usage ;;
     esac
   done
@@ -392,12 +474,15 @@ main() {
   [ "$(id -u)" -eq 0 ] || die "sudo로 실행한다: sudo host/install.sh --cluster ${cluster} ${mode}"
   load_cluster "$cluster"
   require_cmds jq awk sed grep ip cmp git
-  assert_host_tree_clean
+  # 되돌리기는 host/의 파일을 깔지 않는다. 급할 때 작업 사본이 더러워도 막지 않는다.
+  [ "$mode" = "--egress-off" ] || assert_host_tree_clean
   TMPD="$(mktemp -d)"
 
   log "install ${mode} (cluster=${CLUSTER}, node=${NODE_NAME}, ip=${NODE_IP}, iface=${NODE_IFACE}, tailnet=${TAILNET_JOIN})"
   case "$mode" in
     --host-config) host_config ;;
+    --egress) egress_on ;;
+    --egress-off) egress_off ;;
     --k3s) k3s_install ;;
   esac
 }

@@ -309,6 +309,12 @@ const steps: Step[] = [
     run: () => tool("app-build", ["bash", "tools/app-build.test.sh"]),
   },
   {
+    name: "host egress",
+    // 파드 egress nft 규칙의 렌더(값·허용 순서·거부할 값)와 업스트림 DNS가 사는 곳(resolved·AdGuard)의 일치.
+    // 실제 허용·차단은 root·podman이 필요해 ci 밖에서 bash tools/host-egress.test.sh --netns로 본다.
+    run: () => tool("host-egress", ["bash", "tools/host-egress.test.sh"]),
+  },
+  {
     name: "workflows",
     run: () => {
       const files = gitFiles(".github/workflows/*.yaml", ".github/workflows/*.yml").map((path) => ({ path, text: readText(path) }));

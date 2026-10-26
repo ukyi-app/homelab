@@ -1,0 +1,23 @@
+# 파드 egress 규칙(table inet homelab_egress)을 올린다. host/install.sh --egress가
+# /etc/systemd/system/homelab-egress.service로 복사하고 켠다. --egress-off가 끄고 지운다.
+#
+# distro의 nftables.service(/etc/nftables.conf)는 쓰지 않는다. 그 파일은 flush ruleset으로 시작해서
+# 다시 시작하면 k3s의 iptables-nft 규칙까지 지운다.
+[Unit]
+Description=Pod egress filter (nftables table inet homelab_egress)
+# k3s보다 먼저 올라, 부팅 뒤 첫 파드부터 규칙 아래서 시작한다. k3s를 다시 시작해도 이 표는 그대로다.
+# Requires를 두지 않는다. 규칙이 못 올라와도 k3s는 뜬다(LAN DNS가 AdGuard라 k3s가 서지 않으면 집 전체가
+# 이름 해석을 잃는다). 그때는 NetworkPolicy만 남는 이전 상태이고, host/verify.sh가 유닛 상태로 잡는다.
+Before=k3s.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/homelab/egress.nft
+# 파일이 표를 통째로 바꾸므로 reload가 규칙 공백 없이 새 내용으로 바꾼다.
+ExecReload=/usr/sbin/nft -f /etc/homelab/egress.nft
+# 멈추면 표를 지운다(= 규칙 끔). 표가 이미 없어도 유닛이 failed가 되지 않게 - 접두를 둔다.
+ExecStop=-/usr/sbin/nft delete table inet homelab_egress
+
+[Install]
+WantedBy=multi-user.target

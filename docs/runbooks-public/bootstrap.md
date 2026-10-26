@@ -13,19 +13,19 @@
 
 아래 `<이름>`은 이 이름 하나다. 스크립트와 매니페스트에는 클러스터 이름 분기가 없고, 값 파일만 바뀐다.
 
-- `vm.env`의 `CHANGE_ME`는 VM을 준비할 때 채운다. 남아 있으면 host 스크립트가 멈춘다.
-- `values-vm.yaml`은 아직 자동 검사가 없다. 지금은 키 모양만 있고 값이 비어 있다. T13이 VM 값을 채우면서 빈 값을 막는 검사도 더한다. 그 전에는 `root-vm.yaml`을 apply하지 않는다.
-- VM 호스트는 tailnet에 넣지 않는다(`TAILNET_JOIN=false`). VM 접근은 LAN 주소나 콘솔로 한다.
+- VM은 NUC 안의 임시 KVM VM이다(사용자 2026-10-26). 만들기·지우기와 `vm.env` 값의 근거는 [vm.md](vm.md)다. env 파일에 `CHANGE_ME`가 남아 있으면 host 스크립트가 멈춘다.
+- `values-vm.yaml`은 ci가 VM 프로필로 단언한다(`platform/root/templates/cluster-check.yaml`): 접두 `vm-`, Infisical `homelab-dev`/`dev`, 버킷과 serverName이 운영과 다름. 하나라도 어긋나면 root-vm 렌더가 실패해 ci와 Argo CD sync가 멈춘다. 복구 원본(`recoverySource`)은 [restore.md](restore.md) 3절의 VM 복구 PR이 넣는다. 그 PR이 main에 병합되기 전에는 `root-vm.yaml`을 apply하지 않는다.
+- VM 호스트는 tailnet에 넣지 않는다(`TAILNET_JOIN=false`). VM은 libvirt NAT 뒤라 NUC에서만 닿는다. 접근은 NUC에서 `vm.env`의 노드 IP(SSH)나 `virsh console`로 한다.
 
 ### 0.0 작업 사본과 필요한 패키지
 
 이 문서의 여러 줄짜리 명령은 모두 한 단계라도 실패하면 멈추게 적는다. 대화형 셸에 줄을 붙여 넣으면 앞 명령이 실패해도 다음 줄이 돌기 때문이다. 그래서 `&&`로 잇거나 `set -euo pipefail`을 건 별도 bash(`bash -euo pipefail <<'EOF'`)로 돌린다. 블록이 실패하면 다음 블록으로 가지 않는다.
 
-새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깔고, 작업 사본이 없으면 만든다(Ubuntu 26.04 기준). `openssh-server`는 `host/install.sh --host-config`가 sshd 설정을 검사(`sshd -t`)하는 데 필요하다. 최소 설치나 VM에는 없을 수 있다.
+새로 설치한 호스트에는 스크립트가 쓰는 도구를 먼저 깔고, 작업 사본이 없으면 만든다(Ubuntu 26.04 기준). `openssh-server`는 `host/install.sh --host-config`가 sshd 설정을 검사(`sshd -t`)하는 데 필요하고, `nftables`(`nft`)는 `--egress`가 파드 egress 규칙을 올리는 데 필요하다. 최소 설치나 VM에는 없을 수 있다.
 
 ```bash
 sudo apt-get update \
-  && sudo apt-get install -y git jq curl gnupg openssh-server \
+  && sudo apt-get install -y git jq curl gnupg openssh-server nftables \
   && { [ -d ~/homelab/.git ] || git clone https://github.com/ukyi-app/homelab ~/homelab; } \
   && cd ~/homelab
 ```
@@ -74,13 +74,13 @@ tailnet에 이미 있으면 건너뛴다.
    # 켜면 tailnet 22번을 Tailscale SSH가 가로채 ACL의 ssh 규칙만으로(키 없이 root까지) 들어온다
    # --advertise-tags: NUC는 tag:nuc다(D-11 (c)). 태그 규칙이 ACL에 먼저 있어야 등록 뒤 원격 접속이 된다
    # --advertise-routes: 공유기 관리 화면(ACL grant와 autoApprovers가 짝이다)
-   sudo tailscale up --hostname=<prod.env의 NODE_NAME> --accept-dns=false \
+   sudo tailscale up --hostname=<prod.env의 TAILNET_DEVICE_NAME(비면 NODE_NAME)> --accept-dns=false \
      --advertise-tags=tag:nuc --advertise-routes=192.168.117.1/32
    EOF
    ```
 
    외부 패키지를 깐 뒤에는 0.0의 `origin/main` 일치 확인을 다시 한다.
-3. 이름을 확인한다. 아래 명령의 첫 라벨이 `prod.env`의 `NODE_NAME`과 같아야 한다.
+3. 이름을 확인한다. 아래 명령의 첫 라벨이 `prod.env`의 `TAILNET_DEVICE_NAME`(비면 `NODE_NAME`)과 같아야 한다. 콘솔에서 기기 이름을 일부러 바꾸면 이 값도 같은 PR에서 바꾼다. MagicDNS 이름이 바뀌어 운영자 kubeconfig의 `server`와 k3s 인증서 SAN이 어긋나므로 1절 끝의 tailnet kubeconfig 안내를 따른다.
 
    ```bash
    tailscale status --self --peers=false --json | jq -r '.Self.DNSName | rtrimstr(".")'
@@ -94,7 +94,7 @@ tailnet에 이미 있으면 건너뛴다.
 
 ### 0.2 사람 확인
 
-- 공유기 DHCP 예약이 `NODE_IP`를 이 기기에 고정하는가. k3s의 node-ip는 설치 때만 정해진다(2026-10-19 운영: 예약 확인, 공유기 DNS 폴백 1.1.1.1).
+- 공유기 DHCP 예약이 `NODE_IP`를 이 기기에 고정하는가. k3s의 node-ip는 설치 때만 정해진다(2026-10-19 운영: 예약 확인, 공유기 DNS 폴백 1.1.1.1). VM은 libvirt 네트워크의 DHCP 예약이다([vm.md](vm.md) 1.2).
 - LAN SSH는 키로만 들어온다(sshd drop-in이 비밀번호 로그인을 끈다). 새 VM은 키나 콘솔을 먼저 마련한다.
 
 ## 1. 호스트 설정과 k3s
@@ -105,6 +105,7 @@ tailnet에 이미 있으면 건너뛴다.
 host/preflight.sh --cluster <이름> --before \
   && sudo host/install.sh --cluster <이름> --host-config \
   && host/preflight.sh --cluster <이름> --after \
+  && sudo host/install.sh --cluster <이름> --egress \
   && sudo host/install.sh --cluster <이름> --k3s \
   && host/verify.sh --cluster <이름>
 ```
@@ -112,8 +113,9 @@ host/preflight.sh --cluster <이름> --before \
 - `--before`: 노드 IP와 인터페이스, k3s 잔여 경로(`/var/lib/rancher/k3s`, `/var/lib/rancher/k3s-storage`, `/etc/rancher/k3s`) 부재.
 - `--host-config`: `host/etc/` drop-in 복사, 스왑 끄기, 타임존, `tailscale set --accept-dns=false`(`TAILNET_JOIN=true`일 때), resolv.conf, networkd drop-in 적용. **이때 클러스터 인터페이스가 약 2초 끊긴다.** 원격 세션이 잠깐 멈췄다 돌아오는 것이 정상이다.
 - `--after`: 스왑 없음, 타임존, resolved 스텁 꺼짐, resolv.conf가 loopback·tailnet·자기 주소 아님, 링크가 DHCP DNS를 거부.
+- `--egress`: 파드 egress 규칙(1.1절)을 `/etc/homelab/egress.nft`로 렌더하고 `homelab-egress.service`(k3s보다 먼저 뜸)로 올린다. k3s보다 먼저 두어 첫 파드부터 규칙 아래서 뜬다.
 - `--k3s`: `host/versions.env`의 `INSTALL_K3S_VERSION` 고정 설치(채널 없음), `host/k3s-config.yaml`을 렌더해 `/etc/rancher/k3s/config.yaml`(0600)로 씀, `local-retain` StorageClass를 자동 배포 매니페스트로 둠, kubeconfig를 `~/.kube/<KUBE_CONTEXT>.yaml`(0600)로 씀.
-- `verify`: 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 config, serving cert SAN, `local-retain`.
+- `verify`: 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 config, serving cert SAN, `local-retain`, egress 유닛·규칙 파일·대역·커널 표. 커널 표는 `sudo -n nft`로 읽는다. 앞 단계의 sudo 자격이 남아 있으면 그대로 읽고, 없으면 실패 없이 **종료 코드 2(미검증)** 로 끝난다. 2는 통과가 아니다.
 - `--k3s`가 중간에 실패하면 `/etc/rancher/k3s`가 남아 `--before`가 막힌다. `--k3s`를 그대로 다시 실행하거나, `k3s-uninstall.sh`로 지우고 잔여 경로가 없는지 본 뒤 1부터 다시 한다.
 
 이후 `kubectl`은 이 kubeconfig로 부른다.
@@ -125,7 +127,172 @@ kubectl config current-context
 
 파괴적인 명령 전에는 `host/verify.sh --cluster <이름> --identity`로 context와 노드 이름이 맞는지 본다. VM 검증 기간에는 두 클러스터가 함께 있다.
 
-운영자 기기에서 tailnet으로 쓰려면 이 파일을 복사하고 `server`를 `https://<MagicDNS 이름>:6443`으로 바꾼다. 그 이름은 k3s SAN에 들어 있다. 저장소와 Infisical에는 두지 않는다.
+운영자 기기에서 tailnet으로 쓰려면 이 파일을 복사하고 `server`를 `https://<MagicDNS 이름>:6443`으로 바꾼다. 그 이름은 설치 때의 MagicDNS 이름으로 k3s SAN에 들어간다. 저장소와 Infisical에는 두지 않는다.
+
+설치 뒤 Tailscale 기기 이름을 바꾸면(prod는 2026-10-26 `nuc-pro`로 바꿈) 옛 MagicDNS 이름은 더 풀리지 않고, 새 이름은 SAN에 없어 x509 오류가 난다. 인증서를 새 이름으로 다시 내는 길은 지금 없다. `--k3s`를 다시 돌려도 `tls-san`이 설치 때 값과 달라 멈춘다(`check_install_time_keys`). 대신 운영자 kubeconfig의 cluster 항목을 아래처럼 둔다. 2026-10-26 NUC에서 tailnet 주소로 `/readyz`를 읽어 확인했다: 새 이름만 주면 실패, 아래 `tls-server-name`이면 통과.
+
+```yaml
+clusters:
+  - name: homelab
+    cluster:
+      server: https://<새 MagicDNS 이름>:6443   # 풀리는 이름
+      tls-server-name: <NODE_NAME>               # 인증서 SAN에 있는 이름(prod: nuc-15-pro)
+      certificate-authority-data: <그대로>
+```
+
+`host/verify.sh`의 node-args·SAN 항목은 렌더에 지금 MagicDNS 이름이 들어가므로 이 상태에서 실패한다. SAN을 새 이름으로 맞출지(재설치, 또는 `tls-san` 변경을 허용하는 절차)는 따로 정한다.
+
+### 1.1 파드 egress 규칙(노드 nftables)
+
+새 파드는 시작 직후 약 1초 동안 NetworkPolicy가 붙기 전이라 egress가 모두 열린다(설계 B.8 E5). `--egress`는 그 틈을 노드에서 막는다. 파드 대역(`POD_CIDR`)에서 출발한 패킷 가운데 노드 밖으로 나가는 것(forward)과 노드 자신으로 들어오는 것(input)을 보고, 아래 허용이 아니면 버린다. 노드 자신으로 가는 길은 NetworkPolicy가 늘 막지 못하던 길이라(설계 B.8 E4) 1초 공백과 상관없이 여기서만 막힌다. 노드가 시작한 연결과 관리자의 LAN·tailnet SSH는 출발이 파드 대역이 아니라 건드리지 않는다. 규칙 원본은 `host/egress/egress.nft`, 값은 `host/clusters/<이름>.env`(`NODE_IP`, `POD_CIDR`, `SERVICE_CIDR`)와 `host/versions.env`(`NODE_UPSTREAM_DNS`)다.
+
+| 허용(순서대로) | 쓰는 곳 |
+|---|---|
+| **파드 → 노드 밖(forward)** | |
+| 들어온 연결의 반환(`ct established,related`), 파드·서비스 대역 | svclb·hostPort 응답, 파드끼리, DNS·DB·Valkey |
+| `NODE_IP` TCP 6443·10250 | 지금 경로에서는 input이라 이 줄에 오지 않는다(경로가 바뀔 때를 대비해 둠) |
+| `NODE_UPSTREAM_DNS`(1.1.1.1·9.9.9.9) UDP·TCP 53 | CoreDNS 업스트림, AdGuard bootstrap |
+| 공개 TCP 443, 공개 TCP·UDP 7844 | R2·Infisical·GitHub·Telegram·Tailscale DERP, cloudflared 터널 |
+| **파드 → 노드 자신(input)** | |
+| 노드가 시작한 연결의 응답(`ct established,related`) | kubelet probe, apiserver → webhook, port-forward |
+| `NODE_IP` TCP 6443·10250 | kube API(`kubernetes` Service가 노드 IP:6443으로 DNAT), vmsingle의 kubelet 수집 |
+
+그 밖은 모두 버린다: tailnet `100.64.0.0/10`, LAN 사설 대역, link-local, 공개 대역의 443·7844 밖 포트, 노드 자신의 나머지 포트(sshd 22 등. 노드 LAN 주소, cni0 게이트웨이, 노드 tailnet 주소 모두). Tailscale direct(UDP 41641)·STUN(3478)도 열지 않아 Tailscale 프록시는 DERP 443으로만 붙는다. hostPort(svclb-adguard `:53`)는 PREROUTING에서 파드로 DNAT되어 forward로 가므로 따로 열지 않았다. 2026-10-26 운영 조사: hostNetwork 파드 0, hostPort는 svclb-adguard 하나, node-exporter는 파드 IP로 수집, 파드가 쓰는 노드 IP 목적지는 `kubernetes` Endpoint 6443과 kubelet 10250뿐이다.
+
+**이미 도는 클러스터에 켜기.** k3s를 다시 시작하지 않는다. 0.0의 main 확인 블록을 먼저 돌린다.
+
+```bash
+sudo host/install.sh --cluster <이름> --egress \
+  && host/verify.sh --cluster <이름>
+```
+
+`--egress`는 렌더한 규칙을 `nft -c`로 먼저 검사하고, 올린 뒤 커널 표를 `verify`와 같은 판정으로 확인하고 표를 출력한다. 판정: 표 comment의 렌더 해시가 지금 Git 렌더와 같다(파일만 바꾸고 reload를 빠뜨리면 걸림), forward·input hook 둘, 파드 대역 출발 조건, 체인별 규칙 수, 필수 허용, 끝 drop, `nonpublic` 원소. 다시 실행하면 `reload`로 표를 통째 바꾼다(규칙이 빈 순간 없음).
+
+`verify`는 같은 판정을 `sudo -n nft`로 한다. 위처럼 sudo 바로 뒤에 같은 터미널에서 돌리면 읽힌다. sudo를 쓸 수 없는 쪽(에이전트 등)이 돌리면 egress 커널 줄이 `SKIP`이고 종료 코드가 2다. 그때 커널 표는 사람이 `sudo -v && host/verify.sh --cluster <이름>`으로 본다.
+
+**되돌리기(한 명령).** 유닛을 끄고 표와 파일을 지운다. 그 뒤는 NetworkPolicy만 남은 이전 상태이고 `verify`는 egress 항목에서 실패한다. 작업 사본에 커밋 안 한 변경이 있어도 막지 않는다.
+
+```bash
+sudo host/install.sh --cluster <이름> --egress-off
+```
+
+**적용 뒤 확인.** 이미 맺힌 연결은 `established`로 계속 통과하므로, 그대로 두면 확인이 헛통과한다. 새 연결을 만들게 cloudflared와 Tailscale 프록시 하나를 다시 띄운 뒤 본다. cloudflared가 다시 붙는 몇 초 동안 공개 URL이 끊긴다.
+
+```bash
+bash -euo pipefail <<'EOF'
+export KUBECONFIG=~/.kube/<KUBE_CONTEXT>.yaml   # prod는 homelab, vm은 homelab-vm
+kubectl -n cloudflared rollout restart deploy/cloudflared
+kubectl -n cloudflared rollout status deploy/cloudflared --timeout=180s
+# Tailscale 프록시 하나(StatefulSet이 다시 만든다). VM은 vm- 접두
+kubectl -n tailscale delete "$(kubectl -n tailscale get pods -o name | grep '^pod/ts-grafana-')"
+# 새 base backup(R2 443)
+kubectl -n database create -f - <<YAML
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata: { name: egress-check-$(date +%Y%m%d%H%M), namespace: database }
+spec: { cluster: { name: pg }, method: plugin, pluginConfiguration: { name: barman-cloud.cloudnative-pg.io } }
+YAML
+# Telegram 시험 경보(Alertmanager -> api.telegram.org 443). 휴대폰에 2분 안에 와야 한다
+kubectl -n observability exec deploy/alertmanager -c alertmanager -- \
+  amtool alert add alertname=EgressCheck severity=warning --alertmanager.url=http://localhost:9093
+echo "다시 띄움·백업·시험 경보 보냄"
+EOF
+```
+
+그다음 아래를 본다. 사람 기기가 필요한 둘(Telegram 수신, tailnet UI)만 사람이 보고, 나머지는 읽기 명령이라 누가 봐도 된다.
+
+| 항목 | 확인 | 통과 |
+|---|---|---|
+| 공개 URL(터널 7844) | `curl -s -o /dev/null -w '%{http_code}\n' https://edge-probe.ukyi.app/`(prod. VM은 E8 VM 격리 5번의 port-forward 확인) | `200`, cloudflared 로그에 `Registered tunnel connection` |
+| 클러스터 DNS(53) | 아래 시험 파드의 `cluster-dns` 줄, `kubectl -n kube-system logs deploy/coredns --since=10m` | 해석 성공, 업스트림 `i/o timeout` 없음 |
+| Argo CD 동기화(GitHub 443) | 2분 뒤 3절의 `Synced/Healthy` 줄 | 모든 Application `Synced/Healthy` |
+| R2 백업(443) | `kubectl -n database get backups`, `kubectl -n database get cluster pg -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")].status}'` | `egress-check-*`가 `completed`, `True` |
+| Alertmanager → Telegram(443) | 휴대폰 | `EgressCheck` 2분 안 수신 |
+| tailnet UI(DERP) | 운영자 기기에서 `grafana` tailnet 주소 열기, `tailscale ping grafana` | 열림, `via DERP(...)`(direct가 아니어도 정상) |
+| 막힌 연결 | `journalctl -k -g homelab-egress --since '-15min'` | 위 경로의 목적지가 없다. 있으면 그 목적지·포트를 보고 판단한다 |
+| 커널 규칙 | `sudo -v && host/verify.sh --cluster <이름>`, `sudo nft list table inet homelab_egress` | verify 종료 코드 0, 허용 줄의 카운터가 오른다(`pod_egress`의 6443·10250 줄은 0이 정상) |
+
+**시작 즉시 연결하는 시험 파드.** NetworkPolicy가 없는 임시 ns에서 파드가 뜨자마자 연결한다. 그 ns에는 정책이 없으므로 결과는 노드 규칙만의 효과이고, 1초 공백 동안의 상태와 같다. 막혔다고 나온 대상이 원래 닫힌 포트라서가 아님을 보이려고, 같은 대상에 노드에서 먼저 연결해 본다(대조).
+
+```bash
+bash -euo pipefail <<'EOF'
+export KUBECONFIG=~/.kube/<KUBE_CONTEXT>.yaml   # prod는 homelab, vm은 homelab-vm
+. host/clusters/<이름>.env
+LAN_GW="${NODE_IP%.*}.1"
+# tailnet 대상(Argo CD 프록시)은 실행 때 얻는다. 저장소에 Tailscale IP를 두지 않는다. VM은 tailnet 밖이라 건너뛴다
+TS_IP=""
+if [ "$TAILNET_JOIN" = true ]; then
+  TS_IP="$(tailscale status --json | jq -r '.Peer[] | select((.DNSName // "") | startswith("argocd.")) | .TailscaleIPs[] | select(startswith("100."))')"
+  test -n "$TS_IP"
+fi
+# 노드 자신의 주소: cni0 게이트웨이(노드 podCIDR의 .1), tailnet 주소(prod만, 실행 때 얻는다)
+CNI_GW="$(kubectl get node "$NODE_NAME" -o jsonpath='{.spec.podCIDR}' | sed -E 's|\.0/[0-9]+$|.1|')"
+TS_NODE=""
+if [ "$TAILNET_JOIN" = true ]; then TS_NODE="$(tailscale ip -4)"; test -n "$TS_NODE"; fi
+# 대조: 노드에서는 열린다
+for t in "$LAN_GW 80" "$LAN_GW 443" "1.1.1.1 80" "github.com 22" ${TS_IP:+"$TS_IP 443"} \
+  "$NODE_IP 22" "$CNI_GW 22" ${TS_NODE:+"$TS_NODE 22"}; do
+  nc -z -w 3 $t || { echo "대조 실패(노드에서도 닫힘): $t"; exit 1; }
+done
+kubectl create namespace egress-probe
+kubectl label namespace egress-probe pod-security.kubernetes.io/enforce=restricted
+sed -e "s/@LAN_GW@/$LAN_GW/g" -e "s/@NODE_IP@/$NODE_IP/g" -e "s/@TS_IP@/$TS_IP/g" \
+  -e "s/@CNI_GW@/$CNI_GW/g" -e "s/@TS_NODE@/$TS_NODE/g" <<'YAML' | kubectl -n egress-probe apply -f -
+apiVersion: v1
+kind: Pod
+metadata: { name: probe }
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext: { runAsNonRoot: true, runAsUser: 65532, seccompProfile: { type: RuntimeDefault } }
+  containers:
+    - name: probe
+      image: docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70
+      securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+      command: [sh, -c]
+      args:
+        - |
+          c() { if nc -z -w 3 "$3" "$4" 2>/dev/null; then g=open; else g=blocked; fi
+                [ "$g" = "$1" ] && echo "ok   $g $2 $3:$4" || echo "FAIL $g(기대 $1) $2 $3:$4"; }
+          # dig +short는 실패도 ";;" 줄로 stdout에 낸다. IPv4 답만 성공으로 센다. 셋째 인자가 없으면 클러스터 DNS다.
+          d() { if dig +time=3 +tries=1 +short ${3:+"$3"} github.com | grep -qE '^[0-9.]+$'; then g=open; else g=blocked; fi
+                [ "$g" = "$1" ] && echo "ok   $g $2" || echo "FAIL $g(기대 $1) $2"; }
+          c blocked lan-gw @LAN_GW@ 80
+          c blocked lan-gw @LAN_GW@ 443
+          [ -z "@TS_IP@" ] || c blocked tailnet @TS_IP@ 443
+          c blocked public-80 1.1.1.1 80
+          c open public-443 1.1.1.1 443
+          d open cluster-dns
+          c blocked public-22 github.com 22
+          c open tunnel-7844 region1.v2.argotunnel.com 7844
+          d open upstream-dns @1.1.1.1
+          d blocked other-dns @8.8.8.8
+          c blocked node-ssh @NODE_IP@ 22
+          c blocked cni-gw-ssh @CNI_GW@ 22
+          [ -z "@TS_NODE@" ] || c blocked node-tailnet-ssh @TS_NODE@ 22
+          c open node-api @NODE_IP@ 6443
+          c open kube-api-svc kubernetes.default.svc.cluster.local 443
+YAML
+kubectl -n egress-probe wait --for=jsonpath='{.status.phase}'=Succeeded pod/probe --timeout=180s
+# grep -q를 파이프 끝에 두지 않는다. 먼저 끝난 grep이 앞 명령을 SIGPIPE로 죽여 pipefail이 결과를 뒤집는다.
+out="$(kubectl -n egress-probe logs probe)"
+printf '%s\n' "$out"
+if grep -q '^FAIL' <<<"$out"; then echo "egress 시험 실패"; exit 1; fi
+kubectl delete namespace egress-probe
+echo "egress 시험 통과"
+EOF
+```
+
+첫 줄(`lan-gw`)은 컨테이너가 시작하자마자 나간다. `node-api`·`kube-api-svc`가 열리는 것은 정상이다(아래 한계 1). 실패하면 ns가 남으니 본 뒤 `kubectl delete namespace egress-probe`로 지운다.
+
+**남는 한계.**
+
+1. 파드 → 노드 자신은 kube API 6443과 kubelet 10250만 열려 있다. 모든 파드(1초 공백의 새 파드 포함)가 이 둘에 닿고, 각자의 인증만 남는다. 앱 파드만 골라 막으려면 출발 파드를 가리는 장치가 따로 필요하다. 파드 대역만으로는 컨트롤러·vmsingle과 앱을 가를 수 없다.
+2. 업스트림 DNS 53(1.1.1.1·9.9.9.9)은 모든 파드에 열려 있다. AdGuard를 거치지 않는 평문 DNS와 그 위의 유출 경로가 남는다.
+3. 공개 443·7844는 모든 파드에 열려 있다(정상 정책도 대부분 공개 443을 연다).
+4. Tailscale 프록시는 DERP로만 붙는다(direct·STUN 막음). 지연이 늘 수 있다. 공개 UDP 443(QUIC)도 막혀 TCP로 넘어간다.
+5. 부팅 때 규칙이 못 올라와도 k3s는 뜬다(fail-open, 유닛에 `Requires`를 두지 않음). 그때는 NetworkPolicy만 남은 이전 상태이고 `verify`가 커널 표로 잡는다. k3s만 다시 시작해도 규칙은 되살아나지 않는다. `--egress`를 다시 실행한다.
+6. 규칙을 켜기 전에 맺힌 연결은 `established`로 계속 통과한다. 그래서 적용 뒤 확인에서 cloudflared와 Tailscale 프록시를 다시 띄운다.
 
 ## 2. Argo CD 설치와 root
 
@@ -169,11 +336,104 @@ EOF
 
 다시 실행해도 같은 Secret을 덮어쓸 뿐 멈추지 않는다. 값은 `kubectl`의 명령행 인자에 들어가지 않고(`--from-literal`은 `ps`·`/proc`로 보인다), `--server-side`로 적용해 client-side apply가 남기는 `last-applied-configuration` 주석에 값이 한 벌 더 복사되지도 않는다. T09가 2026-10-20에 이 방식을 확정했다(시나리오 7의 장애 주입과 복구가 같은 방식이었다. ESO를 재시작하지 않아도 Secret 교체 약 1분 20초 뒤 Store가 Ready였다). 자격을 바꾸는 순서는 [rotate.md](rotate.md) 1절이다.
 
-**vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). T11·T13이 명령을 채운다.
+**vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). 위의 일반 ESO 블록 대신 아래 2단계 블록을 쓰고, 2.3 대신 4단계 블록을 쓴다.
 
-1. ESO Secret 전에, 운영 클러스터의 ExternalSecret 키 목록과 `homelab-dev`의 키를 대조한다. 빠진 키가 0이어야 한다. 하나라도 빠지면 멈춘다. 값은 출력하지 않는다.
-2. ESO Secret의 값은 `eso-homelab-dev`이다.
-3. root apply 전에 복구 원본 R2 읽기 자격 Secret을 넣는다. 복구가 끝나면 지운다.
+NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있고 VM에는 없다. NUC에는 운영 kubeconfig도 있으므로 VM에 쓰는 블록은 모두 첫 두 줄에서 `KUBECONFIG`를 VM 파일로 고정하고 정체성(context `homelab-vm`, `vm.env`의 노드 이름 하나)을 본다. VM kubeconfig를 NUC에 두는 방법은 [vm.md](vm.md) 3절이다. **운영 kubeconfig로 2단계를 돌리면 운영 ESO 자격이 dev identity로 바뀌어 운영의 모든 ExternalSecret 갱신이 멈춘다.**
+
+1. **ESO Secret 전에 키를 대조한다.** 운영 클러스터(main을 동기화한 결과)의 ExternalSecret이 읽는 키를 Infisical 경로로 바꾸고, `homelab-dev`/`dev`의 같은 폴더 키 이름과 `comm -23`으로 대조한다(설계 E8 VM 격리 2번). 운영 클러스터는 읽기만 한다. 값은 출력하지 않고, 빠진 키가 하나라도 있으면 그 이름만 내고 멈춘다. `infisical login`(사람 계정)을 먼저 한다. `homelab-smoke` 키는 시나리오 2·3 뒤에 생기므로 그 뒤의 대조에 들어간다.
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   # 운영은 읽기만 한다. VM 블록과 섞이지 않게 kubeconfig와 context를 호출마다 적는다
+   prod() { kubectl --kubeconfig "$HOME/.kube/homelab.yaml" --context homelab --request-timeout=15s "$@"; }
+   # 이 bash의 stdin은 스크립트 자체라 터미널에서 읽는다. ID는 저장소에 두지 않는다
+   [ -n "${HOMELAB_DEV_PROJECT_ID:-}" ] || read -r -p 'Infisical homelab-dev project ID: ' HOMELAB_DEV_PROJECT_ID </dev/tty
+   [[ "$HOMELAB_DEV_PROJECT_ID" =~ ^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$ ]] || { echo "project ID가 UUID 형식이 아니다"; exit 1; }
+   # infra/README.md 2절과 같은 잠금. 로그인 사용자의 CLI 0.44.2는 조회한 값을 ~/.infisical/secrets-backup/에 남긴다
+   mkdir -p ~/.infisical
+   if [ -d ~/.infisical/secrets-backup ]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi
+   mkdir -p ~/.infisical/secrets-backup && chmod 0500 ~/.infisical/secrets-backup
+   if touch ~/.infisical/secrets-backup/.probe 2>/dev/null; then
+     rm -f ~/.infisical/secrets-backup/.probe; echo "백업 폴더가 쓰기 가능하다. 멈춘다"; exit 1
+   fi
+   d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+   # 운영 ExternalSecret의 키를 Infisical 절대 경로로. store의 secretsPath를 앞에 붙이고, /로 시작하는 키는 그대로다(U06).
+   # dataFrom이나 namespaced SecretStore는 이 방법으로 키 이름을 셀 수 없어 멈춘다(지금은 없다)
+   stores="$(prod get clustersecretstore -o json \
+     | jq -c '[.items[] | {key: .metadata.name, value: .spec.provider.infisical.secretsScope.secretsPath}] | from_entries')"
+   prod get externalsecret -A -o json | jq -r --argjson s "$stores" '
+     .items[] | . as $e | "\($e.metadata.namespace)/\($e.metadata.name)" as $n
+     | if ($e.spec.secretStoreRef.kind // "SecretStore") != "ClusterSecretStore" then error("ClusterSecretStore가 아니다: \($n)")
+       elif ($e.spec.dataFrom // []) != [] then error("dataFrom은 키 이름을 셀 수 없다: \($n)")
+       else ($s[$e.spec.secretStoreRef.name] // error("store 경로를 모른다: \($n)")) as $p
+         | $e.spec.data[]?.remoteRef.key | if startswith("/") then . else "\($p)/\(.)" end
+       end' | LC_ALL=C sort -u >"$d/want"
+   test -s "$d/want"
+   # homelab-dev의 같은 폴더에서 키 이름만. 목록 JSON에는 값도 오지만 jq가 이름만 남긴다(화면·파일에 값 없음).
+   # 가져온(import) 키와 개인 덮어쓰기는 빼고 이 폴더의 shared 키만 센다. ESO identity는 개인 덮어쓰기를 보지 못하고,
+   # 사람 로그인으로 그것까지 세면 빠진 shared 키를 놓친다. 폴더가 없어 CLI가 실패해도 멈춘다
+   while IFS= read -r dir; do
+     infisical secrets --path "$dir" --env dev --projectId "$HOMELAB_DEV_PROJECT_ID" --silent -o json \
+         --include-imports=false --expand=false --secret-overriding=false </dev/null \
+       | jq -r --arg dir "$dir" '(. // [])[] | "\($dir)/\(.secretKey)"'
+     if [ "$(find ~/.infisical/secrets-backup -type f | wc -l)" -ne 0 ]; then
+       chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; chmod 0500 ~/.infisical/secrets-backup
+       echo "Infisical 백업 파일이 생겼다. 지우고 멈춘다" >&2; exit 1
+     fi
+   done < <(sed 's|/[^/]*$||' "$d/want" | LC_ALL=C sort -u) | LC_ALL=C sort -u >"$d/have"
+   missing="$(LC_ALL=C comm -23 "$d/want" "$d/have")"
+   if [ -n "$missing" ]; then
+     printf 'homelab-dev/dev에 없는 키 %s개(이름만):\n%s\n' "$(wc -l <<<"$missing")" "$missing"; exit 1
+   fi
+   echo "빠진 키 0 (운영 키 $(wc -l <"$d/want")개)"
+   EOF
+   ```
+
+2. **ESO Secret의 값은 `eso-homelab-dev`이다.** VM 준비 자산의 client ID·secret을 대화형 셸에서 `read -rs ESO_CLIENT_ID`, `read -rs ESO_CLIENT_SECRET`로 받고 `export ESO_CLIENT_ID ESO_CLIENT_SECRET`한 뒤 돌린다. 운영 자격을 잘못 넣으면 그 identity가 `homelab-dev`에 없어 Store가 Ready가 되지 않는다(조용히 운영 값을 읽지 않는다).
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   export KUBECONFIG=~/.kube/homelab-vm.yaml
+   host/verify.sh --cluster vm --identity
+   : "${ESO_CLIENT_ID:?ESO_CLIENT_ID가 비었다}" "${ESO_CLIENT_SECRET:?ESO_CLIENT_SECRET가 비었다}"
+   kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
+   jq -n '{apiVersion: "v1", kind: "Secret", type: "Opaque",
+           metadata: {name: "infisical-universal-auth", namespace: "external-secrets"},
+           stringData: {clientId: env.ESO_CLIENT_ID, clientSecret: env.ESO_CLIENT_SECRET}}' \
+     | kubectl apply --server-side --field-manager=bootstrap -f -
+   EOF
+   ```
+
+3. **root apply 전에 복구 원본 R2 읽기 전용 Secret을 넣는다.** 복구 자산의 운영 버킷(`homelab-backups`) 읽기 전용 토큰을 2단계처럼 `R2_RO_ACCESS_KEY_ID`·`R2_RO_SECRET_ACCESS_KEY`·`R2_RO_ENDPOINT`(S3 API endpoint URL)로 export한다. Infisical에 두지 않는 Secret 하나다(설계 E8 VM 격리 3번). 이름과 키는 values-vm의 `recoverySource.credentialsSecret`, CNPG 차트가 읽는 키(`platform/cnpg/cluster/templates/_helpers.tpl`)와 같다. 그래서 main의 values-vm에 복구 PR이 없으면 넣지 않고 멈춘다. `database` ns는 root의 namespaces(wave -9)가 만들기 전이라 여기서 만들고, 나중에 root가 라벨을 붙여 인수한다. 같은 블록이 [restore.md](restore.md) 3절에도 있다. 고치면 둘을 함께 고친다.
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   export KUBECONFIG=~/.kube/homelab-vm.yaml
+   host/verify.sh --cluster vm --identity
+   : "${R2_RO_ACCESS_KEY_ID:?R2_RO_ACCESS_KEY_ID가 비었다}" "${R2_RO_SECRET_ACCESS_KEY:?R2_RO_SECRET_ACCESS_KEY가 비었다}" "${R2_RO_ENDPOINT:?R2_RO_ENDPOINT가 비었다}"
+   git fetch -q origin main
+   src=$(git show origin/main:platform/root/values-vm.yaml | yq -o json '.cluster.cnpg.recoverySource // {}')
+   [ "$(jq -r '.credentialsSecret' <<<"$src")" = r2-source-readonly ] && [ "$(jq -r '.bucket' <<<"$src")" = homelab-backups ] \
+     || { echo "main의 values-vm.yaml에 복구 PR(recoverySource.bucket·credentialsSecret)이 없다. 먼저 병합한다" >&2; exit 1; }
+   kubectl create namespace database --dry-run=client -o yaml | kubectl apply -f -
+   jq -n '{apiVersion: "v1", kind: "Secret", type: "Opaque",
+           metadata: {name: "r2-source-readonly", namespace: "database"},
+           stringData: {ACCESS_KEY_ID: env.R2_RO_ACCESS_KEY_ID, SECRET_ACCESS_KEY: env.R2_RO_SECRET_ACCESS_KEY, ENDPOINT_URL: env.R2_RO_ENDPOINT}}' \
+     | kubectl apply --server-side --field-manager=bootstrap -f -
+   EOF
+   ```
+
+   넣은 뒤 [restore.md](restore.md) 3절 3단계의 쓰기 거부 시험을 하고 4단계(root apply)로 간다. 이 Secret은 복구가 끝나면 restore.md 3절의 정리 단계에서 지운다. 끝나면 셸의 자격 변수를 `unset`한다.
+
+4. **root apply는 `root-vm.yaml`이다.** 2.3의 명령 대신 이 블록으로 한다. 2.3의 나머지 설명은 그대로다.
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   export KUBECONFIG=~/.kube/homelab-vm.yaml
+   host/verify.sh --cluster vm --identity
+   kubectl apply -f platform/root/root-vm.yaml
+   EOF
+   ```
 
 ### 2.3 root apply
 
@@ -186,13 +446,13 @@ kubectl apply -f platform/root/root-<이름>.yaml
 
 ## 3. 확인
 
-다른 블록처럼 한 항목이라도 틀리면 멈추고, 모든 항목(prod의 Tailscale DNS 포함)이 맞을 때만 마지막에 `확인 통과`를 출력한다. 재부팅 뒤 새 셸에서도 이 블록을 그대로 돌린다(`KUBECONFIG`를 안에서 잡는다).
+다른 블록처럼 한 항목이라도 틀리면 멈추고, 모든 항목(prod의 Tailscale DNS 포함)이 맞을 때만 마지막에 `확인 통과`를 출력한다. 재부팅 뒤 새 셸에서도 이 블록을 그대로 돌린다(`KUBECONFIG`를 안에서 잡는다). `verify`가 egress 커널 표를 `sudo -n nft`로 읽으므로 블록 앞에서 `sudo -v`를 한 번 한다. 하지 않으면 `verify`가 2(미검증)로 끝나 블록이 멈춘다.
 
 ```bash
 bash -euo pipefail <<'EOF'
 export KUBECONFIG=~/.kube/<KUBE_CONTEXT>.yaml   # prod는 homelab, vm은 homelab-vm
 host/preflight.sh --cluster <이름> --after      # 스왑, 타임존, resolved 스텁, resolv.conf, 링크가 DHCP DNS 거부(drop-in 로드)
-host/verify.sh --cluster <이름>                 # 노드 Ready, k3s 버전, node-args, SAN, local-retain
+host/verify.sh --cluster <이름>                 # 노드 Ready, k3s 버전, node-args, SAN, local-retain, egress(커널 표). 2는 미검증
 kubectl -n argocd get applications
 # 모든 Application이 Synced·Healthy
 test "$(kubectl -n argocd get applications -o jsonpath='{range .items[*]}{.status.sync.status}/{.status.health.status}{"\n"}{end}' | sort -u)" = "Synced/Healthy"

@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # k3s 설치 뒤 라이브 클러스터가 Git(host/)과 같은지 본다. 읽기만 하고 sudo 없이 실행한다(C.3.2 4번).
+# 예외 하나: 커널 nft 표는 root만 읽어서 sudo -n(비밀번호를 묻지 않음)으로 읽어 본다.
 #
 # 사용: host/verify.sh --cluster <이름> [--identity]
 #   기본        정체성, 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 k3s-config.yaml,
-#               serving cert SAN, local-retain StorageClass, kubeconfig 권한.
+#               serving cert SAN, local-retain StorageClass, 파드 egress(유닛, 규칙 파일, 대역, 커널 표),
+#               kubeconfig 권한.
 #   --identity  정체성만 본다. 파괴 명령(삭제, 복구, 제거) 앞에서 대상 클러스터를 확인할 때 쓴다.
+#
+# 종료 코드: 0 통과, 1 실패, 2 실패는 없지만 커널 표를 못 읽어 미검증(sudo 자격이 없다).
+# 2를 통과로 읽지 않는다. sudo -v로 자격을 받아 둔 같은 터미널에서 다시 실행하면 0이나 1이 된다.
 #
 # kubeconfig는 KUBECONFIG가 있으면 그것, 없으면 ~/.kube/<KUBE_CONTEXT>.yaml(install.sh가 씀)이다.
 # 모든 kubectl 호출에 --context <KUBE_CONTEXT>를 붙인다. 다른 클러스터의 파일을 가리키면 그 context가
@@ -18,10 +23,15 @@ set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 FAILS=0
+UNVERIFIED=0
 ok() { printf 'ok   %s\n' "$(mask "$*")"; }
 bad() {
   printf 'FAIL %s\n' "$(mask "$*")" >&2
   FAILS=$((FAILS + 1))
+}
+skip() {
+  printf 'SKIP %s\n' "$(mask "$*")" >&2
+  UNVERIFIED=$((UNVERIFIED + 1))
 }
 
 usage() { die "사용: host/verify.sh --cluster <이름> [--identity]"; }
@@ -135,6 +145,64 @@ check_storageclass() {
   fi
 }
 
+# 파드 egress 규칙(install.sh --egress). 유닛·파일만으로는 부족하다. 유닛은 oneshot이라 누가 표를 지우거나
+# flush ruleset(distro nftables.service 재시작 등)해도 active로 남고, 파일만 바꾸고 reload를 빠뜨려도 파일은
+# Git과 같다. 그래서 커널 표를 읽어 렌더 해시·hook·파드 출발 조건·필수 허용·끝 drop을 본다.
+# 대역도 본다. 라이브 대역과 다르면 규칙은 성공한 채 아무 파드에도 걸리지 않는다.
+check_egress() {
+  local en act want d pod svc js rc problems
+  # 꺼져 있거나 없으면 0이 아닌 값으로 끝나지만 상태 글자(disabled, inactive)는 낸다. 그 글자를 본다.
+  en="$(systemctl is-enabled "$EGRESS_UNIT_NAME" 2>/dev/null || true)"
+  act="$(systemctl is-active "$EGRESS_UNIT_NAME" 2>/dev/null || true)"
+  if [ "$en" = "enabled" ] && [ "$act" = "active" ]; then
+    ok "${EGRESS_UNIT_NAME} enabled, active"
+  else
+    bad "${EGRESS_UNIT_NAME}가 enabled·active가 아니다(${en:-없음}, ${act:-없음}). sudo host/install.sh --cluster ${CLUSTER} --egress"
+  fi
+
+  want="$(render_egress)"
+  if [ ! -r "$EGRESS_RULES" ]; then
+    bad "${EGRESS_RULES}가 없다"
+  elif d="$(diff <(printf '%s\n' "$want") "$EGRESS_RULES")"; then
+    ok "${EGRESS_RULES}가 host/egress/egress.nft 렌더 결과와 같다"
+  else
+    bad "${EGRESS_RULES}가 Git 렌더와 다르다(< Git, > 라이브). install.sh --egress를 다시 실행한다:"$'\n'"${d}"
+  fi
+  if cmp -s "$HOST_DIR/egress/${EGRESS_UNIT_NAME}" "$EGRESS_UNIT"; then
+    ok "${EGRESS_UNIT}가 Git과 같다"
+  else
+    bad "${EGRESS_UNIT}가 없거나 host/egress/${EGRESS_UNIT_NAME}와 다르다"
+  fi
+
+  pod="$(kc get node "$NODE_NAME" -o jsonpath='{.spec.podCIDR}')" || pod=""
+  if [ -n "$pod" ] && cidr_within "$POD_CIDR" "$pod"; then
+    ok "노드 podCIDR ${pod}가 POD_CIDR ${POD_CIDR} 안에 있다"
+  else
+    bad "노드 podCIDR '${pod:-없음}'가 POD_CIDR ${POD_CIDR} 밖이다. egress 규칙이 파드에 걸리지 않는다"
+  fi
+  svc="$(kc -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}')" || svc=""
+  if [ -n "$svc" ] && cidr_within "$SERVICE_CIDR" "$svc"; then
+    ok "kubernetes Service ${svc}가 SERVICE_CIDR ${SERVICE_CIDR} 안에 있다"
+  else
+    bad "kubernetes Service IP '${svc:-없음}'가 SERVICE_CIDR ${SERVICE_CIDR} 밖이다"
+  fi
+
+  rc=0
+  js="$(egress_kernel_json)" || rc=$?
+  case "$rc" in
+    0)
+      problems="$(egress_kernel_problems <<<"$js")"
+      if [ -z "$problems" ]; then
+        ok "커널 table inet ${EGRESS_TABLE}: 렌더 해시, forward·input hook, 파드 출발 조건, 필수 허용, 끝 drop"
+      else
+        bad "커널 table inet ${EGRESS_TABLE}가 Git 렌더와 다르다. sudo host/install.sh --cluster ${CLUSTER} --egress:"$'\n'"${problems}"
+      fi
+      ;;
+    2) skip "커널 table inet ${EGRESS_TABLE}를 읽지 못했다(root 아님, sudo -n 불가). sudo -v 뒤 같은 터미널에서 다시 실행한다" ;;
+    *) bad "커널에 table inet ${EGRESS_TABLE}가 없다. 규칙이 꺼져 있다. sudo host/install.sh --cluster ${CLUSTER} --egress" ;;
+  esac
+}
+
 # kubeconfig에는 cluster-admin 자격이 있다.
 check_kubeconfig_mode() {
   local m
@@ -171,7 +239,7 @@ main() {
     return 0
   fi
 
-  require_cmds openssl timeout tr stat diff
+  require_cmds openssl timeout tr stat diff cmp systemctl sha256sum
   resolve_magicdns
   K3S_CFG="$(render_k3s_config)"
   check_ready
@@ -179,12 +247,22 @@ main() {
   check_node_args
   check_san
   check_storageclass
+  check_egress
   check_kubeconfig_mode
+  finish
+}
 
+# 실패가 하나라도 있으면 1, 실패 없이 미검증이 있으면 2, 모두 확인했을 때만 0.
+finish() {
   if [ "$FAILS" -gt 0 ]; then
     die "verify: ${FAILS}개 실패"
+  fi
+  if [ "$UNVERIFIED" -gt 0 ]; then
+    printf 'UNVERIFIED: verify: 실패 0, 미검증 %s개. 통과가 아니다(종료 코드 2)\n' "$UNVERIFIED" >&2
+    exit 2
   fi
   log "verify 통과"
 }
 
-main "$@"
+# tools/host-egress.test.sh가 check_egress·finish만 쓰려고 source한다. 그때는 main을 돌리지 않는다.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
