@@ -215,7 +215,9 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
     list(kind, ns, selector) {
       if (ns) checkName("namespace", ns);
       if (selector !== undefined && !SELECTOR.test(selector)) throw new Error("kubectl label selector 형식이 아니다");
-      const r = run(exec, [...(ns ? ["-n", ns] : ["-A"]), "get", resource(kind), ...(selector ? ["-l", selector] : []), "-o", "json"]);
+      // -A는 get의 플래그라 하위 명령 뒤에 둔다. 앞에 두면 kubectl 1.36.5가 플러그인 이름 자리로 보고 거부한다
+      // ("flags cannot be placed before plugin name: -A", T12-05 운영 실측). -n은 전역 플래그라 앞에 있어도 된다.
+      const r = run(exec, [...nsArgs(ns), "get", resource(kind), ...(ns ? [] : ["-A"]), ...(selector ? ["-l", selector] : []), "-o", "json"]);
       must(r, `kubectl get ${kind}`);
       return jsonParse(r.stdout).items ?? [];
     },

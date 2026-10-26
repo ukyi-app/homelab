@@ -162,9 +162,9 @@ describe("status(전체·--platform)", () => {
       get("argocd", "applications.argoproj.io", `${APP}-data`, synced),
       get("argocd", "applications.argoproj.io", APP, synced),
       kubectlRule(["-n", "argocd", "get", "applications.argoproj.io", "-o", "json"], json({ items: [{ metadata: { name: "traefik" }, spec: { project: "platform" }, ...synced }, { metadata: { name: "memo" }, spec: { project: "apps" }, status: {} }] })),
-      kubectlRule(["-A", "get", "nodes", "-o", "json"], json({ items: [{ metadata: { name: "nuc" }, status: READY }] })),
+      kubectlRule(["get", "nodes", "-A", "-o", "json"], json({ items: [{ metadata: { name: "nuc" }, status: READY }] })),
       get("database", "clusters.postgresql.cnpg.io", "pg", { status: { phase: "Cluster in healthy state" } }),
-      kubectlRule(["-A", "get", "clustersecretstores.external-secrets.io", "-o", "json"], json({ items: [{ metadata: { name: "infisical-apps" }, status: READY }] })),
+      kubectlRule(["get", "clustersecretstores.external-secrets.io", "-A", "-o", "json"], json({ items: [{ metadata: { name: "infisical-apps" }, status: READY }] })),
     ];
     const all = await runCli(["status", "--json"], rules);
     expect(all.code).toBe(0);

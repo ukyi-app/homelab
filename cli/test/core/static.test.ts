@@ -58,6 +58,7 @@ const FS_IMPORTERS: Record<string, Set<string> | "any"> = {
   "core/infisical-backup.ts": "any",
   "core/version.ts": new Set(["readFileSync"]),
   "core/github.ts": new Set(["existsSync", "readFileSync", "realpathSync"]),
+  "core/tools.ts": new Set(["realpathSync"]),
   "core/input.ts": new Set(["readFileSync", "readSync"]),
   "main.ts": new Set(["readSync"]),
 };
