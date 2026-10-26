@@ -86,15 +86,17 @@ function passwordStep(app: string): Step {
   };
 }
 
-// 단계 B 앞의 대기: 앱 Application이 아직 캐시 리소스(<앱>-valkey*)를 갖고 있으면 영속을 켜지 않는다.
-// 영속이 이미 떠 있는 재실행은 그 리소스가 데이터 Application(<앱>-data) 몫이라 여기 걸리지 않는다.
+// 단계 B 앞의 대기: 앱 Application이 아직 캐시 서버 리소스를 갖고 있으면 영속을 켜지 않는다.
+// 캐시 렌더(app 차트 1.1.0): <앱>-valkey(Deployment·Service), -valkey-auth, -valkey-config, -valkey-init-scripts,
+// -valkey-url. 이 가운데 -valkey-url(연결 ExternalSecret)은 uses.valkey가 있으면 영속에서도 앱 Application 몫이라 기다릴
+// 대상이 아니다(#884 리뷰 P2-1: 넣으면 다 된 재실행이 영원히 대기). 영속 서버는 데이터 Application(<앱>-data) 몫이다.
 export function cacheGoneStep(app: string): Step {
   return {
     id: "cache-gone",
     target: `Argo CD ${app}의 캐시 Valkey 정리`,
     async read(c) {
       const a = c.k8s.get("application", "argocd", app);
-      const left = (Array.isArray(a?.status?.resources) ? a.status.resources : []).filter((r: { name?: string }) => typeof r?.name === "string" && (r.name === `${app}-valkey` || r.name.startsWith(`${app}-valkey-`)));
+      const left = (Array.isArray(a?.status?.resources) ? a.status.resources : []).filter((r: { name?: string }) => typeof r?.name === "string" && r.name !== `${app}-valkey-url` && (r.name === `${app}-valkey` || r.name.startsWith(`${app}-valkey-`)));
       if (left.length === 0) return same("캐시 리소스 없음");
       return same(`캐시 리소스 ${left.length}개 남음`, { hold: "캐시 Valkey 정리 대기(Argo CD 동기화)" });
     },

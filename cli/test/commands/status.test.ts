@@ -70,6 +70,33 @@ describe("status <app>", () => {
     expect(r.json.steps.find((x: any) => x.id === `argocd-${APP}`).state).toBe("missing");
   });
 
+  test("GitHub 조회 실패(403·429)를 '기록 없음'·'PR 없음'으로 숨기지 않는다(#884 P2-5)", async () => {
+    const swap = (match: string, status: number) => world().map((x) => (String(x.argv.at(-1)) === match ? ghGet(match, status, { message: "x" }) : x));
+    for (const [path, id] of [[`repos/ukyi-app/${APP}/actions/runs?branch=main&per_page=1`, "build"], [pullsPath(`deploy/${APP}`), "deploy-pr"]] as const) {
+      for (const status of [403, 429]) {
+        const r = await runCli(["status", APP, "--json"], swap(path, status));
+        expect(r.code).toBe(1);
+        expect(r.json.steps.find((s: any) => s.id === id).result).toBe("failed");
+        expect(r.json.error.message).toContain(`HTTP ${status}`);
+      }
+    }
+    // 정상 빈 목록은 실패가 아니다.
+    const empty = await runCli(["status", APP, "--json"], world().map((x) => (String(x.argv.at(-1)) === `repos/ukyi-app/${APP}/actions/runs?branch=main&per_page=1` ? ghGet(`repos/ukyi-app/${APP}/actions/runs?branch=main&per_page=1`, 200, { workflow_runs: [] }) : x)));
+    expect(empty.code).toBe(0);
+    expect(empty.json.steps.find((s: any) => s.id === "build").detail).toBe("기록 없음");
+  });
+
+  test("DB 역할 ExternalSecret·백업 CronJob이 없으면 준비됨으로 보지 않는다(없음을 정상으로 읽지 않기)", async () => {
+    const noRole = world().map((x) => (x.argv.includes(`pg-role-${APP}`) ? get("database", "externalsecrets.external-secrets.io", `pg-role-${APP}`, null) : x));
+    const a = await runCli(["status", APP, "--json"], noRole);
+    expect(a.code).toBe(1);
+    expect(a.json.steps.find((s: any) => s.id === "secrets").detail).toContain(`pg-role-${APP}`);
+    const noCron = world().map((x) => (x.argv.includes(`${APP}-valkey-backup`) ? get(NS, "cronjobs.batch", `${APP}-valkey-backup`, null) : x));
+    const b = await runCli(["status", APP, "--json"], noCron);
+    expect(b.code).toBe(1);
+    expect(b.json.steps.find((s: any) => s.id === "valkey").state).toBe("missing");
+  });
+
   test("등록 안 된 앱은 app add로 안내하고 클러스터를 읽지 않는다", async () => {
     const rules = [...homelab({ [`apps/${APP}/values.yaml`]: null, [`apps/${APP}/image.yaml`]: null, [`data/${APP}/values.yaml`]: null }), ghGet(`repos/ukyi-app/${APP}/actions/runs?branch=main&per_page=1`, 200, { workflow_runs: [] }), ghGet(pullsPath(`deploy/${APP}`), 200, [])];
     const r = await runCli(["status", APP, "--json"], rules);
@@ -80,10 +107,30 @@ describe("status <app>", () => {
 });
 
 describe("status(전체·--platform)", () => {
+  test("전체 보기는 data/도 연다: 앱 없는 데이터·<app>-data 장애를 보인다(#884 P2-4)", async () => {
+    const degraded = { status: { sync: { status: "OutOfSync" }, health: { status: "Degraded" } } };
+    const rules = [
+      ...homelab({}),
+      ghGet(`${R}/contents/apps?ref=${MAIN}`, 200, [{ name: APP, type: "dir" }]),
+      ghGet(`${R}/contents/data?ref=${MAIN}`, 200, [{ name: APP, type: "dir" }, { name: "db-only", type: "dir" }]),
+      get("argocd", "applications.argoproj.io", APP, synced),
+      get("argocd", "applications.argoproj.io", `${APP}-data`, degraded),
+      get("argocd", "applications.argoproj.io", "db-only-data", degraded),
+    ];
+    const r = await runCli(["status", "--json"], rules);
+    expect(r.code).toBe(1);
+    expectPlanReadOnly(r);
+    expect(r.json.steps.map((s: any) => [s.id, s.state])).toEqual([["argocd-db-only-data", "differs"], [`argocd-${APP}`, "same"], [`argocd-${APP}-data`, "differs"]]);
+    const fail = rules.map((x) => (String(x.argv.at(-1)) === `${R}/contents/data?ref=${MAIN}` ? ghGet(`${R}/contents/data?ref=${MAIN}`, 500, {}) : x));
+    expect((await runCli(["status", "--json"], fail)).code).toBe(1);
+  });
+
   test("앱마다 Argo CD 한 줄, --platform은 플랫폼 줄", async () => {
     const rules = [
       ...homelab({}),
       ghGet(`${R}/contents/apps?ref=${MAIN}`, 200, [{ name: APP, type: "dir" }]),
+      ghGet(`${R}/contents/data?ref=${MAIN}`, 200, [{ name: APP, type: "dir" }]),
+      get("argocd", "applications.argoproj.io", `${APP}-data`, synced),
       get("argocd", "applications.argoproj.io", APP, synced),
       kubectlRule(["-n", "argocd", "get", "applications.argoproj.io", "-o", "json"], json({ items: [{ metadata: { name: "traefik" }, spec: { project: "platform" }, ...synced }, { metadata: { name: "memo" }, spec: { project: "apps" }, status: {} }] })),
       kubectlRule(["-A", "get", "nodes", "-o", "json"], json({ items: [{ metadata: { name: "nuc" }, status: READY }] })),
@@ -93,7 +140,7 @@ describe("status(전체·--platform)", () => {
     const all = await runCli(["status", "--json"], rules);
     expect(all.code).toBe(0);
     expectPlanReadOnly(all);
-    expect(all.json.steps.map((s: any) => s.id)).toEqual([`argocd-${APP}`]);
+    expect(all.json.steps.map((s: any) => s.id)).toEqual([`argocd-${APP}`, `argocd-${APP}-data`]);
     const plat = await runCli(["status", "--platform", "--json"], rules);
     expect(plat.code).toBe(0);
     expectPlanReadOnly(plat);

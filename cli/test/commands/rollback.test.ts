@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { matches } from "../../src/commands/rollback";
-import { expectPlanReadOnly, ghGet, runCli, type Rule } from "../harness";
-import { APP_HEAD, DIGEST, OLD_DIGEST, OLD_REV, R, contentsPath, fileJson, homelab, imageYaml, noPr, prCreate, prOpen, pullsPath } from "../fixtures/app-add-world/world";
+import { expectPlanReadOnly, ghGet, ghResponse, runCli, type Rule } from "../harness";
+import { APP_HEAD, DIGEST, MAIN, OLD_DIGEST, OLD_REV, R, contentsPath, fileJson, homelab, imageYaml, noPr, prCreate, prOpen, pullsPath } from "../fixtures/app-add-world/world";
 
 const APP = "memo";
 const P = `apps/${APP}/image.yaml`;
@@ -51,6 +51,33 @@ describe("rollback", () => {
     const open = await runCli(["rollback", APP, "--release", "--apply", "--json"], world(BACK, prOpen(BRANCH, "rollback", { [P]: imageYaml(APP, OLD_DIGEST, OLD_REV, false) })));
     expect(open.code).toBe(3);
     expect(open.writes).toEqual([]);
+  });
+
+  test("--release는 PR 계산 때의 main 이미지에서 hold만 푼다(시작 뒤 병합된 롤백을 되돌리지 않는다, #884 P2-2)", async () => {
+    const MAIN2 = "6".repeat(40);
+    const later = imageYaml(APP, DIGEST, APP_HEAD, true);
+    const rules = [
+      // 첫 main 읽기(명령 시작)는 MAIN, 그 뒤(prStep)는 MAIN2. MAIN2에는 다른 롤백(APP_HEAD, hold true)이 병합돼 있다.
+      ghGet(`${R}/git/ref/heads/main`, [ghResponse(200, { object: { sha: MAIN } }), ghResponse(200, { object: { sha: MAIN2 } })]),
+      ghGet(contentsPath(P), 200, fileJson(BACK)),
+      ghGet(contentsPath(P, MAIN2), 200, fileJson(later)),
+      ghGet(pullsPath(`deploy/${APP}`), 200, []),
+      noPr(BRANCH),
+    ];
+    const r = await runCli(["rollback", APP, "--release", "--json"], rules);
+    expect(r.code).toBe(0);
+    expect(r.json.steps.find((s: any) => s.id === "pr").detail).toContain(`${APP_HEAD.slice(0, 7)} hold true → ${APP_HEAD.slice(0, 7)} hold false`);
+  });
+
+  test("GitHub 조회 실패(403)를 '지워졌다'·'배포 PR 없음'으로 읽지 않는다(#884 P2-5 같은 부류)", async () => {
+    const pkg = world(NOW, [noPr(BRANCH)]).map((x) => (String(x.argv.at(-1)).includes("/packages/") ? ghGet(`orgs/ukyi-app/packages/container/${APP}/versions?per_page=100`, 403, { message: "Forbidden" }) : x));
+    const a = await runCli(["rollback", APP, "--to", OLD_REV, "--json"], pkg);
+    expect(a.code).toBe(1);
+    expect(a.json.error.message).toContain("HTTP 403");
+    const prs = world(BACK, [noPr(BRANCH)]).map((x) => (String(x.argv.at(-1)) === pullsPath(`deploy/${APP}`) ? ghGet(pullsPath(`deploy/${APP}`), 403, { message: "Forbidden" }) : x));
+    const b = await runCli(["rollback", APP, "--release", "--json"], prs);
+    expect(b.code).toBe(1);
+    expect(b.json.steps.find((s: any) => s.id === "deploy-pr").result).toBe("failed");
   });
 
   test("기록에 없거나 GHCR에서 지워졌으면 쓰지 않고 멈춘다", async () => {

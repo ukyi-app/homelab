@@ -16,6 +16,14 @@ const LONGEST_PREFIX = 3;
 
 type ImageFound = { image: Image } | { problem: Observation };
 
+// GitHub 조회 실패(403·429·5xx)를 "없음"으로 읽지 않는다(#884 리뷰 P2-5). 404는 allow404일 때만 null.
+function gh(ctx: ReadCtx, path: string, what: string, allow404 = false): any {
+  const r = ctx.gh.get(path);
+  if (allow404 && r.status === 404) return null;
+  if (r.status !== 200) throw new CliError(`${what}: HTTP ${r.status}`, "gh auth status로 로그인·권한을 확인한 뒤 다시 실행한다");
+  return r.json;
+}
+
 function latestChart(ctx: ReadCtx, prefix: string): string {
   const r = ctx.gh.get(`repos/ukyi-app/homelab/git/matching-refs/tags/${prefix}`);
   const v = r.status === 200 ? latestVersion(r.json, prefix) : null;
@@ -51,20 +59,25 @@ export function attestationMatches(json: unknown, app: string, digest: string, r
 // 앱 저장소 main HEAD의 이미지(태그 sha-<HEAD>, app-build.yaml push job)와 그 출처 확인.
 function findImage(ctx: ReadCtx, app: string): ImageFound {
   const next = `빌드가 끝난 뒤 다시: ${ctx.line}`;
-  const ref = ctx.gh.get(`repos/ukyi-app/${app}/git/ref/heads/main`);
-  const head = ref.json?.object?.sha;
-  if (ref.status !== 200 || typeof head !== "string") return { problem: bad("missing", `main HEAD를 읽지 못했다(HTTP ${ref.status})`, `앱 저장소 ukyi-app/${app}에 main이 있는지 본다`) };
-  const versions = ctx.gh.get(`orgs/ukyi-app/packages/container/${app}/versions?per_page=100`);
-  const hit = versions.status === 200 && Array.isArray(versions.json) ? versions.json.find((v: any) => Array.isArray(v?.metadata?.container?.tags) && v.metadata.container.tags.includes(`sha-${head}`)) : undefined;
+  const ref = gh(ctx, `repos/ukyi-app/${app}/git/ref/heads/main`, "앱 저장소 main", true);
+  const head = ref?.object?.sha;
+  if (ref === null) return { problem: bad("missing", "main이 없다", `앱 저장소 ukyi-app/${app}에 main을 만든다(템플릿)`) };
+  if (typeof head !== "string") throw new Error("앱 저장소 main SHA를 읽지 못했다");
+  // 패키지가 아직 없으면(첫 빌드 전) 404다.
+  const versions = gh(ctx, `orgs/ukyi-app/packages/container/${app}/versions?per_page=100`, "GHCR 패키지 버전", true) ?? [];
+  if (!Array.isArray(versions)) throw new Error("GHCR 패키지 버전: 목록이 아니다");
+  const hit = versions.find((v: any) => Array.isArray(v?.metadata?.container?.tags) && v.metadata.container.tags.includes(`sha-${head}`));
   if (!hit || typeof hit.name !== "string") {
-    const runs = ctx.gh.get(`repos/ukyi-app/${app}/actions/runs?branch=main&head_sha=${head}&per_page=5`);
-    const run = Array.isArray(runs.json?.workflow_runs) ? runs.json.workflow_runs[0] : undefined;
+    const runs = gh(ctx, `repos/ukyi-app/${app}/actions/runs?branch=main&head_sha=${head}&per_page=5`, "앱 저장소 빌드 기록");
+    if (!Array.isArray(runs?.workflow_runs)) throw new Error("앱 저장소 빌드 기록: 모양이 다르다");
+    const run = runs.workflow_runs[0];
     const how = !run ? "빌드 기록 없음" : run.status !== "completed" ? `빌드 ${run.status}` : `빌드 ${run.conclusion}`;
     return { problem: bad("missing", `HEAD ${head.slice(0, 7)}의 이미지가 없다(${how})`, run?.status === "completed" ? `앱 저장소 Actions에서 빌드 실패 원인을 고친다(gh run view -R ukyi-app/${app} ${run.id})` : next) };
   }
   const digest: string = hit.name;
-  const att = ctx.gh.get(`repos/ukyi-app/${app}/attestations/${digest}`);
-  if (att.status !== 200 || !attestationMatches(att.json, app, digest, head)) {
+  // attestation이 없으면 404다. 그 밖의 실패는 "맞지 않음"이 아니라 읽기 실패다.
+  const att = gh(ctx, `repos/ukyi-app/${app}/attestations/${digest}`, "build provenance", true);
+  if (att === null || !attestationMatches(att, app, digest, head)) {
     return { problem: bad("differs", `이미지 ${digest.slice(0, 19)}…의 build provenance가 이 저장소 main ${head.slice(0, 7)}와 맞지 않는다`, `앱 저장소 main의 빌드(app-build)가 attestation을 만들었는지 본다: gh attestation verify oci://ghcr.io/ukyi-app/${app}@${digest} -R ukyi-app/${app}`) };
   }
   return { image: { repository: `ghcr.io/ukyi-app/${app}`, digest, revision: head, hold: false } };
@@ -138,8 +151,9 @@ export default defineCommand({
           if (repo.status === 404) return bad("missing", "없음", `homelab app new ${app}`);
           if (repo.status !== 200) throw new Error(`앱 저장소 읽기: HTTP ${repo.status}`);
           if (repo.json?.visibility !== "public") return bad("differs", `${repo.json?.visibility ?? "알 수 없음"} (public만 받는다, D-29)`, `저장소를 public으로 바꾸거나 등록하지 않는다`);
-          const rs = c.gh.get(`repos/ukyi-app/${app}/rulesets`);
-          const active = rs.status === 200 && Array.isArray(rs.json) && rs.json.some((r: any) => r?.name === "app-main" && r?.enforcement === "active");
+          const rs = gh(c, `repos/ukyi-app/${app}/rulesets`, "앱 저장소 ruleset");
+          if (!Array.isArray(rs)) throw new Error("앱 저장소 ruleset: 목록이 아니다");
+          const active = rs.some((r: any) => r?.name === "app-main" && r?.enforcement === "active");
           return active ? same("public, app-main active (자동 배포 가능)") : same("public, app-main 없음", { warn: "app-main이 active가 아니라 배포 PR이 자동 병합되지 않는다(조건 9). homelab github apply로 건다" });
         },
       },

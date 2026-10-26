@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { attestationMatches, passwordStep } from "../../src/commands/app-add";
 import { appValues, dataValues, describeFile, imageText, parseImage } from "../../src/commands/app-add-values";
 import { argvFor as infArgv } from "../../src/core/infisical";
-import { FAKE_PROJECT, FAKE_SECRETS, applyWith, expectNoSecrets, expectPlanReadOnly, infisicalSet, runCli, testCtx, type Rule } from "../harness";
+import { FAKE_PROJECT, FAKE_SECRETS, applyWith, expectNoSecrets, expectPlanReadOnly, ghGet, infisicalSet, runCli, testCtx, type Rule } from "../harness";
 import { APP_HEAD, DIGEST, appRepo, attestation, chartTags, createFolder, folders, homelab, imageYaml, infisicalList, noPr, prCreate, prOpen } from "../fixtures/app-add-world/world";
 
+// 타임아웃 주입(스텁 5초 지연 > exec 상한 3초)이 든 시험은 3초를 넘는다. bun 기본 시험 제한(5초)에 걸리지 않게 늘린다.
+const SLOW = 20_000;
 const APP = "memo";
 const BRANCH = `cli/app-add-${APP}`;
 const P = { values: `apps/${APP}/values.yaml`, image: `apps/${APP}/image.yaml`, data: `data/${APP}/values.yaml` };
@@ -120,7 +122,7 @@ describe("app add", () => {
     expect(r.code).toBe(3);
     expect(r.calls.filter((c) => c.argv.join(" ") === infArgv.set(FAKE_PROJECT, pg).join(" ")).length).toBe(1);
     expect(r.json.notes.join(" ")).toContain("infisical-postgres: 시간 초과 뒤 다시 읽어");
-  });
+  }, SLOW);
 
   test("PR 쓰기 실패: tree 만들기가 실패하면 exit 1(비밀번호는 남고 재실행이 PR부터 잇는다)", async () => {
     const r = await runCli([...ARGS, "--apply", "--json"], newWorld({ tree: 500 }));
@@ -149,6 +151,19 @@ describe("app add", () => {
       expect(r.writes).toEqual([]);
       expect(r.json.steps.find((s: any) => s.id === id).result).toBe("failed");
     }
+  });
+
+  test("GitHub 조회 실패를 'app-main 없음'·'이미지 없음'·'provenance 불일치'로 읽지 않는다(#884 P2-5 같은 부류)", async () => {
+    const swap = (path: string, status: number) => newWorld().map((x) => (String(x.argv.at(-1)) === path ? ghGet(path, status, { message: "x" }) : x));
+    for (const path of [`repos/ukyi-app/${APP}/rulesets`, `orgs/ukyi-app/packages/container/${APP}/versions?per_page=100`, `repos/ukyi-app/${APP}/attestations/${DIGEST}`, `repos/ukyi-app/${APP}/git/ref/heads/main`]) {
+      const r = await runCli([...ARGS, "--apply", "--json"], swap(path, 503));
+      expect(r.code).toBe(1);
+      expect(r.writes).toEqual([]);
+      expect(JSON.stringify(r.json.error)).toContain("HTTP 503");
+    }
+    // 정상 404: 패키지가 아직 없으면 이미지 없음(빌드 대기).
+    const r = await runCli([...ARGS, "--json"], swap(`orgs/ukyi-app/packages/container/${APP}/versions?per_page=100`, 404));
+    expect(r.json.steps.find((s: any) => s.id === "image").detail).toContain("이미지가 없다");
   });
 
   test("이미 등록된 앱(image.yaml 있음)은 HEAD 이미지를 찾지 않는다", async () => {

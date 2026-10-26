@@ -79,10 +79,12 @@ export default defineCommand({
         target = { ...hit[0], hold: true };
         // 지워진 패키지 버전으로 되돌리면 파드가 이미지를 받지 못한다.
         const v = ctx.gh.get(`orgs/ukyi-app/packages/container/${app}/versions?per_page=100`);
-        if (v.status !== 200 || !Array.isArray(v.json) || !v.json.some((x: { name?: string }) => x?.name === target!.digest)) problem = { state: "missing", action: "none", detail: `GHCR에 ${target.digest.slice(0, 19)}…가 없다(지워졌거나 최근 100개 밖)`, next: "다른 revision을 고른다" };
+        // 조회 실패(403·5xx)를 "지워졌다"로 읽지 않는다(#884 리뷰 P2-5). 패키지 자체가 없으면 404다.
+        if (v.status !== 200 && v.status !== 404) throw new CliError(`GHCR 패키지 버전: HTTP ${v.status}`, "gh auth status로 로그인·권한(read:packages)을 확인한 뒤 다시 실행한다");
+        if (v.status === 200 && !Array.isArray(v.json)) throw new Error("GHCR 패키지 버전: 목록이 아니다");
+        if (v.status === 404 || !v.json.some((x: { name?: string }) => x?.name === target!.digest)) problem = { state: "missing", action: "none", detail: `GHCR에 ${target.digest.slice(0, 19)}…가 없다(지워졌거나 최근 100개 밖)`, next: "다른 revision을 고른다" };
       }
     }
-    if (current !== null && release) target = { ...current, hold: false };
 
     const steps: Step[] = [
       {
@@ -99,7 +101,8 @@ export default defineCommand({
         target: `배포 PR deploy/${app}`,
         async read(c) {
           const r = c.gh.get(`repos/ukyi-app/homelab/pulls?head=${encodeURIComponent(`ukyi-app:deploy/${app}`)}&state=open`);
-          const open = Array.isArray(r.json) ? r.json[0] : undefined;
+          if (r.status !== 200 || !Array.isArray(r.json)) throw new Error(`열린 배포 PR 찾기: HTTP ${r.status}`);
+          const open = r.json[0];
           if (release || !open) return same(open ? `PR #${open.number} 열림` : "열린 배포 PR 없음");
           return same(`PR #${open.number} 열림`, { warn: `배포 PR #${open.number}이 롤백보다 먼저 자동 병합될 수 있다. 닫는다: gh pr close ${open.number} -R ukyi-app/homelab` });
         },
@@ -112,7 +115,13 @@ export default defineCommand({
           ? `homelab rollback --release가 만든 PR이다(설계 C.4.9). hold를 풀어 다음 빌드부터 정상 배포 흐름으로 돌아간다.`
           : `homelab rollback이 만든 PR이다(설계 C.4.9). image.yaml을 이전 이미지로 되돌리고 hold: true로 새 배포 PR을 멈춘다. 데이터는 바뀌지 않는다. 풀기: homelab rollback ${app} --release`,
         files: [path],
-        edit: (cur) => ({ [path]: target === null || cur[path] === null ? cur[path] : imageText({ ...target, repository: `ghcr.io/ukyi-app/${app}` }) }),
+        // --release는 PR을 계산하는 그때의 main 이미지에서 hold만 푼다(#884 리뷰 P2-2). 시작 때 읽은 이미지를 쓰면
+        // 그사이 병합된 배포·롤백의 digest·revision을 되돌린다. --to는 사람이 고른 이미지라 고정한다.
+        edit: (cur) => {
+          if (cur[path] === null) return { [path]: null };
+          if (release) return { [path]: imageText({ ...parseImage(cur[path], app), hold: false }) };
+          return { [path]: target === null ? cur[path] : imageText({ ...target, repository: `ghcr.io/ukyi-app/${app}` }) };
+        },
         describe: (_p, before, after) => {
           const b = before ? parseImage(before, app) : null;
           const a = after ? parseImage(after, app) : null;

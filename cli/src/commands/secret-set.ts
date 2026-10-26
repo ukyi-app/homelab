@@ -38,8 +38,9 @@ export default defineCommand({
       async apply(w) {
         if (!w.infisical.folderExists(folder)) w.infisical.createFolder(folder);
         const value = w.readSecretInput(`${folder}/${key} 값: `);
-        w.infisical.setValue(folder, key, value);
+        // 쓰기 전에 기억한다. 서버에는 반영됐는데 응답이 시간 초과면 엔진이 다시 읽어 이 해시로 반영을 확인한다(#884 리뷰 P2-3).
         written = value.sha256Prefix(12);
+        w.infisical.setValue(folder, key, value);
       },
     };
 

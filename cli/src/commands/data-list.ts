@@ -50,7 +50,9 @@ export default defineCommand({
         id: "unmounted-pvc",
         target: "PVC 중 마운트하는 파드 없음",
         async read(c) {
-          const used = new Set(c.k8s.list("pod", null).flatMap((p: any) => (p?.spec?.volumes ?? []).filter((v: any) => v?.persistentVolumeClaim?.claimName).map((v: any) => `${p.metadata?.namespace}/${v.persistentVolumeClaim.claimName}`)));
+          // 끝난 파드(Succeeded·Failed)는 볼륨을 놓았다(restore.md 0.2와 같은 판정, #884 리뷰 P2-6). Terminating·Pending은 보수적으로 쓴다고 본다.
+          const live = c.k8s.list("pod", null).filter((p: any) => p?.status?.phase !== "Succeeded" && p?.status?.phase !== "Failed");
+          const used = new Set(live.flatMap((p: any) => (p?.spec?.volumes ?? []).filter((v: any) => v?.persistentVolumeClaim?.claimName).map((v: any) => `${p.metadata?.namespace}/${v.persistentVolumeClaim.claimName}`)));
           return same(listed(c.k8s.list("pvc", null).map(nameOf).filter((n) => !used.has(n)).sort()));
         },
       },

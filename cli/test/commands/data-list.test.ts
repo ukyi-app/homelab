@@ -44,6 +44,14 @@ describe("data list", () => {
     expect(r.json.status).toBe("same");
   });
 
+  test("끝난 파드(Succeeded·Failed)의 옛 PVC 참조는 마운트로 세지 않는다, Terminating은 센다(#884 P2-6)", async () => {
+    const pvcs = ["a", "b", "c"].map((name) => ({ metadata: { namespace: "app-memo", name } }));
+    const pod = (claim: string, extra: object) => ({ metadata: { namespace: "app-memo", ...("deletionTimestamp" in extra ? extra : {}) }, spec: { volumes: [{ persistentVolumeClaim: { claimName: claim } }] }, status: "phase" in extra ? extra : { phase: "Running" } });
+    const r = await runCli(["data", "list", "--json"], world({ apps: [], data: [], dbs: [], pvcs, pods: [pod("a", { phase: "Succeeded" }), pod("b", { phase: "Failed" }), pod("c", { deletionTimestamp: "2026-10-26T00:00:00Z" })] }));
+    expect(r.code).toBe(0);
+    expect(r.json.steps.find((s: any) => s.id === "unmounted-pvc").detail).toBe("2개: app-memo/a, app-memo/b");
+  });
+
   test("없으면 없음, 읽기 실패는 exit 1", async () => {
     const ok = await runCli(["data", "list"], world({ apps: ["a"], data: ["a"], dbs: ["a"] }));
     expect(ok.code).toBe(0);

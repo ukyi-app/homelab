@@ -22,6 +22,14 @@ function digestOf(text: string | null): string | null {
   return text === null ? null : (/^digest: (sha256:[0-9a-f]{64})$/m.exec(text)?.[1] ?? null);
 }
 
+// GitHub 조회 실패(403·429·5xx)를 "기록 없음"·"PR 없음"으로 읽지 않는다(#884 리뷰 P2-5). 실패는 그 줄의 읽기 실패다.
+function ghList(c: ReadCtx, path: string, what: string, field?: string): any[] {
+  const r = c.gh.get(path);
+  const list = field ? r.json?.[field] : r.json;
+  if (r.status !== 200 || !Array.isArray(list)) throw new Error(`${what}: HTTP ${r.status}${r.status === 200 ? "(모양이 다르다)" : ""}`);
+  return list;
+}
+
 const ready = (o: any) => (o?.status?.conditions ?? []).some((c: any) => c?.type === "Ready" && c?.status === "True");
 const wait = (app: string) => `잠시 뒤 다시: homelab status ${app}`;
 
@@ -68,9 +76,8 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
       id: "build",
       target: `빌드 ukyi-app/${app}`,
       async read(c) {
-        const r = c.gh.get(`repos/ukyi-app/${app}/actions/runs?branch=main&per_page=1`);
-        const run = Array.isArray(r.json?.workflow_runs) ? r.json.workflow_runs[0] : undefined;
-        if (r.status !== 200 || !run) return ok("기록 없음");
+        const run = ghList(c, `repos/ukyi-app/${app}/actions/runs?branch=main&per_page=1`, "앱 저장소 빌드 기록", "workflow_runs")[0];
+        if (!run) return ok("기록 없음");
         if (run.status !== "completed") return ok(`${run.status} run #${run.run_number}`);
         return run.conclusion === "success" ? ok(`성공 run #${run.run_number}`) : bad(`${run.conclusion} run #${run.run_number}`, `gh run view -R ukyi-app/${app} ${run.id} --log-failed`);
       },
@@ -79,8 +86,7 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
       id: "deploy-pr",
       target: "배포 PR",
       async read(c) {
-        const r = c.gh.get(`repos/ukyi-app/homelab/pulls?head=${encodeURIComponent(`ukyi-app:deploy/${app}`)}&state=open`);
-        const open = Array.isArray(r.json) ? r.json[0] : undefined;
+        const open = ghList(c, `repos/ukyi-app/homelab/pulls?head=${encodeURIComponent(`ukyi-app:deploy/${app}`)}&state=open`, "열린 배포 PR")[0];
         return ok(open ? `#${open.number} 열림(자동 병합 대기)` : "없음");
       },
     },
@@ -108,7 +114,9 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
     id: "secrets",
     target: "시크릿(ExternalSecret)",
     async read(c) {
-      const list = [...c.k8s.list("externalsecret", ns), ...(usesPg ? [c.k8s.get("externalsecret", "database", `pg-role-${app}`)].filter(Boolean) : [])];
+      // DB 역할 ExternalSecret이 아직 없으면(데이터 Application 전) 빼지 않고 준비 안 됨으로 센다.
+      const role = usesPg ? (c.k8s.get("externalsecret", "database", `pg-role-${app}`) ?? { metadata: { name: `pg-role-${app}`, namespace: "database" } }) : null;
+      const list = [...c.k8s.list("externalsecret", ns), ...(role ? [role] : [])];
       const notReady = list.filter((e: any) => !ready(e));
       if (notReady.length === 0) return ok(`${list.length}/${list.length} Ready`);
       // 시나리오 6: 빠진 키를 이름으로 보인다(값은 보지 않는다).
@@ -151,7 +159,8 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
         if ((dep.status?.availableReplicas ?? 0) < 1) return bad(`${kind} 서버 준비 안 됨`, wait(app));
         if (!persistent) return ok("캐시 준비됨");
         const cron = c.k8s.get("cronjob", ns, `${app}-valkey-backup`);
-        const last = cron?.status?.lastSuccessfulTime;
+        if (!cron) return bad("영속 준비됨, 백업 CronJob 없음", `kubectl -n argocd get application ${app}-data -o yaml로 원인을 본다`, "missing");
+        const last = cron.status?.lastSuccessfulTime;
         return ok(`영속 준비됨, 마지막 백업 ${last ?? "없음(첫 백업은 03:30 KST)"}`);
       },
     });
@@ -170,11 +179,19 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
   return steps;
 }
 
+// 전체 보기는 apps/와 data/를 함께 연다. 앱 없이 데이터만 남은 것(예 data/homelab-probe2)과 <app>-data 장애를
+// 놓치지 않는다(#884 리뷰 P2-4). 이름 순으로 <app>, <app>-data.
+function dirs(ctx: ReadCtx, main: string, dir: "apps" | "data"): string[] {
+  const r = ctx.gh.get(`repos/ukyi-app/homelab/contents/${dir}?ref=${main}`);
+  if (r.status === 404) return [];
+  if (r.status !== 200 || !Array.isArray(r.json)) throw new Error(`${dir}/ 목록: HTTP ${r.status}`);
+  return r.json.filter((e: any) => e?.type === "dir").map((e: any) => String(e.name));
+}
+
 function overviewSteps(ctx: ReadCtx, main: string): Step[] {
-  const r = ctx.gh.get(`repos/ukyi-app/homelab/contents/apps?ref=${main}`);
-  const apps = r.status === 200 && Array.isArray(r.json) ? r.json.filter((e: any) => e?.type === "dir").map((e: any) => String(e.name)).sort() : [];
-  if (r.status !== 200 && r.status !== 404) throw new Error(`apps/ 목록: HTTP ${r.status}`);
-  return apps.map((a) => argoRow(a, a));
+  const apps = dirs(ctx, main, "apps");
+  const data = dirs(ctx, main, "data");
+  return [...new Set([...apps, ...data])].sort().flatMap((a) => [...(apps.includes(a) ? [argoRow(a, a)] : []), ...(data.includes(a) ? [argoRow(`${a}-data`, a)] : [])]);
 }
 
 function platformSteps(): Step[] {
