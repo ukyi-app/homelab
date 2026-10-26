@@ -603,8 +603,8 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     expect(pre.status).toBe("failed");
     expect(e.w.records.get(`${NS}/restore-vk`)!.data["empty.accepted"]).toBeUndefined();
     // --finish·--abort와는 함께 쓰지 않는다
-    for (const f of [{ finish: true as const }, { abort: true as const }]) {
-      await expect(runIn(e.w, cmd, "apply", { app: APP }, { ...f, "accept-empty": true })).rejects.toThrow("--accept-empty");
+    for (const f of ["finish", "abort"]) {
+      await expect(runIn(e.w, cmd, "apply", { app: APP }, { [f]: true, "accept-empty": true })).rejects.toThrow("--accept-empty");
     }
   });
 
