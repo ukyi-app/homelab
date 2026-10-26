@@ -5,14 +5,14 @@ import type { Observation, Step } from "../../src/core/command";
 import { ExecTimeout } from "../../src/core/exec";
 import { APP_REPO_CALLS, argvFor as ghArgv, parsePlanJson } from "../../src/core/github";
 import { argvFor as infArgv } from "../../src/core/infisical";
-import { parseRecord } from "../../src/core/kubectl";
+import { esSyncVersion, goStringMap, parseRecord } from "../../src/core/kubectl";
 import { newRunId } from "../../src/core/names";
 import { render } from "../../src/core/output";
 import { PG_PASSWORD_CHECK, VALKEY_CLI } from "../../src/core/podops";
 import { prStep } from "../../src/core/pr";
 import { Secret } from "../../src/core/secret";
 import { flow, setTopLevel } from "../../src/core/values";
-import { FAKE_PROJECT, FAKE_SECRETS, FAKE_SHA, REST, applyWith, expectNoSecrets, expectPlanReadOnly, ghGet, ghResponse, ghSend, kubectlRule, rule, sha256, testCtx } from "../harness";
+import { FAKE_PROJECT, FAKE_SECRETS, FAKE_SHA, REST, applyWith, expectNoSecrets, expectPlanReadOnly, ghGet, ghResponse, ghSend, infisicalList, kubectlRule, rule, sha256, testCtx } from "../harness";
 
 const b64 = (s: string) => Buffer.from(s).toString("base64");
 const same = (detail = "됨"): Observation => ({ state: "same", action: "none", detail });
@@ -224,7 +224,7 @@ describe("kubectl 읽기 확장", () => {
     const doc = (data: Record<string, string>, label = "20261026000000abcdef") => JSON.stringify({ metadata: { resourceVersion: "5", labels: { "homelab.ukyi.app/restore": label } }, data });
     const run = "20261026000000abcdef";
     const { ctx } = testCtx("read", [kubectlRule(["-n", "app-smoke", "get", "configmaps", "restore-pg", "-o", "json"], [{ stdout: doc({ run, to: "2026-10-26 00:00:00+00", "in.ext": "a\nb" }) }, { stdout: doc({ run }, "other") }, { stdout: doc({ run, to: "x\ny" }) }])]);
-    expect(ctx.k8s.restoreRecord("app-smoke", "restore-pg")).toEqual({ run, data: { run, to: "2026-10-26 00:00:00+00", "in.ext": "a\nb" }, resourceVersion: "5" });
+    expect(ctx.k8s.restoreRecord("app-smoke", "restore-pg")).toEqual({ run, data: { run, to: "2026-10-26 00:00:00+00", "in.ext": "a\nb" }, resourceVersion: "5", uid: "" });
     expect(() => ctx.k8s.restoreRecord("app-smoke", "restore-pg")).toThrow("라벨");
     expect(() => ctx.k8s.restoreRecord("app-smoke", "restore-pg")).toThrow("제어 문자");
     expect(() => ctx.k8s.restoreRecord("app-smoke", "smoke-config" as never)).toThrow("restore-pg");
@@ -233,16 +233,28 @@ describe("kubectl 읽기 확장", () => {
 });
 
 describe("kubectl 쓰기 확장", () => {
-  test("forceSync waitSec: annotate 전과 다른 syncedResourceVersion + Ready여야 끝. 같은 초의 이전 동기화는 인정하지 않는다(Connector 4372999902)", async () => {
-    const now = new Date().toISOString();
-    const es = (srv: string, ready = "True") => JSON.stringify({ status: { refreshTime: now, syncedResourceVersion: srv, conditions: [{ type: "Ready", status: ready }] } });
+  test("ESO 버전 계산은 ESO v2.13.0과 같다(시험 벡터: ObjectHash, Go map 꼴)", () => {
+    const sha3 = (t: string) => new Bun.CryptoHasher("sha3-224").update(t).digest("hex");
+    // runtime/esutils/utils_test.go TestObjectHash의 값
+    expect(sha3("<nil>")).toBe("c461202a18e99215f121936fb2452e03843828e448a00a53f285a6fc");
+    expect(sha3("hello there")).toBe("f78681ec611ebaeea0689bff6c7812a83ff98a7faba986d9af76c999");
+    const bytes = (x: string) => `[${[...Buffer.from(x)].join(" ")}]`;
+    expect(sha3(`map[bar:${bytes("value2")} foo:${bytes("value1")}]`)).toBe("1bed8bcbcb4547ffe19a19cd47d9078e84aa6598266d86b99f992d64");
+    expect(goStringMap({ b: "2", a: "1" })).toBe("map[a:1 b:2]");
+    expect(goStringMap(undefined)).toBe("map[]");
+    expect(esSyncVersion({ generation: 3, annotations: { "force-sync": "1" } })).toBe(`3-${sha3("{annotations:map[force-sync:1] labels:map[]}")}`);
+  });
+
+  test("forceSync waitSec: 이번 annotation이 든 메타데이터의 버전까지 기다린다. 앞선 요청의 완료는 인정하지 않는다(#880 2라운드)", async () => {
+    // annotate 뒤 메타데이터에는 이번 값 C가 있다. 첫 읽기의 status는 앞선 요청 B의 완료(이전 값과 다르고 Ready) → 기다려야 한다.
+    const meta = (v: string) => ({ generation: 1, annotations: { "force-sync": v, "argocd.argoproj.io/tracking-id": "smoke:x" }, labels: { app: "smoke" } });
+    const es = (now: string, synced: string, ready = "True") => JSON.stringify({ metadata: meta(now), status: { syncedResourceVersion: esSyncVersion(meta(synced)), conditions: [{ type: "Ready", status: ready }] } });
     const annotate = kubectlRule(["-n", "app-smoke", "annotate", "externalsecrets.external-secrets.io", "smoke-db", /force-sync=[0-9]+-[0-9a-f]{4}/, "--overwrite"]);
     const get = (resps: { stdout: string }[]) => kubectlRule(["-n", "app-smoke", "get", "externalsecrets.external-secrets.io", "smoke-db", "-o", "json"], resps);
-    // annotate 전 1-aaa, 그 뒤 첫 읽기도 1-aaa(같은 초 refreshTime, Ready) → 기다림, 다음 읽기 1-bbb → 끝
-    const ok = testCtx("apply", [annotate, get([{ stdout: es("1-aaa") }, { stdout: es("1-aaa") }, { stdout: es("1-bbb", "False") }, { stdout: es("1-bbb") }])]);
+    const ok = testCtx("apply", [annotate, get([{ stdout: es("C", "B") }, { stdout: es("C", "C", "False") }, { stdout: es("C", "C") }])]);
     await applyWith(ok.ctx, (w) => w.k8s.forceSync("app-smoke", "smoke-db", { waitSec: 5 }));
-    expect(ok.calls().calls.filter((c) => c.argv.includes("get")).length).toBe(4);
-    const stuck = testCtx("apply", [annotate, get([{ stdout: es("1-aaa") }])]);
+    expect(ok.calls().calls.filter((c) => c.argv.includes("get")).length).toBe(3);
+    const stuck = testCtx("apply", [annotate, get([{ stdout: es("C", "B") }])]);
     await expect(applyWith(stuck.ctx, (w) => w.k8s.forceSync("app-smoke", "smoke-db", { waitSec: 1 }))).rejects.toBeInstanceOf(ExecTimeout);
     // 값은 호출마다 다르다(같은 값이면 annotation 해시가 안 바뀌어 ESO가 동기화하지 않는다).
     const values = [ok, stuck].flatMap((t) => t.calls().calls.filter((c) => c.argv.includes("annotate")).map((c) => c.argv[6]));
@@ -293,7 +305,8 @@ describe("kubectl 쓰기 확장", () => {
     const job = (run: string, uid = "11111111-aaaa") => JSON.stringify({ metadata: { uid, labels: { "homelab.ukyi.app/restore": run } } });
     const dry = JSON.stringify({ kind: "Job", metadata: { name: "backup-run1-ab12" }, spec: {} });
     const rules = [
-      kubectlRule(["-n", "app-smoke", "delete", "configmaps", "-l", `homelab.ukyi.app/restore=${RUN}`, "--field-selector=metadata.name=restore-vk", "--wait=true"]),
+      kubectlRule(["-n", "app-smoke", "get", "configmaps", "restore-vk", "-o", "json"], { stdout: JSON.stringify({ metadata: { uid: "cccccccc-0000", resourceVersion: "5", labels: { "homelab.ukyi.app/restore": RUN } }, data: { run: RUN } }) }),
+      { ...kubectlRule(["delete", "--raw", "/api/v1/namespaces/app-smoke/configmaps/restore-vk", "-f", "-"], { stdout: "{}" }), captureStdin: true },
       kubectlRule(["-n", "database", "get", "jobs.batch", "restore-x-db", "-o", "json"], [{ stdout: job(RUN) }, { stdout: "", stderr: 'Error from server (NotFound): jobs.batch "restore-x-db" not found', code: 1 }, { stdout: job("other") }]),
       { ...kubectlRule(["delete", "--raw", "/apis/batch/v1/namespaces/database/jobs/restore-x-db", "-f", "-"], { stdout: '{"kind":"Status","status":"Success"}' }), captureStdin: true },
       kubectlRule(["-n", "app-smoke", "create", "job", "backup-run1-ab12", "--from=cronjob/smoke-valkey-backup", "--dry-run=client", "-o", "json"], { stdout: dry }),
@@ -307,10 +320,25 @@ describe("kubectl 쓰기 확장", () => {
     });
     expect(JSON.parse(calls().calls.at(-1)!.stdin!).metadata.labels["homelab.ukyi.app/restore"]).toBe("run1");
     expect(calls().unmatched).toEqual([]);
-    expect(JSON.parse(calls().calls.find((c) => c.argv.includes("--raw"))!.stdin!)).toEqual({ kind: "DeleteOptions", apiVersion: "v1", propagationPolicy: "Foreground", preconditions: { uid: "11111111-aaaa" } });
+    const jobDel = (c: { argv: string[] }) => c.argv.includes("/apis/batch/v1/namespaces/database/jobs/restore-x-db");
+    expect(JSON.parse(calls().calls.find(jobDel)!.stdin!)).toEqual({ kind: "DeleteOptions", apiVersion: "v1", propagationPolicy: "Foreground", preconditions: { uid: "11111111-aaaa" } });
+    expect(JSON.parse(calls().calls.find((c) => c.argv.includes("/api/v1/namespaces/app-smoke/configmaps/restore-vk"))!.stdin!).preconditions).toEqual({ uid: "cccccccc-0000" });
     await expect(applyWith(ctx, (w) => w.k8s.deleteRestoreObject("database", "job", "restore-x-db", RUN))).rejects.toThrow("이 실행");
-    expect(calls().calls.filter((c) => c.argv.includes("--raw")).length).toBe(1);
+    expect(calls().calls.filter(jobDel).length).toBe(1);
     await expect(applyWith(ctx, (w) => w.k8s.createJobFromCronJob("app-smoke", "x", "not-backup", "run1"))).rejects.toThrow("형식");
+  });
+
+  test("복원 기록 삭제: 확인한 uid만 지운다. 그사이 다른 실행의 기록으로 바뀌면 지우지 않고 실패, 남의 기록이면 아무것도 안 한다(#880 2라운드)", async () => {
+    const rec = (run: string, uid: string) => JSON.stringify({ metadata: { uid, resourceVersion: "5", labels: { "homelab.ukyi.app/restore": run } }, data: { run } });
+    const get = (resps: { stdout: string }[]) => kubectlRule(["-n", "app-smoke", "get", "configmaps", "restore-vk", "-o", "json"], resps);
+    const del = (resp: object) => ({ ...kubectlRule(["delete", "--raw", "/api/v1/namespaces/app-smoke/configmaps/restore-vk", "-f", "-"], resp), captureStdin: true });
+    const conflict = { stdout: "", code: 1, stderr: 'Error from server (Conflict): Operation cannot be fulfilled on configmaps "restore-vk": Precondition failed: UID in precondition: aaaaaaaa-1111, UID in object meta: bbbbbbbb-2222' };
+    const raced = testCtx("apply", [get([{ stdout: rec("run1", "aaaaaaaa-1111") }]), del(conflict)]);
+    await expect(applyWith(raced.ctx, (w) => w.k8s.restoreRecordDelete("app-smoke", "restore-vk", "run1"))).rejects.toThrow("지우지 않았다");
+    expect(JSON.parse(raced.calls().calls.find((c) => c.argv.includes("--raw"))!.stdin!)).toEqual({ kind: "DeleteOptions", apiVersion: "v1", preconditions: { uid: "aaaaaaaa-1111" } });
+    const other = testCtx("apply", [get([{ stdout: rec("run2", "bbbbbbbb-2222") }]), del({})]);
+    await applyWith(other.ctx, (w) => w.k8s.restoreRecordDelete("app-smoke", "restore-vk", "run1"));
+    expect(other.calls().calls.filter((c) => c.argv.includes("--raw"))).toEqual([]);
   });
 
   test("확인 뒤 같은 이름의 다른 실행 객체로 바뀌면 uid precondition이 막고, 지우지 않았다고 실패한다(#880 리뷰 P2)", async () => {
@@ -418,6 +446,17 @@ describe("Infisical 폴더·web·확인", () => {
     // 모양이 다르면(옛 가정 {name}) 던진다.
     const odd = testCtx("plan", [rule(infArgv.folders(FAKE_PROJECT, "/apps"), { stdout: JSON.stringify([{ name: "smoke" }]) })]);
     expect(() => odd.ctx.infisical.folderExists("/apps/smoke")).toThrow("모양이 다르다");
+  });
+
+  test("빈 시크릿 폴더(0.44.2 실제 출력 null): has=false, listKeys=[], getValue=null, valueHash=null(#880 2라운드)", () => {
+    const { ctx, calls } = testCtx("plan", [rule(infArgv.list(FAKE_PROJECT, "/apps/smoke"), { stdout: "null" })]);
+    expect(ctx.infisical.has("/apps/smoke", "PASSWORD")).toBe(false);
+    expect(ctx.infisical.listKeys("/apps/smoke")).toEqual([]);
+    expect(ctx.infisical.getValue("/apps/smoke", "PASSWORD")).toBeNull();
+    expect(ctx.infisical.valueHash("/apps/smoke", "PASSWORD")).toBeNull();
+    expectPlanReadOnly(calls());
+    // 시험 도우미의 빈 목록도 실제처럼 null이다.
+    expect(infisicalList("/apps/smoke", {}).responses[0].stdout).toBe("null");
   });
 
   test("web.publicStatus: 정해진 curl 꼴, host는 <이름>.ukyi.app만", () => {
