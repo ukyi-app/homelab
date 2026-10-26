@@ -22,8 +22,6 @@ const SIZE = /^[0-9]+(Mi|Gi|Ti)$/;
 const PLUGIN = "barman-cloud.cloudnative-pg.io";
 // 오프셋 필수(로컬 시각의 모호함을 받지 않는다). RFC 3339 또는 런북 꼴, 소수 초 없음.
 export const TO = /[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}(:?[0-9]{2})?)/;
-// archive_timeout(CNPG 기본 5분)보다 최근이면 그 WAL이 아직 R2에 없을 수 있다(T11은 pg_switch_wal로 밀었다).
-const ARCHIVE_LAG_MS = 5 * 60_000;
 const KEEP = undefined as unknown as string | null;
 
 const same = (detail: string, extra: Partial<Observation> = {}): Observation => ({ state: "same", action: "none", detail, ...extra });
@@ -99,7 +97,11 @@ export function normalizeTo(s: string): { t1: string; ms: number } | null {
   const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})[T ]([0-9]{2}):([0-9]{2}):([0-9]{2})(Z|([+-])([0-9]{2}):?([0-9]{2})?)$/.exec(s);
   if (!m) return null;
   const [y, mo, d, h, mi, se] = m.slice(1, 7).map(Number);
-  const off = m[7] === "Z" ? 0 : (m[8] === "-" ? -1 : 1) * (Number(m[9]) * 60 + Number(m[10] ?? "0"));
+  const offH = Number(m[9] ?? "0");
+  const offM = Number(m[10] ?? "0");
+  // 오프셋의 시·분도 범위를 본다(+09:60은 없는 시각이다. 받으면 다른 유효한 시각으로 바뀐다, #886 r1 P2-5).
+  if (m[7] !== "Z" && (offH > 14 || offM > 59)) return null;
+  const off = m[7] === "Z" ? 0 : (m[8] === "-" ? -1 : 1) * (offH * 60 + offM);
   if (mo < 1 || mo > 12 || d < 1 || h > 23 || mi > 59 || se > 59 || Math.abs(off) > 14 * 60) return null;
   const local = Date.UTC(y, mo - 1, d, h, mi, se);
   const back = new Date(local);
@@ -188,7 +190,67 @@ function ensureHelper(w: WriteCtx, n: Names, run: string): void {
   }
 }
 
-function stepOf(n: Names, id: string, target: string, readyDetail: string, todo: string, apply: (w: WriteCtx, r: RestoreRecord) => Promise<void>, alive?: (ctx: ReadCtx, r: RestoreRecord) => boolean): Step {
+// 같은 실행을 두 프로세스가 함께 진행하지 않게 하는 단계별 lease(#886 r1 P1-1). 기록 ConfigMap은 실행 id만 test하므로 같은 RUN의
+// 두 호출을 가르지 못한다. 앱 ns에 고정 이름 Job restore-<run>-lease를 만들어(API 서버의 이름 유일성이 원자적 잠금) 쥐고 단계를
+// 실행한 뒤 지운다. suspend: true라 파드는 생기지 않는다. 쥔 뒤 그 단계의 표식을 다시 본다: 앞 프로세스가 그사이 끝냈으면
+// 다시 하지 않는다(읽기와 lease 사이에 끝낸 경우). 프로세스가 비정상 종료하면 lease가 남아 다음 실행이 멈춘다(안전한 쪽).
+const leaseName = (run: string) => `restore-${run}-lease`;
+
+function leaseJob(n: Names, r: RestoreRecord, step: string): Record<string, unknown> {
+  return {
+    apiVersion: "batch/v1",
+    kind: "Job",
+    metadata: { name: leaseName(r.run), namespace: n.ns, labels: { [LABEL]: r.run }, annotations: { "homelab.ukyi.app/lease": `db restore ${step}` } },
+    spec: {
+      suspend: true,
+      backoffLimit: 0,
+      template: {
+        metadata: { labels: { [LABEL]: r.run } },
+        spec: {
+          restartPolicy: "Never",
+          automountServiceAccountToken: false,
+          securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: "RuntimeDefault" } },
+          containers: [{ name: "lease", image: fixed(r).img, command: ["true"], resources: { requests: { cpu: "1m", memory: "1Mi" } }, securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } } }],
+        },
+      },
+    },
+  };
+}
+
+async function withLease(w: WriteCtx, n: Names, step: string, body: (r: RestoreRecord) => Promise<void>, isDone: (r: RestoreRecord) => boolean = (r) => ok(r, step)): Promise<void> {
+  const r0 = mine(w, n);
+  try {
+    w.k8s.createRestoreObject(n.ns, leaseJob(n, r0, step));
+  } catch (e) {
+    if (/AlreadyExists|already exists/.test((e as Error).message)) throw new Error(`다른 호출이 이 복원(실행 ${r0.run})을 진행 중이다(Job ${leaseName(r0.run)}). 그 호출이 없는데 남았으면 kubectl -n ${n.ns} delete job ${leaseName(r0.run)} 뒤 다시`);
+    throw e;
+  }
+  let failure: unknown;
+  try {
+    const r = mine(w, n);
+    if (isDone(r)) return;
+    await body(r);
+  } catch (e) {
+    failure = e;
+    throw e;
+  } finally {
+    try {
+      w.k8s.deleteRestoreObject(n.ns, "job", leaseName(r0.run), r0.run);
+    } catch (e) {
+      if (failure === undefined) throw e;
+    }
+  }
+}
+
+// 캐시 Valkey 비우기(5단계 앞). 파드를 지우는 대신 Deployment 업데이트(restore.md 1절 5의 겹침 함정과 같은 이유로 rollout만 쓴다).
+function cacheFlush(w: WriteCtx, n: Names, r: RestoreRecord): void {
+  if (!ok(r, "verify")) throw new Error("멈춤: 확인(4-6)이 끝나지 않았다");
+  w.k8s.rolloutRestart(n.ns, `${n.app}-valkey`);
+  if (!w.k8s.rolloutStatus(n.ns, `${n.app}-valkey`, 300)) throw new Error("캐시 Valkey rollout이 끝나지 않았다");
+  w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "ok.cacheflush": "1" });
+}
+
+function stepOf(n: Names, id: string, target: string, readyDetail: string, todo: string, apply: (w: WriteCtx, r: RestoreRecord) => Promise<void>, alive?: (ctx: ReadCtx | WriteCtx, r: RestoreRecord) => boolean): Step {
   return {
     id,
     target,
@@ -199,10 +261,18 @@ function stepOf(n: Names, id: string, target: string, readyDetail: string, todo:
       return { state: "missing", action: "update", detail: todo };
     },
     async apply(w) {
-      const r = begin(w, n, id);
-      need(r, id);
-      await apply(w, r);
-      done(w, n, id);
+      await withLease(
+        w,
+        n,
+        id,
+        async () => {
+          const r = begin(w, n, id);
+          need(r, id);
+          await apply(w, r);
+          done(w, n, id);
+        },
+        (r) => ok(r, id) && (!alive || alive(w, r)),
+      );
     },
   };
 }
@@ -233,15 +303,20 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         const srv = srvOf(pg);
         if (!srv) return { state: "differs", action: "none", detail: "Cluster pg의 serverName을 읽지 못했다", next: "kubectl -n database get cluster pg -o yaml" };
         const bad = (detail: string, next = "--to를 고친다"): Observation => ({ state: "differs", action: "none", detail, next });
-        const lastWal = Date.parse(pg?.status?.lastArchivedWALTime ?? "");
-        if (to.ms > Date.now() - ARCHIVE_LAG_MS && !(Number.isFinite(lastWal) && lastWal >= to.ms)) return bad("5분보다 최근이라 WAL이 아직 아카이브되지 않았을 수 있다");
         if (!hasTrue(pg, "ContinuousArchiving")) return bad("Cluster pg의 WAL 아카이브(ContinuousArchiving)가 True가 아니다", "kubectl -n database get cluster pg");
-        const base = ctx.k8s.list("backup", "database").some((b) => b?.spec?.cluster?.name === "pg" && b?.status?.phase === "completed" && Date.parse(b?.status?.stoppedAt ?? "") <= to.ms);
-        if (!base) return bad(`${to.t1} 앞에 끝난 completed base backup이 없다`);
         const first = ctx.k8s.get("objectstore", "database", "r2")?.status?.serverRecoveryWindow?.[srv]?.firstRecoverabilityPoint;
-        if (typeof first === "string" && Date.parse(first) > to.ms) return bad(`복구 가능한 가장 이른 시각(${first})보다 앞이다`);
-        // 여기를 넘겨 틀려도 2단계 임시 Cluster가 Ready가 되지 않아 DB는 지우지 않는다(런북과 같은 최종 안전).
-        return same(`${to.t1}: base backup 있음, WAL 아카이브 중`, typeof first === "string" ? {} : { warn: "ObjectStore에 복구 가능 범위가 없어 가장 이른 시각은 확인하지 않았다" });
+        // 복구 범위를 확인할 수 없으면 멈춘다(경고로 넘기지 않는다, #886 r1 P1-3).
+        if (typeof first !== "string" || !Number.isFinite(Date.parse(first))) return bad(`ObjectStore r2에 ${srv}의 복구 가능 범위(firstRecoverabilityPoint)가 없다`, "kubectl -n database get objectstore r2 -o yaml");
+        if (Date.parse(first) > to.ms) return bad(`복구 가능한 가장 이른 시각(${first})보다 앞이다`);
+        const ends = ctx.k8s.list("backup", "database").filter((b) => b?.spec?.cluster?.name === "pg" && b?.status?.phase === "completed").map((b) => Date.parse(b?.status?.stoppedAt ?? "")).filter(Number.isFinite);
+        if (!ends.some((t) => t <= to.ms)) return bad(`${to.t1} 앞에 끝난 completed base backup이 없다`);
+        // WAL이 T1까지 있다는 근거: T1 뒤에 끝난 completed base backup. pg_backup_stop은 기본으로 끝 WAL이 아카이브될 때까지
+        // 기다리므로(wait_for_archive) 그 백업이 끝났으면 그 시각까지의 WAL이 R2에 있다. CNPG 1.30.1 Cluster에는 마지막 아카이브
+        // 시각 필드가 없고(lastArchivedWALTime은 없다), pg_stat_archiver를 읽는 어댑터도 아직 없다(REPORT-ops 14절). 그래서
+        // 마지막 base backup 뒤의 시각은 확인할 수 없어 멈춘다. 그때는 온디맨드 base backup을 하나 만든 뒤 다시 한다.
+        // (경과 시간 기준 "지금 − 5분"은 아카이브가 밀리면 근거가 되지 않아 쓰지 않는다, #886 r1 P1-3.)
+        if (!ends.some((t) => t >= to.ms)) return bad(`${to.t1} 뒤에 끝난 completed base backup이 없어 WAL이 그 시각까지 있는지 확인할 수 없다`, "온디맨드 base backup(restore.md 3절 4단계의 Backup)을 만들고 completed가 된 뒤 다시 실행한다");
+        return same(`${to.t1}: 앞뒤로 completed base backup, 복구 가능 범위 안`);
       },
     },
     {
@@ -334,12 +409,20 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         return stopped(ctx, n) ? { state: "differs", action: "update", detail: "replicas 0, 앱 파드 없음 → 기록" } : same("main에 suspended", { hold: "앱 멈춤 반영 대기(Argo CD)" });
       },
       async apply(w) {
-        begin(w, n, "suspended");
-        if (!stopped(w, n)) throw new Error("앱이 멈춰 있지 않다");
-        done(w, n, "suspended");
+        await withLease(w, n, "suspended", async () => {
+          begin(w, n, "suspended");
+          if (!stopped(w, n)) throw new Error("앱이 멈춰 있지 않다");
+          done(w, n, "suspended");
+        });
       },
     },
-    stepOf(n, "db", "DB 다시 만들기(4-3)", "지우고 다시 만듦, 확장 만듦", "앞 확인이 모두 끝나고 되돌림 사본이 R2에 있으면 지금 DB를 지우고 다시 만든다", async (w, r) => {
+    stepOf(
+      n,
+      "db",
+      "DB 다시 만들기(4-3)",
+      "지우고 다시 만듦, 확장 만듦",
+      "앞 확인이 모두 끝나고 되돌림 사본이 R2에 있으면 지금 DB를 지우고 다시 만든다",
+      async (w, r) => {
       // core는 잠금·앱 멈춤·입력·원본·덤프 읽기를 다시 본다. 되돌림 사본이 지금도 있는지는 여기서 본다(DROP 뒤 되돌릴 길).
       // 앱 멈춤은 표식이 아니라 지금 클러스터로 다시 본다(표식 뒤 다른 PR로 다시 떴을 수 있다. core도 한 번 더 본다).
       if (!stopped(w, n)) throw new Error("멈춤: 앱이 멈춰 있지 않다. DB를 지우지 않는다");
@@ -348,8 +431,16 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
       if (!w.pgRestore.inputsOk(n.app, r.run)) throw new Error("멈춤: 4-2 입력이 바뀌었다. 4-2를 다시 돈다");
       await w.pgRestore.recreateDatabase(n.app, r.run, fixed(r));
       w.pgRestore.createExtensions(n.app, r.run);
-    }),
+      w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "try.main": null });
+    },
+    // 본 복원(4-4)을 한 번 시작했는데 끝 표식이 없으면 DB가 일부만 복원됐을 수 있다(pg_restore는 문장마다 커밋한다). 그때는
+    // 표식이 있어도 이 단계부터 다시 한다: 빈 DB로 다시 만들고 본 복원을 처음부터(#886 r1 P2-4). 복원은 됐는데 표식만 못 쓴
+    // 경우도 같은 길로 간다(다시 하면 같은 결과다).
+    (_ctx, r) => ok(r, "main") || r.data["try.main"] !== "1",
+    ),
     stepOf(n, "main", "본 복원(4-4)", "앱 역할로 넣음", "임시 클러스터 덤프 → 앱 역할 pg_restore(--no-owner --no-privileges)", async (w, r) => {
+      // 시작 표시를 먼저 남긴다. 실패하면 다음 실행이 4-3(빈 DB로 다시 만들기)부터 한다.
+      w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "try.main": "1" });
       await w.pgRestore.restoreMain(n.app, r.run);
     }),
     stepOf(n, "acl", "ACL 복원·대조(4-5)", "원본과 같음", "ACL을 넣고 임시 클러스터와 대조", async (w, r) => {
@@ -373,12 +464,7 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         return { state: "missing", action: "update", detail: "다시 띄워 비움(emptyDir, T1 뒤 값이 남지 않게)" };
       },
       async apply(w) {
-        const r = mine(w, n);
-        if (!ok(r, "verify")) throw new Error("멈춤: 확인(4-6)이 끝나지 않았다");
-        // 파드를 지우는 대신 Deployment 업데이트(restore.md 1절 5의 겹침 함정과 같은 이유로 rollout만 쓴다).
-        w.k8s.rolloutRestart(n.ns, `${app}-valkey`);
-        if (!w.k8s.rolloutStatus(n.ns, `${app}-valkey`, 300)) throw new Error("캐시 Valkey rollout이 끝나지 않았다");
-        w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "ok.cacheflush": "1" });
+        await withLease(w, n, "cacheflush", async (r) => cacheFlush(w, n, r));
       },
     },
     gatedPr(
@@ -407,8 +493,7 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         return rolledOut(d) ? { state: "differs", action: "update", detail: "앱 Ready → 기록" } : same("main에서 suspended 지움", { hold: "앱 재개 반영 대기(Argo CD)" });
       },
       async apply(w) {
-        const r = mine(w, n);
-        w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "ok.resumed": "1" });
+        await withLease(w, n, "resumed", async (r) => w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "ok.resumed": "1" }));
       },
     },
     {
@@ -421,19 +506,23 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         return { state: "missing", action: "delete", detail: "임시 Cluster·PVC·도우미 Job 둘 지우고 0개 확인" };
       },
       async apply(w) {
-        const r = mine(w, n);
-        if (r.data["ok.resumed"] !== "1") throw new Error("멈춤: 앱 재개 전에는 정리하지 않는다");
-        // Job은 파드까지(foreground), 그다음 임시 Cluster와 PVC. 잠금은 남긴다(--finish).
-        w.k8s.deleteRestoreObject(n.ns, "job", n.dbJob(r.run), r.run);
-        w.k8s.deleteRestoreObject("database", "job", n.r2Job(r.run), r.run);
-        w.k8s.deleteRestoreObjects("database", r.run);
-        w.k8s.deleteRestoreObjects(n.ns, r.run);
-        const left = runObjects(w, n, r.run);
-        if (left.length) throw new Error(`이 실행의 객체가 남았다(${left.join(", ")}). 없어진 뒤 다시`);
-        w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "ok.cleanup": "1" });
+        await withLease(w, n, "cleanup", async (r) => cleanup(w, n, r));
       },
     },
   ];
+}
+
+// 6단계. lease Job도 이 실행의 라벨이라 deleteRestoreObjects가 함께 지운다(마지막 단계라 괜찮다).
+function cleanup(w: WriteCtx, n: Names, r: RestoreRecord): void {
+  if (r.data["ok.resumed"] !== "1") throw new Error("멈춤: 앱 재개 전에는 정리하지 않는다");
+  // Job은 파드까지(foreground), 그다음 임시 Cluster와 PVC. 잠금은 남긴다(--finish).
+  w.k8s.deleteRestoreObject(n.ns, "job", n.dbJob(r.run), r.run);
+  w.k8s.deleteRestoreObject("database", "job", n.r2Job(r.run), r.run);
+  w.k8s.deleteRestoreObjects("database", r.run);
+  w.k8s.deleteRestoreObjects(n.ns, r.run);
+  const left = runObjects(w, n, r.run);
+  if (left.length) throw new Error(`이 실행의 객체가 남았다(${left.join(", ")}). 없어진 뒤 다시`);
+  w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "ok.cleanup": "1" });
 }
 
 function finishSteps(n: Names): Step[] {
@@ -469,6 +558,14 @@ function finishSteps(n: Names): Step[] {
   ];
 }
 
+function abortObjects(w: WriteCtx, n: Names, r: RestoreRecord): void {
+  if (r.data.dropped === "1") throw new Error("DB를 지운 뒤라 그만두지 않는다");
+  w.k8s.deleteRestoreObject(n.ns, "job", n.dbJob(r.run), r.run);
+  w.k8s.deleteRestoreObject("database", "job", n.r2Job(r.run), r.run);
+  w.k8s.deleteRestoreObjects("database", r.run);
+  w.k8s.deleteRestoreObjects(n.ns, r.run);
+}
+
 // DB를 지우기 전(dropped 없음)에만 그만둔다. 그 뒤에는 지금 DB가 비었거나 일부만 복원돼 끝까지 잇는다.
 function abortSteps(n: Names): Step[] {
   const app = n.app;
@@ -497,12 +594,8 @@ function abortSteps(n: Names): Step[] {
         return left.length ? { state: "differs", action: "delete", detail: `${left.length}개 지움` } : same("0개");
       },
       async apply(w) {
-        const r = mine(w, n);
-        if (r.data.dropped === "1") throw new Error("DB를 지운 뒤라 그만두지 않는다");
-        w.k8s.deleteRestoreObject(n.ns, "job", n.dbJob(r.run), r.run);
-        w.k8s.deleteRestoreObject("database", "job", n.r2Job(r.run), r.run);
-        w.k8s.deleteRestoreObjects("database", r.run);
-        w.k8s.deleteRestoreObjects(n.ns, r.run);
+        // 진행 중인 다른 호출이 있으면 그만두지 않는다(lease). 지우는 객체에 lease Job도 들어간다.
+        await withLease(w, n, "abort", async (r) => abortObjects(w, n, r));
       },
     },
     holdPr(

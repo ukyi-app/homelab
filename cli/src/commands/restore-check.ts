@@ -92,9 +92,11 @@ const steps: Step[] = [
       const r = mine(w);
       const v = { t1: r.data.to, srv: r.data.srv, img: r.data.img, size: r.data.size };
       if (!T1.test(v.t1 ?? "") || !SRV.test(v.srv ?? "") || !IMG.test(v.img ?? "") || !SIZE.test(v.size ?? "")) throw new Error("실행 기록의 값 형식이 아니다");
-      // 같은 실행의 임시 클러스터가 이미 있으면(앞 시도) core가 던진다. 정리 단계부터 다시: --abort 없이 기록을 지우지 않는다.
-      if (!w.k8s.get("cluster", NS, tmpName(r.run))) w.pgRestore.createTmpCluster(r.run, v as { t1: string; srv: string; img: string; size: string });
-      if (!w.k8s.waitCondition("cluster", NS, { name: tmpName(r.run) }, "Ready", 1800)) throw new Error("임시 클러스터가 30분 안에 Ready가 되지 않았다(복구 실패: WAL 아카이브·base backup을 본다)");
+      // 같은 실행의 임시 클러스터가 이미 있으면(앞 시도) 다시 쓰지 않는다. 그사이 사람이 다른 원본으로 다시 만들거나 바꿨을 수 있어
+      // Ready·DB 이름만으로는 이번 백업의 복구라고 볼 수 없다(restore.md 2절 2단계, #886 r1 P1-2). --abort로 정리하고 새 시험으로.
+      if (w.k8s.get("cluster", NS, tmpName(r.run))) throw new Error(`임시 클러스터 ${tmpName(r.run)}가 이미 있다(앞 시도). 다시 쓰지 않는다: homelab db restore-check --abort 뒤 새 시험`);
+      w.pgRestore.createTmpCluster(r.run, v as { t1: string; srv: string; img: string; size: string });
+      if (!w.k8s.waitCondition("cluster", NS, { name: tmpName(r.run) }, "Ready", 1800)) throw new Error("임시 클러스터가 30분 안에 Ready가 되지 않았다(복구 실패: WAL 아카이브·base backup을 본다. 버리려면 --abort)");
       w.k8s.restoreRecordUpdate(NS, RECORD, r.run, { "ok.tmp": "1" });
     },
   },
@@ -124,7 +126,26 @@ const steps: Step[] = [
     },
     async apply(w) {
       const r = mine(w);
-      if (r.data["ok.contents"] !== "1") throw new Error("멈춤: 시험이 끝나지 않았다(임시 클러스터를 남겨 원인을 본다)");
+      if (r.data["ok.contents"] !== "1") throw new Error("멈춤: 시험이 끝나지 않았다(임시 클러스터를 남겨 원인을 본다. 버리려면 --abort)");
+      w.k8s.deleteRestoreObjects(NS, r.run);
+      const left = runObjects(w, r.run);
+      if (left.length) throw new Error(`이 시험의 객체가 남았다(${left.join(", ")}). 기록은 그대로다`);
+      w.k8s.restoreRecordDelete(NS, RECORD, r.run);
+    },
+  },
+];
+
+// 멈춘 시험을 버린다: 이 시험의 객체를 지우고 0개를 본 뒤 기록을 지운다(앱·pg에는 쓰지 않으니 언제든 된다).
+const abortSteps: Step[] = [
+  {
+    id: "abort",
+    target: "이 시험의 객체와 기록",
+    async read(ctx) {
+      const r = record(ctx);
+      return r ? { state: "differs", action: "delete", detail: `실행 ${r.run}: 임시 Cluster·PVC 지우고 0개 확인 → 기록 지움` } : same("기록 없음");
+    },
+    async apply(w) {
+      const r = mine(w);
       w.k8s.deleteRestoreObjects(NS, r.run);
       const left = runObjects(w, r.run);
       if (left.length) throw new Error(`이 시험의 객체가 남았다(${left.join(", ")}). 기록은 그대로다`);
@@ -135,11 +156,12 @@ const steps: Step[] = [
 
 export default defineCommand({
   path: ["db", "restore-check"],
-  summary: "최신 백업 복원 시험(임시 Cluster, 앱 영향 없음)",
+  summary: "최신 백업 복원 시험(임시 Cluster, 앱 영향 없음). 멈춘 시험은 --abort",
   kind: "change",
   args: [],
-  flags: [],
-  async run(ctx) {
+  flags: [{ name: "abort", kind: "bool", help: "멈춘 시험의 임시 Cluster·기록을 지운다" }],
+  async run(ctx, input) {
+    if (input.flags.abort === true) return ctx.engine({ command: "db restore-check", steps: abortSteps });
     return ctx.engine({
       command: "db restore-check",
       steps,

@@ -36,6 +36,10 @@ export class World {
   prs: { number: number; head: string; open: boolean }[] = [];
   // 기록 쓰기마다 부른다(시험이 단계 사이에 기록을 바꿔 보는 데 쓴다).
   onUpdate?: (set: Record<string, string | null>, data: Record<string, string>) => void;
+  // DROP 직후(복원 전)에 부른다. 같은 실행을 다른 호출이 함께 돌리는 시험에 쓴다.
+  duringDrop?: () => Promise<void>;
+  // 복원 객체를 만든 직후에 부른다(lease를 쥔 순간에 다른 호출이 그 단계를 끝낸 경우를 흉내 낸다).
+  onCreate?: (m: Obj) => void;
 
   constructor(files: Record<string, string>) {
     const sha = nextSha();
@@ -191,8 +195,9 @@ export class World {
       },
       restoreRecordUpdate(ns: string, name: string, run: string, set: Record<string, string | null>) {
         const r = rec(ns, name, run);
-        for (const [k, v] of Object.entries(set)) v === null ? delete r.data[k] : (r.data[k] = v);
+        // 시험 훅이 던지면 기록은 바뀌지 않는다(쓰기 실패). 훅이 data를 고치면 쓰기 전 다른 변경으로 본다.
         w.onUpdate?.(set, r.data);
+        for (const [k, v] of Object.entries(set)) v === null ? delete r.data[k] : (r.data[k] = v);
       },
       restoreRecordDelete(ns: string, name: string, run: string) {
         w.write(`recordDelete ${ns}/${name}`);
@@ -211,6 +216,13 @@ export class World {
       },
       rolloutRestart(ns: string, d: string) {
         w.write(`rolloutRestart ${ns}/${d}`);
+      },
+      createRestoreObject(ns: string, m: Obj) {
+        w.write(`create ${m.kind} ${ns}/${m.metadata.name}`);
+        const kind = String(m.kind).toLowerCase();
+        if (w.obj(kind, ns, m.metadata.name)) throw new Error(`kubectl create ${m.kind}: AlreadyExists`);
+        w.put(kind, ns, m.metadata.name, m);
+        w.onCreate?.(m);
       },
     };
     const pg = {
@@ -263,11 +275,19 @@ export class World {
         w.write("pg recreateDatabase(DROP)");
         rec(`app-${app}`, "restore-pg", run).data.dropped = "1";
         w.db = "empty";
+        await w.duringDrop?.();
         return "recreated" as const;
       },
       createExtensions: () => w.write("pg createExtensions"),
+      // 실제 pg_restore처럼 문장마다 커밋한다: 중간에 끊기면 일부 테이블이 남고, 빈 DB가 아니면 "already exists"로 실패한다.
       async restoreMain() {
         w.write("pg restoreMain");
+        if (w.db !== "empty") throw new Error('pg_restore: relation "t" already exists');
+        if (w.fail.get("pg restoreMain partial")) {
+          w.fail.delete("pg restoreMain partial");
+          w.db = "partial";
+          throw new Error("pg_restore: 연결이 끊겼다(주입)");
+        }
         w.db = "t1";
       },
       async restoreAcl() {
@@ -301,6 +321,8 @@ export function dbWorld(app: string, opts: { cache?: boolean } = {}): World {
   });
   w.put("objectstore", "database", "r2", { status: { serverRecoveryWindow: { "pg-20261023": { firstRecoverabilityPoint: "2026-10-19T18:00:00Z" } } } });
   w.put("backup", "database", "b1", { spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-19T18:05:00Z" } });
+  // T1 뒤에 끝난 base backup(그 시각까지의 WAL이 R2에 있다는 근거)
+  w.put("backup", "database", "b2", { spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-20T18:05:00Z" } });
   w.put("database", "database", app, { spec: { cluster: { name: "pg" }, name: app }, status: { applied: true } });
   w.put("deployment", `app-${app}`, app, { metadata: { generation: 1 }, spec: { replicas: 1 }, status: { observedGeneration: 1, replicas: 1, updatedReplicas: 1, readyReplicas: 1 } });
   return w;

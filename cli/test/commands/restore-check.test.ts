@@ -47,21 +47,26 @@ describe("db restore-check: 흐름(가짜 세계)", () => {
     expect(w.writes.some((x) => /DROP|recreate|restoreMain|dumpToR2/.test(x))).toBe(false);
   });
 
-  test("임시 클러스터가 Ready가 아니면 실패하고 기록·클러스터를 남긴다. 고친 뒤 같은 실행을 잇는다", async () => {
+  test("r1 P1-2: 임시 클러스터가 Ready가 아니면 남기고, 재실행은 그것을 다시 쓰지 않고 멈춘다. --abort 뒤 새 시험", async () => {
     const w = checkWorld();
     w.tmpReady = false;
     const r = await runIn(w, cmd, "apply", {});
     expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("--abort");
     expect(r.steps.find((s) => s.id === "cleanup")!.result).toBe("not-run");
-    expect(w.records.size).toBe(1);
     const run = w.records.get("database/restore-check")!.run;
+    // 사람이 고쳤거나 다른 원본으로 바꾼 같은 이름의 Cluster가 Ready가 돼도 성공으로 보지 않는다
     w.tmpReady = true;
-    w.writes = [];
     const again = await runIn(w, cmd, "apply", {});
-    expect(again.status).toBe("done");
-    // 같은 실행의 임시 클러스터를 다시 만들지 않는다
-    expect(w.writes).not.toContain("pg createTmpCluster");
+    expect(again.status).toBe("failed");
+    expect(again.error!.message).toContain("다시 쓰지 않는다");
+    expect(w.records.size).toBe(1);
+    const a = await runIn(w, cmd, "apply", {}, { abort: true });
+    expect(a.status).toBe("done");
+    expect(w.records.size).toBe(0);
     expect(w.runObjects(run)).toEqual([]);
+    const fresh = await runIn(w, cmd, "apply", {});
+    expect(fresh.status).toBe("done");
   });
 
   test("DB 하나가 임시 클러스터에 없으면 실패(정리하지 않는다)", async () => {

@@ -24,7 +24,7 @@ function planRules(): Rule[] {
     kubectlRule(["-n", NS, "get", "deployments.apps", APP, "-o", "json"], { stdout: JSON.stringify({ spec: { replicas: 1 } }) }),
     kubectlRule(["-n", NS, "get", "configmaps", "restore-pg", "-o", "json"], notFound),
     kubectlRule(["-n", "database", "get", "clusters.postgresql.cnpg.io", "pg", "-o", "json"], { stdout: JSON.stringify(pg) }),
-    kubectlRule(["-n", "database", "get", "backups.postgresql.cnpg.io", "-o", "json"], items([{ spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-19T18:05:00Z" } }])),
+    kubectlRule(["-n", "database", "get", "backups.postgresql.cnpg.io", "-o", "json"], items([{ spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-19T18:05:00Z" } }, { spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-20T18:05:00Z" } }])),
     kubectlRule(["-n", "database", "get", "objectstores.barmancloud.cnpg.io", "r2", "-o", "json"], { stdout: JSON.stringify({ status: { serverRecoveryWindow: { "pg-20261023": { firstRecoverabilityPoint: "2026-10-19T18:00:00Z" } } } }) }),
     ...["database", NS].flatMap((ns) => ["clusters.postgresql.cnpg.io", "jobs.batch", "persistentvolumeclaims", "pods"].map((r) => kubectlRule(["-n", ns, "get", r, "-l", LABEL, "-o", "json"], items([])))),
   ];
@@ -38,10 +38,15 @@ describe("db restore: 입력", () => {
     expect(normalizeTo("2026-02-30T01:00:00Z")).toBeNull();
     expect(normalizeTo("2026-11-02T10:00:00")).toBeNull();
     expect(normalizeTo("2026-11-02T25:00:00Z")).toBeNull();
+    // r1 P2-5: 오프셋 분은 00~59, 시는 14까지
+    expect(normalizeTo("2026-10-20T10:00:00+09:60")).toBeNull();
+    expect(normalizeTo("2026-10-20T10:00:00+09:99")).toBeNull();
+    expect(normalizeTo("2026-10-20T10:00:00+15:00")).toBeNull();
+    expect(normalizeTo("2026-10-20T10:00:00-09:59")?.t1).toBe("2026-10-20 19:59:00+00");
   });
 
   test("사용법 오류는 64(아무것도 부르지 않는다)", async () => {
-    for (const args of [["db", "restore", APP], ["db", "restore", APP, "--to", "2026-11-02T10:00:00"], ["db", "restore", APP, "--to", "2026-02-30T01:00:00Z"], ["db", "restore", APP, "--finish", "--to", T1_INPUT], ["db", "restore", APP, "--finish", "--abort"], ["db", "restore", APP, "--to", T1_INPUT, "--to", T1_INPUT]]) {
+    for (const args of [["db", "restore", APP], ["db", "restore", APP, "--to", "2026-11-02T10:00:00"], ["db", "restore", APP, "--to", "2026-02-30T01:00:00Z"], ["db", "restore", APP, "--finish", "--to", T1_INPUT], ["db", "restore", APP, "--finish", "--abort"], ["db", "restore", APP, "--to", T1_INPUT, "--to", T1_INPUT], ["db", "restore", APP, "--to", "2026-10-20T10:00:00+09:60"]]) {
       const r = await runCli(args, []);
       expect(r.code).toBe(64);
       expectPlanReadOnly(r, { allowNoCalls: true });
@@ -206,6 +211,7 @@ describe("db restore: 흐름(가짜 세계)", () => {
     expect(r.error!.message).toContain("ACL이 원본과 다르다");
     // ACL이 다르면 확인(4-6)·재개 PR로 가지 않는다
     expect(w.openPrs()).toEqual([]);
+    w.writes = [];
     const a = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
     expect(a.status).toBe("failed");
     expect(a.error!.message).toContain("DB를 지운 뒤");
@@ -266,18 +272,108 @@ describe("db restore: 흐름(가짜 세계)", () => {
       expect(r.status).toBe("failed");
       expect(w.writes).toEqual([]);
     }
-    // 복구 가능 범위가 없으면(필드 없음) base backup 조건만으로 막는다
+    // r1 P1-3: 복구 가능 범위를 확인할 수 없으면(필드 없음) 경고가 아니라 멈춘다
     const nb = dbWorld(APP);
     nb.objects.delete("objectstore/database/r2");
-    nb.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-20T02:00:00Z";
     const rb = await runIn(nb, cmd, "apply", { app: APP }, { to: T1_INPUT });
     expect(rb.status).toBe("failed");
-    expect(rb.error!.message).toContain("completed base backup이 없다");
+    expect(rb.error!.message).toContain("복구 가능 범위");
+    expect(nb.writes).toEqual([]);
+    // T1 앞에 끝난 base backup이 없다
+    const nf = dbWorld(APP);
+    nf.objects.delete("backup/database/b1");
+    nf.obj("objectstore", "database", "r2")!.status.serverRecoveryWindow["pg-20261023"].firstRecoverabilityPoint = "2026-10-19T00:00:00Z";
+    const rf = await runIn(nf, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(rf.status).toBe("failed");
+    expect(rf.error!.message).toContain("앞에 끝난 completed base backup이 없다");
     const w = dbWorld(APP);
     w.obj("objectstore", "database", "r2")!.status.serverRecoveryWindow["pg-20261023"].firstRecoverabilityPoint = "2026-10-20T02:00:00Z";
     const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
     expect(r.status).toBe("failed");
     expect(r.error!.message).toContain("복구 가능한 가장 이른 시각");
+  });
+
+  test("r1 P1-3: T1 뒤에 끝난 base backup이 없으면(WAL 범위를 확인할 수 없으면) 쓰기 없이 멈추고 온디맨드 백업을 안내한다", async () => {
+    const w = dbWorld(APP);
+    w.objects.delete("backup/database/b2");
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("뒤에 끝난 completed base backup이 없어");
+    expect(r.error!.next).toContain("온디맨드 base backup");
+    expect(w.writes).toEqual([]);
+  });
+
+  test("r1 P1-1: 같은 실행을 다른 호출이 함께 돌리면 lease에 막혀 DROP은 한 번뿐이다", async () => {
+    const w = await readyToDrop();
+    let second: Awaited<ReturnType<typeof runIn>> | undefined;
+    w.duringDrop = async () => {
+      w.duringDrop = undefined;
+      second = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    };
+    const first = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(second!.status).toBe("failed");
+    expect(second!.error!.message).toContain("다른 호출이 이 복원");
+    expect(dropped(w)).toBe(1);
+    expect(first.status).toBe("waiting");
+    // 첫 호출이 끝나면 lease는 남지 않는다
+    expect([...w.objects.keys()].filter((k) => k.endsWith("-lease"))).toEqual([]);
+  });
+
+  test("r1 P1-1: 단계를 읽은 뒤 lease를 쥐기 전에 앞 호출이 그 단계를 끝냈으면 다시 하지 않는다(DROP 0건)", async () => {
+    const w = await readyToDrop();
+    w.onCreate = (m) => {
+      if (m.metadata?.annotations?.["homelab.ukyi.app/lease"] !== "db restore db") return;
+      w.onCreate = undefined;
+      // 앞 호출이 DB를 다시 만들고 표식을 남긴 뒤 lease를 놓았다
+      const rec = w.records.get(`${NS}/restore-pg`)!;
+      rec.data["ok.db"] = "1";
+      rec.data.dropped = "1";
+      w.db = "empty";
+    };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("waiting");
+    expect(dropped(w)).toBe(0);
+    expect(w.db).toBe("t1");
+  });
+
+  test("r1 P1-1: 앞 호출이 비정상 종료해 lease가 남으면 다음 호출은 멈춘다(DROP 0건)", async () => {
+    const w = await readyToDrop();
+    const run = w.records.get(`${NS}/restore-pg`)!.run;
+    w.put("job", NS, `restore-${run}-lease`, { metadata: { labels: { [LABEL]: run } } });
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain(`kubectl -n ${NS} delete job restore-${run}-lease`);
+    expect(dropped(w)).toBe(0);
+  });
+
+  test("r1 P2-4: 본 복원이 중간에 끊기면 다음 실행은 빈 DB로 다시 만들고 처음부터 복원한다", async () => {
+    const w = await readyToDrop();
+    w.fail.set("pg restoreMain partial", new Error("x"));
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("failed");
+    expect(w.db).toBe("partial");
+    expect(dropped(w)).toBe(1);
+    const again = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(again.status).toBe("waiting");
+    expect(w.db).toBe("t1");
+    expect(dropped(w)).toBe(2);
+  });
+
+  test("r1 P2-4: 본 복원은 됐는데 끝 표식만 못 썼어도 다음 실행은 4-3부터 다시 한다(already exists로 막히지 않는다)", async () => {
+    const w = await readyToDrop();
+    w.onUpdate = (set) => {
+      if (set["ok.main"] === "1") {
+        w.onUpdate = undefined;
+        throw new Error("기록 쓰기 실패(주입)");
+      }
+    };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("failed");
+    expect(w.db).toBe("t1");
+    const again = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(again.status).toBe("waiting");
+    expect(w.db).toBe("t1");
+    expect(dropped(w)).toBe(2);
   });
 
   test("--finish는 이 실행의 객체가 남아 있으면 잠금을 지우지 않는다", async () => {
