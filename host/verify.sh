@@ -147,7 +147,8 @@ check_storageclass() {
 
 # 파드 egress 규칙(install.sh --egress). 유닛·파일만으로는 부족하다. 유닛은 oneshot이라 누가 표를 지우거나
 # flush ruleset(distro nftables.service 재시작 등)해도 active로 남고, 파일만 바꾸고 reload를 빠뜨려도 파일은
-# Git과 같다. 그래서 커널 표를 읽어 렌더 해시·hook·파드 출발 조건·필수 허용·끝 drop을 본다.
+# Git과 같다. 그래서 커널 표를 읽어 렌더 해시, 표가 켜져 있는지(flags), 모든 규칙이 렌더와 같은지 본다
+# (lib.sh egress_kernel_problems).
 # 대역도 본다. 라이브 대역과 다르면 규칙은 성공한 채 아무 파드에도 걸리지 않는다.
 check_egress() {
   local en act want d pod svc js rc problems
@@ -193,7 +194,7 @@ check_egress() {
     0)
       problems="$(egress_kernel_problems <<<"$js")"
       if [ -z "$problems" ]; then
-        ok "커널 table inet ${EGRESS_TABLE}: 렌더 해시, forward·input hook, 파드 출발 조건, 필수 허용, 끝 drop"
+        ok "커널 table inet ${EGRESS_TABLE}: 렌더 해시, 켜져 있음(flags 없음), 체인·규칙·nonpublic이 렌더와 같음"
       else
         bad "커널 table inet ${EGRESS_TABLE}가 Git 렌더와 다르다. sudo host/install.sh --cluster ${CLUSTER} --egress:"$'\n'"${problems}"
       fi

@@ -179,7 +179,7 @@ sudo host/install.sh --cluster <이름> --egress \
   && host/verify.sh --cluster <이름>
 ```
 
-`--egress`는 렌더한 규칙을 `nft -c`로 먼저 검사하고, 올린 뒤 커널 표를 `verify`와 같은 판정으로 확인하고 표를 출력한다. 판정: 표 comment의 렌더 해시가 지금 Git 렌더와 같다(파일만 바꾸고 reload를 빠뜨리면 걸림), forward·input hook 둘, 파드 대역 출발 조건, 체인별 규칙 수, 필수 허용, 끝 drop, `nonpublic` 원소. 다시 실행하면 `reload`로 표를 통째 바꾼다(규칙이 빈 순간 없음).
+`--egress`는 렌더한 규칙을 `nft -c`로 먼저 검사하고, 올린 뒤 커널 표를 `verify`와 같은 판정으로 확인하고 표를 출력한다. 판정: 표 comment의 렌더 해시가 지금 Git 렌더와 같다(파일만 바꾸고 reload를 빠뜨리면 걸림), 표에 flags가 없다(`dormant`면 규칙이 남아도 표 전체가 꺼진다), forward·input hook 둘, 체인마다 규칙이 렌더와 자리까지 같다(로그 자리는 verdict 없는 로그, 클러스터 대역은 두 CIDR의 합집합. nft가 인접 CIDR을 합친 것은 같게, 넓힌 것은 다르게 본다), `nonpublic` 원소. 다시 실행하면 `reload`로 표를 통째 바꾼다(규칙이 빈 순간 없음).
 
 `verify`는 같은 판정을 `sudo -n nft`로 한다. 위처럼 sudo 바로 뒤에 같은 터미널에서 돌리면 읽힌다. sudo를 쓸 수 없는 쪽(에이전트 등)이 돌리면 egress 커널 줄이 `SKIP`이고 종료 코드가 2다. 그때 커널 표는 사람이 `sudo -v && host/verify.sh --cluster <이름>`으로 본다.
 

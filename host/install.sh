@@ -276,7 +276,7 @@ egress_on() {
   fi
 
   log "[3/3] 커널 규칙 확인"
-  # verify.sh와 같은 판정이다: 표 해시 = 렌더, forward·input hook, 파드 출발 조건, 필수 허용, 끝 drop.
+  # verify.sh와 같은 판정이다: 표 해시 = 렌더, flags 없음(dormant 아님), 체인·규칙·nonpublic이 렌더와 같음.
   js="$(nft -j list table inet "$EGRESS_TABLE")" || die "커널에 table inet ${EGRESS_TABLE}가 없다"
   problems="$(egress_kernel_problems <<<"$js")"
   [ -z "$problems" ] \
