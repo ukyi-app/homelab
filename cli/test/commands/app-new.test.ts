@@ -38,6 +38,9 @@ const pvr = (resps: boolean[]) => ghGet(`${A}/private-vulnerability-reporting`, 
 const fork = (resps: string[]) => ghGet(`${A}/actions/permissions/fork-pr-contributor-approval`, resps.map((approval_policy) => ghResponse(200, { approval_policy })));
 const appRulesets = (resps: unknown[][]) => ghGet(`${A}/rulesets?includes_parents=false&per_page=100`, resps.map((j) => ghResponse(200, j)));
 const ACTIVE = [{ id: 21, name: "app-main", enforcement: "active" }];
+// 앱 main에 실제로 걸린 규칙(#882 리뷰 1). 21이 있어야 완료다.
+const appRules = (resps: unknown[][]) => ghGet(`${A}/rules/branches/main`, resps.map((j) => ghResponse(200, j)));
+const APPLIED = [{ type: "deletion", ruleset_id: 21 }];
 
 const clone = rule(["git", REST], { materialize: { "tools/tf-github.sh": "stub" } });
 const planJson = (changes: unknown[]) => JSON.stringify({ schema: "tf-github-plan/v1", sha: PLAN_SHA, changes });
@@ -54,7 +57,7 @@ const wrapperCalls = (r: { calls: { argv: string[] }[] }) => r.calls.filter((c) 
 const stepsOf = (json: any) => Object.fromEntries(json.steps.map((s: any) => [s.id, s]));
 
 // 다 된 상태(homelab-probe처럼): 목록에 있음, 저장소·설정·app-main 모두 됨.
-const allDone = (): Rule[] => [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on"))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([ACTIVE])];
+const allDone = (): Rule[] => [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on"))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([ACTIVE]), appRules([APPLIED])];
 
 describe("app new: 목록 PR 단계(앱이 main 목록에 없음)", () => {
   const phaseA = (): Rule[] => [mainAt, listOnMain(BASE), ...templateOk(), repoGet([ghResponse(404, {})])];
@@ -218,6 +221,29 @@ describe("app new: 생성 단계(앱이 main 목록에 있음)", () => {
     expect(r.json.schema).toBe("homelab-cli/v1");
   });
 
+  test("app-main이 active여도 main에 걸려 있지 않으면 완료로 보지 않고 래퍼 plan으로 판정한다(드리프트는 생성이 아니라 멈춤, #882 리뷰 1)", async () => {
+    const drift = [{ address: WANT, mode: "managed", actions: ["update"], importing: false }];
+    for (const args of [["app", "new", "smoke", "--json"], ["app", "new", "smoke", "--apply", "--json"]]) {
+      const rules = [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on"))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([ACTIVE]), appRules([[]]), clone, wrapperPlan(2, drift), wrapperApply(0)];
+      const r = await runCli(args, rules);
+      expect(r.code).toBe(1);
+      expect(r.writes).toEqual([]);
+      expect(r.json.status).toBe("failed");
+      expect(r.json.error.message).toContain(`${WANT}(update)`);
+      expect(wrapperCalls(r)).toEqual(["plan"]);
+    }
+  });
+
+  test("plan: 래퍼 plan에 주소 이동(moved)·root output 변경이 섞이면 실패(1), 쓰기 0건(#882 리뷰 2)", async () => {
+    const mixed = [...ONLY_CREATE, { address: "github_repository_ruleset.main_review_v2", mode: "managed", actions: ["no-op"], importing: false }, { address: "output.ruleset_ids", mode: "managed", actions: ["update"], importing: false }];
+    const rules = [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on"))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([[]]), clone, wrapperPlan(2, mixed)];
+    const r = await runCli(["app", "new", "smoke", "--json"], rules);
+    expect(r.code).toBe(1);
+    expectPlanReadOnly(r);
+    expect(r.json.error.message).toContain("github_repository_ruleset.main_review_v2(주소 이동)");
+    expect(r.json.error.message).toContain("output.ruleset_ids(update)");
+  });
+
   test("plan: 래퍼 plan에 다른 관리 변경이 있으면 실패(1), 주소를 보이고 쓰기 0건", async () => {
     const other = [...ONLY_CREATE, { address: "github_repository_ruleset.main_review", mode: "managed", actions: ["update"], importing: false }];
     const rules = [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on"))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([[]]), clone, wrapperPlan(2, other)];
@@ -228,7 +254,7 @@ describe("app new: 생성 단계(앱이 main 목록에 있음)", () => {
   });
 
   test("이미 있는 저장소가 템플릿에서 만든 것이 아니면 plan이 실패(1)", async () => {
-    const rules = [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on", { template_repository: null }))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([ACTIVE])];
+    const rules = [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on", { template_repository: null }))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([ACTIVE]), appRules([APPLIED])];
     const r = await runCli(["app", "new", "smoke", "--json"], rules);
     expect(r.code).toBe(1);
     expectPlanReadOnly(r);
@@ -245,6 +271,7 @@ describe("app new: 생성 단계(앱이 main 목록에 있음)", () => {
     pvr([false, true]),
     fork(["first_time_contributors", "all_external_contributors"]),
     appRulesets([[], ACTIVE]),
+    appRules([APPLIED]),
     ghSend("POST", `${T}/generate`, over.generate ?? 201, {}),
     ghSend("PATCH", A, over.settings ?? 200, {}),
     ghSend("PUT", `${A}/private-vulnerability-reporting`, 204, {}),
@@ -292,6 +319,7 @@ describe("app new: 생성 단계(앱이 main 목록에 있음)", () => {
       fork(["first_time_contributors", "first_time_contributors", "all_external_contributors"]),
       // 저장소가 있어 전체 읽기에서도 app-main 목록을 본다: 전체 읽기·직전 읽기 없음, 재조회 active.
       appRulesets([[], [], ACTIVE]),
+      appRules([APPLIED]),
       ghSend("PATCH", A, 200, {}),
       ghSend("PUT", `${A}/private-vulnerability-reporting`, 204, {}),
       ghSend("PUT", `${A}/actions/permissions/fork-pr-contributor-approval`, 204, {}),
@@ -333,13 +361,15 @@ describe("app new: 판정과 목록 편집(순수 함수)", () => {
   test("막는 경우: 래퍼 실패, 변경 없음, 다른 앱의 app_main, import, delete, data의 다른 동작, 생성 + 다른 변경", () => {
     const c = (address: string, actions: string[], extra: Record<string, unknown> = {}) => ({ address, mode: "managed", actions, importing: false, ...extra });
     const cases: [number, any[] | null, string][] = [
-      [1, null, "exit 1"],
+      [1, null, "0·2가 아닌 코드"],
       [0, [], "생성이 없다"],
       [2, [c('github_repository_ruleset.app_main["other"]', ["create"])], "생성 말고 변경"],
       [2, [c(WANT, ["create"], { importing: true })], "생성 말고 변경"],
       [2, [c(WANT, ["delete", "create"])], "생성 말고 변경"],
       [2, [{ address: 'data.github_rest_api.x["smoke"]', mode: "data", actions: ["create"], importing: false }], "생성 말고 변경"],
       [2, [c(WANT, ["create"]), c("github_repository_environment.automerge", ["update"])], "automerge(update)"],
+      [2, [c(WANT, ["create"]), c("github_repository_ruleset.renamed", ["no-op"])], "renamed(주소 이동)"],
+      [2, [c(WANT, ["create"]), c("output.o", ["update"])], "output.o(update)"],
     ];
     for (const [code, changes, msg] of cases) expect(() => judgePlan("smoke", pc(code, changes))).toThrow(msg);
   });

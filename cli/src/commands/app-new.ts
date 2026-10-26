@@ -42,16 +42,17 @@ export function addApp(text: string | null, app: string): string {
 // 래퍼 plan JSON 판정(AC-6). 관리 자원 변경이 app_main["<app>"] 생성 하나뿐이어야 한다.
 // 함정: 새 app_main에 의존하는 guard 3·4(rulesets_app·bypass_app)는 plan에서 미뤄진 읽기(mode data, actions ["read"])로
 // 나온다(U35). 이것까지 "다른 변경"으로 세면 정상인 경우가 늘 멈춘다. 미뤄진 guard는 래퍼 apply 끝의 verify가 본다.
+// 래퍼 코드는 어댑터 계약(changes는 0·2일 때만 있다)으로 본다. 종료 코드 필드는 github 하위 명령만 다룬다(정적 시험).
+// 래퍼는 plain no-op을 빼므로 남은 no-op은 import 또는 주소 이동(moved)이고, root output 변경은 주소 output.<이름>으로 온다.
 export function judgePlan(app: string, pc: PlanChanges): Observation {
   const want = `github_repository_ruleset.app_main["${app}"]`;
-  if ((pc.exitCode !== 0 && pc.exitCode !== 2) || pc.changes === null) {
-    throw new Error(`래퍼 plan이 exit ${pc.exitCode}로 끝났다. guard 번호는 homelab github plan으로 본다`);
-  }
+  if (pc.changes === null) throw new Error("래퍼 plan이 0·2가 아닌 코드로 끝났다(guard 실패·오류). guard 번호는 homelab github plan으로 본다");
   const changes = pc.changes.filter((c) => !(c.mode === "data" && c.actions.length === 1 && c.actions[0] === "read"));
   const isWant = (c: (typeof changes)[number]) => c.address === want && c.mode === "managed" && c.actions.length === 1 && c.actions[0] === "create" && !c.importing;
+  const kindOf = (c: (typeof changes)[number]) => (c.importing ? "import" : c.actions.length === 1 && c.actions[0] === "no-op" ? "주소 이동" : c.actions.join("/"));
   const other = changes.filter((c) => !isWant(c));
   if (other.length > 0) {
-    const list = other.slice(0, 10).map((c) => `${c.address}(${c.actions.join("/")}${c.importing ? ", import" : ""})`);
+    const list = other.slice(0, 10).map((c) => `${c.address}(${kindOf(c)})`);
     throw new Error(`plan에 ${want} 생성 말고 변경이 있다: ${list.join(", ")}${other.length > 10 ? ` 외 ${other.length - 10}개` : ""}. homelab github plan으로 보고, 다른 변경을 먼저 apply하거나 되돌린 뒤 다시 실행한다`);
   }
   if (changes.length !== 1) throw new Error(`래퍼 plan에 ${want} 생성이 없다(GitHub에는 app-main이 안 보인다). homelab github plan으로 본다`);
@@ -219,7 +220,12 @@ function appMainStep(app: string): Step {
       // 이미 걸렸으면 래퍼를 부르지 않는다(재실행과 apply 뒤 확인이 가볍고, 래퍼가 묻는 값도 없다).
       const rulesets = getJson(ctx, `repos/${OWNER}/${app}/rulesets?includes_parents=false&per_page=100`, "앱 ruleset 목록");
       const hits = Array.isArray(rulesets) ? rulesets.filter((r: any) => r?.name === "app-main") : [];
-      if (hits.length === 1 && hits[0].enforcement === "active") return { state: "same", action: "none", detail: `app-main active (ruleset ${hits[0].id})` };
+      // 이름과 active만으로는 main을 지키는지 모른다(대상 브랜치를 바꾸거나 main을 뺄 수 있다). 브랜치에 적용된 규칙으로 본다.
+      // 걸려 있지 않으면 완료로 보지 않고 래퍼 plan으로 넘긴다(드리프트면 생성이 아닌 변경이라 판정이 멈춘다).
+      if (hits.length === 1 && hits[0].enforcement === "active") {
+        const rules = getJson(ctx, `repos/${OWNER}/${app}/rules/branches/main`, "앱 main 규칙");
+        if (Array.isArray(rules) && rules.some((x: any) => x?.ruleset_id === hits[0].id)) return { state: "same", action: "none", detail: `app-main active, main에 걸림 (ruleset ${hits[0].id})` };
+      }
       // 하드닝 전에는 guard 2가 plan을 멈춘다. 래퍼를 돌리지 않고 앞 단계를 기다린다.
       if (settingsOff(v.json).length > 0 || !vulnReportingOn(ctx, app) || forkPolicy(ctx, app) !== "all_external_contributors") {
         return { state: "missing", action: "create", detail: "보안 설정 뒤 래퍼 plan으로 판정" };

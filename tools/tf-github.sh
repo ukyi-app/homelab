@@ -218,12 +218,17 @@ deletes() {
 }
 
 # 변경 목록만 낸다. before·after·configuration·variables는 빼서 provider가 state에 넣는 값을 파일로 남기지 않는다.
-# no-op은 빼되 import(no-op + importing)는 남긴다. 미뤄진 guard 읽기는 mode data, actions ["read"]로 남는다.
+# plain no-op은 빼되 state를 바꾸는 no-op은 남긴다: import(importing)와 주소 이동(moved, previous_address. #882 리뷰).
+# 미뤄진 guard 읽기는 mode data, actions ["read"]로 남는다. root output 변경도 apply가 state에 쓰는 변경이라
+# 주소 output.<이름>으로 남긴다(소비자 파서의 mode가 managed·data 둘뿐이라 managed로 둔다).
 write_plan_json() {
   local j
   j=$(tf show -json tfplan | jq -c --arg sha "$sha" '{schema: "tf-github-plan/v1", sha: $sha,
-    changes: [.resource_changes[]? | select((.change.actions != ["no-op"]) or (.change.importing != null))
-      | {address, mode, actions: .change.actions, importing: (.change.importing != null)}]}') ||
+    changes: ([.resource_changes[]?
+      | select((.change.actions != ["no-op"]) or (.change.importing != null) or (.previous_address != null))
+      | {address, mode, actions: .change.actions, importing: (.change.importing != null)}]
+      + [(.output_changes // {}) | to_entries[] | select(.value.actions != ["no-op"])
+      | {address: "output.\(.key)", mode: "managed", actions: .value.actions, importing: false}])}') ||
     die "plan JSON을 만들지 못했다"
   (umask 077 && set -o noclobber && printf '%s\n' "$j" >"$plan_json") || die "--plan-json 파일을 쓰지 못했다"
 }
