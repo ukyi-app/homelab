@@ -165,11 +165,12 @@ export default defineCommand({
           app,
           title: `cache add: ${app}`,
           body: `homelab cache add가 만든 PR이다(설계 C.5.6). ${app} ns에 캐시 Valkey(PVC 없음, allkeys-lru)와 VALKEY_URL을 켠다.`,
-          // 데이터 파일이 있으면 함께 읽어(내용 그대로) PR 계산 때 영속 Valkey가 그사이 켜졌는지 본다.
-          files: dataNow === null ? [appPath] : [appPath, dataPath],
+          // 데이터 파일을 늘 함께 읽어(내용 그대로) PR 계산 때 영속 Valkey가 그사이 켜졌는지 본다. 시작 때 없던 파일도
+          // 본다(#890 1라운드 P2-1). 바뀌지 않은 파일은 core가 tree에서 뺀다.
+          files: [appPath, dataPath],
           edit: (cur) => {
-            if (obj(cur[dataPath] ?? null).valkey?.persistent === true) throw new Error("그사이 main에 영속 Valkey가 켜졌다(캐시와 함께 둘 수 없다)");
-            return { [appPath]: cur[appPath] === null ? null : cacheOn(cur[appPath], appChart), ...(dataNow === null ? {} : { [dataPath]: cur[dataPath] }) };
+            if (obj(cur[dataPath]).valkey?.persistent === true) throw new Error("그사이 main에 영속 Valkey가 켜졌다(캐시와 함께 둘 수 없다)");
+            return { [appPath]: cur[appPath] === null ? null : cacheOn(cur[appPath], appChart), [dataPath]: cur[dataPath] };
           },
           describe: (_p, before, after) => `cache.enabled ${obj(before).cache?.enabled === true} → ${obj(after).cache?.enabled === true}${obj(before).chartVersion !== obj(after).chartVersion ? `, chart ${obj(after).chartVersion}` : ""}`,
         }),

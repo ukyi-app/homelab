@@ -201,9 +201,9 @@ export default defineCommand({
     if (cache !== "none") steps.push(passwordStep(app, "valkey"));
 
     const image = found && "image" in found ? found.image : null;
-    // 데이터 파일은 쓸 때와, 이미 있을 때(PR 계산 때 캐시·영속 상호 배제를 보려고, 내용은 그대로) 넣는다. 없는 파일을
-    // 그대로 넣으면 tree에 없는 경로의 삭제가 된다.
-    const files = [paths.values, paths.image, ...(flags.postgres || cache === "persistent" || onMain.data !== null ? [paths.data] : [])];
+    // 데이터 파일은 늘 넣는다. 쓰지 않을 때도 PR 계산 때의 main에서 캐시·영속 상호 배제를 본다(시작 때 없던 파일이
+    // 그사이 영속 등록으로 생긴 경우, #890 1라운드 P2-1). 바뀌지 않은 파일은 core가 tree에서 뺀다(없는 경로 삭제를 보내지 않는다).
+    const files = [paths.values, paths.image, paths.data];
     steps.push(
       prStep({
         command: "app add",
@@ -216,7 +216,7 @@ export default defineCommand({
             [paths.values]: appValues(cur[paths.values], flags, { secrets, latestChart: appChart }),
             [paths.image]: cur[paths.image] ?? (image ? imageText(image) : null),
           };
-          if (files.includes(paths.data)) out[paths.data] = dataValues(cur[paths.data], flags, dataChart);
+          out[paths.data] = dataValues(cur[paths.data], flags, dataChart);
           return out;
         },
         describe: describeFile,
