@@ -1187,7 +1187,8 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
              volumeMounts: [{ name: tmp, mountPath: /tmp }]
          volumes: [{ name: tmp, emptyDir: { sizeLimit: 16Mi } }]
    YAML
-   kubectl -n database wait --for=condition=ready pod -l job-name="$J" --timeout=5m
+   # --for=create가 먼저다. 없으면 Job 컨트롤러가 파드를 만들기 전에 "no matching resources found"로 바로 끝난다
+   kubectl -n database wait --for=create --for=condition=ready pod -l job-name="$J" --timeout=5m
    x() { kubectl -n database exec -i "job/$J" -- rclone --retries 1 --low-level-retries 1 "$@"; }
    # 읽기: 운영 아카이브의 base backup 디렉터리가 보인다(복구가 읽을 것)
    n=$(x lsf --dirs-only "src:homelab-backups/pg/$SRV/base/" </dev/null 2>/dev/null | wc -l) \
@@ -1275,7 +1276,8 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
              volumeMounts: [{ name: tmp, mountPath: /tmp }]
          volumes: [{ name: tmp, emptyDir: { sizeLimit: 16Mi } }]
    YAML
-   kubectl -n database wait --for=condition=ready pod -l job-name="$J" --timeout=5m
+   # --for=create가 먼저다. 없으면 Job 컨트롤러가 파드를 만들기 전에 "no matching resources found"로 바로 끝난다
+   kubectl -n database wait --for=create --for=condition=ready pod -l job-name="$J" --timeout=5m
    kubectl -n database exec "job/$J" -- rclone copy "src:homelab-backups/pg/$SRV" "dst:$VMB/pg/$SRV"
    kubectl -n database exec "job/$J" -- rclone check --one-way "src:homelab-backups/pg/$SRV" "dst:$VMB/pg/$SRV"
    echo "복사 확인: 운영 pg/$SRV → VM 버킷 $VMB/pg/$SRV"
@@ -1298,6 +1300,74 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
    ```
 
 5. 영속 Valkey가 있는 앱은 1절로 RDB를 복원한다. 1단계(`running: false`)는 복구 PR이 이미 했으므로 2단계(복원 Job)부터 한다. 1절 5단계까지 끝나 데이터(키 0개 아님, 표식 키를 적었으면 그 키)를 확인한 뒤에 그 앱의 `suspended` 줄을 지우는 PR로 앱을 재개한다. VM 시험은 1절 3·5단계의 PR과 앱 재개를 1단계의 VM 줄대로 `values-vm.yaml`의 `cluster.restore`로 한다.
+
+   **VM 시험: 1절 2단계 전에 운영 RDB를 VM 버킷으로 가져온다.** 1절 2단계는 백업 CronJob의 `BUCKET`(VM은 VM 버킷)에서 앱 자격(VM 버킷 토큰)으로 `valkey/<앱>/`를 읽는다. VM의 Valkey와 백업 CronJob은 복구 PR부터 멈춰 있어 VM 버킷에는 복원할 RDB가 없다. 그래서 운영 버킷의 RDB 하나를 읽기 전용 원본 자격(`r2-source-readonly`)으로 읽어 VM 버킷의 같은 키에 VM 자격(`r2-backup`)으로 쓰고, 내려받아 바이트를 대조한다. 공용 values와 운영 쓰기 자격은 쓰지 않는다. 운영 백업은 매일 03:30 KST라, 표식 키는 고른 백업 시각 전에 있던 것만 확인할 수 있다. `OBJECT=latest`면 운영의 가장 최근 것, 특정 시점이면 파일 이름(`dump-<UTC>.rdb`)을 적는다. 가져온 이름을 1절 2단계의 `OBJECT`로 쓴다.
+
+   ```bash
+   APP=<앱> OBJECT=latest bash -euo pipefail <<'EOF'
+   export KUBECONFIG=~/.kube/homelab-vm.yaml
+   host/verify.sh --cluster vm --identity
+   case $APP in ''|*[!a-z0-9-]*) echo "APP이 앱 이름이 아니다" >&2; exit 1 ;; esac
+   git fetch -q origin main
+   VMB=$(git show origin/main:platform/root/values-vm.yaml | yq '.cluster.backup.bucket')
+   J=r2-vk-copy-$(date -u +%Y%m%d%H%M%S)
+   trap 'kubectl -n database delete job "$J" --ignore-not-found --wait=false >/dev/null' EXIT
+   # src: 운영 버킷 읽기 전용(r2-source-readonly), dst: VM 버킷 R&W(ESO가 만든 r2-backup)
+   kubectl apply -f - <<YAML
+   apiVersion: batch/v1
+   kind: Job
+   metadata: { name: $J, namespace: database }
+   spec:
+     backoffLimit: 0
+     activeDeadlineSeconds: 1800
+     template:
+       spec:
+         restartPolicy: Never
+         automountServiceAccountToken: false
+         securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+         containers:
+           - name: rclone
+             image: docker.io/rclone/rclone:1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5
+             command: ["sleep", "1700"]
+             env:
+               - { name: HOME, value: /tmp }
+               - { name: RCLONE_CONFIG_SRC_TYPE, value: s3 }
+               - { name: RCLONE_CONFIG_SRC_PROVIDER, value: Cloudflare }
+               - { name: RCLONE_CONFIG_SRC_REGION, value: auto }
+               - { name: RCLONE_CONFIG_SRC_NO_CHECK_BUCKET, value: "true" }
+               - { name: RCLONE_CONFIG_SRC_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: r2-source-readonly, key: ACCESS_KEY_ID } } }
+               - { name: RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: r2-source-readonly, key: SECRET_ACCESS_KEY } } }
+               - { name: RCLONE_CONFIG_SRC_ENDPOINT, valueFrom: { secretKeyRef: { name: r2-source-readonly, key: ENDPOINT_URL } } }
+               - { name: RCLONE_CONFIG_DST_TYPE, value: s3 }
+               - { name: RCLONE_CONFIG_DST_PROVIDER, value: Cloudflare }
+               - { name: RCLONE_CONFIG_DST_REGION, value: auto }
+               - { name: RCLONE_CONFIG_DST_NO_CHECK_BUCKET, value: "true" }
+               - { name: RCLONE_CONFIG_DST_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: r2-backup, key: ACCESS_KEY_ID } } }
+               - { name: RCLONE_CONFIG_DST_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: r2-backup, key: SECRET_ACCESS_KEY } } }
+               - { name: RCLONE_CONFIG_DST_ENDPOINT, valueFrom: { secretKeyRef: { name: r2-backup, key: ENDPOINT_URL } } }
+             resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { memory: 256Mi } }
+             securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+             volumeMounts: [{ name: tmp, mountPath: /tmp }]
+         volumes: [{ name: tmp, emptyDir: { sizeLimit: 16Mi } }]
+   YAML
+   # --for=create가 먼저다. 없으면 Job 컨트롤러가 파드를 만들기 전에 "no matching resources found"로 바로 끝난다
+   kubectl -n database wait --for=create --for=condition=ready pod -l job-name="$J" --timeout=5m
+   x() { kubectl -n database exec "job/$J" -- rclone --retries 1 --low-level-retries 1 "$@" </dev/null; }
+   obj=$OBJECT
+   # 오류 문구는 출력하지 않는다(endpoint에 계정 ID가 들어 있다). 이름이 UTC 시각이라 정렬이 시각순이다
+   if [ "$obj" = latest ]; then
+     obj=$(x lsf --files-only "src:homelab-backups/valkey/$APP" 2>/dev/null | LC_ALL=C sort | tail -n 1) \
+       || { echo "운영 백업 목록을 읽지 못했다: valkey/$APP" >&2; exit 1; }
+   fi
+   case $obj in dump-*.rdb) ;; *) echo "가져올 백업이 없거나 이름이 dump-<UTC>.rdb 꼴이 아니다: '$obj'" >&2; exit 1 ;; esac
+   x copyto "src:homelab-backups/valkey/$APP/$obj" "dst:$VMB/valkey/$APP/$obj" 2>/dev/null \
+     || { echo "복사 실패: valkey/$APP/$obj" >&2; exit 1; }
+   # 내려받아 바이트를 대조한다(R2 ETag만으로는 multipart 객체를 대조하지 못한다)
+   x check --download --one-way --include "/$obj" "src:homelab-backups/valkey/$APP" "dst:$VMB/valkey/$APP" 2>/dev/null \
+     || { echo "대조 실패: valkey/$APP/$obj" >&2; exit 1; }
+   echo "가져옴: VM 버킷 valkey/$APP/$obj (1절 2단계에 OBJECT=$obj)"
+   EOF
+   ```
 6. 앱이 뜬 뒤 시나리오 1·10을 확인한다.
 7. **정리 PR:** `recoverySource`를 지워 렌더 결과를 `initdb`로 되돌린다(새 serverName은 그대로). recovery를 남기면 나중에 볼륨을 잃고 Cluster를 다시 만들 때 옛 아카이브에서 낡은 데이터로 조용히 복구된다. 떠 있는 클러스터에는 영향이 없다(U26).
    - VM 시험: `values-vm.yaml`에서 `recoverySource`를 지우고, `cluster.restore`가 빈 값(`suspendedApps: []`, `valkey: {}`)인지 본다. 이 PR이 동기화되면 ObjectStore `r2-source`가 prune된다. 그 뒤 복구 원본 자격 Secret을 지운다. 컨테이너가 다시 시작될 때 참조하는 Secret이 없으면 `CreateContainerConfigError`가 나므로, 이 Secret을 참조하는 리소스가 0일 때만 지운다. 남아 있으면 그 파드를 VM에서만 지워 지금 spec으로 다시 띄운 뒤(단일 인스턴스라 잠깐 끊긴다) 다시 돌린다. 읽기 전용 토큰 자체는 Cloudflare에서 폐기한다(복구 자산 정리).
