@@ -87,6 +87,17 @@ function traces(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   return left;
 }
 
+// 서버가 내려가 있지 않은 이유(빈 배열이면 내려감). main의 running: false, Deployment 없음, PVC 있음, CronJob suspend.
+// 파드 0개는 증거가 아니다. Deployment가 다시 생겼으면 곧 파드를 만든다(#883 r3 P1-2).
+function serverUp(ctx: ReadCtx | WriteCtx, n: Names): string[] {
+  const left: string[] = [];
+  if (values(ctx, n.dataFile)?.valkey?.running !== false) left.push(`main ${n.dataFile}에 running: false 없음`);
+  if (ctx.k8s.get("deployment", n.ns, n.server)) left.push(`deployment/${n.server} 있음`);
+  if (!ctx.k8s.get("pvc", n.ns, "valkey-data")) left.push("pvc/valkey-data 없음");
+  if (ctx.k8s.get("cronjob", n.ns, n.cronjob)?.spec?.suspend !== true) left.push(`cronjob/${n.cronjob} suspend 아님`);
+  return left;
+}
+
 function rolledOut(d: any): boolean {
   const want = d?.spec?.replicas ?? 1;
   return want >= 1 && d?.status?.updatedReplicas === want && d?.status?.readyReplicas === want && (d?.status?.observedGeneration ?? 0) >= (d?.metadata?.generation ?? 0);
@@ -308,13 +319,18 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
       target: `서버 ${n.server} 내림`,
       async read(ctx) {
         const r = record(ctx, n);
-        if (has(r, "ok.down")) return same("내려감");
         if (!r) return later("서버 내림 PR 병합 뒤 확인");
-        const down = !ctx.k8s.get("deployment", n.ns, n.server) && !!ctx.k8s.get("pvc", n.ns, "valkey-data") && ctx.k8s.get("cronjob", n.ns, n.cronjob)?.spec?.suspend === true;
-        return down ? { state: "differs", action: "update", detail: "Deployment 없음, PVC 남음, CronJob suspend → 기록" } : same("PR 병합됨", { hold: "Argo CD 반영 대기(서버 내림)" });
+        // 복원 Job을 새로 만들 차례면 ok.down이 있어도 지금 다시 본다. 그만두기(--abort) PR이 병합됐거나 누가 서버를 올렸으면
+        // 옛 표식만 믿고 서버와 복원 Job이 같은 PVC를 쓰게 된다(#883 r3 P1-2). 이미 있는 Job은 기다리기만 해 새로 만들지 않는다.
+        if (has(r, "ok.down") && (has(r, "ok.job") || ctx.k8s.get("job", n.ns, JOB))) return same("내려감");
+        const up = serverUp(ctx, n);
+        if (has(r, "ok.down")) return up.length ? { state: "differs", action: "update", detail: `서버 내림을 기록했지만 지금은 아니다(${up.join(", ")}) → 표식을 지우고 서버 내림 PR부터 다시` } : same("내려감(다시 확인)");
+        return up.length ? same("PR 병합됨", { hold: "서버 내림 PR 병합·Argo CD 반영 대기" }) : { state: "differs", action: "update", detail: "Deployment 없음, PVC 남음, CronJob suspend → 기록" };
       },
       async apply(w) {
-        mark(w, n, { "ok.down": "1" });
+        const up = serverUp(w, n);
+        // 표식을 지우면 다음 실행에서 서버 내림 PR(running: false)이 다시 열리고, 반영을 확인한 뒤에야 복원 Job으로 간다.
+        mark(w, n, { "ok.down": up.length ? null : "1" });
       },
     },
     {
@@ -341,6 +357,9 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
           const pods = w.k8s.list("pod", n.ns).filter((p) => p?.status?.phase !== "Succeeded" && p?.status?.phase !== "Failed" && mountsData(p?.spec)).map((p) => `pod/${p.metadata?.name}`);
           const jobs = w.k8s.list("job", n.ns).filter((j) => !hasTrue(j, "Complete") && !hasTrue(j, "Failed") && mountsData(j?.spec?.template?.spec)).map((j) => `job/${j.metadata?.name}`);
           if (pods.length || jobs.length) throw new Error(`valkey-data를 쓰는 파드·Job이 남아 있다: ${[...pods, ...jobs].join(", ")}. 끝났는지 보고 지운 뒤 다시 한다`);
+          // down 단계가 방금 봤어도 touched·Job 직전에 한 번 더 본다(#883 r3 P1-2).
+          const up = serverUp(w, n);
+          if (up.length) throw new Error(`서버가 내려가 있지 않다(${up.join(", ")}). 다시 실행하면 서버 내림부터 잇는다`);
           const { image, bucket } = uploadContainer(w, n);
           mark(w, n, { touched: "1", "ok.cleanup": null });
           w.k8s.createRestoreObject(n.ns, restoreJob(n, run, mine(w, n).data.object ?? object, image, bucket));

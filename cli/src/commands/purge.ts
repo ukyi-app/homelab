@@ -14,6 +14,12 @@ import { parseYaml, setTopLevel } from "../core/values";
 const REPO = "repos/ukyi-app/homelab";
 const PURGE_CHART = "1.0.2";
 const PROTECT = "argocd.argoproj.io/sync-options";
+// R2 valkey/ 객체는 올린 뒤 14일(1,209,600초)에 지워진다(infra/cloudflare/main.tf valkey-expire-14d).
+// 여유 2일: 객체는 Job 성공 시각보다 먼저 올라가고, PR 2는 이 확인 뒤 사람이 병합한다(#883 r3 P1-1).
+const VALKEY_KEEP_MS = 14 * 86_400_000;
+const VALKEY_MARGIN_MS = 2 * 86_400_000;
+// 이 기기와 클러스터의 시계 차이로 보는 범위. 이보다 미래의 성공 시각은 믿지 않는다.
+const CLOCK_SKEW_MS = 3_600_000;
 
 const same = (detail: string, extra: Partial<Observation> = {}): Observation => ({ state: "same", action: "none", detail, ...extra });
 
@@ -177,8 +183,16 @@ function steps(n: Names, dataFiles: string[]): Step[] {
           if (!ok) lacks.push("completed base backup");
         }
         if (data.valkey?.persistent === true) {
-          const cj = ctx.k8s.get("cronjob", n.ns, `${app}-valkey-backup`);
-          if (!after(cj?.status?.lastSuccessfulTime)) lacks.push("Valkey 백업");
+          const t = ctx.k8s.get("cronjob", n.ns, `${app}-valkey-backup`)?.status?.lastSuccessfulTime;
+          if (!after(t)) lacks.push("Valkey 백업");
+          else {
+            // 성공 이력만으로는 객체가 R2에 남아 있다는 증거가 아니다. 백업이 멈춘 채 14일이 지나면 복구할 객체가 없다(#883 r3 P1-1).
+            const age = Date.now() - Date.parse(t);
+            if (age < -CLOCK_SKEW_MS) return { state: "differs", action: "none", detail: `Valkey 마지막 성공 백업(${t})이 지금보다 미래다(시계를 믿을 수 없다)`, next: "이 기기와 클러스터의 시각을 맞춘 뒤 다시 실행한다" };
+            if (age > VALKEY_KEEP_MS - VALKEY_MARGIN_MS) {
+              return { state: "differs", action: "none", detail: `Valkey 마지막 성공 백업(${t})이 12일보다 오래됐다(R2는 14일 뒤 지운다)`, next: `kubectl -n ${n.ns} get cronjob ${app}-valkey-backup로 suspend·실패를 보고, 새 백업이 성공한 뒤 다시 실행한다` };
+            }
+          }
         }
         if (lacks.length) return { state: "differs", action: "none", detail: `${what}(${date}) 뒤 ${lacks.join("·")}이 없다`, next: "다음 정기 백업(PostgreSQL 03:00, Valkey 03:30 KST) 뒤 다시 실행한다" };
         return same(`${what}(${date}) 뒤 백업 있음`);
@@ -269,7 +283,7 @@ function steps(n: Names, dataFiles: string[]): Step[] {
         command: "data purge delete",
         app,
         title: `purge: delete data/${app}`,
-        body: [`\`homelab data purge ${app}\`의 PR 2(설계 C.5.5).`, "", `- \`data/${app}/\`를 지운다. Application \`${app}-data\`가 지워지며 Database·DatabaseRole(DROP)과 Valkey PVC·PV가 사라진다.`, "- 폐기 뒤에도 그 DB는 base backup 안에 보존 기간(14일) 동안 남는다."].join("\n"),
+        body: [`\`homelab data purge ${app}\`의 PR 2(설계 C.5.5).`, "", `- \`data/${app}/\`를 지운다. Application \`${app}-data\`가 지워지며 Database·DatabaseRole(DROP)과 Valkey PVC·PV가 사라진다.`, "- 폐기 뒤에도 그 DB는 base backup 안에 보존 기간(14일) 동안 남는다.", "- Valkey 백업은 R2에서 14일 뒤 지워진다. 이 PR을 며칠 뒀으면 병합 전에 같은 명령을 다시 쳐 백업 확인이 통과하는지 본다."].join("\n"),
         files: dataFiles,
         edit: (cur) => Object.fromEntries(Object.keys(cur).map((k) => [k, null])),
       }),

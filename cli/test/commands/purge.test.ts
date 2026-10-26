@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { FAKE_SECRETS, FAKE_SHA, expectPlanReadOnly, ghGet, infisicalList, kubectlRule, rule, runCli, type Rule } from "../harness";
 import { argvFor as infisicalArgv } from "../../src/core/infisical";
 import cmd from "../../src/commands/purge";
@@ -81,6 +81,10 @@ function purgeWorld(): World {
 }
 
 describe("data purge: 흐름(가짜 세계)", () => {
+  // Valkey 백업 보존 기간(14일) 판정이 지금 시각을 쓴다. 고정 날짜 세계가 시간이 지나도 같은 결과를 내게 시계를 묶는다.
+  beforeAll(() => setSystemTime(new Date("2026-10-26T00:00:00Z")));
+  afterAll(() => setSystemTime());
+
   test("PR 1 → 동기화 대기 → PV reclaim·PR 2 → 삭제 대기 → 확인 뒤 키 삭제, 재실행 same", async () => {
     const w = purgeWorld();
     const flags = { confirm: APP };
@@ -226,6 +230,58 @@ describe("data purge: 흐름(가짜 세계)", () => {
     ]);
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
+    expect(w.openPrs()).toEqual([]);
+  });
+
+  test("r3 P1-1: 마지막 Valkey 백업이 R2 보존 기간(14일, 여유 2일)을 넘으면 PR을 열지 않는다", async () => {
+    // 데이터 등록 9/1 → 앱 삭제 10/1 → 마지막 성공 백업 10/2, 지금 10/26
+    const w = purgeWorld();
+    w.history.set(`apps/${APP}/values.yaml`, [{ date: "2026-10-01T00:00:00Z", status: "removed" }]);
+    w.history.set(DATA, [{ date: "2026-09-01T00:00:00Z", status: "added" }]);
+    w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-25T18:00:00Z";
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-02T18:30:00Z";
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("12일보다 오래됐다");
+    expect(w.openPrs()).toEqual([]);
+    expect(w.writes).toEqual([]);
+    // 경계: 12일 안이면 통과, 12일을 넘으면 멈춘다
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-14T00:00:01Z";
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-13T23:59:59Z";
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+  });
+
+  test("r3 P1-1: PR 1 병합 뒤 백업이 오래되면 PV reclaim·PR 2로 가지 않는다", async () => {
+    const w = purgeWorld();
+    await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    w.merge(900);
+    for (const k of ["database", "databaserole"]) {
+      const o = w.obj(k, "database", APP)!;
+      delete o.metadata.annotations;
+      o.spec = k === "database" ? { databaseReclaimPolicy: "delete" } : { databaseRoleReclaimPolicy: "delete" };
+    }
+    delete w.obj("pvc", NS, "valkey-data")!.metadata.annotations;
+    // 그사이 백업이 멈춰 마지막 성공(10/21)이 12일을 넘었다
+    setSystemTime(new Date("2026-11-03T00:00:00Z"));
+    try {
+      w.writes = [];
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(r.status).toBe("failed");
+      expect(w.writes).toEqual([]);
+      expect(w.obj("pv", null, "pvc-9")!.spec.persistentVolumeReclaimPolicy).toBe("Retain");
+      expect(w.openPrs()).toEqual([]);
+    } finally {
+      setSystemTime(new Date("2026-10-26T00:00:00Z"));
+    }
+  });
+
+  test("r3 P1-1: 마지막 성공 시각이 지금보다 미래면(시계를 믿을 수 없다) 멈춘다", async () => {
+    const w = purgeWorld();
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-27T00:00:00Z";
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("미래");
     expect(w.openPrs()).toEqual([]);
   });
 

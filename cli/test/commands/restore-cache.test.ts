@@ -356,6 +356,89 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     expect(w.openPrs().map((p) => p.head)).toEqual([`cli/cache-restore-abort-${APP}`]);
   });
 
+  // 서버 내림을 확인(ok.down)한 뒤 옛 서버 파드 때문에 사전 검사에서 멈춘 상태. 파드는 이제 없다.
+  async function downThenBlocked(): Promise<World> {
+    const w = restoreWorld();
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(900);
+    w.objects.delete(`deployment/${NS}/${APP}-valkey`);
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = true;
+    w.put("pod", NS, "old-server", { metadata: { name: "old-server" }, status: { phase: "Running" }, spec: { volumes: [{ persistentVolumeClaim: { claimName: "valkey-data" } }] } });
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("failed");
+    expect(w.records.get(`${NS}/restore-vk`)!.data["ok.down"]).toBe("1");
+    w.objects.delete(`pod/${NS}/old-server`);
+    return w;
+  }
+  const noNewJob = (w: World) => {
+    expect(w.obj("job", NS, "restore-vk")).toBeUndefined();
+    expect(w.writes).not.toContain(`create Job ${NS}/restore-vk`);
+  };
+
+  test("r3 P1-2: --abort PR 병합 뒤 Deployment만 다시 생기고 파드가 없어도 기본 복원은 Job을 만들지 않는다", async () => {
+    const w = await downThenBlocked();
+    const a = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    expect(a.status).toBe("waiting");
+    w.merge(901);
+    // Argo CD가 Deployment만 다시 만들고 아직 파드는 없다. CronJob suspend도 풀렸다
+    w.put("deployment", NS, `${APP}-valkey`, { metadata: { name: `${APP}-valkey` }, spec: { replicas: 1 }, status: {} });
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = false;
+    w.writes = [];
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("waiting");
+    noNewJob(w);
+    const rec = w.records.get(`${NS}/restore-vk`)!;
+    expect(rec.data.touched).toBeUndefined();
+    expect(rec.data["ok.down"]).toBeUndefined();
+    // 다음 실행은 서버 내림 PR부터 다시 연다(옛 표식을 믿지 않는다)
+    const again = await runIn(w, cmd, "apply", { app: APP });
+    expect(again.status).toBe("waiting");
+    expect(w.openPrs().map((p) => p.head)).toEqual([`cli/cache-restore-${APP}`]);
+    noNewJob(w);
+    // 그만두기는 여전히 된다(touched 없음)
+    const b = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    expect(b.status).not.toBe("failed");
+  });
+
+  test("r3 P1-2: 서버 내림 조건이 하나라도 풀리면 재시도에서 Job을 만들지 않고, 다시 내린 뒤에 잇는다", async () => {
+    const changes: [string, (w: World) => void][] = [
+      ["Deployment 다시 생김", (w) => w.put("deployment", NS, `${APP}-valkey`, { metadata: { name: `${APP}-valkey` }, status: {} })],
+      ["CronJob suspend 풀림", (w) => (w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = false)],
+      ["PVC 없음", (w) => w.objects.delete(`pvc/${NS}/valkey-data`)],
+      // 클러스터는 아직 내려가 있지만 main이 서버를 다시 올리라고 한다(그만두기 PR 병합 직후, Argo CD 반영 전)
+      ["main에 running: false 없음", (w) => w.main().set(DATA, w.main().get(DATA)!.replace(", running: false", ""))],
+    ];
+    for (const [what, change] of changes) {
+      const w = await downThenBlocked();
+      change(w);
+      w.writes = [];
+      const r = await runIn(w, cmd, "apply", { app: APP });
+      expect([what, r.status]).toEqual([what, "waiting"]);
+      noNewJob(w);
+      expect(w.records.get(`${NS}/restore-vk`)!.data.touched).toBeUndefined();
+    }
+    // 되돌리면(서버 내림 반영) 같은 실행이 Job으로 잇는다
+    const w = await downThenBlocked();
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = false;
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("waiting");
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = true;
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("waiting");
+    expect(w.obj("job", NS, "restore-vk")).toBeDefined();
+    expect(w.records.get(`${NS}/restore-vk`)!.data["ok.down"]).toBe("1");
+  });
+
+  test("r3 P1-2: 실패한 복원 Job을 지운 뒤 재시도도 서버가 다시 떠 있으면 새 Job을 만들지 않는다", async () => {
+    const w = await toRestoreJob("failed");
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("failed");
+    expect(w.records.get(`${NS}/restore-vk`)!.data.touched).toBe("1");
+    w.objects.delete(`job/${NS}/restore-vk`);
+    w.put("deployment", NS, `${APP}-valkey`, { metadata: { name: `${APP}-valkey` }, status: {} });
+    w.writes = [];
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("waiting");
+    noNewJob(w);
+  });
+
   test("--abort: 복원 Job 전이면 기록을 지우고, 복원 Job 뒤면 거부한다", async () => {
     const w = restoreWorld();
     await runIn(w, cmd, "apply", { app: APP });
