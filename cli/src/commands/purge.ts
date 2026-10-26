@@ -65,14 +65,18 @@ function dataPod(p: any, app: string): boolean {
 function appWorkloads(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   const own = (o: any) => o?.metadata?.labels?.["homelab.ukyi.app/app"] === n.app || o?.metadata?.labels?.["app.kubernetes.io/name"] === n.app;
   const out: string[] = [];
-  // 앱 ns가 없으면 목록은 비어 있다(앱이 처음부터 없거나 지워졌다). 앱 Application이 남아 있으면 곧 다시 띄울 수 있다.
-  if (ctx.k8s.get("application", "argocd", n.app)) out.push(`application/${n.app}`);
-  for (const kind of ["deployment", "statefulset", "cronjob", "job"] as const) {
-    for (const o of ctx.k8s.list(kind, n.ns)) if (own(o) || (kind === "deployment" && o?.metadata?.name === n.app)) out.push(`${kind}/${o?.metadata?.name}`);
-  }
-  for (const p of ctx.k8s.list("pod", n.ns)) if (live(p) && (own(p) || !dataPod(p, n.app))) out.push(`pod/${p?.metadata?.name}`);
   // 모든 워크로드 읽기가 여기를 지난다(전용 엔진, 사전 읽기, 재조회, 쓰기 뒤 재조회, guarded 안 확인). 본 것은 잊지 않는다(#893 r2).
-  for (const x of out) n.seen.add(x);
+  // 찾는 즉시 남긴다. 다음 종류 조회가 예외로 끝나도 앞에서 본 것이 사라지지 않게(#893 r3).
+  const found = (x: string) => {
+    n.seen.add(x);
+    out.push(x);
+  };
+  // 앱 ns가 없으면 목록은 비어 있다(앱이 처음부터 없거나 지워졌다). 앱 Application이 남아 있으면 곧 다시 띄울 수 있다.
+  if (ctx.k8s.get("application", "argocd", n.app)) found(`application/${n.app}`);
+  for (const kind of ["deployment", "statefulset", "cronjob", "job"] as const) {
+    for (const o of ctx.k8s.list(kind, n.ns)) if (own(o) || (kind === "deployment" && o?.metadata?.name === n.app)) found(`${kind}/${o?.metadata?.name}`);
+  }
+  for (const p of ctx.k8s.list("pod", n.ns)) if (live(p) && (own(p) || !dataPod(p, n.app))) found(`pod/${p?.metadata?.name}`);
   return out;
 }
 

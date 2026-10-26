@@ -163,6 +163,40 @@ describe("data purge: 한 실행의 관측 표시(#893 r2)", () => {
     expect(r.error!.message).toContain("엔진 밖 예외(주입)");
   });
 
+  for (const kind of ["application", "deployment"] as const) {
+    test(`#893 r3: ${kind}를 본 직후 다음 종류 조회가 실패해도 본 것을 잊지 않고 기록을 지운다(재실행은 새 백업 요구)`, async () => {
+      const w = prepared();
+      seed(w);
+      backup(w, "2026-10-26T06:00:00Z");
+      if (kind === "application") w.put("application", "argocd", APP, { metadata: { name: APP } });
+      else w.put("deployment", NS, APP, { metadata: { name: APP, labels: { "homelab.ukyi.app/app": APP } }, status: { readyReplicas: 1 } });
+      // 다음 종류(application 뒤 deployment, deployment 뒤 statefulset) 목록 조회가 시간 초과
+      const original = w.read.bind(w);
+      let broken = true;
+      w.read = (mode) => {
+        const c = original(mode);
+        const list = c.k8s.list;
+        c.k8s.list = (k, ns, sel) => {
+          if (broken && k === (kind === "application" ? "deployment" : "statefulset")) throw new Error("다음 종류 kubectl 조회 시간 초과(주입)");
+          return list(k, ns, sel);
+        };
+        return c;
+      };
+      const r = await run(w);
+      lost(w, r);
+      expect(r.error!.message).toContain(kind === "application" ? `application/${APP}` : `deployment/${APP}`);
+      expect(r.steps.map((x) => x.id)).toContain("record-invalidated");
+      // 조회가 정상이 되고 워크로드가 사라져도 06:00 백업으로 진행하지 않는다(새 기록 12:00 뒤 백업이 필요하다)
+      broken = false;
+      w.objects.delete(kind === "application" ? `application/argocd/${APP}` : `deployment/${NS}/${APP}`);
+      const again = await run(w);
+      expect(again.status).toBe("failed");
+      expect(w.records.get(REC)!.created).toBe("2026-10-26T12:00:00Z");
+      expect(w.obj("pv", null, "pvc-1")!.spec.persistentVolumeReclaimPolicy).toBe("Retain");
+      expect(w.openPrs()).toEqual([]);
+    });
+  }
+
   test("plan은 표시가 켜져도 쓰기 0, 기록이 무효가 된다는 것만 보인다", async () => {
     const w = prepared();
     seed(w);
