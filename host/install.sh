@@ -22,10 +22,17 @@ set -euo pipefail
 # shellcheck source=lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-K3S_CONFIG=/etc/rancher/k3s/config.yaml
-K3S_MANIFESTS=/var/lib/rancher/k3s/server/manifests
+K3S_ETC=/etc/rancher/k3s
+K3S_CONFIG="${K3S_ETC}/config.yaml"
+K3S_SERVER_DIR=/var/lib/rancher/k3s/server
+K3S_MANIFESTS="${K3S_SERVER_DIR}/manifests"
 K3S_BIN=/usr/local/bin/k3s
+# config를 바꾸기 전 사본을 둔다. 저장소 밖, root만 읽는다(MagicDNS 이름이 들어 있다).
+K3S_BACKUP_DIR=/var/lib/homelab/backup
+K3S_BACKUP=""
 NET_WAIT_MAX=30
+RESTART_WAIT_MAX=180
+NET_CHECK_MAX=60
 TMPD=""
 TARGETS=""
 NET_DROPINS=""
@@ -313,17 +320,35 @@ egress_off() {
 
 # --------------------------------------------------------------------------------- --k3s
 
-# node-name, node-ip, tls-san은 설치 때만 정할 수 있다. 이미 깔린 config와 이 셋이 다르면
-# 다시 설치해도 반영되지 않고(노드 재등록, serving cert 재발급 필요) hostPath PV의 nodeAffinity가
-# 깨질 수 있다. 그때는 멈추고 사람이 k3s-uninstall.sh부터 다시 한다.
+# node-name, node-ip는 설치 때만 정할 수 있다. 이미 깔린 config와 다르면 노드가 새로 등록돼 hostPath PV의
+# nodeAffinity가 깨질 수 있다. 그때는 멈추고 사람이 k3s-uninstall.sh부터 다시 한다.
+#
+# tls-san은 바꿀 수 있다. 바뀌면 config가 달라져 아래에서 k3s를 재시작하고, k3s v1.36.5+k3s1의 dynamiclistener
+# (e4a1908ede0d)가 재시작 뒤 첫 연결에서 인증서에 없는 설정 SAN을 기존 SAN에 더해 다시 서명한다
+# (k3s pkg/cluster/https.go:52-80, dynamiclistener listener.go:288-298, factory/gen.go:195-241).
+# 기존 SAN은 지우지 않는다(k3s가 FilterExisting을 켜지 않는다, gen.go:65-120). 그래서 config에서 뺀 이름도
+# 인증서에 남는다. 지우려면 k3s-serving Secret과 dynamic-cert.json을 함께 지우고 재시작해야 한다.
 check_install_time_keys() {
   # grep -E는 \t를 탭으로 읽지 않는다. 진짜 탭 문자를 넣는다.
-  local new_cfg="$1" filter=$'^--(node-name|node-ip|tls-san)\t' old new
+  local new_cfg="$1" filter=$'^--(node-name|node-ip)\t' old new added removed
   [ -e "$K3S_CONFIG" ] || return 0
   old="$(config_pairs <"$K3S_CONFIG" | grep -E "$filter" || true)"
   new="$(config_pairs <<<"$new_cfg" | grep -E "$filter" || true)"
   [ "$old" = "$new" ] \
-    || die "기존 ${K3S_CONFIG}와 node-name/node-ip/tls-san이 다르다. 설치 뒤에는 바꿀 수 없다. k3s-uninstall.sh와 잔여 경로 삭제 뒤 preflight --before부터 다시 한다"
+    || die "기존 ${K3S_CONFIG}와 node-name/node-ip가 다르다. 설치 뒤에는 바꿀 수 없다(노드 재등록, hostPath PV nodeAffinity). k3s-uninstall.sh와 잔여 경로 삭제 뒤 preflight --before부터 다시 한다"
+
+  old="$(config_pairs <"$K3S_CONFIG" | awk -F '\t' '$1 == "--tls-san" { print $2 }')"
+  new="$(config_pairs <<<"$new_cfg" | awk -F '\t' '$1 == "--tls-san" { print $2 }')"
+  added="$(comm -13 <(printf '%s\n' "$old" | sed '/^$/d' | LC_ALL=C sort -u) <(printf '%s\n' "$new" | sed '/^$/d' | LC_ALL=C sort -u))"
+  removed="$(comm -23 <(printf '%s\n' "$old" | sed '/^$/d' | LC_ALL=C sort -u) <(printf '%s\n' "$new" | sed '/^$/d' | LC_ALL=C sort -u))"
+  [ -n "$added" ] || [ -n "$removed" ] || return 0
+  echo "    tls-san이 바뀐다. config가 달라져 k3s를 재시작하고, 재시작 뒤 더한 이름이 서빙 인증서에 들어간다:"
+  # 옛 MagicDNS 전체 이름은 mask가 모른다(지금 이름만 안다). tailnet 이름이 출력에 남지 않게 따로 가린다.
+  { sed -e '/^$/d' -e 's/^/      + /' <<<"$added"; sed -e '/^$/d' -e 's/^/      - /' <<<"$removed"; } \
+    | sed -E 's/\.[a-z0-9-]+\.ts\.net$/.<tailnet>.ts.net/'
+  if [ -n "$removed" ]; then
+    echo "    뺀 이름은 인증서에 남는다(k3s는 서빙 인증서의 SAN을 지우지 않는다). 남아도 서버 CA 키 없이는 그 이름으로 흉내 낼 수 없다"
+  fi
 }
 
 write_user_kubeconfig() {
@@ -337,7 +362,7 @@ write_user_kubeconfig() {
   fi
   dest="${home}/.kube/${KUBE_CONTEXT}.yaml"
   tmp="$TMPD/kubeconfig"
-  install -m 0600 /etc/rancher/k3s/k3s.yaml "$tmp"
+  install -m 0600 "${K3S_ETC}/k3s.yaml" "$tmp"
 
   # k3s 기본 kubeconfig는 context, cluster, user 이름이 모두 default다. 두 클러스터(prod, vm)가
   # 공존하면 경로, 포트, 이름이 같아 KUBECONFIG를 잘못 고르면 조용히 반대편을 조작한다(B.8 E2).
@@ -360,8 +385,70 @@ write_user_kubeconfig() {
   KUBECONFIG_OUT="$dest"
 }
 
+# 이미 깔린 k3s가 핀 버전이고 새 config가 기존과 tls-san만 다른지. 그때는 공식 설치 스크립트를 다시
+# 부르지 않고 config만 바꿔 재시작한다. 설치 스크립트는 강제 재시작 전에
+# iptables-save | grep -v KUBE- | grep -iv flannel | iptables-restore로 Service DNAT·kube-router·flannel
+# 규칙을 지운다(k3s v1.36.5+k3s1 install.sh:1150-1163). k3s가 다시 만들 때까지 Service·DNS 통신이 끊길 수 있다.
+# 같은 버전이면 바이너리·유닛·env가 그대로라 설치 스크립트가 할 일이 재시작뿐이다.
+san_only_change() {
+  local new_pairs="$1" old_pairs ver
+  [ -e "$K3S_CONFIG" ] && [ -x "$K3S_BIN" ] || return 1
+  ver="$("$K3S_BIN" --version 2>/dev/null)" || return 1
+  [[ "$ver" == *"$INSTALL_K3S_VERSION"* ]] || return 1
+  old_pairs="$(config_pairs <"$K3S_CONFIG")" || return 1
+  [ "$old_pairs" != "$new_pairs" ] || return 1
+  [ "$(grep -v $'^--tls-san\t' <<<"$old_pairs" || true)" = "$(grep -v $'^--tls-san\t' <<<"$new_pairs" || true)" ]
+}
+
+rollback_hint() {
+  if [ -n "$K3S_BACKUP" ]; then
+    printf 'sudo install -m 0600 -o root -g root %s %s && sudo systemctl restart k3s' "$K3S_BACKUP" "$K3S_CONFIG"
+  else
+    printf '이전 config 백업 없음(처음 설치)'
+  fi
+}
+
+# 지금 config를 바꾸기 전에 저장소 밖에 둔다. 되돌리기는 이 사본을 제자리로 놓고 재시작하는 것이다.
+# Git을 되돌려 --k3s를 다시 돌리는 것으로는 돌아가지 않는다. 렌더가 그때의 tailscale status에서 MagicDNS
+# 이름을 다시 읽어 새 이름이 그대로 나온다.
+backup_k3s_config() {
+  install -d -m 0700 -o root -g root "${K3S_BACKUP_DIR%/*}" "$K3S_BACKUP_DIR"
+  K3S_BACKUP="${K3S_BACKUP_DIR}/k3s-config.$(date +%Y%m%d%H%M%S).yaml"
+  install -m 0600 -o root -g root "$K3S_CONFIG" "$K3S_BACKUP"
+  echo "    이전 config 백업: ${K3S_BACKUP} (0600)"
+}
+
+# 같은 디렉터리의 임시 파일에 쓴 뒤 mv로 바꾼다. 쓰다 끊겨도 k3s가 반쯤 쓴 config를 읽지 않는다.
+write_k3s_config() {
+  install -d -m 0755 "${K3S_ETC%/*}" "$K3S_ETC"
+  install -m 0600 -o root -g root "$TMPD/config.yaml" "${K3S_CONFIG}.homelab-new"
+  mv -f "${K3S_CONFIG}.homelab-new" "$K3S_CONFIG"
+}
+
+# shellcheck disable=SC2016  # $1·$2는 안쪽 bash가 펼친다(값을 명령 글자에 넣지 않는다)
+tcp_open() { timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$1" "$2" 2>/dev/null; }
+
+# 재시작 뒤 데이터 경로를 본다. 노드에서 kube-dns Service로 묻고(Service DNAT -> CoreDNS 파드) 그 답이
+# kubernetes Service IP와 같고, 그 IP의 443이 열린다(Service DNAT -> 노드 6443). 규칙이 다시 맞춰지는 동안
+# 잠깐 실패할 수 있어 NET_CHECK_MAX초까지 다시 본다. 공개 URL은 클러스터마다 달라 런북에서 사람이 본다.
+check_cluster_net() {
+  local dns api got="" i=0
+  dns="$("$K3S_BIN" kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}')" \
+    || die "kube-dns Service를 읽지 못했다. 되돌리기: $(rollback_hint)"
+  api="$("$K3S_BIN" kubectl -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}')" \
+    || die "kubernetes Service를 읽지 못했다. 되돌리기: $(rollback_hint)"
+  until got="$(dig +short +time=2 +tries=1 "@${dns}" kubernetes.default.svc.cluster.local A 2>/dev/null)" \
+    && [ "$got" = "$api" ] && tcp_open "$api" 443; do
+    [ "$i" -lt "$NET_CHECK_MAX" ] \
+      || die "재시작 뒤 클러스터 DNS(${dns})나 Service(${api}:443)가 ${NET_CHECK_MAX}초 안에 돌아오지 않았다(DNS 답: ${got:-없음}). 되돌리기: $(rollback_hint)"
+    sleep 2
+    i=$((i + 2))
+  done
+  echo "    클러스터 DNS ${dns} -> kubernetes.default = ${api}, ${api}:443 연결(${i}초)"
+}
+
 k3s_install() {
-  local cfg pairs url installer f ver i restart
+  local cfg pairs url installer f ver i restart=false path=installer
 
   log "확인"
   # 2번이 끝났는지 다시 본다. 실패하면 3번으로 가지 않는다(C.3.2).
@@ -371,7 +458,7 @@ k3s_install() {
   else
     assert_not_in_tailnet
   fi
-  require_cmds curl install sh head
+  require_cmds curl install sh head mv date timeout
   cfg="$(render_k3s_config)"
   pairs="$(config_pairs <<<"$cfg")"
   if grep -q '^BAD' <<<"$pairs"; then
@@ -381,50 +468,66 @@ k3s_install() {
   echo "    렌더한 설정(플래그 형태):"
   mask "      ${pairs//$'\n'/$'\n'      }"
   echo
+  printf '%s' "$cfg" >"$TMPD/config.yaml"
 
-  # 설치 스크립트도 이 버전 태그의 것을 받는다. get.k3s.io는 늘 최신 스크립트다.
-  # curl | sh로 잇지 않는다. 받은 파일을 확인한 뒤 실행한다.
-  url="https://raw.githubusercontent.com/k3s-io/k3s/${INSTALL_K3S_VERSION}/install.sh"
-  installer="$TMPD/k3s-install.sh"
-  log "k3s 설치 스크립트 받기(${INSTALL_K3S_VERSION})"
-  curl -fsSL --proto '=https' --tlsv1.2 --retry 3 -o "$installer" "$url" \
-    || die "설치 스크립트를 받지 못했다: ${url}"
-  [ "$(head -c 2 "$installer")" = '#!' ] || die "받은 설치 스크립트가 셸 스크립트가 아니다: ${url}"
+  # 재시작은 설정 값이 바뀔 때만 한다. 주석만 바뀐 config는 쓰기만 하고 재시작하지 않는다(k3s는 시작할 때만
+  # config를 읽는다). 설치 스크립트는 바이너리·유닛·env 해시가 그대로면 재시작하지 않아, 값이 바뀌면 강제한다.
+  if [ -e "$K3S_CONFIG" ] && [ "$(config_pairs <"$K3S_CONFIG")" != "$pairs" ]; then
+    restart=true
+    require_cmds dig systemctl
+    if san_only_change "$pairs"; then path=config-only; fi
+  fi
+  if [ "$path" = config-only ]; then
+    echo "    경로: tls-san만 바뀌었다(k3s ${INSTALL_K3S_VERSION} 그대로). 설치 스크립트 없이 config만 바꾸고 재시작한다"
+  else
+    # 설치 스크립트도 이 버전 태그의 것을 받는다. get.k3s.io는 늘 최신 스크립트다.
+    # curl | sh로 잇지 않는다. 받은 파일을 확인한 뒤 실행한다.
+    url="https://raw.githubusercontent.com/k3s-io/k3s/${INSTALL_K3S_VERSION}/install.sh"
+    installer="$TMPD/k3s-install.sh"
+    log "k3s 설치 스크립트 받기(${INSTALL_K3S_VERSION})"
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 -o "$installer" "$url" \
+      || die "설치 스크립트를 받지 못했다: ${url}"
+    [ "$(head -c 2 "$installer")" = '#!' ] || die "받은 설치 스크립트가 셸 스크립트가 아니다: ${url}"
+  fi
 
   log "${K3S_CONFIG} 쓰기(0600)"
-  install -d -m 0755 /etc/rancher /etc/rancher/k3s
-  printf '%s' "$cfg" >"$TMPD/config.yaml"
-  # 설치 스크립트는 바이너리·유닛·env 파일 해시가 그대로면 k3s를 재시작하지 않는다. config.yaml은
-  # 그 해시에 없어서, 다시 실행해 config만 바뀌면 재시작을 강제해야 새 값이 적용된다.
-  restart=false
   if [ -e "$K3S_CONFIG" ] && ! cmp -s "$TMPD/config.yaml" "$K3S_CONFIG"; then
-    restart=true
+    backup_k3s_config
   fi
-  install -m 0600 -o root -g root "$TMPD/config.yaml" "$K3S_CONFIG"
+  write_k3s_config
 
   log "k3s 자동 배포 매니페스트 쓰기(${K3S_MANIFESTS})"
   # k3s가 시작할 때마다 이 디렉터리를 다시 적용한다. local-retain StorageClass가 Argo CD보다 먼저 선다.
-  install -d -m 0755 /var/lib/rancher /var/lib/rancher/k3s
-  install -d -m 0700 /var/lib/rancher/k3s/server "$K3S_MANIFESTS"
+  install -d -m 0755 "${K3S_SERVER_DIR%/*/*}" "${K3S_SERVER_DIR%/*}"
+  install -d -m 0700 "$K3S_SERVER_DIR" "$K3S_MANIFESTS"
   for f in "$HOST_DIR"/k3s-manifests/*.yaml; do
     [ -e "$f" ] || die "host/k3s-manifests/에 매니페스트가 없다"
     install -m 0600 -o root -g root "$f" "${K3S_MANIFESTS}/$(basename "$f")"
     echo "    ${K3S_MANIFESTS}/$(basename "$f")"
   done
 
-  log "k3s ${INSTALL_K3S_VERSION} 설치"
-  # 빈 환경으로 실행한다. 부르는 셸에 K3S_URL이 남아 있으면 agent로 깔리고, INSTALL_K3S_CHANNEL,
-  # INSTALL_K3S_EXEC, K3S_* 값은 설치 스크립트가 k3s.service.env로 옮겨 적는다.
-  # 플래그는 모두 config.yaml에 있다. 하위 명령은 기본값 server다.
-  env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    INSTALL_K3S_VERSION="$INSTALL_K3S_VERSION" \
-    INSTALL_K3S_FORCE_RESTART="$restart" \
-    sh "$installer"
+  if [ "$path" = config-only ]; then
+    log "k3s 재시작(설치 스크립트 없이)"
+    # 설치 스크립트를 부르지 않아 iptables 규칙을 지우지 않는다. 유닛이 KillMode=process라 컨테이너는 계속 돈다.
+    # 유닛이 Type=notify, TimeoutStartSec=0이라 시작 통지가 안 오면 restart가 끝나지 않는다. 상한을 둔다.
+    timeout "$RESTART_WAIT_MAX" systemctl restart k3s.service \
+      || die "systemctl restart k3s가 ${RESTART_WAIT_MAX}초 안에 끝나지 않았거나 실패했다. journalctl -u k3s를 본다. 되돌리기: $(rollback_hint)"
+  else
+    log "k3s ${INSTALL_K3S_VERSION} 설치"
+    # 빈 환경으로 실행한다. 부르는 셸에 K3S_URL이 남아 있으면 agent로 깔리고, INSTALL_K3S_CHANNEL,
+    # INSTALL_K3S_EXEC, K3S_* 값은 설치 스크립트가 k3s.service.env로 옮겨 적는다.
+    # 플래그는 모두 config.yaml에 있다. 하위 명령은 기본값 server다.
+    # restart=true면 설치 스크립트가 재시작 전에 KUBE-·flannel iptables 줄을 지운다(san_only_change 주석).
+    env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+      INSTALL_K3S_VERSION="$INSTALL_K3S_VERSION" \
+      INSTALL_K3S_FORCE_RESTART="$restart" \
+      sh "$installer"
+  fi
 
   log "API 준비 대기"
   i=0
   until "$K3S_BIN" kubectl get --raw=/readyz >/dev/null 2>&1; do
-    [ "$i" -lt 90 ] || die "k3s API가 180초 안에 준비되지 않았다. journalctl -u k3s를 본다"
+    [ "$i" -lt 90 ] || die "k3s API가 180초 안에 준비되지 않았다. journalctl -u k3s를 본다. 되돌리기: $(rollback_hint)"
     sleep 2
     i=$((i + 1))
   done
@@ -433,11 +536,20 @@ k3s_install() {
   ver="$("$K3S_BIN" --version)"
   [[ "$ver" == *"$INSTALL_K3S_VERSION"* ]] || die "설치된 k3s 버전이 핀과 다르다: ${ver%%$'\n'*}"
 
+  # 떠 있던 클러스터를 다시 시작했으면 데이터 경로를 본다. 처음 설치는 CoreDNS가 아직 없어 건너뛴다.
+  if [ "$restart" = true ]; then
+    log "재시작 뒤 클러스터 DNS·Service 확인"
+    check_cluster_net
+  fi
+
   log "kubeconfig 쓰기"
   write_user_kubeconfig
 
   log "k3s 설치 완료"
   echo "    kubeconfig: ${KUBECONFIG_OUT} (context ${KUBE_CONTEXT}, 0600)"
+  if [ -n "$K3S_BACKUP" ]; then
+    echo "    되돌리기: $(rollback_hint)"
+  fi
   echo "    다음: KUBECONFIG=${KUBECONFIG_OUT} host/verify.sh --cluster ${CLUSTER} (sudo 없이)"
 }
 
@@ -469,4 +581,5 @@ main() {
   esac
 }
 
-main "$@"
+# tools/host-k3s.test.sh가 check_install_time_keys만 쓰려고 source한다. 그때는 main을 돌리지 않는다.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

@@ -249,6 +249,11 @@ const steps: Step[] = [
     run: () => tool("tf-github", ["bash", "tools/tf-github.test.sh"]),
   },
   {
+    name: "host k3s config",
+    // install.sh --k3s가 node-name·node-ip는 설치 때 값으로 고정하고(다르면 멈춤), tls-san 차이는 출력만 하고 통과하는지.
+    run: () => tool("host-k3s", ["bash", "tools/host-k3s.test.sh"]),
+  },
+  {
     name: "cli",
     // homelab CLI 시험(설계 C.4.6 CLI 행): PATH 스텁으로 plan의 쓰기 부명령 0건, 출력의 시크릿 0, 엔진의 재실행·실패 주입.
     // 0건 통과는 실패다(B.8 E7: 0건을 처리하고 성공하는 검사는 검사가 아니다).
