@@ -13,9 +13,9 @@
 
 아래 `<이름>`은 이 이름 하나다. 스크립트와 매니페스트에는 클러스터 이름 분기가 없고, 값 파일만 바뀐다.
 
-- `vm.env`의 `CHANGE_ME`는 VM을 준비할 때 채운다. 남아 있으면 host 스크립트가 멈춘다.
-- `values-vm.yaml`은 아직 자동 검사가 없다. 지금은 키 모양만 있고 값이 비어 있다. T13이 VM 값을 채우면서 빈 값을 막는 검사도 더한다. 그 전에는 `root-vm.yaml`을 apply하지 않는다.
-- VM 호스트는 tailnet에 넣지 않는다(`TAILNET_JOIN=false`). VM 접근은 LAN 주소나 콘솔로 한다.
+- VM은 NUC 안의 임시 KVM VM이다(사용자 2026-10-26). 만들기·지우기와 `vm.env` 값의 근거는 [vm.md](vm.md)다. env 파일에 `CHANGE_ME`가 남아 있으면 host 스크립트가 멈춘다.
+- `values-vm.yaml`은 ci가 VM 프로필로 단언한다(`platform/root/templates/cluster-check.yaml`): 접두 `vm-`, Infisical `homelab-dev`/`dev`, 버킷과 serverName이 운영과 다름. 하나라도 어긋나면 root-vm 렌더가 실패해 ci와 Argo CD sync가 멈춘다. 복구 원본(`recoverySource`)은 [restore.md](restore.md) 3절의 VM 복구 PR이 넣는다. 그 PR이 main에 병합되기 전에는 `root-vm.yaml`을 apply하지 않는다.
+- VM 호스트는 tailnet에 넣지 않는다(`TAILNET_JOIN=false`). VM은 libvirt NAT 뒤라 NUC에서만 닿는다. 접근은 NUC에서 `vm.env`의 노드 IP(SSH)나 `virsh console`로 한다.
 
 ### 0.0 작업 사본과 필요한 패키지
 
@@ -94,7 +94,7 @@ tailnet에 이미 있으면 건너뛴다.
 
 ### 0.2 사람 확인
 
-- 공유기 DHCP 예약이 `NODE_IP`를 이 기기에 고정하는가. k3s의 node-ip는 설치 때만 정해진다(2026-10-19 운영: 예약 확인, 공유기 DNS 폴백 1.1.1.1).
+- 공유기 DHCP 예약이 `NODE_IP`를 이 기기에 고정하는가. k3s의 node-ip는 설치 때만 정해진다(2026-10-19 운영: 예약 확인, 공유기 DNS 폴백 1.1.1.1). VM은 libvirt 네트워크의 DHCP 예약이다([vm.md](vm.md) 1.2).
 - LAN SSH는 키로만 들어온다(sshd drop-in이 비밀번호 로그인을 끈다). 새 VM은 키나 콘솔을 먼저 마련한다.
 
 ## 1. 호스트 설정과 k3s
@@ -169,11 +169,104 @@ EOF
 
 다시 실행해도 같은 Secret을 덮어쓸 뿐 멈추지 않는다. 값은 `kubectl`의 명령행 인자에 들어가지 않고(`--from-literal`은 `ps`·`/proc`로 보인다), `--server-side`로 적용해 client-side apply가 남기는 `last-applied-configuration` 주석에 값이 한 벌 더 복사되지도 않는다. T09가 2026-10-20에 이 방식을 확정했다(시나리오 7의 장애 주입과 복구가 같은 방식이었다. ESO를 재시작하지 않아도 Secret 교체 약 1분 20초 뒤 Store가 Ready였다). 자격을 바꾸는 순서는 [rotate.md](rotate.md) 1절이다.
 
-**vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). T11·T13이 명령을 채운다.
+**vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). 위의 일반 ESO 블록 대신 아래 2단계 블록을 쓰고, 2.3 대신 4단계 블록을 쓴다.
 
-1. ESO Secret 전에, 운영 클러스터의 ExternalSecret 키 목록과 `homelab-dev`의 키를 대조한다. 빠진 키가 0이어야 한다. 하나라도 빠지면 멈춘다. 값은 출력하지 않는다.
-2. ESO Secret의 값은 `eso-homelab-dev`이다.
-3. root apply 전에 복구 원본 R2 읽기 자격 Secret을 넣는다. 복구가 끝나면 지운다.
+NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있고 VM에는 없다. NUC에는 운영 kubeconfig도 있으므로 VM에 쓰는 블록은 모두 첫 두 줄에서 `KUBECONFIG`를 VM 파일로 고정하고 정체성(context `homelab-vm`, `vm.env`의 노드 이름 하나)을 본다. VM kubeconfig를 NUC에 두는 방법은 [vm.md](vm.md) 3절이다. **운영 kubeconfig로 2단계를 돌리면 운영 ESO 자격이 dev identity로 바뀌어 운영의 모든 ExternalSecret 갱신이 멈춘다.**
+
+1. **ESO Secret 전에 키를 대조한다.** 운영 클러스터(main을 동기화한 결과)의 ExternalSecret이 읽는 키를 Infisical 경로로 바꾸고, `homelab-dev`/`dev`의 같은 폴더 키 이름과 `comm -23`으로 대조한다(설계 E8 VM 격리 2번). 운영 클러스터는 읽기만 한다. 값은 출력하지 않고, 빠진 키가 하나라도 있으면 그 이름만 내고 멈춘다. `infisical login`(사람 계정)을 먼저 한다. `homelab-smoke` 키는 시나리오 2·3 뒤에 생기므로 그 뒤의 대조에 들어간다.
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   # 운영은 읽기만 한다. VM 블록과 섞이지 않게 kubeconfig와 context를 호출마다 적는다
+   prod() { kubectl --kubeconfig "$HOME/.kube/homelab.yaml" --context homelab --request-timeout=15s "$@"; }
+   # 이 bash의 stdin은 스크립트 자체라 터미널에서 읽는다. ID는 저장소에 두지 않는다
+   [ -n "${HOMELAB_DEV_PROJECT_ID:-}" ] || read -r -p 'Infisical homelab-dev project ID: ' HOMELAB_DEV_PROJECT_ID </dev/tty
+   [[ "$HOMELAB_DEV_PROJECT_ID" =~ ^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$ ]] || { echo "project ID가 UUID 형식이 아니다"; exit 1; }
+   # infra/README.md 2절과 같은 잠금. 로그인 사용자의 CLI 0.44.2는 조회한 값을 ~/.infisical/secrets-backup/에 남긴다
+   mkdir -p ~/.infisical
+   if [ -d ~/.infisical/secrets-backup ]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi
+   mkdir -p ~/.infisical/secrets-backup && chmod 0500 ~/.infisical/secrets-backup
+   if touch ~/.infisical/secrets-backup/.probe 2>/dev/null; then
+     rm -f ~/.infisical/secrets-backup/.probe; echo "백업 폴더가 쓰기 가능하다. 멈춘다"; exit 1
+   fi
+   d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+   # 운영 ExternalSecret의 키를 Infisical 절대 경로로. store의 secretsPath를 앞에 붙이고, /로 시작하는 키는 그대로다(U06).
+   # dataFrom이나 namespaced SecretStore는 이 방법으로 키 이름을 셀 수 없어 멈춘다(지금은 없다)
+   stores="$(prod get clustersecretstore -o json \
+     | jq -c '[.items[] | {key: .metadata.name, value: .spec.provider.infisical.secretsScope.secretsPath}] | from_entries')"
+   prod get externalsecret -A -o json | jq -r --argjson s "$stores" '
+     .items[] | . as $e | "\($e.metadata.namespace)/\($e.metadata.name)" as $n
+     | if ($e.spec.secretStoreRef.kind // "SecretStore") != "ClusterSecretStore" then error("ClusterSecretStore가 아니다: \($n)")
+       elif ($e.spec.dataFrom // []) != [] then error("dataFrom은 키 이름을 셀 수 없다: \($n)")
+       else ($s[$e.spec.secretStoreRef.name] // error("store 경로를 모른다: \($n)")) as $p
+         | $e.spec.data[]?.remoteRef.key | if startswith("/") then . else "\($p)/\(.)" end
+       end' | LC_ALL=C sort -u >"$d/want"
+   test -s "$d/want"
+   # homelab-dev의 같은 폴더에서 키 이름만. 목록 JSON에는 값도 오지만 jq가 이름만 남긴다(화면·파일에 값 없음).
+   # 가져온(import) 키와 개인 덮어쓰기는 빼고 이 폴더의 shared 키만 센다. ESO identity는 개인 덮어쓰기를 보지 못하고,
+   # 사람 로그인으로 그것까지 세면 빠진 shared 키를 놓친다. 폴더가 없어 CLI가 실패해도 멈춘다
+   while IFS= read -r dir; do
+     infisical secrets --path "$dir" --env dev --projectId "$HOMELAB_DEV_PROJECT_ID" --silent -o json \
+         --include-imports=false --expand=false --secret-overriding=false </dev/null \
+       | jq -r --arg dir "$dir" '(. // [])[] | "\($dir)/\(.secretKey)"'
+     if [ "$(find ~/.infisical/secrets-backup -type f | wc -l)" -ne 0 ]; then
+       chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; chmod 0500 ~/.infisical/secrets-backup
+       echo "Infisical 백업 파일이 생겼다. 지우고 멈춘다" >&2; exit 1
+     fi
+   done < <(sed 's|/[^/]*$||' "$d/want" | LC_ALL=C sort -u) | LC_ALL=C sort -u >"$d/have"
+   missing="$(LC_ALL=C comm -23 "$d/want" "$d/have")"
+   if [ -n "$missing" ]; then
+     printf 'homelab-dev/dev에 없는 키 %s개(이름만):\n%s\n' "$(wc -l <<<"$missing")" "$missing"; exit 1
+   fi
+   echo "빠진 키 0 (운영 키 $(wc -l <"$d/want")개)"
+   EOF
+   ```
+
+2. **ESO Secret의 값은 `eso-homelab-dev`이다.** VM 준비 자산의 client ID·secret을 대화형 셸에서 `read -rs ESO_CLIENT_ID`, `read -rs ESO_CLIENT_SECRET`로 받고 `export ESO_CLIENT_ID ESO_CLIENT_SECRET`한 뒤 돌린다. 운영 자격을 잘못 넣으면 그 identity가 `homelab-dev`에 없어 Store가 Ready가 되지 않는다(조용히 운영 값을 읽지 않는다).
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   export KUBECONFIG=~/.kube/homelab-vm.yaml
+   host/verify.sh --cluster vm --identity
+   : "${ESO_CLIENT_ID:?ESO_CLIENT_ID가 비었다}" "${ESO_CLIENT_SECRET:?ESO_CLIENT_SECRET가 비었다}"
+   kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
+   jq -n '{apiVersion: "v1", kind: "Secret", type: "Opaque",
+           metadata: {name: "infisical-universal-auth", namespace: "external-secrets"},
+           stringData: {clientId: env.ESO_CLIENT_ID, clientSecret: env.ESO_CLIENT_SECRET}}' \
+     | kubectl apply --server-side --field-manager=bootstrap -f -
+   EOF
+   ```
+
+3. **root apply 전에 복구 원본 R2 읽기 전용 Secret을 넣는다.** 복구 자산의 운영 버킷(`homelab-backups`) 읽기 전용 토큰을 2단계처럼 `R2_RO_ACCESS_KEY_ID`·`R2_RO_SECRET_ACCESS_KEY`·`R2_RO_ENDPOINT`(S3 API endpoint URL)로 export한다. Infisical에 두지 않는 Secret 하나다(설계 E8 VM 격리 3번). 이름과 키는 values-vm의 `recoverySource.credentialsSecret`, CNPG 차트가 읽는 키(`platform/cnpg/cluster/templates/_helpers.tpl`)와 같다. 그래서 main의 values-vm에 복구 PR이 없으면 넣지 않고 멈춘다. `database` ns는 root의 namespaces(wave -9)가 만들기 전이라 여기서 만들고, 나중에 root가 라벨을 붙여 인수한다. 같은 블록이 [restore.md](restore.md) 3절에도 있다. 고치면 둘을 함께 고친다.
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   export KUBECONFIG=~/.kube/homelab-vm.yaml
+   host/verify.sh --cluster vm --identity
+   : "${R2_RO_ACCESS_KEY_ID:?R2_RO_ACCESS_KEY_ID가 비었다}" "${R2_RO_SECRET_ACCESS_KEY:?R2_RO_SECRET_ACCESS_KEY가 비었다}" "${R2_RO_ENDPOINT:?R2_RO_ENDPOINT가 비었다}"
+   git fetch -q origin main
+   src=$(git show origin/main:platform/root/values-vm.yaml | yq -o json '.cluster.cnpg.recoverySource // {}')
+   [ "$(jq -r '.credentialsSecret' <<<"$src")" = r2-source-readonly ] && [ "$(jq -r '.bucket' <<<"$src")" = homelab-backups ] \
+     || { echo "main의 values-vm.yaml에 복구 PR(recoverySource.bucket·credentialsSecret)이 없다. 먼저 병합한다" >&2; exit 1; }
+   kubectl create namespace database --dry-run=client -o yaml | kubectl apply -f -
+   jq -n '{apiVersion: "v1", kind: "Secret", type: "Opaque",
+           metadata: {name: "r2-source-readonly", namespace: "database"},
+           stringData: {ACCESS_KEY_ID: env.R2_RO_ACCESS_KEY_ID, SECRET_ACCESS_KEY: env.R2_RO_SECRET_ACCESS_KEY, ENDPOINT_URL: env.R2_RO_ENDPOINT}}' \
+     | kubectl apply --server-side --field-manager=bootstrap -f -
+   EOF
+   ```
+
+   넣은 뒤 [restore.md](restore.md) 3절 3단계의 쓰기 거부 시험을 하고 4단계(root apply)로 간다. 이 Secret은 복구가 끝나면 restore.md 3절의 정리 단계에서 지운다. 끝나면 셸의 자격 변수를 `unset`한다.
+
+4. **root apply는 `root-vm.yaml`이다.** 2.3의 명령 대신 이 블록으로 한다. 2.3의 나머지 설명은 그대로다.
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   export KUBECONFIG=~/.kube/homelab-vm.yaml
+   host/verify.sh --cluster vm --identity
+   kubectl apply -f platform/root/root-vm.yaml
+   EOF
+   ```
 
 ### 2.3 root apply
 
