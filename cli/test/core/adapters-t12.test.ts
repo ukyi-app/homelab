@@ -188,13 +188,15 @@ describe("kubectl 읽기 확장", () => {
     const { ctx, calls } = testCtx("read", [
       kubectlRule(["-n", "database", "wait", "clusters.postgresql.cnpg.io/pg-restore-x", "--for=jsonpath={.status.phase}=Cluster in healthy state", REST], {}),
       kubectlRule(["-n", "database", "wait", "clusters.postgresql.cnpg.io/pg", "--for=jsonpath={.status.currentPrimary}=pg-1", "--timeout=10s"], [{ code: 1, stderr: "error: timed out waiting for the condition" }, { code: 1, stderr: 'Error from server (NotFound): clusters "pg" not found' }]),
-      kubectlRule(["-n", "app-smoke", "wait", "pods", "-l", "job-name=restore-vk", "--for=condition=Ready", "--timeout=300s"], {}),
+      kubectlRule(["-n", "app-smoke", "wait", "pods", "-l", "job-name=restore-vk", "--for=condition=Ready", /--timeout=[0-9]+s/], [{ code: 1, stderr: "error: no matching resources found" }, {}]),
     ]);
     expect(() => ctx.k8s.waitFor("cluster", "database", "pg-restore-x", "{.status.phase}", "Cluster in healthy state", 10)).toThrow("값 형식");
     expect(ctx.k8s.waitFor("cluster", "database", "pg", "{.status.currentPrimary}", "pg-1", 10)).toBe(false);
     expect(() => ctx.k8s.waitFor("cluster", "database", "pg", "{.status.currentPrimary}", "pg-1", 10)).toThrow("대상이 없다");
     expect(() => ctx.k8s.waitFor("cluster", "database", "pg", "{.spec.x}", "a", 10)).toThrow("jsonpath");
+    // 파드가 아직 없으면(kubectl: no matching resources found) 실패가 아니라 다시 본다.
     expect(ctx.k8s.waitCondition("job", "app-smoke", { jobPods: "restore-vk" }, "Ready", 300)).toBe(true);
+    expect(calls().calls.filter((c) => c.argv.includes("job-name=restore-vk")).length).toBe(2);
     expectPlanReadOnly(calls());
   });
 
@@ -231,15 +233,20 @@ describe("kubectl 읽기 확장", () => {
 });
 
 describe("kubectl 쓰기 확장", () => {
-  test("forceSync waitSec: refreshTime이 annotate 뒤이고 Ready면 끝, 아니면 ExecTimeout", async () => {
-    const es = (refresh: string, ready = "True") => JSON.stringify({ status: { refreshTime: refresh, conditions: [{ type: "Ready", status: ready }] } });
-    const annotate = kubectlRule(["-n", "app-smoke", "annotate", "externalsecrets.external-secrets.io", "smoke-db", /force-sync=[0-9]+/, "--overwrite"]);
+  test("forceSync waitSec: annotate 전과 다른 syncedResourceVersion + Ready여야 끝. 같은 초의 이전 동기화는 인정하지 않는다(Connector 4372999902)", async () => {
+    const now = new Date().toISOString();
+    const es = (srv: string, ready = "True") => JSON.stringify({ status: { refreshTime: now, syncedResourceVersion: srv, conditions: [{ type: "Ready", status: ready }] } });
+    const annotate = kubectlRule(["-n", "app-smoke", "annotate", "externalsecrets.external-secrets.io", "smoke-db", /force-sync=[0-9]+-[0-9a-f]{4}/, "--overwrite"]);
     const get = (resps: { stdout: string }[]) => kubectlRule(["-n", "app-smoke", "get", "externalsecrets.external-secrets.io", "smoke-db", "-o", "json"], resps);
-    const future = new Date(Date.now() + 60_000).toISOString();
-    const ok = testCtx("apply", [annotate, get([{ stdout: es("2020-01-01T00:00:00Z") }, { stdout: es(future) }])]);
+    // annotate 전 1-aaa, 그 뒤 첫 읽기도 1-aaa(같은 초 refreshTime, Ready) → 기다림, 다음 읽기 1-bbb → 끝
+    const ok = testCtx("apply", [annotate, get([{ stdout: es("1-aaa") }, { stdout: es("1-aaa") }, { stdout: es("1-bbb", "False") }, { stdout: es("1-bbb") }])]);
     await applyWith(ok.ctx, (w) => w.k8s.forceSync("app-smoke", "smoke-db", { waitSec: 5 }));
-    const stuck = testCtx("apply", [annotate, get([{ stdout: es("2020-01-01T00:00:00Z") }])]);
+    expect(ok.calls().calls.filter((c) => c.argv.includes("get")).length).toBe(4);
+    const stuck = testCtx("apply", [annotate, get([{ stdout: es("1-aaa") }])]);
     await expect(applyWith(stuck.ctx, (w) => w.k8s.forceSync("app-smoke", "smoke-db", { waitSec: 1 }))).rejects.toBeInstanceOf(ExecTimeout);
+    // 값은 호출마다 다르다(같은 값이면 annotation 해시가 안 바뀌어 ESO가 동기화하지 않는다).
+    const values = [ok, stuck].flatMap((t) => t.calls().calls.filter((c) => c.argv.includes("annotate")).map((c) => c.argv[6]));
+    expect(new Set(values).size).toBe(values.length);
   });
 
   test("restartForSecrets: 참조 Secret rv 해시를 템플릿 주석으로 patch(stdin), 명령은 rv를 넘기지 않는다", async () => {
@@ -283,12 +290,12 @@ describe("kubectl 쓰기 확장", () => {
   });
 
   test("restoreRecordDelete·deleteRestoreObject·createJobFromCronJob argv, 라벨이 다르면 지우지 않는다", async () => {
-    const job = (run: string) => JSON.stringify({ metadata: { labels: { "homelab.ukyi.app/restore": run } } });
+    const job = (run: string, uid = "11111111-aaaa") => JSON.stringify({ metadata: { uid, labels: { "homelab.ukyi.app/restore": run } } });
     const dry = JSON.stringify({ kind: "Job", metadata: { name: "backup-run1-ab12" }, spec: {} });
     const rules = [
       kubectlRule(["-n", "app-smoke", "delete", "configmaps", "-l", `homelab.ukyi.app/restore=${RUN}`, "--field-selector=metadata.name=restore-vk", "--wait=true"]),
-      kubectlRule(["-n", "database", "get", "jobs.batch", "restore-x-db", "-o", "json"], [{ stdout: job(RUN) }, { stdout: job("other") }]),
-      kubectlRule(["-n", "database", "delete", "jobs.batch", "restore-x-db", "--ignore-not-found", "--cascade=foreground", "--wait=true", "--timeout=120s"]),
+      kubectlRule(["-n", "database", "get", "jobs.batch", "restore-x-db", "-o", "json"], [{ stdout: job(RUN) }, { stdout: "", stderr: 'Error from server (NotFound): jobs.batch "restore-x-db" not found', code: 1 }, { stdout: job("other") }]),
+      { ...kubectlRule(["delete", "--raw", "/apis/batch/v1/namespaces/database/jobs/restore-x-db", "-f", "-"], { stdout: '{"kind":"Status","status":"Success"}' }), captureStdin: true },
       kubectlRule(["-n", "app-smoke", "create", "job", "backup-run1-ab12", "--from=cronjob/smoke-valkey-backup", "--dry-run=client", "-o", "json"], { stdout: dry }),
       { ...kubectlRule(["-n", "app-smoke", "create", "-f", "-"]), captureStdin: true },
     ];
@@ -300,9 +307,28 @@ describe("kubectl 쓰기 확장", () => {
     });
     expect(JSON.parse(calls().calls.at(-1)!.stdin!).metadata.labels["homelab.ukyi.app/restore"]).toBe("run1");
     expect(calls().unmatched).toEqual([]);
+    expect(JSON.parse(calls().calls.find((c) => c.argv.includes("--raw"))!.stdin!)).toEqual({ kind: "DeleteOptions", apiVersion: "v1", propagationPolicy: "Foreground", preconditions: { uid: "11111111-aaaa" } });
     await expect(applyWith(ctx, (w) => w.k8s.deleteRestoreObject("database", "job", "restore-x-db", RUN))).rejects.toThrow("이 실행");
-    expect(calls().calls.filter((c) => c.argv.includes("delete") && c.argv.includes("jobs.batch")).length).toBe(1);
+    expect(calls().calls.filter((c) => c.argv.includes("--raw")).length).toBe(1);
     await expect(applyWith(ctx, (w) => w.k8s.createJobFromCronJob("app-smoke", "x", "not-backup", "run1"))).rejects.toThrow("형식");
+  });
+
+  test("확인 뒤 같은 이름의 다른 실행 객체로 바뀌면 uid precondition이 막고, 지우지 않았다고 실패한다(#880 리뷰 P2)", async () => {
+    const job = (run: string, uid: string) => JSON.stringify({ metadata: { uid, labels: { "homelab.ukyi.app/restore": run } } });
+    // 확인한 것은 run1(uid A). 삭제 요청 때는 이미 run2(uid B)로 바뀌어 API 서버가 409 Precondition failed를 낸다.
+    const conflict = { stdout: "", code: 1, stderr: 'Error from server (Conflict): Operation cannot be fulfilled on jobs.batch "restore-vk": Precondition failed: UID in precondition: aaaaaaaa-1111, UID in object meta: bbbbbbbb-2222' };
+    const { ctx, calls } = testCtx("apply", [
+      kubectlRule(["-n", "app-smoke", "get", "jobs.batch", "restore-vk", "-o", "json"], [{ stdout: job("run1", "aaaaaaaa-1111") }, { stdout: job("run2", "bbbbbbbb-2222") }]),
+      { ...kubectlRule(["delete", "--raw", "/apis/batch/v1/namespaces/app-smoke/jobs/restore-vk", "-f", "-"], conflict), captureStdin: true },
+    ]);
+    await expect(applyWith(ctx, (w) => w.k8s.deleteRestoreObject("app-smoke", "job", "restore-vk", "run1"))).rejects.toThrow("다른 객체로 바뀌었다. 지우지 않았다");
+    expect(JSON.parse(calls().calls.find((c) => c.argv.includes("--raw"))!.stdin!).preconditions).toEqual({ uid: "aaaaaaaa-1111" });
+    // 같은 이름의 새 객체(다른 uid)가 있어도 기다림은 그 uid만 본다.
+    const replaced = testCtx("apply", [
+      kubectlRule(["-n", "app-smoke", "get", "jobs.batch", "restore-vk", "-o", "json"], [{ stdout: job("run1", "aaaaaaaa-1111") }, { stdout: job("run2", "bbbbbbbb-2222") }]),
+      kubectlRule(["delete", "--raw", "/apis/batch/v1/namespaces/app-smoke/jobs/restore-vk", "-f", "-"], { stdout: "{}" }),
+    ]);
+    await applyWith(replaced.ctx, (w) => w.k8s.deleteRestoreObject("app-smoke", "job", "restore-vk", "run1"));
   });
 
   test("setPvReclaimDelete: local-retain·claimRef가 맞을 때만 patch", async () => {
@@ -378,7 +404,8 @@ describe("파드 안 작업", () => {
 
 describe("Infisical 폴더·web·확인", () => {
   test("folderExists(읽기)·createFolder(없는 조각만 바깥부터)", async () => {
-    const list = (parent: string, names: string[]) => rule(infArgv.folders(FAKE_PROJECT, parent), { stdout: JSON.stringify(names.map((name) => ({ name }))) });
+    // 0.44.2 실제 출력(#880 리뷰 실측, packages/cmd/folder.go): 항목 {folderId, folderName, folderPath}, 빈 목록은 null.
+    const list = (parent: string, names: string[]) => rule(infArgv.folders(FAKE_PROJECT, parent), { stdout: names.length ? JSON.stringify(names.map((folderName, i) => ({ folderId: `f-${i}`, folderName, folderPath: parent }))) : "null" });
     const r = testCtx("plan", [list("/apps", ["other"])]);
     expect(r.ctx.infisical.folderExists("/apps/smoke")).toBe(false);
     expectPlanReadOnly(r.calls());
@@ -386,6 +413,11 @@ describe("Infisical 폴더·web·확인", () => {
     await applyWith(ctx, (w) => w.infisical.createFolder("/apps/smoke/postgres"));
     expect(calls().calls.filter((c) => c.argv.includes("create")).map((c) => c.argv[c.argv.indexOf("--name") + 1])).toEqual(["smoke", "postgres"]);
     expect(calls().unmatched).toEqual([]);
+    const exists = testCtx("plan", [list("/apps", ["smoke"])]);
+    expect(exists.ctx.infisical.folderExists("/apps/smoke")).toBe(true);
+    // 모양이 다르면(옛 가정 {name}) 던진다.
+    const odd = testCtx("plan", [rule(infArgv.folders(FAKE_PROJECT, "/apps"), { stdout: JSON.stringify([{ name: "smoke" }]) })]);
+    expect(() => odd.ctx.infisical.folderExists("/apps/smoke")).toThrow("모양이 다르다");
   });
 
   test("web.publicStatus: 정해진 curl 꼴, host는 <이름>.ukyi.app만", () => {
