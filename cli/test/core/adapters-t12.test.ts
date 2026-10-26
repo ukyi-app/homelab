@@ -505,12 +505,12 @@ describe("읽기 문맥에 쓰기가 없다", () => {
 
 describe("github 래퍼 plan JSON·app new 쓰기", () => {
   const clone = rule(["git", REST], { materialize: { "tools/tf-github.sh": "stub" } });
-  const planJson = JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: 'github_repository_ruleset.app_main["smoke"]', mode: "managed", actions: ["create"], importing: false }] });
+  const planJson = JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: 'github_repository_ruleset.app_main["smoke"]', mode: "managed", actions: ["create"], importing: false, moved: false }] });
 
   test("planChanges: 파일은 clone 밖 임시 폴더, 코드 2면 변경 목록, 1이면 null, 0인데 파일 없으면 던진다", () => {
     const wrap = (resp: object) => rule(["tf-github.sh", "plan", "--plan-json", /.*\/homelab-cli-plan-[^/]+\/plan\.json/], resp, { noStdin: true });
     const two = testCtx("plan", [clone, wrap({ code: 2, writeLastArg: planJson })], { wrapper: true });
-    expect(two.ctx.github!.planChanges()).toEqual({ exitCode: 2, sha: "b".repeat(40), changes: [{ address: 'github_repository_ruleset.app_main["smoke"]', mode: "managed", actions: ["create"], importing: false }] });
+    expect(two.ctx.github!.planChanges()).toEqual({ exitCode: 2, sha: "b".repeat(40), changes: [{ address: 'github_repository_ruleset.app_main["smoke"]', mode: "managed", actions: ["create"], importing: false, moved: false }] });
     const out = two.calls().calls.find((c) => c.argv[0] === "tf-github.sh")!.argv.at(-1)!;
     expect(out).not.toMatch(/homelab-cli-github-/);
     expect(two.calls().writes).toEqual([]);
@@ -520,9 +520,11 @@ describe("github 래퍼 plan JSON·app new 쓰기", () => {
 
   test("plan JSON 형식이 다르면 던진다(값 키는 받지 않고 주소·동작만)", () => {
     expect(() => parsePlanJson("{}")).toThrow("tf-github-plan/v1");
-    expect(() => parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a; rm", mode: "managed", actions: ["create"], importing: false }] }))).toThrow("주소");
-    expect(() => parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a", mode: "managed", actions: ["destroy-everything"], importing: false }] }))).toThrow("동작");
-    expect(parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a", mode: "data", actions: ["read"], importing: false, after: { token: "x" } }] })).changes![0]).toEqual({ address: "a", mode: "data", actions: ["read"], importing: false });
+    // moved가 없으면(옛 래퍼·다른 형식) 이동을 놓칠 수 있어 받지 않는다(#882 리뷰).
+    expect(() => parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a", mode: "data", actions: ["read"], importing: false }] }))).toThrow("moved 형식");
+    expect(() => parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a; rm", mode: "managed", actions: ["create"], importing: false, moved: false }] }))).toThrow("주소");
+    expect(() => parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a", mode: "managed", actions: ["destroy-everything"], importing: false, moved: false }] }))).toThrow("동작");
+    expect(parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a", mode: "data", actions: ["read"], importing: false, moved: false, after: { token: "x" } }] })).changes![0]).toEqual({ address: "a", mode: "data", actions: ["read"], importing: false, moved: false });
   });
 
   test("w.github.apply는 wrapper 명령의 apply 문맥에만, 래퍼 apply를 쓰기로 부른다(--allow-destroy 없음)", async () => {

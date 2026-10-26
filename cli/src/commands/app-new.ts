@@ -43,13 +43,14 @@ export function addApp(text: string | null, app: string): string {
 // 함정: 새 app_main에 의존하는 guard 3·4(rulesets_app·bypass_app)는 plan에서 미뤄진 읽기(mode data, actions ["read"])로
 // 나온다(U35). 이것까지 "다른 변경"으로 세면 정상인 경우가 늘 멈춘다. 미뤄진 guard는 래퍼 apply 끝의 verify가 본다.
 // 래퍼 코드는 어댑터 계약(changes는 0·2일 때만 있다)으로 본다. 종료 코드 필드는 github 하위 명령만 다룬다(정적 시험).
-// 래퍼는 plain no-op을 빼므로 남은 no-op은 import 또는 주소 이동(moved)이고, root output 변경은 주소 output.<이름>으로 온다.
+// 래퍼는 plain no-op을 빼므로 남은 no-op은 import 또는 주소 이동이고, root output 변경은 주소 output.<이름>으로 온다.
+// 주소 이동(moved)은 data read 예외보다 먼저 센다. 미뤄진 읽기와 이동이 한 항목에 겹치면 동작은 ["read"]뿐이다(#882 리뷰).
 export function judgePlan(app: string, pc: PlanChanges): Observation {
   const want = `github_repository_ruleset.app_main["${app}"]`;
   if (pc.changes === null) throw new Error("래퍼 plan이 0·2가 아닌 코드로 끝났다(guard 실패·오류). guard 번호는 homelab github plan으로 본다");
-  const changes = pc.changes.filter((c) => !(c.mode === "data" && c.actions.length === 1 && c.actions[0] === "read"));
-  const isWant = (c: (typeof changes)[number]) => c.address === want && c.mode === "managed" && c.actions.length === 1 && c.actions[0] === "create" && !c.importing;
-  const kindOf = (c: (typeof changes)[number]) => (c.importing ? "import" : c.actions.length === 1 && c.actions[0] === "no-op" ? "주소 이동" : c.actions.join("/"));
+  const changes = pc.changes.filter((c) => c.moved || !(c.mode === "data" && c.actions.length === 1 && c.actions[0] === "read"));
+  const isWant = (c: (typeof changes)[number]) => c.address === want && c.mode === "managed" && c.actions.length === 1 && c.actions[0] === "create" && !c.importing && !c.moved;
+  const kindOf = (c: (typeof changes)[number]) => [c.moved ? "주소 이동" : "", c.importing ? "import" : "", c.actions.join("/")].filter((x) => x && x !== "no-op").join(", ") || "no-op";
   const other = changes.filter((c) => !isWant(c));
   if (other.length > 0) {
     const list = other.slice(0, 10).map((c) => `${c.address}(${kindOf(c)})`);

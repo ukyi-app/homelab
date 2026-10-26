@@ -17,6 +17,11 @@ export default defineCommand({
     const r: Result = { command: "github verify", mode: ctx.mode, status: "same", steps: [], notes: [], next: null, exitCode: code };
     if (code === 0) return { ...r, title: "homelab github verify: exit 0 (선언과 같음)" };
     if (code === 2) return { ...r, status: "pending", title: "homelab github verify: exit 2 (선언과 다름)", next: "homelab github plan" };
+    // 128 이상은 래퍼가 신호로 끝난 것이다(셸의 $?와 같은 128+번호, core가 보존한다). guard 실패로 안내하지 않는다.
+    if (code >= 128) {
+      const again = `중단된 이유를 확인한 뒤 다시: homelab github verify`;
+      return { ...r, status: "failed", title: `homelab github verify: exit ${code} (신호로 중단)`, next: again, error: { message: `래퍼 verify가 신호로 끝났다(exit ${code})`, next: again } };
+    }
     const next = `${GUARD_NEXT}. 고친 뒤 다시: homelab github verify`;
     return { ...r, status: "failed", title: `homelab github verify: exit ${code} (guard 실패·오류)`, next, error: { message: `래퍼 verify가 exit ${code}로 끝났다`, next } };
   },

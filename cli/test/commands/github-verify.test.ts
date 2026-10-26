@@ -20,6 +20,22 @@ describe("github verify", () => {
     });
   }
 
+  for (const [sig, code] of [["INT", 130], ["TERM", 143], ["KILL", 137]] as const) {
+    test(`래퍼가 SIG${sig}로 끝나면 셸의 $?와 같은 ${code}, guard 실패로 안내하지 않는다(#882 리뷰)`, async () => {
+      const self = rule(["git", REST], { materialize: { "tools/tf-github.sh": `#!/bin/sh\nkill -${sig} $$\n` } });
+      for (const json of [true, false]) {
+        const r = await runCli(["github", "verify", ...(json ? ["--json"] : [])], [self]);
+        expect(r.code).toBe(code);
+        expectPlanReadOnly(r);
+        if (json) {
+          expect([r.json.exitCode, r.json.status]).toEqual([code, "failed"]);
+          expect(r.json.error.message).toContain("신호로 끝났다");
+          expect(r.json.error.next).not.toContain("guard");
+        } else expect(r.stdout).toContain(`exit ${code} (신호로 중단)`);
+      }
+    });
+  }
+
   test("--json이면 래퍼 출력은 stderr로, stdout은 JSON 하나", async () => {
     const r = await runCli(["github", "verify", "--json"], [clone, wrapper({ code: 2, stdout: "WRAPPER-PLAN-TEXT\n" })]);
     expect(r.code).toBe(2);

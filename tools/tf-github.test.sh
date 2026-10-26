@@ -137,7 +137,8 @@ cat >"$t/p-app" <<'EOF2'
  {"address":"github_repository_ruleset.main_checks","mode":"managed","change":{"actions":["no-op"],"before":{"name":"VALUEMARK"}}},
  {"address":"github_repository_ruleset.app_main[\"files\"]","mode":"managed","change":{"actions":["no-op"],"importing":{"id":"files:1"}}},
  {"address":"data.github_rest_api.rulesets_app[\"smoke\"]","mode":"data","change":{"actions":["read"],"after":{"body":"VALUEMARK"}}},
- {"address":"github_repository_ruleset.main_review_v2","previous_address":"github_repository_ruleset.main_review","mode":"managed","change":{"actions":["no-op"],"before":{"name":"VALUEMARK"}}}
+ {"address":"github_repository_ruleset.main_review_v2","previous_address":"github_repository_ruleset.main_review","mode":"managed","change":{"actions":["no-op"],"before":{"name":"VALUEMARK"}}},
+ {"address":"data.terraform_remote_state.renamed","previous_address":"data.terraform_remote_state.old","mode":"data","change":{"actions":["read"]}}
 ],
 "output_changes":{
  "ruleset_ids":{"actions":["update"],"before":"VALUEMARK","after":"VALUEMARK"},
@@ -204,8 +205,8 @@ expect "delete plan은 --allow-destroy로 통과" 2 STUB_PLAN_EXIT=2 STUB_PLAN_J
 # --plan-json(T12 app new): 주소·동작만 남기고 종료 코드는 그대로다.
 expect "plan --plan-json은 exit 2를 그대로" 2 STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-app" -- plan --plan-json "$t/out/a.json"
 if [[ -f $t/out/a.json ]]; then
-  got=$(jq -c '[.schema, (.sha | test("^[0-9a-f]{40}$")), [.changes[] | [.address, .mode, (.actions | join(",")), .importing]]]' "$t/out/a.json")
-  want='["tf-github-plan/v1",true,[["github_repository_ruleset.app_main[\"smoke\"]","managed","create",false],["github_repository_ruleset.app_main[\"files\"]","managed","no-op",true],["data.github_rest_api.rulesets_app[\"smoke\"]","data","read",false],["github_repository_ruleset.main_review_v2","managed","no-op",false],["output.ruleset_ids","managed","update",false]]]'
+  got=$(jq -c '[.schema, (.sha | test("^[0-9a-f]{40}$")), [.changes[] | [.address, .mode, (.actions | join(",")), .importing, .moved]]]' "$t/out/a.json")
+  want='["tf-github-plan/v1",true,[["github_repository_ruleset.app_main[\"smoke\"]","managed","create",false,false],["github_repository_ruleset.app_main[\"files\"]","managed","no-op",true,false],["data.github_rest_api.rulesets_app[\"smoke\"]","data","read",false,false],["github_repository_ruleset.main_review_v2","managed","no-op",false,true],["data.terraform_remote_state.renamed","data","read",false,true],["output.ruleset_ids","managed","update",false,false]]]'
   [[ $got == "$want" ]] || { echo "FAIL: plan JSON 내용: $got"; fails=$((fails + 1)); }
   ! grep -q VALUEMARK "$t/out/a.json" || { echo "FAIL: plan JSON에 값이 있다"; fails=$((fails + 1)); }
   [[ $(stat -c %a "$t/out/a.json") == 600 ]] || { echo "FAIL: plan JSON 권한이 600이 아니다"; fails=$((fails + 1)); }

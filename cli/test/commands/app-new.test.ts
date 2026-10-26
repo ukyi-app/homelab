@@ -45,10 +45,10 @@ const APPLIED = [{ type: "deletion", ruleset_id: 21 }];
 const clone = rule(["git", REST], { materialize: { "tools/tf-github.sh": "stub" } });
 const planJson = (changes: unknown[]) => JSON.stringify({ schema: "tf-github-plan/v1", sha: PLAN_SHA, changes });
 const ONLY_CREATE = [
-  { address: WANT, mode: "managed", actions: ["create"], importing: false },
+  { address: WANT, mode: "managed", actions: ["create"], importing: false, moved: false },
   // 새 app_main에 의존하는 guard 3·4의 미뤄진 읽기(U35). 판정은 무시해야 한다.
-  { address: 'data.github_rest_api.rulesets_app["smoke"]', mode: "data", actions: ["read"], importing: false },
-  { address: 'data.github_rest_api.bypass_app["smoke"]', mode: "data", actions: ["read"], importing: false },
+  { address: 'data.github_rest_api.rulesets_app["smoke"]', mode: "data", actions: ["read"], importing: false, moved: false },
+  { address: 'data.github_rest_api.bypass_app["smoke"]', mode: "data", actions: ["read"], importing: false, moved: false },
 ];
 const wrapperPlan = (code: number, changes: unknown[] = ONLY_CREATE) => rule(["tf-github.sh", "plan", "--plan-json", REST], { code, writeLastArg: code === 0 || code === 2 ? planJson(changes) : undefined }, { noStdin: true });
 const wrapperApply = (code = 0) => rule(["tf-github.sh", "apply"], { code }, { noStdin: true });
@@ -222,7 +222,7 @@ describe("app new: 생성 단계(앱이 main 목록에 있음)", () => {
   });
 
   test("app-main이 active여도 main에 걸려 있지 않으면 완료로 보지 않고 래퍼 plan으로 판정한다(드리프트는 생성이 아니라 멈춤, #882 리뷰 1)", async () => {
-    const drift = [{ address: WANT, mode: "managed", actions: ["update"], importing: false }];
+    const drift = [{ address: WANT, mode: "managed", actions: ["update"], importing: false, moved: false }];
     for (const args of [["app", "new", "smoke", "--json"], ["app", "new", "smoke", "--apply", "--json"]]) {
       const rules = [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on"))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([ACTIVE]), appRules([[]]), clone, wrapperPlan(2, drift), wrapperApply(0)];
       const r = await runCli(args, rules);
@@ -235,17 +235,23 @@ describe("app new: 생성 단계(앱이 main 목록에 있음)", () => {
   });
 
   test("plan: 래퍼 plan에 주소 이동(moved)·root output 변경이 섞이면 실패(1), 쓰기 0건(#882 리뷰 2)", async () => {
-    const mixed = [...ONLY_CREATE, { address: "github_repository_ruleset.main_review_v2", mode: "managed", actions: ["no-op"], importing: false }, { address: "output.ruleset_ids", mode: "managed", actions: ["update"], importing: false }];
+    const mixed = [
+      ...ONLY_CREATE,
+      { address: "github_repository_ruleset.main_review_v2", mode: "managed", actions: ["no-op"], importing: false, moved: true },
+      { address: "data.terraform_remote_state.renamed", mode: "data", actions: ["read"], importing: false, moved: true },
+      { address: "output.ruleset_ids", mode: "managed", actions: ["update"], importing: false, moved: false },
+    ];
     const rules = [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on"))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([[]]), clone, wrapperPlan(2, mixed)];
     const r = await runCli(["app", "new", "smoke", "--json"], rules);
     expect(r.code).toBe(1);
     expectPlanReadOnly(r);
     expect(r.json.error.message).toContain("github_repository_ruleset.main_review_v2(주소 이동)");
     expect(r.json.error.message).toContain("output.ruleset_ids(update)");
+    expect(r.json.error.message).toContain("data.terraform_remote_state.renamed(주소 이동, read)");
   });
 
   test("plan: 래퍼 plan에 다른 관리 변경이 있으면 실패(1), 주소를 보이고 쓰기 0건", async () => {
-    const other = [...ONLY_CREATE, { address: "github_repository_ruleset.main_review", mode: "managed", actions: ["update"], importing: false }];
+    const other = [...ONLY_CREATE, { address: "github_repository_ruleset.main_review", mode: "managed", actions: ["update"], importing: false, moved: false }];
     const rules = [mainAt, listOnMain([...BASE, "smoke"]), ...templateOk(), repoGet([ghResponse(200, repo("on"))]), pvr([true]), fork(["all_external_contributors"]), appRulesets([[]]), clone, wrapperPlan(2, other)];
     const r = await runCli(["app", "new", "smoke", "--json"], rules);
     expect(r.code).toBe(1);
@@ -359,16 +365,19 @@ describe("app new: 판정과 목록 편집(순수 함수)", () => {
   });
 
   test("막는 경우: 래퍼 실패, 변경 없음, 다른 앱의 app_main, import, delete, data의 다른 동작, 생성 + 다른 변경", () => {
-    const c = (address: string, actions: string[], extra: Record<string, unknown> = {}) => ({ address, mode: "managed", actions, importing: false, ...extra });
+    const c = (address: string, actions: string[], extra: Record<string, unknown> = {}) => ({ address, mode: "managed", actions, importing: false, moved: false, ...extra });
     const cases: [number, any[] | null, string][] = [
       [1, null, "0·2가 아닌 코드"],
       [0, [], "생성이 없다"],
       [2, [c('github_repository_ruleset.app_main["other"]', ["create"])], "생성 말고 변경"],
       [2, [c(WANT, ["create"], { importing: true })], "생성 말고 변경"],
       [2, [c(WANT, ["delete", "create"])], "생성 말고 변경"],
-      [2, [{ address: 'data.github_rest_api.x["smoke"]', mode: "data", actions: ["create"], importing: false }], "생성 말고 변경"],
+      [2, [{ address: 'data.github_rest_api.x["smoke"]', mode: "data", actions: ["create"], importing: false, moved: false }], "생성 말고 변경"],
       [2, [c(WANT, ["create"]), c("github_repository_environment.automerge", ["update"])], "automerge(update)"],
-      [2, [c(WANT, ["create"]), c("github_repository_ruleset.renamed", ["no-op"])], "renamed(주소 이동)"],
+      [2, [c(WANT, ["create"]), c("github_repository_ruleset.renamed", ["no-op"], { moved: true })], "renamed(주소 이동)"],
+      // 미뤄진 data read와 이동이 겹친 항목. data read 예외보다 이동을 먼저 센다(#882 리뷰 2라운드).
+      [2, [c(WANT, ["create"]), c("data.terraform_remote_state.renamed", ["read"], { mode: "data", moved: true })], "renamed(주소 이동, read)"],
+      [2, [c(WANT, ["create"], { moved: true })], "생성 말고 변경"],
       [2, [c(WANT, ["create"]), c("output.o", ["update"])], "output.o(update)"],
     ];
     for (const [code, changes, msg] of cases) expect(() => judgePlan("smoke", pc(code, changes))).toThrow(msg);

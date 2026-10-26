@@ -19,6 +19,11 @@ export default defineCommand({
     if (code === 0) return { ...r, title: "homelab github plan: exit 0 (변경 없음)" };
     // 래퍼 apply는 plan을 다시 만들어 보여 주고 yes를 받는다. 이 plan 출력과 같은지 사람이 본다.
     if (code === 2) return { ...r, status: "pending", title: "homelab github plan: exit 2 (변경 있음)", next: allowDestroy ? "homelab github apply --allow-destroy" : "homelab github apply" };
+    // 128 이상은 래퍼가 신호로 끝난 것이다(셸의 $?와 같은 128+번호, core가 보존한다). guard 실패로 안내하지 않는다.
+    if (code >= 128) {
+      const again = `중단된 이유를 확인한 뒤 다시: homelab github plan`;
+      return { ...r, status: "failed", title: `homelab github plan: exit ${code} (신호로 중단)`, next: again, error: { message: `래퍼 plan가 신호로 끝났다(exit ${code})`, next: again } };
+    }
     const next = `${GUARD_NEXT}. 고친 뒤 다시: homelab github plan${allowDestroy ? " --allow-destroy" : ""}`;
     return { ...r, status: "failed", title: `homelab github plan: exit ${code} (guard 실패·오류)`, next, error: { message: `래퍼 plan이 exit ${code}로 끝났다`, next } };
   },
