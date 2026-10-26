@@ -283,6 +283,79 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     expect(w.writes).toEqual([]);
   });
 
+  test("r2 P1-1: 실행 기록이 사라져도 복원 흔적(Job, values의 running)이 있으면 --abort는 PR을 열지 않는다", async () => {
+    const w = await toRestoreJob("failed");
+    await runIn(w, cmd, "apply", { app: APP });
+    w.records.clear();
+    const a = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    expect(a.status).toBe("failed");
+    expect(a.error!.message).toContain("복원 흔적");
+    expect(w.openPrs()).toEqual([]);
+    // Job까지 지워도 values의 running: false가 남아 있다
+    w.objects.delete(`job/${NS}/restore-vk`);
+    const b = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    expect(b.status).toBe("failed");
+    expect(w.openPrs()).toEqual([]);
+  });
+
+  test("r2 P1-1: 기록도 흔적도 없으면 --abort는 할 일 없음(same)", async () => {
+    const w = restoreWorld();
+    const a = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    expect(a.status).toBe("same");
+    expect(w.writes).toEqual([]);
+  });
+
+  test("r2 P2-3: 라벨 없는 수동 백업 파드가 남아 있으면 --abort·--finish는 기록을 지우지 않는다", async () => {
+    const w = restoreWorld();
+    const orig = w.read.bind(w);
+    w.read = (mode) => {
+      const ctx = orig(mode);
+      const base = (ctx.k8s as any).waitCondition;
+      (ctx.k8s as any).waitCondition = (...a: any[]) => (String(a[2]?.name).startsWith("backup-") ? false : base(...a));
+      return ctx;
+    };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { "backup-first": true });
+    expect(r.status).toBe("failed");
+    const job = w.records.get(`${NS}/restore-vk`)!.data["backup.jobs"];
+    expect(job).toMatch(/^backup-[a-z0-9]+-[0-9a-f]{4}$/);
+    // 실제 백업 파드는 Job 라벨(job-name)만 있고 실행 라벨이 없다
+    w.put("pod", NS, `${job}-xyz`, { metadata: { name: `${job}-xyz`, labels: { "job-name": job } }, status: { phase: "Running" } });
+    const a = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    expect(a.status).toBe("failed");
+    expect(a.error!.message).toContain(`pod/${job}-xyz`);
+    expect(w.records.size).toBe(1);
+    w.objects.delete(`pod/${NS}/${job}-xyz`);
+    expect((await runIn(w, cmd, "apply", { app: APP }, { abort: true })).status).toBe("done");
+    expect(w.records.size).toBe(0);
+  });
+
+  test("r2 P2-4: 서버가 Ready가 아니어도(AOF 손상 등) 복원 흔적이 없으면 복원을 시작한다", async () => {
+    const w = restoreWorld();
+    w.obj("deployment", NS, `${APP}-valkey`)!.status = { updatedReplicas: 1, readyReplicas: 0 };
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("waiting");
+    expect(w.openPrs().map((p) => p.head)).toEqual([`cli/cache-restore-${APP}`]);
+  });
+
+  test("r2 P2-5: 복원 Job 전 사전 검사에서 멈추면 touched를 남기지 않아 --abort가 된다", async () => {
+    const w = restoreWorld();
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(900);
+    w.objects.delete(`deployment/${NS}/${APP}-valkey`);
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = true;
+    // 아직 끝나는 중인 옛 서버 파드(PVC를 마운트)
+    w.put("pod", NS, "old-server", { metadata: { name: "old-server" }, status: { phase: "Running" }, spec: { volumes: [{ persistentVolumeClaim: { claimName: "valkey-data" } }] } });
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("failed");
+    expect(w.obj("job", NS, "restore-vk")).toBeUndefined();
+    expect(w.records.get(`${NS}/restore-vk`)!.data.touched).toBeUndefined();
+    w.objects.delete(`pod/${NS}/old-server`);
+    const a = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    // 서버를 다시 올리는 PR을 열고 병합을 기다린다(거부가 아니다)
+    expect(a.status).toBe("waiting");
+    expect(w.openPrs().map((p) => p.head)).toEqual([`cli/cache-restore-abort-${APP}`]);
+  });
+
   test("--abort: 복원 Job 전이면 기록을 지우고, 복원 Job 뒤면 거부한다", async () => {
     const w = restoreWorld();
     await runIn(w, cmd, "apply", { app: APP });

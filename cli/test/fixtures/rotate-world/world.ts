@@ -45,7 +45,8 @@ export class World {
   prs: { number: number; head: string; open: boolean; title: string }[] = [];
   removalDate = "2026-10-20T00:00:00Z";
   // 저장소 경로 → 커밋 시각(새것부터). 없으면 apps/는 [removalDate], 그 밖은 [2026-10-01]. "broken"은 모양이 다른 응답.
-  history = new Map<string, string[] | "broken">();
+  history = new Map<string, { date: string; status: "added" | "modified" | "removed" }[] | "broken">();
+  commitFiles = new Map<string, { filename: string; status: string }[]>();
   tags = new Set<string>();
   passwords = 0;
   jobLogs = new Map<string, string>();
@@ -157,9 +158,20 @@ export class World {
     }
     if ((x = m.match(/^commits\?path=(.+)&sha=main&per_page=([0-9]+)$/))) {
       const path = decodeURIComponent(x[1]);
-      const h = this.history.get(path) ?? (path.startsWith("apps/") ? [this.removalDate] : ["2026-10-01T00:00:00Z"]);
+      const h = this.history.get(path) ?? (path.startsWith("apps/") ? [{ date: this.removalDate, status: "removed" as const }] : [{ date: "2026-10-01T00:00:00Z", status: "added" as const }]);
       if (h === "broken") return { status: 200, json: { message: "모양이 다름" } };
-      return { status: 200, json: h.slice(0, Number(x[2])).map((date) => ({ commit: { committer: { date } } })) };
+      return {
+        status: 200,
+        json: h.slice(0, Number(x[2])).map((e, i) => {
+          const sha = new Bun.CryptoHasher("sha1").update(`${path}#${i}`).digest("hex");
+          this.commitFiles.set(sha, [{ filename: path, status: e.status }]);
+          return { sha, commit: { committer: { date: e.date } } };
+        }),
+      };
+    }
+    if ((x = m.match(/^commits\/([0-9a-f]{40})$/))) {
+      const files = this.commitFiles.get(x[1]);
+      return files ? { status: 200, json: { files } } : { status: 404, json: { message: "Not Found" } };
     }
     if ((x = m.match(/^contents\/([^?]+)\?ref=main$/))) {
       const dir = decodeURIComponent(x[1]);

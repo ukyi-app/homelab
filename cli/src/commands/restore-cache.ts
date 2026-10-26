@@ -56,9 +56,35 @@ function restoreUsers(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   return [...pods, ...jobs];
 }
 
-// 이 실행 라벨의 Job·파드(지우는 중 포함). 기록을 지우기 직전에 0개여야 한다.
-function runObjects(ctx: ReadCtx | WriteCtx, n: Names, run: string): string[] {
-  return [...ctx.k8s.list("job", n.ns, `${LABEL}=${run}`).map((j) => `job/${j.metadata?.name}`), ...ctx.k8s.list("pod", n.ns, `${LABEL}=${run}`).map((p) => `pod/${p.metadata?.name}`)];
+// 이 실행의 Job·파드(지우는 중 포함). 기록을 지우기 직전에 0개여야 한다.
+// 함정: CronJob에서 만든 수동 백업 Job은 Job에만 실행 라벨이 있고 파드 템플릿에는 없다(core createJobFromCronJob, 차트의 백업
+// 템플릿에도 없다). 그래서 기록해 둔 백업 Job 이름마다 Kubernetes가 붙이는 job-name 라벨로 파드를 따로 찾는다(#883 r2 P2-3).
+function runObjects(ctx: ReadCtx | WriteCtx, n: Names, r: RestoreRecord): string[] {
+  const out = [...ctx.k8s.list("job", n.ns, `${LABEL}=${r.run}`).map((j) => `job/${j.metadata?.name}`), ...ctx.k8s.list("pod", n.ns, `${LABEL}=${r.run}`).map((p) => `pod/${p.metadata?.name}`)];
+  for (const job of backupJobs(r)) {
+    for (const p of ctx.k8s.list("pod", n.ns, `job-name=${job}`)) out.push(`pod/${p.metadata?.name}`);
+    if (ctx.k8s.get("job", n.ns, job)) out.push(`job/${job}`);
+  }
+  return [...new Set(out)];
+}
+
+const BACKUP_JOB = /^backup-[a-z0-9]{1,22}-[0-9a-f]{4}$/;
+
+function backupJobs(r: RestoreRecord): string[] {
+  const names = (r.data["backup.jobs"] ?? "").split(",").filter(Boolean);
+  if (names.some((x) => !BACKUP_JOB.test(x))) throw new Error("실행 기록의 backup.jobs 형식이 아니다");
+  return names;
+}
+
+// 기록이 없을 때 남은 복원 흔적. Git의 복원 설정, 복원 Job, valkey-data를 쓰는 Job 파드. 서버가 안 떠 있는 것은 흔적이 아니다
+// (AOF 손상처럼 서버 장애를 복원으로 고치려는 경우다, #883 r2 P2-4).
+function traces(ctx: ReadCtx | WriteCtx, n: Names): string[] {
+  const v = values(ctx, n.dataFile)?.valkey ?? {};
+  const left: string[] = [];
+  if ("running" in v || "restoreMode" in v) left.push(`${n.dataFile}에 running·restoreMode`);
+  if (ctx.k8s.get("job", n.ns, JOB)) left.push(`job/${JOB}`);
+  left.push(...restoreUsers(ctx, n));
+  return left;
 }
 
 function rolledOut(d: any): boolean {
@@ -219,14 +245,9 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         if (job && job.metadata?.labels?.[LABEL] !== r?.run) return { state: "differs", action: "none", detail: `다른 실행의 Job ${JOB}이 있다`, next: `kubectl -n ${n.ns} get job,pod -L ${LABEL}로 보고, 끝났으면 로그를 남긴 뒤 지운다` };
         if (r) return same(`이 복원(실행 ${r.run})을 잇는다`);
         // 기록이 없으면 처음 상태여야 한다. 기록만 지워진 진행 중 복원을 새 실행으로 처음부터 다시 하지 않는다(PVC를 또 덮는다).
-        const v = values(ctx, n.dataFile)?.valkey ?? {};
-        const left: string[] = [];
-        if ("running" in v || "restoreMode" in v) left.push(`${n.dataFile}에 running·restoreMode`);
-        const d = ctx.k8s.get("deployment", n.ns, n.server);
-        if (!d || !rolledOut(d)) left.push(`서버 ${n.server}가 떠 있지 않다`);
-        left.push(...restoreUsers(ctx, n));
+        const left = traces(ctx, n);
         if (left.length) return { state: "differs", action: "none", detail: `실행 기록 없이 복원 흔적이 있다(${left.join(", ")})`, next: `kubectl -n ${n.ns} get deploy,job,pod -L ${LABEL}와 ${n.dataFile}를 손으로 확인한다(restore.md 1절)` };
-        return same("없음, 서버 정상");
+        return same("없음, 복원 흔적 없음");
       },
     },
     {
@@ -254,7 +275,8 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         const run = mine(w, n).run;
         // 시도마다 새 이름(restore.md 0.1: 실패한 시도의 로그를 지우지 않고 남긴다).
         const job = `backup-${run}-${newRunId().slice(-4)}`;
-        mark(w, n, { "ok.cleanup": null });
+        // 만들기 전에 이름을 남긴다. 만들기 결과가 미상이어도 정리·재확인이 그 이름으로 파드를 찾는다.
+        mark(w, n, { "ok.cleanup": null, "backup.jobs": [...backupJobs(mine(w, n)), job].join(",") });
         w.k8s.createJobFromCronJob(n.ns, n.cronjob, job, run);
         if (!w.k8s.waitCondition("job", n.ns, { name: job }, "complete", 600)) throw new Error(`수동 백업 Job ${job}이 10분 안에 끝나지 않았다(kubectl -n ${n.ns} logs job/${job} --all-containers)`);
         const up = /^올림: (r2:[a-z0-9-]+\/valkey\/[a-z0-9-]+\/dump-[0-9]{8}T[0-9]{6}Z\.rdb)$/m.exec(w.k8s.logs(n.ns, { job }, { container: "upload", tail: 20 }))?.[1];
@@ -306,12 +328,13 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
       },
       async apply(w) {
         const run = mine(w, n).run;
-        // Job을 만들기 전에 남긴다. Job이 appendonlydir을 지운 뒤 실패하거나 로그·기록 저장이 실패해 ok.job이 없어도,
-        // 사람이 Job을 지워도 PVC는 이미 바뀌었을 수 있다. 이 표식이 있으면 --abort를 거부한다(#883 r1 P1-1).
-        mark(w, n, { touched: "1", "ok.cleanup": null });
+        // touched: Job이 appendonlydir을 지운 뒤 실패하거나 로그·기록 저장이 실패해 ok.job이 없어도, 사람이 Job을 지워도 PVC는
+        // 이미 바뀌었을 수 있다. 이 표식이 있으면 --abort를 거부한다(#883 r1 P1-1). 읽기 사전 검사가 실패하면 남기지 않는다.
+        // 만들기를 요청하기 바로 전, 또는 이 실행의 Job이 이미 있음을 본 때에만 남긴다(#883 r2 P2-5).
         const existing = w.k8s.get("job", n.ns, JOB);
         if (existing) {
           if (existing.metadata?.labels?.[LABEL] !== run) throw new Error(`다른 실행의 Job ${JOB}이 있다`);
+          mark(w, n, { touched: "1", "ok.cleanup": null });
           if (hasTrue(existing, "Failed")) throw new Error(`앞 시도의 Job ${JOB}이 실패했다. 로그(kubectl -n ${n.ns} logs job/${JOB})를 남긴 뒤 지우고(kubectl -n ${n.ns} delete job ${JOB} --wait) 다시 실행한다`);
         } else {
           // 이 PVC를 쓰는(쓸) 파드·Job이 남아 있으면 멈춘다. 이름·라벨로 거르지 않는다(옛 이름의 Job, 아직 안 내려간 서버 파드도 걸리게).
@@ -319,6 +342,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
           const jobs = w.k8s.list("job", n.ns).filter((j) => !hasTrue(j, "Complete") && !hasTrue(j, "Failed") && mountsData(j?.spec?.template?.spec)).map((j) => `job/${j.metadata?.name}`);
           if (pods.length || jobs.length) throw new Error(`valkey-data를 쓰는 파드·Job이 남아 있다: ${[...pods, ...jobs].join(", ")}. 끝났는지 보고 지운 뒤 다시 한다`);
           const { image, bucket } = uploadContainer(w, n);
+          mark(w, n, { touched: "1", "ok.cleanup": null });
           w.k8s.createRestoreObject(n.ns, restoreJob(n, run, mine(w, n).data.object ?? object, image, bucket));
         }
         if (!w.k8s.waitCondition("job", n.ns, { name: JOB }, "complete", 900)) throw new Error(`복원 Job이 15분 안에 끝나지 않았다(kubectl -n ${n.ns} get job,pod -L ${LABEL})`);
@@ -431,9 +455,10 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         return { state: "missing", action: "delete", detail: "수동 백업·복원 Job 지우고 0개 확인" };
       },
       async apply(w) {
-        const run = mine(w, n).run;
+        const r = mine(w, n);
+        const run = r.run;
         w.k8s.deleteRestoreObjects(n.ns, run);
-        const left = runObjects(w, n, run);
+        const left = runObjects(w, n, r);
         if (left.length) throw new Error(`이 실행의 객체가 남았다(${left.join(", ")})`);
         mark(w, n, { "ok.cleanup": "1" });
       },
@@ -451,7 +476,7 @@ function finishSteps(n: Names): Step[] {
         const r = record(ctx, n);
         if (!r) return same("기록 없음");
         if (!has(r, "ok.cleanup")) return { state: "differs", action: "none", detail: `실행 ${r.run}이 끝나지 않았다`, next: `homelab cache restore ${n.app} --apply로 끝까지 잇거나 --abort` };
-        const left = runObjects(ctx, n, r.run);
+        const left = runObjects(ctx, n, r);
         if (left.length) return { state: "differs", action: "none", detail: `실행 ${r.run}의 객체가 남아 있다(${left.join(", ")})`, next: `kubectl -n ${n.ns} get job,pod -l ${LABEL}=${r.run}로 보고 끝난 뒤 다시` };
         return same(`실행 ${r.run} 끝남(키 ${r.data.dbsize}개)`);
       },
@@ -467,7 +492,7 @@ function finishSteps(n: Names): Step[] {
         const r = mine(w, n);
         // 기록이 잠금이다. 지우기 직전에 표식이 아니라 지금 클러스터를 다시 본다(#883 r1 P1-3).
         if (!has(r, "ok.cleanup")) throw new Error(`실행 ${r.run}이 끝나지 않았다`);
-        const left = runObjects(w, n, r.run);
+        const left = runObjects(w, n, r);
         if (left.length) throw new Error(`실행 ${r.run}의 객체가 남아 있다(${left.join(", ")}). 기록은 그대로다`);
         w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
       },
@@ -484,7 +509,12 @@ function abortSteps(n: Names): Step[] {
       target: "그만둘 수 있는지",
       async read(ctx) {
         const r = record(ctx, n);
-        if (!r) return same("기록 없음");
+        if (!r) {
+          // 기록이 없으면 파괴 이전임을 기록으로 증명할 수 없다. 흔적이 하나라도 있으면 복원 설정을 지우는 PR을 열지 않는다(#883 r2 P1-1).
+          const left = traces(ctx, n);
+          if (left.length) return { state: "differs", action: "none", detail: `실행 기록 없이 복원 흔적이 있다(${left.join(", ")})`, next: `PVC가 바뀌었는지 손으로 확인한다(restore.md 1절, kubectl -n ${n.ns} get job,pod -L ${LABEL})` };
+          return same("기록 없음, 복원 흔적 없음");
+        }
         const next = `homelab cache restore ${app} --apply로 끝까지 잇는다`;
         // Job 유무가 아니라 Job을 만들기 전에 남긴 touched로 판단한다. Job은 지워질 수 있다(#883 r1 P1-1).
         if (has(r, "touched") || has(r, "ok.job")) return { state: "differs", action: "none", detail: "복원 Job을 만든 뒤라 PVC가 바뀌었을 수 있다", next };
@@ -512,8 +542,11 @@ function abortSteps(n: Names): Step[] {
       id: "up",
       target: `서버 ${n.server}`,
       async read(ctx) {
+        if (!record(ctx, n)) return same("기록 없음");
         const d = ctx.k8s.get("deployment", n.ns, n.server);
-        return d && rolledOut(d) ? same("떠 있음") : same("PR 병합됨", { hold: "Argo CD 반영 대기(서버 올림)" });
+        if (!d) return same("PR 병합됨", { hold: "Argo CD 반영 대기(서버 Deployment 다시 생김)" });
+        // 복원 전부터 장애였던 서버는 Ready가 안 될 수 있다. 그만두기를 Ready에 묶지 않고 알리기만 한다.
+        return rolledOut(d) ? same("떠 있음") : same("Deployment 있음", { warn: "서버가 Ready가 아니다. 그만둔 뒤 따로 본다" });
       },
     },
     {
@@ -527,7 +560,7 @@ function abortSteps(n: Names): Step[] {
         // 지우기 직전에 다시 본다(abortable 뒤에 Job이 생겼을 수 있다).
         if (has(r, "touched") || has(r, "ok.job") || w.k8s.get("job", n.ns, JOB)) throw new Error("복원 Job을 만든 뒤라 그만두지 않는다");
         w.k8s.deleteRestoreObjects(n.ns, r.run);
-        const left = runObjects(w, n, r.run);
+        const left = runObjects(w, n, r);
         if (left.length) throw new Error(`이 실행의 객체가 남았다(${left.join(", ")}). 기록은 그대로다`);
         w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
       },

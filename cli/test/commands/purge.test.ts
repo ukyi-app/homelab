@@ -19,7 +19,9 @@ function planRules(opts: { backupAfter?: boolean } = {}): Rule[] {
     ghGet(contents(`apps/${APP}`), 404, { message: "Not Found" }),
     kubectlRule(["-n", "argocd", "get", "applications.argoproj.io", APP, "-o", "json"], notFound),
     ghGet(contents(DATA), 200, fileResp(dataText)),
-    ghGet(`repos/ukyi-app/homelab/commits?path=apps%2F${APP}%2Fvalues.yaml&sha=main&per_page=1`, 200, [{ commit: { committer: { date: "2026-10-20T00:00:00Z" } } }]),
+    ghGet(`repos/ukyi-app/homelab/commits?path=apps%2F${APP}%2Fvalues.yaml&sha=main&per_page=1`, 200, [{ sha: "1".repeat(40), commit: { committer: { date: "2026-10-20T00:00:00Z" } } }]),
+    ghGet(`repos/ukyi-app/homelab/commits?path=data%2F${APP}%2Fvalues.yaml&sha=main&per_page=30`, 200, [{ sha: "2".repeat(40), commit: { committer: { date: "2026-10-01T00:00:00Z" } } }]),
+    ghGet(`repos/ukyi-app/homelab/commits/${"2".repeat(40)}`, 200, { files: [{ filename: DATA, status: "added" }] }),
     kubectlRule(["-n", "database", "get", "backups.postgresql.cnpg.io", "-o", "json"], { stdout: JSON.stringify({ items: [{ spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: opts.backupAfter === false ? "2026-10-19T18:00:00Z" : "2026-10-20T18:00:00Z" } }] }) }),
     ghGet("repos/ukyi-app/homelab/git/ref/tags/data-chart-v1.0.2", 200, { object: { sha: FAKE_SHA } }),
     ghGet("repos/ukyi-app/homelab/git/ref/heads/main", 200, { object: { sha: FAKE_SHA } }),
@@ -156,9 +158,9 @@ describe("data purge: 흐름(가짜 세계)", () => {
   });
 
   test("r1 P1-2: 앱 이력을 못 읽거나 모양이 다르면 백업 검사를 통과시키지 않는다(PR 없음)", async () => {
-    for (const broken of ["broken", []] as const) {
+    for (const broken of ["broken" as const, []]) {
       const w = purgeWorld();
-      w.history.set(`apps/${APP}/values.yaml`, broken as any);
+      w.history.set(`apps/${APP}/values.yaml`, broken);
       if (Array.isArray(broken)) w.history.set(DATA, []);
       const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
       expect(r.status).toBe("failed");
@@ -171,8 +173,11 @@ describe("data purge: 흐름(가짜 세계)", () => {
   test("r1 P1-2: 앱 없이 등록한 데이터는 data 첫 커밋 뒤 백업을 요구한다(이력이 길면 멈춘다)", async () => {
     const w = purgeWorld();
     w.history.set(`apps/${APP}/values.yaml`, []);
-    // 새것부터: PR 1이 같은 파일을 고쳐도 첫 커밋(2026-10-22)은 그대로다
-    w.history.set(DATA, ["2026-10-25T00:00:00Z", "2026-10-22T00:00:00Z"]);
+    // 새것부터: PR 1이 같은 파일을 고쳐도(modified) 생긴 커밋(2026-10-22)은 그대로다
+    w.history.set(DATA, [
+      { date: "2026-10-25T00:00:00Z", status: "modified" },
+      { date: "2026-10-22T00:00:00Z", status: "added" },
+    ]);
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
     expect(r.error!.message).toContain("데이터 등록(앱 이력 없음)(2026-10-22T00:00:00Z) 뒤");
@@ -183,8 +188,45 @@ describe("data purge: 흐름(가짜 세계)", () => {
 
     const long = purgeWorld();
     long.history.set(`apps/${APP}/values.yaml`, []);
-    long.history.set(DATA, Array.from({ length: 100 }, () => "2026-10-22T00:00:00Z"));
+    long.history.set(DATA, Array.from({ length: 100 }, () => ({ date: "2026-10-22T00:00:00Z", status: "modified" as const })));
     expect((await runIn(long, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+  });
+
+  test("r2 P1-2: 폐기 뒤 다시 등록한 데이터는 재등록 뒤 백업만 인정한다", async () => {
+    for (const apps of [[], [{ date: "2026-10-10T00:00:00Z", status: "removed" as const }]]) {
+      const w = purgeWorld();
+      w.history.set(`apps/${APP}/values.yaml`, apps);
+      // 10/1 처음 등록 → 10/24 삭제 → 10/25 재등록. 성공 백업은 10/21(옛 데이터)뿐이다
+      w.history.set(DATA, [
+        { date: "2026-10-25T00:00:00Z", status: "added" },
+        { date: "2026-10-24T00:00:00Z", status: "removed" },
+        { date: "2026-10-01T00:00:00Z", status: "added" },
+      ]);
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(r.status).toBe("failed");
+      expect(r.error!.message).toContain("2026-10-25T00:00:00Z");
+      expect(w.openPrs()).toEqual([]);
+    }
+  });
+
+  test("r2 P1-2: 앱 삭제 뒤 데이터를 다시 등록했으면 늦은 쪽(재등록)이 기준이다", async () => {
+    const w = purgeWorld();
+    w.history.set(DATA, [{ date: "2026-10-22T12:00:00Z", status: "added" }]);
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("데이터 재등록(앱 삭제 뒤)");
+  });
+
+  test("r2 P1-2: 커밋의 파일 목록을 못 읽거나 상태가 이상하면 멈춘다", async () => {
+    const w = purgeWorld();
+    // 파일이 지금 있는데 가장 최근 상태가 removed: 이력이 맞지 않는다. 더 오래된 added로 넘어가 옛 백업을 인정하지 않는다
+    w.history.set(DATA, [
+      { date: "2026-10-22T00:00:00Z", status: "removed" },
+      { date: "2026-10-01T00:00:00Z", status: "added" },
+    ]);
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(w.openPrs()).toEqual([]);
   });
 
   test("PR 1 뒤 Database CR이 없으면 반영으로 보지 않고 PR 2를 열지 않는다", async () => {

@@ -53,17 +53,41 @@ function commitDates(ctx: ReadCtx, path: string, perPage: number): string[] | { 
   return dates as string[];
 }
 
+const MAX_WALK = 30;
+
+// 지금 data/<app>/values.yaml이 생긴 커밋(가장 최근의 added)의 시각. 폐기 뒤 재등록이면 그 재등록이다(#883 r2 P1-2).
+// 새것부터 커밋마다 그 파일의 상태(added·modified·removed)를 읽는다. PR 1(purge: true)은 modified라 지나간다.
+// 생긴 커밋을 MAX_WALK 안에서 못 찾거나 모양이 다르면 정할 수 없다(멈춘다).
+function dataRegistered(ctx: ReadCtx, path: string): { date: string } | { problem: string } {
+  const r = ctx.gh.get(`${REPO}/commits?path=${encodeURIComponent(path)}&sha=main&per_page=${MAX_WALK}`);
+  if (r.status !== 200 || !Array.isArray(r.json)) return { problem: `${path} 이력을 읽지 못했다(HTTP ${r.status})` };
+  for (const c of r.json) {
+    const sha = c?.sha;
+    const date = c?.commit?.committer?.date;
+    if (typeof sha !== "string" || !/^[0-9a-f]{40}$/.test(sha) || typeof date !== "string" || !Number.isFinite(Date.parse(date))) return { problem: `${path} 이력의 커밋 모양이 다르다` };
+    const d = ctx.gh.get(`${REPO}/commits/${sha}`);
+    const files = d.status === 200 && Array.isArray(d.json?.files) ? d.json.files : null;
+    if (!files) return { problem: `커밋 ${sha.slice(0, 7)}의 파일 목록을 읽지 못했다(HTTP ${d.status})` };
+    // 커밋이 파일 300개를 넘으면 목록이 잘린다. 그 파일이 없으면 판단할 수 없다.
+    const f = files.find((x: any) => x?.filename === path);
+    if (!f) return { problem: `커밋 ${sha.slice(0, 7)}에서 ${path}의 변경을 찾지 못했다` };
+    if (f.status === "added" || f.status === "renamed" || f.status === "copied") return { date };
+    if (f.status !== "modified" && f.status !== "changed") return { problem: `${path}이 지금 있는데 이력의 상태가 ${String(f.status)}다` };
+  }
+  return { problem: `${path}이 생긴 커밋을 최근 ${MAX_WALK}개 안에서 찾지 못했다` };
+}
+
+// 백업 기준 시각: 앱 삭제(apps/<app>의 마지막 커밋)와 지금 데이터 등록 중 늦은 쪽. 앱을 지운 뒤 데이터를 다시 등록했으면
+// 앱 삭제 뒤 백업이라도 새 데이터를 담지 않았을 수 있다. 앱 이력이 없으면(앱 없이 등록한 데이터) 데이터 등록만.
 function baseline(ctx: ReadCtx, app: string): Baseline {
   const apps = commitDates(ctx, `apps/${app}/values.yaml`, 1);
   if (!Array.isArray(apps)) return apps;
-  if (apps.length > 0) return { date: apps[0], removed: Date.parse(apps[0]), what: "앱 삭제" };
-  const data = commitDates(ctx, `data/${app}/values.yaml`, 100);
-  if (!Array.isArray(data)) return data;
-  if (data.length === 0) return { problem: `apps/${app}·data/${app} 이력이 둘 다 없어 백업 기준 시각을 정할 수 없다` };
-  // 100개를 채우면 첫 커밋이 이 쪽에 없을 수 있다.
-  if (data.length >= 100) return { problem: `data/${app} 이력이 100개 이상이라 첫 커밋을 정할 수 없다` };
-  const first = data[data.length - 1];
-  return { date: first, removed: Date.parse(first), what: "데이터 등록(앱 이력 없음)" };
+  const reg = dataRegistered(ctx, `data/${app}/values.yaml`);
+  if ("problem" in reg) return reg;
+  const removed = apps.length > 0 ? Date.parse(apps[0]) : Number.NEGATIVE_INFINITY;
+  const registered = Date.parse(reg.date);
+  if (removed >= registered) return { date: apps[0], removed, what: "앱 삭제" };
+  return { date: reg.date, removed: registered, what: apps.length > 0 ? "데이터 재등록(앱 삭제 뒤)" : "데이터 등록(앱 이력 없음)" };
 }
 
 const protectedOf = (o: any) => /Delete=false|Prune=false/.test(String(o?.metadata?.annotations?.[PROTECT] ?? ""));
