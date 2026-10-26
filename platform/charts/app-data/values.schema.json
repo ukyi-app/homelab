@@ -36,6 +36,10 @@
         "restoreMode": { "description": "true면 appendonly no로 띄워 RDB를 읽는다(복원 3단계). 복원 뒤 false로 되돌린다.", "type": "boolean" }
       }
     },
+    "purge": {
+      "description": "true면 폐기 준비다(설계 C.5.5 PR 1): 보호 주석(Prune=false,Delete=false)을 빼고 Database·DatabaseRole reclaim을 delete로. 병합·동기화 확인 뒤 data/<app> 삭제 PR(PR 2)로 DB·역할·PVC가 지워진다. 평소에는 적지 않는다.",
+      "type": "boolean"
+    },
     "backup": {
       "description": "ApplicationSet data가 클러스터 값으로 넣는다. 사람이 적지 않는다.",
       "type": "object",

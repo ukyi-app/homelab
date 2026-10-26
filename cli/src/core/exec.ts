@@ -42,6 +42,8 @@ export type ExecResult = {
   errKind?: "not-found" | "timeout" | "spawn";
   // opts.signals 중 stdout·stderr에 맞은 이름.
   signals?: string[];
+  // 자식이 신호로 끝났으면 그 이름(SIGTERM 등). 그때 code는 null이다(#882 리뷰: 위임 종료 코드 보존).
+  signal?: string;
 };
 
 export type Exec = (argv: string[], opts?: ExecOpts) => ExecResult;
@@ -148,6 +150,7 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
     if (opts.signals) result.signals = Object.entries(opts.signals).filter(([, re]) => re.test(rawErr) || re.test(stdoutText)).map(([k]) => k);
     if (opts.secretStdout) result.stdoutSecret = new Secret(stdoutText);
     if ((p as { exitedDueToTimeout?: boolean }).exitedDueToTimeout) result.errKind = "timeout";
+    if (typeof p.signalCode === "string") result.signal = p.signalCode;
     return result;
   };
 }
@@ -207,6 +210,56 @@ export function makeForward(exec: Exec, m: { env: Record<string, string | undefi
     } finally {
       p.kill();
       await p.exited;
+    }
+  };
+}
+
+// kubectl 둘을 잇는 파이프(03 2부: pg_dump | rclone rcat, rclone cat | pg_restore, 임시 클러스터 pg_dump | 복원 Job pg_restore).
+// 데이터는 CLI 메모리를 흐름으로만 지나고 디스크에 남지 않는다(restore.md 1단계: 사람 기기에 데이터가 남지 않게).
+// 판정은 두 종료 코드를 함께 본다(한쪽만 0이면 실패다: 앞이 죽으면 뒤는 잘린 입력으로 성공할 수 있다).
+// stderr 원문은 돌려주지 않는다(pg_restore 오류에 행 데이터가 섞일 수 있다). 소비자 stdout만 상한까지 모은다.
+export type PipeResult = { producerCode: number | null; consumerCode: number | null; stdout: string; timedOut: boolean };
+export type Pipe = (producer: string[], consumer: string[], opts?: { timeoutMs?: number; maxStdout?: number }) => Promise<PipeResult>;
+
+const PIPE_MAX_STDOUT = 32 * 1024 * 1024;
+
+export function makePipe(m: { env: Record<string, string | undefined>; live: () => boolean }): Pipe {
+  return async (producer, consumer, opts = {}) => {
+    if (!m.live()) throw new Error(`${PLAN_WRITE_BLOCKED}: 끝난 apply의 쓰기 문맥을 다시 썼다(Step.apply 밖)`);
+    for (const argv of [producer, consumer]) {
+      if (argv[0] !== "kubectl" || argv[1] !== "-n" || !argv.includes("exec")) throw new Error("파이프는 kubectl exec 둘만 잇는다");
+      for (const a of argv) if (containsTracked(a) || a.includes("\0")) throw new Error("파이프 인자에 쓸 수 없는 값이 있다");
+    }
+    const env = childEnv("kubectl", m.env, {});
+    const max = opts.maxStdout ?? PIPE_MAX_STDOUT;
+    const timeoutMs = timeoutFor(true, m.env, opts.timeoutMs ?? 3_600_000);
+    const a = Bun.spawn(producer, { env, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const b = Bun.spawn(consumer, { env, stdin: a.stdout, stdout: "pipe", stderr: "ignore" });
+    let timedOut = false;
+    let tooBig = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      a.kill();
+      b.kill();
+    }, timeoutMs);
+    try {
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      for await (const c of b.stdout) {
+        size += c.length;
+        if (size > max) {
+          tooBig = true;
+          a.kill();
+          b.kill();
+          break;
+        }
+        chunks.push(c);
+      }
+      const [producerCode, consumerCode] = await Promise.all([a.exited, b.exited]);
+      if (tooBig) throw new Error(`파이프 출력이 상한(${max}바이트)을 넘었다`);
+      return { producerCode: timedOut ? null : producerCode, consumerCode: timedOut ? null : consumerCode, stdout: new TextDecoder().decode(Buffer.concat(chunks)), timedOut };
+    } finally {
+      clearTimeout(timer);
     }
   };
 }

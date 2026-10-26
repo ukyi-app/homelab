@@ -340,6 +340,33 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
 // 이 실행이 아닌 기록·객체를 건드리지 않게, 기록 키를 JSON pointer로 쓸 때 쓰는 꼴(키 형식에 ~·/가 없다).
 const pointer = (key: string) => `/data/${key}`;
 const RAW_PATH = { job: "/apis/batch/v1", cluster: "/apis/postgresql.cnpg.io/v1" } as const;
+// core(pgrestore.ts)만 쓰는 기록 키: 4-2 입력, 파괴 단계 표시, 2단계에서 고정한 임시 주 파드, 되돌림 사본 버킷.
+const CORE_KEYS = /^(in\.|dropped$|tmp$|bucket$)/;
+
+// 복원 기록 고치기. 첫 op가 test /data/run = run이라 남의 실행 기록이면 API 서버가 거부한다. 값 null은 그 키를 지운다.
+// allowCore는 pgrestore.ts만 true로 부른다(in.*·dropped).
+export function updateRecord(exec: Exec, r: KubeRead, ns: string, name: RestoreRecordName, runId: string, set: Record<string, string | null>, allowCore: boolean): void {
+  checkName("namespace", ns);
+  checkRecord(name);
+  checkRun(runId);
+  const cur = r.restoreRecord(ns, name);
+  if (!cur || cur.run !== runId) throw new Error(`복원 기록 ${name}이 이 실행(${runId})의 것이 아니다`);
+  const ops: unknown[] = [{ op: "test", path: pointer("run"), value: runId }];
+  for (const [k, v] of entries(set)) {
+    if (!RECORD_KEY.test(k) || k === "run") throw new Error("복원 기록 키 형식이 아니다(run은 바꾸지 않는다)");
+    if (!allowCore && CORE_KEYS.test(k)) throw new Error(`복원 기록 ${k}는 core만 쓴다`);
+    if (v === null) {
+      if (Object.hasOwn(cur.data, k)) ops.push({ op: "remove", path: pointer(k) });
+    } else {
+      if (typeof v !== "string" || isSecret(v)) throw new Error("복원 기록 값은 문자열이다");
+      ops.push({ op: "add", path: pointer(k), value: v });
+    }
+  }
+  parseRecord({ metadata: { labels: { [RESTORE_LABEL]: runId }, resourceVersion: "0" }, data: { ...cur.data, ...Object.fromEntries(entries(set).filter(([, v]) => v !== null)) } }, name);
+  const x = run(exec, ["-n", ns, "patch", "configmaps", name, "--type=json", "--patch-file=/dev/stdin"], { input: jsonStringify(ops) });
+  if (x.code !== 0 && /test operation|testing value|jsonpatch test/i.test(x.stderr)) throw new Error(`복원 기록 ${name}: 잠금이 이 실행의 것이 아니다(test 실패)`);
+  must(x, `복원 기록 ${name} 고치기`);
+}
 
 export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
   const pollMs = opts.pollMs ?? POLL_MS;
@@ -393,6 +420,7 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       checkName("namespace", ns);
       checkRecord(name);
       checkRun(runId);
+      for (const k of Object.keys(data)) if (CORE_KEYS.test(k)) throw new Error(`복원 기록 ${k}는 core만 쓴다`);
       const body = { ...data, run: runId };
       for (const [k, v] of entries(body)) {
         if (!RECORD_KEY.test(k) || typeof v !== "string") throw new Error("복원 기록 키·값 형식이 아니다");
@@ -406,25 +434,9 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       return "created";
     },
     restoreRecordUpdate(ns, name, runId, set) {
-      checkName("namespace", ns);
-      checkRecord(name);
-      checkRun(runId);
-      const cur = r.restoreRecord(ns, name);
-      if (!cur || cur.run !== runId) throw new Error(`복원 기록 ${name}이 이 실행(${runId})의 것이 아니다`);
-      const ops: unknown[] = [{ op: "test", path: pointer("run"), value: runId }];
-      for (const [k, v] of entries(set)) {
-        if (!RECORD_KEY.test(k) || k === "run") throw new Error("복원 기록 키 형식이 아니다(run은 바꾸지 않는다)");
-        if (v === null) {
-          if (Object.hasOwn(cur.data, k)) ops.push({ op: "remove", path: pointer(k) });
-        } else {
-          if (typeof v !== "string" || isSecret(v)) throw new Error("복원 기록 값은 문자열이다");
-          ops.push({ op: "add", path: pointer(k), value: v });
-        }
-      }
-      parseRecord({ metadata: { labels: { [RESTORE_LABEL]: runId }, resourceVersion: "0" }, data: { ...cur.data, ...Object.fromEntries(entries(set).filter(([, v]) => v !== null)) } }, name);
-      const x = run(exec, ["-n", ns, "patch", "configmaps", name, "--type=json", "--patch-file=/dev/stdin"], { input: jsonStringify(ops) });
-      if (x.code !== 0 && /test operation|testing value|jsonpatch test/i.test(x.stderr)) throw new Error(`복원 기록 ${name}: 잠금이 이 실행의 것이 아니다(test 실패)`);
-      must(x, `복원 기록 ${name} 고치기`);
+      // in.*(4-2 산출물)와 dropped(파괴 단계 표시)는 core(pgrestore.ts)만 쓴다. 명령이 바꾸면 고정한 입력·되돌림 판단이 무너진다.
+      for (const k of Object.keys(set)) if (CORE_KEYS.test(k)) throw new Error(`복원 기록 ${k}는 core만 쓴다`);
+      updateRecord(exec, r, ns, name, runId, set, false);
     },
     restoreRecordDelete(ns, name, runId) {
       checkName("namespace", ns);
