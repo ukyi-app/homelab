@@ -63,6 +63,18 @@ describe("doctor", () => {
     expect(bad.code).toBe(1);
   });
 
+  test("PATH의 homelab이 지금 실행 중인 것이 아니면 경고(exit 0, 주의 줄), 없으면 경고 없음(T12-05 운영)", async () => {
+    // 스텁 폴더의 homelab은 스텁 실행 파일이라 지금 실행 중인 main.ts와 다르다(옛 bun link 흉내).
+    const r = await runCli(["doctor", "--json"], healthy(), { tools: ["gh", "git", "kubectl", "infisical", "curl", "terraform", "jq", "homelab"] });
+    expect(r.code).toBe(0);
+    expectPlanReadOnly(r);
+    expect(r.json.status).toBe("same");
+    expect(r.json.steps.find((s: { id: string }) => s.id === "self-path").state).toBe("same");
+    expect(r.json.notes.join(" ")).toContain("PATH에서 먼저 잡히는 homelab");
+    const none = await runCli(["doctor", "--json"], healthy());
+    expect(none.json.notes.join(" ")).not.toContain("PATH에서 먼저 잡히는 homelab");
+  });
+
   test("--apply는 읽기 명령에 사용법 오류(64)", async () => {
     const r = await runCli(["doctor", "--apply"], []);
     expect(r.code).toBe(64);

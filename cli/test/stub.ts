@@ -3,6 +3,7 @@
 // 규칙에 captureStdin이 있으면 원문도 적는다(시크릿이 없는 gh api 본문 확인용).
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { kubectlLeadingProblem } from "./kubectl-order";
 
 type Matcher = string | { re: string };
 // materialize: argv 마지막 인자(clone 목적지) 아래에 파일을 만든다. 값 "stub"은 스텁 실행 파일.
@@ -39,6 +40,16 @@ function homeWrite(w: { path: string; force?: boolean }): "written" | "denied" {
     return "written";
   } catch {
     return "denied";
+  }
+}
+
+// 실제 kubectl처럼 하위 명령 앞의 전역이 아닌 플래그를 거부한다(kubectl-order.ts).
+if (argv[0] === "kubectl") {
+  const bad = kubectlLeadingProblem(argv.slice(1));
+  if (bad !== null) {
+    appendFileSync(join(dir, "ledger.jsonl"), JSON.stringify({ argv, stdinLength: 0, stdinSha256: "", rule: null, cwd: process.cwd(), order: bad }) + "\n");
+    process.stderr.write(`Error: flags cannot be placed before plugin name: ${bad}\n`);
+    process.exit(1);
   }
 }
 

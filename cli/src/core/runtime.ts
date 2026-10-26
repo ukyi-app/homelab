@@ -93,7 +93,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
     repo: repoRead(readExec),
     ghcr: ghcrRead(readExec),
     web: webRead(readExec),
-    tools: toolsRead(readExec),
+    tools: toolsRead(readExec, o.env),
     progress: o.progress,
     // 엔진은 한 번에 하나만 돈다(중첩·병렬 거부). 한 apply의 쓰기 문맥이 살아 있는 동안 다른 엔진의 단계가 돌 수 없다.
     engine: async (plan) => {
