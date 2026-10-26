@@ -460,11 +460,12 @@ run "g7_repo_first_time" {
 }
 
 run "g8_unlisted_public" {
-  # 목록 밖 public 저장소(목록은 전부 있고 newapp 하나가 더 있다)
+  # 목록 밖 public 저장소(목록은 전부 있고 하나가 더 있다). 더하는 이름은 목록 이름을 모두 이어 붙여 어느 목록 이름보다
+  # 길다. 목록에 이미 있는 이름이면 목록 밖이 아니라 중복을 시험하게 된다.
   command = plan
   override_data {
     target = data.github_rest_api.public_repos
-    values = { code = 200, body = jsonencode([for n in concat(["homelab", "homelab-app-template", "newapp"], jsondecode(file("app-repos.json"))) : { name = n, archived = false }]) }
+    values = { code = 200, body = jsonencode([for n in concat(["homelab", "homelab-app-template", "unlisted-${join("-", jsondecode(file("app-repos.json")))}"], jsondecode(file("app-repos.json"))) : { name = n, archived = false }]) }
   }
   expect_failures = [data.github_rest_api.public_repos]
 }
