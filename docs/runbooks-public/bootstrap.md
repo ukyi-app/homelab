@@ -80,7 +80,7 @@ tailnet에 이미 있으면 건너뛴다.
    ```
 
    외부 패키지를 깐 뒤에는 0.0의 `origin/main` 일치 확인을 다시 한다.
-3. 이름을 확인한다. 아래 명령의 첫 라벨이 `prod.env`의 `TAILNET_DEVICE_NAME`(비면 `NODE_NAME`)과 같아야 한다. 콘솔에서 기기 이름을 일부러 바꾸면 이 값도 같은 PR에서 바꾼다. MagicDNS 이름이 바뀌어 운영자 kubeconfig의 `server`와 k3s 인증서 SAN이 어긋나므로 1절 끝의 tailnet kubeconfig 안내를 따른다.
+3. 이름을 확인한다. 아래 명령의 첫 라벨이 `prod.env`의 `TAILNET_DEVICE_NAME`(비면 `NODE_NAME`)과 같아야 한다. 콘솔에서 기기 이름을 일부러 바꾸면 이 값도 같은 PR에서 바꾼다. MagicDNS 이름이 바뀌어 운영자 kubeconfig의 `server`와 k3s 인증서 SAN이 어긋나므로 1절 끝의 안내대로 `--k3s`를 다시 돌려 새 이름을 SAN에 더한다.
 
    ```bash
    tailscale status --self --peers=false --json | jq -r '.Self.DNSName | rtrimstr(".")'
@@ -129,18 +129,16 @@ kubectl config current-context
 
 운영자 기기에서 tailnet으로 쓰려면 이 파일을 복사하고 `server`를 `https://<MagicDNS 이름>:6443`으로 바꾼다. 그 이름은 설치 때의 MagicDNS 이름으로 k3s SAN에 들어간다. 저장소와 Infisical에는 두지 않는다.
 
-설치 뒤 Tailscale 기기 이름을 바꾸면(prod는 2026-10-26 `nuc-pro`로 바꿈) 옛 MagicDNS 이름은 더 풀리지 않고, 새 이름은 SAN에 없어 x509 오류가 난다. 인증서를 새 이름으로 다시 내는 길은 지금 없다. `--k3s`를 다시 돌려도 `tls-san`이 설치 때 값과 달라 멈춘다(`check_install_time_keys`). 대신 운영자 kubeconfig의 cluster 항목을 아래처럼 둔다. 2026-10-26 NUC에서 tailnet 주소로 `/readyz`를 읽어 확인했다: 새 이름만 주면 실패, 아래 `tls-server-name`이면 통과.
+설치 뒤 Tailscale 기기 이름을 바꾸면(prod는 2026-10-26 `nuc-pro`로 바꿈) 옛 MagicDNS 이름은 더 풀리지 않고, 새 이름은 아직 SAN에 없어 x509 오류가 난다. `--k3s`를 다시 돌리면 새 이름이 인증서에 더해진다. node-name·node-ip는 그대로라 통과하고, tls-san 차이를 출력한 뒤 config를 새로 써 k3s를 한 번 재시작한다(API 몇 초, 컨테이너는 계속 돈다). k3s는 재시작 뒤 설정 SAN 가운데 인증서에 없는 이름을 기존 SAN에 더해 다시 서명하고 옛 SAN은 지우지 않는다. 그래서 옛 MagicDNS 이름도 인증서에 남는다(무해하다. 근거는 `host/install.sh` `check_install_time_keys` 주석). 0.0의 main 확인 블록 뒤에 돌린다.
 
-```yaml
-clusters:
-  - name: homelab
-    cluster:
-      server: https://<새 MagicDNS 이름>:6443   # 풀리는 이름
-      tls-server-name: <NODE_NAME>               # 인증서 SAN에 있는 이름(prod: nuc-15-pro)
-      certificate-authority-data: <그대로>
+```bash
+sudo host/install.sh --cluster <이름> --k3s       # tls-san 차이 출력, config 새로 씀, k3s 재시작, /readyz 대기
+sudo -v && host/verify.sh --cluster <이름>        # node-args·SAN ok
+openssl s_client -connect <NODE_IP>:6443 -noservername </dev/null 2>/dev/null \
+  | openssl x509 -noout -ext subjectAltName       # 새 MagicDNS 이름이 있다. 출력에 tailnet 이름이 있어 공개 기록에 붙이지 않는다
 ```
 
-`host/verify.sh`의 node-args·SAN 항목은 렌더에 지금 MagicDNS 이름이 들어가므로 이 상태에서 실패한다. SAN을 새 이름으로 맞출지(재설치, 또는 `tls-san` 변경을 허용하는 절차)는 따로 정한다.
+그다음 운영자 기기 kubeconfig의 `server`를 `https://<새 MagicDNS 이름>:6443`으로 바꾼다. `--k3s`를 다시 돌리기 전에 급히 붙어야 하면 같은 cluster 항목에 `tls-server-name: <NODE_NAME>`(인증서에 있는 이름, prod는 `nuc-15-pro`)을 더하면 통과한다(2026-10-26 NUC에서 tailnet 주소로 `/readyz` 확인). SAN을 맞춘 뒤에는 지운다(둬도 동작한다).
 
 ### 1.1 파드 egress 규칙(노드 nftables)
 
