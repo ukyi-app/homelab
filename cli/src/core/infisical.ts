@@ -115,6 +115,8 @@ export function infisicalRead(exec: Exec, project: ReturnType<typeof projectReso
     } catch {
       throw new Error(`Infisical ${path} 목록: JSON이 아니다`);
     }
+    // 빈 폴더는 null이다(0.44.2 실측, #880 2라운드: packages/cmd/secrets.go가 빈 slice를 그대로 직렬화). 폴더 목록과 같다.
+    if (parsed === null) parsed = [];
     if (!Array.isArray(parsed)) throw new Error(`Infisical ${path} 목록: 배열이 아니다`);
     const keys: string[] = [];
     let value: Secret | null = null;

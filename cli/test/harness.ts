@@ -60,7 +60,9 @@ export function ghSend(method: string, path: string, status: number | Resp[], js
   return rule(ghArgv.send(method, path), Array.isArray(status) ? status : ghResponse(status, json), { captureStdin: true });
 }
 export function infisicalList(path: string, entries: Record<string, string> | Resp[]): Rule {
-  const resp = Array.isArray(entries) ? entries : { stdout: JSON.stringify(Object.entries(entries).map(([secretKey, secretValue]) => ({ secretKey, secretValue }))) };
+  // 빈 목록은 0.44.2 실제 출력처럼 null이다(#880 2라운드).
+  const list = Array.isArray(entries) ? [] : Object.entries(entries).map(([secretKey, secretValue]) => ({ secretKey, secretValue }));
+  const resp = Array.isArray(entries) ? entries : { stdout: list.length ? JSON.stringify(list) : "null" };
   return rule(infisicalArgv.list(FAKE_PROJECT, path), resp);
 }
 export function infisicalSet(path: string, resp: Resp | Resp[] = {}): Rule {
