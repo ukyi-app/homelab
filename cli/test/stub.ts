@@ -88,4 +88,5 @@ if (resp.echoEnv) process.stdout.write(JSON.stringify(Object.fromEntries(resp.ec
 if (resp.stderr) process.stderr.write(resp.stderr);
 // 백그라운드 프로세스 흉내: 출력을 낸 뒤 살아 있는다(호출한 쪽이 kill한다).
 if (resp.holdMs) await Bun.sleep(resp.holdMs);
-process.exit(resp.code ?? 0);
+// process.exit()로 끝내면 아직 파이프로 나가지 않은 stdout이 잘린다(큰 응답에서 시험이 가끔 깨졌다, 출력 비우기 시험).
+process.exitCode = resp.code ?? 0;
