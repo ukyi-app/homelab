@@ -44,13 +44,14 @@ function planRules(opts: { backupAfter?: boolean } = {}): Rule[] {
 }
 
 describe("data purge: plan(PATH 스텁)", () => {
-  test("plan은 --confirm 없이도 읽기만 하고 지울 키 이름을 보인다(값은 없다)", async () => {
+  test("plan은 --confirm 없이도 읽기만 하고, PR 2 전에는 Infisical을 부르지 않는다(#893 r1 P1-2)", async () => {
     const r = await runCli(["data", "purge", APP, "--json"], planRules());
     expect(r.code).toBe(0);
     expectPlanReadOnly(r);
     expect(r.json.status).toBe("pending");
     expect(r.json.next).toBe(`homelab data purge ${APP} --confirm ${APP} --apply`);
-    expect(JSON.stringify(r.json)).toContain(`/apps/${APP}/postgres/PASSWORD`);
+    expect(r.json.steps.find((x: { id: string }) => x.id === "secrets").detail).toContain("PR 2 뒤 키 삭제");
+    expect(r.calls.some((c) => c.argv[0] === "infisical")).toBe(false);
   });
 
   test("앱 삭제 뒤 백업이 없으면 실패", async () => {
@@ -426,7 +427,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
       w.put("pod", NS, "writer", { metadata: { name: "writer", labels: { "homelab.ukyi.app/app": APP } }, status: { phase: "Running" } });
       // plan은 읽기만 하고 "기록을 지운다"를 보인다
       const p = await runIn(w, cmd, "plan", { app: APP });
-      expect(p.steps.find((x) => x.id === "writes-stopped")!.detail).toContain("종료 기록을 지우고");
+      expect(p.steps.find((x) => x.id === "workloads")!.detail).toContain("폐기 확인 기록이 무효가 된다");
       expect(w.writes).toEqual([]);
       expect(w.records.has(`database/data-purge-${APP}`)).toBe(true);
       const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
@@ -485,6 +486,158 @@ describe("data purge: 흐름(가짜 세계)", () => {
         setSystemTime(new Date("2026-10-26T00:00:00Z"));
       }
     }
+  });
+
+  // PR 1이 병합·반영된 상태(보호 주석 없음, reclaim delete, PV Retain)
+  async function prepared(): Promise<World> {
+    const w = purgeWorld();
+    await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    w.merge(900);
+    for (const k of ["database", "databaserole"]) {
+      const o = w.obj(k, "database", APP)!;
+      delete o.metadata.annotations;
+      o.spec = k === "database" ? { databaseReclaimPolicy: "delete" } : { databaseRoleReclaimPolicy: "delete" };
+    }
+    delete w.obj("pvc", NS, "valkey-data")!.metadata.annotations;
+    return w;
+  }
+
+  test("r1 P1-1(#893): writes-stopped가 기록하는 사이·그 뒤 backup 재조회 때 앱 파드가 나타나면 기록을 지우고 멈춘다(PV·PR 2 없음)", async () => {
+    // 리뷰 재현: PR 1 반영 뒤, 기록 없음(앞 무효화 뒤), 성공 백업 없음
+    for (const when of ["기록하는 사이", "backup 재조회"] as const) {
+      const w = await prepared();
+      w.records.delete(`database/data-purge-${APP}`);
+      w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-19T00:00:00Z";
+      valkeyBackup(w, "2026-10-19T00:00:00Z");
+      // 기록이 생기면 파드를 켠다. backup 재조회: 쓰기 직후 확인·쓰기 뒤 재조회에서는 아직 끝난 파드, 그다음(backup의 읽기)부터 실행 중
+      let armed = false;
+      let reads = 0;
+      const phase = () => (armed && (when === "기록하는 사이" || ++reads > 2) ? "Running" : "Succeeded");
+      w.put("pod", NS, "writer", { metadata: { name: "writer", labels: { "homelab.ukyi.app/app": APP } }, status: { get phase() { return phase(); } } });
+      const set = w.records.set.bind(w.records);
+      w.records.set = (k, v) => {
+        if (k === `database/data-purge-${APP}`) armed = true;
+        return set(k, v);
+      };
+      w.writes = [];
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect([when, r.status]).toEqual([when, "failed"]);
+      expect(r.steps.find((x) => x.id === (when === "기록하는 사이" ? "writes-stopped" : "backup"))!.result).toBe("failed");
+      expect(w.records.has(`database/data-purge-${APP}`)).toBe(false);
+      expect(w.writes).toEqual([`recordCreate database/data-purge-${APP}`, `recordDelete database/data-purge-${APP}`]);
+      expect(w.obj("pv", null, "pvc-9")!.spec.persistentVolumeReclaimPolicy).toBe("Retain");
+      expect(w.openPrs()).toEqual([]);
+    }
+  });
+
+  test("r1 P1-1(#893): 읽을 때 본 파드가 apply 때 사라졌어도 무효화한다(본 엔진 단계·워크로드 전용 실행)", async () => {
+    // 본 엔진: 기록 직후 두 번(쓰기 직후 확인·재조회)은 끝난 파드, backup 재조회 한 번만 실행 중, apply 때는 다시 끝남
+    const w = await prepared();
+    w.records.delete(`database/data-purge-${APP}`);
+    let armed = false;
+    let reads = 0;
+    w.put("pod", NS, "blip", { metadata: { name: "blip", labels: { "homelab.ukyi.app/app": APP } }, status: { get phase() { if (!armed) return "Succeeded"; reads++; return reads === 3 || reads === 4 ? "Running" : "Succeeded"; } } });
+    const set = w.records.set.bind(w.records);
+    w.records.set = (k, v) => {
+      if (k === `database/data-purge-${APP}`) armed = true;
+      return set(k, v);
+    };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("읽을 때 본 워크로드");
+    expect(w.records.has(`database/data-purge-${APP}`)).toBe(false);
+    expect(w.openPrs()).toEqual([]);
+
+    // 워크로드 전용 실행: 전체 읽기·재조회에서 보이고(읽기 2번씩 4번) apply 때 사라짐
+    const v = purgeWorld();
+    let n = 0;
+    v.put("pod", NS, "blip", { metadata: { name: "blip", labels: { "homelab.ukyi.app/app": APP } }, status: { get phase() { return ++n <= 4 ? "Running" : "Succeeded"; } } });
+    const q = await runIn(v, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(q.status).toBe("failed");
+    expect(q.steps.map((x) => x.id)).toEqual(["workloads"]);
+    expect(v.records.has(`database/data-purge-${APP}`)).toBe(false);
+  });
+
+  test("r1 P1-2(#893): PR 2 병합 뒤 리소스가 남아 있는 동안은 Infisical이 깨져 있어도 대기로 끝난다", async () => {
+    const w = await prepared();
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
+    w.merge(901);
+    w.infisical.has = () => {
+      throw new Error("Infisical: 시간 초과(주입)");
+    };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("waiting");
+    expect(r.next).toContain("지우는 중");
+  });
+
+  test("r1 P1-1(#893): PV를 바꾸기 직전에 파드가 보이면(그 단계 읽기 뒤) 쓰지 않고 기록을 지운다", async () => {
+    const w = await prepared();
+    // pv-reclaim이 PV 정책을 두 번째로 읽는 때(apply 중 재조회)가 끝나면 파드가 생긴다. 그 뒤는 apply의 쓰기 직전 확인뿐이다
+    const spec = w.obj("pv", null, "pvc-9")!.spec;
+    let policy = spec.persistentVolumeReclaimPolicy;
+    let reads = 0;
+    Object.defineProperty(spec, "persistentVolumeReclaimPolicy", {
+      get() {
+        if (++reads === 2) w.put("pod", NS, "late", { metadata: { name: "late", labels: { "homelab.ukyi.app/app": APP } }, status: { phase: "Running" } });
+        return policy;
+      },
+      set(v) {
+        policy = v;
+      },
+    });
+    w.writes = [];
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("pod/late");
+    expect(w.writes).toEqual([`recordDelete database/data-purge-${APP}`]);
+    expect(policy).toBe("Retain");
+    expect(w.openPrs()).toEqual([]);
+  });
+
+  test("r1 P1-2(#893): Infisical·GitHub 조회가 실패해도 apply는 먼저 워크로드를 보고 기록을 지운다(plan은 쓰기 0)", async () => {
+    setSystemTime(new Date("2026-10-26T12:00:00Z"));
+    try {
+      // 리뷰 재현: 기록 10/25 12:00, 백업 없음, 앱 파드, Infisical 폴더 조회 오류(+ GitHub 이력 오류)
+      const w = purgeWorld();
+      goneRecord(w, "2026-10-25T12:00:00Z");
+      w.put("pod", NS, "writer", { metadata: { name: "writer", labels: { "homelab.ukyi.app/app": APP } }, status: { phase: "Running" } });
+      const broken = () => {
+        throw new Error("Infisical: 시간 초과(주입)");
+      };
+      const has = w.infisical.has.bind(w.infisical);
+      w.infisical.has = broken;
+      w.history.set(`apps/${APP}/values.yaml`, "broken");
+      const p = await runIn(w, cmd, "plan", { app: APP });
+      expect(p.steps.find((x) => x.id === "workloads")!.detail).toContain("무효가 된다");
+      expect(w.writes).toEqual([]);
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(r.status).toBe("failed");
+      expect(r.steps.map((x) => x.id)).toEqual(["workloads"]);
+      expect(w.records.has(`database/data-purge-${APP}`)).toBe(false);
+      expect(w.writes).toEqual([`recordDelete database/data-purge-${APP}`]);
+      // 이어서: 조회가 정상이 되고, 파드가 쓰던 10/26 06:00의 백업 뒤 파드가 사라졌다 → 새 기록(12:00) 뒤가 아니라 PR 없음
+      w.infisical.has = has;
+      w.history.delete(`apps/${APP}/values.yaml`);
+      w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-26T06:00:00Z";
+      valkeyBackup(w, "2026-10-26T06:00:00Z");
+      w.objects.delete(`pod/${NS}/writer`);
+      const again = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(again.status).toBe("failed");
+      expect(w.records.get(`database/data-purge-${APP}`)!.created).toBe("2026-10-26T12:00:00Z");
+      expect(w.openPrs()).toEqual([]);
+    } finally {
+      setSystemTime(new Date("2026-10-26T00:00:00Z"));
+    }
+  });
+
+  test("r1 P1-2(#893): PR 2 병합·리소스 소멸 전에는 Infisical이 깨져 있어도 사전 읽기가 막히지 않는다", async () => {
+    const w = purgeWorld();
+    w.infisical.has = () => {
+      throw new Error("Infisical: 시간 초과(주입)");
+    };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("waiting");
+    expect(w.openPrs().map((x) => x.head)).toEqual([`cli/data-purge-${APP}`]);
   });
 
   test("r2 P2-5: 종료 시각은 기록의 생성 시각(클러스터 시계)이라 이 기기 시계가 늦어도 그 전 백업을 인정하지 않는다", async () => {
