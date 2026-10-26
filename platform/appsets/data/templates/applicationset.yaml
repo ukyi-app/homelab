@@ -1,9 +1,31 @@
 {{- /*
 ApplicationSet 본문은 files/applicationset.yaml에 그대로 둔다. Argo CD의 Go 템플릿을 Helm이 렌더하지 않게 하려는 것이다
-(platform/appsets/apps와 같은 방식). Helm은 클러스터 값 자리표시 하나만 바꾼다.
+(platform/appsets/apps와 같은 방식). Helm은 클러스터 값 자리표시만 바꾼다.
+
+복구 동안 멈출 영속 Valkey(valkeyRestore, 앱 이름 → stopped | restoreMode)가 있으면 templatePatch의 값 합치기 줄을
+files/restore-patch.tpl로 바꿔 그 앱의 valkey.running·restoreMode만 덮어쓴다. 없으면(운영) 본문을 그대로 낸다.
+apps와 같은 이유로 바꿀 줄이 정확히 한 번 있어야 하고, tools/ci/render.ts(APPSET_RENDERERS.data, 6.)를 함께 고친다.
 */}}
 {{- $bucket := (.Values.backup | default dict).bucket | default "" | toString }}
 {{- if not (regexMatch "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" $bucket) }}
 {{- fail (printf "backup.bucket %q는 R2 버킷 이름이어야 한다(root가 cluster.backup.bucket을 넘긴다)" $bucket) }}
 {{- end }}
-{{ .Files.Get "files/applicationset.yaml" | replace "__BACKUP_BUCKET__" (quote $bucket) }}
+{{- $body := .Files.Get "files/applicationset.yaml" | replace "__BACKUP_BUCKET__" (quote $bucket) }}
+{{- with .Values.valkeyRestore }}
+{{- $pairs := list }}
+{{- range $app, $mode := . }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $app) }}
+{{- fail (printf "valkeyRestore의 %q는 앱 이름(data/<앱>)이어야 한다" $app) }}
+{{- end }}
+{{- if not (has (toString $mode) (list "stopped" "restoreMode")) }}
+{{- fail (printf "valkeyRestore.%s는 stopped(서버 내림) 또는 restoreMode(복원 모드로 올림)다: %q" $app (toString $mode)) }}
+{{- end }}
+{{- $pairs = append $pairs (printf "%q %q" $app (toString $mode)) }}
+{{- end }}
+{{- $line := `            {{- omit . "path" "values" "backup" | toYaml | nindent 8 }}` }}
+{{- if ne (len (splitList $line $body)) 2 }}
+{{- fail "files/applicationset.yaml의 templatePatch에 값 합치기 줄이 한 번 있어야 한다(valkeyRestore 주입 자리)" }}
+{{- end }}
+{{- $body = replace $line ($.Files.Get "files/restore-patch.tpl" | replace "__VALKEY_RESTORE__" (join " " $pairs) | trimSuffix "\n") $body }}
+{{- end }}
+{{ $body }}

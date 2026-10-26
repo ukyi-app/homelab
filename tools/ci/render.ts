@@ -120,8 +120,8 @@ function plainDir(dir: string): { ok: boolean; out: string } {
 }
 
 // ApplicationSet 이름 → 그 모양이 render.ts의 전개와 같은지 보는 함수(true 또는 어긋난 이유).
-// 같은 모양일 때만 아래 단계가 생성될 Application을 대신 렌더한 것이 된다.
-const APPSET_RENDERERS: Record<string, (set: any) => true | string> = {};
+// 같은 모양일 때만 아래 단계가 생성될 Application을 대신 렌더한 것이 된다. 복구 멈춤 값은 클러스터마다 달라 함께 받는다.
+const APPSET_RENDERERS: Record<string, (set: any, restore: Restore) => true | string> = {};
 // 클러스터 값 파일의 tailnet 접두(cluster.tailscale.prefix). ApplicationSet이 앱 values에 넣는 값과 같다.
 function clusterPrefixes(clusterFiles: string[]): [string, string][] {
   return clusterFiles.map((vf) => {
@@ -133,10 +133,21 @@ function clusterPrefixes(clusterFiles: string[]): [string, string][] {
   });
 }
 
+// 복구 동안 이 클러스터에서만 멈출 앱(cluster.restore). 비어 있지 않으면 ApplicationSet apps·data의 templatePatch가
+// files/restore-patch.tpl로 바뀌어 그 앱의 values를 덮어쓴다(platform/appsets/*/templates/applicationset.yaml).
+type Restore = { suspendedApps: string[]; valkey: Record<string, string> };
+function clusterRestore(vf: string): Restore {
+  const r = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) as any)?.cluster?.restore ?? {};
+  // 모양이 틀린 값(목록·맵이 아님)은 ApplicationSet 차트 렌더가 실패로 막는다. 여기서는 빈 값으로 본다.
+  return {
+    suspendedApps: Array.isArray(r.suspendedApps) ? r.suspendedApps.map(String) : [],
+    valkey: r.valkey && typeof r.valkey === "object" && !Array.isArray(r.valkey) ? r.valkey : {},
+  };
+}
 
 // ApplicationSet apps(platform/appsets/apps/files/applicationset.yaml). 아래 5.가 그 Application을 대신 렌더하므로
 // 생성기·템플릿·값 합치기가 그 전개와 같은지 본다. 하나를 바꾸면 이 함수와 5.를 함께 바꾼다.
-APPSET_RENDERERS.apps = (set) => {
+APPSET_RENDERERS.apps = (set, restore) => {
   const gens: any[] = set.spec?.generators?.[0]?.merge?.generators ?? [];
   const files = gens.map((g) => (g.git?.files ?? []).map((f: any) => f.path).join(",")).join("|");
   if (set.spec?.generators?.length !== 1 || files !== "apps/*/values.yaml|apps/*/image.yaml") {
@@ -156,14 +167,20 @@ APPSET_RENDERERS.apps = (set) => {
   ) {
     return "템플릿 이름·ns·source가 render.ts의 앱 렌더(app-<앱>, platform/charts/app@app-chart-v<chartVersion>)와 다르다";
   }
-  if (!String(set.spec?.templatePatch ?? "").includes('omit . "path" "values" "tailnetPrefix" | toYaml')) {
-    return "templatePatch의 값 합치기가 render.ts와 다르다";
+  const patch = String(set.spec?.templatePatch ?? "");
+  if (restore.suspendedApps.length === 0) {
+    if (!patch.includes('omit . "path" "values" "tailnetPrefix" | toYaml')) return "templatePatch의 값 합치기가 render.ts와 다르다";
+    return true;
   }
+  // 복구 멈춤: 목록의 앱에만 suspended: true(아래 5.와 같은 전개).
+  const list = restore.suspendedApps.map((a) => JSON.stringify(a)).join(" ");
+  const want = ['{{- $v := omit . "path" "values" "tailnetPrefix" }}', `{{- if has .values.app (list ${list}) }}`, '{{- $_ := set $v "suspended" true }}', "{{- $v | toYaml | nindent 8 }}"];
+  if (want.some((w) => !patch.includes(w))) return "templatePatch의 복구 멈춤 주입(suspendedApps)이 render.ts의 전개와 다르다";
   return true;
 };
 
 // ApplicationSet data(platform/appsets/data/files/applicationset.yaml). 아래 6.이 그 Application을 대신 렌더한다.
-APPSET_RENDERERS.data = (set) => {
+APPSET_RENDERERS.data = (set, restore) => {
   const gens: any[] = set.spec?.generators ?? [];
   const files = (gens[0]?.git?.files ?? []).map((f: any) => f.path).join(",");
   if (gens.length !== 1 || files !== "data/*/values.yaml" || gens[0].git?.values?.app !== "{{ .path.basename }}") {
@@ -181,9 +198,24 @@ APPSET_RENDERERS.data = (set) => {
   ) {
     return "템플릿 이름·ns·source가 render.ts의 데이터 렌더(<앱>-data, 릴리스 <앱>, platform/charts/app-data@data-chart-v<chartVersion>)와 다르다";
   }
-  if (!String(set.spec?.templatePatch ?? "").includes('omit . "path" "values" "backup" | toYaml')) {
-    return "templatePatch의 값 합치기가 render.ts와 다르다";
+  const patch = String(set.spec?.templatePatch ?? "");
+  const apps = Object.keys(restore.valkey).sort();
+  if (apps.length === 0) {
+    if (!patch.includes('omit . "path" "values" "backup" | toYaml')) return "templatePatch의 값 합치기가 render.ts와 다르다";
+    return true;
   }
+  // 복구 멈춤: 맵의 앱에만 valkey.running·restoreMode를 모드 값으로 다시 쓴다(아래 6.과 같은 전개).
+  const pairs = apps.map((a) => `${JSON.stringify(a)} ${JSON.stringify(String(restore.valkey[a]))}`).join(" ");
+  const want = [
+    '{{- $v := omit . "path" "values" "backup" }}',
+    `{{- $mode := get (dict ${pairs}) .values.app }}`,
+    '{{- $vk := omit (get $v "valkey" | default dict) "running" "restoreMode" }}',
+    '{{- $_ := set $vk "running" (eq $mode "restoreMode") }}',
+    '{{- $_ := set $vk "restoreMode" true }}',
+    '{{- $_ := set $v "valkey" $vk }}',
+    "{{- $v | toYaml | nindent 8 }}",
+  ];
+  if (want.some((w) => !patch.includes(w))) return "templatePatch의 복구 멈춤 주입(valkeyRestore)이 render.ts의 전개와 다르다";
   return true;
 };
 
@@ -349,7 +381,7 @@ export function renderAll(): RenderResult {
     const visit = (text: string, depth: number) => {
       // ApplicationSet이 만드는 Application도 검사해야 한다. 어느 단계에서 나오든 여기서 전개하는 것만 받는다(아래 5.).
       for (const set of parseAll(text).filter((d) => d?.kind === "ApplicationSet")) {
-        const ok = APPSET_RENDERERS[set.metadata?.name]?.(set);
+        const ok = APPSET_RENDERERS[set.metadata?.name]?.(set, clusterRestore(`platform/root/values-${cluster}.yaml`));
         if (ok !== true) fail(`${set.metadata?.name}[${cluster}]`, `ApplicationSet ${set.metadata?.name}: ${ok ?? "render.ts가 전개하지 않는 ApplicationSet이다"}`);
       }
       for (const app of parseAll(text).filter((d) => d?.kind === "Application")) {
@@ -368,6 +400,14 @@ export function renderAll(): RenderResult {
     visit(out, 1);
   }
   for (const vf of valueFiles) fail(vf, "이 값 파일을 읽는 root-<클러스터>.yaml이 없다");
+  // 복구 멈춤 값의 이름이 등록된 앱인지. ApplicationSet은 없는 이름을 조용히 지나가 그 앱이 멈추지 않는다(빈 DB로 뜬다).
+  const appDirs = new Set(gitFiles("apps/*/values.yaml").map((f) => basename(dirname(f))));
+  const dataDirs = new Set(gitFiles("data/*/values.yaml").map((f) => basename(dirname(f))));
+  for (const vf of clusterFiles) {
+    const r = clusterRestore(vf);
+    for (const a of r.suspendedApps.filter((a) => !appDirs.has(a))) fail(vf, `cluster.restore.suspendedApps의 ${a}: apps/${a}/values.yaml이 없다`);
+    for (const a of Object.keys(r.valkey).filter((a) => !dataDirs.has(a))) fail(vf, `cluster.restore.valkey의 ${a}: data/${a}/values.yaml이 없다`);
+  }
 
   // 3. 나머지 kustomization
   for (const f of gitFiles(...KUSTOMIZATION_FILES.map((n) => `:(glob)platform/**/${n}`))) {
@@ -403,11 +443,13 @@ export function renderAll(): RenderResult {
 
   // 5. 등록된 앱(apps/<앱>/values.yaml). ApplicationSet apps(platform/appsets/apps/files/applicationset.yaml)와
   //    같게 values.yaml + image.yaml + 클러스터 tailnet 접두를 values로, 차트는 그 앱의 태그로 렌더한다.
+  //    그 클러스터의 복구 멈춤 목록(cluster.restore.suspendedApps)에 있으면 suspended: true로 덮는다.
   //    앱이 0개인 것은 정상이라 세지 않는다.
   for (const vf of gitFiles("apps/*/values.yaml")) {
     const app = basename(dirname(vf));
     for (const [cluster, prefix] of clusterPrefixes(clusterFiles)) {
       const where = `app:${app}[${cluster}]`;
+      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`);
       try {
         // ApplicationSet은 path·values를 생성기 변수로 덮고 tailnetPrefix는 클러스터 값으로 덮는다. 사람이 적은 같은 키는
         // 조용히 사라지므로(예: probe 경로를 최상위 path로 적음) 지우지 않고 실패로 둔다. 두 파일의 키도 서로 겹치지 않는다.
@@ -423,6 +465,7 @@ export function renderAll(): RenderResult {
         if (badHuman.length > 0) throw new Error(`values.yaml에 둘 수 없는 키: ${badHuman.join(", ")}(생성기 변수·클러스터 값·image.yaml 키)`);
         if (badImage.length > 0) throw new Error(`image.yaml에는 ${imageKeys.join(", ")}만 둔다: ${badImage.join(", ")}`);
         const values: Record<string, any> = { ...human, ...image, tailnetPrefix: prefix };
+        if (restore.suspendedApps.includes(app)) values.suspended = true;
         const chartDir = pathAtRevision(`app-chart-v${values.chartVersion}`, "platform/charts/app", tmp);
         const vfile = join(tmp, `app-${app}-${cluster}.json`);
         writeFileSync(vfile, JSON.stringify(values));
@@ -437,17 +480,24 @@ export function renderAll(): RenderResult {
 
   // 6. 등록된 데이터(data/<앱>/values.yaml). ApplicationSet data(platform/appsets/data/files/applicationset.yaml)와
   //    같게 values.yaml + 클러스터 백업 버킷을 values로, 릴리스 이름은 앱 이름, 차트는 그 앱의 태그로 렌더한다.
+  //    그 클러스터의 복구 멈춤 맵(cluster.restore.valkey)에 있으면 valkey.running·restoreMode를 모드 값으로 다시 쓴다.
   for (const vf of gitFiles("data/*/values.yaml")) {
     const app = basename(dirname(vf));
     for (const [cluster, bucket] of clusterBuckets(clusterFiles)) {
       const where = `data:${app}[${cluster}]`;
+      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`);
       try {
         const human = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) ?? {}) as Record<string, any>;
         // valkeyServer·global은 차트 내부 값(공식 valkey 차트로 내려간다)이다. backup은 클러스터 값이라 ApplicationSet이 덮는다.
         const bad = Object.keys(human).filter((k) => ["path", "values", "backup", "valkeyServer", "global"].includes(k));
         if (bad.length > 0) throw new Error(`data values.yaml에 둘 수 없는 키: ${bad.join(", ")}(생성기 변수·클러스터 값·차트 내부 값)`);
         if (bucket === undefined) throw new Error(`platform/root/values-${cluster}.yaml에 cluster.backup.bucket이 없다`);
-        const values = { ...human, backup: { bucket } };
+        const values: Record<string, any> = { ...human, backup: { bucket } };
+        const mode = restore.valkey[app];
+        if (mode !== undefined) {
+          const { running: _running, restoreMode: _restoreMode, ...rest } = (human.valkey ?? {}) as Record<string, any>;
+          values.valkey = { ...rest, running: mode === "restoreMode", ...(mode === "restoreMode" ? { restoreMode: true } : {}) };
+        }
         const chartDir = pathAtRevision(`data-chart-v${values.chartVersion}`, "platform/charts/app-data", tmp);
         const vfile = join(tmp, `data-${app}-${cluster}.json`);
         writeFileSync(vfile, JSON.stringify(values));
