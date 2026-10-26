@@ -236,31 +236,11 @@ host_config() {
 
 # ------------------------------------------------------------------------------ --egress
 
-# 커널에 올라간 표가 기대한 모양인지 본다: forward hook 체인 하나, 파드 대역만 pod_egress로 넘김,
-# pod_egress의 첫 줄은 established 허용, 마지막 줄은 drop. 실패는 1로 돌려준다.
-check_egress_kernel() {
-  local js
-  js="$(nft -j list table inet "$EGRESS_TABLE" 2>/dev/null)" || return 1
-  jq -e --arg pod "$POD_CIDR" '
-    [.nftables[] | .chain? // empty] as $c
-    | [.nftables[] | .rule? // empty] as $r
-    | [$r[] | select(.chain == "pod_egress")] as $p
-    | ([$c[] | select(.hook == "forward")] | length) == 1
-      and ([$r[] | select(.chain == "forward") | .expr | tostring] | length) == 1
-      and ([$r[] | select(.chain == "forward") | .expr[] | .jump?.target // empty] == ["pod_egress"])
-      and ([$r[] | select(.chain == "forward") | .expr[] | .match?.right.prefix? // empty
-            | "\(.addr)/\(.len)"] == [$pod])
-      and ($p | length) >= 2
-      and ($p[0].expr | any(.match?.left.ct?.key == "state"))
-      and ($p[-1].expr | any(has("drop")))
-  ' <<<"$js" >/dev/null
-}
-
 egress_on() {
-  local rules
+  local rules js problems
 
   log "확인"
-  require_cmds nft systemctl install
+  require_cmds nft systemctl install sha256sum
   # 노드 IP 허용과 대역 검사가 이 값에서 온다. 다른 호스트의 값 파일로 돌리면 여기서 멈춘다.
   grep -qxF -- "$NODE_IP" <<<"$(iface_ipv4s)" \
     || die "노드 IP ${NODE_IP}가 ${NODE_IFACE}에 없다. --cluster 값이 이 호스트의 것인지 본다"
@@ -289,8 +269,11 @@ egress_on() {
   fi
 
   log "[3/3] 커널 규칙 확인"
-  check_egress_kernel \
-    || die "커널의 table inet ${EGRESS_TABLE}가 기대와 다르다. sudo nft list table inet ${EGRESS_TABLE}로 본다. 끄기: sudo host/install.sh --cluster ${CLUSTER} --egress-off"
+  # verify.sh와 같은 판정이다: 표 해시 = 렌더, forward·input hook, 파드 출발 조건, 필수 허용, 끝 drop.
+  js="$(nft -j list table inet "$EGRESS_TABLE")" || die "커널에 table inet ${EGRESS_TABLE}가 없다"
+  problems="$(egress_kernel_problems <<<"$js")"
+  [ -z "$problems" ] \
+    || die "커널의 table inet ${EGRESS_TABLE}가 렌더와 다르다. 끄기: sudo host/install.sh --cluster ${CLUSTER} --egress-off"$'\n'"${problems}"
   nft list table inet "$EGRESS_TABLE"
 
   log "파드 egress 규칙 적용 완료"

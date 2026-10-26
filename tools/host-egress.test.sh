@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# 파드 egress 규칙(host/egress/, host/lib.sh render_egress) 시험.
+# 파드 egress 규칙(host/egress/, host/lib.sh render_egress) 시험. 같은 host/lib.sh의 Tailscale 기기 이름 대조
+# (resolve_magicdns, TAILNET_DEVICE_NAME)도 여기서 본다.
 #
-#   bash tools/host-egress.test.sh          렌더 시험. ci가 부른다. root·nft 없이 돈다.
+#   bash tools/host-egress.test.sh          렌더 시험과 verify.sh 판정(가짜 sudo·nft). ci가 부른다. root·nft 없이 돈다.
 #   bash tools/host-egress.test.sh --netns  rootless podman 컨테이너 안의 네트워크 네임스페이스에 운영 렌더를 올려
-#                                           실제 허용·차단을 본다. ci 밖에서 사람이 돌린다. 호스트 네트워크는 건드리지 않는다.
+#                                           실제 허용·차단과 실제 커널 표에 대한 verify.sh 판정을 본다.
+#                                           ci 밖에서 사람이 돌린다. 호스트 네트워크는 건드리지 않는다.
 #
 # 렌더 시험은 host/ 사본에 가짜 클러스터 값 파일을 더해 install.sh와 같은 load_cluster -> render_egress를 탄다.
 set -euo pipefail
@@ -62,6 +64,23 @@ chain_lines() {
   ' "$1"
 }
 
+# check_order <렌더 파일> <체인> <통과 설명> <정규식...>: 체인의 줄이 정규식과 수·순서까지 같아야 한다.
+check_order() {
+  local file="$1" chain="$2" desc="$3" lines got n i=0
+  shift 3
+  lines="$(chain_lines "$file" "$chain")"
+  n="$(grep -c . <<<"$lines" || true)"
+  if [ "$n" -ne "$#" ]; then
+    fail "${chain} 규칙이 ${n}줄이다(기대 $#):"$'\n'"${lines}"
+    return
+  fi
+  while IFS= read -r got; do
+    i=$((i + 1))
+    [[ "$got" =~ ${!i} ]] || { fail "${chain} ${i}번째 줄이 다르다: ${got}"; return; }
+  done <<<"$lines"
+  pass "${chain}: ${desc}"
+}
+
 render_tests() {
   local out lines want got i n
   copy_host base
@@ -84,41 +103,62 @@ render_tests() {
     if grep -qxF -- "$want" "$TMP/prod.nft"; then pass "값: ${want}"; else fail "렌더에 '${want}'가 없다"; fi
   done
 
-  # --- forward 체인: 파드 대역만 pod_egress로 넘기고 나머지는 지나간다
-  lines="$(chain_lines "$TMP/prod.nft" forward)"
-  want=$'type filter hook forward priority filter; policy accept;\nip saddr $POD_CIDR jump pod_egress'
-  if [ "$lines" = "$want" ]; then pass "forward 체인은 파드 대역만 pod_egress로 넘긴다"; else fail "forward 체인이 다르다:"$'\n'"${lines}"; fi
-
-  # --- pod_egress 순서: 허용 여섯 -> 로그 -> drop. 허용이 drop 뒤에 오면 쓰이지 않는다.
-  lines="$(chain_lines "$TMP/prod.nft" pod_egress)"
+  # --- base chain 둘: 파드 대역 출발만 넘기고 나머지는 지나간다. input은 노드 자신이 보낸 것(lo)을 뺀다.
   # shellcheck disable=SC2016  # $POD_CIDR 등은 nft 변수 글자 그대로다
-  local -a order=(
-    '^ct state established,related counter accept$'
-    '^ip daddr \{ \$POD_CIDR, \$SERVICE_CIDR \} counter accept$'
-    '^ip daddr \$NODE_IP tcp dport \{ 6443, 10250 \} counter accept$'
-    '^ip daddr \$UPSTREAM_DNS meta l4proto \{ tcp, udp \} th dport 53 counter accept$'
-    '^ip daddr != @nonpublic tcp dport 443 counter accept$'
-    '^ip daddr != @nonpublic meta l4proto \{ tcp, udp \} th dport 7844 counter accept$'
-    '^limit rate [0-9]+/minute burst [0-9]+ packets log prefix "homelab-egress drop: "$'
+  check_order "$TMP/prod.nft" forward "파드 대역 출발만 pod_egress로" \
+    '^type filter hook forward priority filter; policy accept;$' \
+    '^ip saddr \$POD_CIDR jump pod_egress$'
+  # shellcheck disable=SC2016
+  check_order "$TMP/prod.nft" input "lo 밖의 파드 대역 출발만 pod_to_node로" \
+    '^type filter hook input priority filter; policy accept;$' \
+    '^iifname != "lo" ip saddr \$POD_CIDR jump pod_to_node$'
+
+  # --- 순서: 허용 -> 로그 -> drop. 허용이 drop 뒤에 오면 쓰이지 않는다.
+  # shellcheck disable=SC2016
+  check_order "$TMP/prod.nft" pod_egress "established -> 대역 -> 노드 6443·10250 -> DNS 53 -> 공개 443 -> 공개 7844 -> drop" \
+    '^ct state established,related counter accept$' \
+    '^ip daddr \{ \$POD_CIDR, \$SERVICE_CIDR \} counter accept$' \
+    '^ip daddr \$NODE_IP tcp dport \{ 6443, 10250 \} counter accept$' \
+    '^ip daddr \$UPSTREAM_DNS meta l4proto \{ tcp, udp \} th dport 53 counter accept$' \
+    '^ip daddr != @nonpublic tcp dport 443 counter accept$' \
+    '^ip daddr != @nonpublic meta l4proto \{ tcp, udp \} th dport 7844 counter accept$' \
+    '^limit rate [0-9]+/minute burst [0-9]+ packets log prefix "homelab-egress drop: "$' \
     '^counter drop$'
-  )
-  n="$(grep -c . <<<"$lines")"
-  if [ "$n" -ne "${#order[@]}" ]; then
-    fail "pod_egress 규칙이 ${n}줄이다(기대 ${#order[@]}):"$'\n'"${lines}"
-  else
-    i=0
-    while IFS= read -r got; do
-      [[ "$got" =~ ${order[$i]} ]] || { fail "pod_egress $((i + 1))번째 줄이 다르다: ${got}"; i=-1; break; }
-      i=$((i + 1))
-    done <<<"$lines"
-    [ "$i" -lt 0 ] || pass "pod_egress: established -> 대역 -> 노드 6443·10250 -> DNS 53 -> 공개 443 -> 공개 7844 -> drop"
-  fi
+  # shellcheck disable=SC2016
+  check_order "$TMP/prod.nft" pod_to_node "established -> 노드 6443·10250 -> drop" \
+    '^ct state established,related counter accept$' \
+    '^ip daddr \$NODE_IP tcp dport \{ 6443, 10250 \} counter accept$' \
+    '^limit rate [0-9]+/minute burst [0-9]+ packets log prefix "homelab-egress node drop: "$' \
+    '^counter drop$'
   # 열지 않기로 한 포트(Tailscale direct·STUN, 22, 80)가 허용에 끼면 안 된다.
+  lines="$(chain_lines "$TMP/prod.nft" pod_egress; chain_lines "$TMP/prod.nft" pod_to_node)"
   if grep -E 'accept' <<<"$lines" | grep -qE '41641|3478|dport (22|80)\b'; then
-    fail "pod_egress 허용에 41641·3478·22·80이 있다"
+    fail "허용에 41641·3478·22·80이 있다"
   else
     pass "41641·3478·22·80은 허용에 없다"
   fi
+
+  # --- 렌더 해시: 표 comment가 자리표시를 뺀 렌더의 sha256이고, 값이나 본문이 바뀌면 달라진다.
+  # verify.sh가 이 해시로 커널 표가 지금 렌더로 올라와 있는지(reload를 빠뜨리지 않았는지) 본다.
+  local h1 h2 unhashed
+  h1="$(sed -n 's/^[[:space:]]*comment "\(sha256:[0-9a-f]\{64\}\)"$/\1/p' "$TMP/prod.nft")"
+  # shellcheck source=../host/lib.sh
+  unhashed="$(. "$TMP/base/host/lib.sh" && load_cluster prod && egress_unhashed)"
+  if [ -n "$h1" ] && [ "$h1" = "sha256:$(printf '%s\n' "$unhashed" | sha256sum | cut -d ' ' -f 1)" ] \
+    && ! grep -q '@EGRESS_HASH@' "$TMP/prod.nft"; then
+    pass "표 comment = 렌더 해시(${h1:0:19}…), 자리표시 없음"
+  else
+    fail "표 comment 해시가 없거나 렌더와 다르다: ${h1:-없음}"
+  fi
+  fake_env base thash NODE_IP=192.168.117.16
+  h2="$(render base thash | sed -n 's/^[[:space:]]*comment "\(sha256:[0-9a-f]*\)"$/\1/p')"
+  if [ -n "$h2" ] && [ "$h2" != "$h1" ]; then pass "값이 바뀌면 해시가 바뀐다"; else fail "NODE_IP를 바꿔도 해시가 같다"; fi
+
+  # --- 체인별 규칙 수(verify.sh가 커널 규칙 수와 대조한다)
+  # shellcheck source=../host/lib.sh
+  got="$(. "$TMP/base/host/lib.sh" && egress_rule_counts <"$TMP/prod.nft")"
+  want='{"forward":1,"input":1,"pod_to_node":4,"pod_egress":8}'
+  if [ "$got" = "$want" ]; then pass "규칙 수 ${want}"; else fail "규칙 수가 다르다: ${got}"; fi
 
   # --- 공개가 아닌 대역(443·7844에서 뺌)
   got="$(sed -n 's/^[[:space:]]*elements = { \(.*\) }$/\1/p' "$TMP/prod.nft")"
@@ -167,6 +207,124 @@ render_tests() {
   if [ -z "$got" ]; then pass "prod.env와 vm.env의 키가 같다"; else fail "prod.env와 vm.env의 키가 다르다:"$'\n'"${got}"; fi
 }
 
+# verify.sh의 check_egress·finish를 가짜 명령으로 돌리는 도구를 TMP에 만든다. ci와 --netns가 함께 쓴다.
+#   stub/: id·sudo·nft는 STUB_* 값에 따라 흉내 내고, 값이 없으면 PATH의 다음 진짜 명령을 부른다.
+#          systemctl·kubectl은 늘 가짜다(유닛 enabled·active, 라이브 podCIDR·Service IP).
+#   vh.sh <host 사본> <작업 폴더>: 렌더를 작업 폴더에 깔린 파일로 두고 check_egress, finish. 종료 코드가 verify의 것이다.
+make_verify_kit() {
+  mkdir -p "$TMP/stub"
+  cat >"$TMP/stub/id" <<'STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ -n "${STUB_UID:-}" ]; then echo "$STUB_UID"; exit 0; fi
+PATH="${PATH#*:}" exec id "$@"
+STUB
+  cat >"$TMP/stub/sudo" <<'STUB'
+#!/usr/bin/env bash
+case "${STUB_SUDO:-no}" in
+  no) echo "sudo: a password is required" >&2; exit 1 ;;
+  yes) [ "${1:-}" != -n ] || shift; exec "$@" ;;
+esac
+STUB
+  cat >"$TMP/stub/nft" <<'STUB'
+#!/usr/bin/env bash
+case "${STUB_NFT:-real}" in
+  real) PATH="${PATH#*:}" exec nft "$@" ;;
+  missing) echo "Error: No such file or directory" >&2; exit 1 ;;
+  empty) echo '{"nftables": [{"metainfo": {"version": "1.1.6"}}]}' ;;
+esac
+STUB
+  cat >"$TMP/stub/systemctl" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in is-enabled) echo enabled ;; is-active) echo active ;; *) exit 9 ;; esac
+STUB
+  cat >"$TMP/stub/kubectl" <<'STUB'
+#!/usr/bin/env bash
+case " $* " in
+  *" get node "*) printf '10.42.0.0/24' ;;
+  *" get svc kubernetes "*) printf '10.43.0.1' ;;
+  *) exit 9 ;;
+esac
+STUB
+  cat >"$TMP/vh.sh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+. "$1/verify.sh"
+load_cluster prod
+EGRESS_RULES="$2/egress.nft"
+EGRESS_UNIT="$2/homelab-egress.service"
+mkdir -p "$2"
+render_egress >"$EGRESS_RULES"
+cp "$1/egress/homelab-egress.service" "$EGRESS_UNIT"
+check_egress
+finish
+STUB
+  chmod +x "$TMP"/stub/* "$TMP/vh.sh"
+}
+
+# 커널 표를 읽지 못하거나 표가 없으면 verify가 0으로 끝나면 안 된다(#919 리뷰 P2).
+# 실제 커널 표에 대한 양성·음성은 --netns가 본다.
+verify_tests() {
+  local out rc c want_rc want_text desc
+  copy_host base
+  make_verify_kit
+  local -a cases=(
+    "2|SKIP|root 아님, sudo -n 불가 -> 미검증(2)|STUB_UID=1000 STUB_SUDO=no"
+    "1|커널에 table inet homelab_egress가 없다|sudo -n 되고 표 없음 -> 실패(1)|STUB_UID=1000 STUB_SUDO=yes STUB_NFT=missing"
+    "1|커널에 table inet homelab_egress가 없다|root이고 표 없음 -> 실패(1)|STUB_UID=0 STUB_NFT=missing"
+    "1|표 inet homelab_egress가 없다|nft가 빈 목록을 냄 -> 실패(1)|STUB_UID=1000 STUB_SUDO=yes STUB_NFT=empty"
+  )
+  for c in "${cases[@]}"; do
+    IFS='|' read -r want_rc want_text desc c <<<"$c"
+    rc=0
+    # shellcheck disable=SC2086  # c는 VAR=값 목록이다
+    out="$(env $c PATH="$TMP/stub:$PATH" bash "$TMP/vh.sh" "$TMP/base/host" "$TMP/vw" 2>&1)" || rc=$?
+    if [ "$rc" = "$want_rc" ] && grep -qF -- "$want_text" <<<"$out" && ! grep -q '^verify 통과\|^==> verify 통과' <<<"$out"; then
+      pass "verify ${desc}"
+    else
+      fail "verify ${desc}: 종료 ${rc}"$'\n'"${out}"
+    fi
+  done
+}
+
+# resolve_magicdns: 실제 MagicDNS 이름의 첫 라벨을 TAILNET_DEVICE_NAME(비면 NODE_NAME)과 대조한다.
+# 옛 기기가 남아 -1이 붙은 재등록은 계속 잡고, 일부러 바꾼 이름은 값 파일로 받아들인다.
+device_name_tests() {
+  local suffix out row spec cluster label want_rc want_text desc rc
+  # 실제 꼴의 tailnet 이름은 저장소에 적지 않는다(gitleaks). ci의 gitleaks 시험처럼 실행 때 조립한다.
+  suffix="example.$(printf '%s.%s' ts net)"
+  copy_host dev
+  mkdir -p "$TMP/tsstub"
+  cat >"$TMP/tsstub/tailscale" <<'STUB'
+#!/usr/bin/env bash
+jq -n --arg n "${STUB_TS_LABEL}.${STUB_TS_SUFFIX}." '{BackendState: "Running", Self: {DNSName: $n}}'
+STUB
+  chmod +x "$TMP/tsstub/tailscale"
+  fake_env dev tdevempty TAILNET_DEVICE_NAME=
+  fake_env dev tdevfqdn TAILNET_DEVICE_NAME=nuc-pro.example
+  local -a cases=(
+    "0|nuc-pro.${suffix}|prod: 기기 이름 nuc-pro = TAILNET_DEVICE_NAME|prod nuc-pro"
+    "1|첫 라벨(nuc-pro-1)이 TAILNET_DEVICE_NAME(nuc-pro)과 다르다|prod: 옛 기기가 남아 -1이 붙음|prod nuc-pro-1"
+    "1|첫 라벨(nuc-15-pro)이 TAILNET_DEVICE_NAME(nuc-pro)과 다르다|prod: 바꾸기 전 이름|prod nuc-15-pro"
+    "0|nuc-15-pro.${suffix}|비면 NODE_NAME과 대조|tdevempty nuc-15-pro"
+    "1|TAILNET_DEVICE_NAME이 DNS 라벨이 아니다|전체 이름을 넣으면 거부|tdevfqdn nuc-pro"
+  )
+  for row in "${cases[@]}"; do
+    IFS='|' read -r want_rc want_text desc spec <<<"$row"
+    read -r cluster label <<<"$spec"
+    rc=0
+    out="$({
+      export PATH="$TMP/tsstub:$PATH" STUB_TS_LABEL="$label" STUB_TS_SUFFIX="$suffix"
+      # shellcheck source=../host/lib.sh
+      . "$TMP/dev/host/lib.sh"
+      load_cluster "$cluster"
+      resolve_magicdns
+      printf '%s' "$NODE_MAGICDNS"
+    } 2>&1)" || rc=$?
+    if [ "$rc" = "$want_rc" ] && grep -qF -- "$want_text" <<<"$out"; then pass "기기 이름 ${desc}"; else fail "기기 이름 ${desc}: 종료 ${rc}: ${out}"; fi
+  done
+}
+
 # 노드 규칙이 허용하는 53 목적지는 NODE_UPSTREAM_DNS뿐이다. AdGuard가 다른 리졸버를 쓰면 노드 규칙이
 # 그 질의를 버려 AdGuard가 뜨지 못한다(bootstrap_dns). 목록이 사는 곳마다 같은지 본다. 0건 추출은 실패다.
 upstream_tests() {
@@ -196,6 +354,7 @@ upstream_tests() {
 # ------------------------------------------------------------------------------ --netns
 
 # 컨테이너 안에서 돈다. 컨테이너의 netns가 노드, pod·pod2·other·world netns를 veth로 붙인다.
+# /host는 host/ 사본, /stub·/vh.sh는 make_verify_kit의 도구다.
 # world는 LAN·tailnet·인터넷을 한데 모은 곳이다(목적지 주소를 lo에 붙이고 모든 포트에 socat이 ok로 답한다).
 # shellcheck disable=SC2016  # 컨테이너 안에서 펼친다
 NETNS_SCRIPT='
@@ -227,6 +386,10 @@ for a in "$LAN.20" 100.100.100.100 172.16.0.1 10.0.0.5 169.254.1.1 1.1.1.1 9.9.9
 done
 ns world ip route add 10.42.0.0/16 via "$NODE_IP"
 ns world ip route add 10.99.0.0/24 via "$NODE_IP"
+# kube-proxy·CNI portmap 흉내: kubernetes Service는 노드 IP:6443으로, hostPort는 파드로 PREROUTING에서 DNAT한다.
+printf "%s\n" "table ip nat {" "  chain prerouting {" "    type nat hook prerouting priority dstnat; policy accept;" \
+  "    ip daddr 10.43.0.1 tcp dport 443 dnat to $NODE_IP:6443" \
+  "    fib daddr type local tcp dport 1053 dnat to 10.42.1.6:8080" "  }" "}" | nft -f -
 
 serve() { # serve <netns|-> <tcp|udp:주소> <포트...>
   local n="$1" p="$2" port; shift 2
@@ -242,7 +405,7 @@ serve() { # serve <netns|-> <tcp|udp:주소> <포트...>
 }
 serve world tcp 22 53 80 443 7844 8443
 for a in 1.1.1.1 9.9.9.9 8.8.8.8 203.0.113.10 "$LAN.1"; do serve world "udp:$a" 53 443 3478 7844 41641; done
-serve - tcp 6443 10250 22
+serve - tcp 6443 10250 22 9100
 serve pod tcp 8080
 serve pod2 tcp 8080
 sleep 1
@@ -294,12 +457,21 @@ matrix() {
   expect drop "link-local" pod tcp 169.254.1.1 443
   expect pass "파드끼리" pod tcp 10.42.1.6 8080
   expect pass "서비스 대역" pod tcp 10.43.0.99 443
-  expect pass "노드 kube API(INPUT)" pod tcp "$NODE_IP" 6443
-  expect pass "노드 kubelet(INPUT)" pod tcp "$NODE_IP" 10250
-  expect pass "노드 sshd(INPUT, 이 표 밖)" pod tcp "$NODE_IP" 22
   expect pass "LAN -> 파드 반환(established)" world tcp 10.42.0.5 8080
   expect pass "노드 자신(OUTPUT)" - tcp 203.0.113.10 22
   expect pass "파드 대역 밖 forward" other tcp 203.0.113.10 22
+  # 파드 -> 노드 자신(INPUT)
+  expect pass "노드 kube API" pod tcp "$NODE_IP" 6443
+  expect pass "노드 kubelet" pod tcp "$NODE_IP" 10250
+  expect pass "kube API Service(DNAT -> 노드 6443)" pod tcp 10.43.0.1 443
+  expect pass "hostPort(DNAT -> 파드)" pod tcp "$NODE_IP" 1053
+  expect drop "노드 sshd(LAN 주소)" pod tcp "$NODE_IP" 22
+  expect drop "노드의 다른 포트" pod tcp "$NODE_IP" 9100
+  expect drop "cni0 게이트웨이 sshd" pod tcp 10.42.0.1 22
+  expect pass "LAN -> hostPort" world tcp "$NODE_IP" 1053
+  expect pass "관리자 LAN SSH" world tcp "$NODE_IP" 22
+  expect pass "노드 자신 -> cni0 주소(lo, 출발이 파드 대역)" - tcp 10.42.0.1 22
+  expect pass "노드 -> 파드(probe)와 응답" - tcp 10.42.0.5 8080
 }
 
 echo "== 1. 규칙만"
@@ -307,6 +479,17 @@ matrix
 NODE_HITS="$(nft list chain inet homelab_egress pod_egress | sed -n "s/.*dport { 6443, 10250 } counter packets \([0-9]*\) .*/\1/p")"
 if [ "$NODE_HITS" = 0 ]; then echo "ok   노드 6443·10250 허용 줄 카운터 0: 파드 -> 노드 IP는 INPUT이라 이 체인에 오지 않는다"
 else echo "FAIL 노드 6443·10250 허용 줄 카운터 ${NODE_HITS:-?}" >&2; FAILS=$((FAILS + 1)); fi
+
+echo "== 1b. 노드의 tailnet 주소(world의 100.100.100.100을 노드로 옮겨 본다)"
+# 주소를 변수로 둔다. gitleaks는 이 고정 주소 글자만 면제하고 /32가 붙은 꼴은 잡는다.
+TSA=100.100.100.100
+ns world ip addr del "$TSA/32" dev lo
+ip link add ts0 type dummy; ip addr add "$TSA/32" dev ts0; ip link set ts0 up
+ns world ip route add "$TSA/32" via "$NODE_IP"
+expect drop "노드 tailnet 주소 sshd" pod tcp 100.100.100.100 22
+expect pass "관리자 tailnet SSH" world tcp 100.100.100.100 22
+expect pass "노드 자신 -> tailnet 주소" - tcp 100.100.100.100 22
+ns world ip route del "$TSA/32"; ip link del ts0; ns world ip addr add "$TSA/32" dev lo
 
 echo "== 2. k3s 흉내: 같은 hook의 ip filter FORWARD가 모두 accept해도 이 표의 drop이 이긴다"
 printf "%s\n" "table ip filter {" "  chain FORWARD {" "    type filter hook forward priority filter; policy accept;" "    counter accept" "  }" "}" | nft -f -
@@ -321,7 +504,30 @@ nft -f "$R"
 expect drop "공개 22(다시 올린 뒤)" pod tcp 203.0.113.10 22
 expect pass "공개 443(다시 올린 뒤)" pod tcp 1.1.1.1 443
 
-echo "== 4. 끄기(--egress-off의 nft 부분) 뒤에는 막히지 않는다"
+echo "== 4. verify.sh 판정(실제 커널 표). 0만 통과다"
+vexpect() { # vexpect <기대 종료 코드> <설명> <host 사본> [<출력에 있어야 할 글자>]
+  local rc=0
+  PATH="/stub:$PATH" bash /vh.sh "$3" /tmp/vw >/tmp/vh.out 2>&1 || rc=$?
+  if [ "$rc" = "$1" ] && { [ -z "${4:-}" ] || grep -qF -- "$4" /tmp/vh.out; }; then echo "ok   verify $rc  $2"
+  else echo "FAIL verify $rc(기대 $1)  $2" >&2; sed "s/^/       /" /tmp/vh.out >&2; FAILS=$((FAILS + 1)); fi
+}
+handle() { nft -a list chain inet homelab_egress "$1" | awk -v re="$2" "\$0 ~ re { print \$NF }"; }
+vexpect 0 "규칙이 지금 렌더대로" /host
+nft delete rule inet homelab_egress pod_egress handle "$(handle pod_egress "th dport 53")"
+vexpect 1 "DNS 허용 규칙을 지움" /host "필수 허용이 없다: 업스트림 DNS 53"; nft -f "$R"
+nft delete rule inet homelab_egress pod_to_node handle "$(handle pod_to_node " drop # handle")"
+vexpect 1 "pod_to_node의 drop을 지움" /host "pod_to_node: 끝 규칙이 drop이 아니다"; nft -f "$R"
+nft insert rule inet homelab_egress pod_to_node tcp dport 22 accept
+vexpect 1 "pod_to_node 앞에 22 허용을 끼움" /host "pod_to_node: 규칙 수 5"; nft -f "$R"
+nft delete element inet homelab_egress nonpublic "{ 192.168.0.0/16 }"
+vexpect 1 "nonpublic에서 LAN 대역을 뺌" /host "set nonpublic"; nft -f "$R"
+nft delete table inet homelab_egress
+vexpect 1 "표를 지움(flush ruleset 등)" /host "커널에 table inet homelab_egress가 없다"; nft -f "$R"
+cp -R /host /tmp/h2; echo "# Git에서 바뀐 줄" >>/tmp/h2/egress/egress.nft
+vexpect 1 "Git·파일은 새것, 커널은 옛것(reload 미실행)" /tmp/h2 "표 해시가 지금 렌더와 다르다"
+vexpect 0 "다시 원래 렌더" /host
+
+echo "== 5. 끄기(--egress-off의 nft 부분) 뒤에는 막히지 않는다"
 nft delete table inet homelab_egress
 expect pass "공개 22(끈 뒤)" pod tcp 203.0.113.10 22
 
@@ -333,12 +539,14 @@ netns_test() {
   local out
   command -v podman >/dev/null 2>&1 || { fail "podman이 없다"; return; }
   copy_host base
+  make_verify_kit
   out="$(render base prod 2>&1)" || { fail "prod 렌더 실패: ${out}"; return; }
   printf '%s\n' "$out" >"$TMP/prod.nft"
   # --network none: 컨테이너 netns에는 lo만 있고 밖으로 나가는 길이 없다. 시험은 그 안에서 만든 netns끼리다.
   # NET_ADMIN·SYS_ADMIN은 rootless의 user namespace 안 권한이라 호스트의 nft·링크에는 닿지 않는다.
   if podman run --rm -i --network none --cap-add NET_ADMIN,SYS_ADMIN --sysctl net.ipv4.ip_forward=1 \
-    -v "$TMP/prod.nft:/rules.nft:ro,Z" "$IMAGE" bash -c "$NETNS_SCRIPT"; then
+    -v "$TMP/prod.nft:/rules.nft:ro,Z" -v "$TMP/base/host:/host:ro,Z" -v "$TMP/stub:/stub:ro,Z" -v "$TMP/vh.sh:/vh.sh:ro,Z" \
+    "$IMAGE" bash -c "$NETNS_SCRIPT"; then
     pass "netns 시험(운영 렌더)"
   else
     fail "netns 시험"
@@ -348,6 +556,8 @@ netns_test() {
 case "${1:-}" in
   "")
     render_tests
+    verify_tests
+    device_name_tests
     upstream_tests
     ;;
   --netns) netns_test ;;

@@ -46,14 +46,14 @@ const PUBLIC_HOST = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.ukyi\.app$/;
 const TAILNET_NAME = /^[a-z]([a-z0-9-]{0,61}[a-z])?$/;
 // Ingress가 아닌 tailnet 기기 이름. 같은 이름의 Ingress 프록시가 생기면 뒤에 붙은 쪽 이름이 바뀐다.
 // go·vm-go는 D-30 리다이렉터, tailscale-operator는 operator(platform/root/templates/tailscale.yaml),
-// 노드 이름은 host/clusters/*.env의 NODE_NAME이다(NUC는 tailnet 기기).
+// 노드(NUC는 tailnet 기기)는 host/clusters/*.env의 TAILNET_DEVICE_NAME이고, 비면 NODE_NAME이다. 둘 다 예약한다.
 const RESERVED_TAILNET_NAMES = new Set(["go", "vm-go", "tailscale-operator", "vm-tailscale-operator", ...nodeNames()]);
 
 function nodeNames(): string[] {
   return gitFiles("host/clusters/*.env").flatMap((f) =>
     readText(f)
       .split("\n")
-      .map((l) => l.match(/^NODE_NAME=["']?([a-z0-9-]+)["']?\s*$/)?.[1])
+      .map((l) => l.match(/^(?:NODE_NAME|TAILNET_DEVICE_NAME)=["']?([a-z0-9-]+)["']?\s*$/)?.[1])
       .filter((x): x is string => !!x),
   );
 }

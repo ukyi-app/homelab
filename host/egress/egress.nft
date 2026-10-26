@@ -1,18 +1,21 @@
-# 파드 대역에서 노드 밖으로 나가는 forward를 NetworkPolicy와 상관없이 조인다(설계 B.8 E5, T13 할 일 9).
+# 파드 대역에서 출발한 패킷을 NetworkPolicy와 상관없이 조인다(설계 B.8 E5, T13 할 일 9).
 # 새 파드는 시작 직후 약 1초 동안 kube-router가 NetworkPolicy를 아직 붙이지 않아 egress가 모두 열린다.
 # 이 규칙은 대역으로 고르므로 파드가 생기는 순간부터 걸린다.
+#   forward: 파드 -> 노드 밖(LAN, tailnet, 인터넷)
+#   input:   파드 -> 노드 자신(노드 LAN 주소, cni0 게이트웨이, 노드 tailnet 주소). NetworkPolicy는 이 길을 막지 못한다(B.8 E4).
+# 노드 자신이 시작한 연결(OUTPUT)과 관리자의 LAN·tailnet SSH는 출발이 파드 대역이 아니라 건드리지 않는다.
 #
 # 이 파일은 그대로 쓰지 않는다. host/lib.sh render_egress가 앞에 클러스터 값 define(NODE_IP, POD_CIDR,
-# SERVICE_CIDR, UPSTREAM_DNS)을 붙여 /etc/homelab/egress.nft로 쓰고, homelab-egress.service가 올린다.
+# SERVICE_CIDR, UPSTREAM_DNS)을 붙이고 표 comment의 자리표시를 렌더 해시로 바꿔 /etc/homelab/egress.nft로 쓴다.
+# 해시는 표 comment로 커널에 남아, host/verify.sh가 커널 규칙이 지금 Git 렌더로 올라와 있는지(reload를 빠뜨리지
+# 않았는지) 본다. comment에는 nft 변수를 쓸 수 없어 글자로 바꾼다.
 #
 # 따로 둔 표다. k3s(flannel, kube-router, kube-proxy)는 iptables-nft의 ip filter·nat 표를 쓰고,
 # k3s-killall.sh와 재시작은 그 표만 다시 쓴다. 같은 hook의 다른 표끼리는 accept가 끝이 아니고 drop만
 # 끝이라, 여기의 drop은 그쪽 accept와 상관없이 이긴다. 반대로 여기의 accept는 NetworkPolicy의 drop을 풀지 않는다.
 #
-# 노드 자신으로 가는 길은 FORWARD가 아니라 INPUT이라 여기서 막지 않는다(B.8 E4, 노드 OUTPUT도 그대로).
-# 파드 -> 노드 IP(kube API 6443, kubelet 10250, sshd 등)와 노드의 tailnet 주소가 그렇다.
-#
 # 체인은 위에서부터 보고 처음 맞는 accept·drop에서 끝난다. 허용은 모두 drop보다 앞에 둔다.
+# 규칙 하나는 한 줄로 쓴다. verify.sh가 체인별 줄 수를 커널의 규칙 수와 대조한다.
 
 # 처음 올릴 때와 다시 올릴 때 모두 한 트랜잭션으로 통째 바꾼다. nft -f는 파일 전체를 원자적으로 적용하므로
 # 다시 올리는 동안 규칙이 빈 순간이 없다. 첫 줄은 표가 없을 때 delete가 실패하지 않게 만든다.
@@ -20,6 +23,8 @@ table inet homelab_egress
 delete table inet homelab_egress
 
 table inet homelab_egress {
+	comment "@EGRESS_HASH@"
+
 	# 공개 대역이 아닌 곳: LAN 사설 대역, tailnet(CGNAT), link-local, loopback.
 	# 443·7844 허용에서만 뺀다. 이 대역을 따로 drop하지 않는 까닭은 10.0.0.0/8이 파드·서비스 대역을
 	# 품고 있어서다(B.8 E4). 대역 허용을 먼저 두고 나머지는 마지막 drop이 받는다.
@@ -33,6 +38,26 @@ table inet homelab_egress {
 		type filter hook forward priority filter; policy accept;
 		# 파드 대역에서 나온 패킷만 본다. 그 밖(LAN에서 hostPort로 들어오는 요청 등)은 지나간다.
 		ip saddr $POD_CIDR jump pod_egress
+	}
+
+	chain input {
+		type filter hook input priority filter; policy accept;
+		# lo로 들어온 것은 노드 자신이 보낸 패킷이다. 노드가 자기 cni0 주소(파드 대역 안)로 붙으면 출발이 파드
+		# 대역이라 이것을 빼지 않으면 노드 자신이 막힌다. 출발 주소가 아니라 인터페이스로 가르는 까닭: 파드가
+		# 출발 주소를 cni0 주소로 꾸며도 lo로는 들어오지 못한다.
+		iifname != "lo" ip saddr $POD_CIDR jump pod_to_node
+	}
+
+	chain pod_to_node {
+		# 노드가 시작한 연결의 응답(kubelet probe, apiserver -> webhook, port-forward).
+		ct state established,related counter accept
+		# 파드가 노드에 실제로 쓰는 둘. kube API(모든 컨트롤러, kubernetes Service가 노드 IP:6443으로 DNAT)와
+		# kubelet(vmsingle의 cAdvisor 수집). 모든 파드에 열린다. 각자의 인증은 남는다.
+		# hostPort(svclb-adguard :53)는 PREROUTING에서 파드로 DNAT돼 forward로 가므로 여기 없어도 된다.
+		ip daddr $NODE_IP tcp dport { 6443, 10250 } counter accept
+		# sshd 22를 비롯한 노드의 나머지 포트, 노드의 cni0·tailnet 주소는 여기서 막힌다.
+		limit rate 10/minute burst 20 packets log prefix "homelab-egress node drop: "
+		counter drop
 	}
 
 	chain pod_egress {
