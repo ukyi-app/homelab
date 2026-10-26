@@ -440,7 +440,7 @@ describe("cache restore: 흐름(가짜 세계)", () => {
   });
 
   // 복원 모드로 떠 키 5개를 읽고 AOF를 켠 뒤, 복원 모드 끄기 PR(903)이 열린 상태.
-  async function toNormalPr(): Promise<{ w: World; vk: { appendonly: boolean; aof: boolean; keys: number } }> {
+  async function toNormalPr(): Promise<{ w: World; vk: { appendonly: boolean; aof: boolean; keys: number; markers?: Set<string> } }> {
     const w = restoreWorld();
     const vk = w.valkeys.get(`${NS}/${APP}-valkey`)!;
     await runIn(w, cmd, "apply", { app: APP });
@@ -684,7 +684,7 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     expect(rec(w)["suspect.marker"]).toBe("1");
     expect(rec(w)["ok.reloaded"]).toBeUndefined();
     // 다시 쳐도, --accept-empty를 붙여도 재시작하지 않고 멈춘다
-    for (const flags of [{}, { "accept-empty": true as const }]) {
+    for (const flags of [{}, { "accept-empty": true }] as Record<string, true>[]) {
       w.writes = [];
       const again = await runIn(w, cmd, "apply", { app: APP }, flags);
       expect(again.status).toBe("failed");
