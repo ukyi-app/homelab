@@ -36,6 +36,14 @@ describe("github 위임", () => {
     expect(w.argv.slice(1)).toEqual(["apply", "--allow-destroy"]);
   });
 
+  test("래퍼가 신호로 끝나면 셸의 $?와 같은 128+번호를 돌려준다(AC-5, #882 리뷰)", () => {
+    for (const [sig, code] of [["INT", 130], ["TERM", 143], ["KILL", 137]] as const) {
+      const self = rule(["git", REST], { materialize: { "tools/tf-github.sh": `#!/bin/sh\nkill -${sig} $$\n` } });
+      const { ctx } = testCtx("read", [self], { delegate: true });
+      expect([sig, ctx.github!.run("verify")]).toEqual([sig, code]);
+    }
+  });
+
   test("clone 실패면 래퍼를 부르지 않고 실패", () => {
     const { ctx, calls } = testCtx("read", [clone(128), rule(["tf-github.sh", REST])], { delegate: true });
     expect(() => ctx.github!.run("verify")).toThrow("clone하지 못했다");

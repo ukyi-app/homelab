@@ -193,7 +193,7 @@ export type AppRepoWrite = {
 export type PlanChanges = {
   exitCode: number;
   sha: string | null;
-  changes: { address: string; mode: "managed" | "data"; actions: string[]; importing: boolean }[] | null;
+  changes: { address: string; mode: "managed" | "data"; actions: string[]; importing: boolean; moved: boolean }[] | null;
 };
 
 export type GhResponse = { status: number; json: any };
