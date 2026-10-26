@@ -1,4 +1,5 @@
 # T11 시나리오 10(한 앱만 복원)의 두 번째 DB. 앱 없이 DB만 둔다(비밀번호 원본 /apps/homelab-probe2/postgres/PASSWORD).
 # homelab-probe를 T1로 되돌리는 동안 이 DB의 T1 뒤 쓰기가 남는지 본다.
-chartVersion: 1.0.0
+chartVersion: 1.0.2
 postgres: { enabled: true }
+purge: true
