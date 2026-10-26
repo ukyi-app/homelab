@@ -171,7 +171,7 @@ function appKeys(w: WriteCtx, n: Names, run: string): { appendonly: string; keys
 // --accept-empty로 넘길 수 없다(손으로 본다).
 function markerLost(w: WriteCtx, n: Names, when: string): never {
   mark(w, n, { "suspect.marker": "1" });
-  throw new Error(`${when} 복원 표식 키 homelab:restore:${mine(w, n).run}이 없다. 복원한 데이터를 잃었을 수 있다. 손으로 확인한다(restore.md 1절, --accept-empty로 넘길 수 없다)`);
+  throw new Error(`${when} 복원 표식 키 homelab:restore:${mine(w, n).run}이 없다. 복원한 데이터를 잃었을 수 있다. 손으로 확인한다(restore.md 1.1, --accept-empty로 넘길 수 없다)`);
 }
 
 function suspectEmpty(w: WriteCtx, n: Names, message: string): never {
@@ -505,7 +505,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
         // appendonly no라 AOF가 꺼진 채 RDB로 떠 있고, 디스크의 AOF는 그 전 것이다. 그대로 재시작하면 옛 AOF를 읽어 그사이
         // 쓰기를 잃는다(#883 Connector P1). 재시작 직전에 지금 서버를 보고, 꺼졌으면 표식을 지워 다음 실행이 AOF부터 다시 켜게 한다.
         const r = mine(w, n);
-        if (has(r, "suspect.marker")) throw new Error(`앞 실행이 복원 표식 키가 없음을 봤다. 손으로 확인한다(restore.md 1절, --accept-empty로 넘길 수 없다)`);
+        if (has(r, "suspect.marker")) throw new Error(`앞 실행이 복원 표식 키가 없음을 봤다. 손으로 확인한다(restore.md 1.1, --accept-empty로 넘길 수 없다)`);
         // 앞 실행이 0개를 봤으면 받아들이기 전에는 다시 재시작하지 않는다.
         if (has(r, "suspect.empty") && !acceptEmpty(w, n, acceptFlag)) suspectEmpty(w, n, "앞 실행이 키 0개를 봤다");
         const r0 = mine(w, n);
