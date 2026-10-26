@@ -69,7 +69,7 @@
   - `github verify` = 래퍼: 같은 main에서 `homelab github verify`와 바로 뒤 `tools/tf-github.sh verify`가 둘 다 exit 0.
   - `app new`: `plan`으로 템플릿 `app-main` active, 같은 이름 저장소 없음, `app-repos.json` PR 계획까지 봤다(아무것도 쓰지 않음). app_main 생성만인지의 판정(래퍼 `plan --plan-json`)은 목록 병합 뒤 단계라 `bun test`가 본다. 실제 생성은 T13 시나리오 1이다.
   - 등록·데이터 정리: `app remove` 뒤 `data purge`를 둘 다 돌렸다(실행 직전 사용자 재승인). 첫 실행은 앱 워크로드 없음을 보고 폐기 확인 기록(`database/data-purge-<app>`)을 남긴 뒤, 그 뒤 백업이 없어 exit 1로 멈췄다. 온디맨드 백업(CNPG `Backup`, Valkey 백업 Job) → PR 1 #906·#907(`purge: true`, 데이터 차트 1.0.2) → PR 2 #909·#910(`data/<app>/` 삭제) → Infisical 키 삭제(터미널에서 앱 이름을 다시 친 뒤). 끝에 `data list`에 둘 다 없고 두 purge 재실행은 `same`이었다. 마지막 스냅샷에서 두 앱의 Infisical 키 0개, DB·Valkey 데이터 없음, 폐기 확인 기록 0개. 설계대로 남긴 것: 빈 앱 ns, 빈 Infisical 폴더, R2 백업(보존 기간 동안).
-  - 배포 절차: `bun cli/build.ts --install`이 `~/.local/bin/homelab`에 설치하고 `homelab --version`이 `homelab 0.1.0 (<커밋 12자>)`를 낸다. 검증 중 두 번 다시 설치했고 그때마다 앞 파일이 `homelab.prev`로 남았다. 되돌리기(`homelab.prev`를 제자리로)는 `cli/README.md` 절차이고 이번에는 쓰지 않았다.
+  - 배포 절차: `bun cli/build.ts --install`이 `~/.local/bin/homelab`에 설치하고 `homelab --version`이 `homelab 0.1.0 (<커밋 12자>)`를 낸다. 검증 중 세 번 다시 설치했다(16f970d·e73fcba·39903bb, 앞 파일은 `homelab.prev`). purge는 #896을 담은 39903bb 빌드로 돌렸다. 되돌리기(`homelab.prev`를 제자리로)는 `cli/README.md` 절차이고 이번에는 쓰지 않았다.
   - 운영에서 찾아 고친 것:
     - #894: core의 `kubectl` 목록 조회가 `-A`를 하위 명령 앞에 둬 kubectl 1.36이 거부했다(`data list`·purge PV 확인 실패). 시험 스텁도 같은 순서를 거부하게 했다(설계 B.8 E7).
     - #908: purge 시험이 저장소의 실제 `data/` 파일을 읽어, 그 파일을 바꾸는 purge PR 1(#906·#907)의 필수 `ci`를 깨뜨렸다. 시험을 fixture로 옮겼다.
