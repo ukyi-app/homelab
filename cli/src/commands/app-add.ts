@@ -83,6 +83,20 @@ function findImage(ctx: ReadCtx, app: string): ImageFound {
   return { image: { repository: `ghcr.io/ukyi-app/${app}`, digest, revision: head, hold: false } };
 }
 
+// cache-add.ts의 cacheGoneStep과 같다(명령끼리 도우미를 나눌 수 없다). 앱 Application에 캐시 서버 리소스가 남아 있으면 대기.
+// <app>-valkey-url(연결 ExternalSecret)은 영속에서도 앱 몫이라 뺀다.
+function cacheGoneStep(app: string): Step {
+  return {
+    id: "cache-gone",
+    target: `Argo CD ${app}의 캐시 Valkey 정리`,
+    async read(c) {
+      const a = c.k8s.get("application", "argocd", app);
+      const left = (Array.isArray(a?.status?.resources) ? a.status.resources : []).filter((r: { name?: string }) => typeof r?.name === "string" && r.name !== `${app}-valkey-url` && (r.name === `${app}-valkey` || r.name.startsWith(`${app}-valkey-`)));
+      return left.length === 0 ? same("캐시 리소스 없음") : same(`캐시 리소스 ${left.length}개 남음`, { hold: "캐시 Valkey 정리 대기(Argo CD 동기화)" });
+    },
+  };
+}
+
 export function passwordStep(app: string, kind: "postgres" | "valkey"): Step {
   const folder = `/apps/${app}/${kind}`;
   return {
@@ -118,6 +132,8 @@ export default defineCommand({
     const flags: AddFlags = { public: input.flags.public as string | undefined, internal: input.flags.internal as string | undefined, postgres: input.flags.postgres === true, cache };
     const nameProblem = appNameProblem(app, { cache: cache === "cache", persistent: cache === "persistent" });
     if (nameProblem) throw new UsageError(nameProblem);
+    // 데이터 차트(data.persistentValkey)도 영속 Valkey 앱 이름의 valkey를 막는다. core appNameProblem은 캐시에서만 본다(#884 2라운드 P2-3).
+    if (cache === "persistent" && app.includes("valkey")) throw new UsageError("영속 Valkey를 쓰는 앱 이름에 valkey를 넣지 않는다(데이터 차트가 렌더를 막는다)");
     if (flags.internal && (RESERVED_INTERNAL.includes(flags.internal) || flags.internal.length + LONGEST_PREFIX > 63)) throw new UsageError("--internal: 예약된 이름이거나 클러스터 접두를 붙이면 63자를 넘는다");
 
     const paths = { values: `apps/${app}/values.yaml`, image: `apps/${app}/image.yaml`, data: `data/${app}/values.yaml` };
@@ -139,6 +155,7 @@ export default defineCommand({
           if (cache === "cache" && d.valkey?.persistent === true) return bad("differs", "이미 영속 Valkey다(data values valkey.persistent)", "--cache 없이 다시 실행한다(영속 Valkey가 VALKEY_URL을 준다)");
           // 캐시와 영속 Valkey는 이름이 같아(<앱>-valkey) 한 revision에 둘을 두지 못한다. 전환은 PR 둘(cache add --persistent).
           if (cache === "persistent" && v.cache?.enabled === true) return bad("differs", "캐시 Valkey가 켜져 있다(같은 이름이라 함께 둘 수 없다)", `homelab cache add ${app} --persistent`);
+          if (v.kind === "worker" && (flags.public || flags.internal)) return bad("differs", "worker 앱이다(공개·내부 주소를 붙일 수 없다)", "--public·--internal 없이 다시 실행하거나, web으로 바꾸려면 values의 kind·port·probes를 사람이 고친다");
           if (onMain.image !== null) parseImage(onMain.image, app);
           return same(onMain.values === null ? "새 앱" : "이미 등록됨(플래그만 더한다)");
         },
@@ -177,11 +194,16 @@ export default defineCommand({
         },
       },
     ];
+    // 영속 연결은 캐시 끄기가 병합된 뒤에도 Argo CD가 캐시 서버를 정리할 때까지 기다린다(cache add --persistent와 같은 대기,
+    // Connector 4373412609). 아니면 두 Application이 같은 <app>-valkey를 관리한다.
+    if (cache === "persistent") steps.push(cacheGoneStep(app));
     if (flags.postgres) steps.push(passwordStep(app, "postgres"));
     if (cache !== "none") steps.push(passwordStep(app, "valkey"));
 
     const image = found && "image" in found ? found.image : null;
-    const files = [paths.values, paths.image, ...(flags.postgres || cache === "persistent" ? [paths.data] : [])];
+    // 데이터 파일은 쓸 때와, 이미 있을 때(PR 계산 때 캐시·영속 상호 배제를 보려고, 내용은 그대로) 넣는다. 없는 파일을
+    // 그대로 넣으면 tree에 없는 경로의 삭제가 된다.
+    const files = [paths.values, paths.image, ...(flags.postgres || cache === "persistent" || onMain.data !== null ? [paths.data] : [])];
     steps.push(
       prStep({
         command: "app add",

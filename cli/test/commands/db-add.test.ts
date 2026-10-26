@@ -84,6 +84,14 @@ describe("db add", () => {
     expect(r.writes).toEqual([]);
   });
 
+  test("env 이름 충돌(values env.DATABASE_URL)은 쓰기 전에 멈춘다(#884 2라운드 P2-4)", async () => {
+    const withEnv = `${APP_VALUES}env: { DATABASE_URL: postgres://x }\n`;
+    const r = await runCli(["db", "add", APP, "--apply", "--json"], [...homelab({ [A]: withEnv, [D]: null }), ...chartTags(), ...fold(), infisicalList(PG, {}), noPr(BRANCH)]);
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).toContain("DATABASE_URL");
+    expect(r.writes).toEqual([]);
+  });
+
   test("기존 data values(영속 Valkey)에는 postgres 키만 더한다", () => {
     const cur = "# T11\nchartVersion: 1.0.1\nvalkey: { persistent: true }\n";
     expect(dbValues(cur, "1.0.1")).toBe("# T11\nchartVersion: 1.0.1\nvalkey: { persistent: true }\npostgres: { enabled: true }\n");

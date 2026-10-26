@@ -100,7 +100,9 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
     target: "파드",
     async read(c) {
       if (v.suspended === true) return ok("멈춤(suspended, 복원 중)");
-      const pods = c.k8s.list("pod", ns, `homelab.ukyi.app/app=${app}`).filter((p: any) => !p?.metadata?.ownerReferences?.some((o: any) => o?.kind === "Job"));
+      // Job 파드와 끝난 파드(Succeeded·Failed, 예 퇴거된 옛 ReplicaSet 파드)는 지금 서비스하는 파드가 아니다(Connector 4373412611,
+      // data-list와 vmalert kubernetes 규칙과 같은 판정).
+      const pods = c.k8s.list("pod", ns, `homelab.ukyi.app/app=${app}`).filter((p: any) => !p?.metadata?.ownerReferences?.some((o: any) => o?.kind === "Job") && p?.status?.phase !== "Succeeded" && p?.status?.phase !== "Failed");
       const isReady = (p: any) => (p?.status?.conditions ?? []).some((x: any) => x?.type === "Ready" && x?.status === "True");
       const readyPods = pods.filter(isReady);
       if (pods.length === 0) return bad("파드 없음", wait(app), "missing");
@@ -116,7 +118,12 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
     async read(c) {
       // DB 역할 ExternalSecret이 아직 없으면(데이터 Application 전) 빼지 않고 준비 안 됨으로 센다.
       const role = usesPg ? (c.k8s.get("externalsecret", "database", `pg-role-${app}`) ?? { metadata: { name: `pg-role-${app}`, namespace: "database" } }) : null;
-      const list = [...c.k8s.list("externalsecret", ns), ...(role ? [role] : [])];
+      // values가 선언한 앱 쪽 ExternalSecret(앱 차트 externalsecret.yaml의 조건)이 목록에 없으면 빈 목록을 0/0 Ready로 보지 않고
+      // 준비 안 됨으로 센다(#884 2라운드 P2-6). 데이터 차트 몫(영속 <app>-valkey-auth 등)은 데이터 Application 줄이 본다.
+      const want = [...(Array.isArray(v.secrets) && v.secrets.length ? [`${app}-app`] : []), ...(v.uses?.postgres ? [`${app}-db`] : []), ...(v.uses?.valkey ? [`${app}-valkey-url`] : []), ...(v.cache?.enabled === true ? [`${app}-valkey-auth`] : [])];
+      const found = c.k8s.list("externalsecret", ns);
+      const absent = want.filter((n) => !found.some((e: any) => e?.metadata?.name === n)).map((name) => ({ metadata: { name, namespace: ns } }));
+      const list = [...found, ...absent, ...(role ? [role] : [])];
       const notReady = list.filter((e: any) => !ready(e));
       if (notReady.length === 0) return ok(`${list.length}/${list.length} Ready`);
       // 시나리오 6: 빠진 키를 이름으로 보인다(값은 보지 않는다).
