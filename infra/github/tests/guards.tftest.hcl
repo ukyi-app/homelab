@@ -10,6 +10,10 @@
 #   기본 state에 만든 자원을 이어 써 변경이 없으므로 guard가 plan 때 평가된다. 그래서 all_guards_pass는 맨 앞에 둔다.
 # - 의존이 없어 plan 때 늘 평가되는 guard(1·2·5·6·7·8, repo·org secret)는 plan이다. 같은 이유로 apply로는 시험할 수 없다.
 # 덮어쓰지 않은 계산 문자열은 mock이 임의 8자를 넣어 나머지 guard까지 실패한다.
+#
+# guard 8의 org public 저장소 응답은 app-repos.json에서 만든다. app new의 목록 PR은 app-repos.json만 고치므로,
+# 이름을 손으로 적어 두면 그 PR의 ci가 여기서 깨진다(T13 #923). ci는 mock이라 실제 org를 읽지 않는다.
+# file() 경로는 terraform test를 도는 root(infra/github) 기준이다. 시험 파일의 variables는 override_data에서 못 쓴다.
 
 variables {
   homelab_deploy_app_id = 1000001
@@ -115,7 +119,7 @@ override_data {
 
 override_data {
   target = data.github_rest_api.public_repos
-  values = { code = 200, body = "[{\"name\":\"homelab\",\"archived\":false},{\"name\":\"homelab-app-template\",\"archived\":false},{\"name\":\"files\",\"archived\":false},{\"name\":\"homelab-bot\",\"archived\":false},{\"name\":\"homelab-probe\",\"archived\":false},{\"name\":\"old\",\"archived\":true}]" }
+  values = { code = 200, body = jsonencode(concat([for n in concat(["homelab", "homelab-app-template"], jsondecode(file("app-repos.json"))) : { name = n, archived = false }], [{ name = "old", archived = true }])) }
 }
 
 override_data {
@@ -456,21 +460,22 @@ run "g7_repo_first_time" {
 }
 
 run "g8_unlisted_public" {
-  # 목록 밖 public 저장소
+  # 목록 밖 public 저장소(목록은 전부 있고 하나가 더 있다). 더하는 이름은 목록 이름을 모두 이어 붙여 어느 목록 이름보다
+  # 길다. 목록에 이미 있는 이름이면 목록 밖이 아니라 중복을 시험하게 된다.
   command = plan
   override_data {
     target = data.github_rest_api.public_repos
-    values = { code = 200, body = "[{\"name\":\"homelab\",\"archived\":false},{\"name\":\"homelab-app-template\",\"archived\":false},{\"name\":\"files\",\"archived\":false},{\"name\":\"homelab-bot\",\"archived\":false},{\"name\":\"homelab-probe\",\"archived\":false},{\"name\":\"newapp\",\"archived\":false}]" }
+    values = { code = 200, body = jsonencode([for n in concat(["homelab", "homelab-app-template", "unlisted-${join("-", jsondecode(file("app-repos.json")))}"], jsondecode(file("app-repos.json"))) : { name = n, archived = false }]) }
   }
   expect_failures = [data.github_rest_api.public_repos]
 }
 
 run "g8_listed_missing" {
-  # 목록의 저장소가 public이 아님
+  # 목록의 앱 저장소 하나가 public이 아니거나 아직 없다(목록 PR 병합 뒤 저장소 생성 전). 실제 plan·verify는 이때 멈춘다.
   command = plan
   override_data {
     target = data.github_rest_api.public_repos
-    values = { code = 200, body = "[{\"name\":\"homelab\",\"archived\":false},{\"name\":\"homelab-app-template\",\"archived\":false},{\"name\":\"files\",\"archived\":false}]" }
+    values = { code = 200, body = jsonencode([for n in concat(["homelab", "homelab-app-template"], jsondecode(file("app-repos.json"))) : { name = n, archived = false } if n != jsondecode(file("app-repos.json"))[0]]) }
   }
   expect_failures = [data.github_rest_api.public_repos]
 }
