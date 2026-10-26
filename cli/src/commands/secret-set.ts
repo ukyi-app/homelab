@@ -1,14 +1,62 @@
-// 자리표시. T12-02가 이 파일을 통째로 바꾼다(cli/README.md "명령 더하기").
-import { placeholder } from "../core/command";
+// homelab secret set: 앱 시크릿 하나를 Infisical /apps/<app>/<KEY>에 둔다(설계 C.7, D 4번). 값은 stdin(파이프) 또는
+// tty(에코 없음)로만 받고 argv·출력·파일에 두지 않는다(rotate.md 3c 1: `secrets set KEY=VALUE`는 값이 명령행 인자라 쓰지 않는다).
+// 등록 전에도 된다(설계 D는 app add보다 앞). 앱에 넣는 것은 values의 secrets 목록이고 app add 재실행이 더한다.
+import { defineCommand, type Observation, type Step } from "../core/command";
 import { APP_NAME, SECRET_KEY } from "../core/names";
+import { parseYaml } from "../core/values";
 
-export default placeholder(
-  {
-    path: ["secret", "set"],
-    summary: "앱 시크릿 등록(값은 stdin)",
-    kind: "change",
-    args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }, { name: "KEY", required: true, help: "키 이름", pattern: SECRET_KEY }],
-    flags: [{ name: "replace", kind: "bool", help: "이미 있는 키를 바꾼다" }],
+const same = (detail: string): Observation => ({ state: "same", action: "none", detail });
+
+export default defineCommand({
+  path: ["secret", "set"],
+  summary: "앱 시크릿 등록(값은 stdin)",
+  kind: "change",
+  args: [
+    { name: "app", required: true, help: "앱 이름", pattern: APP_NAME },
+    { name: "KEY", required: true, help: "키 이름", pattern: SECRET_KEY },
+  ],
+  flags: [{ name: "replace", kind: "bool", help: "이미 있는 키를 바꾼다" }],
+  async run(ctx, input) {
+    const app = input.args.app as string;
+    const key = input.args.KEY as string;
+    const replace = input.flags.replace === true;
+    const folder = `/apps/${app}`;
+    // --replace는 이 실행이 쓴 값의 해시와 같아야 same이다. 다시 실행하면 다시 바꾼다(명시적으로 요청한 일).
+    let written: string | null = null;
+
+    const step: Step = {
+      id: "infisical-key",
+      target: `Infisical homelab/prod ${folder}/${key}`,
+      async read(c) {
+        if (!c.infisical.folderExists(folder)) return { state: "missing", action: "create", detail: "없음 → 저장(폴더 포함, 값은 stdin)" };
+        const hash = c.infisical.valueHash(folder, key);
+        if (hash === null) return { state: "missing", action: "create", detail: "없음 → 저장(값은 stdin)" };
+        if (!replace) return same("있음 (그대로. 바꾸려면 --replace)");
+        if (written !== null && hash === written) return same("바꿨다");
+        return { state: "differs", action: "update", detail: "있음 → 바꾼다(--replace, 값은 stdin)" };
+      },
+      async apply(w) {
+        if (!w.infisical.folderExists(folder)) w.infisical.createFolder(folder);
+        const value = w.readSecretInput(`${folder}/${key} 값: `);
+        w.infisical.setValue(folder, key, value);
+        written = value.sha256Prefix(12);
+      },
+    };
+
+    const notes: string[] = [];
+    const values = ctx.repo.readFile(`apps/${app}/values.yaml`, ctx.repo.mainSha());
+    const registered = values !== null;
+    if (registered) {
+      const list = (parseYaml(values) as { secrets?: unknown } | null)?.secrets;
+      if (!Array.isArray(list) || !list.includes(key)) notes.push(`apps/${app}/values.yaml secrets에 ${key}가 없어 앱에 들어가지 않는다. 더하기: homelab app add ${app}`);
+    }
+    return ctx.engine({
+      command: "secret set",
+      app,
+      steps: [step],
+      notes,
+      // undefined를 돌려주면 엔진의 기본 다음 행동(pending이면 --apply)을 쓴다(engine.ts finish).
+      next: (status) => (status === "done" && registered ? `homelab secret sync ${app}` : undefined) as string | null,
+    });
   },
-  "T12-02",
-);
+});
