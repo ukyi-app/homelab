@@ -79,9 +79,14 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
 
 **검증 키는 백업에 섞여 돌아올 수 있다.** 3단계의 `running: true`는 백업 CronJob도 다시 켠다(`restoreMode`와 무관). 6단계 전에 정기 백업이 돌면 검증 키가 R2 백업에 들어가고, 6단계가 서버에서 지워도 그 백업에는 남는다. 그 백업을 다른 `RUN`으로 복원하면 옛 검증 키가 돌아온다. 이번 키만 빼고 세면 앱 키가 0개인 백업도 그 옛 키 하나로 3단계를 통과한다(#891 리뷰). 그래서 이 실행의 키 하나가 아니라 `homelab:restore:*` 전부를 앱 키 수에서 빼고(`vkapp`), 6단계에서 전부 지운다. CLI(`homelab cache restore`)도 같다.
 
+변수 블록과 함수 블록을 차례로 정의한다. 함수 블록은 정의할 때 변수를 읽지 않는다(1.1은 `RUN`을 CLI 기록에서 얻어 함수 블록만 정의한다).
+
 ```bash
 MARK=''    # 운영자가 아는 만료 없는 앱 표식 키(선택). 모르면 비워 둔다
 VKEY="homelab:restore:$RUN"   # 3단계가 쓰는 이 실행의 검증 키. 같은 RUN의 재시도는 같은 키를 쓴다
+```
+
+```bash
 # 숫자 하나인지. valkey-cli가 오류 문구를 내도 걸린다.
 num() { case $1 in ''|*[!0-9]*) return 1 ;; esac; }
 # 검증 키(homelab:restore:*) 목록, 한 줄에 하나. 이 실행 것만이 아니다(백업에서 돌아온 옛 RUN 것, 위). KEYS는 서버를 막아
@@ -302,8 +307,12 @@ vkdata() { local n v m=-; n=$(vk DBSIZE) || return 1; v=$(vk EXISTS "$VKEY") || 
    ```bash
    ( set -euo pipefail
    rm -f "$W/ok-vk-clean"
-   kubectl -n app-$APP delete job -l homelab.ukyi.app/restore=$RUN
-   out=$(kubectl -n app-$APP get job,pvc -l homelab.ukyi.app/restore=$RUN -o name)
+   # foreground: 파드까지 없어진 뒤 돌아온다. 기본(background)은 Job만 먼저 지워, 실행 라벨이 없는 수동 백업 파드가
+   # 아래 라벨 확인에 걸리지 않은 채 남는다(그 파드 템플릿에는 실행 라벨이 없다). Job이 이미 지워진 재시도에 남은
+   # 복원 Job 파드는 직접 지운다. 그때 남은 수동 백업 파드는 이 블록이 찾지 못한다(1.1은 기록의 backup.jobs로 본다).
+   kubectl -n app-$APP delete job -l homelab.ukyi.app/restore=$RUN --cascade=foreground --timeout=5m
+   kubectl -n app-$APP delete pod -l homelab.ukyi.app/restore=$RUN --timeout=5m
+   out=$(kubectl -n app-$APP get job,pod,pvc -l homelab.ukyi.app/restore=$RUN -o name)
    if [ -n "$out" ]; then printf '%s\n' "$out" | cat -v >&2; echo "이 실행의 객체가 남았다(위)" >&2; exit 1; fi
    mk=$(vkmarks)
    # vk 안의 명령이 루프의 입력(키 목록)을 읽지 않게 /dev/null을 준다. DEL의 답은 1(지움)이나 0(이미 없음)이다.
@@ -336,11 +345,17 @@ CLI `homelab cache restore <앱>`은 이 절의 검증 키를 복원 표식 키�
    - `dbsize`: RDB를 읽은 직후의 앱 키 수(표식 키 제외). `dbsize.pre`: 첫 재시작 직전의 앱 키 수. 없으면 재시작 전에 멈췄다.
    - `suspect.marker=1`이 이 멈춤이다. `suspect.empty=1`이 함께 있으면 앱 키 0개도 본 적이 있다. `ok.*`는 끝낸 단계다.
 
-2. **데이터 확인.** 값은 보지 않는다. 키 수, 표식 키, AOF 상태만 본다. 0.3의 `vk`와 1절 머리 블록(함수)을 이 셸에 먼저 정의한다. 0.1 블록은 돌리지 않는다(새 `RUN`을 만든다). 아래 `RUN`은 CLI 기록의 실행 id다.
+2. **데이터 확인.** 값은 보지 않는다. 키 수, 표식 키, AOF 상태만 본다. 먼저 CLI 기록의 실행 id를 `RUN`으로 읽고 꼴을 본다. 0.1 블록과 1절 머리의 변수 블록은 돌리지 않는다(0.1은 새 `RUN`을 만든다).
 
    ```bash
-   MARK=''    # 운영자가 아는 만료 없는 앱 표식 키(1절 머리와 같다). 모르면 비워 둔다
    RUN=$(kubectl -n app-$APP get configmap restore-vk -o jsonpath='{.data.run}')
+   case $RUN in ''|*[!a-z0-9]*) echo "멈춤: 기록의 run을 읽지 못했거나 꼴이 아니다. 더 하지 않는다" >&2 ;; *) echo "CLI 실행 id: $RUN" ;; esac
+   MARK=''    # 운영자가 아는 만료 없는 앱 표식 키(1절 머리와 같다). 모르면 비워 둔다
+   ```
+
+   그다음 0.3의 `vk`와 1절 머리의 함수 블록을 이 셸에 정의하고 확인한다.
+
+   ```bash
    ( set -euo pipefail
    case $RUN in ''|*[!a-z0-9]*) echo "기록의 run 꼴이 아니다" >&2; exit 1 ;; esac
    ov=$(kubectl -n app-$APP get configmap valkey-overrides -o jsonpath='{.data.overrides\.conf}')
@@ -385,14 +400,30 @@ CLI `homelab cache restore <앱>`은 이 절의 검증 키를 복원 표식 키�
 
 4. **표식 키 지우기(맞을 때만).** 6단계 블록을 그대로 돌린다(`RUN`은 2의 값, `$W`가 없으면 먼저 `W=$(mktemp -d)`). "정리 끝"이 나와야 한다. 이번 키와 백업에서 돌아온 옛 키를 모두 지우고 이 실행의 Job도 지운다.
 
-5. **기록 지우기.** 기록은 CLI의 잠금이다. 지우면 새 `cache restore`가 시작할 수 있어, 이 실행의 Job·파드가 0개이고 다른 복원이 없을 때만 지운다.
+5. **기록 지우기.** 기록은 CLI의 잠금이다. 지우면 새 `cache restore`가 시작할 수 있어, 이 실행의 Job·파드(기록의 `backup.jobs`에 적힌 수동 백업 Job의 파드 포함)가 0개이고 다른 복원이 없을 때만 지운다.
 
    ```bash
    ( set -euo pipefail
    case $RUN in ''|*[!a-z0-9]*) echo "RUN 꼴이 아니다" >&2; exit 1 ;; esac
+   # 2에서 본 그 실행의 기록인지 먼저 본다(수동 백업 Job 이름을 이 기록에서 읽는다). 지우기 직전에 한 번 더 본다.
+   r=$(kubectl -n app-$APP get configmap restore-vk -o jsonpath='{.data.run}')
+   [ "$r" = "$RUN" ] || { echo "기록의 run이 $(printf '%s' "$r" | cat -v)다(2에서 본 것과 다르다)" >&2; exit 1; }
+   bjobs=$(kubectl -n app-$APP get configmap restore-vk -o jsonpath='{.data.backup\.jobs}')
    # 이 실행의 Job(복원 Job restore-vk, 수동 백업 backup-<run>-<시도>). foreground라 파드까지 없어진 뒤 돌아온다.
-   # 함정: 수동 백업 Job의 파드에는 실행 라벨이 없어 아래 라벨 확인에 걸리지 않는다.
+   # Job이 이미 지워진 재시도(앞에서 background로 지웠다)에는 파드가 남아 있을 수 있어 파드도 직접 지운다(지워질 때까지 기다린다).
    kubectl -n app-$APP delete job -l homelab.ukyi.app/restore=$RUN --cascade=foreground --timeout=5m
+   kubectl -n app-$APP delete pod -l homelab.ukyi.app/restore=$RUN --timeout=5m
+   # 함정: 수동 백업 파드에는 실행 라벨도 valkey-data도 없어 라벨 확인과 아래 다른 복원 검사에 모두 걸리지 않는다.
+   # 기록의 backup.jobs(쉼표 목록)의 Job마다 job-name 라벨로 파드를 지우고 0개인지 본다(CLI의 runObjects와 같다).
+   while IFS= read -r j; do
+     [ -n "$j" ] || continue
+     case $j in "backup-$RUN-"????) ;; *) echo "기록의 backup.jobs 꼴이 아니다" >&2; exit 1 ;; esac
+     printf '%s\n' "$j" | LC_ALL=C grep -aqxE 'backup-[a-z0-9]{1,22}-[0-9a-f]{4}' || { echo "기록의 backup.jobs 꼴이 아니다" >&2; exit 1; }
+     kubectl -n app-$APP delete job "$j" --cascade=foreground --timeout=5m --ignore-not-found
+     kubectl -n app-$APP delete pod -l "job-name=$j" --timeout=5m
+     out=$(kubectl -n app-$APP get pod -l "job-name=$j" -o name)
+     if [ -n "$out" ]; then printf '%s\n' "$out" | cat -v >&2; echo "수동 백업 파드가 남았다(위)" >&2; exit 1; fi
+   done <<<"$(printf '%s' "$bjobs" | tr ',' '\n')"
    out=$(kubectl -n app-$APP get job,pod -l homelab.ukyi.app/restore=$RUN -o name)
    if [ -n "$out" ]; then printf '%s\n' "$out" | cat -v >&2; echo "이 실행의 Job·파드가 남았다(위)" >&2; exit 1; fi
    # 다른 복원: 남은 restore-vk Job(다른 실행 것), valkey-data를 마운트하는 끝나지 않은 Job과 그 파드(1절 2단계와 같은 검사).
@@ -404,7 +435,7 @@ CLI `homelab cache restore <앱>`은 이 절의 검증 키를 복원 표식 키�
    bj=$(printf '%s\n' "$jobs" | awk -F'\t' '(" " $2 " ") !~ / (Complete|Failed) / && (" " $3 " ") ~ / valkey-data / { print "job/" $1 }')
    if [ -n "$x$bp$bj" ]; then printf '%s\n' "$x" "$bp" "$bj" | cat -v >&2
      echo "다른 복원의 Job·파드가 있다(위). 그 실행이 끝났는지 보고 다시 한다" >&2; exit 1; fi
-   # 2에서 본 그 실행의 기록인지 지우기 직전에 다시 본다.
+   # 지우기 직전에 다시 본다.
    r=$(kubectl -n app-$APP get configmap restore-vk -o jsonpath='{.data.run}')
    [ "$r" = "$RUN" ] || { echo "기록의 run이 $(printf '%s' "$r" | cat -v)다(2에서 본 것과 다르다)" >&2; exit 1; }
    kubectl -n app-$APP delete configmap restore-vk
