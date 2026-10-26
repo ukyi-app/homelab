@@ -14,3 +14,4 @@ migration:
     - -e
     - 'await Bun.sql`create table if not exists t11_probe (id int primary key, at timestamptz not null default now())`; console.log("migrate ok"); process.exit(0)'
 secrets: [T12_PROBE]
+suspended: true
