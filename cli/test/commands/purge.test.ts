@@ -27,8 +27,8 @@ function planRules(opts: { backupAfter?: boolean } = {}): Rule[] {
     ghGet(`repos/ukyi-app/homelab/pulls?head=ukyi-app%3Acli%2Fdata-purge-${APP}&state=open`, 200, []),
     ghGet(`repos/ukyi-app/homelab/pulls?head=ukyi-app%3Acli%2Fdata-purge-delete-${APP}&state=open`, 200, []),
     kubectlRule(["-n", NS, "get", "persistentvolumeclaims", "valkey-data", "-o", "json"], notFound),
-    rule(infisicalArgv.folders(PROJECT, `/apps/${APP}`), { stdout: JSON.stringify([{ name: "postgres" }]) }),
-    rule(infisicalArgv.folders(PROJECT, "/apps"), { stdout: JSON.stringify([{ name: APP }]) }),
+    rule(infisicalArgv.folders(PROJECT, `/apps/${APP}`), { stdout: JSON.stringify([{ folderId: "f1", folderName: "postgres", folderPath: `/apps/${APP}/postgres` }]) }),
+    rule(infisicalArgv.folders(PROJECT, "/apps"), { stdout: JSON.stringify([{ folderId: "f2", folderName: APP, folderPath: `/apps/${APP}` }]) }),
     infisicalList(`/apps/${APP}/postgres`, { PASSWORD: FAKE_SECRETS[0] }),
     infisicalList(`/apps/${APP}`, { API_KEY: FAKE_SECRETS[1] }),
   ];
@@ -150,6 +150,65 @@ describe("data purge: 흐름(가짜 세계)", () => {
   test("차트 1.0.2 태그가 없으면 PR 1을 열지 않는다", async () => {
     const w = purgeWorld();
     w.tags.clear();
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(w.openPrs()).toEqual([]);
+  });
+
+  test("r1 P1-2: 앱 이력을 못 읽거나 모양이 다르면 백업 검사를 통과시키지 않는다(PR 없음)", async () => {
+    for (const broken of ["broken", []] as const) {
+      const w = purgeWorld();
+      w.history.set(`apps/${APP}/values.yaml`, broken as any);
+      if (Array.isArray(broken)) w.history.set(DATA, []);
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(r.status).toBe("failed");
+      expect(r.steps.find((x) => x.id === "backup")!.result).toBe("failed");
+      expect(w.openPrs()).toEqual([]);
+      expect(w.writes).toEqual([]);
+    }
+  });
+
+  test("r1 P1-2: 앱 없이 등록한 데이터는 data 첫 커밋 뒤 백업을 요구한다(이력이 길면 멈춘다)", async () => {
+    const w = purgeWorld();
+    w.history.set(`apps/${APP}/values.yaml`, []);
+    // 새것부터: PR 1이 같은 파일을 고쳐도 첫 커밋(2026-10-22)은 그대로다
+    w.history.set(DATA, ["2026-10-25T00:00:00Z", "2026-10-22T00:00:00Z"]);
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("데이터 등록(앱 이력 없음)(2026-10-22T00:00:00Z) 뒤");
+    expect(w.openPrs()).toEqual([]);
+    w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-23T18:00:00Z";
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-23T18:30:00Z";
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
+
+    const long = purgeWorld();
+    long.history.set(`apps/${APP}/values.yaml`, []);
+    long.history.set(DATA, Array.from({ length: 100 }, () => "2026-10-22T00:00:00Z"));
+    expect((await runIn(long, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+  });
+
+  test("PR 1 뒤 Database CR이 없으면 반영으로 보지 않고 PR 2를 열지 않는다", async () => {
+    const w = purgeWorld();
+    await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    w.merge(900);
+    w.objects.delete(`database/database/${APP}`);
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("waiting");
+    expect(r.next).toContain("Database gone(없음)");
+    expect(w.openPrs()).toEqual([]);
+  });
+
+  test("PVC에 묶인 PV를 못 찾으면 reclaim을 확인할 수 없어 PR 2를 열지 않는다", async () => {
+    const w = purgeWorld();
+    await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    w.merge(900);
+    for (const k of ["database", "databaserole"]) {
+      const o = w.obj(k, "database", APP)!;
+      delete o.metadata.annotations;
+      o.spec = k === "database" ? { databaseReclaimPolicy: "delete" } : { databaseRoleReclaimPolicy: "delete" };
+    }
+    delete w.obj("pvc", NS, "valkey-data")!.metadata.annotations;
+    w.objects.delete("pv/-/pvc-9");
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
     expect(w.openPrs()).toEqual([]);

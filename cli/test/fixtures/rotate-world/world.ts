@@ -44,6 +44,8 @@ export class World {
   refs = new Map<string, string>();
   prs: { number: number; head: string; open: boolean; title: string }[] = [];
   removalDate = "2026-10-20T00:00:00Z";
+  // 저장소 경로 → 커밋 시각(새것부터). 없으면 apps/는 [removalDate], 그 밖은 [2026-10-01]. "broken"은 모양이 다른 응답.
+  history = new Map<string, string[] | "broken">();
   tags = new Set<string>();
   passwords = 0;
   jobLogs = new Map<string, string>();
@@ -153,7 +155,12 @@ export class World {
       const names = new Set([...a.keys(), ...b.keys()]);
       return { status: 200, json: { files: [...names].filter((n) => a.get(n) !== b.get(n)).map((filename) => ({ filename })) } };
     }
-    if ((x = m.match(/^commits\?path=(.+)&sha=main&per_page=1$/))) return { status: 200, json: [{ commit: { committer: { date: this.removalDate } } }] };
+    if ((x = m.match(/^commits\?path=(.+)&sha=main&per_page=([0-9]+)$/))) {
+      const path = decodeURIComponent(x[1]);
+      const h = this.history.get(path) ?? (path.startsWith("apps/") ? [this.removalDate] : ["2026-10-01T00:00:00Z"]);
+      if (h === "broken") return { status: 200, json: { message: "모양이 다름" } };
+      return { status: 200, json: h.slice(0, Number(x[2])).map((date) => ({ commit: { committer: { date } } })) };
+    }
     if ((x = m.match(/^contents\/([^?]+)\?ref=main$/))) {
       const dir = decodeURIComponent(x[1]);
       const entries = [...this.main().keys()].filter((k) => k.startsWith(`${dir}/`)).map((k) => ({ type: "file", path: k, name: k.slice(dir.length + 1) }));

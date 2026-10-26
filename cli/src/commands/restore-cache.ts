@@ -49,6 +49,18 @@ function mark(w: WriteCtx, n: Names, set: Record<string, string | null>): void {
 const hasTrue = (o: any, type: string) => (o?.status?.conditions ?? []).some((c: any) => c?.type === type && c?.status === "True");
 const mountsData = (spec: any) => (spec?.volumes ?? []).some((v: any) => v?.persistentVolumeClaim?.claimName === "valkey-data");
 
+// valkey-data를 마운트하는 끝나지 않은 Job과 그 파드(서버 파드는 Job 파드가 아니라 빠진다). 복원 Job의 흔적이다.
+function restoreUsers(ctx: ReadCtx | WriteCtx, n: Names): string[] {
+  const pods = ctx.k8s.list("pod", n.ns).filter((p) => typeof p?.metadata?.labels?.["job-name"] === "string" && p?.status?.phase !== "Succeeded" && p?.status?.phase !== "Failed" && mountsData(p?.spec)).map((p) => `pod/${p.metadata?.name}`);
+  const jobs = ctx.k8s.list("job", n.ns).filter((j) => !hasTrue(j, "Complete") && !hasTrue(j, "Failed") && mountsData(j?.spec?.template?.spec)).map((j) => `job/${j.metadata?.name}`);
+  return [...pods, ...jobs];
+}
+
+// 이 실행 라벨의 Job·파드(지우는 중 포함). 기록을 지우기 직전에 0개여야 한다.
+function runObjects(ctx: ReadCtx | WriteCtx, n: Names, run: string): string[] {
+  return [...ctx.k8s.list("job", n.ns, `${LABEL}=${run}`).map((j) => `job/${j.metadata?.name}`), ...ctx.k8s.list("pod", n.ns, `${LABEL}=${run}`).map((p) => `pod/${p.metadata?.name}`)];
+}
+
 function rolledOut(d: any): boolean {
   const want = d?.spec?.replicas ?? 1;
   return want >= 1 && d?.status?.updatedReplicas === want && d?.status?.readyReplicas === want && (d?.status?.observedGeneration ?? 0) >= (d?.metadata?.generation ?? 0);
@@ -200,10 +212,21 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
       target: "다른 복원",
       async read(ctx) {
         const r = record(ctx, n);
-        if (r && r.data.object !== object) return { state: "differs", action: "none", detail: `다른 복원(실행 ${r.run}, 객체 ${r.data.object})이 남아 있다`, next: `homelab cache restore ${app} --finish 또는 --abort` };
+        const opt = backupFirst ? "1" : "0";
+        // 실행 옵션은 기록에 고정한다. 끝난 실행에 --backup-first를 붙여 다시 치면 정리 뒤에 새 Job이 생긴다(#883 r1 P1-3).
+        if (r && (r.data.object !== object || (r.data["opt.backup"] ?? "") !== opt)) return { state: "differs", action: "none", detail: `다른 복원(실행 ${r.run}, 객체 ${r.data.object}, 수동 백업 ${r.data["opt.backup"] === "1" ? "함" : "안 함"})이 남아 있다`, next: `같은 옵션으로 잇거나 homelab cache restore ${app} --finish 또는 --abort` };
         const job = ctx.k8s.get("job", n.ns, JOB);
         if (job && job.metadata?.labels?.[LABEL] !== r?.run) return { state: "differs", action: "none", detail: `다른 실행의 Job ${JOB}이 있다`, next: `kubectl -n ${n.ns} get job,pod -L ${LABEL}로 보고, 끝났으면 로그를 남긴 뒤 지운다` };
-        return same(r ? `이 복원(실행 ${r.run})을 잇는다` : "없음");
+        if (r) return same(`이 복원(실행 ${r.run})을 잇는다`);
+        // 기록이 없으면 처음 상태여야 한다. 기록만 지워진 진행 중 복원을 새 실행으로 처음부터 다시 하지 않는다(PVC를 또 덮는다).
+        const v = values(ctx, n.dataFile)?.valkey ?? {};
+        const left: string[] = [];
+        if ("running" in v || "restoreMode" in v) left.push(`${n.dataFile}에 running·restoreMode`);
+        const d = ctx.k8s.get("deployment", n.ns, n.server);
+        if (!d || !rolledOut(d)) left.push(`서버 ${n.server}가 떠 있지 않다`);
+        left.push(...restoreUsers(ctx, n));
+        if (left.length) return { state: "differs", action: "none", detail: `실행 기록 없이 복원 흔적이 있다(${left.join(", ")})`, next: `kubectl -n ${n.ns} get deploy,job,pod -L ${LABEL}와 ${n.dataFile}를 손으로 확인한다(restore.md 1절)` };
+        return same("없음, 서버 정상");
       },
     },
     {
@@ -214,7 +237,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         return r ? same(`실행 ${r.run}`) : { state: "missing", action: "create", detail: `없음 → 새 실행(객체 ${object})` };
       },
       async apply(w) {
-        if (w.k8s.restoreRecordCreate(n.ns, RECORD, newRunId(), { object }) === "exists") throw new Error("그사이 다른 실행이 기록을 만들었다. 다시 실행해 상태를 읽는다");
+        if (w.k8s.restoreRecordCreate(n.ns, RECORD, newRunId(), { object, "opt.backup": backupFirst ? "1" : "0" }) === "exists") throw new Error("그사이 다른 실행이 기록을 만들었다. 다시 실행해 상태를 읽는다");
       },
     },
   ];
@@ -231,6 +254,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         const run = mine(w, n).run;
         // 시도마다 새 이름(restore.md 0.1: 실패한 시도의 로그를 지우지 않고 남긴다).
         const job = `backup-${run}-${newRunId().slice(-4)}`;
+        mark(w, n, { "ok.cleanup": null });
         w.k8s.createJobFromCronJob(n.ns, n.cronjob, job, run);
         if (!w.k8s.waitCondition("job", n.ns, { name: job }, "complete", 600)) throw new Error(`수동 백업 Job ${job}이 10분 안에 끝나지 않았다(kubectl -n ${n.ns} logs job/${job} --all-containers)`);
         const up = /^올림: (r2:[a-z0-9-]+\/valkey\/[a-z0-9-]+\/dump-[0-9]{8}T[0-9]{6}Z\.rdb)$/m.exec(w.k8s.logs(n.ns, { job }, { container: "upload", tail: 20 }))?.[1];
@@ -282,6 +306,9 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
       },
       async apply(w) {
         const run = mine(w, n).run;
+        // Job을 만들기 전에 남긴다. Job이 appendonlydir을 지운 뒤 실패하거나 로그·기록 저장이 실패해 ok.job이 없어도,
+        // 사람이 Job을 지워도 PVC는 이미 바뀌었을 수 있다. 이 표식이 있으면 --abort를 거부한다(#883 r1 P1-1).
+        mark(w, n, { touched: "1", "ok.cleanup": null });
         const existing = w.k8s.get("job", n.ns, JOB);
         if (existing) {
           if (existing.metadata?.labels?.[LABEL] !== run) throw new Error(`다른 실행의 Job ${JOB}이 있다`);
@@ -375,8 +402,11 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         if (!has(r, "ok.aof")) return later("복원 모드 끄기 PR 병합 뒤 rollout restart·키 수 확인");
         const v = values(ctx, n.dataFile)?.valkey ?? {};
         const argo = ctx.k8s.get("application", "argocd", `${n.app}-data`);
-        // ConfigMap(valkey-overrides)은 읽지 않는다. 그 PR을 포함한 main으로 동기화됐는지로 본다.
-        const synced = !("running" in v) && !("restoreMode" in v) && argo?.status?.sync?.status === "Synced" && argo?.status?.sync?.revision === ctx.repo.mainSha();
+        // ConfigMap(valkey-overrides)은 읽지 않는다. 데이터 Application의 source는 차트 태그(data-chart-v<버전>)라 revision은 main SHA가
+        // 아니다(#883 r1 P2). main values는 ApplicationSet이 spec.source.helm.valuesObject로 넣으므로, 그 값과 Argo CD가 마지막으로
+        // 비교한 값(status.sync.comparedTo)에 둘 다 running·restoreMode가 없고 Synced인지로 본다.
+        const clean = (o: any) => o !== null && typeof o === "object" && o.valkey?.persistent === true && !("running" in o.valkey) && !("restoreMode" in o.valkey);
+        const synced = !("running" in v) && !("restoreMode" in v) && argo?.status?.sync?.status === "Synced" && clean(argo?.spec?.source?.helm?.valuesObject) && clean(argo?.status?.sync?.comparedTo?.source?.helm?.valuesObject);
         return synced ? { state: "differs", action: "update", detail: "rollout restart → appendonly yes·키 수 확인" } : same("PR 병합 대기 또는 반영 대기", { hold: "Argo CD 반영 대기(복원 모드 끄기)" });
       },
       async apply(w) {
@@ -403,8 +433,8 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
       async apply(w) {
         const run = mine(w, n).run;
         w.k8s.deleteRestoreObjects(n.ns, run);
-        const left = [...w.k8s.list("job", n.ns, `${LABEL}=${run}`), ...w.k8s.list("pod", n.ns, `${LABEL}=${run}`)];
-        if (left.length) throw new Error(`이 실행의 객체가 ${left.length}개 남았다`);
+        const left = runObjects(w, n, run);
+        if (left.length) throw new Error(`이 실행의 객체가 남았다(${left.join(", ")})`);
         mark(w, n, { "ok.cleanup": "1" });
       },
     },
@@ -421,6 +451,8 @@ function finishSteps(n: Names): Step[] {
         const r = record(ctx, n);
         if (!r) return same("기록 없음");
         if (!has(r, "ok.cleanup")) return { state: "differs", action: "none", detail: `실행 ${r.run}이 끝나지 않았다`, next: `homelab cache restore ${n.app} --apply로 끝까지 잇거나 --abort` };
+        const left = runObjects(ctx, n, r.run);
+        if (left.length) return { state: "differs", action: "none", detail: `실행 ${r.run}의 객체가 남아 있다(${left.join(", ")})`, next: `kubectl -n ${n.ns} get job,pod -l ${LABEL}=${r.run}로 보고 끝난 뒤 다시` };
         return same(`실행 ${r.run} 끝남(키 ${r.data.dbsize}개)`);
       },
     },
@@ -432,7 +464,12 @@ function finishSteps(n: Names): Step[] {
         return r ? { state: "differs", action: "delete", detail: `실행 ${r.run} 기록 지움` } : same("없음");
       },
       async apply(w) {
-        w.k8s.restoreRecordDelete(n.ns, RECORD, mine(w, n).run);
+        const r = mine(w, n);
+        // 기록이 잠금이다. 지우기 직전에 표식이 아니라 지금 클러스터를 다시 본다(#883 r1 P1-3).
+        if (!has(r, "ok.cleanup")) throw new Error(`실행 ${r.run}이 끝나지 않았다`);
+        const left = runObjects(w, n, r.run);
+        if (left.length) throw new Error(`실행 ${r.run}의 객체가 남아 있다(${left.join(", ")}). 기록은 그대로다`);
+        w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
       },
     },
   ];
@@ -448,8 +485,11 @@ function abortSteps(n: Names): Step[] {
       async read(ctx) {
         const r = record(ctx, n);
         if (!r) return same("기록 없음");
-        const job = ctx.k8s.get("job", n.ns, JOB);
-        if (has(r, "ok.job") || (job && job.metadata?.labels?.[LABEL] === r.run)) return { state: "differs", action: "none", detail: "복원 Job을 만든 뒤라 PVC가 바뀌었을 수 있다", next: `homelab cache restore ${app} --apply로 끝까지 잇는다` };
+        const next = `homelab cache restore ${app} --apply로 끝까지 잇는다`;
+        // Job 유무가 아니라 Job을 만들기 전에 남긴 touched로 판단한다. Job은 지워질 수 있다(#883 r1 P1-1).
+        if (has(r, "touched") || has(r, "ok.job")) return { state: "differs", action: "none", detail: "복원 Job을 만든 뒤라 PVC가 바뀌었을 수 있다", next };
+        const users = [...(ctx.k8s.get("job", n.ns, JOB) ? [`job/${JOB}`] : []), ...restoreUsers(ctx, n)];
+        if (users.length) return { state: "differs", action: "none", detail: `valkey-data를 쓰는 Job·파드가 있다(${users.join(", ")})`, next };
         return same(`실행 ${r.run}: 복원 Job 전`);
       },
     },
@@ -483,11 +523,13 @@ function abortSteps(n: Names): Step[] {
         return record(ctx, n) ? { state: "differs", action: "delete", detail: "수동 백업 Job과 실행 기록 지움" } : same("없음");
       },
       async apply(w) {
-        const run = mine(w, n).run;
-        w.k8s.deleteRestoreObjects(n.ns, run);
-        const left = [...w.k8s.list("job", n.ns, `${LABEL}=${run}`), ...w.k8s.list("pod", n.ns, `${LABEL}=${run}`)];
-        if (left.length) throw new Error(`이 실행의 객체가 ${left.length}개 남았다(기록은 그대로)`);
-        w.k8s.restoreRecordDelete(n.ns, RECORD, run);
+        const r = mine(w, n);
+        // 지우기 직전에 다시 본다(abortable 뒤에 Job이 생겼을 수 있다).
+        if (has(r, "touched") || has(r, "ok.job") || w.k8s.get("job", n.ns, JOB)) throw new Error("복원 Job을 만든 뒤라 그만두지 않는다");
+        w.k8s.deleteRestoreObjects(n.ns, r.run);
+        const left = runObjects(w, n, r.run);
+        if (left.length) throw new Error(`이 실행의 객체가 남았다(${left.join(", ")}). 기록은 그대로다`);
+        w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
       },
     },
   ];

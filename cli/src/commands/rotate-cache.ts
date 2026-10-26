@@ -46,6 +46,8 @@ function appPort(ctx: ReadCtx | WriteCtx, app: string): number {
 function phase(ctx: ReadCtx, n: Names): { prev: string | null; cur: string | null; pending: boolean } {
   const prev = ctx.infisical.valueHash(n.folder, PREVIOUS);
   const cur = ctx.infisical.valueHash(n.folder, PASSWORD);
+  // PASSWORD가 없으면 어느 단계도 판단할 수 없다(없음을 "새 값 있음"으로 읽지 않는다).
+  if (cur === null) throw new Error(`Infisical ${n.folder}/${PASSWORD}가 없다`);
   return { prev, cur, pending: prev === null || cur === prev };
 }
 

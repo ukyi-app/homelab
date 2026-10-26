@@ -19,6 +19,9 @@ function planRules(): Rule[] {
     kubectlRule(["-n", NS, "get", "cronjobs.batch", `${APP}-valkey-backup`, "-o", "json"], { stdout: JSON.stringify(cronjob) }),
     kubectlRule(["-n", NS, "get", "configmaps", "restore-vk", "-o", "json"], notFound),
     kubectlRule(["-n", NS, "get", "jobs.batch", "restore-vk", "-o", "json"], notFound),
+    kubectlRule(["-n", NS, "get", "deployments.apps", `${APP}-valkey`, "-o", "json"], { stdout: JSON.stringify({ spec: { replicas: 1 }, status: { updatedReplicas: 1, readyReplicas: 1 } }) }),
+    kubectlRule(["-n", NS, "get", "pods", "-o", "json"], { stdout: JSON.stringify({ items: [] }) }),
+    kubectlRule(["-n", NS, "get", "jobs.batch", "-o", "json"], { stdout: JSON.stringify({ items: [] }) }),
     ghGet("repos/ukyi-app/homelab/git/ref/heads/main", 200, { object: { sha: FAKE_SHA } }),
     ghGet(contents(DATA, FAKE_SHA), 200, fileResp(dataText)),
     ghGet(`repos/ukyi-app/homelab/pulls?head=ukyi-app%3Acli%2Fcache-restore-${APP}&state=open`, 200, []),
@@ -46,7 +49,9 @@ describe("cache restore: plan(PATH 스텁)", () => {
 function restoreWorld(): World {
   const w = valkeyWorld(APP, "persistent");
   w.obj("deployment", NS, `${APP}-valkey`)!.status = { updatedReplicas: 1, readyReplicas: 1 };
-  w.put("application", "argocd", `${APP}-data`, { status: { sync: { status: "Synced", revision: "x" } } });
+  // 데이터 Application의 source는 차트 태그라 revision은 main SHA가 아니다(#883 r1 P2). values는 valuesObject로 들어간다.
+  const mode = { chartVersion: "1.0.1", valkey: { persistent: true, running: true, restoreMode: true } };
+  w.put("application", "argocd", `${APP}-data`, { spec: { source: { targetRevision: "data-chart-v1.0.1", helm: { valuesObject: mode } } }, status: { sync: { status: "Synced", revision: "c".repeat(40), comparedTo: { source: { helm: { valuesObject: mode } } } } } });
   w.jobLogs.set("restore-vk", `받음: ${GOT}\n-rw-r--r-- dump.rdb\n`);
   return w;
 }
@@ -100,7 +105,12 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     expect(r5.status).toBe("waiting");
     expect(r5.next).toContain("복원 모드 끄기");
 
-    w.obj("application", "argocd", `${APP}-data`)!.status.sync.revision = w.refs.get("main");
+    // ApplicationSet이 새 values를 spec에 넣었지만 Argo CD가 아직 비교하지 않았다 → 아직 대기
+    const argo = w.obj("application", "argocd", `${APP}-data`)!;
+    const clean = { chartVersion: "1.0.1", valkey: { persistent: true } };
+    argo.spec.source.helm.valuesObject = clean;
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("waiting");
+    argo.status.sync.comparedTo.source.helm.valuesObject = clean;
     w.writes = [];
     const r6 = await runIn(w, cmd, "apply", { app: APP });
     expect(r6.status).toBe("done");
@@ -174,6 +184,103 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     expect(again.status).toBe("waiting");
     expect(w.records.get(`${NS}/restore-vk`)!.data.backup).toContain("dump-");
     expect(w.openPrs()).toHaveLength(1);
+  });
+
+  // 서버를 내리고 복원 Job 단계까지 간 세계. 복원 Job의 결과는 outcome으로 정한다.
+  async function toRestoreJob(outcome: "complete" | "failed", logs = `받음: ${GOT}\n`): Promise<World> {
+    const w = restoreWorld();
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(900);
+    w.objects.delete(`deployment/${NS}/${APP}-valkey`);
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = true;
+    w.jobOutcome.set("restore-vk", outcome);
+    w.jobLogs.set("restore-vk", logs);
+    return w;
+  }
+
+  test("r1 P1-1: 복원 Job이 실패해 사람이 지웠어도 --abort는 거부한다(PVC가 이미 바뀌었을 수 있다)", async () => {
+    const w = await toRestoreJob("failed");
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("failed");
+    w.objects.delete(`job/${NS}/restore-vk`);
+    const a = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    expect(a.status).toBe("failed");
+    expect(a.error!.message).toContain("PVC가 바뀌었을 수 있다");
+    expect(w.openPrs()).toEqual([]);
+    expect(w.records.size).toBe(1);
+  });
+
+  test("r1 P1-1: Job은 끝났지만 로그를 못 읽어 표식이 없어도 --abort는 거부한다", async () => {
+    const w = await toRestoreJob("complete", "");
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("failed");
+    expect(w.records.get(`${NS}/restore-vk`)!.data["ok.job"]).toBeUndefined();
+    w.objects.delete(`job/${NS}/restore-vk`);
+    const a = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    expect(a.status).toBe("failed");
+    expect(w.openPrs()).toEqual([]);
+  });
+
+  test("r1 P1-1: 기록 전 복원 Job 파드가 valkey-data를 쓰고 있으면 --abort는 거부한다", async () => {
+    const w = restoreWorld();
+    await runIn(w, cmd, "apply", { app: APP });
+    w.put("pod", NS, "restore-vk-abc", { metadata: { name: "restore-vk-abc", labels: { "job-name": "restore-vk" } }, status: { phase: "Running" }, spec: { volumes: [{ persistentVolumeClaim: { claimName: "valkey-data" } }] } });
+    const a = await runIn(w, cmd, "apply", { app: APP }, { abort: true });
+    expect(a.status).toBe("failed");
+    expect(w.records.size).toBe(1);
+  });
+
+  async function finished(): Promise<World> {
+    const w = await toRestoreJob("complete");
+    const vk = w.valkeys.get(`${NS}/${APP}-valkey`)!;
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(901);
+    w.put("deployment", NS, `${APP}-valkey`, { spec: { replicas: 1 }, status: { updatedReplicas: 1, readyReplicas: 1 } });
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = false;
+    vk.appendonly = false;
+    vk.aof = false;
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(902);
+    const argo = w.obj("application", "argocd", `${APP}-data`)!;
+    const clean = { chartVersion: "1.0.1", valkey: { persistent: true } };
+    argo.spec.source.helm.valuesObject = clean;
+    argo.status.sync.comparedTo.source.helm.valuesObject = clean;
+    const done = await runIn(w, cmd, "apply", { app: APP });
+    expect(done.status).toBe("done");
+    return w;
+  }
+
+  test("r1 P1-3: 끝난 실행에 --backup-first를 붙여 다시 치면 새 Job을 만들지 않고 멈춘다", async () => {
+    const w = await finished();
+    w.writes = [];
+    const r = await runIn(w, cmd, "apply", { app: APP }, { "backup-first": true });
+    expect(r.status).toBe("failed");
+    expect(w.writes).toEqual([]);
+  });
+
+  test("r1 P1-3: --finish는 기록을 지우기 직전에 이 실행의 Job·파드를 다시 보고, 남아 있으면 지우지 않는다", async () => {
+    const w = await finished();
+    const run = w.records.get(`${NS}/restore-vk`)!.run;
+    w.put("pod", NS, "late", { metadata: { name: "late", labels: { "homelab.ukyi.app/restore": run } }, status: { phase: "Running" } });
+    const f = await runIn(w, cmd, "apply", { app: APP }, { finish: true });
+    expect(f.status).toBe("failed");
+    expect(f.error!.message).toContain("pod/late");
+    expect(w.records.size).toBe(1);
+    w.objects.delete(`pod/${NS}/late`);
+    expect((await runIn(w, cmd, "apply", { app: APP }, { finish: true })).status).toBe("done");
+  });
+
+  test("기록만 지워진 진행 중 복원(서버 내려감)은 새 실행으로 다시 시작하지 않는다", async () => {
+    const w = await toRestoreJob("complete");
+    await runIn(w, cmd, "apply", { app: APP });
+    w.records.clear();
+    // 사람이 끝난 restore-vk Job도 지웠다. 남은 흔적은 서버가 내려간 것과 values의 running뿐이다
+    w.objects.delete(`job/${NS}/restore-vk`);
+    w.writes = [];
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("복원 흔적");
+    expect(w.writes).toEqual([]);
   });
 
   test("--abort: 복원 Job 전이면 기록을 지우고, 복원 Job 뒤면 거부한다", async () => {

@@ -156,6 +156,18 @@ describe("db rotate: 흐름(가짜 세계)", () => {
     expect(w.writes).toEqual([]);
   });
 
+  test("회전 중 PASSWORD를 읽지 못하면(없음) 쓰기 없이 실패한다", async () => {
+    const w = postgresWorld(APP);
+    w.setValue(FOLDER, "PASSWORD_PREVIOUS", OLD);
+    w.infisical.get(FOLDER)!.delete("PASSWORD");
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("failed");
+    expect(w.writes).toEqual([]);
+    const f = await runIn(w, cmd, "apply", { app: APP }, { finish: true });
+    expect(f.status).toBe("failed");
+    expect(w.value(FOLDER, "PASSWORD_PREVIOUS")).toBe(OLD);
+  });
+
   test("가짜 시크릿 꼴 값도 결과에 없다", async () => {
     const w = postgresWorld(APP, { password: FAKE_SECRETS[0] });
     const r = await runIn(w, cmd, "apply", { app: APP });

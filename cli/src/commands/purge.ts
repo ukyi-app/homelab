@@ -43,20 +43,44 @@ function listDir(ctx: ReadCtx, dir: string): string[] {
   });
 }
 
+type Baseline = { date: string; removed: number; what: string } | { problem: string };
+
+function commitDates(ctx: ReadCtx, path: string, perPage: number): string[] | { problem: string } {
+  const r = ctx.gh.get(`${REPO}/commits?path=${encodeURIComponent(path)}&sha=main&per_page=${perPage}`);
+  if (r.status !== 200 || !Array.isArray(r.json)) return { problem: `${path} 이력을 읽지 못했다(HTTP ${r.status})` };
+  const dates = r.json.map((c: any) => c?.commit?.committer?.date);
+  if (dates.some((d: unknown) => typeof d !== "string" || !Number.isFinite(Date.parse(d as string)))) return { problem: `${path} 이력의 커밋 시각 형식이 아니다` };
+  return dates as string[];
+}
+
+function baseline(ctx: ReadCtx, app: string): Baseline {
+  const apps = commitDates(ctx, `apps/${app}/values.yaml`, 1);
+  if (!Array.isArray(apps)) return apps;
+  if (apps.length > 0) return { date: apps[0], removed: Date.parse(apps[0]), what: "앱 삭제" };
+  const data = commitDates(ctx, `data/${app}/values.yaml`, 100);
+  if (!Array.isArray(data)) return data;
+  if (data.length === 0) return { problem: `apps/${app}·data/${app} 이력이 둘 다 없어 백업 기준 시각을 정할 수 없다` };
+  // 100개를 채우면 첫 커밋이 이 쪽에 없을 수 있다.
+  if (data.length >= 100) return { problem: `data/${app} 이력이 100개 이상이라 첫 커밋을 정할 수 없다` };
+  const first = data[data.length - 1];
+  return { date: first, removed: Date.parse(first), what: "데이터 등록(앱 이력 없음)" };
+}
+
 const protectedOf = (o: any) => /Delete=false|Prune=false/.test(String(o?.metadata?.annotations?.[PROTECT] ?? ""));
 
 // PR 1이 살아 있는 리소스에 반영됐는지. 남은 것을 이름으로 돌려준다.
 function notPrepared(ctx: ReadCtx, n: Names, data: any): string[] {
   const left: string[] = [];
   if (data?.postgres?.enabled === true) {
+    // 없는 CR을 "반영됨"으로 보지 않는다. CR 없이 PR 2를 내면 DB·역할이 PostgreSQL에 남아도 이 명령은 알 수 없다.
     const db = ctx.k8s.get("database", "database", n.app);
-    if (db && (protectedOf(db) || db.spec?.databaseReclaimPolicy !== "delete")) left.push(`Database ${n.app}`);
+    if (!db || protectedOf(db) || db.spec?.databaseReclaimPolicy !== "delete") left.push(`Database ${n.app}${db ? "" : "(없음)"}`);
     const role = ctx.k8s.get("databaserole", "database", n.app);
-    if (role && (protectedOf(role) || role.spec?.databaseRoleReclaimPolicy !== "delete")) left.push(`DatabaseRole ${n.app}`);
+    if (!role || protectedOf(role) || role.spec?.databaseRoleReclaimPolicy !== "delete") left.push(`DatabaseRole ${n.app}${role ? "" : "(없음)"}`);
   }
   if (data?.valkey?.persistent === true) {
     const pvc = ctx.k8s.get("pvc", n.ns, "valkey-data");
-    if (pvc && protectedOf(pvc)) left.push("PVC valkey-data");
+    if (!pvc || protectedOf(pvc)) left.push(`PVC valkey-data${pvc ? "" : "(없음)"}`);
   }
   return left;
 }
@@ -116,12 +140,12 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       async read(ctx) {
         const data = values(ctx, n.dataFile);
         if (data === null) return same(`data/${app} 없음(PR 2 뒤라 확인하지 않는다)`);
-        const r = ctx.gh.get(`${REPO}/commits?path=${encodeURIComponent(`apps/${app}/values.yaml`)}&sha=main&per_page=1`);
-        const date = Array.isArray(r.json) ? r.json[0]?.commit?.committer?.date : undefined;
-        if (r.status !== 200) throw new Error(`앱 삭제 시각을 읽지 못했다(HTTP ${r.status})`);
-        if (typeof date !== "string") return same("앱 등록 기록 없음");
-        const removed = Date.parse(date);
-        if (!Number.isFinite(removed)) throw new Error("앱 삭제 시각 형식이 아니다");
+        // 기준 시각을 못 정하면 통과시키지 않는다(#883 r1 P1-2). 앱이 있었으면 apps/<app>/values.yaml의 마지막 커밋(삭제),
+        // 앱 없이 데이터만 등록했으면(시나리오 10의 probe2) data/<app>/values.yaml의 첫 커밋(등록). 첫 커밋은 PR 1이 같은
+        // 파일을 고쳐도 움직이지 않는다.
+        const base = baseline(ctx, app);
+        if ("problem" in base) return { state: "differs", action: "none", detail: base.problem, next: "GitHub 이력을 확인한 뒤 다시 실행한다(기준 시각 없이는 백업을 판단하지 않는다)" };
+        const { date, removed, what } = base;
         const after = (t: unknown) => typeof t === "string" && Date.parse(t) > removed;
         const lacks: string[] = [];
         if (data.postgres?.enabled === true) {
@@ -132,8 +156,8 @@ function steps(n: Names, dataFiles: string[]): Step[] {
           const cj = ctx.k8s.get("cronjob", n.ns, `${app}-valkey-backup`);
           if (!after(cj?.status?.lastSuccessfulTime)) lacks.push("Valkey 백업");
         }
-        if (lacks.length) return { state: "differs", action: "none", detail: `앱 삭제(${date}) 뒤 ${lacks.join("·")}이 없다`, next: "다음 정기 백업(PostgreSQL 03:00, Valkey 03:30 KST) 뒤 다시 실행한다" };
-        return same(`앱 삭제(${date}) 뒤 백업 있음`);
+        if (lacks.length) return { state: "differs", action: "none", detail: `${what}(${date}) 뒤 ${lacks.join("·")}이 없다`, next: "다음 정기 백업(PostgreSQL 03:00, Valkey 03:30 KST) 뒤 다시 실행한다" };
+        return same(`${what}(${date}) 뒤 백업 있음`);
       },
     },
     {
@@ -200,10 +224,13 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       target: `PV(${n.ns}/valkey-data)`,
       async read(ctx) {
         const data = values(ctx, n.dataFile);
+        if (data === null || data.valkey?.persistent !== true) return same("영속 Valkey 없음");
         const pvc = ctx.k8s.get("pvc", n.ns, "valkey-data");
-        if (data === null || !pvc) return same("영속 Valkey PVC 없음");
+        // PVC가 없으면 앞 단계(prepared)가 멈춘다. 여기까지 왔는데 없으면 PR 2 뒤이거나 바깥에서 지운 것이라 바꿀 PV가 없다.
+        if (!pvc) return same("PVC 없음");
         const pv = typeof pvc.spec?.volumeName === "string" ? ctx.k8s.get("pv", null, pvc.spec.volumeName) : null;
-        if (!pv) return same("묶인 PV 없음");
+        // 묶인 PV를 못 찾으면 reclaim을 확인할 수 없다. 폴더가 남는 쪽으로 넘어가지 않고 멈춘다.
+        if (!pv) return { state: "differs", action: "none", detail: "PVC에 묶인 PV를 찾지 못했다(reclaim을 확인할 수 없다)", next: `kubectl -n ${n.ns} get pvc valkey-data -o wide로 본다` };
         if (pv.spec?.persistentVolumeReclaimPolicy === "Delete") return same("reclaim Delete");
         if (data.purge !== true) return afterPr("PR 1 뒤 reclaim Retain → Delete");
         return { state: "differs", action: "update", detail: "reclaim Retain → Delete(PVC가 지워질 때 노드 폴더도 지워지게)" };
