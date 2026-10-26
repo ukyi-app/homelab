@@ -10,11 +10,14 @@ import type { Result, Status, StepReport } from "./result";
 const RERUN = "같은 명령을 다시 실행하면 된 단계는 건너뛰고 이어 간다";
 
 function normalize(o: Observation): Observation {
+  // hold는 "이 단계는 됐고 바깥을 기다린다"다. 아직 안 된 단계가 뒤를 막으려면 그 단계가 실패해야 한다.
+  if (o.hold !== undefined && o.state !== "same") throw new Error("hold는 same 관찰에만 둔다(엔진 계약)");
   return o.state === "same" ? { ...o, action: "none" } : o;
 }
 
 function detailOf(o: Observation): string {
-  return o.wait ? `${o.detail} (${o.wait})` : o.detail;
+  const extra = o.hold ?? o.wait;
+  return extra ? `${o.detail} (${extra})` : o.detail;
 }
 
 // --apply는 `--`(뒤는 위치 인자만) 앞에 둔다. 끝에 붙이면 재실행이 위치 인자로 읽어 64로 끝난다(Connector 4360754469).
@@ -37,15 +40,18 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
   const reports: StepReport[] = plan.steps.map((s) => ({ id: s.id, target: s.target, state: "missing", action: "none", detail: "", result: "not-run" }));
   const notes = [...(plan.notes ?? [])];
 
-  const finish = (status: Status, error?: { message: string; next: string }): Result => {
+  const finish = (status: Status, error?: { message: string; next: string }, held?: string): Result => {
     let next: string | null;
     const custom = plan.next?.(status);
-    if (custom !== undefined) next = custom;
+    // hold로 멈추면 뒤 단계가 남아 있다. 같은 apply를 다시 치는 것이 다음 행동이다(확인만 하는 plan이 아니다).
+    if (held !== undefined) next = `${held}. 끝나면 다시: ${ctx.line}`;
+    else if (custom !== undefined) next = custom;
     else if (status === "pending") next = applyLine(ctx.line);
     else if (status === "waiting") next = `대기가 끝나면 확인: ${planLine(ctx.line)}`;
     else if (status === "failed") next = error?.next ?? RERUN;
     else next = null;
     const result: Result = { command: plan.command, app: plan.app, mode: ctx.mode, status, steps: reports, notes, next, title: plan.title };
+    if (plan.body !== undefined) result.body = plan.body;
     if (error) result.error = error;
     return result;
   };
@@ -58,6 +64,7 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
       const o = normalize(await s.read(ctx));
       reports[i] = { ...reports[i], state: o.state, action: o.action, detail: detailOf(o), result: ctx.mode === "apply" ? "not-run" : o.state === "same" ? "skipped" : "planned" };
       if (o.warn) notes.push(`${s.target}: ${o.warn}`);
+      if (o.hold) notes.push(`${s.target}: ${o.hold}. 뒤 단계는 대기가 끝난 뒤 실행한다`);
       if (!s.apply && o.state !== "same") {
         reports[i].result = "failed";
         blocked ??= { message: `${s.target}: ${o.detail}`, next: o.next ?? `원인을 고친 뒤 다시: ${planLine(ctx.line)}` };
@@ -83,6 +90,10 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
       return finish("failed", { message: `${s.target}: ${(e as Error).message}`, next: RERUN });
     }
     reports[i] = { ...reports[i], state: seen.state, action: seen.action, detail: detailOf(seen) };
+    if (seen.state === "same" && seen.hold) {
+      reports[i].result = "waiting";
+      return finish("waiting", undefined, seen.hold);
+    }
     if (seen.state === "same") {
       reports[i].result = seen.wait ? "waiting" : "skipped";
       if (seen.wait) waits.push(seen.wait);
@@ -124,6 +135,11 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
     }
     changed = true;
     if (timedOut) notes.push(`${s.id}: 시간 초과 뒤 다시 읽어 반영된 것을 확인했다`);
+    if (after.hold) {
+      reports[i].result = "waiting";
+      reports[i].detail = `${seen.detail} (${after.hold})`;
+      return finish("waiting", undefined, after.hold);
+    }
     if (after.wait) waits.push(after.wait);
     reports[i].result = after.wait ? "waiting" : "applied";
     if (after.wait) reports[i].detail = `${seen.detail} (${after.wait})`;

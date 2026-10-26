@@ -46,3 +46,10 @@ export function repoPathProblem(path: string): string | null {
   if (!fullMatch(REPO_PATH, path) || path.split("/").some((p) => p === "." || p === "..")) return `저장소 경로가 아니다: ${jsonStringify(path)}`;
   return null;
 }
+
+// 복원 실행 id(03 L8): UTC YYYYMMDDHHMMSS + 16진 6자 = 20자. 라벨 homelab.ukyi.app/restore의 ^[a-z0-9]{1,22}$에 맞는다.
+export function newRunId(now: Date = new Date()): string {
+  const stamp = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+  const rand = [...crypto.getRandomValues(new Uint8Array(3))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${stamp}${rand}`;
+}

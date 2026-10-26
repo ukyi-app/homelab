@@ -130,17 +130,17 @@ describe("kubectl 어댑터", () => {
     const leaked = new Secret("fakevalue-logs-0001");
     void leaked;
     const { ctx, calls } = testCtx("read", [kubectlRule(["-n", "app-smoke", "logs", "deploy/smoke", "--tail=200"], { stdout: "boot ok\npassword=fakevalue-logs-0001\n" })]);
-    const text = ctx.k8s.logs("app-smoke", "smoke");
+    const text = ctx.k8s.logs("app-smoke", { deployment: "smoke" });
     expect(text).toContain("boot ok");
     expect(() => render(ok({ notes: [text] }), false)).toThrow("시크릿");
     expect(() => render(ok({ notes: ["boot ok"] }), false)).not.toThrow();
     expectPlanReadOnly(calls());
   });
 
-  test("secretExists는 키 이름만", () => {
-    const data = { data: { password: Buffer.from(FAKE_SECRETS[0]).toString("base64"), user: Buffer.from("u").toString("base64") } };
+  test("secretExists는 키 이름과 resourceVersion만", () => {
+    const data = { metadata: { resourceVersion: "4242" }, data: { password: Buffer.from(FAKE_SECRETS[0]).toString("base64"), user: Buffer.from("u").toString("base64") } };
     const { ctx, calls } = testCtx("read", [kubectlRule(["-n", "database", "get", "secret", "pg-role-smoke", "-o", "json"], { stdout: JSON.stringify(data) })]);
-    expect(ctx.k8s.secretExists("database", "pg-role-smoke")).toEqual({ exists: true, keys: ["password", "user"] });
+    expect(ctx.k8s.secretExists("database", "pg-role-smoke")).toEqual({ exists: true, keys: ["password", "user"], resourceVersion: "4242" });
     expectPlanReadOnly(calls());
   });
 

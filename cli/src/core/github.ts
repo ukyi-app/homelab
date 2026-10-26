@@ -1,15 +1,16 @@
 // gh·curl·git 어댑터. 사람의 gh 로그인을 쓰고 자격을 저장하지 않는다(설계 C.7). argv는 여기서만 만든다.
 // gh api -i로 상태 줄을 함께 받는다. 404에도 gh는 exit 1이지만 상태 줄과 본문을 stdout에 내므로 상태 코드로 판정한다.
 import { jsonParse, jsonStringify } from "./intrinsics";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { GhcrRead, GhRead, GhResponse, GithubDelegate } from "./command";
+import type { AppRepoWrite, GhcrRead, GhRead, GhResponse, GithubDelegate, PlanChanges, WebRead } from "./command";
 import { ExecTimeout, why, type Exec } from "./exec";
 import { findSecretPath } from "./guard";
-import { APP_NAME, fullMatch, hasControl } from "./names";
+import { APP_NAME, PUBLIC_HOST, fullMatch, hasControl } from "./names";
 import { containsTracked } from "./secret";
 import { tempDir } from "./temp";
 
+const OWNER = "ukyi-app";
 export const HOMELAB_REPO = "ukyi-app/homelab";
 export const HOMELAB_URL = "https://github.com/ukyi-app/homelab.git";
 
@@ -41,6 +42,7 @@ export const argvFor = {
   get: (path: string) => ["gh", "api", "-i", path],
   send: (method: string, path: string) => ["gh", "api", "-i", "-X", method, path, "--input", "-"],
   ghcr: (app: string) => ["curl", "-q", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-m", "20", `https://ghcr.io/token?scope=repository:ukyi-app/${app}:pull`],
+  web: (host: string, path: string) => ["curl", "-q", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-m", "10", `https://${host}${path}`],
 };
 
 // GET 경로. ukyi-app의 저장소·org와 로그인 사용자만. graphql·다른 owner는 받지 않는다.
@@ -121,27 +123,112 @@ export function originRoot(cwd: string): string | null {
   }
 }
 
+type DelegateEnv = { env: Record<string, string | undefined>; cwd: string };
+
+// main을 core 임시 폴더로 fresh clone하고 그 사본의 래퍼를 부른다(run·planChanges·app new apply가 같은 길).
+function runWrapper(readExec: Exec, exec: Exec, d: DelegateEnv, args: string[], stdio: "inherit" | "stdout-to-stderr"): number {
+  const work = tempDir("github", ["nohooks", "home"]);
+  const clean: Record<string, string> = { PATH: d.env.PATH ?? "/usr/bin:/bin", HOME: join(work, "home"), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" };
+  if (d.env.TMPDIR) clean.TMPDIR = d.env.TMPDIR;
+  const c = readExec(cloneArgv(work), { cleanEnv: clean, cloneInto: work, timeoutMs: 120_000 });
+  if (c.code !== 0) throw new Error(`main을 clone하지 못했다: ${why(c)}`);
+  const r = exec([join(work, "tree", "tools", "tf-github.sh"), ...args], {
+    stdio,
+    // 래퍼는 TF_GITHUB_CLONE을 보기 전에 git rev-parse --show-toplevel을 set -e로 실행한다. cwd를 clone으로 두지 않으면
+    // 저장소 밖(예: 홈)에서 실행한 CLI가 exit 128로 끝난다(#873 3라운드).
+    cwd: join(work, "tree"),
+    // 상속된 TF_GITHUB_ORIGIN_ROOT는 쓰지 않는다(이 실행의 cwd로만 정한다). GIT_* 제거는 exec가 한다.
+    env: { TF_GITHUB_CLONE: work, TF_GITHUB_ORIGIN_ROOT: originRoot(d.cwd) ?? undefined },
+    timeoutMs: 3_600_000,
+  });
+  if (r.errKind === "not-found") throw new Error("clone한 main에 tools/tf-github.sh가 없다");
+  return r.code ?? 1;
+}
+
+const PLAN_ADDRESS = /^[A-Za-z0-9_.\[\]"-]+$/;
+const PLAN_ACTIONS = new Set(["no-op", "create", "read", "update", "delete"]);
+
+// 래퍼 plan JSON(tf-github-plan/v1, 04 3절) 해석. 값(before·after)은 래퍼가 내지 않고, 여기서도 주소와 동작만 받는다.
+export function parsePlanJson(text: string): Pick<PlanChanges, "sha" | "changes"> {
+  let doc: any;
+  try {
+    doc = jsonParse(text);
+  } catch {
+    throw new Error("래퍼 plan JSON이 JSON이 아니다");
+  }
+  if (doc?.schema !== "tf-github-plan/v1" || !Array.isArray(doc.changes)) throw new Error("래퍼 plan JSON 형식이 아니다(tf-github-plan/v1)");
+  if (typeof doc.sha !== "string" || !/^[0-9a-f]{40}$/.test(doc.sha)) throw new Error("래퍼 plan JSON의 sha 형식이 아니다");
+  const changes = doc.changes.map((c: any) => {
+    if (typeof c?.address !== "string" || !PLAN_ADDRESS.test(c.address)) throw new Error("래퍼 plan JSON의 주소 형식이 아니다");
+    if (c.mode !== "managed" && c.mode !== "data") throw new Error("래퍼 plan JSON의 mode 형식이 아니다");
+    if (!Array.isArray(c.actions) || c.actions.length === 0 || !c.actions.every((a: unknown) => typeof a === "string" && PLAN_ACTIONS.has(a))) throw new Error("래퍼 plan JSON의 동작 형식이 아니다");
+    if (typeof c.importing !== "boolean") throw new Error("래퍼 plan JSON의 importing 형식이 아니다");
+    return { address: c.address, mode: c.mode, actions: [...c.actions], importing: c.importing };
+  });
+  return { sha: doc.sha, changes };
+}
+
+// app new(04): 래퍼 plan JSON. 파일은 clone과 다른 임시 폴더에 둔다(함정: 래퍼가 TF_GITHUB_CLONE 폴더를 EXIT trap으로 지운다).
+// stdout은 늘 stderr로 돌린다(CLI stdout은 결과 하나). stdin은 상속해 래퍼가 묻는 값을 사람이 답한다.
+function planChangesOf(readExec: Exec, d: DelegateEnv): PlanChanges {
+  const out = join(tempDir("plan"), "plan.json");
+  const exitCode = runWrapper(readExec, readExec, d, ["plan", "--plan-json", out], "stdout-to-stderr");
+  if (exitCode !== 0 && exitCode !== 2) return { exitCode, sha: null, changes: null };
+  if (!existsSync(out)) throw new Error(`래퍼가 exit ${exitCode}인데 plan JSON을 쓰지 않았다`);
+  return { exitCode, ...parsePlanJson(readFileSync(out, "utf8")) };
+}
+
+// app new의 쓰기 문맥에만 준다. --allow-destroy는 받지 않는다.
+export function wrapperApply(readExec: Exec, writeExec: Exec, d: DelegateEnv): { apply(): number } {
+  return { apply: () => runWrapper(readExec, writeExec, d, ["apply"], "stdout-to-stderr") };
+}
+
 export function githubDelegate(readExec: Exec, writeOnce: () => Exec | null, env: Record<string, string | undefined>, json: boolean, cwd: string): GithubDelegate {
+  const d = { env, cwd };
   return {
     run(sub, opts = {}) {
       const exec = sub === "apply" ? writeOnce() : readExec;
       if (!exec) throw new Error("github apply는 apply 문맥(homelab github apply)에서만 실행한다");
-      const work = tempDir("github", ["nohooks", "home"]);
-      const clean: Record<string, string> = { PATH: env.PATH ?? "/usr/bin:/bin", HOME: join(work, "home"), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" };
-      if (env.TMPDIR) clean.TMPDIR = env.TMPDIR;
-      const c = readExec(cloneArgv(work), { cleanEnv: clean, cloneInto: work, timeoutMs: 120_000 });
-      if (c.code !== 0) throw new Error(`main을 clone하지 못했다: ${why(c)}`);
-      const r = exec([join(work, "tree", "tools", "tf-github.sh"), sub, ...(opts.allowDestroy ? ["--allow-destroy"] : [])], {
-        stdio: json ? "stdout-to-stderr" : "inherit",
-        // 래퍼는 TF_GITHUB_CLONE을 보기 전에 git rev-parse --show-toplevel을 set -e로 실행한다. cwd를 clone으로 두지 않으면
-        // 저장소 밖(예: 홈)에서 실행한 CLI가 exit 128로 끝난다(#873 3라운드). 백업 경로 보호의 기준도 이 clone이 된다.
-        cwd: join(work, "tree"),
-        // 상속된 TF_GITHUB_ORIGIN_ROOT는 쓰지 않는다(이 실행의 cwd로만 정한다). GIT_* 제거는 exec가 한다.
-        env: { TF_GITHUB_CLONE: work, TF_GITHUB_ORIGIN_ROOT: originRoot(cwd) ?? undefined },
-        timeoutMs: 3_600_000,
-      });
-      if (r.errKind === "not-found") throw new Error("clone한 main에 tools/tf-github.sh가 없다");
-      return r.code ?? 1;
+      return runWrapper(readExec, exec, d, [sub, ...(opts.allowDestroy ? ["--allow-destroy"] : [])], json ? "stdout-to-stderr" : "inherit");
     },
+    planChanges: () => planChangesOf(readExec, d),
+  };
+}
+
+// 공개 host의 응답 코드(02 R9). host는 <이름>.ukyi.app 전체 일치, 경로는 소문자·숫자·/_-만.
+export function webRead(exec: Exec): WebRead {
+  return {
+    publicStatus(host, path) {
+      if (!fullMatch(PUBLIC_HOST, host)) throw new Error("공개 host 형식이 아니다(<이름>.ukyi.app)");
+      if (!/^\/[a-z0-9\/_-]*$/.test(path)) throw new Error("경로 형식이 아니다");
+      const r = exec(argvFor.web(host, path));
+      if (r.errKind === "timeout") throw new ExecTimeout(`https://${host}${path}: 시간 초과`);
+      if (r.errKind) throw new Error(`https://${host}${path}: ${why(r)}`);
+      const code = Number(r.stdout.trim());
+      if (!Number.isInteger(code)) throw new Error(`https://${host}${path}: 응답 코드를 읽지 못했다`);
+      return code;
+    },
+  };
+}
+
+// app new(04 W2)의 앱 저장소 생성·보안 설정. 메서드·경로·본문은 고정이고 앱 이름만 바뀐다(설계 C.7 app new, guard 2·7).
+export const APP_REPO_CALLS = {
+  createFromTemplate: (app: string) => ["POST", `repos/${OWNER}/homelab-app-template/generate`, { owner: OWNER, name: app, private: false, include_all_branches: false }] as const,
+  setRepoSettings: (app: string) => ["PATCH", `repos/${OWNER}/${app}`, { security_and_analysis: { secret_scanning: { status: "enabled" }, secret_scanning_push_protection: { status: "enabled" } }, pull_request_creation_policy: "collaborators_only" }] as const,
+  enableVulnReporting: (app: string) => ["PUT", `repos/${OWNER}/${app}/private-vulnerability-reporting`, {}] as const,
+  setForkPrApproval: (app: string) => ["PUT", `repos/${OWNER}/${app}/actions/permissions/fork-pr-contributor-approval`, { approval_policy: "all_external_contributors" }] as const,
+};
+
+export function appRepoWrite(exec: Exec): AppRepoWrite {
+  const callFor = (name: keyof typeof APP_REPO_CALLS) => (app: string) => {
+    if (!fullMatch(APP_NAME, app) || app === "homelab" || app === "homelab-app-template") throw new Error("앱 저장소 이름이 아니다(homelab·homelab-app-template 제외)");
+    const [method, path, body] = APP_REPO_CALLS[name](app);
+    ok(ghSend(exec, method, path, body), `${name} ${app}`);
+  };
+  return {
+    createFromTemplate: callFor("createFromTemplate"),
+    setRepoSettings: callFor("setRepoSettings"),
+    enableVulnReporting: callFor("enableVulnReporting"),
+    setForkPrApproval: callFor("setForkPrApproval"),
   };
 }
