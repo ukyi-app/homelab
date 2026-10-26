@@ -340,7 +340,8 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
 // 이 실행이 아닌 기록·객체를 건드리지 않게, 기록 키를 JSON pointer로 쓸 때 쓰는 꼴(키 형식에 ~·/가 없다).
 const pointer = (key: string) => `/data/${key}`;
 const RAW_PATH = { job: "/apis/batch/v1", cluster: "/apis/postgresql.cnpg.io/v1" } as const;
-const CORE_KEYS = /^(in\.|dropped$)/;
+// core(pgrestore.ts)만 쓰는 기록 키: 4-2 입력, 파괴 단계 표시, 2단계에서 고정한 임시 주 파드, 되돌림 사본 버킷.
+const CORE_KEYS = /^(in\.|dropped$|tmp$|bucket$)/;
 
 // 복원 기록 고치기. 첫 op가 test /data/run = run이라 남의 실행 기록이면 API 서버가 거부한다. 값 null은 그 키를 지운다.
 // allowCore는 pgrestore.ts만 true로 부른다(in.*·dropped).

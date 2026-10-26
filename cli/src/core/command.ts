@@ -146,8 +146,10 @@ export type PgRestoreWrite = {
   tmpPrimary(run: string): string;
   // 임시 클러스터에 그 앱 DB가 있는지(0·1, restore-check와 2단계 확인. 런북의 "표식 테이블 count"를 대신한다).
   tmpDbCount(run: string, app: string): 0 | 1;
-  // 임시 클러스터가 지금도 이 실행의 복원 원본인지(Ready, 주 파드, 복구 원본·지점).
-  srcOk(run: string, v: { t1: string; srv: string }): boolean;
+  // 2단계 끝: 지금 임시 주 파드를 기록 tmp에 고정한다(이미 있으면 같은지 확인, 다르면 던진다). 뒤 단계의 덤프·확인은 이 값만 쓴다.
+  pinTmpPrimary(app: string, run: string): string;
+  // 임시 클러스터가 지금도 이 실행의 복원 원본인지(Ready, 주 파드 = 기록 tmp, 복구 원본·지점).
+  srcOk(app: string, run: string, v: { t1: string; srv: string }): boolean;
   r2DumpExists(app: string, run: string): boolean;
   // 되돌림 사본 올리기(primary pg_dump | rclone rcat). 이미 있거나 dropped 뒤면 던진다(덮어쓰지 않는다).
   dumpToR2(app: string, run: string): Promise<void>;

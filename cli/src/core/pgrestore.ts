@@ -27,6 +27,7 @@ export const SRV = /^[a-z0-9-]+$/;
 export const IMG = /^[a-z0-9./_-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$/;
 export const SIZE = /^[0-9]+(Mi|Gi|Ti)$/;
 const BUCKET = /^s3:\/\/([a-z0-9][a-z0-9-]{1,61}[a-z0-9])\//;
+const BUCKET_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 
 export const EXT_SQL = "select e.extname, n.nspname, e.extversion, pg_get_userbyid(e.extowner) from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname <> 'plpgsql' order by e.oid";
 
@@ -60,6 +61,12 @@ exec sleep 7000
 `;
 
 const RCLONE_IMAGE = "docker.io/rclone/rclone:1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5";
+
+// pg_restore를 파이프 소비자로 쓸 때의 고정 셸. --list나 ACL만 고른 -L은 데이터 본문을 다 읽지 않고 끝나 생산자가 SIGPIPE(141)로
+// 죽는다(#885 리뷰 실측: 22MB 덤프, PostgreSQL 18.6). 끝난 뒤 남은 stdin을 읽어 버리고 pg_restore의 종료 코드를 그대로 낸다.
+// 생산자의 141을 성공으로 바꾸지 않는다(진짜 생산자 실패를 숨긴다).
+export const PG_RESTORE_DRAINED = 'pg_restore "$@"; rc=$?; cat >/dev/null; exit $rc';
+const drained = (args: string[]) => ["sh", "-c", PG_RESTORE_DRAINED, "sh", ...args];
 
 // 파드 안 고정 파일 이름. 내용은 이 모듈이 만든 것만 쓴다.
 const LIST_FILES = { main: "/tmp/main.list", acl: "/tmp/acl.list", aclsu: "/tmp/acl-su.list" } as const;
@@ -166,7 +173,9 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
   const q = (pod: string, sql: string, vars: Record<string, string>, db?: string, extra: string[] = []) => must(exec(psqlArgv(pod, vars, db, extra), { input: sql }), "psql").trim();
   // 복원 Job(앱 역할) 안에서. 긴 흐름(파이프)에는 --request-timeout을 붙이지 않는다(스트림이 20초에 끊길 수 있다).
   const jobArgv = (app: string, run: string, cmd: string[], rt = true) => ["kubectl", "-n", appNs(app), "exec", "-i", `job/${dbJob(run)}`, ...(rt ? [RT] : []), "--", ...cmd];
-  const dumpArgv = (run: string, app: string) => ["kubectl", "-n", "database", "exec", tmpPod(run), "-c", "postgres", "--", "pg_dump", "-U", "postgres", "-Fc", "-d", app];
+  // 덤프 원본은 2단계에서 고정한 임시 주 파드(기록 tmp)다. 지금 주 파드가 그와 다르면 멈춘다(#885 리뷰 P1: 다시 고르면
+  // 검증하지 않은 다른 파드의 덤프로 DB를 지울 수 있다. pg_restore -L은 OID를 대조하지 않아 목록이 읽힌다는 것은 증거가 아니다).
+  const dumpArgv = (app: string, run: string) => ["kubectl", "-n", "database", "exec", pinnedTmp(app, run), "-c", "postgres", "--", "pg_dump", "-U", "postgres", "-Fc", "-d", app];
   const piped = async (producer: string[], consumer: string[], what: string): Promise<string> => {
     const r = await pipe(producer, consumer);
     if (r.timedOut) throw new ExecTimeout(`${what}: 시간 초과(결과 미상)`);
@@ -184,13 +193,26 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
     if (n !== "0" && n !== "1") throw new Error("DB 개수를 읽지 못했다");
     return n === "1" ? 1 : 0;
   };
-  const bucket = (): string => {
+  const bucketNow = (): string => {
     const dest = k8s.get("objectstore", "database", "r2")?.spec?.configuration?.destinationPath;
     const m = typeof dest === "string" ? BUCKET.exec(dest) : null;
     if (!m) throw new Error("ObjectStore r2의 destinationPath에서 버킷을 읽지 못했다");
     return m[1];
   };
-  const r2Key = (app: string, run: string) => `r2:${bucket()}/pgdump/${app}/pre-restore-${run}.dump`;
+  // 되돌림 사본 버킷은 이 실행에서 처음 한 번 기록(bucket)에 고정하고 조회·올리기·끝까지 읽기가 같은 값을 쓴다(#885 리뷰 P1,
+  // 런북 vars.env의 BUCKET). 그 뒤 ObjectStore가 바뀌어도 원래 사본 위치를 쓴다.
+  const fixedBucket = (app: string, run: string): string => {
+    const rec = record(app, run);
+    const b = rec.data.bucket;
+    if (b !== undefined) {
+      if (!BUCKET_NAME.test(b)) throw new Error("기록의 bucket 형식이 아니다");
+      return b;
+    }
+    const now = bucketNow();
+    updateRecord(exec, k8s, appNs(app), RECORD, run, { bucket: now }, true);
+    return now;
+  };
+  const r2Path = (app: string, run: string) => `/pgdump/${app}/pre-restore-${run}.dump`;
   const r2Argv = (run: string, cmd: string[], rt = true) => ["kubectl", "-n", "database", "exec", "-i", `job/${r2Job(run)}`, ...(rt ? [RT] : []), "--", ...cmd];
 
   // 잠금(mine)과 기록. 기록은 앱 ns의 restore-pg, 값은 03 2절.
@@ -225,24 +247,31 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
   };
   const mainReadable = async (app: string, run: string, main: string) => {
     putFile(app, run, LIST_FILES.main, main);
-    await piped(dumpArgv(run, app), jobArgv(app, run, ["pg_restore", "-L", LIST_FILES.main, "-f", "/dev/null"], false), "본 복원 목록으로 덤프 읽기");
+    await piped(dumpArgv(app, run), jobArgv(app, run, drained(["-L", LIST_FILES.main, "-f", "/dev/null"]), false), "본 복원 목록으로 덤프 읽기");
   };
   const createJob = (ns: string, name: string, manifest: object) => {
     // 같은 RUN의 재시도: 파드까지 지운 뒤(foreground) 새로 만든다(restore.md 1·4-1).
     must(exec(["kubectl", "-n", ns, "delete", "jobs.batch", name, "--ignore-not-found", "--cascade=foreground", "--wait=true", "--timeout=120s", RT], { timeoutMs: 150_000 }), `Job ${name} 지우기`);
     must(exec(["kubectl", "-n", ns, "create", "-f", "-", RT], { input: jsonStringify(manifest) }), `Job ${name} 만들기`);
   };
-  const r2DumpExists = (app: string, run: string): boolean => {
-    const key = `/pgdump/${app}/pre-restore-${run}.dump`;
-    return must(exec(r2Argv(run, ["rclone", "lsf", "-R", "--files-only", `r2:${bucket()}`, "--include", key])), "되돌림 사본 찾기").trim() !== "";
+  const r2DumpExists = (app: string, run: string, bucket: string): boolean =>
+    must(exec(r2Argv(run, ["rclone", "lsf", "-R", "--files-only", `r2:${bucket}`, "--include", r2Path(app, run)])), "되돌림 사본 찾기").trim() !== "";
+  // 2단계에서 고정한 임시 주 파드. 기록 tmp가 있고 지금 currentPrimary와 같아야 한다.
+  const pinnedTmp = (app: string, run: string): string => {
+    const t = record(app, run).data.tmp;
+    if (typeof t !== "string" || !new RegExp(`^pg-restore-${run}-[0-9]+$`).test(t)) throw new Error("기록에 고정한 임시 주 파드(tmp)가 없다. 2단계(pinTmpPrimary)를 먼저 돈다");
+    if (tmpPod(run) !== t) throw new Error("멈춤: 임시 클러스터의 주 파드가 2단계와 다르다. 정리하고 새 실행으로 다시 시작한다");
+    return t;
   };
-  const srcOk = (run: string, v: { t1: string; srv: string }): boolean => {
+  const srcOk = (app: string, run: string, v: { t1: string; srv: string }): boolean => {
+    const t = record(app, run).data.tmp;
     const c = k8s.get("cluster", "database", tmpCluster(run));
     const ready = (c?.status?.conditions ?? []).some((x: any) => x?.type === "Ready" && x?.status === "True");
     const origin = (c?.spec?.externalClusters ?? []).find((x: any) => x?.name === "origin");
     return (
       ready &&
-      c?.status?.currentPrimary === tmpPod(run) &&
+      typeof t === "string" &&
+      c?.status?.currentPrimary === t &&
       c?.spec?.bootstrap?.recovery?.source === "origin" &&
       c?.spec?.bootstrap?.recovery?.recoveryTarget?.targetTime === v.t1 &&
       origin?.plugin?.name === "barman-cloud.cloudnative-pg.io" &&
@@ -343,25 +372,34 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
       must(exec(["kubectl", "-n", "database", "create", "-f", "-", RT], { input: jsonStringify(manifest) }), "임시 클러스터 만들기");
     },
     tmpPrimary: (run) => (check("x", run), tmpPod(run)),
+    pinTmpPrimary(app, run) {
+      check(app, run);
+      const now = tmpPod(run);
+      const t = record(app, run).data.tmp;
+      if (t === undefined) updateRecord(exec, k8s, appNs(app), RECORD, run, { tmp: now }, true);
+      else if (t !== now) throw new Error("멈춤: 임시 클러스터의 주 파드가 2단계와 다르다. 정리하고 새 실행으로 다시 시작한다");
+      return now;
+    },
     tmpDbCount(run, app) {
       check(app, run);
       const n = q(tmpPod(run), "select count(*) from pg_database where datname = :'app'\n", { app });
       if (n !== "0" && n !== "1") throw new Error("임시 클러스터의 DB 개수를 읽지 못했다");
       return n === "1" ? 1 : 0;
     },
-    srcOk: (run, v) => (check("x", run), srcOk(run, v)),
-    r2DumpExists: (app, run) => (check(app, run), r2DumpExists(app, run)),
+    srcOk: (app, run, v) => (check(app, run), srcOk(app, run, v)),
+    r2DumpExists: (app, run) => (check(app, run), r2DumpExists(app, run, fixedBucket(app, run))),
     async dumpToR2(app, run) {
       check(app, run);
       // 되돌림 사본은 한 실행에 한 번만, 덮어쓰지 않는다. 4-3에 들어간 뒤(dropped)의 DB는 원래 상태가 아니다.
       if (record(app, run).data.dropped === "1") throw new Error("4-3에 들어간 뒤라 되돌림 사본을 새로 만들지 않는다. 원래 사본을 찾는다");
-      if (r2DumpExists(app, run)) throw new Error("되돌림 사본이 이미 있다(덮어쓰지 않는다)");
-      await piped(["kubectl", "-n", "database", "exec", primary(), "-c", "postgres", "--", "pg_dump", "-U", "postgres", "-Fc", "-d", app], r2Argv(run, ["rclone", "rcat", r2Key(app, run)], false), "되돌림 사본 올리기");
+      const bucket = fixedBucket(app, run);
+      if (r2DumpExists(app, run, bucket)) throw new Error("되돌림 사본이 이미 있다(덮어쓰지 않는다)");
+      await piped(["kubectl", "-n", "database", "exec", primary(), "-c", "postgres", "--", "pg_dump", "-U", "postgres", "-Fc", "-d", app], r2Argv(run, ["rclone", "rcat", `r2:${bucket}${r2Path(app, run)}`], false), "되돌림 사본 올리기");
     },
     async r2DumpReadable(app, run) {
       check(app, run);
       // 목록(--list)만 보면 잘린 사본도 통과한다. 끝까지 읽는다(restore.md 1단계).
-      await piped(r2Argv(run, ["rclone", "cat", r2Key(app, run)], false), ["kubectl", "-n", "database", "exec", "-i", primary(), "-c", "postgres", "--", "pg_restore", "-f", "/dev/null"], "되돌림 사본 끝까지 읽기");
+      await piped(r2Argv(run, ["rclone", "cat", `r2:${fixedBucket(app, run)}${r2Path(app, run)}`], false), ["kubectl", "-n", "database", "exec", "-i", primary(), "-c", "postgres", "--", ...drained(["-f", "/dev/null"])], "되돌림 사본 끝까지 읽기");
     },
     dbCount: (app) => (check(app, "x"), dbCount(app)),
     roleFlags(app) {
@@ -377,8 +415,8 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
       check(app, run);
       record(app, run);
       jobAuth(app, run, dbCount(app) === 1 ? app : "postgres");
-      const tmp = tmpPod(run);
-      const list = await piped(dumpArgv(run, app), jobArgv(app, run, ["pg_restore", "--list"], false), "덤프 목록");
+      const tmp = pinnedTmp(app, run);
+      const list = await piped(dumpArgv(app, run), jobArgv(app, run, drained(["--list"]), false), "덤프 목록");
       if (!list.trim()) throw new Error("덤프 목록이 비었다");
       const extText = q(tmp, `${EXT_SQL}\n`, {}, app, ["-F", " "]);
       const ext = parseExt(extText, app);
@@ -392,13 +430,13 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
       await mainReadable(app, run, lists.main);
       if (lists.acl) {
         putFile(app, run, LIST_FILES.acl, lists.acl);
-        const sql = await piped(dumpArgv(run, app), jobArgv(app, run, ["pg_restore", "-L", LIST_FILES.acl, "-f", "-"], false), "앱 역할 ACL SQL 만들기");
+        const sql = await piped(dumpArgv(app, run), jobArgv(app, run, drained(["-L", LIST_FILES.acl, "-f", "-"]), false), "앱 역할 ACL SQL 만들기");
         if (sql.includes("SESSION AUTHORIZATION")) throw new Error("앱 역할 ACL에 다른 역할로 바꿔 주는 문장이 있다(앱 역할로는 못 넣는다)");
       }
       let aclsu = "";
       if (lists.aclsu) {
         putFile(app, run, LIST_FILES.aclsu, lists.aclsu);
-        aclsu = await piped(dumpArgv(run, app), jobArgv(app, run, ["pg_restore", "-L", LIST_FILES.aclsu, "-f", "-"], false), "postgres ACL SQL 만들기");
+        aclsu = await piped(dumpArgv(app, run), jobArgv(app, run, drained(["-L", LIST_FILES.aclsu, "-f", "-"]), false), "postgres ACL SQL 만들기");
         const bad = sqlProblems(aclsu, app);
         if (bad.length) throw new Error(`postgres로 넣을 ACL에 허용하지 않는 문장이 있다: ${bad.slice(0, 5).join(" | ")}`);
       }
@@ -420,7 +458,7 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
     async recreateDatabase(app, run, v) {
       check(app, run);
       const i = guard(app, run);
-      if (!srcOk(run, v)) throw new Error("멈춤: 임시 클러스터가 이 실행의 복원 원본이 아니다(Ready·주 파드·복구 지점)");
+      if (!srcOk(app, run, v)) throw new Error("멈춤: 임시 클러스터가 이 실행의 복원 원본이 아니다(Ready·주 파드·복구 지점)");
       // 원본이 죽었으면 DROP 뒤에야 드러난다. 목록으로 덤프를 끝까지 읽어 본다(4-2와 같은 확인).
       await mainReadable(app, run, i.main);
       stopped(app);
@@ -457,7 +495,7 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
       const i = guard(app, run);
       jobAuth(app, run, app);
       putFile(app, run, LIST_FILES.main, i.main);
-      await piped(dumpArgv(run, app), jobArgv(app, run, ["sh", "-c", `pg_restore -L ${LIST_FILES.main} --no-owner --no-privileges --exit-on-error -d "$PGDATABASE"`], false), "본 복원");
+      await piped(dumpArgv(app, run), jobArgv(app, run, ["sh", "-c", `pg_restore -L ${LIST_FILES.main} --no-owner --no-privileges --exit-on-error -d "$PGDATABASE"; rc=$?; cat >/dev/null; exit $rc`], false), "본 복원");
     },
     async restoreAcl(app, run) {
       check(app, run);
@@ -465,7 +503,7 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
       jobAuth(app, run, app);
       if (i.acl) {
         putFile(app, run, LIST_FILES.acl, i.acl);
-        await piped(dumpArgv(run, app), jobArgv(app, run, ["sh", "-c", `pg_restore -L ${LIST_FILES.acl} --no-owner --exit-on-error -d "$PGDATABASE"`], false), "앱 역할 ACL 복원");
+        await piped(dumpArgv(app, run), jobArgv(app, run, ["sh", "-c", `pg_restore -L ${LIST_FILES.acl} --no-owner --exit-on-error -d "$PGDATABASE"; rc=$?; cat >/dev/null; exit $rc`], false), "앱 역할 ACL 복원");
       }
       // 4-2에서 만들고 이 모듈이 검증한 SQL만 postgres로 넣는다(guard가 sqlok를 다시 봤다).
       if (i.aclsu) must(exec(psqlArgv(primary(), {}, app, ["-q", "-o", "/dev/null"]), { input: i.aclsu }), "postgres ACL 복원");
@@ -473,7 +511,7 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
     aclCompare(app, run) {
       check(app, run);
       record(app, run);
-      const src = q(tmpPod(run), ACL_SQL, {}, app, ["-q"]);
+      const src = q(pinnedTmp(app, run), ACL_SQL, {}, app, ["-q"]);
       const dst = q(primary(), ACL_SQL, {}, app, ["-q"]);
       // 둘 다 비면 "같음"이 된다. public 스키마 줄이 늘 있어 비지 않는다.
       if (!src || !dst) throw new Error("ACL 조회 결과가 비었다");

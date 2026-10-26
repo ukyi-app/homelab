@@ -1,10 +1,11 @@
 // DB 복원 흐름(core/pgrestore.ts, 03 2부). 순수 판정은 restore.md 2절의 awk·grep과 같은지, 흐름은 파괴 단계 앞의 확인이
 // 하나라도 어긋나면 DROP·복원 호출이 0건인지 본다. 파드 안 명령은 PATH 스텁이다(실제 동작은 T12-05·2a 로컬 시험).
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ExecTimeout } from "../../src/core/exec";
-import { ACL_SQL, DB_JOB_SCRIPT, EXT_SQL, buildLists, parseExt, sqlProblems } from "../../src/core/pgrestore";
+import { ACL_SQL, DB_JOB_SCRIPT, EXT_SQL, PG_RESTORE_DRAINED, buildLists, parseExt, sqlProblems } from "../../src/core/pgrestore";
 import { REST, applyWith, kubectlRule, rule, sha256, testCtx, type Call, type Rule } from "../harness";
 
 const RUNBOOK = readFileSync(join(import.meta.dir, "..", "..", "..", "docs", "runbooks-public", "restore.md"), "utf8");
@@ -93,40 +94,43 @@ const aclsu = "GRANT ALL ON FUNCTION public.f() TO smoke;\n";
 const fixed = { ext: `${ext}\n`, main: lists.main, acl: lists.acl, aclsu };
 const inSha = sha256(JSON.stringify([fixed.ext, fixed.main, fixed.acl, fixed.aclsu]));
 
-type World = { run?: string; replicas?: number; livePods?: number; inputs?: Partial<typeof fixed> & { sha?: string }; dropped?: boolean; dbCount?: string; srcTarget?: string; r2Have?: string };
+type World = { run?: string; replicas?: number; livePods?: number; inputs?: Partial<typeof fixed> & { sha?: string }; dropped?: boolean; dbCount?: string; srcTarget?: string; r2Have?: string; tmp?: string | null; current?: string; bucket?: string | null; storeBucket?: string };
 
 function rules(w: World = {}): Rule[] {
   const i = { ...fixed, ...w.inputs };
   const data: Record<string, string> = { run: w.run ?? RUN, to: "2026-10-26 00:00:00+00", srv: "pg-v2", "in.ext": i.ext, "in.main": i.main, "in.acl": i.acl, "in.aclsu": i.aclsu, "in.sha": w.inputs?.sha ?? sha256(JSON.stringify([i.ext, i.main, i.acl, i.aclsu])) };
   if (w.dropped) data.dropped = "1";
+  if (w.tmp !== null) data.tmp = w.tmp ?? TMP;
+  if (w.bucket !== null) data.bucket = w.bucket ?? "homelab-backup";
   const record = JSON.stringify({ metadata: { resourceVersion: "9", labels: { "homelab.ukyi.app/restore": w.run ?? RUN } }, data });
   const psql = (vars: string[], resp: object) => rule(["kubectl", "-n", "database", "exec", "-i", "pg-2", "-c", "postgres", "--request-timeout=20s", "--", "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-tA", ...vars], resp);
   const job = (cmd: string[], resp: object = {}) => rule(["kubectl", "-n", "app-smoke", "exec", "-i", `job/restore-${RUN}-db`, "--request-timeout=20s", "--", ...cmd], resp);
   const jobPipe = (cmd: string[], resp: object = {}) => rule(["kubectl", "-n", "app-smoke", "exec", "-i", `job/restore-${RUN}-db`, "--", ...cmd], resp);
+  const drained = (args: string[]) => ["sh", "-c", PG_RESTORE_DRAINED, "sh", ...args];
   return [
     kubectlRule(["-n", "app-smoke", "get", "configmaps", "restore-pg", "-o", "json"], { stdout: record }),
     kubectlRule(["-n", "app-smoke", "patch", "configmaps", "restore-pg", "--type=json", "--patch-file=/dev/stdin"], {}),
     kubectlRule(["-n", "database", "get", "clusters.postgresql.cnpg.io", "pg", "-o", "json"], { stdout: JSON.stringify({ status: { currentPrimary: "pg-2" } }) }),
     kubectlRule(["-n", "database", "get", "clusters.postgresql.cnpg.io", `pg-restore-${RUN}`, "-o", "json"], {
       stdout: JSON.stringify({
-        status: { currentPrimary: TMP, conditions: [{ type: "Ready", status: "True" }] },
+        status: { currentPrimary: w.current ?? TMP, conditions: [{ type: "Ready", status: "True" }] },
         spec: { bootstrap: { recovery: { source: "origin", recoveryTarget: { targetTime: w.srcTarget ?? "2026-10-26 00:00:00+00" } } }, externalClusters: [{ name: "origin", plugin: { name: "barman-cloud.cloudnative-pg.io", parameters: { barmanObjectName: "r2", serverName: "pg-v2" } } }] },
       }),
     }),
     kubectlRule(["-n", "app-smoke", "get", "deployments.apps", "smoke", "-o", "json"], { stdout: JSON.stringify({ spec: { replicas: w.replicas ?? 0 }, status: {} }) }),
     kubectlRule(["-n", "app-smoke", "get", "pods", "-l", "homelab.ukyi.app/app=smoke", "-o", "json"], { stdout: JSON.stringify({ items: Array.from({ length: w.livePods ?? 0 }, () => ({ status: { phase: "Running" } })) }) }),
     kubectlRule(["-n", "app-smoke", "wait", "pods", "-l", `job-name=restore-${RUN}-db`, "--for=condition=Ready", "--timeout=60s"], {}),
-    kubectlRule(["-n", "database", "get", "objectstores.barmancloud.cnpg.io", "r2", "-o", "json"], { stdout: JSON.stringify({ spec: { configuration: { destinationPath: "s3://homelab-backup/pg/" } } }) }),
+    kubectlRule(["-n", "database", "get", "objectstores.barmancloud.cnpg.io", "r2", "-o", "json"], { stdout: JSON.stringify({ spec: { configuration: { destinationPath: `s3://${w.storeBucket ?? "homelab-backup"}/pg/` } } }) }),
     job(["psql", "-d", "smoke", "-v", "ON_ERROR_STOP=1", "-tAc", "select current_user"], { stdout: "smoke\n" }),
     job(["psql", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-tAc", "select current_user"], { stdout: "smoke\n" }),
     job(["sh", "-c", REST], {}),
     job(["psql", REST], {}),
     // 파이프: 임시 클러스터 덤프 → 복원 Job
     rule(["kubectl", "-n", "database", "exec", TMP, "-c", "postgres", "--", "pg_dump", "-U", "postgres", "-Fc", "-d", "smoke"], { stdout: "PGDMP-fake-dump" }, { noStdin: true }),
-    jobPipe(["pg_restore", "--list"], { stdout: list }),
-    jobPipe(["pg_restore", "-L", "/tmp/acl-su.list", "-f", "-"], { stdout: aclsu }),
-    jobPipe(["pg_restore", "-L", "/tmp/acl.list", "-f", "-"], { stdout: "GRANT ALL ON TABLE public.t TO smoke;\n" }),
-    jobPipe(["pg_restore", REST], {}),
+    jobPipe(drained(["--list"]), { stdout: list }),
+    jobPipe(drained(["-L", "/tmp/acl-su.list", "-f", "-"]), { stdout: aclsu }),
+    jobPipe(drained(["-L", "/tmp/acl.list", "-f", "-"]), { stdout: "GRANT ALL ON TABLE public.t TO smoke;\n" }),
+    jobPipe(drained(["-L", "/tmp/main.list", "-f", "/dev/null"]), {}),
     jobPipe(["sh", "-c", REST], {}),
     // primary psql: 개수·owner·확장 가능 여부·DDL
     psql(["-v", "app=smoke"], [{ stdout: `${w.dbCount ?? "1"}\n` }, { stdout: "smoke\n" }, {}]),
@@ -140,7 +144,7 @@ function rules(w: World = {}): Rule[] {
     rule(["kubectl", "-n", "database", "exec", "-i", `job/restore-${RUN}-r2`, "--request-timeout=20s", "--", "rclone", "lsf", REST], { stdout: w.r2Have ?? "" }),
     rule(["kubectl", "-n", "database", "exec", "-i", `job/restore-${RUN}-r2`, "--", "rclone", REST], { stdout: "PGDMP-fake-dump" }),
     rule(["kubectl", "-n", "database", "exec", "pg-2", "-c", "postgres", "--", "pg_dump", REST], { stdout: "PGDMP-live-dump" }, { noStdin: true }),
-    rule(["kubectl", "-n", "database", "exec", "-i", "pg-2", "-c", "postgres", "--", "pg_restore", "-f", "/dev/null"], {}),
+    rule(["kubectl", "-n", "database", "exec", "-i", "pg-2", "-c", "postgres", "--", ...drained(["-f", "/dev/null"])], {}),
   ];
 }
 
@@ -151,7 +155,7 @@ describe("파이프", () => {
   test("생산자 출력이 그대로 소비자 stdin으로, 두 종료 코드를 함께 본다", async () => {
     const { ctx, calls } = testCtx("apply", rules());
     await applyWith(ctx, (w) => w.pgRestore.r2DumpReadable("smoke", RUN));
-    const consumer = calls().calls.find((c) => c.argv.includes("pg_restore") && c.argv.includes("/dev/null"))!;
+    const consumer = calls().calls.find((c) => c.argv.includes(PG_RESTORE_DRAINED) && c.argv.includes("/dev/null") && c.argv.includes("pg-2"))!;
     expect(consumer.stdinSha256).toBe(sha256("PGDMP-fake-dump"));
   });
 
@@ -178,9 +182,69 @@ describe("파이프", () => {
     expect([...uploads(have.calls().calls), ...uploads(dropped.calls().calls)]).toEqual([]);
     const fresh = testCtx("apply", rules());
     await applyWith(fresh.ctx, (w) => w.pgRestore.dumpToR2("smoke", RUN));
+    // 기록에 버킷이 없던 실행: ObjectStore의 버킷을 기록에 고정한 뒤 쓴다.
+    const unpinned = testCtx("apply", rules({ bucket: null }).map((r) => (r.argv.includes("patch") ? { ...r, captureStdin: true } : r)));
+    await applyWith(unpinned.ctx, (w) => w.pgRestore.dumpToR2("smoke", RUN));
+    expect(JSON.parse(unpinned.calls().calls.find((c) => c.argv.includes("patch"))!.stdin!)).toContainEqual({ op: "add", path: "/data/bucket", value: "homelab-backup" });
     const up = uploads(fresh.calls().calls)[0];
     expect(up.argv.at(-1)).toBe("r2:homelab-backup/pgdump/smoke/pre-restore-run1.dump");
     expect(up.stdinSha256).toBe(sha256("PGDMP-live-dump"));
+  });
+});
+
+describe("#885 리뷰 1라운드", () => {
+  const v = { t1: "2026-10-26 00:00:00+00", srv: "pg-v2" };
+
+  test("P1 임시 주 파드가 2단계(기록 tmp)와 다르면 srcOk false, DB 다시 만들기·복원이 멈추고 DROP·덤프 0건", async () => {
+    const { ctx, calls } = testCtx("apply", rules({ current: "pg-restore-run1-2" }));
+    expect((await applyWith(ctx, (w) => w.pgRestore.srcOk("smoke", RUN, v))).value).toBe(false);
+    await expect(applyWith(ctx, (w) => w.pgRestore.recreateDatabase("smoke", RUN, v))).rejects.toThrow();
+    await expect(applyWith(ctx, (w) => w.pgRestore.restoreMain("smoke", RUN))).rejects.toThrow("2단계와 다르다");
+    expect(drops(calls().calls)).toEqual([]);
+    expect(calls().calls.filter((c) => c.argv.includes("pg_dump"))).toEqual([]);
+  });
+
+  test("P1 pinTmpPrimary: 없으면 지금 주 파드를 기록에 고정, 있으면 같은지 보고 다르면 던진다. 기록이 없으면 덤프하지 않는다", async () => {
+    const fresh = testCtx("apply", rules({ tmp: null }).map((r) => (r.argv.includes("patch") ? { ...r, captureStdin: true } : r)));
+    expect((await applyWith(fresh.ctx, (w) => w.pgRestore.pinTmpPrimary("smoke", RUN))).value).toBe(TMP);
+    expect(JSON.parse(fresh.calls().calls.find((c) => c.argv.includes("patch"))!.stdin!)).toContainEqual({ op: "add", path: "/data/tmp", value: TMP });
+    await expect(applyWith(fresh.ctx, (w) => w.pgRestore.prepareInputs("smoke", RUN))).rejects.toThrow("tmp");
+    const moved = testCtx("apply", rules({ current: "pg-restore-run1-2" }));
+    await expect(applyWith(moved.ctx, (w) => w.pgRestore.pinTmpPrimary("smoke", RUN))).rejects.toThrow("2단계와 다르다");
+    // 명령은 tmp·bucket을 쓸 수 없다.
+    for (const k of ["tmp", "bucket"]) await expect(applyWith(moved.ctx, (w) => w.k8s.restoreRecordUpdate("app-smoke", "restore-pg", RUN, { [k]: "x" }))).rejects.toThrow("core만");
+  });
+
+  test("P1 되돌림 사본: 조회·올리기·끝까지 읽기가 기록에 고정한 같은 버킷 키를 쓴다(ObjectStore가 바뀌어도)", async () => {
+    const { ctx, calls } = testCtx("apply", rules({ bucket: "bucket-one", storeBucket: "bucket-two" }));
+    await applyWith(ctx, (w) => w.pgRestore.dumpToR2("smoke", RUN));
+    await applyWith(ctx, (w) => w.pgRestore.r2DumpReadable("smoke", RUN));
+    const keys = calls().calls.filter((c) => c.argv.includes("rclone")).map((c) => c.argv.find((a) => a.startsWith("r2:"))!);
+    expect(keys).toEqual(["r2:bucket-one", "r2:bucket-one/pgdump/smoke/pre-restore-run1.dump", "r2:bucket-one/pgdump/smoke/pre-restore-run1.dump"]);
+  });
+
+  test("P2 목록·ACL·검증 소비자는 남은 stdin을 소진하는 고정 셸로 pg_restore를 부른다", async () => {
+    const { ctx, calls } = testCtx("apply", rules());
+    await applyWith(ctx, (w) => w.pgRestore.prepareInputs("smoke", RUN));
+    await applyWith(ctx, (w) => w.pgRestore.restoreAcl("smoke", RUN));
+    const restores = calls().calls.filter((c) => c.argv.some((a) => a.includes("pg_restore")));
+    expect(restores.length).toBeGreaterThan(0);
+    for (const c of restores) expect([c.argv.join(" "), c.argv.some((a) => a.includes("cat >/dev/null"))]).toEqual([c.argv.join(" "), true]);
+  });
+
+  test("P2 소진 셸: 입력을 다 읽지 않고 끝나는 pg_restore 앞의 생산자가 SIGPIPE로 죽지 않고, pg_restore 실패 코드는 그대로", () => {
+    const dir = mkdtempSync(join(tmpdir(), "homelab-cli-test-drain-"));
+    // 가짜 pg_restore: 앞 10바이트만 읽고 목록을 낸 뒤 끝낸다(--list의 실제 동작과 같은 모양). FAIL이면 3.
+    writeFileSync(join(dir, "pg_restore"), '#!/bin/sh\nhead -c 10 >/dev/null\necho "list"\n[ "$FAIL" = 1 ] && exit 3\nexit 0\n');
+    chmodSync(join(dir, "pg_restore"), 0o755);
+    const run = (script: string, fail = "0") => {
+      const p = Bun.spawnSync(["/bin/bash", "-c", 'head -c 5000000 /dev/zero | sh -c "$1" sh --list; echo "${PIPESTATUS[0]} ${PIPESTATUS[1]}"', "_", script], { env: { PATH: `${dir}:/usr/bin:/bin`, FAIL: fail } });
+      return p.stdout.toString().trim().split("\n");
+    };
+    expect(run(PG_RESTORE_DRAINED)).toEqual(["list", "0 0"]);
+    expect(run(PG_RESTORE_DRAINED, "1")).toEqual(["list", "0 3"]);
+    // 대조군: 소진하지 않으면 생산자가 141(SIGPIPE)이다(#885 리뷰 실측과 같은 꼴).
+    expect(run('pg_restore "$@"')).toEqual(["list", "141 0"]);
   });
 });
 
