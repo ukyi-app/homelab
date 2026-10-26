@@ -168,30 +168,72 @@ render_k3s_config() {
 # k3s가 config를 플래그로 바꾸는 방식(목록은 항목마다 플래그 하나)과 같은 모양이라
 # 라이브 k3s.io/node-args 어노테이션과 바로 비교할 수 있다. 모르는 형식 줄은 BAD로 낸다.
 # yq를 쓰지 않는다. NUC의 yq는 개인 mise 설치라 root PATH와 새 호스트에 있다고 볼 수 없다.
+#
+# 값이 빈 키(key: "" 또는 항목 없는 key:)도 "--키<TAB>"로 낸다. k3s는 빈 값도 --키=로 넘겨 키가 없을 때의
+# 기본값과 다르다(cluster-domain: ""는 cluster.local이 아니다). 옛 판은 이 줄을 버려 재시작 판단이 틀렸다.
+#
+# config_pairs exact: install.sh가 재시작할지 고를 때 쓴다. 따옴표를 벗기지 않고 파일 순서를 지킨다.
+# "0600"과 0600은 YAML에서 문자열과 8진수 정수라 k3s에 다른 값이 가고, 목록은 뒤 항목이 앞 항목을 덮을 수 있다.
+# 주석과 빈 줄만 빼므로, 두 config의 exact 출력이 같으면 k3s가 받는 값도 같다.
 config_pairs() {
-  awk '
-    function clean(v) {
-      sub(/[[:space:]]+#.*$/, "", v)
+  if [ "${1:-}" = exact ]; then
+    config_pairs_awk 1
+  else
+    config_pairs_awk 0 | LC_ALL=C sort
+  fi
+}
+
+config_pairs_awk() {
+  awk -v exact="$1" '
+    # 한 줄 스칼라. 따옴표 안의 #은 주석이 아니다. 닫히지 않은 따옴표, 닫은 뒤 주석 밖 글자는 bad.
+    function scalar(v,   q, i, n, c) {
+      bad = 0
       sub(/^[[:space:]]+/, "", v)
-      sub(/[[:space:]]+$/, "", v)
-      if (v ~ /^".*"$/) v = substr(v, 2, length(v) - 2)
+      q = substr(v, 1, 1)
+      if (q != "\"" && q != "'\''") {
+        sub(/[[:space:]]+#.*$/, "", v)
+        sub(/[[:space:]]+$/, "", v)
+        return v
+      }
+      n = length(v)
+      for (i = 2; i <= n; i++) {
+        c = substr(v, i, 1)
+        if (q == "\"" && c == "\\") { i++; continue }
+        if (c == q) {
+          if (q == "'\''" && substr(v, i + 1, 1) == q) { i++; continue }
+          break
+        }
+      }
+      if (i > n || substr(v, i + 1) !~ /^([[:space:]]+#.*)?[[:space:]]*$/) { bad = 1; return "" }
+      v = substr(v, 1, i)
+      if (!exact && q == "\"") v = substr(v, 2, length(v) - 2)
       return v
     }
+    # 값 없이 끝난 키: 다음 줄이 목록 항목이 아니면 빈 값이다.
+    function flush() { if (pend != "") print "--" pend "\t"; pend = "" }
     /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
     /^[a-z0-9-]+:/ {
+      flush()
       key = $0; sub(/:.*/, "", key)
-      val = $0; sub(/^[^:]*:/, "", val); val = clean(val)
-      if (val != "") print "--" key "\t" val
+      raw = $0; sub(/^[^:]*:/, "", raw)
+      list = ""
+      if (raw ~ /^[[:space:]]*(#.*)?$/) { pend = key; list = key; next }
+      val = scalar(raw)
+      if (bad || raw !~ /^[[:space:]]/) { print "BAD\t" $0; next }
+      print "--" key "\t" val
       next
     }
     /^[[:space:]]+-[[:space:]]/ {
-      if (key == "") { print "BAD\t" $0; next }
-      item = $0; sub(/^[[:space:]]+-[[:space:]]+/, "", item)
-      print "--" key "\t" clean(item)
+      pend = ""
+      raw = $0; sub(/^[[:space:]]+-/, "", raw)
+      val = scalar(raw)
+      if (list == "" || bad) { print "BAD\t" $0; next }
+      print "--" list "\t" val
       next
     }
-    { print "BAD\t" $0 }
-  ' | LC_ALL=C sort
+    { flush(); list = ""; print "BAD\t" $0 }
+    END { flush() }
+  '
 }
 
 # k3s.io/node-args 어노테이션(JSON 배열)을 config_pairs와 같은 모양으로 바꾼다.

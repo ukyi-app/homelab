@@ -131,19 +131,50 @@ kubectl config current-context
 
 설치 뒤 Tailscale 기기 이름을 바꾸면(prod는 2026-10-26 `nuc-pro`로 바꿈) 옛 MagicDNS 이름은 더 풀리지 않고, 새 이름은 아직 SAN에 없어 x509 오류가 난다. `--k3s`를 다시 돌리면 새 이름이 인증서에 더해진다. k3s는 재시작 뒤 설정 SAN 가운데 인증서에 없는 이름을 기존 SAN에 더해 다시 서명하고 옛 SAN은 지우지 않는다. 그래서 옛 MagicDNS 이름도 인증서에 남는다(무해하다. 근거는 `host/install.sh` `check_install_time_keys` 주석).
 
-`--k3s`가 고르는 경로:
+`--k3s`가 고르는 경로. 기존 config와의 비교는 주석과 빈 줄만 빼고 한다. 따옴표만 다른 값(`"0600"`은 문자열, `0600`은 8진수 정수), 빈 값 키(`cluster-domain: ""`, 항목 없는 `key:`), 목록 순서가 달라도 값이 바뀐 것으로 본다.
 
-- **같은 k3s 버전에서 tls-san만 바뀜(이 경우):** 공식 설치 스크립트를 부르지 않는다. 이전 config를 백업하고, 새 config를 임시 파일에 쓴 뒤 `mv`로 바꾸고, `systemctl restart k3s`(180초 상한) → `/readyz` → 클러스터 DNS(kube-dns Service로 `kubernetes.default`를 물어 kubernetes Service IP가 나오는지)와 Service(그 IP의 443)를 60초까지 확인한다. iptables 규칙은 건드리지 않고, 유닛이 `KillMode=process`라 컨테이너는 계속 돈다. 그래도 재시작 동안의 데이터 경로 영향은 재지 않았으니 아래 확인을 한다.
-- **그 밖의 값이나 k3s 버전이 바뀜:** 지금처럼 설치 스크립트를 강제 재시작으로 부른다. 설치 스크립트는 재시작 전에 `KUBE-`·`flannel`이 든 iptables 줄을 지우고 복원한다(k3s v1.36.5+k3s1 `install.sh:1150-1163`). k3s가 다시 만들 때까지 Service·DNS 통신이 끊길 수 있다. 재시작 뒤 같은 DNS·Service 확인을 한다.
+- **같은 k3s 버전에서 tls-san만 바뀜(이 경우):** 공식 설치 스크립트를 부르지 않는다. 이전 config를 백업하고, 새 config를 임시 파일에 쓴 뒤 `mv`로 바꾸고, `systemctl restart k3s`(180초 상한) → `/readyz` → 클러스터 DNS(kube-dns Service로 `kubernetes.default`를 물어 kubernetes Service IP가 나오는지)와 Service(그 IP의 443)를 확인한다. 이 확인은 Service 조회부터 마지막 재시도까지 합쳐 60초 상한이고, 넘으면 되돌리기 명령을 내고 멈춘다. 설치 스크립트의 `KUBE-`·`flannel` 일괄 제거는 피하고, 유닛이 `KillMode=process`라 컨테이너는 계속 돈다.
+- **그 밖의 값이나 k3s 버전이 바뀜:** 지금처럼 설치 스크립트를 강제 재시작으로 부른다. 설치 스크립트는 재시작 전에 `KUBE-`·`flannel`이 든 iptables 줄을 지우고 복원한다(k3s v1.36.5+k3s1 `install.sh:1150-1163`). k3s가 다시 만들 때까지 Service·DNS 통신이 끊길 수 있다. config 값이 바뀌었으면 재시작 뒤 같은 DNS·Service 확인을 한다. **k3s 버전만 바뀌고 config 값이 같으면 설치 스크립트가 스스로 재시작하지만 `--k3s`는 이 확인을 건너뛴다.** 그때도 아래 확인을 모두 한다.
+
+**두 경로 모두 재시작 때 iptables가 잠깐 비는 자리가 있다.** k3s가 시작할 때 flannel(v0.28.4)이 자기 체인 `FLANNEL-POSTRTG`(nat)·`FLANNEL-FWD`(filter)를 비우고(`-F`) 곧 다시 채운다. 설치 스크립트를 건너뛰는 경로도 마찬가지다. 그 틈에 파드가 새로 여는 외부 연결은 SNAT(MASQUERADE) 없이 나가 실패할 수 있다. 이미 맺힌 연결은 conntrack에 남은 NAT로 이어진다. FORWARD 쪽 영향은 나머지 규칙에 달렸다. 틈의 길이는 재지 않았다. 노드에서 하는 DNS·Service 확인은 이 길을 지나지 않으므로 아래 새 파드 확인을 한다.
 
 0.0의 main 확인 블록 뒤에 돌린다.
 
 ```bash
-sudo host/install.sh --cluster <이름> --k3s       # 경로, tls-san 차이, 백업 경로 출력 → 재시작 → /readyz → 클러스터 DNS·Service 확인
+sudo host/install.sh --cluster <이름> --k3s       # 경로, tls-san 차이, 백업 경로 출력 → 재시작 → /readyz → 클러스터 DNS·Service 확인(60초 상한)
 sudo -v && host/verify.sh --cluster <이름>        # node-args·SAN ok
 openssl s_client -connect <NODE_IP>:6443 -noservername </dev/null 2>/dev/null \
   | openssl x509 -noout -ext subjectAltName       # 새 MagicDNS 이름이 있다. 출력에 tailnet 이름이 있어 공개 기록에 붙이지 않는다
 curl -s -o /dev/null -w '%{http_code}\n' https://edge-probe.ukyi.app/   # prod 공개 URL(터널) 200. VM은 E8 VM 격리 5번의 port-forward 확인
+```
+
+**재시작 뒤 새 파드의 새 외부 연결.** 위 확인은 이미 맺힌 터널과 노드 출발 연결이라 flannel이 비웠다 다시 채운 MASQUERADE를 지나지 않는다. 재시작이 끝난 뒤 새 파드를 띄워 클러스터 DNS로 공개 이름을 풀고 공개 443에 새로 연결한다. 실패하면 ns가 남는다. `kubectl -n net-check describe pod probe`와 `logs`를 본 뒤 `kubectl delete namespace net-check`로 지운다.
+
+```bash
+bash -euo pipefail <<'EOF'
+export KUBECONFIG=~/.kube/<KUBE_CONTEXT>.yaml   # prod는 homelab, vm은 homelab-vm
+kubectl create namespace net-check
+kubectl label namespace net-check pod-security.kubernetes.io/enforce=restricted
+kubectl -n net-check apply -f - <<'YAML'
+apiVersion: v1
+kind: Pod
+metadata: { name: probe }
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext: { runAsNonRoot: true, runAsUser: 65532, seccompProfile: { type: RuntimeDefault } }
+  containers:
+    - name: probe
+      image: docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70
+      securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+      command: [sh, -c]
+      # 셋 다 되어야 Succeeded: 클러스터 DNS로 공개 이름(IPv4 답), 그 이름의 443, 공개 주소의 443
+      args: ["dig +time=3 +tries=1 +short github.com | grep -qE '^[0-9.]+$' && nc -z -w 3 github.com 443 && nc -z -w 3 1.1.1.1 443"]
+YAML
+kubectl -n net-check wait --for=jsonpath='{.status.phase}'=Succeeded pod/probe --timeout=120s
+kubectl delete namespace net-check
+echo "새 파드 외부 연결 통과"
+EOF
 ```
 
 **되돌리기:** `--k3s`가 출력한 백업을 제자리로 놓고 재시작한다. Git을 되돌려 `--k3s`를 다시 돌리는 것으로는 돌아가지 않는다(렌더가 그때의 `tailscale status`에서 MagicDNS 이름을 다시 읽는다). 인증서에 더한 새 이름은 남지만 무해하다.
