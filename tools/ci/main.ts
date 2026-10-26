@@ -241,8 +241,9 @@ const steps: Step[] = [
     name: "cli",
     // homelab CLI 시험(설계 C.4.6 CLI 행): PATH 스텁으로 plan의 쓰기 부명령 0건, 출력의 시크릿 0, 엔진의 재실행·실패 주입.
     // 0건 통과는 실패다(B.8 E7: 0건을 처리하고 성공하는 검사는 검사가 아니다).
+    // 감싸개(cli/test/run.ts)가 전용 TMPDIR로 돌리고 끝나면 지운다. 시험이 남긴 임시 폴더가 /tmp에 쌓이지 않는다.
     run: () => {
-      const r = run(["bun", "test", "cli/"]);
+      const r = run(["bun", "cli/test/run.ts", "cli/"]);
       const out = (r.stdout + r.stderr).trim();
       console.log(out);
       const pass = Number(out.match(/^\s*(\d+) pass$/m)?.[1] ?? 0);
