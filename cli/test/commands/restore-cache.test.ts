@@ -744,6 +744,44 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     expect(w.writes).not.toContain(`rolloutRestart ${NS}/${APP}-valkey`);
   });
 
+  test("#891 r2 P2: 백업에서 돌아온 옛 실행의 표식 키는 앱 키로 세지 않고, 정리에서 함께 지운다", async () => {
+    // 복원 중 정기 백업이 표식을 가져갔고, 그 백업을 이번 실행으로 복원했다(옛 CLI id와 손 런북 RUN 꼴)
+    const { w, vk } = await toNormalPr();
+    const old = ["oldrun1", "20261025-031000-123abc"];
+    for (const id of old) vk.markers!.add(id);
+    mergeNormal(w);
+    // 재시작에서 앱 키를 다 잃고 표식들만 남은 경우: 옛 표식을 앱 키로 세면 2개로 보여 통과한다
+    onRestart(w, vk, { keys: 0, marker: true });
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("failed");
+    expect(rec(w)["suspect.empty"]).toBe("1");
+    // 정상 경로: 옛 표식은 정리에서 지운다
+    const ok = await toNormalPr();
+    for (const id of old) ok.vk.markers!.add(id);
+    mergeNormal(ok.w);
+    expect((await runIn(ok.w, cmd, "apply", { app: APP })).status).toBe("done");
+    expect(ok.vk.markers!.size).toBe(0);
+    expect(ok.w.records.get(`${NS}/restore-vk`)!.data["dbsize.after"]).toBe("5");
+  });
+
+  test("#891 r2 P2: 복원 직후 키 수에서도 옛 표식을 뺀다(앱 키 0개·옛 표식 1개는 0개)", async () => {
+    const w = restoreWorld();
+    const vk = w.valkeys.get(`${NS}/${APP}-valkey`)!;
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(900);
+    w.objects.delete(`deployment/${NS}/${APP}-valkey`);
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = true;
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(901);
+    w.put("deployment", NS, `${APP}-valkey`, { metadata: { generation: 2 }, spec: { replicas: 1 }, status: { observedGeneration: 2, updatedReplicas: 1, readyReplicas: 1 } });
+    vk.appendonly = false;
+    vk.aof = false;
+    vk.keys = 0;
+    vk.markers = new Set(["20261025-031000-123abc"]);
+    await runIn(w, cmd, "apply", { app: APP });
+    expect(rec(w).dbsize).toBe("0");
+  });
+
   test("r2 6: 정상 완료면 정리 단계가 표식 키를 지운다(앱 키 수에는 표식을 세지 않는다)", async () => {
     const { w, vk } = await toNormalPr();
     expect(rec(w).dbsize).toBe("5");

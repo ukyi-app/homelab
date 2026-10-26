@@ -25,6 +25,10 @@ const VALKEY_WORDS: Record<ValkeyCommand, string[]> = {
   "INFO persistence": ["INFO", "persistence"],
 };
 
+// 복원 표식 키. id는 CLI 실행 id(소문자·숫자) 또는 손 런북 RUN(YYYYMMDD-HHMMSS-hex).
+const MARKER_PREFIX = "homelab:restore:";
+const MARKER_ID = /^[a-z0-9][a-z0-9-]{0,40}$/;
+
 const PG_REJECTED = { rejected: /password authentication failed/ };
 const VALKEY_REJECTED = { rejected: /WRONGPASS|NOAUTH/ };
 
@@ -100,8 +104,8 @@ export function valkeyWrite(exec: Exec, k8s: KubeRead, pollMs: number): ValkeyWr
     marker(ns, deployment, run, op) {
       checkNs(ns);
       checkValkey(deployment);
-      if (!/^[a-z0-9]{1,22}$/.test(run)) throw new Error("복원 실행 id 형식이 아니다");
-      const key = `homelab:restore:${run}`;
+      if (!MARKER_ID.test(run)) throw new Error("복원 실행 id 형식이 아니다");
+      const key = `${MARKER_PREFIX}${run}`;
       const words = op === "set" ? ["SET", key, run] : op === "exists" ? ["EXISTS", key] : op === "del" ? ["DEL", key] : undefined;
       if (!words) throw new Error("표식 키 작업은 set·exists·del만");
       const r = send(ns, deployment, authOf(ns, deployment), words);
@@ -120,6 +124,22 @@ export function valkeyWrite(exec: Exec, k8s: KubeRead, pollMs: number): ValkeyWr
       }
       if (out !== "0" && out !== "1") throw new Error("valkey-cli DEL: 답이 0·1이 아니다");
       return true;
+    },
+    markers(ns, deployment) {
+      checkNs(ns);
+      checkValkey(deployment);
+      const r = send(ns, deployment, authOf(ns, deployment), ["--scan", "--pattern", `${MARKER_PREFIX}*`]);
+      if (r.errKind === "timeout") throw new ExecTimeout("valkey-cli --scan: 시간 초과");
+      if (r.signals?.includes("rejected")) throw new Error("valkey-cli --scan: 인증이 거부됐다");
+      if (r.code !== 0) throw new Error(`valkey-cli --scan: ${why(r)}`);
+      const ids: string[] = [];
+      for (const line of r.stdout.split("\n").map((x) => x.trim()).filter(Boolean)) {
+        // 오류 문구(ERR·NOPERM)나 꼴이 다른 키는 셀 수 없다.
+        const id = line.startsWith(MARKER_PREFIX) ? line.slice(MARKER_PREFIX.length) : "";
+        if (!MARKER_ID.test(id)) throw new Error("valkey-cli --scan: 표식 키 꼴이 아닌 답이 있다");
+        ids.push(id);
+      }
+      return [...new Set(ids)];
     },
     authCheck(ns, deployment, password) {
       checkNs(ns);

@@ -415,9 +415,17 @@ describe("파드 안 작업", () => {
   test("restoreRecord: created는 API 서버의 creationTimestamp, 형식이 다르면 실패(#889 r2 P2-5)", async () => {
     const run = "abc123";
     const doc = (created: unknown) => JSON.stringify({ metadata: { resourceVersion: "5", labels: { "homelab.ukyi.app/restore": run }, creationTimestamp: created }, data: { run } });
-    const { ctx } = testCtx("read", [kubectlRule(["-n", "app-smoke", "get", "configmaps", "data-purge", "-o", "json"], [{ stdout: doc("2026-10-26T12:20:00Z") }, { stdout: doc("어제") }])]);
-    expect(ctx.k8s.restoreRecord("app-smoke", "data-purge")!.created).toBe("2026-10-26T12:20:00Z");
-    expect(() => ctx.k8s.restoreRecord("app-smoke", "data-purge")).toThrow("creationTimestamp");
+    const { ctx } = testCtx("read", [kubectlRule(["-n", "database", "get", "configmaps", "data-purge-smoke", "-o", "json"], [{ stdout: doc("2026-10-26T12:20:00Z") }, { stdout: doc("어제") }])]);
+    expect(ctx.k8s.restoreRecord("database", "data-purge-smoke")!.created).toBe("2026-10-26T12:20:00Z");
+    expect(() => ctx.k8s.restoreRecord("database", "data-purge-smoke")).toThrow("creationTimestamp");
+  });
+
+  test("restoreRecord: data-purge-<앱>은 database ns에만, 앱 이름 꼴만(그 밖의 ConfigMap은 받지 않는다)", async () => {
+    const { ctx, calls } = testCtx("read", []);
+    for (const [ns, name] of [["app-smoke", "data-purge-smoke"], ["database", "data-purge"], ["database", "data-purge-Bad_Name"], ["database", "data-purge--x"], ["database", "kube-root-ca.crt"], ["database", `data-purge-${"a".repeat(60)}`]]) {
+      expect(() => ctx.k8s.restoreRecord(ns, name as never)).toThrow("data-purge-<앱>");
+    }
+    expect(calls().calls).toEqual([]);
   });
 
   test("valkey.marker: 키는 homelab:restore:<run>, 값은 실행 id. 기대한 답이 아니면 실패(#889 r2 6)", async () => {
@@ -434,6 +442,21 @@ describe("파드 안 작업", () => {
     const bad = testCtx("apply", [auth, vk(["SET", key, "abc123"], { stdout: "NOPERM this user has no permissions\n" }), vk(["EXISTS", key], { stdout: "ERR x\n" })]);
     await expect(applyWith(bad.ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "abc123", "set"))).rejects.toThrow("OK가 아니다");
     await expect(applyWith(bad.ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "abc123", "exists"))).rejects.toThrow("0·1이 아니다");
+  });
+
+  test("valkey.markers: homelab:restore:* 고정 패턴, 꼴이 다른 답은 실패(#891 r2 P2)", async () => {
+    const scan = (stdout: string) => vk(["--scan", "--pattern", "homelab:restore:*"], { stdout });
+    const ok = testCtx("apply", [auth, scan("homelab:restore:abc123\nhomelab:restore:20261025-031000-123abc\nhomelab:restore:abc123\n")]);
+    expect((await applyWith(ok.ctx, (w) => w.valkey.markers("app-smoke", "smoke-valkey"))).value).toEqual(["abc123", "20261025-031000-123abc"]);
+    const none = testCtx("apply", [auth, scan("")]);
+    expect((await applyWith(none.ctx, (w) => w.valkey.markers("app-smoke", "smoke-valkey"))).value).toEqual([]);
+    for (const bad of ["NOPERM this user has no permissions to run the 'scan' command\n", "homelab:restore:Bad Key\n", "homelab:restore:\n"]) {
+      const b = testCtx("apply", [auth, scan(bad)]);
+      await expect(applyWith(b.ctx, (w) => w.valkey.markers("app-smoke", "smoke-valkey"))).rejects.toThrow("표식 키 꼴");
+    }
+    // 손 런북 RUN 꼴도 지울 수 있다
+    const del = testCtx("apply", [auth, vk(["DEL", "homelab:restore:20261025-031000-123abc"], { stdout: "1\n" })]);
+    expect((await applyWith(del.ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "20261025-031000-123abc", "del"))).value).toBe(true);
   });
 
   test("valkey.authCheck: WRONGPASS·NOAUTH면 rejected", async () => {

@@ -408,6 +408,9 @@ export class World {
         return "PONG\n";
       },
       waitAof: (ns: string, d: string) => w.valkeys.get(`${ns}/${d}`)!.aof,
+      markers(ns: string, d: string) {
+        return [...(w.valkeys.get(`${ns}/${d}`)!.markers ?? [])];
+      },
       marker(ns: string, d: string, run: string, op: "set" | "exists" | "del") {
         const v = w.valkeys.get(`${ns}/${d}`)!;
         v.markers ??= new Set();
