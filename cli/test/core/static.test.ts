@@ -221,7 +221,7 @@ describe("소스 규칙", () => {
   });
 
   test("exec 생성·문맥 조립·비밀번호 생성·쓰기 문맥 내부는 정해진 core 파일만", () => {
-    expect(offenders(/\bmakeExec\b/, ["core/exec.ts", "core/runtime.ts"])).toEqual([]);
+    expect(offenders(/\b(makeExec|makePipe|makeForward)\b/, ["core/exec.ts", "core/runtime.ts"])).toEqual([]);
     expect(offenders(/\bmakeRuntime\b/, ["core/runtime.ts", "main.ts"])).toEqual([]);
     expect(offenders(/\bnewPassword\b/, ["core/secret.ts", "core/runtime.ts"])).toEqual([]);
     expect(offenders(/\b(writeExecOf|registerWriteExec)\b/, ["core/runtime-internal.ts", "core/runtime.ts", "core/pr.ts"])).toEqual([]);
