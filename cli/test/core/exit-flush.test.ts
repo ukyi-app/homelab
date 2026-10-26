@@ -7,10 +7,10 @@ import { rule, stubSandbox } from "../harness";
 
 const MAIN = join(import.meta.dir, "..", "..", "src", "main.ts");
 const want = expectedTools();
-const BIG = "9".repeat(300_000);
+const BIG = "9".repeat(1_000_000);
 
 describe("출력 비우기", () => {
-  test("느린 소비자에게도 300KB 넘는 JSON 문서가 잘리지 않는다", async () => {
+  test("느린 소비자에게도 1MB 넘는 JSON 문서가 잘리지 않는다", async () => {
     const sb = stubSandbox([
       rule(["kubectl", "version", "--client", "-o", "json"], { stdout: JSON.stringify({ clientVersion: { gitVersion: `v${want.kubectl}` } }) }),
       rule(["infisical", "--version"], { stdout: `infisical version ${want.infisical}\n` }),

@@ -69,21 +69,23 @@ function folderPieces(path: string): [string, string][] {
   return parts.map((name, i) => [i === 0 ? "/" : `/${parts.slice(0, i).join("/")}`, name]);
 }
 
-// 폴더 목록 JSON에서 이름만. [미검증] 0.44.2 실제 서버의 -o json 모양: 배열의 각 항목에 name이 있다고 보고, 다르면 던진다(T12-05).
+// 폴더 목록 JSON에서 이름만. 실측(0.44.2 바이너리 + 가짜 API, #880 리뷰, packages/cmd/folder.go): 항목은
+// {folderId, folderName, folderPath}이고 빈 목록은 null이다. 그 밖의 모양이면 던진다.
 function folderNames(exec: Exec, project: string, parent: string): string[] {
   const r = exec(argvFor.folders(project, parent));
   if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${parent} 폴더 목록: 시간 초과`);
   if (r.code !== 0) throw new Error(`Infisical ${parent} 폴더 목록: ${why(r)}`);
   let parsed: unknown;
   try {
-    parsed = jsonParse(r.stdout.trim() || "[]");
+    parsed = jsonParse(r.stdout.trim());
   } catch {
     throw new Error(`Infisical ${parent} 폴더 목록: JSON이 아니다`);
   }
+  if (parsed === null) return [];
   if (!Array.isArray(parsed)) throw new Error(`Infisical ${parent} 폴더 목록: 배열이 아니다`);
   return parsed.map((f) => {
-    if (typeof (f as { name?: unknown })?.name !== "string") throw new Error(`Infisical ${parent} 폴더 목록: 모양이 다르다`);
-    return (f as { name: string }).name;
+    if (typeof (f as { folderName?: unknown })?.folderName !== "string") throw new Error(`Infisical ${parent} 폴더 목록: 모양이 다르다`);
+    return (f as { folderName: string }).folderName;
   });
 }
 

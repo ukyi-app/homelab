@@ -256,7 +256,19 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
         checkName("리소스", target.name);
         what = [`${resource(kind)}/${target.name}`];
       }
-      return waited(run(exec, ["-n", ns, "wait", ...what, `--for=condition=${cond}`, `--timeout=${timeoutSec}s`], { timeoutMs: (timeoutSec + 30) * 1000 }), what.join(" "));
+      // 함정(kubectl 1.36.5 pkg/cmd/wait): 셀렉터에 맞는 객체가 아직 없으면 기다리지 않고 "no matching resources found"로 끝난다.
+      // Job을 만든 직후의 파드가 그렇다. 시간 안에서 다시 본다(#880 후속, 실제 출력 대조).
+      const deadline = Date.now() + timeoutSec * 1000;
+      for (;;) {
+        const left = Math.max(1, Math.ceil((deadline - Date.now()) / 1000));
+        const x = run(exec, ["-n", ns, "wait", ...what, `--for=condition=${cond}`, `--timeout=${left}s`], { timeoutMs: (left + 30) * 1000 });
+        if (x.code !== 0 && /no matching resources found/.test(x.stderr)) {
+          if (Date.now() + pollMs > deadline) return false;
+          Bun.sleepSync(pollMs);
+          continue;
+        }
+        return waited(x, what.join(" "));
+      }
     },
     podSecretsCurrent(ns, deployment) {
       return podSecrets(ns, deployment).state;
@@ -311,6 +323,7 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
 
 // 이 실행이 아닌 기록·객체를 건드리지 않게, 기록 키를 JSON pointer로 쓸 때 쓰는 꼴(키 형식에 ~·/가 없다).
 const pointer = (key: string) => `/data/${key}`;
+const RAW_PATH = { job: "/apis/batch/v1", cluster: "/apis/postgresql.cnpg.io/v1" } as const;
 
 export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
   const pollMs = opts.pollMs ?? POLL_MS;
@@ -333,17 +346,22 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
     forceSync(ns, externalSecret, o = {}) {
       checkName("namespace", ns);
       checkName("ExternalSecret", externalSecret);
-      const at = Math.floor(Date.now() / 1000);
-      must(run(exec, ["-n", ns, "annotate", KINDS.externalsecret, externalSecret, `force-sync=${at}`, "--overwrite"]), `force-sync ${externalSecret}`);
+      if (o.waitSec !== undefined) checkTimeout(o.waitSec, 120);
+      // 이번 요청 뒤의 동기화를 가르는 표지: ESO는 동기화할 때 status.syncedResourceVersion을 generation과 annotation·label 해시로
+      // 쓴다(v2.13.0 ctrlutil.GetResourceVersion). annotate 전 값과 달라졌으면 이 annotation 뒤에 동기화한 것이다.
+      // refreshTime은 초 단위라 같은 초의 이전 동기화와 구별하지 못한다(Connector 4372999902). 값은 ms+난수라 늘 바뀐다.
+      const before = o.waitSec === undefined ? null : r.get("externalsecret", ns, externalSecret);
+      if (o.waitSec !== undefined && !before) throw new Error(`ExternalSecret ${externalSecret}이 없다`);
+      const stamp = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(2))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+      must(run(exec, ["-n", ns, "annotate", KINDS.externalsecret, externalSecret, `force-sync=${stamp}`, "--overwrite"]), `force-sync ${externalSecret}`);
       if (o.waitSec === undefined) return;
-      checkTimeout(o.waitSec, 120);
+      const prev = before.status?.syncedResourceVersion;
       const deadline = Date.now() + o.waitSec * 1000;
       for (;;) {
         const es = r.get("externalsecret", ns, externalSecret);
-        const refreshed = Date.parse(es?.status?.refreshTime ?? "") / 1000;
+        const synced = es?.status?.syncedResourceVersion;
         const ready = (es?.status?.conditions ?? []).some((c: any) => c?.type === "Ready" && c?.status === "True");
-        // refreshTime은 초 단위다. annotate 시각과 같은 초도 그 뒤의 동기화로 본다.
-        if (ready && Number.isFinite(refreshed) && refreshed >= at) return;
+        if (ready && typeof synced === "string" && synced !== "" && synced !== prev) return;
         if (Date.now() + pollMs > deadline) throw new ExecTimeout(`ExternalSecret ${externalSecret}: 동기화 대기 시간 초과`);
         Bun.sleepSync(pollMs);
       }
@@ -406,7 +424,23 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       const cur = r.get(kind, ns, name);
       if (!cur) return;
       if (cur.metadata?.labels?.[RESTORE_LABEL] !== runId) throw new Error(`${kind} ${name}은 이 실행(${runId})의 복원 객체가 아니다`);
-      must(run(exec, ["-n", ns, "delete", resource(kind), name, "--ignore-not-found", "--cascade=foreground", "--wait=true", "--timeout=120s"], { timeoutMs: 150_000 }), `${kind} ${name} 지우기`);
+      const uid = cur.metadata?.uid;
+      if (typeof uid !== "string" || !/^[0-9a-f-]{8,64}$/.test(uid)) throw new Error(`${kind} ${name}의 uid를 읽지 못했다`);
+      // 확인한 그 객체만 지운다(#880 리뷰 P2): 이름만으로 지우면 확인과 삭제 사이 같은 이름의 다른 실행 객체가 생겼을 때 그것을 지운다.
+      // kubectl delete는 precondition을 넣지 않아 DeleteOptions를 --raw 본문으로 보낸다(kubectl 1.36.5 실측: -f - 본문을 그대로 보낸다).
+      const body = jsonStringify({ kind: "DeleteOptions", apiVersion: "v1", propagationPolicy: "Foreground", preconditions: { uid } });
+      const x = run(exec, ["delete", "--raw", `${RAW_PATH[kind]}/namespaces/${ns}/${kind === "job" ? "jobs" : "clusters"}/${name}`, "-f", "-"], { input: body, secretStdout: true, signals: { conflict: /Precondition failed|\(Conflict\)/ } });
+      if (x.errKind === "timeout") throw new ExecTimeout(`${kind} ${name} 지우기: 시간 초과(결과 미상)`);
+      if (x.signals?.includes("conflict")) throw new Error(`${kind} ${name}이 확인 뒤 다른 객체로 바뀌었다. 지우지 않았다`);
+      if (x.code !== 0 && !x.notFound) throw new Error(`${kind} ${name} 지우기: ${why(x)}`);
+      // foreground 삭제는 비동기다. 그 uid의 객체가 사라질 때까지 기다린다(같은 이름의 새 객체는 다른 uid라 기다리지 않는다).
+      const deadline = Date.now() + 120_000;
+      for (;;) {
+        const now = r.get(kind, ns, name);
+        if (!now || now.metadata?.uid !== uid) return;
+        if (Date.now() + pollMs > deadline) throw new ExecTimeout(`${kind} ${name}: 삭제 대기 시간 초과`);
+        Bun.sleepSync(pollMs);
+      }
     },
     createJobFromCronJob(ns, cronjob, jobName, runId) {
       checkName("namespace", ns);
