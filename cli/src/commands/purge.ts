@@ -8,7 +8,7 @@
 import { defineCommand, type Observation, type ReadCtx, type Step, type WriteCtx } from "../core/command";
 import { APP_NAME, newRunId } from "../core/names";
 import { prStep } from "../core/pr";
-import { UsageError } from "../core/result";
+import { UsageError, type Result } from "../core/result";
 import { parseYaml, setTopLevel } from "../core/values";
 
 const REPO = "repos/ukyi-app/homelab";
@@ -71,7 +71,15 @@ function appWorkloads(ctx: ReadCtx | WriteCtx, n: Names): string[] {
     for (const o of ctx.k8s.list(kind, n.ns)) if (own(o) || (kind === "deployment" && o?.metadata?.name === n.app)) out.push(`${kind}/${o?.metadata?.name}`);
   }
   for (const p of ctx.k8s.list("pod", n.ns)) if (live(p) && (own(p) || !dataPod(p, n.app))) out.push(`pod/${p?.metadata?.name}`);
+  // 모든 워크로드 읽기가 여기를 지난다(전용 엔진, 사전 읽기, 재조회, 쓰기 뒤 재조회, guarded 안 확인). 본 것은 잊지 않는다(#893 r2).
+  for (const x of out) n.seen.add(x);
   return out;
+}
+
+// 지금 보이는 워크로드, 없으면 이 실행에서 앞서 본 것. 한 번 보면 그 뒤 읽기는 사라졌어도 본 것으로 판정한다(#893 r2 A).
+function observed(ctx: ReadCtx | WriteCtx, n: Names): string[] {
+  const left = appWorkloads(ctx, n);
+  return left.length ? left : [...n.seen];
 }
 
 // 기록된 "앱 워크로드 없음" 확인 시각(기록의 creationTimestamp). 지금 기준(앱 삭제·데이터 등록)보다 앞이면 옛 실행의 것이라
@@ -90,7 +98,8 @@ function staleness(t: string, keepMs: number): string | null {
   return null;
 }
 
-type Names = { app: string; ns: string; dataFile: string };
+// seen: 이 실행에서 한 번이라도 본 앱 워크로드(메모리, 쓰기 아님). 어느 읽기에서 봤든 apply가 끝날 때 기록을 무효화한다.
+type Names = { app: string; ns: string; dataFile: string; seen: Set<string> };
 
 function values(ctx: ReadCtx | WriteCtx, path: string): any | null {
   const text = ctx.repo.readFile(path);
@@ -238,7 +247,7 @@ function workloadStep(n: Names): Step {
     id: "workloads",
     target: `앱 워크로드(${n.ns})`,
     async read(ctx) {
-      const left = appWorkloads(ctx, n);
+      const left = observed(ctx, n);
       return left.length ? seen(ctx, n, left) : same("없음");
     },
     async apply(w) {
@@ -258,7 +267,7 @@ function guarded(n: Names, step: Step): Step {
     ...step,
     async read(ctx) {
       if (values(ctx, n.dataFile) === null) return step.read(ctx);
-      const left = appWorkloads(ctx, n);
+      const left = observed(ctx, n);
       if (left.length) return seen(ctx, n, left);
       const o = await step.read(ctx);
       if (check && o.state !== "same") throw new Error(o.next ? `${o.detail}. ${o.next}` : o.detail);
@@ -273,6 +282,22 @@ function guarded(n: Names, step: Step): Step {
       // 쓴 직후에도 본다. 엔진의 쓰기 뒤 재조회가 워크로드를 보면 그냥 실패할 뿐 기록을 지우지 못한다.
       const after = appWorkloads(w, n);
       if (after.length) invalidate(w, n, after);
+    },
+  };
+}
+
+// 이 실행에서 워크로드를 봤을 때 마지막에 도는 단계. 지금 없어도 지운다. 기록이 없으면 할 일 없음.
+function dropRecord(n: Names, list: string): Step {
+  return {
+    id: "record-invalidated",
+    target: `기록 ${REC_NS}/${recordName(n.app)}`,
+    async read(ctx) {
+      const r = ctx.k8s.restoreRecord(REC_NS, recordName(n.app));
+      return r ? { state: "differs", action: "delete", detail: `이 실행에서 앱 워크로드를 봤다(${list}) → 폐기 확인 기록이 무효가 된다` } : same("기록 없음(무효)");
+    },
+    async apply(w) {
+      const r = w.k8s.restoreRecord(REC_NS, recordName(n.app));
+      if (r) w.k8s.restoreRecordDelete(REC_NS, recordName(n.app), r.run);
     },
   };
 }
@@ -506,20 +531,45 @@ export default defineCommand({
     const confirm = input.flags.confirm;
     if (confirm !== undefined && confirm !== app) throw new UsageError("--confirm 값이 앱 이름과 다르다");
     if (input.apply && confirm === undefined) throw new UsageError(`--apply에는 --confirm ${app}이 함께 있어야 한다`);
-    const n: Names = { app, ns: `app-${app}`, dataFile: `data/${app}/values.yaml` };
-    // apply면 본 엔진 전에 워크로드만 보는 실행을 따로 돌린다. GitHub·Infisical·백업 조회의 실패와 상관없이 무효화가 돈다.
-    if (input.apply) {
-      const pre = await ctx.engine({ command: "data purge", app, steps: [workloadStep(n)] });
-      if (pre.status === "failed") return pre;
+    const n: Names = { app, ns: `app-${app}`, dataFile: `data/${app}/values.yaml`, seen: new Set() };
+    const main = async (): Promise<Result> => {
+      // apply면 본 엔진 전에 워크로드만 보는 실행을 따로 돌린다. GitHub·Infisical·백업 조회의 실패와 상관없이 무효화가 돈다.
+      if (input.apply) {
+        const pre = await ctx.engine({ command: "data purge", app, steps: [workloadStep(n)] });
+        if (pre.status === "failed") return pre;
+      }
+      const listed = listDir(ctx, `data/${app}`);
+      const dataFiles = listed.length ? listed : [n.dataFile];
+      return ctx.engine({
+        command: "data purge",
+        app,
+        steps: steps(n, dataFiles),
+        notes: ["폐기 뒤에도 그 DB는 base backup 안에 보존 기간(14일) 동안 남는다.", `앱 ns app-${app}과 Infisical 폴더는 남는다(키만 지운다).`],
+        next: (status) => (status === "pending" ? `homelab data purge ${app} --confirm ${app} --apply` : (undefined as unknown as string | null)),
+      });
+    };
+    if (!input.apply) return main();
+    // 본 엔진이 어떻게 끝나든(성공·실패·예외·대기) 이 실행에서 워크로드를 봤으면 마지막에 기록을 지우고 실패로 끝낸다(#893 r2).
+    // 엔진은 사전 읽기 실패·쓰기 뒤 재조회 실패에서 apply를 부르지 않고 돌아간다. 그 관측을 여기서 받는다.
+    let result: Result | undefined;
+    let thrown: unknown;
+    try {
+      result = await main();
+    } catch (e) {
+      thrown = e;
     }
-    const listed = listDir(ctx, `data/${app}`);
-    const dataFiles = listed.length ? listed : [n.dataFile];
-    return ctx.engine({
-      command: "data purge",
-      app,
-      steps: steps(n, dataFiles),
-      notes: ["폐기 뒤에도 그 DB는 base backup 안에 보존 기간(14일) 동안 남는다.", `앱 ns app-${app}과 Infisical 폴더는 남는다(키만 지운다).`],
-      next: (status) => (status === "pending" ? `homelab data purge ${app} --confirm ${app} --apply` : (undefined as unknown as string | null)),
-    });
+    if (n.seen.size === 0) {
+      if (thrown !== undefined) throw thrown;
+      return result!;
+    }
+    const list = [...n.seen].join(", ");
+    const inv = await ctx.engine({ command: "data purge", app, steps: [dropRecord(n, list)] });
+    const next =
+      inv.status === "failed"
+        ? `폐기 확인 기록을 지우지 못했다(${inv.error?.message ?? "원인 미상"}). kubectl -n ${REC_NS} delete configmap ${recordName(app)}로 지운 뒤, 워크로드가 사라지면 다시 실행한다`
+        : `kubectl -n ${n.ns} get deploy,sts,cronjob,job,pod --show-labels로 보고, 사라진 뒤 다시 실행한다(그때부터 새로 잰다)`;
+    const message = `${result?.error ? `${result.error.message}. ` : ""}이 실행에서 앱 워크로드를 봤다(${list}). ${inv.status === "failed" ? "폐기 확인 기록을 지우지 못했다" : "폐기 확인 기록을 지웠다"}${thrown !== undefined ? `. 본 실행은 예외로 끝났다: ${(thrown as Error)?.message ?? String(thrown)}` : ""}`;
+    const base = result ?? inv;
+    return { ...base, status: "failed", steps: [...(result?.steps ?? []), ...inv.steps], notes: [...base.notes, ...(result ? inv.notes : [])], next, error: { message, next } };
   },
 });

@@ -554,7 +554,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
     v.put("pod", NS, "blip", { metadata: { name: "blip", labels: { "homelab.ukyi.app/app": APP } }, status: { get phase() { return ++n <= 4 ? "Running" : "Succeeded"; } } });
     const q = await runIn(v, cmd, "apply", { app: APP }, { confirm: APP });
     expect(q.status).toBe("failed");
-    expect(q.steps.map((x) => x.id)).toEqual(["workloads"]);
+    expect(q.steps.map((x) => x.id)).toEqual(["workloads", "record-invalidated"]);
     expect(v.records.has(`database/data-purge-${APP}`)).toBe(false);
   });
 
@@ -612,7 +612,8 @@ describe("data purge: 흐름(가짜 세계)", () => {
       expect(w.writes).toEqual([]);
       const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
       expect(r.status).toBe("failed");
-      expect(r.steps.map((x) => x.id)).toEqual(["workloads"]);
+      // 워크로드 전용 실행에서 멈추고, 마지막 무효화 단계만 더 돈다(본 엔진은 돌지 않는다)
+      expect(r.steps.map((x) => x.id)).toEqual(["workloads", "record-invalidated"]);
       expect(w.records.has(`database/data-purge-${APP}`)).toBe(false);
       expect(w.writes).toEqual([`recordDelete database/data-purge-${APP}`]);
       // 이어서: 조회가 정상이 되고, 파드가 쓰던 10/26 06:00의 백업 뒤 파드가 사라졌다 → 새 기록(12:00) 뒤가 아니라 PR 없음
