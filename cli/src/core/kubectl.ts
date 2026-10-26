@@ -42,7 +42,7 @@ export type KubeOpts = { pollMs?: number };
 const POLL_MS = 2_000;
 const SECRETS_RV = "homelab.ukyi.app/secrets-rv";
 const RV = /^[0-9]{1,20}$/;
-const RECORD_NAMES = new Set<RestoreRecordName>(["restore-pg", "restore-vk", "restore-check"]);
+const RECORD_NAMES = new Set<RestoreRecordName>(["restore-pg", "restore-vk", "restore-check", "data-purge"]);
 const RECORD_KEY = /^[a-z0-9][a-z0-9.-]{0,62}$/;
 const RUN_ID = /^[a-z0-9]{1,22}$/;
 const JSONPATH = /^\{\.status(\.[A-Za-z][A-Za-z0-9]*)+\}$/;
@@ -53,7 +53,7 @@ function checkTimeout(sec: number, max: number): void {
 }
 
 function checkRecord(name: string): void {
-  if (!RECORD_NAMES.has(name as RestoreRecordName)) throw new Error("복원 기록 이름은 restore-pg·restore-vk·restore-check만");
+  if (!RECORD_NAMES.has(name as RestoreRecordName)) throw new Error("복원 기록 이름은 restore-pg·restore-vk·restore-check·data-purge만");
 }
 
 function checkRun(runId: string): void {
@@ -147,7 +147,9 @@ export function parseRecord(doc: any, name: string): RestoreRecord {
   // 만들기 전 검사(restoreRecordCreate)에는 uid가 없다. 지우기는 uid가 있어야 한다.
   const uid = doc?.metadata?.uid;
   if (uid !== undefined && (typeof uid !== "string" || !/^[0-9a-f-]{8,64}$/.test(uid))) throw new Error(`복원 기록 ${name}: uid 형식이 아니다`);
-  return { run, data: { ...data }, resourceVersion: rv, uid: uid ?? "" };
+  const created = doc?.metadata?.creationTimestamp;
+  if (created !== undefined && (typeof created !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(created))) throw new Error(`복원 기록 ${name}: creationTimestamp 형식이 아니다`);
+  return { run, data: { ...data }, resourceVersion: rv, uid: uid ?? "", created: created ?? "" };
 }
 
 export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {

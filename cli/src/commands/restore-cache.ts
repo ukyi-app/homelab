@@ -139,6 +139,45 @@ function gatedPr(n: Names, id: string, pre: string | null, done: string, step: S
   };
 }
 
+// 키 수가 같기를 요구하지 않는다. 복원 모드로 올린 뒤 사람이 PR을 병합할 때까지 앱이 돌며 키를 바꾸고 TTL 키도 만료된다.
+// 같기를 요구하면 정상 변경을 손실로 보고, touched 때문에 --abort도 안 돼 실행이 갇힌다(#883 Connector P2).
+// 아는 실패는 빈 데이터(U18)라, 기준들 중 하나라도 양수인데 지금 0개면 멈춘다. 기준은 저장된 값과 바로 앞에서 새로 본 값
+// 둘 다다. 저장된 0만 믿으면 그 뒤 생긴 키를 다 잃어도 통과한다(#889 r2 P1-2).
+function emptied(before: number[], after: number): boolean {
+  return before.some((x) => x > 0) && after === 0;
+}
+
+// 0개를 본 실행은 기록에 suspect.empty를 남긴다. 재실행이 빈 서버의 0개를 새 기준으로 받아 성공으로 넘어가지 않게 한다
+// (#889 r1 P1-3). 앱이 정상적으로 다 지웠거나 TTL로 모두 만료됐으면(#889 r1 P2) 사람이 보고 --accept-empty로 받아들인다.
+// 플래그는 이 표식이 있을 때만 쓰인다(미리 붙여 두어 검사를 끄지 못하게). 받아들이면 그 빈 상태가 새 기준(0)이 되고 표식은
+// 지운다. 승인은 그 관측에만 쓰인다: 뒤에 키가 생겼다가 다시 0이 되면 바로 앞에서 본 양수 때문에 다시 멈춘다(#889 r2 P1-1).
+// empty.accepted는 받아들인 횟수 기록일 뿐 검사를 끄지 않는다.
+function acceptEmpty(w: WriteCtx, n: Names, flag: boolean): boolean {
+  const r = mine(w, n);
+  if (!flag || !has(r, "suspect.empty")) return false;
+  mark(w, n, { "suspect.empty": null, "empty.accepted": String(Number(r.data["empty.accepted"] ?? "0") + 1), "dbsize.base": "0", "dbsize.pre": "0" });
+  return true;
+}
+
+// 앱 키 수(복원 표식 키는 뺀다)와 표식 유무.
+function appKeys(w: WriteCtx, n: Names, run: string): { appendonly: string; keys: number; marker: boolean } {
+  const s = valkeyServer(w, n);
+  const marker = w.valkey.marker(n.ns, n.server, run, "exists");
+  return { appendonly: s.appendonly, keys: s.dbsize - (marker ? 1 : 0), marker };
+}
+
+// 표식 키가 없으면 복원한 데이터가 그대로라는 근거가 없다. 키 수로는 "복원 키가 다 사라지고 앱이 새 키를 썼다"를 못 가린다.
+// --accept-empty로 넘길 수 없다(손으로 본다).
+function markerLost(w: WriteCtx, n: Names, when: string): never {
+  mark(w, n, { "suspect.marker": "1" });
+  throw new Error(`${when} 복원 표식 키 homelab:restore:${mine(w, n).run}이 없다. 복원한 데이터를 잃었을 수 있다. 손으로 확인한다(restore.md 1절, --accept-empty로 넘길 수 없다)`);
+}
+
+function suspectEmpty(w: WriteCtx, n: Names, message: string): never {
+  mark(w, n, { "suspect.empty": "1" });
+  throw new Error(`${message}. 데이터를 확인하고, 비어 있는 것이 정상이면 같은 명령에 --accept-empty를 붙여 다시 한다`);
+}
+
 function valkeyServer(w: WriteCtx, n: Names): { appendonly: string; dbsize: number } {
   const ao = w.valkey.cli(n.ns, n.server, "CONFIG GET appendonly").trim().split(/\s+/).at(-1) ?? "";
   const size = Number(w.valkey.cli(n.ns, n.server, "DBSIZE").trim());
@@ -231,7 +270,7 @@ function jobFinished(w: WriteCtx, n: Names): string {
   return got;
 }
 
-function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
+function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: boolean): Step[] {
   const app = n.app;
   const steps: Step[] = [
     {
@@ -397,7 +436,11 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         const s = valkeyServer(w, n);
         // appendonly yes로 떴으면 RDB를 읽지 않고 빈 데이터다(U18). 여기서 멈춘다.
         if (s.appendonly !== "no") throw new Error(`복원 모드가 아니다(appendonly ${s.appendonly}). restoreMode가 반영됐는지 본다`);
-        mark(w, n, { "ok.loaded": "1", dbsize: String(s.dbsize) });
+        // RDB를 읽은 직후 표식 키를 넣는다. 재시작 뒤 이 키가 있어야 복원한 데이터가 AOF로 이어진 것이다(#889 r2 6).
+        const run = mine(w, n).run;
+        const keys = s.dbsize - (w.valkey.marker(n.ns, n.server, run, "exists") ? 1 : 0);
+        w.valkey.marker(n.ns, n.server, run, "set");
+        mark(w, n, { "ok.loaded": "1", dbsize: String(keys), marker: "1" });
       },
     },
     {
@@ -410,11 +453,15 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         return { state: "missing", action: "update", detail: "CONFIG SET appendonly yes → rewrite 완료 대기" };
       },
       async apply(w) {
-        const want = Number(mine(w, n).data.dbsize);
+        const r = mine(w, n);
+        if (has(r, "suspect.empty") && !acceptEmpty(w, n, acceptFlag)) suspectEmpty(w, n, "앞 실행이 키 0개를 봤다");
+        const cur = mine(w, n);
+        const want = Number(cur.data["dbsize.base"] ?? cur.data.dbsize);
+        const before = appKeys(w, n, r.run).keys;
         w.valkey.cli(n.ns, n.server, "CONFIG SET appendonly yes");
         if (!w.valkey.waitAof(n.ns, n.server, 300)) throw new Error("AOF rewrite가 300초 안에 끝나지 않았다");
-        const s = valkeyServer(w, n);
-        if (s.dbsize !== want) throw new Error(`키 수가 바뀌었다(${want} → ${s.dbsize})`);
+        const s = appKeys(w, n, r.run);
+        if (emptied([want, before], s.keys)) suspectEmpty(w, n, `키가 0개가 됐다(복원 직후 ${want}개, 켜기 직전 ${before}개)`);
         mark(w, n, { "ok.aof": "1" });
       },
     },
@@ -441,7 +488,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
       target: "AOF에서 다시 읽음",
       async read(ctx) {
         const r = record(ctx, n);
-        if (has(r, "ok.reloaded")) return same(`키 ${r!.data.dbsize}개 그대로`);
+        if (has(r, "ok.reloaded")) return same(`키 ${r!.data["dbsize.after"] ?? r!.data.dbsize}개(복원 직후 ${r!.data.dbsize}개)`);
         if (!has(r, "ok.aof")) return later("복원 모드 끄기 PR 병합 뒤 rollout restart·키 수 확인");
         const v = values(ctx, n.dataFile)?.valkey ?? {};
         const argo = ctx.k8s.get("application", "argocd", `${n.app}-data`);
@@ -453,15 +500,34 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         return synced ? { state: "differs", action: "update", detail: "rollout restart → appendonly yes·키 수 확인" } : same("PR 병합 대기 또는 반영 대기", { hold: "Argo CD 반영 대기(복원 모드 끄기)" });
       },
       async apply(w) {
-        const want = Number(mine(w, n).data.dbsize);
+        // ok.aof는 그때의 서버 프로세스 이야기다. 복원 모드 끄기 PR을 기다리는 동안 서버가 재시작됐으면 ConfigMap이 아직
+        // appendonly no라 AOF가 꺼진 채 RDB로 떠 있고, 디스크의 AOF는 그 전 것이다. 그대로 재시작하면 옛 AOF를 읽어 그사이
+        // 쓰기를 잃는다(#883 Connector P1). 재시작 직전에 지금 서버를 보고, 꺼졌으면 표식을 지워 다음 실행이 AOF부터 다시 켜게 한다.
+        const r = mine(w, n);
+        if (has(r, "suspect.marker")) throw new Error(`앞 실행이 복원 표식 키가 없음을 봤다. 손으로 확인한다(restore.md 1절, --accept-empty로 넘길 수 없다)`);
+        // 앞 실행이 0개를 봤으면 받아들이기 전에는 다시 재시작하지 않는다.
+        if (has(r, "suspect.empty") && !acceptEmpty(w, n, acceptFlag)) suspectEmpty(w, n, "앞 실행이 키 0개를 봤다");
+        const r0 = mine(w, n);
+        const pre = appKeys(w, n, r0.run);
+        // 재시작 전에 이미 없으면(복원 모드에서 재시작돼 RDB로 되돌아감) 재시작하지 않는다.
+        if (!pre.marker) markerLost(w, n, "재시작 전에");
+        if (pre.appendonly !== "yes" || !w.valkey.waitAof(n.ns, n.server, 60)) {
+          mark(w, n, { "ok.aof": null });
+          throw new Error(`지금 서버의 AOF가 켜져 있지 않거나 rewrite가 끝나지 않았다(appendonly ${pre.appendonly}, 그사이 재시작됐을 수 있다). 다시 실행하면 AOF부터 다시 켠다`);
+        }
+        // 첫 재시작 전 키 수를 기준으로 고정한다. 실패 뒤 재실행이 지금(이미 빈 서버)의 값을 기준으로 삼지 않게 한다.
+        const base = r0.data["dbsize.pre"] !== undefined ? Number(r0.data["dbsize.pre"]) : pre.keys;
+        if (!Number.isInteger(base) || base < 0) throw new Error("실행 기록의 dbsize.pre 형식이 아니다");
+        if (r0.data["dbsize.pre"] === undefined) mark(w, n, { "dbsize.pre": String(pre.keys) });
         // 파드를 직접 지우지 않는다. Deployment 업데이트만 옛 파드가 끝난 뒤 새 파드를 띄운다(로컬 kind 실측 약 14초 겹침).
         w.k8s.rolloutRestart(n.ns, n.server);
         if (!w.k8s.rolloutStatus(n.ns, n.server, 300)) throw new Error("Valkey rollout이 끝나지 않았다");
-        const s = valkeyServer(w, n);
+        const s = appKeys(w, n, r0.run);
         if (s.appendonly !== "yes") throw new Error(`appendonly ${s.appendonly}다(복원 모드가 남아 있다)`);
-        if (s.dbsize !== want) throw new Error(`키 수가 바뀌었다(${want} → ${s.dbsize})`);
+        if (!s.marker) markerLost(w, n, "재시작 뒤");
+        if (emptied([base, pre.keys], s.keys)) suspectEmpty(w, n, `재시작 뒤 키가 0개다(첫 재시작 전 ${base}개, 이번 재시작 직전 ${pre.keys}개). AOF에서 읽지 못했을 수 있다`);
         if (w.k8s.get("cronjob", n.ns, n.cronjob)?.spec?.suspend !== false) throw new Error(`CronJob ${n.cronjob}이 아직 suspend다`);
-        mark(w, n, { "ok.reloaded": "1" });
+        mark(w, n, { "ok.reloaded": "1", "dbsize.after": String(s.keys) });
       },
     },
     {
@@ -471,11 +537,15 @@ function mainSteps(n: Names, object: string, backupFirst: boolean): Step[] {
         const r = record(ctx, n);
         if (has(r, "ok.cleanup")) return same("0개");
         if (!has(r, "ok.reloaded")) return later("지우고 0개 확인");
-        return { state: "missing", action: "delete", detail: "수동 백업·복원 Job 지우고 0개 확인" };
+        return { state: "missing", action: "delete", detail: `복원 표식 키 지우고, 수동 백업·복원 Job 지우고 0개 확인` };
       },
       async apply(w) {
         const r = mine(w, n);
         const run = r.run;
+        if (has(r, "marker")) {
+          w.valkey.marker(n.ns, n.server, run, "del");
+          mark(w, n, { marker: null });
+        }
         w.k8s.deleteRestoreObjects(n.ns, run);
         const left = runObjects(w, n, r);
         if (left.length) throw new Error(`이 실행의 객체가 남았다(${left.join(", ")})`);
@@ -497,7 +567,7 @@ function finishSteps(n: Names): Step[] {
         if (!has(r, "ok.cleanup")) return { state: "differs", action: "none", detail: `실행 ${r.run}이 끝나지 않았다`, next: `homelab cache restore ${n.app} --apply로 끝까지 잇거나 --abort` };
         const left = runObjects(ctx, n, r);
         if (left.length) return { state: "differs", action: "none", detail: `실행 ${r.run}의 객체가 남아 있다(${left.join(", ")})`, next: `kubectl -n ${n.ns} get job,pod -l ${LABEL}=${r.run}로 보고 끝난 뒤 다시` };
-        return same(`실행 ${r.run} 끝남(키 ${r.data.dbsize}개)`);
+        return same(`실행 ${r.run} 끝남(키 ${r.data["dbsize.after"] ?? r.data.dbsize}개)`);
       },
     },
     {
@@ -595,6 +665,7 @@ export default defineCommand({
   flags: [
     { name: "object", kind: "value", valueName: "dump-<UTC>.rdb|latest", pattern: OBJECT, help: "R2 valkey/<app>/의 객체(기본 latest)" },
     { name: "backup-first", kind: "bool", help: "복원 전에 지금 상태를 수동 백업한다(0단계)" },
+    { name: "accept-empty", kind: "bool", help: "앞 실행이 키 0개를 보고 멈춘 뒤, 비어 있는 것이 정상임을 확인했을 때만" },
     { name: "finish", kind: "bool", help: "끝난 복원의 실행 기록을 지운다" },
     { name: "abort", kind: "bool", help: "복원 Job 전이면 그만두고 서버를 다시 올린다" },
   ],
@@ -603,13 +674,13 @@ export default defineCommand({
     const finish = input.flags.finish === true;
     const abort = input.flags.abort === true;
     if (finish && abort) throw new UsageError("--finish와 --abort는 함께 쓰지 않는다");
-    if ((finish || abort) && (input.flags.object !== undefined || input.flags["backup-first"] !== undefined)) throw new UsageError("--finish·--abort에는 --object·--backup-first를 쓰지 않는다");
+    if ((finish || abort) && (input.flags.object !== undefined || input.flags["backup-first"] !== undefined || input.flags["accept-empty"] !== undefined)) throw new UsageError("--finish·--abort에는 --object·--backup-first·--accept-empty를 쓰지 않는다");
     const n: Names = { app, ns: `app-${app}`, server: `${app}-valkey`, cronjob: `${app}-valkey-backup`, dataFile: `data/${app}/values.yaml` };
     const object = (input.flags.object as string | undefined) ?? "latest";
     return ctx.engine({
       command: "cache restore",
       app,
-      steps: finish ? finishSteps(n) : abort ? abortSteps(n) : mainSteps(n, object, input.flags["backup-first"] === true),
+      steps: finish ? finishSteps(n) : abort ? abortSteps(n) : mainSteps(n, object, input.flags["backup-first"] === true, input.flags["accept-empty"] === true),
       notes: finish ? [] : abort ? [`열린 PR(cli/cache-restore-${app}, cli/cache-restore-mode-${app})이 있으면 닫는다(병합하지 않는다).`] : ["서버를 내린 동안 앱은 Valkey 오류를 낸다. 복원하면 백업 시각 뒤에 쓴 키는 사라진다."],
       next: finish || abort ? undefined : (status) => (status === "done" || status === "same" ? `homelab cache restore ${app} --finish` : KEEP),
     });

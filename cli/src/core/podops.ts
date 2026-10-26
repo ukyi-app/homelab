@@ -89,10 +89,37 @@ export function valkeyWrite(exec: Exec, k8s: KubeRead, pollMs: number): ValkeyWr
       for (;;) {
         const info = cli(ns, deployment, "INFO persistence");
         const field = (k: string) => new RegExp(`^${k}:(\\S+)`, "m").exec(info)?.[1];
-        if (field("aof_enabled") === "1" && field("aof_rewrite_in_progress") === "0" && field("aof_last_bgrewrite_status") === "ok") return true;
+        // 예약(aof_rewrite_scheduled:1)도 끝나지 않은 것이다. RDB 저장 중에 AOF를 켜면 Valkey 9.1.2는 첫 AOF 생성을 예약만 하고
+        // 나머지 값은 끝난 것처럼 보인다(aof.c startAppendOnly). 그때 재시작하면 옛 AOF나 빈 데이터로 뜬다(#889 r1 P1-1).
+        // 값이 없으면(필드 이름이 바뀐 버전) 끝났다고 보지 않는다.
+        if (field("aof_enabled") === "1" && field("aof_rewrite_in_progress") === "0" && field("aof_rewrite_scheduled") === "0" && field("aof_last_bgrewrite_status") === "ok") return true;
         if (Date.now() + pollMs > deadline) return false;
         Bun.sleepSync(pollMs);
       }
+    },
+    marker(ns, deployment, run, op) {
+      checkNs(ns);
+      checkValkey(deployment);
+      if (!/^[a-z0-9]{1,22}$/.test(run)) throw new Error("복원 실행 id 형식이 아니다");
+      const key = `homelab:restore:${run}`;
+      const words = op === "set" ? ["SET", key, run] : op === "exists" ? ["EXISTS", key] : op === "del" ? ["DEL", key] : undefined;
+      if (!words) throw new Error("표식 키 작업은 set·exists·del만");
+      const r = send(ns, deployment, authOf(ns, deployment), words);
+      if (r.errKind === "timeout") throw new ExecTimeout(`valkey-cli ${words[0]}: 시간 초과`);
+      if (r.signals?.includes("rejected")) throw new Error(`valkey-cli ${words[0]}: 인증이 거부됐다`);
+      if (r.code !== 0) throw new Error(`valkey-cli ${words[0]}: ${why(r)}`);
+      const out = r.stdout.trim();
+      // valkey-cli는 오류도 exit 0으로 stdout에 낼 수 있다(ERR·NOPERM). 기대한 답이 아니면 실패다.
+      if (op === "set") {
+        if (out !== "OK") throw new Error(`valkey-cli SET: 답이 OK가 아니다`);
+        return true;
+      }
+      if (op === "exists") {
+        if (out !== "0" && out !== "1") throw new Error("valkey-cli EXISTS: 답이 0·1이 아니다");
+        return out === "1";
+      }
+      if (out !== "0" && out !== "1") throw new Error("valkey-cli DEL: 답이 0·1이 아니다");
+      return true;
     },
     authCheck(ns, deployment, password) {
       checkNs(ns);

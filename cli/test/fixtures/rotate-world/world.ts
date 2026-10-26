@@ -33,8 +33,10 @@ export class World {
   roles = new Map<string, { password: string; rv: number }>();
   cnpgApplies = true;
   // Valkey 서버 "ns/deploy" → 시작 때 읽은 비밀번호와 데이터
-  valkeys = new Map<string, { password: string; appendonly: boolean; aof: boolean; keys: number }>();
-  records = new Map<string, { run: string; data: Record<string, string> }>();
+  valkeys = new Map<string, { password: string; appendonly: boolean; aof: boolean; keys: number; markers?: Set<string> }>();
+  strictNamespaces = false;
+  clusterSkewMs = 0;
+  records = new Map<string, { run: string; data: Record<string, string>; created?: string }>();
   rv = 100;
   writes: string[] = [];
   fail = new Map<string, Failure>();
@@ -279,7 +281,7 @@ export class World {
       },
       restoreRecord(ns: string, name: string) {
         const r = w.records.get(`${ns}/${name}`);
-        return r ? { run: r.run, data: { ...r.data, run: r.run }, resourceVersion: "1" } : null;
+        return r ? { run: r.run, data: { ...r.data, run: r.run }, resourceVersion: "1", uid: "", created: r.created ?? "" } : null;
       },
       logs(ns: string, target: { job: string }) {
         return w.jobLogs.get(target.job) ?? "";
@@ -338,7 +340,10 @@ export class World {
       restoreRecordCreate(ns: string, name: string, run: string, data: Record<string, string>) {
         w.write(`recordCreate ${ns}/${name}`);
         if (w.records.has(`${ns}/${name}`)) return "exists";
-        w.records.set(`${ns}/${name}`, { run, data: { ...data } });
+        // 실제 API는 없는 ns에 만들지 못한다(namespaces "<ns>" not found). strictNamespaces일 때만 본다.
+        if (w.strictNamespaces && !w.obj("namespace", null, ns)) throw new Error(`namespaces "${ns}" not found`);
+        // creationTimestamp는 API 서버 시계다. 시험에서는 clusterSkewMs로 이 기기 시계와 다르게 둔다.
+        w.records.set(`${ns}/${name}`, { run, data: { ...data }, created: new Date(Date.now() + w.clusterSkewMs).toISOString().replace(/\.\d{3}Z$/, "Z") });
         return "created";
       },
       restoreRecordUpdate(ns: string, name: string, run: string, set: Record<string, string | null>) {
@@ -391,7 +396,8 @@ export class World {
     const valkey = {
       cli(ns: string, d: string, cmd: string) {
         const v = w.valkeys.get(`${ns}/${d}`)!;
-        if (cmd === "DBSIZE") return `${v.keys}\n`;
+        // keys는 앱 키 수, 표식 키는 따로 센다(DBSIZE에는 함께 잡힌다).
+        if (cmd === "DBSIZE") return `${v.keys + (v.markers?.size ?? 0)}\n`;
         if (cmd === "CONFIG GET appendonly") return `appendonly\n${v.appendonly ? "yes" : "no"}\n`;
         if (cmd === "CONFIG SET appendonly yes") {
           w.write(`valkey appendonly ${ns}/${d}`);
@@ -402,6 +408,15 @@ export class World {
         return "PONG\n";
       },
       waitAof: (ns: string, d: string) => w.valkeys.get(`${ns}/${d}`)!.aof,
+      marker(ns: string, d: string, run: string, op: "set" | "exists" | "del") {
+        const v = w.valkeys.get(`${ns}/${d}`)!;
+        v.markers ??= new Set();
+        if (op === "exists") return v.markers.has(run);
+        w.write(`valkey marker ${op} ${ns}/${d}`);
+        if (op === "set") v.markers.add(run);
+        else v.markers.delete(run);
+        return true;
+      },
       authCheck: (ns: string, d: string, pw: Secret) => (w.valkeys.get(`${ns}/${d}`)?.password === revealSecret(pw) ? "accepted" : "rejected"),
     };
     const out: any = {

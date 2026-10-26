@@ -13,16 +13,24 @@ const fileResp = (text: string) => ({ type: "file", encoding: "base64", content:
 const notFound = { code: 1, stderr: 'Error from server (NotFound): x "y" not found\n' };
 const dataText = "chartVersion: 1.0.1\npostgres: { enabled: true }\n";
 
+// 하위 프로세스는 시계를 묶을 수 없어 지금 기준 상대 시각을 쓴다(백업 보존 12일 판정).
+const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+const empty = JSON.stringify({ items: [] });
+
 function planRules(opts: { backupAfter?: boolean } = {}): Rule[] {
+  const gone = { metadata: { name: "data-purge", labels: { "homelab.ukyi.app/restore": "seed" }, resourceVersion: "1", creationTimestamp: ago(2.5) }, data: { run: "seed" } };
   return [
+    kubectlRule(["get", "namespaces", NS, "-o", "json"], { stdout: JSON.stringify({ metadata: { name: NS } }) }),
+    ...["deployments.apps", "statefulsets.apps", "cronjobs.batch", "jobs.batch", "pods"].map((r) => kubectlRule(["-n", NS, "get", r, "-o", "json"], { stdout: empty })),
+    kubectlRule(["-n", NS, "get", "configmaps", "data-purge", "-o", "json"], { stdout: JSON.stringify(gone) }),
     ghGet(contents(`data/${APP}`), 200, [{ type: "file", path: DATA, name: "values.yaml" }]),
     ghGet(contents(`apps/${APP}`), 404, { message: "Not Found" }),
     kubectlRule(["-n", "argocd", "get", "applications.argoproj.io", APP, "-o", "json"], notFound),
     ghGet(contents(DATA), 200, fileResp(dataText)),
-    ghGet(`repos/ukyi-app/homelab/commits?path=apps%2F${APP}%2Fvalues.yaml&sha=main&per_page=1`, 200, [{ sha: "1".repeat(40), commit: { committer: { date: "2026-10-20T00:00:00Z" } } }]),
-    ghGet(`repos/ukyi-app/homelab/commits?path=data%2F${APP}%2Fvalues.yaml&sha=main&per_page=30`, 200, [{ sha: "2".repeat(40), commit: { committer: { date: "2026-10-01T00:00:00Z" } } }]),
+    ghGet(`repos/ukyi-app/homelab/commits?path=apps%2F${APP}%2Fvalues.yaml&sha=main&per_page=1`, 200, [{ sha: "1".repeat(40), commit: { committer: { date: ago(3) } } }]),
+    ghGet(`repos/ukyi-app/homelab/commits?path=data%2F${APP}%2Fvalues.yaml&sha=main&per_page=30`, 200, [{ sha: "2".repeat(40), commit: { committer: { date: ago(30) } } }]),
     ghGet(`repos/ukyi-app/homelab/commits/${"2".repeat(40)}`, 200, { files: [{ filename: DATA, status: "added" }] }),
-    kubectlRule(["-n", "database", "get", "backups.postgresql.cnpg.io", "-o", "json"], { stdout: JSON.stringify({ items: [{ spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: opts.backupAfter === false ? "2026-10-19T18:00:00Z" : "2026-10-20T18:00:00Z" } }] }) }),
+    kubectlRule(["-n", "database", "get", "backups.postgresql.cnpg.io", "-o", "json"], { stdout: JSON.stringify({ items: [{ spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: opts.backupAfter === false ? ago(2.6) : ago(1) } }] }) }),
     ghGet("repos/ukyi-app/homelab/git/ref/tags/data-chart-v1.0.2", 200, { object: { sha: FAKE_SHA } }),
     ghGet("repos/ukyi-app/homelab/git/ref/heads/main", 200, { object: { sha: FAKE_SHA } }),
     ghGet(contents(DATA, FAKE_SHA), 200, fileResp(dataText)),
@@ -63,16 +71,35 @@ describe("data purge: plan(PATH 스텁)", () => {
   });
 });
 
+// 백업 CronJob이 만든 성공 Job 하나(successfulJobsHistoryLimit 1이라 마지막 것만 남는다). start는 Job 시작 시각.
+function valkeyBackup(w: World, start: string, opts: { complete?: boolean; owner?: string } = {}) {
+  w.put("job", NS, "gone-valkey-backup-1", {
+    metadata: { name: "gone-valkey-backup-1", ownerReferences: [{ kind: "CronJob", name: opts.owner ?? `${APP}-valkey-backup` }] },
+    status: { startTime: start, conditions: [{ type: opts.complete === false ? "Failed" : "Complete", status: "True" }] },
+  });
+}
+
+// 앞 실행이 앱 워크로드 없음을 보고 만든 기록. at은 그 creationTimestamp(API 서버 시계)다.
+function goneRecord(w: World, at: string) {
+  w.records.set(`${NS}/data-purge`, { run: "seed", data: {}, created: at });
+}
+
 function purgeWorld(): World {
   const w = new World({ [DATA]: "chartVersion: 1.0.1\n# 사람이 쓴 주석\npostgres: { enabled: true }\nvalkey: { persistent: true }\n" });
   const protect = { "argocd.argoproj.io/sync-options": "Prune=false,Delete=false" };
+  // 실제 API처럼 없는 ns에는 기록을 만들지 못하게 한다(#889 r2 P2-4)
+  w.strictNamespaces = true;
+  w.put("namespace", null, NS, { metadata: { name: NS } });
   w.put("database", "database", APP, { metadata: { name: APP, annotations: { ...protect } }, spec: { databaseReclaimPolicy: "retain" } });
   w.put("databaserole", "database", APP, { metadata: { name: APP, annotations: { ...protect } }, spec: { databaseRoleReclaimPolicy: "retain" } });
   w.put("pvc", NS, "valkey-data", { metadata: { name: "valkey-data", annotations: { ...protect } }, spec: { volumeName: "pvc-9" } });
   w.put("pv", null, "pvc-9", { metadata: { name: "pvc-9" }, spec: { storageClassName: "local-retain", persistentVolumeReclaimPolicy: "Retain", claimRef: { namespace: NS, name: "valkey-data" } } });
   w.put("application", "argocd", `${APP}-data`, { metadata: { name: `${APP}-data` } });
   w.put("backup", "database", "b1", { spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-21T18:00:00Z" } });
-  w.put("cronjob", NS, `${APP}-valkey-backup`, { status: { lastSuccessfulTime: "2026-10-21T18:30:00Z" } });
+  w.put("cronjob", NS, `${APP}-valkey-backup`, { status: { lastSuccessfulTime: "2026-10-21T18:31:00Z" } });
+  valkeyBackup(w, "2026-10-21T18:30:00Z");
+  // 앞 실행이 앱 워크로드 없음을 본 시각(앱 삭제 10/20 00:00 뒤, 백업 10/21 전)
+  goneRecord(w, "2026-10-20T06:00:00Z");
   w.tags.add("data-chart-v1.0.2");
   w.setValue(`/apps/${APP}/postgres`, "PASSWORD", "x".repeat(20));
   w.setValue(`/apps/${APP}/valkey`, "PASSWORD", "y".repeat(20));
@@ -134,8 +161,11 @@ describe("data purge: 흐름(가짜 세계)", () => {
     expect(w.value(`/apps/${APP}`, "API_KEY")).toBeDefined();
 
     w.confirmAnswer = APP;
+    expect(w.records.has(`${NS}/data-purge`)).toBe(true);
     const r6 = await runIn(w, cmd, "apply", { app: APP }, flags);
     expect(r6.status).toBe("done");
+    // 앱 쓰기 종료 기록도 마지막에 지운다
+    expect(w.records.has(`${NS}/data-purge`)).toBe(false);
     expect(w.writes.filter((x) => x.startsWith("infisical delete"))).toHaveLength(3);
 
     w.writes = [];
@@ -182,12 +212,13 @@ describe("data purge: 흐름(가짜 세계)", () => {
       { date: "2026-10-25T00:00:00Z", status: "modified" },
       { date: "2026-10-22T00:00:00Z", status: "added" },
     ]);
+    goneRecord(w, "2026-10-22T06:00:00Z");
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
-    expect(r.error!.message).toContain("데이터 등록(앱 이력 없음)(2026-10-22T00:00:00Z) 뒤");
+    expect(r.error!.message).toContain("데이터 등록(앱 이력 없음)(2026-10-22T00:00:00Z)");
     expect(w.openPrs()).toEqual([]);
     w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-23T18:00:00Z";
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-23T18:30:00Z";
+    valkeyBackup(w, "2026-10-23T18:30:00Z");
     expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
 
     const long = purgeWorld();
@@ -238,17 +269,18 @@ describe("data purge: 흐름(가짜 세계)", () => {
     const w = purgeWorld();
     w.history.set(`apps/${APP}/values.yaml`, [{ date: "2026-10-01T00:00:00Z", status: "removed" }]);
     w.history.set(DATA, [{ date: "2026-09-01T00:00:00Z", status: "added" }]);
+    goneRecord(w, "2026-10-01T06:00:00Z");
     w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-25T18:00:00Z";
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-02T18:30:00Z";
+    valkeyBackup(w, "2026-10-02T18:30:00Z");
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
     expect(r.error!.message).toContain("12일보다 오래됐다");
     expect(w.openPrs()).toEqual([]);
     expect(w.writes).toEqual([]);
     // 경계: 12일 안이면 통과, 12일을 넘으면 멈춘다
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-14T00:00:01Z";
+    valkeyBackup(w, "2026-10-14T00:00:01Z");
     expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-13T23:59:59Z";
+    valkeyBackup(w, "2026-10-13T23:59:59Z");
     expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
   });
 
@@ -278,11 +310,236 @@ describe("data purge: 흐름(가짜 세계)", () => {
 
   test("r3 P1-1: 마지막 성공 시각이 지금보다 미래면(시계를 믿을 수 없다) 멈춘다", async () => {
     const w = purgeWorld();
-    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-27T00:00:00Z";
+    valkeyBackup(w, "2026-10-27T00:00:00Z");
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
     expect(r.error!.message).toContain("미래");
     expect(w.openPrs()).toEqual([]);
+  });
+
+  test("Connector P1: 앱 워크로드 없음 확인 전에 시작한 백업(스냅샷은 그 전)은 완료가 늦어도 인정하지 않는다", async () => {
+    // 확인 10/20 06:00. 05:59에 시작한 Job이 스냅샷을 찍고 06:10에 업로드를 마쳤다
+    const w = purgeWorld();
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-20T06:10:00Z";
+    valkeyBackup(w, "2026-10-20T05:59:00Z");
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("시작한 Valkey 백업");
+    expect(w.openPrs()).toEqual([]);
+    expect(w.writes).toEqual([]);
+    // 기록 생성 시각과 백업 시작은 둘 다 클러스터 시계다. 같은 초는 인정하지 않고 그 뒤만
+    valkeyBackup(w, "2026-10-20T06:00:00Z");
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+    expect(w.openPrs()).toEqual([]);
+    valkeyBackup(w, "2026-10-20T06:00:01Z");
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
+    expect(w.openPrs().map((p) => p.head)).toEqual([`cli/data-purge-${APP}`]);
+  });
+
+  test("r1 P1-2: 삭제 커밋 뒤에도 앱이 쓰던 동안의 백업은 인정하지 않는다(쓰기 종료는 워크로드가 사라진 것을 본 시각)", async () => {
+    // 리뷰 재현: 삭제 커밋 10/20 00:00, Argo CD가 늦어 앱이 03:00까지 썼고 02:00 백업이 성공했다. 기록은 아직 없다
+    setSystemTime(new Date("2026-10-20T03:30:00Z"));
+    try {
+      const w = purgeWorld();
+      w.records.delete(`${NS}/data-purge`);
+      w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-20T02:10:00Z";
+      valkeyBackup(w, "2026-10-20T02:00:00Z");
+      // 앱이 아직 떠 있으면 기록도 하지 않고 멈춘다
+      w.put("deployment", NS, APP, { metadata: { name: APP, labels: { "homelab.ukyi.app/app": APP } } });
+      const a = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(a.status).toBe("failed");
+      expect(a.error!.message).toContain(`deployment/${APP}`);
+      // 어디를 볼지 알려 준다
+      expect(a.error!.message).toContain("kubectl");
+      expect(w.writes).toEqual([]);
+      // 앱 라벨이 없어도 데이터 차트 것으로 알 수 없는 살아 있는 파드가 있으면 멈춘다
+      w.objects.delete(`deployment/${NS}/${APP}`);
+      w.put("pod", NS, "stray", { metadata: { name: "stray", labels: {} }, status: { phase: "Running" } });
+      w.put("pod", NS, `${APP}-valkey-x`, { metadata: { name: `${APP}-valkey-x`, labels: { "app.kubernetes.io/name": "valkey", "app.kubernetes.io/instance": APP } }, status: { phase: "Running" } });
+      expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+      expect(w.writes).toEqual([]);
+      // 03:30 앱이 사라졌다(서버 파드만 남음): 확인 시각을 남기고, 그 전의 02:00 백업으로는 진행하지 않는다
+      w.objects.delete(`pod/${NS}/stray`);
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(r.status).toBe("failed");
+      expect(w.records.get(`${NS}/data-purge`)!.created).toBe("2026-10-20T03:30:00Z");
+      expect(w.writes).toEqual([`recordCreate ${NS}/data-purge`]);
+      expect(w.openPrs()).toEqual([]);
+      // 재실행도 같은 기록으로 멈춘다(기록을 새로 쓰지 않는다)
+      w.writes = [];
+      expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+      expect(w.writes).toEqual([]);
+      expect(w.openPrs()).toEqual([]);
+      // 다음 정기 백업(확인 뒤 시작)이 생기면 진행한다
+      setSystemTime(new Date("2026-10-21T00:00:00Z"));
+      w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-20T18:10:00Z";
+      valkeyBackup(w, "2026-10-20T18:30:00Z");
+      expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
+      expect(w.openPrs().map((p) => p.head)).toEqual([`cli/data-purge-${APP}`]);
+    } finally {
+      setSystemTime(new Date("2026-10-26T00:00:00Z"));
+    }
+  });
+
+  test("r1 P1-2: 읽은 뒤 기록 직전에 앱 파드가 살아나면 확인 시각을 남기지 않는다", async () => {
+    const w = purgeWorld();
+    w.records.delete(`${NS}/data-purge`);
+    // 앞의 두 번 읽기(전체 읽기, 단계 다시 읽기)에서는 끝난 파드, 기록 직전 apply에서는 살아 있는 파드
+    let seen = 0;
+    w.put("pod", NS, APP, { metadata: { name: APP, labels: { "homelab.ukyi.app/app": APP } }, status: { get phase() { return seen++ < 2 ? "Succeeded" : "Running"; } } });
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain(`pod/${APP}`);
+    expect(w.records.has(`${NS}/data-purge`)).toBe(false);
+    expect(w.writes).toEqual([]);
+  });
+
+  test("r1 P1-2: 기준(앱 삭제·재등록)보다 앞선 기록은 옛 실행의 것이라 지금 다시 확인해 새로 쓴다", async () => {
+    const w = purgeWorld();
+    // 10/22 재등록. 기록은 10/20(옛 데이터 때)
+    w.history.set(DATA, [{ date: "2026-10-22T12:00:00Z", status: "added" }]);
+    valkeyBackup(w, "2026-10-23T18:30:00Z");
+    w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-23T18:00:00Z";
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    // 새 기록(지금 10/26) 뒤의 백업이 없다
+    expect(r.status).toBe("failed");
+    expect(w.records.get(`${NS}/data-purge`)!.created).toBe("2026-10-26T00:00:00Z");
+    expect(w.openPrs()).toEqual([]);
+  });
+
+  test("r2 P1-3: 종료 기록 뒤 앱 파드가 다시 보이면 기록을 지우고, 사라진 뒤 새로 잰 시각 뒤의 백업만 인정한다", async () => {
+    // 리뷰 재현: 기록 10/25 12:00, 백업 시작 10/25 18:30, 10/26 12:00에 앱 라벨의 실행 중 파드
+    setSystemTime(new Date("2026-10-26T12:00:00Z"));
+    try {
+      const w = purgeWorld();
+      goneRecord(w, "2026-10-25T12:00:00Z");
+      w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-25T18:00:00Z";
+      valkeyBackup(w, "2026-10-25T18:30:00Z");
+      w.put("pod", NS, "writer", { metadata: { name: "writer", labels: { "homelab.ukyi.app/app": APP } }, status: { phase: "Running" } });
+      // plan은 읽기만 하고 "기록을 지운다"를 보인다
+      const p = await runIn(w, cmd, "plan", { app: APP });
+      expect(p.steps.find((x) => x.id === "writes-stopped")!.detail).toContain("종료 기록을 지우고");
+      expect(w.writes).toEqual([]);
+      expect(w.records.has(`${NS}/data-purge`)).toBe(true);
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(r.status).toBe("failed");
+      expect(w.records.has(`${NS}/data-purge`)).toBe(false);
+      expect(w.writes).toEqual([`recordDelete ${NS}/data-purge`]);
+      expect(w.openPrs()).toEqual([]);
+      // 파드가 끝난 뒤: 지금(12:00) 새로 기록하고, 그 전의 18:30 백업으로는 진행하지 않는다
+      w.objects.delete(`pod/${NS}/writer`);
+      const again = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(again.status).toBe("failed");
+      expect(w.records.get(`${NS}/data-purge`)!.created).toBe("2026-10-26T12:00:00Z");
+      expect(w.openPrs()).toEqual([]);
+      expect(w.writes.some((x) => x.startsWith("setPvReclaimDelete"))).toBe(false);
+      // 그 뒤 정기 백업이 생기면 진행한다
+      setSystemTime(new Date("2026-10-27T00:00:00Z"));
+      w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-26T18:00:00Z";
+      valkeyBackup(w, "2026-10-26T18:30:00Z");
+      expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
+      expect(w.openPrs().map((x) => x.head)).toEqual([`cli/data-purge-${APP}`]);
+    } finally {
+      setSystemTime(new Date("2026-10-26T00:00:00Z"));
+    }
+  });
+
+  test("r2 P2-5: 종료 시각은 기록의 생성 시각(클러스터 시계)이라 이 기기 시계가 늦어도 그 전 백업을 인정하지 않는다", async () => {
+    // 리뷰 재현: 이 기기 12:00, 클러스터는 20분 앞(12:20). 백업 시작 12:10(클러스터 시계)은 확인보다 앞이다
+    setSystemTime(new Date("2026-10-26T12:00:00Z"));
+    try {
+      const w = purgeWorld();
+      w.records.delete(`${NS}/data-purge`);
+      w.clusterSkewMs = 20 * 60_000;
+      w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-26T12:10:00Z";
+      valkeyBackup(w, "2026-10-26T12:10:00Z");
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect(r.status).toBe("failed");
+      expect(w.records.get(`${NS}/data-purge`)!.created).toBe("2026-10-26T12:20:00Z");
+      expect(w.openPrs()).toEqual([]);
+    } finally {
+      setSystemTime(new Date("2026-10-26T00:00:00Z"));
+    }
+  });
+
+  function pgOnlyWorld(): World {
+    // 앱 없이 PostgreSQL만 등록한 데이터(T12-05의 homelab-probe2). 앱 ns가 없다
+    const w = new World({ [DATA]: "chartVersion: 1.0.1\npostgres: { enabled: true }\n" });
+    w.strictNamespaces = true;
+    w.put("database", "database", APP, { metadata: { name: APP, annotations: { "argocd.argoproj.io/sync-options": "Prune=false,Delete=false" } }, spec: { databaseReclaimPolicy: "retain" } });
+    w.put("databaserole", "database", APP, { metadata: { name: APP }, spec: { databaseRoleReclaimPolicy: "retain" } });
+    w.put("application", "argocd", `${APP}-data`, { metadata: { name: `${APP}-data` } });
+    w.put("backup", "database", "b1", { spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-21T18:00:00Z" } });
+    w.tags.add("data-chart-v1.0.2");
+    w.history.set(`apps/${APP}/values.yaml`, []);
+    w.history.set(DATA, [{ date: "2026-10-20T00:00:00Z", status: "added" }]);
+    return w;
+  }
+
+  test("r2 P2-4: 앱 ns·앱 이력이 없는 PostgreSQL 전용 데이터는 기록 없이 데이터 등록 뒤 백업으로 PR 1을 연다", async () => {
+    const w = pgOnlyWorld();
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("waiting");
+    expect(w.openPrs().map((x) => x.head)).toEqual([`cli/data-purge-${APP}`]);
+    expect(w.records.size).toBe(0);
+    expect(w.writes.some((x) => x.startsWith("record"))).toBe(false);
+    // 등록 뒤 백업이 없으면 여전히 멈춘다
+    const old = pgOnlyWorld();
+    old.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-19T18:00:00Z";
+    expect((await runIn(old, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+    expect(old.openPrs()).toEqual([]);
+  });
+
+  test("r2 P2-4: 앱 ns가 없는데 앱 이력이 있으면 쓰기 종료 시각을 알 수 없어 멈춘다", async () => {
+    const w = pgOnlyWorld();
+    w.history.set(`apps/${APP}/values.yaml`, [{ date: "2026-10-19T00:00:00Z", status: "removed" }]);
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("앱 이력이 있다");
+    expect(w.openPrs()).toEqual([]);
+    expect(w.writes).toEqual([]);
+  });
+
+  test("r1 P1-4: PostgreSQL base backup이 ObjectStore 보존(14일, 여유 2일)을 넘으면 PR을 열지 않는다", async () => {
+    const w = purgeWorld();
+    w.history.set(`apps/${APP}/values.yaml`, [{ date: "2026-10-01T00:00:00Z", status: "removed" }]);
+    w.history.set(DATA, [{ date: "2026-09-01T00:00:00Z", status: "added" }]);
+    goneRecord(w, "2026-10-01T06:00:00Z");
+    w.obj("backup", "database", "b1")!.status.stoppedAt = "2026-10-02T18:00:00Z";
+    valkeyBackup(w, "2026-10-25T18:30:00Z");
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("base backup");
+    expect(r.error!.message).toContain("12일보다 오래됐다");
+    expect(w.openPrs()).toEqual([]);
+    expect(w.writes).toEqual([]);
+    // 새 base backup이 있으면(옛 CR이 남아 있어도) 가장 최근 것으로 본다
+    w.put("backup", "database", "b2", { spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-14T00:00:01Z" } });
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("waiting");
+    // 경계: 12일 + 1초 → 멈춤
+    w.obj("backup", "database", "b2")!.status.stoppedAt = "2026-10-13T23:59:59Z";
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+    // 미래 시각 → 멈춤
+    w.obj("backup", "database", "b2")!.status.stoppedAt = "2026-10-27T00:00:00Z";
+    expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
+  });
+
+  test("Connector P1: 성공한 백업 Job을 확인할 수 없으면 완료 시각이 새로워도 멈춘다", async () => {
+    const cases: [string, (w: World) => void][] = [
+      ["Job 이력 없음", (w) => w.objects.delete(`job/${NS}/gone-valkey-backup-1`)],
+      ["실패한 Job뿐", (w) => valkeyBackup(w, "2026-10-25T18:30:00Z", { complete: false })],
+      ["다른 CronJob의 Job", (w) => valkeyBackup(w, "2026-10-25T18:30:00Z", { owner: "other-valkey-backup" })],
+      ["시작 시각 없음", (w) => delete w.obj("job", NS, "gone-valkey-backup-1")!.status.startTime],
+    ];
+    for (const [what, change] of cases) {
+      const w = purgeWorld();
+      w.obj("cronjob", NS, `${APP}-valkey-backup`)!.status.lastSuccessfulTime = "2026-10-25T18:31:00Z";
+      change(w);
+      const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+      expect([what, r.status]).toEqual([what, "failed"]);
+      expect(w.openPrs()).toEqual([]);
+      expect(w.writes).toEqual([]);
+    }
   });
 
   test("PR 1 뒤 Database CR이 없으면 반영으로 보지 않고 PR 2를 열지 않는다", async () => {

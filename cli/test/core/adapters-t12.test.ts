@@ -224,7 +224,7 @@ describe("kubectl 읽기 확장", () => {
     const doc = (data: Record<string, string>, label = "20261026000000abcdef") => JSON.stringify({ metadata: { resourceVersion: "5", labels: { "homelab.ukyi.app/restore": label } }, data });
     const run = "20261026000000abcdef";
     const { ctx } = testCtx("read", [kubectlRule(["-n", "app-smoke", "get", "configmaps", "restore-pg", "-o", "json"], [{ stdout: doc({ run, to: "2026-10-26 00:00:00+00", "in.ext": "a\nb" }) }, { stdout: doc({ run }, "other") }, { stdout: doc({ run, to: "x\ny" }) }])]);
-    expect(ctx.k8s.restoreRecord("app-smoke", "restore-pg")).toEqual({ run, data: { run, to: "2026-10-26 00:00:00+00", "in.ext": "a\nb" }, resourceVersion: "5", uid: "" });
+    expect(ctx.k8s.restoreRecord("app-smoke", "restore-pg")).toEqual({ run, data: { run, to: "2026-10-26 00:00:00+00", "in.ext": "a\nb" }, resourceVersion: "5", uid: "", created: "" });
     expect(() => ctx.k8s.restoreRecord("app-smoke", "restore-pg")).toThrow("라벨");
     expect(() => ctx.k8s.restoreRecord("app-smoke", "restore-pg")).toThrow("제어 문자");
     expect(() => ctx.k8s.restoreRecord("app-smoke", "smoke-config" as never)).toThrow("restore-pg");
@@ -393,14 +393,47 @@ describe("파드 안 작업", () => {
   const vk = (words: string[], resp: { stdout?: string; stderr?: string; code?: number } | { stdout: string }[]) => rule(["kubectl", "-n", "app-smoke", "exec", "-i", "deploy/smoke-valkey", "--request-timeout=20s", "--", "sh", "-c", VALKEY_CLI, "sh", ...words], resp);
 
   test("valkey.cli: 정해진 명령만, 인증은 Secret 값을 stdin으로. waitAof", async () => {
-    const info = (inProgress: string) => `# Persistence\r\naof_enabled:1\r\naof_rewrite_in_progress:${inProgress}\r\naof_last_bgrewrite_status:ok\r\n`;
-    const { ctx, calls } = testCtx("apply", [auth, vk(["DBSIZE"], { stdout: "42\n" }), vk(["INFO", "persistence"], [{ stdout: info("1") }, { stdout: info("0") }])]);
+    const info = (inProgress: string, scheduled = "0") => `# Persistence\r\naof_enabled:1\r\naof_rewrite_in_progress:${inProgress}\r\naof_rewrite_scheduled:${scheduled}\r\naof_last_bgrewrite_status:ok\r\n`;
+    const { ctx, calls } = testCtx("apply", [auth, vk(["DBSIZE"], { stdout: "42\n" }), vk(["INFO", "persistence"], [{ stdout: info("1") }, { stdout: info("0", "1") }, { stdout: info("0") }])]);
     expect((await applyWith(ctx, (w) => w.valkey.cli("app-smoke", "smoke-valkey", "DBSIZE"))).value).toBe("42\n");
     expect(calls().calls.find((c) => c.argv.includes("DBSIZE"))!.stdinSha256).toBe(sha256(FAKE_SECRETS[1]));
     expect((await applyWith(ctx, (w) => w.valkey.waitAof("app-smoke", "smoke-valkey", 5))).value).toBe(true);
     await expect(applyWith(ctx, (w) => w.valkey.cli("app-smoke", "smoke-valkey", "FLUSHALL" as never))).rejects.toThrow("다섯");
     await expect(applyWith(ctx, (w) => w.valkey.cli("app-smoke", "smoke", "PING"))).rejects.toThrow("-valkey");
     expectNoSecrets(calls(), FAKE_SECRETS);
+  });
+
+  test("valkey.waitAof: rewrite 예약(aof_rewrite_scheduled:1)이 남거나 그 값이 없으면 끝나지 않은 것이다(#889 r1 P1-1)", async () => {
+    const scheduled = "# Persistence\r\naof_enabled:1\r\naof_rewrite_in_progress:0\r\naof_rewrite_scheduled:1\r\naof_last_bgrewrite_status:ok\r\n";
+    const missing = "# Persistence\r\naof_enabled:1\r\naof_rewrite_in_progress:0\r\naof_last_bgrewrite_status:ok\r\n";
+    for (const stdout of [scheduled, missing]) {
+      const { ctx } = testCtx("apply", [auth, vk(["INFO", "persistence"], { stdout })]);
+      expect((await applyWith(ctx, (w) => w.valkey.waitAof("app-smoke", "smoke-valkey", 1))).value).toBe(false);
+    }
+  });
+
+  test("restoreRecord: created는 API 서버의 creationTimestamp, 형식이 다르면 실패(#889 r2 P2-5)", async () => {
+    const run = "abc123";
+    const doc = (created: unknown) => JSON.stringify({ metadata: { resourceVersion: "5", labels: { "homelab.ukyi.app/restore": run }, creationTimestamp: created }, data: { run } });
+    const { ctx } = testCtx("read", [kubectlRule(["-n", "app-smoke", "get", "configmaps", "data-purge", "-o", "json"], [{ stdout: doc("2026-10-26T12:20:00Z") }, { stdout: doc("어제") }])]);
+    expect(ctx.k8s.restoreRecord("app-smoke", "data-purge")!.created).toBe("2026-10-26T12:20:00Z");
+    expect(() => ctx.k8s.restoreRecord("app-smoke", "data-purge")).toThrow("creationTimestamp");
+  });
+
+  test("valkey.marker: 키는 homelab:restore:<run>, 값은 실행 id. 기대한 답이 아니면 실패(#889 r2 6)", async () => {
+    const key = "homelab:restore:abc123";
+    const { ctx, calls } = testCtx("apply", [auth, vk(["SET", key, "abc123"], { stdout: "OK\n" }), vk(["EXISTS", key], [{ stdout: "1\n" }, { stdout: "0\n" }]), vk(["DEL", key], { stdout: "1\n" })]);
+    expect((await applyWith(ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "abc123", "set"))).value).toBe(true);
+    expect((await applyWith(ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "abc123", "exists"))).value).toBe(true);
+    expect((await applyWith(ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "abc123", "exists"))).value).toBe(false);
+    expect((await applyWith(ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "abc123", "del"))).value).toBe(true);
+    await expect(applyWith(ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "Bad;KEY", "set"))).rejects.toThrow("실행 id");
+    await expect(applyWith(ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "abc123", "flush" as never))).rejects.toThrow("set·exists·del");
+    expectNoSecrets(calls(), FAKE_SECRETS);
+    // ACL 오류는 exit 0으로 stdout에 올 수 있다
+    const bad = testCtx("apply", [auth, vk(["SET", key, "abc123"], { stdout: "NOPERM this user has no permissions\n" }), vk(["EXISTS", key], { stdout: "ERR x\n" })]);
+    await expect(applyWith(bad.ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "abc123", "set"))).rejects.toThrow("OK가 아니다");
+    await expect(applyWith(bad.ctx, (w) => w.valkey.marker("app-smoke", "smoke-valkey", "abc123", "exists"))).rejects.toThrow("0·1이 아니다");
   });
 
   test("valkey.authCheck: WRONGPASS·NOAUTH면 rejected", async () => {
