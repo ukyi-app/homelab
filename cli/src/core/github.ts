@@ -1,5 +1,6 @@
 // gh·curl·git 어댑터. 사람의 gh 로그인을 쓰고 자격을 저장하지 않는다(설계 C.7). argv는 여기서만 만든다.
 // gh api -i로 상태 줄을 함께 받는다. 404에도 gh는 exit 1이지만 상태 줄과 본문을 stdout에 내므로 상태 코드로 판정한다.
+import { constants as osConstants } from "node:os";
 import { jsonParse, jsonStringify } from "./intrinsics";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -142,7 +143,11 @@ function runWrapper(readExec: Exec, exec: Exec, d: DelegateEnv, args: string[], 
     timeoutMs: 3_600_000,
   });
   if (r.errKind === "not-found") throw new Error("clone한 main에 tools/tf-github.sh가 없다");
-  return r.code ?? 1;
+  if (r.code !== null) return r.code;
+  // 래퍼가 신호로 끝나면 셸이 보이는 $?와 같은 128+번호를 돌려준다(AC-5: 직접 실행과 CLI의 종료 코드가 같다, #882 리뷰).
+  // CLI가 시간 초과로 죽인 것은 래퍼의 결과가 아니라 1로 둔다.
+  const n = r.signal && r.errKind !== "timeout" ? (osConstants.signals as Record<string, number>)[r.signal] : undefined;
+  return n ? 128 + n : 1;
 }
 
 const PLAN_ADDRESS = /^[A-Za-z0-9_.\[\]"-]+$/;
@@ -163,7 +168,9 @@ export function parsePlanJson(text: string): Pick<PlanChanges, "sha" | "changes"
     if (c.mode !== "managed" && c.mode !== "data") throw new Error("래퍼 plan JSON의 mode 형식이 아니다");
     if (!Array.isArray(c.actions) || c.actions.length === 0 || !c.actions.every((a: unknown) => typeof a === "string" && PLAN_ACTIONS.has(a))) throw new Error("래퍼 plan JSON의 동작 형식이 아니다");
     if (typeof c.importing !== "boolean") throw new Error("래퍼 plan JSON의 importing 형식이 아니다");
-    return { address: c.address, mode: c.mode, actions: [...c.actions], importing: c.importing };
+    // 주소 이동(previous_address)은 동작 목록과 따로다. data read와 겹치면 동작만으로 구별할 수 없다(#882 리뷰).
+    if (typeof c.moved !== "boolean") throw new Error("래퍼 plan JSON의 moved 형식이 아니다");
+    return { address: c.address, mode: c.mode, actions: [...c.actions], importing: c.importing, moved: c.moved };
   });
   return { sha: doc.sha, changes };
 }

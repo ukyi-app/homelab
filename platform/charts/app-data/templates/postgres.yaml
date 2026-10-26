@@ -35,7 +35,7 @@ spec:
       remoteRef:
         key: {{ $name }}/postgres/PASSWORD
 ---
-# 역할 이름 = 앱 이름 = DB owner. 앱끼리 owner를 공유하지 않는다(L10). reclaim 기본 retain이라 CR이 지워져도 역할이 남는다[S31].
+# 역할 이름 = 앱 이름 = DB owner. 앱끼리 owner를 공유하지 않는다(L10). reclaim retain이라 CR이 지워져도 역할이 남는다[S31](purge: true만 delete).
 apiVersion: postgresql.cnpg.io/v1
 kind: DatabaseRole
 metadata:
@@ -53,8 +53,9 @@ spec:
   login: true
   passwordSecret:
     name: pg-role-{{ $name }}
+  databaseRoleReclaimPolicy: {{ include "data.reclaim" . }}
 ---
-# DB 이름 = 앱 이름. databaseReclaimPolicy 기본 retain이라 CR이 지워져도 DB가 남는다[S30].
+# DB 이름 = 앱 이름. databaseReclaimPolicy retain이라 CR이 지워져도 DB가 남는다[S30](purge: true만 delete).
 # 같은 DB를 두 CR이 관리하면 두 번째를 CNPG가 거부한다.
 apiVersion: postgresql.cnpg.io/v1
 kind: Database
@@ -71,4 +72,5 @@ spec:
     name: pg
   name: {{ $name }}
   owner: {{ $name }}
+  databaseReclaimPolicy: {{ include "data.reclaim" . }}
 {{- end }}

@@ -7,7 +7,7 @@ apiVersion: v2
 name: app-data
 description: Data resources (PostgreSQL role and database, persistent Valkey) for one homelab app
 type: application
-version: 1.0.1
+version: 1.0.2
 # 영속 Valkey(설계 C.5.6). 공식 차트를 valkeyServer라는 이름으로 넣는다. 사람이 적는 키는 valkey이고 valkeyServer는
 # 차트 내부 값이다(data values에 적으면 ci가 막는다, tools/ci/render.ts).
 # condition은 앞 경로가 있으면 그 값, 없으면 다음 경로다(Helm). running: false(복원 중 멈춤)면 서버만 내리고

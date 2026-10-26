@@ -42,6 +42,8 @@ export type ExecResult = {
   errKind?: "not-found" | "timeout" | "spawn";
   // opts.signals 중 stdout·stderr에 맞은 이름.
   signals?: string[];
+  // 자식이 신호로 끝났으면 그 이름(SIGTERM 등). 그때 code는 null이다(#882 리뷰: 위임 종료 코드 보존).
+  signal?: string;
 };
 
 export type Exec = (argv: string[], opts?: ExecOpts) => ExecResult;
@@ -148,6 +150,7 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
     if (opts.signals) result.signals = Object.entries(opts.signals).filter(([, re]) => re.test(rawErr) || re.test(stdoutText)).map(([k]) => k);
     if (opts.secretStdout) result.stdoutSecret = new Secret(stdoutText);
     if ((p as { exitedDueToTimeout?: boolean }).exitedDueToTimeout) result.errKind = "timeout";
+    if (typeof p.signalCode === "string") result.signal = p.signalCode;
     return result;
   };
 }

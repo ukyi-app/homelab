@@ -4,6 +4,8 @@ postgres:
 valkey:
   persistent: false
   restoreMode: false
+# 폐기 PR 1(설계 C.5.5). 평소에는 적지 않는다.
+purge: false
 # ApplicationSet data가 클러스터 값 cluster.backup.bucket으로 채운다(운영 homelab-backups, VM은 전용 버킷). 사람이 적지 않는다.
 backup: {}
 

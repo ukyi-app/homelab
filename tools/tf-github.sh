@@ -3,7 +3,7 @@
 # T12부터 homelab github plan·apply·verify가 같은 규칙으로 감싼다.
 #
 #   tools/tf-github.sh verify                 plan -lock=false. exit 0 같음, 2 차이, 1 guard 실패·오류
-#   tools/tf-github.sh plan [--allow-destroy]  plan -lock=false, delete가 있으면 --allow-destroy 없이는 멈춤
+#   tools/tf-github.sh plan [--allow-destroy] [--plan-json <절대 경로>]  plan -lock=false, delete가 있으면 --allow-destroy 없이는 멈춤
 #   tools/tf-github.sh apply [--allow-destroy] state 백업 → 잠금 잡은 plan → 확인 → apply → verify
 #
 # 자격:
@@ -29,12 +29,22 @@ usage() { sed -n '4,7p' "$0" >&2; exit 64; }
 cmd=${1:-}
 [[ $cmd == plan || $cmd == apply || $cmd == verify ]] || usage
 shift
+# 사본으로 다시 실행할 때 그대로 넘기려고 원래 인자를 남긴다(아래 파싱이 shift로 비운다).
+args=("$@")
 allow_destroy=false
-for a in "$@"; do
-  case $a in
+# --plan-json: plan만. 변경 목록(주소·동작, 값 없음)을 파일로 남긴다. homelab app new가 "app_main 생성만"을 판정한다(T12).
+plan_json=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
     --allow-destroy) allow_destroy=true ;;
+    --plan-json)
+      [[ $cmd == plan && $# -ge 2 && -z $plan_json && -n $2 ]] || usage
+      plan_json=$2
+      shift
+      ;;
     *) usage ;;
   esac
+  shift
 done
 
 for t in git gh jq terraform infisical; do
@@ -74,7 +84,7 @@ else
     { rm -rf "$work"; die "main을 clone하지 못했다"; }
   [[ -f $work/tree/tools/tf-github.sh ]] || { rm -rf "$work"; die "main에 tools/tf-github.sh가 없다"; }
   # 처음 호출한 작업 사본의 루트도 넘긴다. state 백업이 그 안에 생기지 않게 둘 다 거부한다.
-  TF_GITHUB_CLONE=$work TF_GITHUB_ORIGIN_ROOT=$repo_root exec bash "$work/tree/tools/tf-github.sh" "$cmd" "$@"
+  TF_GITHUB_CLONE=$work TF_GITHUB_ORIGIN_ROOT=$repo_root exec bash "$work/tree/tools/tf-github.sh" "$cmd" "${args[@]}"
 fi
 trap 'rm -rf "$work"' EXIT
 origin_root=${TF_GITHUB_ORIGIN_ROOT:-$repo_root}
@@ -85,6 +95,16 @@ bad=$(find "$work/tree" -path "$work/tree/.git" -prune -o \( -name '*override.tf
 [[ -z $bad ]] || die "사본에 override·tfvars 파일이 있다: ${bad}"
 root="$work/tree/infra/github"
 [[ -d $root ]] || die "main에 infra/github가 없다"
+# plan JSON 경로는 자격을 읽기 전에 본다. state 백업과 같은 이유로 저장소 안은 거부하고, $work는 EXIT에 지워진다.
+# 이미 있는 파일은 덮지 않는다(링크를 따라 다른 파일을 덮는 길도 막는다).
+if [[ -n $plan_json ]]; then
+  [[ $plan_json == /* ]] || die "--plan-json은 절대 경로다"
+  [[ -d $(dirname "$plan_json") ]] || die "--plan-json의 폴더가 없다"
+  [[ ! -e $plan_json && ! -L $plan_json ]] || die "--plan-json 파일이 이미 있다(덮지 않는다)"
+  for r in "$repo_root" "$origin_root" "$work"; do
+    case $(realpath -m "$plan_json") in "$r" | "$r"/*) die "--plan-json은 저장소(작업 사본·실행 사본) 밖에 둔다" ;; esac
+  done
+fi
 
 # 2. 토큰 종류와 범위. 머리글은 응답 전체를 변수로 받은 뒤 본다. grep -q로 파이프를 끊으면 pipefail 아래 SIGPIPE로
 #    범위가 있는데도 놓친다(2026-10-18 실측: 15회 중 1회).
@@ -197,6 +217,23 @@ deletes() {
   tf show -json tfplan | jq -r '.resource_changes[]? | select(.change.actions | index("delete")) | .address'
 }
 
+# 변경 목록만 낸다. before·after·configuration·variables는 빼서 provider가 state에 넣는 값을 파일로 남기지 않는다.
+# plain no-op은 빼되 state를 바꾸는 no-op은 남긴다: import(importing)와 주소 이동(moved, previous_address. #882 리뷰).
+# 이동은 동작과 따로 moved로 남긴다. 미뤄진 data read와 이동이 한 항목에 겹치면 동작만으로는 보통 읽기와 같아 보인다.
+# 미뤄진 guard 읽기는 mode data, actions ["read"]로 남는다. root output 변경도 apply가 state에 쓰는 변경이라
+# 주소 output.<이름>으로 남긴다(소비자 파서의 mode가 managed·data 둘뿐이라 managed로 둔다).
+write_plan_json() {
+  local j
+  j=$(tf show -json tfplan | jq -c --arg sha "$sha" '{schema: "tf-github-plan/v1", sha: $sha,
+    changes: ([.resource_changes[]?
+      | select((.change.actions != ["no-op"]) or (.change.importing != null) or (.previous_address != null))
+      | {address, mode, actions: .change.actions, importing: (.change.importing != null), moved: (.previous_address != null)}]
+      + [(.output_changes // {}) | to_entries[] | select(.value.actions != ["no-op"])
+      | {address: "output.\(.key)", mode: "managed", actions: .value.actions, importing: false, moved: false}])}') ||
+    die "plan JSON을 만들지 못했다"
+  (umask 077 && set -o noclobber && printf '%s\n' "$j" >"$plan_json") || die "--plan-json 파일을 쓰지 못했다"
+}
+
 check_deletes() {
   local d
   d=$(deletes)
@@ -220,6 +257,7 @@ case $cmd in
     plan -lock=false || rc=$?
     [[ $rc == 0 || $rc == 2 ]] || exit 1
     check_deletes
+    [[ -z $plan_json ]] || write_plan_json
     say "plan: main ${sha}, exit ${rc}. 미뤄진 guard 결과는 plan에 없어 apply 뒤 verify가 본다"
     exit "$rc"
     ;;
