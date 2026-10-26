@@ -9,7 +9,7 @@
     "test:cli": "bun cli/test/run.ts cli/"
   },
   "devDependencies": {
-    "@types/bun": "1.4.3",
+    "@types/bun": "1.4.4",
     "typescript": "7.0.2"
   }
 }
