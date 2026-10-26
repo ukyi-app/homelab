@@ -11,6 +11,7 @@
 | [approvals.md](approvals.md) | 외부 변경 승인 기록 | 계정·App·삭제·배포·병합·공개 같은 외부 변경의 승인과 그 전제가 되는 사용자 결정 (AC-X2) |
 | [platform/design-prompt.md](platform/design-prompt.md) | 플랫폼 설계 프롬프트 (T04가 실행) | 플랫폼 설계 지시, 검증 시나리오 1~17 |
 | [platform/design.md](platform/design.md) | 플랫폼 설계 결과 (T04 산출물, T05 결정 반영) | 새 플랫폼의 실제 구성, 구축 단계(E절)와 티켓 대응 |
+| [platform/verification.md](platform/verification.md) | 플랫폼 검증 결과표 (T13 산출물) | 설계 G 시나리오 1~17과 봇 자리(AC-P12·AC-P8·AC-P11)의 실행 결과·판정·증거 |
 | [00-start.md](https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/prompts/00-start.md) | 봇 시작점 (`00`) | 제품 정의, V1 필수 기능, 보안 경계, 공통 규칙 |
 | [01-v1-build.md](https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/prompts/01-v1-build.md) | 봇 V1 (`01`) | STAGE 7개, F01~F09, R01~R18 |
 | [02-v2-v3.md](https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/prompts/02-v2-v3.md) | 봇 V2·V3 (`02`) | V2-01~V2-12, V3-01~V3-09 |
