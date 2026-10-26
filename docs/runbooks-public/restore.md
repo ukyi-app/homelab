@@ -435,11 +435,25 @@ CLI `homelab cache restore <앱>`은 이 절의 검증 키를 복원 표식 키�
    bj=$(printf '%s\n' "$jobs" | awk -F'\t' '(" " $2 " ") !~ / (Complete|Failed) / && (" " $3 " ") ~ / valkey-data / { print "job/" $1 }')
    if [ -n "$x$bp$bj" ]; then printf '%s\n' "$x" "$bp" "$bj" | cat -v >&2
      echo "다른 복원의 Job·파드가 있다(위). 그 실행이 끝났는지 보고 다시 한다" >&2; exit 1; fi
-   # 지우기 직전에 다시 본다.
-   r=$(kubectl -n app-$APP get configmap restore-vk -o jsonpath='{.data.run}')
+   # 지우기 직전에 다시 보고, 그때 본 그 객체(uid)만 지운다(CLI restoreRecordDelete와 같다). 이름으로 지우면 이 확인과
+   # 삭제 사이에 다른 셸이 기록을 지우고 새 실행이 같은 이름으로 만든 잠금을 지운다(#914 2라운드). run과 uid는 한 번에 읽는다.
+   cur=$(kubectl -n app-$APP get configmap restore-vk -o jsonpath='{.data.run} {.metadata.uid}')
+   read -r r uid <<<"$cur"
    [ "$r" = "$RUN" ] || { echo "기록의 run이 $(printf '%s' "$r" | cat -v)다(2에서 본 것과 다르다)" >&2; exit 1; }
-   kubectl -n app-$APP delete configmap restore-vk
-   out=$(kubectl -n app-$APP get configmap restore-vk -o name --ignore-not-found); [ -z "$out" ] )
+   case $uid in ''|*[!0-9a-f-]*) echo "기록의 uid를 읽지 못했다" >&2; exit 1 ;; esac
+   # uid가 바뀌었으면 API가 409(Precondition failed)로 거부한다. 그때는 새 실행의 기록이라 건드리지 않고 멈춘다.
+   # 404는 이 기록이 이미 지워진 것이라 통과한다. 응답 본문(기록 내용)은 출력하지 않는다.
+   if ! err=$(printf '{"kind":"DeleteOptions","apiVersion":"v1","preconditions":{"uid":"%s"}}' "$uid" \
+       | kubectl delete --raw "/api/v1/namespaces/app-$APP/configmaps/restore-vk" -f - 2>&1 >/dev/null); then
+     case $err in
+       *"Precondition failed"*|*"(Conflict)"*) echo "기록이 확인 뒤 다른 실행의 것으로 바뀌었다(409). 지우지 않았다" >&2; exit 1 ;;
+       *"(NotFound)"*) ;;
+       *) printf '%s\n' "$err" | cat -v >&2; exit 1 ;;
+     esac
+   fi
+   # 같은 이름의 새 기록(다른 실행)이 생겼어도 이 실행의 기록(uid)이 없어졌으면 끝이다.
+   now=$(kubectl -n app-$APP get configmap restore-vk -o jsonpath='{.metadata.uid}' --ignore-not-found)
+   [ "$now" != "$uid" ] )
    [ $? -eq 0 ] && echo "기록 지움" || echo "멈춤: 위 이유를 본다. 기록은 그대로다"
    ```
 
@@ -639,7 +653,8 @@ YAML
              volumeMounts: [{ name: tmp, mountPath: /tmp }]
          volumes: [{ name: tmp, emptyDir: { sizeLimit: 16Mi } }]
    YAML
-     kubectl -n database wait --for=condition=ready pod -l job-name=restore-$RUN-r2 --timeout=5m
+     # --for=create가 먼저다. 없으면 Job 컨트롤러가 파드를 만들기 전에 "no matching resources found"로 --timeout과 무관하게 바로 끝난다
+     kubectl -n database wait --for=create --for=condition=ready pod -l job-name=restore-$RUN-r2 --timeout=5m
      KEY="r2:$BUCKET/pgdump/$APP/pre-restore-$RUN.dump"
      # 되돌림 사본은 이 실행에서 처음 한 번만 만든다. 이미 있으면(같은 RUN 재시도) 덮어쓰지 않고 검증만 한다.
      # 4-3에 들어간 뒤($W/dropped, begin이 지우지 않는다)면 지금 DB는 원래 상태가 아니므로 어떤 경우에도 새로 만들지 않는다.
@@ -780,7 +795,8 @@ YAML
              volumeMounts: [{ name: tmp, mountPath: /tmp }]
          volumes: [{ name: tmp, emptyDir: { medium: Memory, sizeLimit: 16Mi } }]
    YAML
-     kubectl -n app-$APP wait --for=condition=ready pod -l job-name=restore-$RUN-db --timeout=5m
+     # --for=create가 먼저다. 없으면 Job 컨트롤러가 파드를 만들기 전에 "no matching resources found"로 --timeout과 무관하게 바로 끝난다
+     kubectl -n app-$APP wait --for=create --for=condition=ready pod -l job-name=restore-$RUN-db --timeout=5m
      # 지금 DB가 있으면 그 DB로, 이미 지워졌으면(4-3 뒤 같은 RUN 재시도) postgres DB로 접속해 본다
      n=$(dbn)
      [ "$n" = 0 ] || [ "$n" = 1 ]
