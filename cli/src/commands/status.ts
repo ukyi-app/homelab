@@ -118,9 +118,16 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
     async read(c) {
       // DB 역할 ExternalSecret이 아직 없으면(데이터 Application 전) 빼지 않고 준비 안 됨으로 센다.
       const role = usesPg ? (c.k8s.get("externalsecret", "database", `pg-role-${app}`) ?? { metadata: { name: `pg-role-${app}`, namespace: "database" } }) : null;
-      // values가 선언한 앱 쪽 ExternalSecret(앱 차트 externalsecret.yaml의 조건)이 목록에 없으면 빈 목록을 0/0 Ready로 보지 않고
-      // 준비 안 됨으로 센다(#884 2라운드 P2-6). 데이터 차트 몫(영속 <app>-valkey-auth 등)은 데이터 Application 줄이 본다.
-      const want = [...(Array.isArray(v.secrets) && v.secrets.length ? [`${app}-app`] : []), ...(v.uses?.postgres ? [`${app}-db`] : []), ...(v.uses?.valkey ? [`${app}-valkey-url`] : []), ...(v.cache?.enabled === true ? [`${app}-valkey-auth`] : [])];
+      // values가 선언한 ExternalSecret이 목록에 없으면 빈 목록을 0/0 Ready로 보지 않고 준비 안 됨으로 센다(#884 2라운드 P2-6).
+      // 앱 차트(externalsecret.yaml의 조건)와 데이터 차트(valkey.yaml: 영속이면 running과 무관하게 -valkey-auth·-valkey-backup-r2)
+      // 둘 다다. 데이터 Application 줄은 Argo CD의 마지막 상태라 부재를 대신 보지 못한다(#890 1라운드 P2-2).
+      const want = [
+        ...(Array.isArray(v.secrets) && v.secrets.length ? [`${app}-app`] : []),
+        ...(v.uses?.postgres ? [`${app}-db`] : []),
+        ...(v.uses?.valkey ? [`${app}-valkey-url`] : []),
+        ...(v.cache?.enabled === true || persistent ? [`${app}-valkey-auth`] : []),
+        ...(persistent ? [`${app}-valkey-backup-r2`] : []),
+      ];
       const found = c.k8s.list("externalsecret", ns);
       const absent = want.filter((n) => !found.some((e: any) => e?.metadata?.name === n)).map((name) => ({ metadata: { name, namespace: ns } }));
       const list = [...found, ...absent, ...(role ? [role] : [])];

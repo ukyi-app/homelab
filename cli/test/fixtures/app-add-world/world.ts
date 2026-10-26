@@ -34,19 +34,22 @@ export function chartTags(): Rule[] {
 export const noPr = (branch: string): Rule => ghGet(pullsPath(branch), 200, []);
 export const openPr = (number: number, head: string) => ghResponse(200, [{ number, head: { sha: head }, base: { ref: "main" } }]);
 
-// 열린 CLI PR이 이미 원하는 내용을 갖고 있다(재실행·대기).
-export function prOpen(branch: string, command: string, files: Record<string, string | null>, head = NEW_COMMIT): Rule[] {
+const contentRules = (files: Record<string, string | null>, ref: string) => Object.entries(files).map(([p, c]) => (c === null ? ghGet(contentsPath(p, ref), 404, {}) : ghGet(contentsPath(p, ref), 200, fileJson(c))));
+
+// 열린 CLI PR이 이미 원하는 내용을 갖고 있다(재실행·대기). readOnly는 명령이 PR 시점 확인용으로 읽기만 하는 파일
+// (PR 브랜치에서도 main과 같은 내용, 변경 목록에는 없다).
+export function prOpen(branch: string, command: string, files: Record<string, string | null>, head = NEW_COMMIT, readOnly: Record<string, string | null> = {}): Rule[] {
   return [
     ghGet(pullsPath(branch), [openPr(12, head)]),
     ghGet(`${R}/git/commits/${head}`, 200, { message: `x\n\nHomelab-CLI: ${command}`, tree: { sha: "d".repeat(40) } }),
     ghGet(`${R}/compare/${MAIN}...${head}`, 200, { files: Object.keys(files).map((filename) => ({ filename })) }),
-    ...Object.entries(files).map(([p, c]) => (c === null ? ghGet(contentsPath(p, head), 404, {}) : ghGet(contentsPath(p, head), 200, fileJson(c)))),
+    ...contentRules({ ...files, ...readOnly }, head),
   ];
 }
 
 // 새 PR 만들기 한 번. 전체 읽기·직전 읽기·apply 안 PR 찾기는 없음, 재조회는 PR 7(머리 NEW_COMMIT, 원하는 내용).
 // treeCode로 tree 만들기 실패를 넣는다.
-export function prCreate(branch: string, command: string, files: Record<string, string | null>, opts: { treeCode?: number } = {}): Rule[] {
+export function prCreate(branch: string, command: string, files: Record<string, string | null>, opts: { treeCode?: number; readOnly?: Record<string, string | null> } = {}): Rule[] {
   return [
     ghGet(pullsPath(branch), [ghResponse(200, []), ghResponse(200, []), ghResponse(200, []), openPr(7, NEW_COMMIT)]),
     ghGet(`${R}/git/commits/${MAIN}`, 200, { message: "main", tree: { sha: "d".repeat(40) } }),
@@ -57,7 +60,7 @@ export function prCreate(branch: string, command: string, files: Record<string, 
     ghSend("POST", `${R}/pulls`, 201, { number: 7 }),
     ghGet(`${R}/git/commits/${NEW_COMMIT}`, 200, { message: `x\n\nHomelab-CLI: ${command}`, tree: { sha: "d".repeat(40) } }),
     ghGet(`${R}/compare/${MAIN}...${NEW_COMMIT}`, 200, { files: Object.keys(files).map((filename) => ({ filename })) }),
-    ...Object.entries(files).map(([p, c]) => (c === null ? ghGet(contentsPath(p, NEW_COMMIT), 404, {}) : ghGet(contentsPath(p, NEW_COMMIT), 200, fileJson(c)))),
+    ...contentRules({ ...files, ...(opts.readOnly ?? {}) }, NEW_COMMIT),
   ];
 }
 

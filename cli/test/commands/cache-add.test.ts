@@ -27,7 +27,7 @@ describe("cache add(캐시)", () => {
   });
 
   test("apply: 비밀번호 → PR, 실패 주입, 다 된 상태 same", async () => {
-    const rules = (code = 0, sleep?: number): Rule[] => [...homelab({ [A]: BASE, [D]: null }), ...chartTags(), ...fold(), infisicalList(VK, [none, none, none, has]), infisicalSet(VK, { code, sleepMs: sleep }), ...prCreate(BRANCH, "cache add", { [A]: CACHED })];
+    const rules = (code = 0, sleep?: number): Rule[] => [...homelab({ [A]: BASE, [D]: null }), ...chartTags(), ...fold(), infisicalList(VK, [none, none, none, has]), infisicalSet(VK, { code, sleepMs: sleep }), ...prCreate(BRANCH, "cache add", { [A]: CACHED }, { readOnly: { [D]: null } })];
     const ok = await runCli(["cache", "add", APP, "--apply", "--json"], rules());
     expect(ok.code).toBe(3);
     expectNoSecrets(ok);
@@ -138,6 +138,32 @@ describe("cache add --persistent(캐시 → 영속, PR 둘)", () => {
     expect(r.code).toBe(1);
     expect(r.json.error.message).toContain("그사이 main에 캐시 Valkey가 켜졌다");
     expect(r.writes).toEqual([]);
+  });
+
+  test("시작 때 없던 data 파일도 PR 계산 때의 main에서 읽는다: 그사이 영속이 등록됐으면 캐시 PR을 만들지 않는다(#890 1라운드 P2-1)", async () => {
+    const MAIN2 = "7".repeat(40);
+    const rules = [
+      ghGet(`${R}/git/ref/heads/main`, [ghResponse(200, { object: { sha: MAIN } }), ghResponse(200, { object: { sha: MAIN2 } })]),
+      ghGet(contentsPath(A), 200, fileJson(BASE)),
+      ghGet(contentsPath(D), 404, {}),
+      ghGet(contentsPath(A, MAIN2), 200, fileJson(BASE)),
+      ghGet(contentsPath(D, MAIN2), 200, fileJson("chartVersion: 1.0.2\nvalkey: { persistent: true }\n")),
+      ...chartTags(),
+      ...fold(),
+      infisicalList(VK, [has]),
+      noPr(BRANCH),
+    ];
+    const r = await runCli(["cache", "add", APP, "--apply", "--json"], rules);
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).toContain("그사이 main에 영속 Valkey가 켜졌다");
+    expect(r.writes).toEqual([]);
+  });
+
+  test("읽기만 하는 data 파일이 없으면(null → null) tree에 넣지 않는다(없는 경로 삭제를 보내지 않는다, #890 1라운드 P2-4)", async () => {
+    const r = await runCli(["cache", "add", APP, "--apply", "--json"], [...homelab({ [A]: BASE, [D]: null }), ...chartTags(), ...fold(), infisicalList(VK, [has]), ...prCreate(BRANCH, "cache add", { [A]: CACHED }, { readOnly: { [D]: null } })]);
+    expect(r.code).toBe(3);
+    const tree = r.calls.find((c) => c.argv.includes(`${R}/git/trees`))!;
+    expect(JSON.parse(tree.stdin!).tree.map((t: any) => t.path)).toEqual([A]);
   });
 
   test("env 이름 충돌(values env.VALKEY_URL)은 쓰기 전에 멈춘다(#884 2라운드 P2-4)", async () => {

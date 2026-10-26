@@ -161,7 +161,8 @@ export function prStep(spec: PrSpec): Step {
     const exec = writeExecOf(w);
     // 이 apply의 스냅샷 하나: base에서 파일을 읽어 다시 계산하고, tree도 base 위에 만든다.
     const base = w.repo.mainSha();
-    const desired = desiredOf(spec, snapshot(w.repo, spec.files, base));
+    const current = snapshot(w.repo, spec.files, base);
+    const desired = desiredOf(spec, current);
     const baseTree = ok(w.gh.get(`repos/${HOMELAB_REPO}/git/commits/${base}`), "main 커밋 읽기").json?.tree?.sha;
     if (typeof baseTree !== "string") throw new Error("main tree를 읽지 못했다");
 
@@ -174,7 +175,11 @@ export function prStep(spec: PrSpec): Step {
     }
 
     // tree 항목에 내용을 직접 넣으면 blob을 따로 만들지 않아도 된다. sha null은 삭제.
-    const tree = spec.files.map((path) => (desired[path] === null ? { path, mode: "100644", type: "blob", sha: null } : { path, mode: "100644", type: "blob", content: desired[path] }));
+    // 이 스냅샷과 같은 파일은 넣지 않는다. 명령이 PR 시점 확인용으로 읽기만 하는 파일(02 데이터 values·bot-slot)이 없으면
+    // null → null이고, 그것을 넣으면 없는 경로의 삭제라 GitHub가 tree를 거부한다(#890 1라운드 P2-4). base_tree가 나머지를 지킨다.
+    const tree = spec.files.filter((path) => desired[path] !== current[path]).map((path) => (desired[path] === null ? { path, mode: "100644", type: "blob", sha: null } : { path, mode: "100644", type: "blob", content: desired[path] }));
+    // 읽은 뒤 그사이 main이 원하는 내용이 됐으면 쓸 것이 없다. 엔진의 재조회가 "main과 같음"을 확인한다.
+    if (tree.length === 0) return;
     const treeSha = ok(ghSend(exec, "POST", `repos/${HOMELAB_REPO}/git/trees`, { base_tree: baseTree, tree }), "tree 만들기").json?.sha;
     const message = `${spec.title}\n\n${TRAILER}: ${spec.command}`;
     const parents = head ? [base, head] : [base];

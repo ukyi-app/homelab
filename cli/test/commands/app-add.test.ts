@@ -228,6 +228,33 @@ describe("app add", () => {
     expect(r.writes).toEqual([]);
   });
 
+  test("--cache: 시작 때 없던 data 파일도 PR 계산 때 읽어, 그사이 영속이 등록됐으면 캐시 PR을 만들지 않는다(#890 1라운드 P2-1)", async () => {
+    const MAIN2 = "8".repeat(40);
+    const values = "chartVersion: 1.1.0\nkind: web\nport: 8080\nresources: { cpu: 50m, memory: 64Mi }\n";
+    const b64 = (t: string) => ({ type: "file", encoding: "base64", content: Buffer.from(t).toString("base64") });
+    const rules = [
+      ghGet("repos/ukyi-app/homelab/git/ref/heads/main", [ghResponse(200, { object: { sha: "a".repeat(40) } }), ghResponse(200, { object: { sha: MAIN2 } })]),
+      ...homelab({ [P.values]: values, [P.image]: wantImage, [P.data]: null }).slice(1),
+      ghGet(`repos/ukyi-app/homelab/contents/${P.values}?ref=${MAIN2}`, 200, b64(values)),
+      ghGet(`repos/ukyi-app/homelab/contents/${P.image}?ref=${MAIN2}`, 200, b64(wantImage)),
+      ghGet(`repos/ukyi-app/homelab/contents/${P.data}?ref=${MAIN2}`, 200, b64("chartVersion: 1.0.2\nvalkey: { persistent: true }\n")),
+      ...chartTags(), argo(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), infisicalList(vk, { PASSWORD: FAKE_SECRETS[1] }), noPr(BRANCH),
+    ];
+    const r = await runCli(["app", "add", APP, "--cache", "--apply", "--json"], rules);
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).toContain("그사이 main에 영속 Valkey가 켜졌다");
+    expect(r.writes).toEqual([]);
+  });
+
+  test("DB·Valkey 없는 app add는 없는 data 파일을 tree에 넣지 않는다(#890 1라운드 P2-4)", async () => {
+    const plain = { [P.values]: appValues(null, { public: "memo.ukyi.app", postgres: false, cache: "none" }, { secrets: [], latestChart: "1.1.0" })!, [P.image]: wantImage };
+    const rules = [...homelab({ [P.values]: null, [P.image]: null, [P.data]: null }), ...chartTags(), argo(), ...appRepo(APP), ...allFolders(), infisicalList(`/apps/${APP}`, {}), ...prCreate(BRANCH, "app add", plain, { readOnly: { [P.data]: null } })];
+    const r = await runCli(["app", "add", APP, "--public", "memo.ukyi.app", "--apply", "--json"], rules);
+    expect(r.code).toBe(3);
+    const tree = r.calls.find((c) => c.argv.includes("repos/ukyi-app/homelab/git/trees"))!;
+    expect(JSON.parse(tree.stdin!).tree.map((t: any) => t.path).sort()).toEqual([P.image, P.values]);
+  });
+
   test("사용법: 이름 한도·내부 이름 예약어는 64", async () => {
     expect((await runCli(["app", "add", "a".repeat(39), "--cache=persistent"], [])).code).toBe(64);
     expect((await runCli(["app", "add", "my-valkey", "--cache"], [])).code).toBe(64);
