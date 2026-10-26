@@ -133,6 +133,49 @@ export type ValkeyWrite = {
   authCheck(ns: string, deployment: string, password: Secret): "accepted" | "rejected";
 };
 
+// 공유 PostgreSQL 앱 DB 복원(restore.md 2절, 03 2부). 흐름·SQL·매니페스트는 core가 갖는다. 명령은 순서(단계)와 표식만 정한다.
+// run은 복원 실행 id, 잠금·기록은 앱 ns의 ConfigMap restore-pg(이 실행의 것이어야 한다). 파괴 단계는 core가 잠금·앱 멈춤·입력 고정을 다시 본다.
+export type RestoreInputs = { ext: { name: string; schema: string; version: string; owner: string }[]; mainEntries: number; aclEntries: number; aclSuEntries: number };
+export type PgRestoreWrite = {
+  // 1단계 도우미 Job(database ns, rclone). 같은 이름이 있으면 파드까지 지운 뒤 새로. Ready는 waitCondition으로 본다.
+  createR2Helper(run: string): void;
+  // 4-1 복원 Job(앱 ns, 앱 역할). img는 cluster pg의 spec.imageName(태그@digest).
+  createDbJob(app: string, run: string, img: string): void;
+  // 2단계 임시 클러스터. 같은 실행의 것이 이미 있으면 던진다. Ready는 waitCondition(cluster, 1800)으로 본다.
+  createTmpCluster(run: string, v: { t1: string; srv: string; img: string; size: string }): void;
+  tmpPrimary(run: string): string;
+  // 임시 클러스터에 그 앱 DB가 있는지(0·1, restore-check와 2단계 확인. 런북의 "표식 테이블 count"를 대신한다).
+  tmpDbCount(run: string, app: string): 0 | 1;
+  // 2단계 끝: 지금 임시 주 파드를 기록 tmp에 고정한다(이미 있으면 같은지 확인, 다르면 던진다). 뒤 단계의 덤프·확인은 이 값만 쓴다.
+  pinTmpPrimary(app: string, run: string): string;
+  // 임시 클러스터가 지금도 이 실행의 복원 원본인지(Ready, 주 파드 = 기록 tmp, 복구 원본·지점).
+  srcOk(app: string, run: string, v: { t1: string; srv: string }): boolean;
+  r2DumpExists(app: string, run: string): boolean;
+  // 되돌림 사본 올리기(primary pg_dump | rclone rcat). 이미 있거나 dropped 뒤면 던진다(덮어쓰지 않는다).
+  dumpToR2(app: string, run: string): Promise<void>;
+  // 올린 사본을 끝까지 읽는다(rclone cat | pg_restore -f /dev/null). 실패면 던진다.
+  r2DumpReadable(app: string, run: string): Promise<void>;
+  dbCount(app: string): 0 | 1;
+  // rolsuper|rolcreaterole|rolcreatedb|rolreplication|rolbypassrls(4-6: "f|f|f|f|f"여야 한다).
+  roleFlags(app: string): string;
+  // 복원 Job이 Ready이고 앱 역할로 그 DB(app 또는 postgres)에 접속하는지. 아니면 던진다.
+  jobAuth(app: string, run: string, db: "app" | "postgres"): void;
+  // 4-2: 목록·확장·ACL을 만들고 검증해 기록 in.*에 고정한다(DB는 그대로).
+  prepareInputs(app: string, run: string): Promise<RestoreInputs>;
+  // 기록 in.*가 4-2 그대로이고 형식이 맞는지.
+  inputsOk(app: string, run: string): boolean;
+  // 4-3: 잠금·앱 멈춤·입력·원본·덤프 읽기를 다시 보고, dropped 표시 뒤 DB를 지우고 다시 만든다.
+  recreateDatabase(app: string, run: string, v: { t1: string; srv: string }): Promise<"recreated" | "created">;
+  // 4-3 끝: 확장을 원본 스키마·버전·소유자로(postgres 소유는 postgres, 앱 소유는 복원 Job이).
+  createExtensions(app: string, run: string): void;
+  // 4-4 본 복원(앱 역할, --no-owner --no-privileges).
+  restoreMain(app: string, run: string): Promise<void>;
+  // 4-5 ACL 복원(앱 역할 ACL, 그리고 core가 검증한 postgres용 SQL).
+  restoreAcl(app: string, run: string): Promise<void>;
+  // 4-5 대조: 임시 클러스터와 복원본의 ACL. diff 줄은 제어 문자를 보이는 꼴로 바꾼 50줄까지.
+  aclCompare(app: string, run: string): { same: boolean; diff: string[] };
+};
+
 export type HttpWrite = {
   // port-forward로 앱 파드에 붙어 헬스 경로의 응답 코드. 경로는 셋만.
   appStatus(ns: string, deployment: string, port: number, path: "/healthz" | "/healthz/db" | "/healthz/cache"): Promise<number>;
@@ -239,6 +282,7 @@ export type WriteCtx = {
   pg: PgWrite;
   valkey: ValkeyWrite;
   http: HttpWrite;
+  pgRestore: PgRestoreWrite;
   // wrapper 표시 명령(app new)에만 있다.
   github?: { apply(): number };
   appRepo?: AppRepoWrite;

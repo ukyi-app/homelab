@@ -6,7 +6,8 @@
 // makeRuntime·makeExec은 main.ts와 시험만 부른다(정적 시험).
 import type { ReadCtx, WriteCtx } from "./command";
 import { runEngine } from "./engine";
-import { PLAN_WRITE_BLOCKED, makeExec, makeForward, type Exec } from "./exec";
+import { PLAN_WRITE_BLOCKED, makeExec, makeForward, makePipe, type Exec } from "./exec";
+import { pgRestoreWrite } from "./pgrestore";
 import { appRepoWrite, ghRead, ghcrRead, githubDelegate, webRead, wrapperApply } from "./github";
 import { httpWrite, pgWrite, valkeyWrite } from "./podops";
 import { infisicalRead, infisicalWrite, projectResolver } from "./infisical";
@@ -70,6 +71,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       pg: pgWrite(exec, k8sRead),
       valkey: valkeyWrite(exec, k8sRead, kube.pollMs ?? 2_000),
       http: httpWrite(makeForward(exec, { env: o.env, live: () => live })),
+      pgRestore: pgRestoreWrite(exec, k8sRead, makePipe({ env: o.env, live: () => live }), (ns, job) => k8sRead.waitCondition("job", ns, { jobPods: job }, "Ready", 60)),
       progress: o.progress,
     };
     if (o.wrapper && delegateRead) {
