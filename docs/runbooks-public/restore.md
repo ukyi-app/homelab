@@ -75,6 +75,30 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
 
 **왜 복원 모드가 필요한가:** `appendonly yes`인 채 시작하면 AOF가 RDB보다 이긴다. AOF 디렉터리를 지우고 `dump.rdb`만 두어도 Valkey 9.1.2는 RDB를 읽지 않고 빈 데이터로 시작해 빈 AOF를 새로 만든다(U18 로컬 실측, 2026-10-23). 그래서 RDB는 `appendonly no`(복원 모드)로 읽고, 읽은 뒤 실행 중에 AOF를 켠다.
 
+**데이터 확인은 키 수 고정 비교가 아니라 검증 키로 한다.** 복원 뒤에도 TTL 만료와 앱의 정상 쓰기로 키 수는 바뀐다. 그리고 앱은 복원 중에도 돌아(1단계) 키를 새로 쓰므로, 키 수가 0이 아니라는 것만으로는 복원한 데이터가 남았는지 알 수 없다(재시작 때 다 사라져도 앱이 키 하나를 쓰면 0이 아니다). 그래서 3단계가 RDB를 읽은 직후 이 실행의 검증 키 `homelab:restore:<실행 id>`(값 `1`, 비밀 아님, 만료 없음)를 직접 쓴다. 4·5단계는 그 키가 있어야 통과한다. 재시작 뒤 없으면 빈 데이터나 옛 AOF로 뜬 것이다. 6단계에서 지운다. 키 이름은 앱의 키 공간에 잠깐 보인다. 키가 0개가 아닌지와, 운영자가 아는 만료 없는 앱 표식 키(`MARK`, 모르면 비워 둔다)가 있는지도 함께 본다. 복원 직후 키 수(`$W/vk-dbsize`)는 참고로만 보여 준다.
+
+```bash
+MARK=''    # 운영자가 아는 만료 없는 앱 표식 키(선택). 모르면 비워 둔다
+VKEY="homelab:restore:$RUN"   # 3단계가 쓰는 이 실행의 검증 키. 같은 RUN의 재시도는 같은 키를 쓴다
+# 숫자 하나인지. valkey-cli가 오류 문구를 내도 걸린다.
+num() { case $1 in ''|*[!0-9]*) return 1 ;; esac; }
+# CONFIG GET appendonly의 값(둘째 줄).
+vkaof() { local a; a=$(vk CONFIG GET appendonly) || return 1; printf '%s\n' "$a" | tr -d '\r' | sed -n 2p; }
+# AOF가 지금 데이터로 다 쓰였는지(INFO persistence 넷 다). 함정: RDB 저장(BGSAVE, 기본 save 지점) 중에 AOF를 켜면
+# Valkey 9.1.2는 첫 AOF 생성을 예약만 해 aof_enabled:1·aof_rewrite_in_progress:0·status ok인 채 aof_rewrite_scheduled:1이다
+# (로컬 실측, 저장이 끝나야 rewrite가 시작된다). 이때 재시작하면 AOF가 없거나 옛 것이라 데이터가 비거나 옛 상태로 돌아간다.
+# INFO 줄 끝에는 CR이 있다.
+aofok() { printf '%s\n' "$1" | tr -d '\r' | awk -F: '{ v[$1] = $2 } END { exit !(v["aof_enabled"] == "1" &&
+  v["aof_rewrite_in_progress"] == "0" && v["aof_rewrite_scheduled"] == "0" && v["aof_last_bgrewrite_status"] == "ok") }'; }
+# 지금 데이터가 이 복원의 것인지: 키가 0개가 아니고, 검증 키가 있고, 표식 키를 적었으면 그 키도 있다.
+# 아니면 지금 값을 알리고 실패한다. 3단계가 검증 키를 쓰기 전에는 부르지 않는다.
+vkdata() { local n v m=-; n=$(vk DBSIZE) || return 1; v=$(vk EXISTS "$VKEY") || return 1
+  if [ -n "${MARK:-}" ]; then m=$(vk EXISTS "$MARK") || return 1; fi
+  if num "$n" && [ "$n" -gt 0 ] && [ "$v" = 1 ] && { [ -z "${MARK:-}" ] || [ "$m" = 1 ]; }; then return 0; fi
+  echo "키 수 $(printf '%s' "$n" | cat -v), 검증 키 $(printf '%s' "$v" | cat -v)(1이어야 한다), 표식 키 $(printf '%s' "$m" | cat -v)(적었으면 1). 복원 직후 키 수 $(cat "$W/vk-dbsize" 2>/dev/null || echo '?')" >&2
+  return 1; }
+```
+
 0. 백업이 있는지 본다. 수동 백업이 필요하면(시나리오 4) 지금 하나 만든다.
 
    ```bash
@@ -181,38 +205,86 @@ vk() {  # 사용: vk DBSIZE / vk INFO persistence
    [ $? -eq 0 ] && echo "복원 Job 끝" || echo "멈춤: 복원 Job을 만들지 못했거나 끝나지 않았다. 'kubectl -n app-$APP get job,pod -L homelab.ukyi.app/restore'로 앞 Job을 본다"
    ```
 
-3. **복원 모드로 올림(PR):** `running: true`와 `restoreMode: true`를 함께. 새 파드가 `appendonly no`로 떠 RDB를 읽는다. 키 수와 표식 키를 본다.
+3. **복원 모드로 올림(PR):** `running: true`와 `restoreMode: true`를 함께. 새 파드가 `appendonly no`로 떠 RDB를 읽는다. 키가 있는지, 표식 키를 적었으면 그 키가 있고 만료 시간이 없는지 보고, 복원 직후 키 수를 적어 둔 뒤 검증 키를 쓴다. 다시 돌리면 검증 키를 다시 쓰고 4·5단계 표식도 지운다(그 뒤 단계를 다시 한다). 4단계가 "검증 키 0"으로 멈추면(복원 모드인 채 서버가 다시 떠 RDB를 다시 읽었다) 이 단계부터 다시 한다.
 
    ```bash
-   kubectl -n app-$APP rollout status deploy/$APP-valkey
-   vk CONFIG GET appendonly          # no
-   vk DBSIZE
-   vk GET <표식 키>
+   ( set -euo pipefail
+   rm -f "$W/ok-vk-loaded" "$W/ok-vk-aof" "$W/ok-vk-reloaded"
+   kubectl -n app-$APP rollout status deploy/$APP-valkey --timeout=5m
+   a=$(vkaof); [ "$a" = no ] || { echo "복원 모드가 아니다(appendonly $(printf '%s' "$a" | cat -v)). restoreMode가 반영됐는지 본다" >&2; exit 1; }
+   # 다시 돌릴 때는 앞에서 쓴 검증 키가 남아 있을 수 있어 그 키를 빼고 센다.
+   n=$(vk DBSIZE); v=$(vk EXISTS "$VKEY")
+   if num "$n" && [ "$v" = 1 ]; then n=$((n - 1)); fi
+   if ! num "$n" || [ "$n" -eq 0 ]; then echo "키가 0개다(키 수 $(printf '%s' "$n" | cat -v)). 받은 RDB가 비었거나 읽히지 않았다" >&2; exit 1; fi
+   if [ -n "${MARK:-}" ]; then
+     m=$(vk EXISTS "$MARK"); [ "$m" = 1 ] || { echo "표식 키가 없다" >&2; exit 1; }
+     t=$(vk TTL "$MARK"); [ "$t" = -1 ] || { echo "표식 키에 만료 시간이 있다(TTL $(printf '%s' "$t" | cat -v)). 만료 시간이 없는 키를 고르거나 비워 둔다" >&2; exit 1; }
+   fi
+   printf '%s\n' "$n" > "$W/vk-dbsize"
+   r=$(vk SET "$VKEY" 1); [ "$r" = OK ] || { printf '%s\n' "$r" | cat -v >&2; exit 1; }
+   t=$(vk TTL "$VKEY"); [ "$t" = -1 ] || { echo "검증 키의 TTL이 $(printf '%s' "$t" | cat -v)다" >&2; exit 1; }
+   vkdata
+   touch "$W/ok-vk-loaded" )
+   [ -f "$W/ok-vk-loaded" ] && echo "복원 모드로 읽음: 키 $(cat "$W/vk-dbsize")개" || echo "멈춤: 복원 모드로 읽지 못했거나 키가 0개이거나 적은 표식 키가 없다(위)"
    ```
 
-4. **AOF 다시 켜기:** 실행 중에 켜면 지금 데이터로 AOF base를 새로 쓴다. rewrite가 끝날 때까지 기다린다.
+4. **AOF 다시 켜기:** 실행 중에 켜면 지금 데이터로 AOF base를 새로 쓴다. 켜기 전에 데이터(검증 키 포함)를 본다(빈 데이터를 AOF로 굳히지 않게). `CONFIG SET appendonly yes`는 그 자리에서 rewrite를 시작하거나(`aof_rewrite_in_progress:1`) 예약한다(`aof_rewrite_scheduled:1`, 위 함정). 그래서 진행·예약이 모두 0이고 성공했을 때(`aofok`) 그 rewrite가 끝난 것이다. 예약 상태는 RDB 저장이 끝난 뒤 rewrite가 시작될 때까지 기다린다. 10분 안에 끝나지 않으면 멈춘다. 다시 돌려도 된다. 이미 켜져 있으면(예: 서버가 AOF 설정으로 다시 떠 AOF를 읽었다) `CONFIG SET`은 아무것도 바꾸지 않고 상태만 다시 본다. `aof_rewrites` 같은 횟수는 보지 않는다(서버가 다시 뜨면 0으로 돌아간다).
 
    ```bash
-   vk CONFIG SET appendonly yes
-   vk INFO persistence | grep -E 'aof_enabled|aof_rewrite_in_progress|aof_last_bgrewrite_status'
-   # aof_enabled:1, aof_rewrite_in_progress:0, aof_last_bgrewrite_status:ok가 될 때까지 다시 본다
+   ( set -euo pipefail
+   rm -f "$W/ok-vk-aof" "$W/ok-vk-reloaded"
+   [ -f "$W/ok-vk-loaded" ] || { echo "멈춤: 3단계 확인이 끝나지 않았다" >&2; exit 1; }
+   vkdata
+   r=$(vk CONFIG SET appendonly yes); [ "$r" = OK ] || { printf '%s\n' "$r" | cat -v >&2; exit 1; }
+   i=0
+   while :; do
+     info=$(vk INFO persistence)
+     if aofok "$info"; then break; fi
+     i=$((i + 1)); [ "$i" -lt 120 ] || { echo "AOF rewrite가 10분 안에 끝나지 않았다" >&2
+       printf '%s\n' "$info" | tr -d '\r' | grep -E '^(aof_|rdb_bgsave_in_progress)' | cat -v >&2; exit 1; }
+     sleep 5
+   done
+   vkdata
+   touch "$W/ok-vk-aof" )
+   [ -f "$W/ok-vk-aof" ] && echo "AOF 다 씀" || echo "멈춤: AOF를 켜지 못했거나 rewrite가 끝나지 않았다(위). 데이터가 없으면 켜지 않았다. 검증 키만 0이면 3단계부터 다시 한다"
    ```
 
-5. **복원 모드 끄기(PR):** `restoreMode`와 `running` 줄을 지운다. ConfigMap만 바뀌고 파드는 그대로다(실행 중 설정은 이미 AOF on). 병합 뒤 서버를 한 번 다시 띄워 AOF에서 다시 읽히는지 본다. 키 수가 4번과 같아야 한다.
+5. **복원 모드 끄기(PR):** `restoreMode`와 `running` 줄을 지운다. ConfigMap만 바뀌고 파드는 그대로다(실행 중 설정은 이미 AOF on). 병합 뒤 서버를 한 번 다시 띄워 AOF에서 다시 읽히는지 본다(검증 키가 있는지, 키가 0개가 아닌지, 표식 키를 적었으면 있는지). 검증 키가 없으면 앱이 새로 쓴 키가 있어도 멈춘다.
+
+   **PR을 기다리는 동안 서버가 다시 떴을 수 있다.** 복원 모드 설정으로 다시 떴으면 `appendonly no`로 돌아가 AOF가 없는 상태다. 그대로 다시 띄우면 데이터가 비거나 옛 상태로 돌아간다. 그래서 다시 띄우기 직전에 ConfigMap에 복원 모드가 없는지, 실행 중 `appendonly`가 yes인지, AOF가 다 쓰였는지(`aofok`), 데이터가 있는지를 다시 본다. `appendonly`나 AOF 상태가 다르면 블록이 4단계 표식을 지우고 멈춘다. 그때는 4단계부터 다시 하고 이 블록을 다시 돌린다. 데이터가 없으면(검증 키 없음, 0개, 또는 적은 표식 키 없음) 다시 띄우지 않고 멈춘다. 원인(언제 다시 떴는지, 파드 로그)을 본 뒤 1단계(서버 내림)부터 다시 한다.
 
    다시 띄우기는 `rollout restart`(Deployment 업데이트)로 한다. 파드를 직접 지우지 않는다. `Recreate`가 "옛 파드가 모두 끝난 뒤 새 파드를 만든다"를 보장하는 것은 Deployment 업데이트 때뿐이다. 파드를 지우면 ReplicaSet이 옛 파드가 끝나기(Terminating) 전에 새 파드를 만들어, 두 서버가 같은 PVC의 AOF·RDB를 함께 쓴다(로컬 kind 1.37 실측: 직접 삭제는 약 14초 겹침, `rollout restart`는 겹침 없음). Argo CD는 `rollout restart`가 더하는 주석을 되돌리지 않는다(Git에 없는 필드라 비교하지 않는다, rotate.md와 같다).
 
    ```bash
+   ( set -euo pipefail
+   rm -f "$W/ok-vk-reloaded"
+   [ -f "$W/ok-vk-aof" ] || { echo "멈춤: 4단계 확인이 끝나지 않았다" >&2; exit 1; }
+   # 병합이 반영됐는지: 덮어쓰기 ConfigMap에 appendonly no가 남아 있으면 다시 띄울 때 복원 모드로 뜬다.
+   ov=$(kubectl -n app-$APP get configmap valkey-overrides -o jsonpath='{.data.overrides\.conf}')
+   if printf '%s\n' "$ov" | grep -Eq '^[[:space:]]*appendonly[[:space:]]+no'; then
+     echo "ConfigMap valkey-overrides에 아직 복원 모드가 있다. PR 병합과 Argo CD 동기화를 기다린다" >&2; exit 1; fi
+   # 재시작 전 다시 보기(PR 대기 중 서버가 다시 떴을 수 있다). 다르면 4단계부터.
+   a=$(vkaof)
+   if [ "$a" != yes ]; then rm -f "$W/ok-vk-aof"
+     echo "appendonly가 $(printf '%s' "$a" | cat -v)다(PR 대기 중 서버가 다시 떴다). 4단계부터 다시 한다" >&2; exit 1; fi
+   info=$(vk INFO persistence)
+   if ! aofok "$info"; then rm -f "$W/ok-vk-aof"
+     printf '%s\n' "$info" | tr -d '\r' | grep -E '^(aof_|rdb_bgsave_in_progress)' | cat -v >&2
+     echo "AOF가 다 쓰이지 않았다(진행·예약 중이거나 실패, 위). 4단계부터 다시 한다" >&2; exit 1; fi
+   vkdata
    kubectl -n app-$APP rollout restart deploy/$APP-valkey
-   kubectl -n app-$APP rollout status deploy/$APP-valkey
-   vk CONFIG GET appendonly          # yes
-   vk DBSIZE
+   kubectl -n app-$APP rollout status deploy/$APP-valkey --timeout=5m
+   a=$(vkaof); [ "$a" = yes ] || { echo "다시 띄운 뒤 appendonly가 $(printf '%s' "$a" | cat -v)다" >&2; exit 1; }
+   vkdata
+   touch "$W/ok-vk-reloaded" )
+   [ -f "$W/ok-vk-reloaded" ] && echo "AOF에서 다시 읽음" || echo "멈춤: 위 이유를 본다. '4단계부터'면 4단계와 이 블록을, 데이터가 없으면 더 다시 띄우지 말고 원인을 본 뒤 1단계(서버 내림)부터 한다"
    kubectl -n app-$APP get cronjob $APP-valkey-backup   # SUSPEND False
    ```
 
-6. **정리:** 이 실행의 Job(수동 백업·복원의 모든 시도)을 라벨로 지우고 0.2의 확인이 0개인지 본다.
+6. **정리:** 3단계가 쓴 검증 키를 지우고, 이 실행의 Job(수동 백업·복원의 모든 시도)을 라벨로 지우고 0.2의 확인이 0개인지 본다. 검증 키는 서버가 떠 있을 때만 지울 수 있다(중간에 그만둔 실행이면 다음에 서버가 뜬 뒤 지운다).
 
    ```bash
+   vk DEL "$VKEY"                                    # 1(지움) 또는 0(이미 없음)
    kubectl -n app-$APP delete job -l homelab.ukyi.app/restore=$RUN
    kubectl -n app-$APP get job,pvc -l homelab.ukyi.app/restore=$RUN    # No resources
    ```
@@ -247,6 +319,13 @@ fit() { case $1 in *[[:cntrl:]]*) echo "제어문자가 든 값이다" >&2; retu
   printf '%s\n' "$1" | LC_ALL=C grep -aqE "$2"; }
 dump() { kubectl -n database exec "$TMP" -c postgres -- pg_dump -U postgres -Fc -d "$APP"; }   # 임시 클러스터의 그 DB
 J() { kubectl -n app-$APP exec -i job/restore-$RUN-db -- "$@"; }                                 # 4-1의 앱 역할 복원 Job
+# 덤프를 읽는 pg_restore는 소진 셸(PGR)로 감싼다. 함정: --list와 ACL만 고른 -L은 덤프를 끝까지 읽지 않고 끝나, 큰 덤프면
+# 쓰던 쪽(pg_dump·rclone cat의 kubectl exec)이 SIGPIPE(141)로 죽어 pipefail이 정상 덤프를 실패로 본다(로컬 실측, 작은 덤프는
+# 파이프 버퍼에 다 들어가 통과해 크기·타이밍에 따라 갈린다). 셸이 pg_restore 뒤 남은 입력을 읽어 버리고 pg_restore의 종료 코드를
+# 그대로 낸다. 생산자의 141을 성공으로 바꾸지 않는다(진짜 덤프 실패를 숨긴다). CLI의 PG_RESTORE_DRAINED와 같은 꼴이다.
+PGR='pg_restore "$@"; rc=$?; cat >/dev/null; exit $rc'
+JR() { J sh -c "$PGR" sh "$@"; }                                                                 # 파일·목록으로
+JRD() { J sh -c 'pg_restore -d "$PGDATABASE" "$@"; rc=$?; cat >/dev/null; exit $rc' sh "$@"; }   # 그 DB에 넣기(앱 역할)
 # 복원 Job이 지금 살아 있는지(jobready), 앱 역할로 그 DB에 접속되는지(jobauth <DB>). 표식(ok-auth)보다
 # Job 수명(약 2시간)이 짧을 수 있어 DB를 지우거나 쓰는 블록(4-3·4-4·4-5) 안에서 매번 다시 본다.
 jobready() { kubectl -n app-$APP wait --for=condition=ready pod -l job-name=restore-$RUN-db --timeout=60s >/dev/null; }
@@ -419,7 +498,7 @@ YAML
          | kubectl -n database exec -i job/restore-$RUN-r2 -- rclone rcat "$KEY"
      fi
      kubectl -n database exec job/restore-$RUN-r2 -- rclone cat "$KEY" \
-       | kubectl -n database exec -i "$PRIMARY" -c postgres -- pg_restore -f /dev/null
+       | kubectl -n database exec -i "$PRIMARY" -c postgres -- sh -c "$PGR" sh -f /dev/null
      touch "$W/ok-predump" )
    [ -f "$W/ok-predump" ] && echo "되돌림 사본 확인" || echo "멈춤: 되돌림 사본을 확인하지 못했다"
    ```
@@ -564,7 +643,7 @@ YAML
    ( set -euo pipefail; step list
      use
      rm -f "$W/inputs.sha"      # 이 블록이 끝까지 성공할 때만 기준이 다시 생긴다
-     dump | J pg_restore --list > "$W/list"
+     dump | JR --list > "$W/list"
      [ -s "$W/list" ]
      kubectl -n database exec "$TMP" -c postgres -- psql -U postgres -d "$APP" -v ON_ERROR_STOP=1 -tA -F ' ' -c \
        "select e.extname, n.nspname, e.extversion, pg_get_userbyid(e.extowner) from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname <> 'plpgsql' order by e.oid" > "$W/ext"
@@ -598,13 +677,13 @@ YAML
      # 4-4·4-5가 쓸 SQL을 DB를 지우기 전에 만들어(실행하지 않는다) 본다. 지원하지 않는 모양이면 지금 멈춘다.
      # 본 복원 목록이 덤프와 맞는지
      J sh -c 'cat > /tmp/main.list' < "$W/main.list"
-     dump | J pg_restore -L /tmp/main.list -f /dev/null
+     dump | JR -L /tmp/main.list -f /dev/null
      # 앱 역할 ACL: 앱 역할로 실행한다. 다른 역할이 준 위임 권한이면 pg_restore가 SET SESSION AUTHORIZATION을 붙이는데
      # 앱 역할은 그것을 못 한다. 이 절차가 다루지 않는 모양이라 멈춘다.
      : > "$W/acl.sql"
      if [ -s "$W/acl.list" ]; then
        J sh -c 'cat > /tmp/acl.list' < "$W/acl.list"
-       dump | J pg_restore -L /tmp/acl.list -f - > "$W/acl.sql"
+       dump | JR -L /tmp/acl.list -f - > "$W/acl.sql"
      fi
      # grep 종료 코드를 나눈다(0 있음, 1 없음, 2 이상 읽기 오류). "if grep"이면 읽기 오류도 "없음"이 된다.
      rc=0; LC_ALL=C grep -aq 'SESSION AUTHORIZATION' "$W/acl.sql" || rc=$?
@@ -615,7 +694,7 @@ YAML
      : > "$W/acl-su.sql"
      if [ -s "$W/acl-su.list" ]; then
        J sh -c 'cat > /tmp/acl-su.list' < "$W/acl-su.list"
-       dump | J pg_restore -L /tmp/acl-su.list -f - > "$W/acl-su.sql"
+       dump | JR -L /tmp/acl-su.list -f - > "$W/acl-su.sql"
      fi
      sqlok "$W/acl-su.sql" | cat -v || { echo "postgres로 넣을 ACL에 허용하지 않는 문장이 있다(위 줄)" >&2; exit 1; }
      # 검증이 모두 끝난 이 내용을 기준으로 고정한다(same). 뒤 단계는 비교만 한다.
@@ -646,7 +725,7 @@ YAML
      # 원본이 죽었으면 4-4에서야 덤프 실패로 멈춰 지금 DB만 지운 꼴이 된다.
      srcok
      J sh -c 'cat > /tmp/main.list' < "$W/main.list"
-     dump | J pg_restore -L /tmp/main.list -f /dev/null
+     dump | JR -L /tmp/main.list -f /dev/null
      # 앱이 지금도 멈춰 있는지(표식 뒤 다른 PR로 다시 떴을 수 있다). 떠 있으면 FORCE DROP이 실행 중인 앱의 DB를 지운다.
      stopped
      # 파괴 단계에 들어간다는 표시. ok-가 아니라 begin이 지우지 않는다. 1단계가 이것을 보고 되돌림 사본을 새로 만들지 않는다.
@@ -689,7 +768,7 @@ YAML
      stopped
      same
      J sh -c 'cat > /tmp/main.list' < "$W/main.list"
-     dump | J sh -c 'pg_restore -L /tmp/main.list --no-owner --no-privileges --exit-on-error -d "$PGDATABASE"'
+     dump | JRD -L /tmp/main.list --no-owner --no-privileges --exit-on-error
      touch "$W/ok-main" )
    [ -f "$W/ok-main" ] && echo "본 복원됨" || echo "멈춤: 본 복원에 실패했다(되돌림 사본은 1단계)"
    ```
@@ -728,7 +807,7 @@ YAML
      same
      if [ -s "$W/acl.list" ]; then
        J sh -c 'cat > /tmp/acl.list' < "$W/acl.list"
-       dump | J sh -c 'pg_restore -L /tmp/acl.list --no-owner --exit-on-error -d "$PGDATABASE"'
+       dump | JRD -L /tmp/acl.list --no-owner --exit-on-error
      fi
      # 4-2에서 만들고 검증한 SQL만 넣는다. 그 사이 파일이 바뀌었을 때를 위해 한 번 더 본다.
      if [ -s "$W/acl-su.sql" ]; then
@@ -882,6 +961,6 @@ podman rm -f pgm
    kubectl -n database get backups                          # completed
    ```
 
-5. 영속 Valkey가 있는 앱은 1절로 RDB를 복원한다. 1단계(`running: false`)는 복구 PR이 이미 했으므로 2단계(복원 Job)부터 한다. 1절 5단계까지 끝나 키 수를 확인한 뒤에 그 앱의 `suspended` 줄을 지우는 PR로 앱을 재개한다.
+5. 영속 Valkey가 있는 앱은 1절로 RDB를 복원한다. 1단계(`running: false`)는 복구 PR이 이미 했으므로 2단계(복원 Job)부터 한다. 1절 5단계까지 끝나 데이터(키 0개 아님, 표식 키를 적었으면 그 키)를 확인한 뒤에 그 앱의 `suspended` 줄을 지우는 PR로 앱을 재개한다.
 6. 앱이 뜬 뒤 시나리오 1·10을 확인한다.
 7. **정리 PR:** `recoverySource`를 지워 렌더 결과를 `initdb`로 되돌린다(새 serverName은 그대로). recovery를 남기면 나중에 볼륨을 잃고 Cluster를 다시 만들 때 옛 아카이브에서 낡은 데이터로 조용히 복구된다. 떠 있는 클러스터에는 영향이 없다(U26).
