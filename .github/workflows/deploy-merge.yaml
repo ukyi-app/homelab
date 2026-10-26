@@ -46,7 +46,7 @@ jobs:
       - name: Install bun
         # ci.yaml과 같은 방식: 버전은 .tool-versions, 받은 파일은 sha256과 대조한다.
         env:
-          BUN_SHA256: "3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18" # 1.4.3 linux-x64
+          BUN_SHA256: "bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c" # 1.4.4 linux-x64
         run: |
           v=$(awk '$1 == "bun" { print $2 }' .tool-versions)
           bin="$RUNNER_TEMP/bin"
