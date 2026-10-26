@@ -130,6 +130,16 @@ printf 'HTTP/2.0 200 OK\r\nGitHub-Authentication-Token-Expiration: 2026-12-01 00
 printf 'HTTP/2.0 200 OK\r\nX-Github-Request-Id: x\r\n\r\n{}\n' >"$t/h-pat-noexp"
 echo '{"resource_changes":[]}' >"$t/p-none"
 echo '{"resource_changes":[{"address":"github_repository_ruleset.app_main[\"files\"]","change":{"actions":["delete"]}}]}' >"$t/p-delete"
+# app new 판정용(T12): 생성 하나, no-op 하나, import(no-op + importing) 하나, 미뤄진 guard 읽기 하나. after에 값 표식을 둔다.
+cat >"$t/p-app" <<'EOF2'
+{"resource_changes":[
+ {"address":"github_repository_ruleset.app_main[\"smoke\"]","mode":"managed","change":{"actions":["create"],"after":{"name":"VALUEMARK"}}},
+ {"address":"github_repository_ruleset.main_checks","mode":"managed","change":{"actions":["no-op"],"before":{"name":"VALUEMARK"}}},
+ {"address":"github_repository_ruleset.app_main[\"files\"]","mode":"managed","change":{"actions":["no-op"],"importing":{"id":"files:1"}}},
+ {"address":"data.github_rest_api.rulesets_app[\"smoke\"]","mode":"data","change":{"actions":["read"],"after":{"body":"VALUEMARK"}}}
+]}
+EOF2
+mkdir -p "$t/out"
 
 fails=0
 # expect <설명> <기대 exit(0|nonzero)> <env...> -- <args>
@@ -185,6 +195,37 @@ expect "/terraform/state에 R2 키가 없으면(*not found*) 멈춤" nonzero STU
 expect "호출 셸에 AWS 키가 있어도 Infisical 값을 씀" 0 AWS_ACCESS_KEY_ID=ambient AWS_SECRET_ACCESS_KEY=ambient -- verify
 expect "delete plan은 --allow-destroy 없이 멈춤" nonzero STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan
 expect "delete plan은 --allow-destroy로 통과" 2 STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan --allow-destroy
+
+# --plan-json(T12 app new): 주소·동작만 남기고 종료 코드는 그대로다.
+expect "plan --plan-json은 exit 2를 그대로" 2 STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-app" -- plan --plan-json "$t/out/a.json"
+if [[ -f $t/out/a.json ]]; then
+  got=$(jq -c '[.schema, (.sha | test("^[0-9a-f]{40}$")), [.changes[] | [.address, .mode, (.actions | join(",")), .importing]]]' "$t/out/a.json")
+  want='["tf-github-plan/v1",true,[["github_repository_ruleset.app_main[\"smoke\"]","managed","create",false],["github_repository_ruleset.app_main[\"files\"]","managed","no-op",true],["data.github_rest_api.rulesets_app[\"smoke\"]","data","read",false]]]'
+  [[ $got == "$want" ]] || { echo "FAIL: plan JSON 내용: $got"; fails=$((fails + 1)); }
+  ! grep -q VALUEMARK "$t/out/a.json" || { echo "FAIL: plan JSON에 값이 있다"; fails=$((fails + 1)); }
+  [[ $(stat -c %a "$t/out/a.json") == 600 ]] || { echo "FAIL: plan JSON 권한이 600이 아니다"; fails=$((fails + 1)); }
+else
+  echo "FAIL: plan JSON 파일이 없다"
+  fails=$((fails + 1))
+fi
+expect "--plan-json 변경 없음은 exit 0, 빈 목록" 0 -- plan --plan-json "$t/out/none.json"
+[[ $(jq -c .changes "$t/out/none.json" 2>/dev/null) == "[]" ]] || { echo "FAIL: 변경 없음의 plan JSON"; fails=$((fails + 1)); }
+expect "--plan-json은 --allow-destroy와 함께 받는다" 2 STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan --allow-destroy --plan-json "$t/out/d.json"
+expect "verify --plan-json은 사용법 오류" 64 -- verify --plan-json "$t/out/v.json"
+expect "apply --plan-json은 사용법 오류" 64 -- apply --plan-json "$t/out/p.json"
+expect "--plan-json 값 없음은 사용법 오류" 64 -- plan --plan-json
+expect "--plan-json 두 번은 사용법 오류" 64 -- plan --plan-json "$t/out/x.json" --plan-json "$t/out/y.json"
+expect "--plan-json 상대 경로 거부" 1 -- plan --plan-json out.json
+expect "--plan-json 폴더 없음 거부" 1 -- plan --plan-json "$t/nodir/a.json"
+echo keep >"$t/out/exists.json"
+expect "--plan-json 이미 있는 파일은 덮지 않음" 1 -- plan --plan-json "$t/out/exists.json"
+[[ $(cat "$t/out/exists.json") == keep ]] || { echo "FAIL: 있던 파일을 덮었다"; fails=$((fails + 1)); }
+ln -s "$t/out/target.json" "$t/out/link.json"
+expect "--plan-json 끊긴 링크도 거부" 1 -- plan --plan-json "$t/out/link.json"
+[[ ! -e $t/out/target.json ]] || { echo "FAIL: 링크를 따라 썼다"; fails=$((fails + 1)); }
+expect "--plan-json 작업 사본 안 경로 거부" 1 -- plan --plan-json "$t/work/plan.json"
+expect "delete plan이면 --plan-json을 쓰지 않고 멈춤" 1 STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan --plan-json "$t/out/del.json"
+[[ ! -e $t/out/del.json ]] || { echo "FAIL: 멈춘 plan이 JSON을 썼다"; fails=$((fails + 1)); }
 
 # 작업 사본의 hook과 remote URL은 쓰지 않는다. 심어 둔 hook이 돌면 표식 파일이 생긴다.
 mkdir -p "$t/work/.git/hooks"
