@@ -147,7 +147,9 @@ export function parseRecord(doc: any, name: string): RestoreRecord {
   // 만들기 전 검사(restoreRecordCreate)에는 uid가 없다. 지우기는 uid가 있어야 한다.
   const uid = doc?.metadata?.uid;
   if (uid !== undefined && (typeof uid !== "string" || !/^[0-9a-f-]{8,64}$/.test(uid))) throw new Error(`복원 기록 ${name}: uid 형식이 아니다`);
-  return { run, data: { ...data }, resourceVersion: rv, uid: uid ?? "" };
+  const created = doc?.metadata?.creationTimestamp;
+  if (created !== undefined && (typeof created !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(created))) throw new Error(`복원 기록 ${name}: creationTimestamp 형식이 아니다`);
+  return { run, data: { ...data }, resourceVersion: rv, uid: uid ?? "", created: created ?? "" };
 }
 
 export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {

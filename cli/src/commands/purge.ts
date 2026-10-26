@@ -24,10 +24,9 @@ const CLOCK_SKEW_MS = 3_600_000;
 // Valkey와 같은 2일 여유를 둔다(#889 r1 P1-4).
 const PG_KEEP_MS = 14 * 86_400_000;
 // 앱이 쓰기를 멈춘 시각은 Git 삭제 커밋이 아니라 이 명령이 클러스터에서 앱 워크로드가 없음을 본 시각이다. Argo CD가 늦거나
-// 멈추면 커밋 뒤 몇 시간이라도 앱이 쓴다(#889 r1 P1-2). 그 시각을 기록 data-purge에 남기고 그 뒤에 시작한 백업만 인정한다.
-// 기록 시각은 이 기기 시계, 백업 시각은 클러스터 시계라 5분을 더 둔다.
+// 멈추면 커밋 뒤 몇 시간이라도 앱이 쓴다(#889 r1 P1-2). 없음을 본 직후 기록 data-purge를 만들고, 그 creationTimestamp(API
+// 서버 시계)보다 뒤에 시작한 백업만 인정한다. 백업 시각도 클러스터 시계라 이 기기와의 시계 차이가 끼지 않는다(#889 r2 P2-5).
 const RECORD = "data-purge";
-const GONE_SKEW_MS = 5 * 60_000;
 
 const hasTrue = (o: any, type: string) => (o?.status?.conditions ?? []).some((c: any) => c?.type === type && c?.status === "True");
 
@@ -68,11 +67,14 @@ function appWorkloads(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   return out;
 }
 
-// 기록된 "앱 워크로드 없음" 확인 시각. 지금 기준(앱 삭제·데이터 등록)보다 앞이면 옛 실행의 것이라 쓰지 않는다.
+// 기록된 "앱 워크로드 없음" 확인 시각(기록의 creationTimestamp). 지금 기준(앱 삭제·데이터 등록)보다 앞이면 옛 실행의 것이라
+// 쓰지 않는다. 확인 뒤 워크로드가 다시 보이면 writes-stopped가 기록을 지운다(#889 r2 P1-3).
 function goneAt(ctx: ReadCtx | WriteCtx, n: Names, removed: number): string | null {
-  const t = ctx.k8s.restoreRecord(n.ns, RECORD)?.data["gone.at"];
+  const t = ctx.k8s.restoreRecord(n.ns, RECORD)?.created;
   return typeof t === "string" && Number.isFinite(Date.parse(t)) && Date.parse(t) > removed ? t : null;
 }
+
+const nsExists = (ctx: ReadCtx | WriteCtx, n: Names) => !!ctx.k8s.get("namespace", null, n.ns);
 
 // 백업 시각 t가 보존 기간 안인지. 문제면 그 설명.
 function staleness(t: string, keepMs: number): string | null {
@@ -108,7 +110,7 @@ function listDir(ctx: ReadCtx, dir: string): string[] {
   });
 }
 
-type Baseline = { date: string; removed: number; what: string } | { problem: string };
+type Baseline = { date: string; removed: number; what: string; appHistory: boolean } | { problem: string };
 
 function commitDates(ctx: ReadCtx, path: string, perPage: number): string[] | { problem: string } {
   const r = ctx.gh.get(`${REPO}/commits?path=${encodeURIComponent(path)}&sha=main&per_page=${perPage}`);
@@ -151,8 +153,9 @@ function baseline(ctx: ReadCtx, app: string): Baseline {
   if ("problem" in reg) return reg;
   const removed = apps.length > 0 ? Date.parse(apps[0]) : Number.NEGATIVE_INFINITY;
   const registered = Date.parse(reg.date);
-  if (removed >= registered) return { date: apps[0], removed, what: "앱 삭제" };
-  return { date: reg.date, removed: registered, what: apps.length > 0 ? "데이터 재등록(앱 삭제 뒤)" : "데이터 등록(앱 이력 없음)" };
+  const appHistory = apps.length > 0;
+  if (removed >= registered) return { date: apps[0], removed, what: "앱 삭제", appHistory };
+  return { date: reg.date, removed: registered, what: appHistory ? "데이터 재등록(앱 삭제 뒤)" : "데이터 등록(앱 이력 없음)", appHistory };
 }
 
 const protectedOf = (o: any) => /Delete=false|Prune=false/.test(String(o?.metadata?.annotations?.[PROTECT] ?? ""));
@@ -220,9 +223,8 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       async read(ctx) {
         if (listDir(ctx, `apps/${app}`).length > 0) return { state: "differs", action: "none", detail: `apps/${app}/가 아직 있다`, next: `homelab app remove ${app}` };
         if (ctx.k8s.get("application", "argocd", app)) return { state: "differs", action: "none", detail: `Application ${app}이 아직 있다(삭제 동기화 대기)`, next: `homelab status ${app}` };
-        const left = appWorkloads(ctx, n);
-        if (left.length) return { state: "differs", action: "none", detail: `앱 워크로드가 남아 있다(${left.join(", ")})`, next: `kubectl -n ${n.ns} get deploy,sts,cronjob,job,pod --show-labels로 보고, 사라진 뒤 다시 실행한다` };
-        return same("앱 삭제됨, 앱 워크로드 없음");
+        // 앱 워크로드는 writes-stopped가 본다. 여기서 막으면 쓰기 단계에 닿지 못해 옛 종료 기록을 지울 수 없다(#889 r2 P1-3).
+        return same("앱 삭제됨");
       },
     },
     {
@@ -233,18 +235,31 @@ function steps(n: Names, dataFiles: string[]): Step[] {
         const base = baseline(ctx, app);
         // 기준을 못 정하면 뒤의 backup 단계가 멈춘다. 여기서는 기록하지 않는다.
         if ("problem" in base) return same("기준 시각 확인은 백업 단계에서");
+        // 앱 없이 PostgreSQL만 등록한 데이터는 앱 ns가 없다(ApplicationSet data는 CreateNamespace를 켜지 않는다). 앱 이력도 없으면
+        // 쓴 앱이 처음부터 없어 데이터 등록 시각만으로 본다(#889 r2 P2-4). ns가 없는데 앱 이력이 있으면 언제 멈췄는지 모른다.
+        if (!nsExists(ctx, n)) {
+          if (!base.appHistory) return same(`${n.ns} 없음, 앱 이력 없음(데이터 등록 시각만으로 본다)`);
+          return { state: "differs", action: "none", detail: `${n.ns}이 없는데 앱 이력이 있다(앱 쓰기가 멈춘 시각을 알 수 없다)`, next: `kubectl get ns ${n.ns}와 apps/${app} 이력을 손으로 확인한다` };
+        }
+        const r = ctx.k8s.restoreRecord(n.ns, RECORD);
+        const left = appWorkloads(ctx, n);
+        if (left.length) return { state: "differs", action: r ? "delete" : "none", detail: `앱 워크로드가 있다(${left.join(", ")})${r ? " → 종료 기록을 지우고" : ""} 멈춘다` };
         const at = goneAt(ctx, n, base.removed);
         if (at) return same(`앱 워크로드 없음 확인 ${at}`);
-        return { state: "missing", action: "create", detail: `앱 워크로드 없음을 지금 다시 보고 그 시각을 ${n.ns}/${RECORD}에 기록` };
+        return { state: r ? "differs" : "missing", action: "create", detail: `앱 워크로드 없음을 지금 다시 보고 ${n.ns}/${RECORD}를 새로 만든다(그 생성 시각이 기준)` };
       },
       async apply(w) {
-        // 기록 직전에 지금 클러스터를 본다. 기록 시각이 곧 "이 뒤에 시작한 백업만"의 기준이다.
-        const left = appWorkloads(w, n);
-        if (left.length) throw new Error(`앱 워크로드가 남아 있다(${left.join(", ")})`);
-        const at = new Date(Date.now()).toISOString();
+        if (!nsExists(w, n)) throw new Error(`${n.ns}이 없는데 앱 이력이 있다. kubectl get ns ${n.ns}와 apps/${app} 이력을 손으로 확인한다`);
         const r = w.k8s.restoreRecord(n.ns, RECORD);
-        if (r) w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "gone.at": at });
-        else if (w.k8s.restoreRecordCreate(n.ns, RECORD, newRunId(), { "gone.at": at }) === "exists") throw new Error("그사이 다른 실행이 기록을 만들었다. 다시 실행한다");
+        // 앱 워크로드를 보면 옛 종료 기록은 거짓이 됐다. 지우고 멈춘다. 사라진 뒤 다시 실행하면 그때부터 새로 잰다.
+        const left = appWorkloads(w, n);
+        if (left.length) {
+          if (r) w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
+          throw new Error(`앱 워크로드가 있다(${left.join(", ")})${r ? ". 종료 기록을 지웠다" : ""}. kubectl -n ${n.ns} get deploy,sts,cronjob,job,pod --show-labels로 보고, 사라진 뒤 다시 실행한다`);
+        }
+        // 기록 시각은 API 서버가 정한다. 옛 기록(기준보다 앞)은 지우고 새로 만든다.
+        if (r) w.k8s.restoreRecordDelete(n.ns, RECORD, r.run);
+        if (w.k8s.restoreRecordCreate(n.ns, RECORD, newRunId(), {}) === "exists") throw new Error("그사이 다른 실행이 기록을 만들었다. 다시 실행한다");
       },
     },
     {
@@ -259,12 +274,14 @@ function steps(n: Names, dataFiles: string[]): Step[] {
         const base = baseline(ctx, app);
         if ("problem" in base) return { state: "differs", action: "none", detail: base.problem, next: "GitHub 이력을 확인한 뒤 다시 실행한다(기준 시각 없이는 백업을 판단하지 않는다)" };
         const { date, removed, what } = base;
-        const gone = goneAt(ctx, n, removed);
+        // 앱 ns·앱 이력이 없으면 쓴 앱이 없다. 데이터 등록 시각만 기준이다(writes-stopped와 같은 판단).
+        const noApp = !base.appHistory && !nsExists(ctx, n);
+        const gone = noApp ? null : goneAt(ctx, n, removed);
         // 앞 단계(writes-stopped)가 apply에서 기록한 뒤 다시 읽힌다. plan과 첫 읽기에서는 아직 없다.
-        if (!gone) return same("앱 워크로드 없음을 기록한 뒤, 그 뒤에 시작한 백업을 본다");
-        const since = Math.max(removed, Date.parse(gone) + GONE_SKEW_MS);
+        if (!noApp && !gone) return same("앱 워크로드 없음을 기록한 뒤, 그 뒤에 시작한 백업을 본다");
+        const since = gone ? Math.max(removed, Date.parse(gone)) : removed;
         const after = (t: unknown) => typeof t === "string" && Number.isFinite(Date.parse(t)) && Date.parse(t) > since;
-        const basis = `${what}(${date})·앱 워크로드 없음 확인(${gone}) 뒤`;
+        const basis = gone ? `${what}(${date})·앱 워크로드 없음 확인(${gone}) 뒤` : `${what}(${date}) 뒤(앱 ns·앱 이력 없음)`;
         const wait = { state: "differs" as const, action: "none" as const, next: "다음 정기 백업(PostgreSQL 03:00, Valkey 03:30 KST)이 성공한 뒤 다시 실행한다" };
         const lacks: string[] = [];
         if (data.postgres?.enabled === true) {

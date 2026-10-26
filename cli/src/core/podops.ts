@@ -97,6 +97,30 @@ export function valkeyWrite(exec: Exec, k8s: KubeRead, pollMs: number): ValkeyWr
         Bun.sleepSync(pollMs);
       }
     },
+    marker(ns, deployment, run, op) {
+      checkNs(ns);
+      checkValkey(deployment);
+      if (!/^[a-z0-9]{1,22}$/.test(run)) throw new Error("복원 실행 id 형식이 아니다");
+      const key = `homelab:restore:${run}`;
+      const words = op === "set" ? ["SET", key, run] : op === "exists" ? ["EXISTS", key] : op === "del" ? ["DEL", key] : undefined;
+      if (!words) throw new Error("표식 키 작업은 set·exists·del만");
+      const r = send(ns, deployment, authOf(ns, deployment), words);
+      if (r.errKind === "timeout") throw new ExecTimeout(`valkey-cli ${words[0]}: 시간 초과`);
+      if (r.signals?.includes("rejected")) throw new Error(`valkey-cli ${words[0]}: 인증이 거부됐다`);
+      if (r.code !== 0) throw new Error(`valkey-cli ${words[0]}: ${why(r)}`);
+      const out = r.stdout.trim();
+      // valkey-cli는 오류도 exit 0으로 stdout에 낼 수 있다(ERR·NOPERM). 기대한 답이 아니면 실패다.
+      if (op === "set") {
+        if (out !== "OK") throw new Error(`valkey-cli SET: 답이 OK가 아니다`);
+        return true;
+      }
+      if (op === "exists") {
+        if (out !== "0" && out !== "1") throw new Error("valkey-cli EXISTS: 답이 0·1이 아니다");
+        return out === "1";
+      }
+      if (out !== "0" && out !== "1") throw new Error("valkey-cli DEL: 답이 0·1이 아니다");
+      return true;
+    },
     authCheck(ns, deployment, password) {
       checkNs(ns);
       checkValkey(deployment);

@@ -608,6 +608,154 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     }
   });
 
+  // 재시작 때 일어날 일을 정한다. lose: 앱 키 수를 이 값으로, marker false면 표식 키도 사라진다(복원 데이터 전부 손실)
+  function onRestart(w: World, vk: { keys: number; markers?: Set<string> }, lose: { keys: number; marker: boolean }) {
+    const restart = w.restart.bind(w);
+    w.restart = (id: string) => {
+      restart(id);
+      vk.keys = lose.keys;
+      if (!lose.marker) vk.markers?.clear();
+    };
+  }
+  const rec = (w: World) => w.records.get(`${NS}/restore-vk`)!.data;
+
+  test("r2 P1-1: 빈 상태 승인은 그 관측에만 쓰인다. 승인 뒤 생긴 키가 재시작에서 사라지면 다시 멈춘다", async () => {
+    for (const marker of [false, true]) {
+      // 복원 직후 5개 → AOF를 켜는 사이 0개(정상 만료라 사람이 승인)
+      const { w, vk } = await toNormalPr();
+      // 서버가 복원 모드로 재시작돼 AOF부터 다시 켜야 하는 상태(앞 시험의 P1 경로와 같다)
+      delete rec(w)["ok.aof"];
+      vk.keys = 0;
+      vk.appendonly = false;
+      vk.aof = false;
+      expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("failed");
+      expect(rec(w)["suspect.empty"]).toBe("1");
+      expect((await runIn(w, cmd, "apply", { app: APP }, { "accept-empty": true })).status).toBe("waiting");
+      expect(rec(w)["ok.aof"]).toBe("1");
+      expect(rec(w)["suspect.empty"]).toBeUndefined();
+      // PR 대기 중 앱이 7개를 쓰고, 재시작에서 다 잃는다
+      vk.keys = 7;
+      mergeNormal(w);
+      onRestart(w, vk, { keys: 0, marker });
+      const r = await runIn(w, cmd, "apply", { app: APP });
+      expect([marker, r.status]).toEqual([marker, "failed"]);
+      expect(rec(w)["ok.reloaded"]).toBeUndefined();
+      expect(rec(w)["ok.cleanup"]).toBeUndefined();
+      expect(w.obj("job", NS, "restore-vk")).toBeDefined();
+    }
+  });
+
+  test("r2 P1-2: 첫 재시작 전 0개가 기준으로 남아도, 이번 재시작 직전에 본 양수가 0이 되면 멈춘다", async () => {
+    for (const marker of [false, true]) {
+      const { w, vk } = await toNormalPr();
+      mergeNormal(w);
+      // 키가 정상적으로 0개인 채 첫 재시작, rollout 실패
+      vk.keys = 0;
+      const dep = w.deploys.get(`${NS}/${APP}-valkey`)!;
+      const restart = w.restart.bind(w);
+      w.restart = (id: string) => {
+        restart(id);
+        dep.rolledOut = false;
+      };
+      expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("failed");
+      expect(rec(w)["dbsize.pre"]).toBe("0");
+      expect(rec(w)["suspect.empty"]).toBeUndefined();
+      // 앱이 7개를 쓴 뒤 두 번째 재시작에서 다 잃는다
+      w.restart = restart;
+      dep.rolledOut = true;
+      vk.keys = 7;
+      onRestart(w, vk, { keys: 0, marker });
+      const r = await runIn(w, cmd, "apply", { app: APP });
+      expect([marker, r.status]).toEqual([marker, "failed"]);
+      expect(rec(w)["ok.cleanup"]).toBeUndefined();
+    }
+  });
+
+  test("r2 6: 재시작 뒤 복원 키가 다 사라지고 앱이 새 키 하나만 써도 표식 키가 없으면 멈춘다(--accept-empty로 못 넘긴다)", async () => {
+    const { w, vk } = await toNormalPr();
+    // 복원 모드로 읽은 직후 표식 키가 들어가 있다
+    expect(vk.markers?.size).toBe(1);
+    expect(rec(w).marker).toBe("1");
+    mergeNormal(w);
+    onRestart(w, vk, { keys: 1, marker: false });
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("복원 표식 키");
+    expect(rec(w)["suspect.marker"]).toBe("1");
+    expect(rec(w)["ok.reloaded"]).toBeUndefined();
+    // 다시 쳐도, --accept-empty를 붙여도 재시작하지 않고 멈춘다
+    for (const flags of [{}, { "accept-empty": true as const }]) {
+      w.writes = [];
+      const again = await runIn(w, cmd, "apply", { app: APP }, flags);
+      expect(again.status).toBe("failed");
+      expect(w.writes).not.toContain(`rolloutRestart ${NS}/${APP}-valkey`);
+    }
+    expect((await runIn(w, cmd, "apply", { app: APP }, { abort: true })).status).toBe("failed");
+    // 누가 표식 키를 다시 넣어도 멈춤은 남는다(기록의 suspect.marker)
+    vk.markers!.add(w.records.get(`${NS}/restore-vk`)!.run);
+    w.writes = [];
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("failed");
+    expect(w.writes).not.toContain(`rolloutRestart ${NS}/${APP}-valkey`);
+  });
+
+  test("r2 P1-2: AOF를 켜기 직전에 본 양수가 켠 뒤 0이 되면(저장 기준이 승인된 0이어도) 멈춘다", async () => {
+    const w = restoreWorld();
+    const vk = w.valkeys.get(`${NS}/${APP}-valkey`)!;
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(900);
+    w.objects.delete(`deployment/${NS}/${APP}-valkey`);
+    w.obj("cronjob", NS, `${APP}-valkey-backup`)!.spec.suspend = true;
+    await runIn(w, cmd, "apply", { app: APP });
+    w.merge(901);
+    w.put("deployment", NS, `${APP}-valkey`, { metadata: { generation: 2 }, spec: { replicas: 1 }, status: { observedGeneration: 2, updatedReplicas: 1, readyReplicas: 1 } });
+    vk.appendonly = false;
+    vk.aof = false;
+    vk.keys = 5;
+    // loaded 뒤 AOF 단계 전에 멈추도록: CONFIG SET이 처음 불릴 때 키를 0으로(첫 실행은 0개 감지 → 승인)
+    let on = false;
+    let lose = 0;
+    Object.defineProperty(vk, "appendonly", {
+      get: () => on,
+      set: (v: boolean) => {
+        if (v && !on) vk.keys = lose;
+        on = v;
+      },
+    });
+    expect((await runIn(w, cmd, "apply", { app: APP })).status).toBe("failed");
+    expect(rec(w)["suspect.empty"]).toBe("1");
+    // 승인하는 실행: 켜기 직전 앱이 7개를 썼고, 켜는 사이 다 사라진다
+    on = false;
+    vk.keys = 7;
+    lose = 0;
+    const r = await runIn(w, cmd, "apply", { app: APP }, { "accept-empty": true });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("켜기 직전 7개");
+    expect(rec(w)["ok.aof"]).toBeUndefined();
+  });
+
+  test("r2 6: 재시작 전에 표식 키가 이미 없으면(복원 모드에서 재시작돼 RDB로 되돌아감) 재시작하지 않는다", async () => {
+    const { w, vk } = await toNormalPr();
+    vk.markers!.clear();
+    mergeNormal(w);
+    w.writes = [];
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("재시작 전에");
+    expect(w.writes).not.toContain(`rolloutRestart ${NS}/${APP}-valkey`);
+  });
+
+  test("r2 6: 정상 완료면 정리 단계가 표식 키를 지운다(앱 키 수에는 표식을 세지 않는다)", async () => {
+    const { w, vk } = await toNormalPr();
+    expect(rec(w).dbsize).toBe("5");
+    mergeNormal(w);
+    const r = await runIn(w, cmd, "apply", { app: APP });
+    expect(r.status).toBe("done");
+    expect(w.writes).toContain(`valkey marker del ${NS}/${APP}-valkey`);
+    expect(vk.markers?.size).toBe(0);
+    expect(rec(w)["dbsize.after"]).toBe("5");
+    expect(rec(w).marker).toBeUndefined();
+  });
+
   test("Connector P2: AOF를 켜는 사이 키가 줄어도 통과하고, 0개가 되면 멈춘다", async () => {
     for (const [keys, want] of [[3, "waiting"], [0, "failed"]] as const) {
       const w = restoreWorld();
