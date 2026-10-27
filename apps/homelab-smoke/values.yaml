@@ -4,3 +4,4 @@ kind: web
 port: 8080
 resources: { cpu: "50m", memory: "128Mi" }
 public: { host: smoke.ukyi.app }
+uses: { postgres: true }
