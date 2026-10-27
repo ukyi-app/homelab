@@ -25,7 +25,11 @@ cluster:
   # 넣는다. bucket을 빠뜨리면 VM 버킷을, credentialsSecret을 빠뜨리면 VM 자격(r2-backup)을 써서 복구가 원본을 못 읽는다.
   # 정리 PR이 recoverySource를 지운다(시나리오 13, E8 VM 격리 3번, 설계 C.6.4, restore.md 3절).
   cnpg:
-    serverName: pg-vm-20261023
+    serverName: pg-vm-20261027
+    recoverySource:
+      serverName: pg-20261023
+      bucket: homelab-backups
+      credentialsSecret: r2-source-readonly
 
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈춘다(restore.md 3절, 설계 C.6.4). 평소에는 빈 값이다.
   # apps/·data/의 values는 운영과 VM이 함께 읽어, VM 복구 PR이 거기에 suspended·running을 적으면 운영 앱도 멈춘다.
@@ -36,5 +40,5 @@ cluster:
   #   영속 Valkey(valkey.persistent: true)인 앱만. 항목을 지우면 data values 그대로다(1절 5단계).
   # 이름 오타는 조용히 아무 앱도 멈추지 않으므로 ci가 apps/<앱>·data/<앱>이 있는지 본다(tools/ci/render.ts).
   restore:
-    suspendedApps: []
-    valkey: {}
+    suspendedApps: [homelab-smoke]
+    valkey: { homelab-smoke: stopped }
