@@ -1,4 +1,4 @@
 repository: ghcr.io/ukyi-app/homelab-smoke
-digest: sha256:11a88a50c6ee1a2ac20f4b0eea5c19d4e0ae83fd66b96066b96e9850d35feb81
-revision: b229fa8b4eff1c125fe337a8574b53ee960f9c2a
+digest: sha256:534f955400ba12d611404be6de486aa84f1756c8c8a546c6465f1f7fae045368
+revision: 6ec09caa877a7c674a1387f43f1af172052ae3b1
 hold: false
