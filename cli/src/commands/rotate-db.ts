@@ -4,7 +4,8 @@
 // 만들어 역할 Secret → CNPG ALTER ROLE → 앱 연결 Secret → 앱 재시작까지 하고 PREVIOUS를 남긴다. 그래서 끝난 뒤 다시
 // 쳐도 모든 단계가 same이다. PREVIOUS는 --finish가 지우기 직전에 헬스·새 값 접속·옛 값 거부를 다시 보고 지운다
 // (끝난 회전과 처음 회전은 클러스터 상태로 구별할 수 없어, 기록을 지우는 일을 따로 둔다. REPORT-ops L2).
-// 함정: 역할 Secret 동기화부터 앱 재시작까지 옛 값으로 새 연결을 여는 파드는 실패한다(T11 약 17~20초, 이미 열린 연결은 유지, U17).
+// 함정: 역할 Secret 동기화부터 새 파드 Ready까지 옛 값으로 새 연결을 여는 파드는 실패한다. 수십 초다(T11 약 17~20초,
+// T13 S8 약 35초: 매 요청 새로 접속하는 /healthz/db 기준). 이미 열린 연결은 유지된다(U17).
 import { defineCommand, type Observation, type ReadCtx, type Step, type WriteCtx } from "../core/command";
 import { APP_NAME } from "../core/names";
 import { parseYaml } from "../core/values";
@@ -241,7 +242,7 @@ export default defineCommand({
       steps: finish ? finishSteps(n, app) : startSteps(n),
       notes: finish
         ? ["옛 값은 지우면 되돌릴 수 없다(Infisical Free에는 버전 이력이 없다). 지우기 직전에 다시 확인한다."]
-        : ["역할 Secret 동기화부터 앱 재시작까지 옛 값으로 새 연결을 여는 파드는 실패한다(T11 약 17~20초). 이미 열린 연결은 유지된다."],
+        : ["역할 Secret 동기화부터 새 파드 Ready까지 옛 값으로 새 연결을 여는 파드는 실패한다. 수십 초다(T11 약 17~20초, T13 약 35초). 이미 열린 연결은 유지된다."],
       next: finish ? undefined : (status) => (status === "done" || status === "same" ? `homelab db rotate ${app} --finish` : KEEP),
     });
   },

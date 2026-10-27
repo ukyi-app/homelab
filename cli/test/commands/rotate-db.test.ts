@@ -29,6 +29,8 @@ describe("db rotate: plan(PATH 스텁)", () => {
     expect(r.json.status).toBe("pending");
     expect(r.json.steps.map((s: { id: string }) => s.id)).toEqual(["registered", "baseline", "previous", "password", "role-secret", "role-applied", "app-secret", "app-restart"]);
     expect(r.json.next).toBe(`homelab db rotate ${APP} --apply`);
+    // T13 S8: 실패 창이 T11 17~20초보다 긴 약 35초였다. 근거와 함께 범위로 알린다.
+    expect(r.json.notes.join(" ")).toContain("수십 초다(T11 약 17~20초, T13 약 35초)");
   });
 
   test("Infisical과 역할 Secret이 다르면 아무것도 쓰기 전에 실패(exit 1)", async () => {
