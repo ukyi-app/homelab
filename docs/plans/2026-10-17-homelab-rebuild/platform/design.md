@@ -1525,7 +1525,7 @@ spec:
 
 **첫 배포 순서:** 데이터 Application(`smoke-data`)과 앱 Application(`smoke`)은 다른 Application이라 순서가 보장되지 않는다. 앱 쪽이 먼저 돌면 역할이 아직 없어 Job이 실패하고, retry backoff로 다시 시도해 수렴한다(B.5의 수렴 보장). `homelab status`는 이 상태를 "DB 준비 대기"로 보여 준다.
 
-**`migration` 설정만 바꾼 PR:** hook은 Argo CD 비교 대상에서 빠진다. 그래서 `migration`만 더하거나 바꾼 PR은 Application을 OutOfSync로 만들지 않고, 자동 sync가 없으니 Job도 그때 돌지 않는다. 마이그레이션은 다음 sync(보통 다음 배포 PR)에서 돈다. 그동안 `homelab status`는 "마이그레이션 Job 없음(다음 sync에 생긴다)"이다(T13 시나리오 2: `migration`만 더한 #930 뒤 Job은 배포 PR #931 때 돌았다).
+**`migration` 설정만 바꾼 PR:** hook은 Argo CD 비교 대상에서 빠진다. 그래서 `migration`만 더하거나 바꾼 PR은 Application을 OutOfSync로 만들지 않고, 자동 sync가 없으니 Job도 그때 돌지 않는다. 마이그레이션은 다음 sync(보통 다음 배포 PR)에서 돈다. 그동안 `homelab status`가 보이는 것은 경우마다 다르다. `migration`을 처음 더해 Job이 아직 없으면 "마이그레이션 Job 없음(다음 sync에 생긴다)"이다(T13 시나리오 2: `migration`만 더한 #930 뒤 Job은 배포 PR #931 때 돌았다). 이미 있던 `migration`을 바꿨으면 옛 Job이 남아 있다(`BeforeHookCreation`은 다음 hook을 만들 때 지운다). status는 그 옛 Job의 결과("마이그레이션 성공" 또는 "마이그레이션 Job 실패")를 보이므로, status만으로는 새 설정이 돌았는지 알 수 없다. Job `<app>-migrate`의 생성 시각(`kubectl -n app-<app> get job <app>-migrate -o jsonpath='{.metadata.creationTimestamp}'`)이 그 PR 병합 뒤인지로 본다.
 
 `migration.command`가 없는 앱은 스스로 self-migration한다(이미 그렇게 짠 앱용). 이때 replicas는 1로 둔다.
 
