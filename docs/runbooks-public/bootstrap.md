@@ -133,15 +133,17 @@ kubectl config current-context
 
 `--k3s`가 고르는 경로. 기존 config와의 비교는 주석과 빈 줄만 빼고 한다. 따옴표만 다른 값(`"0600"`은 문자열, `0600`은 8진수 정수), 빈 값 키(`cluster-domain: ""`, 항목 없는 `key:`), 목록 순서가 달라도 값이 바뀐 것으로 본다.
 
-- **같은 k3s 버전에서 tls-san만 바뀜(이 경우):** 공식 설치 스크립트를 부르지 않는다. 이전 config를 백업하고, 새 config를 임시 파일에 쓴 뒤 `mv`로 바꾸고, `systemctl restart k3s`(180초 상한) → `/readyz` → 클러스터 DNS(kube-dns Service로 `kubernetes.default`를 물어 kubernetes Service IP가 나오는지)와 Service(그 IP의 443)를 확인한다. 이 확인은 Service 조회부터 마지막 재시도까지 합쳐 60초 상한이고, 넘으면 되돌리기 명령을 내고 멈춘다. 설치 스크립트의 `KUBE-`·`flannel` 일괄 제거는 피하고, 유닛이 `KillMode=process`라 컨테이너는 계속 돈다.
-- **그 밖의 값이나 k3s 버전이 바뀜:** 지금처럼 설치 스크립트를 강제 재시작으로 부른다. 설치 스크립트는 재시작 전에 `KUBE-`·`flannel`이 든 iptables 줄을 지우고 복원한다(k3s v1.36.5+k3s1 `install.sh:1150-1163`). k3s가 다시 만들 때까지 Service·DNS 통신이 끊길 수 있다. config 값이 바뀌었으면 재시작 뒤 같은 DNS·Service 확인을 한다. **k3s 버전만 바뀌고 config 값이 같으면 설치 스크립트가 스스로 재시작하지만 `--k3s`는 이 확인을 건너뛴다.** 그때도 아래 확인을 모두 한다.
+- **같은 k3s 버전에서 tls-san만 바뀜(이 경우):** 공식 설치 스크립트를 부르지 않는다. 이전 config를 백업하고, 새 config를 임시 파일에 쓴 뒤 `mv`로 바꾸고, `systemctl restart k3s`(180초 상한) → `/readyz` → 클러스터 DNS(kube-dns Service로 `kubernetes.default`를 물어 kubernetes Service IP가 나오는지)와 Service(그 IP의 443)를 확인한다. 이 확인은 Service 조회부터 마지막 재시도까지 합쳐 60초 상한이고, 넘으면 되돌리기 명령을 내고 멈춘다. 이어서 6443 서빙 인증서(SNI 없이)에 렌더의 tls-san이 모두 나올 때까지 기다린다(60초 상한, 넘으면 되돌리기 명령을 내고 멈춘다). 재시작 직후에는 k3s가 Secret을 갱신하기 전까지 옛 인증서가 잠시 나가서, 바로 돌린 verify의 SAN 검사가 실패할 수 있었다(2026-10-27). 설치 스크립트의 `KUBE-`·`flannel` 일괄 제거는 피하고, 유닛이 `KillMode=process`라 컨테이너는 계속 돈다.
+- **그 밖의 값이나 k3s 버전이 바뀜:** 지금처럼 설치 스크립트를 부른다. config 값이 바뀌었으면 강제 재시작으로 부르고, 버전만 바뀌었으면 강제가 없어도 설치 스크립트가 바이너리를 바꾸며 스스로 재시작한다(바이너리·유닛·env 해시 비교, k3s v1.36.5+k3s1 `install.sh:1097-1099`·`1150-1153`). 설치 스크립트는 재시작 전에 `KUBE-`·`flannel`이 든 iptables 줄을 지우고 복원한다(`install.sh:1150-1163`). k3s가 다시 만들 때까지 Service·DNS 통신이 끊길 수 있다. 버전을 올린 뒤 실패하면 config 백업으로는 버전이 돌아가지 않는다. k3s의 버전 되돌리기는 바이너리와 데이터스토어를 함께 되돌린다([Rolling Back K3s](https://docs.k3s.io/upgrades/roll-back)).
+
+**이미 설치된 k3s가 다시 떴으면 경로와 상관없이 위 DNS·Service 확인을 하고, tls-san이 바뀌었으면 SAN 대기도 한다.** 다시 떴는지는 config 비교로 정하지 않고 `k3s.service`의 시작 시각(`InactiveExitTimestampMonotonic`)을 실행 앞뒤로 비교해 정한다. 버전만 바뀐 실행도 여기 걸린다. 처음 설치(기존 config나 k3s 바이너리가 없음)는 CoreDNS가 아직 없어 하지 않는다.
 
 **두 경로 모두 재시작 때 iptables가 잠깐 비는 자리가 있다.** k3s가 시작할 때 flannel(v0.28.4)이 자기 체인 `FLANNEL-POSTRTG`(nat)·`FLANNEL-FWD`(filter)를 비우고(`-F`) 곧 다시 채운다. 설치 스크립트를 건너뛰는 경로도 마찬가지다. 그 틈에 파드가 새로 여는 외부 연결은 SNAT(MASQUERADE) 없이 나가 실패할 수 있다. 이미 맺힌 연결은 conntrack에 남은 NAT로 이어진다. FORWARD 쪽 영향은 나머지 규칙에 달렸다. 틈의 길이는 재지 않았다. 노드에서 하는 DNS·Service 확인은 이 길을 지나지 않으므로 아래 새 파드 확인을 한다.
 
 0.0의 main 확인 블록 뒤에 돌린다.
 
 ```bash
-sudo host/install.sh --cluster <이름> --k3s       # 경로, tls-san 차이, 백업 경로 출력 → 재시작 → /readyz → 클러스터 DNS·Service 확인(60초 상한)
+sudo host/install.sh --cluster <이름> --k3s       # 경로, tls-san 차이, 백업 경로 출력 → 재시작 → /readyz → 클러스터 DNS·Service 확인(60초 상한) → 서빙 인증서 SAN 대기(60초 상한)
 sudo -v && host/verify.sh --cluster <이름>        # node-args·SAN ok
 openssl s_client -connect <NODE_IP>:6443 -noservername </dev/null 2>/dev/null \
   | openssl x509 -noout -ext subjectAltName       # 새 MagicDNS 이름이 있다. 출력에 tailnet 이름이 있어 공개 기록에 붙이지 않는다

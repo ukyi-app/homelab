@@ -4,7 +4,10 @@
 #   k3s_install 경로: 같은 버전에서 tls-san만 바뀌면 설치 스크립트를 부르지 않고 config만 바꿔 재시작한다.
 #   그 밖의 값이 바뀌면 설치 스크립트를 강제 재시작으로 부른다. 값이 바뀌면 이전 config를 백업한다.
 #   config_pairs: 빈 값 키를 버리지 않고, exact는 따옴표·순서를 지킨다(재시작 판단이 이것을 쓴다).
-#   check_cluster_net: NET_CHECK_MAX가 Service 조회·DNS·TCP·재시도 전체의 상한이다.
+#   재시작 뒤 확인: 이미 설치된 k3s가 다시 뜨면(config 값 변경, 버전만 변경, 설치 스크립트가 스스로 재시작) 경로와
+#   상관없이 DNS·Service를 본다. 처음 설치는 보지 않는다. NET_CHECK_MAX가 조회·DNS·TCP·재시도 전체의 상한이다.
+#   SAN 대기: tls-san을 바꾼 재시작 뒤 서빙 인증서에 새 SAN이 나올 때까지 SAN_WAIT_MAX까지 기다린다.
+#   verify.sh check_san: 렌더 tls-san이 인증서에 줄 전체로 모두 있어야 ok다.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -92,17 +95,31 @@ pairs 'exact: 따옴표와 파일 순서를 지킨다' exact $'m: "0600"\nk:\n  
   "--m${T}\"0600\""$'\n'"--k${T}\"b\""$'\n'"--k${T}a"$'\n'"--e${T}\"\""
 
 # ------------------------------------------------------------------ k3s_install 경로
-# 실제 k3s_install을 가짜 명령으로 돌린다. 경로는 모두 TMP 아래로 돌린다.
-#   curl: 설치 스크립트 대신, 불리면 로그에 "installer force=<값>"을 남기는 스크립트를 내려 준다
+# 실제 k3s_install을 가짜 명령으로 돌린다. 경로는 모두 TMP 아래로 돌린다. 실행마다 STUB_STATE에
+# k3s 버전(version), k3s.service 시작 횟수(started, systemctl show가 시작 시각 대신 낸다), 인증서 SAN을 둔다.
+#   curl: 설치 스크립트 대신 가짜를 내려 준다. 가짜는 로그에 "installer force=<값>"을 남기고, 진짜처럼
+#         바이너리를 깔고(version을 핀으로) 강제거나 바이너리가 바뀌었으면 재시작한다(k3s install.sh:1150-1153).
+#         STUB_UNIT_CHANGE면 같은 버전에서도 재시작한다(유닛·env 파일만 바뀐 경우).
 #   install: -o·-g를 빼고 진짜 install을 부른다(root가 아니어도 돌게)
-#   systemctl·dig·tailscale·k3s: 로그를 남기거나 정해 둔 값을 낸다
+#   systemctl·dig·tailscale·k3s·openssl: 로그를 남기거나 정해 둔 값을 낸다
 STUB="$TMP/stub"
 mkdir -p "$STUB"
 cat >"$STUB/curl" <<'EOF'
 #!/usr/bin/env bash
 out=""
 while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; *) shift ;; esac; done
-printf '#!/bin/sh\necho "installer force=$INSTALL_K3S_FORCE_RESTART" >>%s\n' "$STUB_LOG" >"$out"
+# 설치 스크립트는 env -i로 돈다. 쓸 경로와 값은 내려 줄 때 박는다.
+cat >"$out" <<SH
+#!/bin/sh
+echo "installer force=\$INSTALL_K3S_FORCE_RESTART" >>"$STUB_LOG"
+old="\$(cat "$STUB_STATE/version")"
+cp "$STUB_DIR/k3s" "$STUB_BIN"
+echo "\$INSTALL_K3S_VERSION" >"$STUB_STATE/version"
+if [ "\$INSTALL_K3S_FORCE_RESTART" = true ] || [ "\$old" != "\$INSTALL_K3S_VERSION" ] || [ -n "${STUB_UNIT_CHANGE:-}" ]; then
+  echo "installer restart" >>"$STUB_LOG"
+  echo \$((\$(cat "$STUB_STATE/started") + 1)) >"$STUB_STATE/started"
+fi
+SH
 EOF
 cat >"$STUB/install" <<'EOF'
 #!/usr/bin/env bash
@@ -113,6 +130,22 @@ EOF
 cat >"$STUB/systemctl" <<'EOF'
 #!/usr/bin/env bash
 echo "systemctl $*" >>"$STUB_LOG"
+case "$1" in
+  show) cat "$STUB_STATE/started" ;;
+  restart) echo $(($(cat "$STUB_STATE/started") + 1)) >"$STUB_STATE/started" ;;
+esac
+EOF
+# s_client는 아무것도 내지 않는다. x509가 지금 나가는 인증서의 SAN 줄을 낸다. 처음 STUB_SAN_STALE번은 재시작 전
+# 인증서(sans.old), 그 뒤는 새 인증서(sans)다. 읽을 때마다 로그에 "san read <번째>"를 남긴다.
+cat >"$STUB/openssl" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = x509 ] || exit 0
+n=$(($(cat "$STUB_STATE/san_reads") + 1))
+echo "$n" >"$STUB_STATE/san_reads"
+echo "san read $n" >>"$STUB_LOG"
+f=sans
+if [ "$n" -le "${STUB_SAN_STALE:-0}" ]; then f=sans.old; fi
+printf 'X509v3 Subject Alternative Name: \n    %s\n' "$(cat "$STUB_STATE/$f")"
 EOF
 cat >"$STUB/dig" <<'EOF'
 #!/usr/bin/env bash
@@ -126,7 +159,7 @@ EOF
 cat >"$STUB/k3s" <<'EOF'
 #!/usr/bin/env bash
 case " $* " in
-  *" --version "*) echo "k3s version ${STUB_K3S_VERSION} (stub)" ;;
+  *" --version "*) echo "k3s version $(cat "$STUB_STATE/version") (stub)" ;;
   *" --raw=/readyz "*) echo ok ;;
   # STUB_K3S_HANG: /readyz 뒤 API가 멈춘 경우. 상한이 없으면 20초 뒤에야 끝나 시험이 시간으로 잡는다.
   *" svc kube-dns "*) [ -z "${STUB_K3S_HANG:-}" ] || exec sleep 20; printf '10.43.0.10' ;;
@@ -135,6 +168,7 @@ case " $* " in
 esac
 EOF
 chmod +x "$STUB"/*
+STUB_PATH="$STUB:$PATH"
 
 # host/ 사본: preflight는 통과만 하고, 시험용 클러스터 값 파일을 둔다(tailnet 밖이라 MagicDNS 줄 없음).
 cp -R "$ROOT/host" "$TMP/host"
@@ -146,18 +180,35 @@ sed -e 's/^NODE_NAME=.*/NODE_NAME="t-node"/' -e 's/^NODE_IP=.*/NODE_IP="192.0.2.
 PIN="$(. "$ROOT/host/versions.env" && printf '%s' "$INSTALL_K3S_VERSION")"
 RENDER="$(. "$TMP/host/lib.sh" && load_cluster t && render_k3s_config)"
 
+# san_line <config>: 그 config의 tls-san으로 k3s가 내줄 서빙 인증서의 SAN 줄(openssl x509 -ext subjectAltName 꼴)
+san_line() {
+  local s san_text="DNS:kubernetes, DNS:kubernetes.default, DNS:localhost, IP Address:10.43.0.1, IP Address:127.0.0.1"
+  # shellcheck source=../host/lib.sh
+  while IFS= read -r s; do
+    case "$s" in
+      *[!0-9.]*) san_text+=", DNS:${s}" ;;
+      ?*) san_text+=", IP Address:${s}" ;;
+    esac
+  done <<<"$(. "$TMP/host/lib.sh" && tls_sans <<<"$1")"
+  printf '%s' "$san_text"
+}
+
 # k3s_run <이름> <기존 config 모양> [k3s 버전] [dig 답]: k3s_install을 돌리고 TMP/<이름>/에 결과를 남긴다.
-#   기존 config 모양: none(처음 설치), same, san(tls-san 하나 더), other(kubelet-arg 다름), comment(주석만 더함),
+#   기존 config 모양: none(처음 설치), same, san(tls-san 하나 더), sanadd(tls-san 하나 덜, 렌더가 이름을 더한다),
+#   other(kubelet-arg 다름), comment(주석만 더함),
 #   empty(cluster-domain: "" 더함), emptysan(empty + san), null(값 없는 cluster-domain: 더함),
 #   quote(write-kubeconfig-mode의 따옴표를 뺌. YAML 0600은 8진수 정수다)
 #   T_NET_MAX(기본 5)·T_HANG·T_DIG_SLEEP으로 NET_CHECK_MAX와 가짜 k3s·dig의 지연을 정한다. 걸린 시간은 TMP/<이름>/ms.
+#   T_SAN_MAX(기본 5)는 SAN_WAIT_MAX, T_SAN_STALE은 재시작 뒤 옛 인증서가 나가는 횟수, T_NOBIN이면 k3s 바이너리가
+#   없다(config만 남은 첫 설치), T_UNIT_CHANGE면 가짜 설치 스크립트가 같은 버전에서도 재시작한다.
 k3s_run() {
   local name="$1" shape="$2" d="$TMP/$1" t0
-  mkdir -p "$d/etc" "$d/backup" "$d/tmpd"
+  mkdir -p "$d/etc" "$d/backup" "$d/tmpd" "$d/bin" "$d/state"
   case "$shape" in
     none) ;;
     same) printf '%s' "$RENDER" >"$d/etc/config.yaml" ;;
     san) sed '/^tls-san:$/a\  - old-name.example.invalid' <<<"$RENDER" >"$d/etc/config.yaml" ;;
+    sanadd) sed '/^  - t-node$/d' <<<"$RENDER" >"$d/etc/config.yaml" ;;
     other) printf '%s' "${RENDER//memory=1Gi/memory=2Gi}" >"$d/etc/config.yaml" ;;
     comment) { printf '# 옛 주석\n'; printf '%s' "$RENDER"; } >"$d/etc/config.yaml" ;;
     empty) printf '%s\ncluster-domain: ""\n' "$RENDER" >"$d/etc/config.yaml" ;;
@@ -166,16 +217,29 @@ k3s_run() {
     quote) sed -E 's/^(write-kubeconfig-mode: )"0600"/\10600/' <<<"$RENDER" >"$d/etc/config.yaml" ;;
   esac
   [ ! -e "$d/etc/config.yaml" ] || cp "$d/etc/config.yaml" "$d/old.yaml"
+  # 처음 설치는 k3s.service가 없어 시작 시각이 0이다.
+  if [ "$shape" = none ]; then echo 0; else echo 100; fi >"$d/state/started"
+  if [ "$shape" = none ] || [ -n "${T_NOBIN:-}" ]; then
+    : >"$d/state/version"
+  else
+    cp "$STUB/k3s" "$d/bin/k3s"
+    printf '%s\n' "${3:-$PIN}" >"$d/state/version"
+  fi
+  echo 0 >"$d/state/san_reads"
+  san_line "$RENDER" >"$d/state/sans"
+  if [ -e "$d/old.yaml" ]; then san_line "$(cat "$d/old.yaml")"; else san_line "$RENDER"; fi >"$d/state/sans.old"
   : >"$d/log"
   t0="${EPOCHREALTIME//[!0-9]/}"
   (
-    export PATH="$STUB:$PATH" STUB_LOG="$d/log" STUB_K3S_VERSION="${3:-$PIN}" STUB_DIG_ANSWER="${4:-10.43.0.1}" \
-      STUB_K3S_HANG="${T_HANG:-}" STUB_DIG_SLEEP="${T_DIG_SLEEP:-}"
+    export PATH="$STUB_PATH" STUB_DIR="$STUB" STUB_LOG="$d/log" STUB_STATE="$d/state" STUB_BIN="$d/bin/k3s" \
+      STUB_DIG_ANSWER="${4:-10.43.0.1}" STUB_K3S_HANG="${T_HANG:-}" STUB_DIG_SLEEP="${T_DIG_SLEEP:-}" \
+      STUB_SAN_STALE="${T_SAN_STALE:-}" STUB_UNIT_CHANGE="${T_UNIT_CHANGE:-}"
     # shellcheck source=../host/install.sh
     . "$TMP/host/install.sh"
     load_cluster t
     K3S_ETC="$d/etc" K3S_CONFIG="$d/etc/config.yaml" K3S_SERVER_DIR="$d/server" K3S_MANIFESTS="$d/server/manifests"
-    K3S_BIN="$STUB/k3s" K3S_BACKUP_DIR="$d/backup/homelab" TMPD="$d/tmpd" NET_CHECK_MAX="${T_NET_MAX:-5}"
+    K3S_BIN="$d/bin/k3s" K3S_BACKUP_DIR="$d/backup/homelab" TMPD="$d/tmpd" NET_CHECK_MAX="${T_NET_MAX:-5}"
+    SAN_WAIT_MAX="${T_SAN_MAX:-5}"
     tcp_open() { echo "tcp $*" >>"$STUB_LOG"; }
     write_user_kubeconfig() { KUBECONFIG_OUT="$d/kubeconfig"; }
     k3s_install
@@ -211,35 +275,65 @@ expect_run() {
 }
 
 k3s_run san san
-expect_run "tls-san만 다름: 설치 스크립트 없이 config만 바꾸고 재시작, 백업, DNS·Service 확인" san \
+expect_run "tls-san만 다름: 설치 스크립트 없이 config만 바꾸고 재시작, 백업, DNS·Service 확인, SAN 확인" san \
   '!log:installer' 'log:systemctl restart k3s.service' 'log:tcp 10.43.0.1 443' '!log:rc=' \
-  backup:1 config=render 'out:경로: tls-san만 바뀌었다' 'out:이전 config 백업:' 'out:되돌리기: sudo install -m 0600'
+  backup:1 config=render 'out:경로: tls-san만 바뀌었다' 'out:이전 config 백업:' 'out:되돌리기: sudo install -m 0600' \
+  'log:san read 1' 'out:서빙 인증서에 tls-san 2개가 모두 있다'
 k3s_run other other
-expect_run "다른 값이 다름: 설치 스크립트를 강제 재시작으로, 백업, DNS·Service 확인" other \
-  'log:installer force=true' '!log:systemctl restart' 'log:tcp 10.43.0.1 443' '!log:rc=' backup:1 config=render
+expect_run "다른 값이 다름: 설치 스크립트를 강제 재시작으로, 백업, DNS·Service 확인, tls-san 그대로라 SAN 대기 없음" other \
+  'log:installer force=true' '!log:systemctl restart' 'log:tcp 10.43.0.1 443' '!log:rc=' backup:1 config=render \
+  '!log:san read'
 k3s_run ver san v1.0.0+k3s1
-expect_run "버전이 다르면 tls-san만 달라도 설치 스크립트" ver 'log:installer force=true' '!log:systemctl restart' backup:1
+expect_run "버전이 다르면 tls-san만 달라도 설치 스크립트, 재시작 뒤 확인" ver \
+  'log:installer force=true' 'log:installer restart' '!log:systemctl restart' 'log:tcp 10.43.0.1 443' '!log:rc=' backup:1
 k3s_run same same
-expect_run "바뀐 것 없음: 설치 스크립트(재시작 안 함), 백업 없음" same \
-  'log:installer force=false' '!log:systemctl restart' '!log:tcp ' backup:0
+expect_run "바뀐 것 없음: 설치 스크립트가 재시작하지 않는다, 확인·백업 없음" same \
+  'log:installer force=false' '!log:installer restart' '!log:systemctl restart' '!log:tcp ' backup:0
 k3s_run comment comment
 expect_run "주석만 다름: 재시작 안 함, 백업은 남김" comment \
-  'log:installer force=false' '!log:systemctl restart' '!log:tcp ' backup:1 config=render
+  'log:installer force=false' '!log:installer restart' '!log:systemctl restart' '!log:tcp ' backup:1 config=render
 k3s_run fresh none
-expect_run "처음 설치: 설치 스크립트, 백업·DNS 확인 없음" fresh \
-  'log:installer force=false' '!log:tcp ' backup:0 config=render
+expect_run "처음 설치: 설치 스크립트가 k3s를 띄워도 백업·DNS 확인 없음" fresh \
+  'log:installer force=false' 'log:installer restart' '!log:tcp ' '!log:san read' '!log:rc=' backup:0 config=render
 T_NET_MAX=1 k3s_run netfail san "" 10.43.0.99
 expect_run "재시작 뒤 DNS 답이 틀리면 NET_CHECK_MAX(1초) 뒤 멈추고 되돌리기를 알린다" netfail \
   'log:rc=1' 'log:systemctl restart k3s.service' 'out:1초 안에 돌아오지 않았다' 'out:되돌리기: sudo install -m 0600' \
   backup:1 maxms:3000
+
+# config 값은 같고 k3s가 다시 뜬 경우(codex 926-r1). 옛 판은 restart=false라 확인을 건너뛰었다.
+k3s_run veronly same v1.0.0+k3s1
+expect_run "버전만 다름: 설치 스크립트가 강제 없이 바이너리를 바꿔 재시작, DNS·Service 확인, 백업 없음" veronly \
+  'log:installer force=false' 'log:installer restart' 'log:tcp 10.43.0.1 443' '!log:rc=' '!log:san read' backup:0 \
+  "out:k3s 버전이 바뀐다: v1.0.0+k3s1 -> ${PIN}" 'out:재시작했다.'
+T_UNIT_CHANGE=1 k3s_run unit same
+expect_run "같은 버전인데 설치 스크립트가 스스로 재시작(유닛·env 변경): DNS·Service 확인" unit \
+  'log:installer force=false' 'log:installer restart' 'log:tcp 10.43.0.1 443' '!log:rc=' backup:0
+T_NET_MAX=1 k3s_run vernetfail same v1.0.0+k3s1 10.43.0.99
+expect_run "버전만 바꾼 재시작 뒤 DNS가 틀리면 멈추고, 백업 없음·버전 되돌리기 절차를 알린다" vernetfail \
+  'log:rc=1' 'out:1초 안에 돌아오지 않았다' 'out:config는 그대로라 백업이 없다' \
+  'out:k3s를 v1.0.0+k3s1에서' 'out:docs.k3s.io/upgrades/roll-back' '!out:처음 설치' backup:0 maxms:3000
+T_NOBIN=1 k3s_run nobin other
+expect_run "config만 있고 바이너리 없음(첫 설치가 중간에 실패): 처음 설치처럼 확인 없음" nobin \
+  'log:installer force=true' 'log:installer restart' '!log:tcp ' '!log:rc=' backup:1 config=render
+
+# tls-san을 더한 재시작 직후 옛 인증서가 잠시 나간다(2026-10-27 운영 verify FAIL). 새 SAN이 나올 때까지 기다린다.
+T_SAN_STALE=2 k3s_run sanwait sanadd
+expect_run "tls-san 더함: 옛 인증서가 두 번 나와도 세 번째에 새 SAN을 보고 끝난다" sanwait \
+  'log:systemctl restart k3s.service' 'log:tcp 10.43.0.1 443' 'log:san read 3' '!log:san read 4' '!log:rc=' \
+  'out:+ t-node' 'out:서빙 인증서에 tls-san 2개가 모두 있다'
+T_SAN_MAX=1 T_SAN_STALE=99 k3s_run santimeout sanadd
+expect_run "새 SAN이 SAN_WAIT_MAX(1초) 안에 안 나오면 멈추고 로그·되돌리기를 알린다" santimeout \
+  'log:rc=1' 'out:1초 안에 모두 나오지 않았다(없는 SAN: t-node)' 'out:journalctl -u k3s -g k3s-serving' \
+  'out:되돌리기: sudo install -m 0600' backup:1 maxms:3500
 
 # 빈 값·따옴표가 다른 기존 config(#921 리뷰). 옛 판은 이 줄을 버리거나 따옴표를 벗겨 같다고 보고 재시작하지 않았다.
 k3s_run empty empty
 expect_run "기존에 빈 값(cluster-domain: \"\") 키가 있음: 값이 바뀐 것, 설치 스크립트 강제 재시작" empty \
   'log:installer force=true' '!log:systemctl restart' 'log:tcp 10.43.0.1 443' '!log:rc=' backup:1 config=render
 k3s_run emptysan emptysan
-expect_run "빈 값 키 + tls-san 차이: tls-san만의 변경이 아니다" emptysan \
-  'log:installer force=true' '!log:systemctl restart' '!out:경로: tls-san만' '!log:rc=' backup:1 config=render
+expect_run "빈 값 키 + tls-san 차이: tls-san만의 변경이 아니다, 설치 스크립트 경로에서도 SAN 확인" emptysan \
+  'log:installer force=true' '!log:systemctl restart' '!out:경로: tls-san만' '!log:rc=' backup:1 config=render \
+  'log:san read 1'
 k3s_run null null
 expect_run "기존에 값 없는 키(cluster-domain:)가 있음: 설치 스크립트 강제 재시작" null \
   'log:installer force=true' '!log:rc=' backup:1 config=render
@@ -254,6 +348,23 @@ expect_run "재시작 뒤 Service 조회가 멈춤: 1초 상한에서 멈추고 
 T_NET_MAX=2 T_DIG_SLEEP=1 k3s_run slowdig san
 expect_run "dig가 1초씩 걸려 실패: 2초 상한 안에 멈춘다" slowdig \
   'log:rc=1' 'out:2초 안에 돌아오지 않았다' 'out:되돌리기: sudo install -m 0600' maxms:3500
+
+# ------------------------------------------------------------------ verify.sh check_san
+# vsan <설명> <인증서 SAN 줄> <있어야 할 글자>: 가짜 openssl로 check_san만 부른다. 렌더 tls-san은 t-node, 192.0.2.10.
+vsan() {
+  local d="$TMP/vsan" out
+  mkdir -p "$d"
+  printf '%s' "$2" >"$d/sans"
+  echo 0 >"$d/san_reads"
+  # shellcheck disable=SC2016  # $1·$2는 안쪽 bash가 펼친다
+  out="$(PATH="$STUB_PATH" STUB_LOG=/dev/null STUB_STATE="$d" \
+    bash -c '. "$1/host/verify.sh" && load_cluster t && K3S_CFG="$2" && check_san' _ "$TMP" "$RENDER" 2>&1)"
+  if grep -qF -- "$3" <<<"$out"; then pass "check_san ${1}"; else fail "check_san ${1}: '${3}'가 없다"$'\n'"${out}"; fi
+}
+vsan "모두 있음: ok" "$(san_line "$RENDER")" 'ok   serving cert SAN에 tls-san 2개가 모두 있다'
+vsan "짧은 이름이 FQDN 안에만 있음: 부분 일치는 통과가 아니다" \
+  'DNS:kubernetes, DNS:localhost, DNS:t-node.example.invalid, IP Address:192.0.2.10' 'FAIL serving cert에 없는 SAN: t-node.'
+vsan "SAN을 3개 미만 읽음: 형식 문제로 가른다" 'DNS:t-node, IP Address:192.0.2.10' 'SAN을 2개만 읽었다'
 
 # 0건 통과는 실패다(B.8 E7).
 [ "$CASES" -gt 0 ] || { echo "FAIL 시험이 0건이다" >&2; exit 1; }

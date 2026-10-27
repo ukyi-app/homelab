@@ -251,6 +251,7 @@ const steps: Step[] = [
   {
     name: "host k3s config",
     // install.sh --k3s가 node-name·node-ip는 설치 때 값으로 고정하고(다르면 멈춤), tls-san 차이는 출력만 하고 통과하는지.
+    // 재시작 경로 고르기, 다시 뜬 k3s의 DNS·Service 확인(버전만 바뀐 재시작 포함)과 SAN 대기, verify.sh SAN 판정도 본다.
     run: () => tool("host-k3s", ["bash", "tools/host-k3s.test.sh"]),
   },
   {

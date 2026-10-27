@@ -246,6 +246,28 @@ node_args_pairs() {
   ' | LC_ALL=C sort
 }
 
+# k3s config(stdin)의 tls-san 값을 한 줄에 하나씩 낸다.
+tls_sans() { config_pairs | awk -F '\t' '$1 == "--tls-san" { print $2 }'; }
+
+# NODE_IP:6443이 SNI 없이 내주는 서빙 인증서의 SAN(DNS·IP)을 한 줄에 하나씩 낸다. 못 받으면 빈 출력이다.
+# 인자는 접속 상한(초). verify.sh check_san과 install.sh --k3s의 재시작 뒤 대기가 같은 판정을 쓴다.
+# SNI를 보내지 않는 까닭은 verify.sh check_san 주석.
+serving_sans() {
+  local pem sans
+  pem="$(timeout "$1" openssl s_client -connect "${NODE_IP}:6443" -noservername </dev/null 2>/dev/null)" || pem=""
+  sans="$(openssl x509 -noout -ext subjectAltName <<<"$pem" 2>/dev/null)" || sans=""
+  tr ',' '\n' <<<"$sans" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | sed -n -e 's/^DNS://p' -e 's/^IP Address://p'
+}
+
+# missing_sans <tls_sans 출력> <serving_sans 출력>: 인증서에 없는 tls-san을 한 줄에 하나씩 낸다.
+# 줄 전체로 비교한다. 부분 일치는 짧은 이름이 빠져도 FQDN 항목에 걸려 통과하던 옛 자리다.
+missing_sans() {
+  local s
+  while IFS= read -r s; do
+    [ -z "$s" ] || grep -qxF -- "$s" <<<"$2" || printf '%s\n' "$s"
+  done <<<"$1"
+}
+
 # host/etc/의 모든 파일을 "원본<TAB>대상" 줄로 낸다. 확장자로 거르지 않는다. 옛 화이트리스트는
 # 목록 밖 확장자를 조용히 빠뜨렸다. 0건이면 성공으로 읽지 않고 멈춘다.
 etc_targets() {
