@@ -12,4 +12,3 @@ migration:
     - bun
     - -e
     - 'await Bun.sql`create table if not exists t13_smoke (id int primary key, at timestamptz not null default now())`; console.log("migrate ok"); process.exit(0)'
-suspended: true
