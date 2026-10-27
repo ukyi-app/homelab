@@ -55,6 +55,11 @@ done
 test -c /dev/kvm || { echo "/dev/kvm이 없다(BIOS의 VT-x를 본다)"; exit 1; }
 # VM에 16 GiB를 주고도 운영에 16 GiB 이상 남아야 한다(0절 크기 근거)
 awk '/^MemAvailable:/ { exit !($2 >= 32 * 1024 * 1024) }' /proc/meminfo || { echo "MemAvailable이 32 GiB보다 작다"; exit 1; }
+# 패키지를 깔면 libvirt가 default 네트워크의 dnsmasq를 root로 띄운다. NUC의 inotify 인스턴스 한도가 host-config 값보다
+# 낮으면 dnsmasq가 "failed to create inotify"로 뜨지 못하고 libvirtd가 virsh에 답하지 않는다(2026-10-27)
+want="$(sed -n 's/^fs\.inotify\.max_user_instances = //p' host/etc/sysctl.d/60-inotify.conf)"
+test "$(cat /proc/sys/fs/inotify/max_user_instances)" -ge "$want" \
+  || { echo "inotify 인스턴스 한도가 ${want}보다 낮다. sudo host/install.sh --cluster prod --host-config를 먼저 한다"; exit 1; }
 install -d -m 0700 "$state"
 sudo apt-get update
 # 버전은 2026-10-26 resolute 저장소의 후보로 고정한다. 저장소가 넘어가 이 버전이 없으면 설치가 실패한다.

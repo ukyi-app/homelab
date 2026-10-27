@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# host/install.sh --k3s 시험. ci가 부른다. root·k3s 없이 돈다.
+# host/install.sh --k3s와 --host-config 일부의 시험. ci가 부른다. root·k3s 없이 돈다.
 #   check_install_time_keys: node-name·node-ip는 설치 때 값으로 고정하고(다르면 멈춤), tls-san은 차이만 출력한다.
 #   k3s_install 경로: 같은 버전에서 tls-san만 바뀌면 설치 스크립트를 부르지 않고 config만 바꿔 재시작한다.
 #   그 밖의 값이 바뀌면 설치 스크립트를 강제 재시작으로 부른다. 값이 바뀌면 이전 config를 백업한다.
@@ -8,6 +8,8 @@
 #   상관없이 DNS·Service를 본다. 처음 설치는 보지 않는다. NET_CHECK_MAX가 조회·DNS·TCP·재시도 전체의 상한이다.
 #   SAN 대기: tls-san을 바꾼 재시작 뒤 서빙 인증서에 새 SAN이 나올 때까지 SAN_WAIT_MAX까지 기다린다.
 #   verify.sh check_san: 렌더 tls-san이 인증서에 줄 전체로 모두 있어야 ok다.
+#   --host-config sysctl: 60-inotify.conf 값(8192), apply_services가 그 파일만 sysctl --load로 바로 걸고 실패하면 멈춤,
+#   verify.sh check_inotify가 설치된 파일과 커널 값(한도라 이상이면 통과)을 따로 본다.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -365,6 +367,92 @@ vsan "모두 있음: ok" "$(san_line "$RENDER")" 'ok   serving cert SAN에 tls-s
 vsan "짧은 이름이 FQDN 안에만 있음: 부분 일치는 통과가 아니다" \
   'DNS:kubernetes, DNS:localhost, DNS:t-node.example.invalid, IP Address:192.0.2.10' 'FAIL serving cert에 없는 SAN: t-node.'
 vsan "SAN을 3개 미만 읽음: 형식 문제로 가른다" 'DNS:t-node, IP Address:192.0.2.10' 'SAN을 2개만 읽었다'
+
+# ------------------------------------------------------------------ --host-config sysctl(inotify 한도)
+# 2026-10-27 운영 NUC에서 기본 128 때문에 libvirt dnsmasq가 inotify를 못 만들었다. 값은 사용자 결정이다.
+INO="$TMP/host/etc/sysctl.d/60-inotify.conf"
+got="$(grep -vE '^[[:space:]]*(#|$)' "$INO" || true)"
+if [ "$got" = "fs.inotify.max_user_instances = 8192" ]; then
+  pass "60-inotify.conf: 설정 줄은 fs.inotify.max_user_instances = 8192 하나"
+else
+  fail "60-inotify.conf 설정 줄이 다르다:"$'\n'"${got}"
+fi
+if grep -qxF -- "${INO}"$'\t'"/etc/sysctl.d/60-inotify.conf" <<<"$(. "$TMP/host/lib.sh" && load_cluster t && etc_targets)"; then
+  pass "etc_targets가 60-inotify.conf를 /etc/sysctl.d/로 복사한다"
+else
+  fail "etc_targets에 /etc/sysctl.d/60-inotify.conf가 없다"
+fi
+
+cat >"$STUB/sysctl" <<'EOF'
+#!/usr/bin/env bash
+echo "sysctl $*" >>"$STUB_LOG"
+if [ -n "${STUB_SYSCTL_FAIL:-}" ]; then echo 'sysctl: permission denied on key "fs.inotify.max_user_instances"' >&2; exit 1; fi
+echo "fs.inotify.max_user_instances = 8192"
+EOF
+cat >"$STUB/systemd-tmpfiles" <<'EOF'
+#!/usr/bin/env bash
+echo "systemd-tmpfiles $*" >>"$STUB_LOG"
+EOF
+chmod +x "$STUB/sysctl" "$STUB/systemd-tmpfiles"
+
+# svc_run <이름> [sysctl 실패]: install.sh의 apply_services([6/7])를 host/etc 전체 대상으로 가짜 명령에 돌린다.
+# 따로 띄운 bash로 돈다. ( ... ) || 안에서는 set -e가 꺼져 실패한 sysctl 뒤로도 계속 가므로 실제 실행과 달라진다.
+svc_run() {
+  local d="$TMP/$1"
+  mkdir -p "$d/state"
+  echo 0 >"$d/state/started"
+  : >"$d/log"
+  # shellcheck disable=SC2016  # $1은 안쪽 bash가 펼친다
+  PATH="$STUB_PATH" STUB_LOG="$d/log" STUB_STATE="$d/state" STUB_SYSCTL_FAIL="${2:-}" \
+    bash -c '. "$1/host/install.sh"; load_cluster t; TARGETS="$(etc_targets)"; apply_services' _ "$TMP" \
+    >"$d/out" 2>&1 || echo "rc=$?" >>"$d/log"
+}
+svc_run svc
+expect_run "서비스 반영: sysctl.d 파일만 sysctl --load로 바로 걸고 건 값을 출력한다(재부팅 없이)" svc \
+  'log:sysctl --load=/etc/sysctl.d/60-inotify.conf' 'out:    fs.inotify.max_user_instances = 8192' \
+  'log:systemd-tmpfiles --create /etc/tmpfiles.d/10-k3s-node.conf' 'log:systemctl restart systemd-journald' \
+  '!log:--system' '!log:systemd-sysctl' '!log:rc='
+svc_run svcfail 1
+expect_run "sysctl이 실패하면 서비스를 다시 시작하기 전에 멈춘다" svcfail 'log:rc=1' '!log:systemctl ' 'out:permission denied'
+
+# vino <설명> <Git 파일> <설치된 파일|-> <커널 값|-> <있어야 할 글자|!없어야 할 글자...>: verify.sh check_inotify만 부른다.
+vino() {
+  local desc="$1" d="$TMP/vino" out t bad=""
+  rm -rf "$d"
+  mkdir -p "$d"
+  [ "$3" = - ] || cp "$3" "$d/dest"
+  [ "$4" = - ] || printf '%s\n' "$4" >"$d/proc"
+  # shellcheck disable=SC2016  # $1~$4는 안쪽 bash가 펼친다
+  out="$(bash -c '. "$1/host/verify.sh" && load_cluster t && INOTIFY_SRC="$2" INOTIFY_DEST="$3" INOTIFY_PROC="$4" && check_inotify' \
+    _ "$TMP" "$2" "$d/dest" "$d/proc" 2>&1)" || true
+  shift 4
+  for t in "$@"; do
+    case "$t" in
+      '!'*) if grep -qF -- "${t#!}" <<<"$out"; then bad+=" '${t#!}'가 있다"; fi ;;
+      *) grep -qF -- "$t" <<<"$out" || bad+=" '${t}'가 없다" ;;
+    esac
+  done
+  if [ -z "$bad" ]; then pass "check_inotify ${desc}"; else fail "check_inotify ${desc}:${bad}"$'\n'"${out}"; fi
+}
+sed 's/= 8192$/= 128/' "$INO" >"$TMP/ino-128.conf"
+{ cat "$INO"; echo "fs.inotify.max_user_instances = 16384"; } >"$TMP/ino-dup.conf"
+vino "파일이 Git과 같고 커널 8192: ok" "$INO" "$INO" 8192 'Git과 같다' 'ok   fs.inotify.max_user_instances 8192(8192 이상)' '!FAIL'
+vino "커널 값이 더 크면 한도라 ok" "$INO" "$INO" 65536 'ok   fs.inotify.max_user_instances 65536(8192 이상)' '!FAIL'
+vino "커널 128(기본): FAIL, host-config 안내" "$INO" "$INO" 128 \
+  'FAIL fs.inotify.max_user_instances가 128이다(기대 8192 이상)' '--host-config'
+vino "파일 없이 커널만 8192(sysctl -w): 재부팅하면 돌아가므로 FAIL" "$INO" - 8192 \
+  'FAIL' '재부팅하면 커널 값이 돌아간다' 'ok   fs.inotify.max_user_instances 8192'
+vino "설치된 파일이 Git과 다름: FAIL" "$INO" "$TMP/ino-128.conf" 8192 '없거나 Git과 다르다'
+vino "커널 값을 못 읽음: FAIL" "$INO" "$INO" - 'FAIL fs.inotify.max_user_instances가 없음이다'
+vino "Git 파일에 키가 둘: 기대 값 없이 비교하지 않는다" "$TMP/ino-dup.conf" "$TMP/ino-dup.conf" 8192 \
+  '값 하나를 읽지 못했다' '!ok'
+# 출력을 다 받은 뒤 grep에 넘긴다. 파이프로 이으면 grep -q가 먼저 끝날 때 pipefail이 실패로 읽는다.
+# shellcheck disable=SC2016
+if grep -qw check_inotify <<<"$(bash -c '. "$1/host/verify.sh" && declare -f main' _ "$TMP")"; then
+  pass "verify main이 check_inotify를 부른다"
+else
+  fail "verify main에 check_inotify가 없다"
+fi
 
 # 0건 통과는 실패다(B.8 E7).
 [ "$CASES" -gt 0 ] || { echo "FAIL 시험이 0건이다" >&2; exit 1; }

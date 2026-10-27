@@ -5,7 +5,7 @@
 # 사용: host/verify.sh --cluster <이름> [--identity]
 #   기본        정체성, 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 k3s-config.yaml,
 #               serving cert SAN, local-retain StorageClass, 파드 egress(유닛, 규칙 파일, 대역, 커널 표),
-#               kubeconfig 권한.
+#               inotify 인스턴스 한도(설치된 sysctl 파일, 커널 값), kubeconfig 권한.
 #   --identity  정체성만 본다. 파괴 명령(삭제, 복구, 제거) 앞에서 대상 클러스터를 확인할 때 쓴다.
 #
 # 종료 코드: 0 통과, 1 실패, 2 실패는 없지만 커널 표를 못 읽어 미검증(sudo 자격이 없다).
@@ -24,6 +24,10 @@ set -euo pipefail
 
 FAILS=0
 UNVERIFIED=0
+# check_inotify가 보는 곳. tools/host-k3s.test.sh가 경로를 바꾼다.
+INOTIFY_SRC="$HOST_DIR/etc/sysctl.d/60-inotify.conf"
+INOTIFY_DEST=/etc/sysctl.d/60-inotify.conf
+INOTIFY_PROC=/proc/sys/fs/inotify/max_user_instances
 ok() { printf 'ok   %s\n' "$(mask "$*")"; }
 bad() {
   printf 'FAIL %s\n' "$(mask "$*")" >&2
@@ -202,6 +206,30 @@ check_egress() {
   esac
 }
 
+# inotify 인스턴스 한도(install.sh --host-config). 설치된 파일(재부팅 뒤에도 systemd-sysctl이 건다)과
+# 지금 커널 값을 따로 본다. 커널 값만 보면 손으로 sysctl -w한 값이 재부팅에 사라지는 것을 놓친다.
+# 기대 값은 Git 파일에서 읽는다. 한도라 더 큰 값은 통과다.
+check_inotify() {
+  local want live
+  want="$(sed -nE 's/^fs\.inotify\.max_user_instances[[:space:]]*=[[:space:]]*([0-9]+)[[:space:]]*$/\1/p' "$INOTIFY_SRC")"
+  # 줄이 0개나 둘 이상이면 숫자 하나가 아니다. 빈 기대 값으로 비교하면 무엇이든 통과한다.
+  if ! [[ "$want" =~ ^[0-9]+$ ]]; then
+    bad "${INOTIFY_SRC}에서 fs.inotify.max_user_instances 값 하나를 읽지 못했다"
+    return
+  fi
+  if cmp -s "$INOTIFY_SRC" "$INOTIFY_DEST"; then
+    ok "${INOTIFY_DEST}가 Git과 같다"
+  else
+    bad "${INOTIFY_DEST}가 없거나 Git과 다르다. 재부팅하면 커널 값이 돌아간다. sudo host/install.sh --cluster ${CLUSTER} --host-config"
+  fi
+  live="$(cat "$INOTIFY_PROC" 2>/dev/null)" || live=""
+  if [[ "$live" =~ ^[0-9]+$ ]] && [ "$live" -ge "$want" ]; then
+    ok "fs.inotify.max_user_instances ${live}(${want} 이상)"
+  else
+    bad "fs.inotify.max_user_instances가 ${live:-없음}이다(기대 ${want} 이상). root 데몬(libvirt dnsmasq 등)이 inotify를 만들지 못한다. sudo host/install.sh --cluster ${CLUSTER} --host-config"
+  fi
+}
+
 # kubeconfig에는 cluster-admin 자격이 있다.
 check_kubeconfig_mode() {
   local m
@@ -247,6 +275,7 @@ main() {
   check_san
   check_storageclass
   check_egress
+  check_inotify
   check_kubeconfig_mode
   finish
 }
@@ -263,5 +292,5 @@ finish() {
   log "verify 통과"
 }
 
-# tools/host-egress.test.sh(check_egress·finish)와 tools/host-k3s.test.sh(check_san)가 source한다. 그때는 main을 돌리지 않는다.
+# tools/host-egress.test.sh(check_egress·finish)와 tools/host-k3s.test.sh(check_san·check_inotify)가 source한다. 그때는 main을 돌리지 않는다.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

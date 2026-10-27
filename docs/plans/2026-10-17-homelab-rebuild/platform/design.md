@@ -695,7 +695,7 @@ homelab/                          (목표 예시)
 │   ├── versions.env              클러스터 공통: k3s 버전, 타임존, 노드 업스트림 DNS
 │   ├── clusters/prod.env  vm.env 클러스터별: 노드 이름·IP, 인터페이스, TLS SAN(E8 VM 격리)
 │   ├── k3s-config.yaml           /etc/rancher/k3s/config.yaml 원본(클러스터별 값은 자리표시, install.sh가 렌더)
-│   ├── etc/                      drop-in (resolved, networkd, sshd, journald, tmpfiles)
+│   ├── etc/                      drop-in (resolved, networkd, sshd, journald, tmpfiles, sysctl)
 │   └── install.sh  preflight.sh  verify.sh
 ├── platform/                     플랫폼 구성 요소. 사람이 편집, Argo CD가 적용
 │   ├── argocd/                   Kustomize: 공식 install.yaml(v3.5.5) + patch
