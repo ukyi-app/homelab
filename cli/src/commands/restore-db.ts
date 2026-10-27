@@ -320,7 +320,7 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         // 시각 필드가 없고(lastArchivedWALTime은 없다), pg_stat_archiver를 읽는 어댑터도 아직 없다(REPORT-ops 14절). 그래서
         // 마지막 base backup 뒤의 시각은 확인할 수 없어 멈춘다. 그때는 온디맨드 base backup을 하나 만든 뒤 다시 한다.
         // (경과 시간 기준 "지금 − 5분"은 아카이브가 밀리면 근거가 되지 않아 쓰지 않는다, #886 r1 P1-3.)
-        if (!ends.some((t) => t >= to.ms)) return bad(`${to.t1} 뒤에 끝난 completed base backup이 없어 WAL이 그 시각까지 있는지 확인할 수 없다`, "온디맨드 base backup(restore.md 3절 4단계의 Backup)을 만들고 completed가 된 뒤 다시 실행한다");
+        if (!ends.some((t) => t >= to.ms)) return bad(`${to.t1} 뒤에 끝난 completed base backup이 없어 WAL이 그 시각까지 있는지 확인할 수 없다`, "온디맨드 base backup(restore.md 2절 앞의 Backup)을 만들고 completed가 된 뒤 다시 실행한다");
         return same(`${to.t1}: 앞뒤로 completed base backup, 복구 가능 범위 안`);
       },
     },

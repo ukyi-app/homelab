@@ -463,6 +463,20 @@ CLI `homelab cache restore <앱>`은 이 절의 검증 키를 복원 표식 키�
 
 CNPG 복원은 제자리가 아니라 항상 새 클러스터다. 그래서 임시 클러스터를 시각 T1로 PITR하고, 그 DB 하나만 덤프해 공유 Cluster `pg`에 다시 넣는다.
 
+**T1 뒤에 끝난 completed base backup이 있어야 한다.** 그 백업이 WAL이 T1까지 R2에 있다는 근거다(`pg_backup_stop`은 끝 WAL이 아카이브될 때까지 기다린다). CNPG 1.30.1 Cluster에는 마지막 아카이브 시각이 없어 다른 근거가 없고, 그래서 `homelab db restore`는 이 백업이 없으면 멈춘다(T13 시나리오 10). T1 뒤 정기 백업(매일 03:00 KST)이 아직 없으면 온디맨드 Backup CR을 하나 만들고 completed를 기다린 뒤 시작한다.
+
+```bash
+B=ondemand-$(date -u +%Y%m%d%H%M%S)   # 이름이 겹치지 않게 시각을 붙인다
+kubectl -n database create -f - <<EOF
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata: { name: $B, namespace: database }
+spec: { cluster: { name: pg }, method: plugin, pluginConfiguration: { name: barman-cloud.cloudnative-pg.io } }
+EOF
+# completed가 될 때까지 다시 본다. STOPPED는 UTC라 T1(+09)과 견줄 때 9시간을 뺀다
+kubectl -n database get backups -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,STOPPED:.status.stoppedAt
+```
+
 복원 객체 이름에는 앱 이름을 넣지 않는다(`pg-restore-<실행 id>`, `restore-<실행 id>-r2`·`-db`, `backup-<실행 id>-<시도 id>`, 1절의 `restore-vk`, 잠금 ConfigMap `restore-pg`, 모두 35자 이하). CNPG는 인스턴스 이름 `<클러스터>-1`을 파드 hostname으로 쓰는데, 앱 이름(최대 53자)을 넣으면 63자를 넘어 임시 클러스터가 뜨지 않는다.
 
 **한 앱 DB에는 복원 하나만.** 두 실행이 같은 앱을 복원하면 임시 Cluster·Job 이름과 `$W`가 달라 둘 다 자기 확인을 통과하고, 한쪽의 `DROP DATABASE ... WITH (FORCE)`가 다른 쪽의 복원 연결을 끊거나 막 복원한 DB를 지운다. 그래서 준비 블록 바로 뒤에 그 앱 ns에 고정 이름 ConfigMap `restore-pg`(값 `run=<실행 id>`)를 잠금으로 만든다. 1절 `restore-vk`처럼 같은 이름은 하나만 만들어져, 동시에 시작해도 한 실행만 잡는다. 그 뒤의 모든 블록(`step`)과 재개 블록이 잠금이 지금 이 실행의 것인지 클러스터에서 다시 본다(`mine`). 잠금은 재개(5단계)까지 쥐고 6단계에서 라벨로 지운다. 다른 실행의 잠금이 남아 있으면 멈춘다. 그 실행이 끝났는지(또는 버렸는지) 사람이 보고, 그 실행의 6단계로 지운 뒤 다시 한다. 잠금이 없던 문서로 시작한 실행은 앱 ns의 끝나지 않은 `restore-<실행 id>-db` Job으로 보고 멈춘다.
@@ -571,7 +585,7 @@ srcok() { local c="cluster/pg-restore-$RUN" v k want
   fit "$SIZE" '^[0-9]+(Mi|Gi|Ti)$'
   fit "$BUCKET" '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'
   fit "$PRIMARY" '^pg-[0-9]+$'
-  kubectl -n database get backups      # T1 앞에 completed base backup이 있는지 눈으로 본다
+  kubectl -n database get backups      # T1 앞과 뒤(위 온디맨드)에 completed base backup이 있는지 눈으로 본다
   # 모든 확인이 끝난 뒤에만 파일을 바꾼다(실패하면 옛 값도 새 값도 남지 않게 먼저 지운다)
   rm -f "$W/vars.env"
   printf "T1='%s'\nSRV='%s'\nIMG='%s'\nSIZE='%s'\nBUCKET='%s'\nPRIMARY='%s'\n" "$T1" "$SRV" "$IMG" "$SIZE" "$BUCKET" "$PRIMARY" > "$W/vars.env.new"
