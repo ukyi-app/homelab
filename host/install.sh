@@ -145,6 +145,25 @@ remove_fstab_swap() {
   echo "    fstab에서 swap 항목을 지웠다(백업 ${bak})"
 }
 
+# host_config의 [6/7]. tools/host-k3s.test.sh가 가짜 명령으로 부른다.
+apply_services() {
+  local dest
+  # 재부팅을 요구하면 "적용했다"가 거짓이 된다. 지금 상태를 만든다.
+  while IFS=$'\t' read -r _ dest; do
+    case "$dest" in
+      /etc/tmpfiles.d/*) systemd-tmpfiles --create "$dest" ;;
+      # 이 파일만 건다. systemd-sysctl.service를 다시 시작하면 배포판 것까지 모든 sysctl.d를 다시 건다.
+      # 출력(키 = 값)이 지금 건 값이다.
+      /etc/sysctl.d/*) sysctl --load="$dest" | sed 's/^/    /' ;;
+    esac
+  done <<<"$TARGETS"
+  systemctl daemon-reload
+  systemctl restart systemd-resolved
+  systemctl restart systemd-journald
+  # 소켓 활성화(ssh.socket)면 연결마다 설정을 새로 읽으므로 이 줄은 아무 일도 하지 않는다.
+  systemctl try-reload-or-restart ssh.service
+}
+
 host_config() {
   local src dest net_changed=0 i
   local -a sshd_new=()
@@ -159,7 +178,7 @@ host_config() {
   else
     assert_not_in_tailnet
   fi
-  require_cmds systemctl networkctl timedatectl systemd-tmpfiles sshd swapoff
+  require_cmds systemctl networkctl timedatectl systemd-tmpfiles sysctl sshd swapoff
 
   log "[1/7] host/etc 파일 복사(0644 root:root)"
   while IFS=$'\t' read -r src dest; do
@@ -212,15 +231,7 @@ host_config() {
   ln -sfn ../run/systemd/resolve/resolv.conf /etc/resolv.conf
 
   log "[6/7] 서비스 반영"
-  # 재부팅을 요구하면 "적용했다"가 거짓이 된다. 지금 상태를 만든다.
-  while IFS=$'\t' read -r src dest; do
-    case "$dest" in /etc/tmpfiles.d/*) systemd-tmpfiles --create "$dest" ;; esac
-  done <<<"$TARGETS"
-  systemctl daemon-reload
-  systemctl restart systemd-resolved
-  systemctl restart systemd-journald
-  # 소켓 활성화(ssh.socket)면 연결마다 설정을 새로 읽으므로 이 줄은 아무 일도 하지 않는다.
-  systemctl try-reload-or-restart ssh.service
+  apply_services
 
   log "[7/7] networkd drop-in 적용(${NODE_IFACE})"
   # systemd 259의 reload는 내용이 바뀐 .network(drop-in 포함)를 쓰는 링크를 스스로 재구성한다.
@@ -681,5 +692,5 @@ main() {
   esac
 }
 
-# tools/host-k3s.test.sh가 check_install_time_keys·k3s_install을 쓰려고 source한다. 그때는 main을 돌리지 않는다.
+# tools/host-k3s.test.sh가 check_install_time_keys·k3s_install·apply_services를 쓰려고 source한다. 그때는 main을 돌리지 않는다.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
