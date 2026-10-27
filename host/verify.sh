@@ -101,31 +101,29 @@ check_node_args() {
 
 # 실제로 6443에서 내주는 인증서의 SAN을 본다. tls-san-security(기본 true)를 끄면 SNI로 보낸 이름을 k3s가
 # 인증서에 더해(동적 SAN) 검사가 스스로 통과를 만들 수 있다. 켜져 있어도 기대지 않고 SNI 없이 접속한다.
-# 렌더 SAN이 인증서에 모두 있는지만 본다. 인증서에는 config에서 뺀 옛 이름이 남을 수 있다.
-# 부분 일치로 보지 않는다. 짧은 이름이 빠져도 FQDN 항목에 걸려 통과하던 옛 자리다.
+# 렌더 SAN이 인증서에 모두 있는지만 본다(lib.sh missing_sans). 인증서에는 config에서 뺀 옛 이름이 남을 수 있다.
+# 한 번만 본다. tls-san을 바꾼 재시작 직후에는 옛 인증서가 잠시 나가는데(install.sh wait_serving_sans 주석),
+# install.sh --k3s가 새 SAN이 나올 때까지 기다린 뒤 끝난다. 그 뒤로는 새 인증서가 dynamic-cert.json에 있어
+# 다음 시작부터 바로 나간다. 여기서 다시 보면 진짜 누락의 FAIL만 늦어진다.
 check_san() {
-  local pem sans tokens want s missing="" n
-  pem="$(timeout 10 openssl s_client -connect "${NODE_IP}:6443" -noservername </dev/null 2>/dev/null)" || pem=""
-  sans="$(openssl x509 -noout -ext subjectAltName <<<"$pem" 2>/dev/null)" || sans=""
-  tokens="$(tr ',' '\n' <<<"$sans" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | sed -n -e 's/^DNS://p' -e 's/^IP Address://p')"
+  local tokens want missing n
+  tokens="$(serving_sans 10)"
   n="$(grep -c . <<<"$tokens" || true)"
   # 해석이 깨져 0개가 되면 모든 SAN이 "없음"으로 나오는 대신 형식 문제로 갈라 낸다.
   if [ "$n" -lt 3 ]; then
     bad "${NODE_IP}:6443 인증서의 SAN을 ${n}개만 읽었다. 접속이나 openssl 출력 형식을 본다"
     return
   fi
-  want="$(config_pairs <<<"$K3S_CFG" | awk -F '\t' '$1 == "--tls-san" { print $2 }')"
+  want="$(tls_sans <<<"$K3S_CFG")"
   if [ -z "$want" ]; then
     bad "host/k3s-config.yaml 렌더 결과에 tls-san이 없다"
     return
   fi
-  while IFS= read -r s; do
-    grep -qxF -- "$s" <<<"$tokens" || missing+=" ${s}"
-  done <<<"$want"
+  missing="$(missing_sans "$want" "$tokens")"
   if [ -z "$missing" ]; then
     ok "serving cert SAN에 tls-san $(grep -c . <<<"$want")개가 모두 있다"
   else
-    bad "serving cert에 없는 SAN:${missing}. config의 tls-san이 바뀌었으면 sudo host/install.sh --cluster ${CLUSTER} --k3s로 config를 쓰고 k3s를 재시작한다"
+    bad "serving cert에 없는 SAN: ${missing//$'\n'/ }. config의 tls-san이 바뀌었으면 sudo host/install.sh --cluster ${CLUSTER} --k3s로 config를 쓰고 k3s를 재시작한다"
   fi
 }
 
@@ -265,5 +263,5 @@ finish() {
   log "verify 통과"
 }
 
-# tools/host-egress.test.sh가 check_egress·finish만 쓰려고 source한다. 그때는 main을 돌리지 않는다.
+# tools/host-egress.test.sh(check_egress·finish)와 tools/host-k3s.test.sh(check_san)가 source한다. 그때는 main을 돌리지 않는다.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

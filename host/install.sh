@@ -33,6 +33,11 @@ K3S_BACKUP=""
 NET_WAIT_MAX=30
 RESTART_WAIT_MAX=180
 NET_CHECK_MAX=60
+SAN_WAIT_MAX=60
+# --k3s 실행 전 상태: 이미 설치된 k3s(config와 바이너리)인지, 그 버전이 핀과 다르면 그 버전, tls-san이 바뀌는지.
+K3S_INSTALLED=false
+K3S_OLD_VERSION=""
+TLS_SAN_CHANGED=false
 TMPD=""
 TARGETS=""
 NET_DROPINS=""
@@ -324,8 +329,9 @@ egress_off() {
 # nodeAffinity가 깨질 수 있다. 그때는 멈추고 사람이 k3s-uninstall.sh부터 다시 한다.
 #
 # tls-san은 바꿀 수 있다. 바뀌면 config가 달라져 아래에서 k3s를 재시작하고, k3s v1.36.5+k3s1의 dynamiclistener
-# (e4a1908ede0d)가 재시작 뒤 첫 연결에서 인증서에 없는 설정 SAN을 기존 SAN에 더해 다시 서명한다
+# (e4a1908ede0d)가 재시작 뒤 리스너의 첫 Accept에서 인증서에 없는 설정 SAN을 기존 SAN에 더해 다시 서명한다
 # (k3s pkg/cluster/https.go:52-80, dynamiclistener listener.go:288-298, factory/gen.go:195-241).
+# 새 인증서가 실제로 나가기까지는 조금 늦다(wait_serving_sans).
 # 기존 SAN은 지우지 않는다(k3s가 FilterExisting을 켜지 않는다, gen.go:65-120). 그래서 config에서 뺀 이름도
 # 인증서에 남는다. 지우려면 k3s-serving Secret과 dynamic-cert.json을 함께 지우고 재시작해야 한다.
 check_install_time_keys() {
@@ -342,6 +348,7 @@ check_install_time_keys() {
   added="$(comm -13 <(printf '%s\n' "$old" | sed '/^$/d' | LC_ALL=C sort -u) <(printf '%s\n' "$new" | sed '/^$/d' | LC_ALL=C sort -u))"
   removed="$(comm -23 <(printf '%s\n' "$old" | sed '/^$/d' | LC_ALL=C sort -u) <(printf '%s\n' "$new" | sed '/^$/d' | LC_ALL=C sort -u))"
   [ -n "$added" ] || [ -n "$removed" ] || return 0
+  TLS_SAN_CHANGED=true
   echo "    tls-san이 바뀐다. config가 달라져 k3s를 재시작하고, 재시작 뒤 더한 이름이 서빙 인증서에 들어간다:"
   # 옛 MagicDNS 전체 이름은 mask가 모른다(지금 이름만 안다). tailnet 이름이 출력에 남지 않게 따로 가린다.
   { sed -e '/^$/d' -e 's/^/      + /' <<<"$added"; sed -e '/^$/d' -e 's/^/      - /' <<<"$removed"; } \
@@ -404,8 +411,15 @@ san_only_change() {
 rollback_hint() {
   if [ -n "$K3S_BACKUP" ]; then
     printf 'sudo install -m 0600 -o root -g root %s %s && sudo systemctl restart k3s' "$K3S_BACKUP" "$K3S_CONFIG"
+  elif [ "$K3S_INSTALLED" = true ]; then
+    printf 'config는 그대로라 백업이 없다'
   else
     printf '이전 config 백업 없음(처음 설치)'
+  fi
+  # 바이너리만 옛 버전으로 다시 까는 것은 되돌리기가 아니다. k3s 공식 절차는 데이터스토어 복원을 함께 한다.
+  if [ -n "$K3S_OLD_VERSION" ]; then
+    printf '. k3s를 %s에서 %s로 바꿨다. 버전 되돌리기는 바이너리와 데이터스토어를 함께 되돌린다(docs.k3s.io/upgrades/roll-back)' \
+      "$K3S_OLD_VERSION" "$INSTALL_K3S_VERSION"
   fi
 }
 
@@ -471,8 +485,36 @@ check_cluster_net() {
   echo "    클러스터 DNS ${dns} -> kubernetes.default = ${api}, ${api}:443 연결($((($(now_ms) - start) / 1000))초)"
 }
 
+# k3s.service가 마지막으로 inactive를 벗어난 시각(부팅 뒤 마이크로초, 유닛이 없으면 0). 시작·재시작마다 바뀐다.
+# 앞뒤로 읽어 이번 실행에서 k3s가 다시 떴는지 가른다(k3s_install 주석).
+k3s_started_at() { systemctl show -P InactiveExitTimestampMonotonic k3s.service; }
+
+# tls-san을 바꾼 재시작 뒤 6443 서빙 인증서에 렌더의 tls-san이 모두 나올 때까지 기다린다(verify.sh check_san과 같은 판정).
+# dynamiclistener는 시작할 때 SAN을 더한 새 인증서를 만들지만 저장은 비동기 큐를 거친다. k3s Secret 컨트롤러가
+# 뜨기 전에는 새 인증서가 옛 ResourceVersion을 단 채 캐시에 들어가, 먼저 읽힌 옛 인증서가 계속 나간다. Secret을
+# 갱신해 버전이 바뀐 뒤의 새 연결부터 새 인증서를 받는다(dynamiclistener e4a1908ede0d listener.go:398-493,
+# storage/kubernetes/controller.go:49-85·244-253). /readyz는 그 전에 통과할 수 있다. 2026-10-27 운영 적용에서
+# install 직후 verify의 SAN 검사가 FAIL, 다시 돌린 verify는 ok였다.
+# SAN_WAIT_MAX: /readyz 뒤 남은 일은 Secret 컨트롤러 초기화(1초 간격으로 기다림)와 Secret 갱신 API 호출 몇 번이라
+# 몇 초다(소스로 셈, 실측 없음). 60초는 NET_CHECK_MAX와 같은 여유이고, 넘으면 갱신이 막힌 것(k3s 로그
+# "Failed to update Secret kube-system/k3s-serving")으로 보고 멈춘다.
+wait_serving_sans() {
+  local want have="" missing="" start end left
+  want="$(tls_sans <<<"$1")"
+  start="$(now_ms)"
+  end=$((start + SAN_WAIT_MAX * 1000))
+  until left="$(left_s "$end" 5)" && have="$(serving_sans "$left")" \
+    && missing="$(missing_sans "$want" "$have")" && [ -z "$missing" ]; do
+    if [ -z "$have" ]; then missing="(인증서를 읽지 못했다)"; fi
+    left="$(left_s "$end" 1)" \
+      || die "$(mask "6443 서빙 인증서에 tls-san이 ${SAN_WAIT_MAX}초 안에 모두 나오지 않았다(없는 SAN: ${missing//$'\n'/ }). journalctl -u k3s -g k3s-serving으로 인증서 갱신 로그를 본다. 되돌리기: $(rollback_hint)")"
+    sleep "$left"
+  done
+  echo "    서빙 인증서에 tls-san $(grep -c . <<<"$want")개가 모두 있다($((($(now_ms) - start) / 1000))초)"
+}
+
 k3s_install() {
-  local cfg pairs exact url installer f ver i restart=false path=installer
+  local cfg pairs exact url installer f ver i restart=false restarted=false path=installer start_before start_after
 
   log "확인"
   # 2번이 끝났는지 다시 본다. 실패하면 3번으로 가지 않는다(C.3.2).
@@ -482,7 +524,7 @@ k3s_install() {
   else
     assert_not_in_tailnet
   fi
-  require_cmds curl install sh head mv date timeout
+  require_cmds curl install sh head mv date timeout systemctl
   cfg="$(render_k3s_config)"
   pairs="$(config_pairs <<<"$cfg")"
   if grep -q '^BAD' <<<"$pairs"; then
@@ -494,13 +536,28 @@ k3s_install() {
   echo
   printf '%s' "$cfg" >"$TMPD/config.yaml"
 
+  # 이미 설치된 k3s가 이번에 다시 뜨면 재시작 뒤 확인을 한다. 다시 뜰지는 설치 스크립트도 정한다. 강제가 아니어도
+  # 바이너리·유닛·env 해시가 바뀌면 재시작해서(k3s v1.36.5+k3s1 install.sh:1097-1099·1150-1153), 버전만 올린
+  # 실행은 config 비교로 알 수 없다. 그래서 k3s_started_at을 앞뒤로 읽고, 그 확인에 쓸 명령은 지금 본다.
+  if [ -e "$K3S_CONFIG" ] && [ -x "$K3S_BIN" ]; then
+    K3S_INSTALLED=true
+    require_cmds dig
+    ver="$("$K3S_BIN" --version 2>/dev/null)" || ver=""
+    if [[ "$ver" != *"$INSTALL_K3S_VERSION"* ]]; then
+      K3S_OLD_VERSION="$(awk 'NR == 1 { print $3 }' <<<"$ver")"
+      K3S_OLD_VERSION="${K3S_OLD_VERSION:-알 수 없음}"
+      echo "    k3s 버전이 바뀐다: ${K3S_OLD_VERSION} -> ${INSTALL_K3S_VERSION}. 설치 스크립트가 바이너리를 바꾸고 재시작한다"
+    fi
+  fi
+  if [ "$TLS_SAN_CHANGED" = true ]; then require_cmds openssl; fi
+  start_before="$(k3s_started_at)" || die "systemctl show k3s.service가 실패했다"
+
   # 재시작은 설정 값이 바뀔 때만 한다. 주석만 바뀐 config는 쓰기만 하고 재시작하지 않는다(k3s는 시작할 때만
   # config를 읽는다). 설치 스크립트는 바이너리·유닛·env 해시가 그대로면 재시작하지 않아, 값이 바뀌면 강제한다.
   # 비교는 config_pairs exact로 한다. 정렬·따옴표 벗김 판은 빈 값·"0600"과 0600 차이를 같다고 읽는다.
   exact="$(config_pairs exact <<<"$cfg")"
   if [ -e "$K3S_CONFIG" ] && [ "$(config_pairs exact <"$K3S_CONFIG")" != "$exact" ]; then
     restart=true
-    require_cmds dig systemctl
     if san_only_change "$exact"; then path=config-only; fi
   fi
   if [ "$path" = config-only ]; then
@@ -548,7 +605,8 @@ k3s_install() {
     # 빈 환경으로 실행한다. 부르는 셸에 K3S_URL이 남아 있으면 agent로 깔리고, INSTALL_K3S_CHANNEL,
     # INSTALL_K3S_EXEC, K3S_* 값은 설치 스크립트가 k3s.service.env로 옮겨 적는다.
     # 플래그는 모두 config.yaml에 있다. 하위 명령은 기본값 server다.
-    # restart=true면 설치 스크립트가 재시작 전에 KUBE-·flannel iptables 줄을 지운다(san_only_change 주석).
+    # 설치 스크립트가 재시작하면(강제, 또는 버전이 바뀌어 바이너리가 바뀜) 그 전에 KUBE-·flannel iptables 줄을
+    # 지운다(san_only_change 주석).
     env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       INSTALL_K3S_VERSION="$INSTALL_K3S_VERSION" \
       INSTALL_K3S_FORCE_RESTART="$restart" \
@@ -567,10 +625,18 @@ k3s_install() {
   ver="$("$K3S_BIN" --version)"
   [[ "$ver" == *"$INSTALL_K3S_VERSION"* ]] || die "설치된 k3s 버전이 핀과 다르다: ${ver%%$'\n'*}"
 
-  # 떠 있던 클러스터를 다시 시작했으면 데이터 경로를 본다. 처음 설치는 CoreDNS가 아직 없어 건너뛴다.
-  if [ "$restart" = true ]; then
+  # 이미 설치된 k3s가 이번에 다시 떴으면 데이터 경로를 본다. config 값을 바꾼 재시작(두 경로)과 버전만 올려
+  # 설치 스크립트가 한 재시작이 모두 여기 걸린다. 처음 설치는 CoreDNS가 아직 없어 건너뛴다. config만 있고
+  # 바이너리가 없던 경우(첫 설치가 중간에 실패)도 처음 설치다.
+  start_after="$(k3s_started_at)" || die "systemctl show k3s.service가 실패했다"
+  if [ "$K3S_INSTALLED" = true ] && [ "$start_after" != "$start_before" ]; then
+    restarted=true
     log "재시작 뒤 클러스터 DNS·Service 확인"
     check_cluster_net
+    if [ "$TLS_SAN_CHANGED" = true ]; then
+      log "재시작 뒤 서빙 인증서 SAN 대기(${SAN_WAIT_MAX}초 상한)"
+      wait_serving_sans "$cfg"
+    fi
   fi
 
   log "kubeconfig 쓰기"
@@ -581,7 +647,7 @@ k3s_install() {
   if [ -n "$K3S_BACKUP" ]; then
     echo "    되돌리기: $(rollback_hint)"
   fi
-  if [ "$restart" = true ]; then
+  if [ "$restarted" = true ]; then
     echo "    재시작했다. 노드 확인은 파드의 새 외부 연결(flannel MASQUERADE)을 보지 않는다: docs/runbooks-public/bootstrap.md 1절 \"재시작 뒤 새 파드의 새 외부 연결\""
   fi
   echo "    다음: KUBECONFIG=${KUBECONFIG_OUT} host/verify.sh --cluster ${CLUSTER} (sudo 없이)"
@@ -615,5 +681,5 @@ main() {
   esac
 }
 
-# tools/host-k3s.test.sh가 check_install_time_keys만 쓰려고 source한다. 그때는 main을 돌리지 않는다.
+# tools/host-k3s.test.sh가 check_install_time_keys·k3s_install을 쓰려고 source한다. 그때는 main을 돌리지 않는다.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
