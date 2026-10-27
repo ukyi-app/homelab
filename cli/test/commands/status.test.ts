@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { argvFor as ghArgv } from "../../src/core/github";
-import { FAKE_SECRETS, expectPlanReadOnly, ghGet, kubectlRule, rule, runCli, type Rule } from "../harness";
+import { argvFor as infArgv } from "../../src/core/infisical";
+import { FAKE_PROJECT, FAKE_SECRETS, expectPlanReadOnly, ghGet, kubectlRule, rule, runCli, type Rule } from "../harness";
 import { DIGEST, MAIN, R, folders, homelab, imageYaml, infisicalList, pullsPath } from "../fixtures/app-add-world/world";
 
 const APP = "memo";
@@ -15,9 +16,18 @@ const synced = { status: { sync: { status: "Synced", revision: MAIN }, health: {
 const READY_POD = { metadata: {}, status: { phase: "Running", conditions: [{ type: "Ready", status: "True" }], containerStatuses: [{ imageID: `ghcr.io/ukyi-app/${APP}@${DIGEST}` }] } };
 // 이 앱(postgres + 영속 Valkey + secrets)이 가져야 할 ExternalSecret(app 차트 셋 + 데이터 차트 둘). pg-role은 database ns.
 const ALL_ES = [`${APP}-app`, `${APP}-db`, `${APP}-valkey-url`, `${APP}-valkey-auth`, `${APP}-valkey-backup-r2`];
-type Opts = { esList?: string[]; pods?: unknown[]; esReady?: boolean; infisicalKeys?: Record<string, string>; migrate?: "ok" | "failed"; http?: number; argo?: unknown };
+// 차트가 만드는 ExternalSecret은 모두 store infisical-apps를 쓴다(app·app-data 차트 _helpers.tpl).
+const STORE_REF = { secretStoreRef: { kind: "ClusterSecretStore", name: "infisical-apps" } };
+const STORES = ["get", "clustersecretstores.external-secrets.io", "-A", "-o", "json"];
+// Argo CD가 ExternalSecret 실패로 sync를 재시도하는 중(T13 S6·S7 실측 모양).
+const RETRYING = { status: { sync: { status: "OutOfSync", revision: MAIN }, health: { status: "Degraded" }, operationState: { phase: "Running", message: "one or more synchronization tasks completed unsuccessfully. Retrying attempt #2 at 4:36AM." } } };
+const storeDown = (reason: string) => ({ conditions: [{ type: "Ready", status: "False", reason, message: "unable to create client" }] });
+// InvalidProviderConfig는 client 생성 실패 전반이라(ESO v2.13.0) 인증 실패로 단정하지 않고 이벤트로 가르게 한다(#950 1라운드 P2).
+const STORE_DETAIL = "Infisical Store 준비 실패: ClusterSecretStore infisical-apps Ready=False InvalidProviderConfig: unable to create client";
+const STORE_NEXT = "kubectl describe clustersecretstore infisical-apps의 Events로 원인을 가른다. 인증 거부면 docs/runbooks-public/rotate.md 1절, 접속 오류(DNS·TLS·시간 초과)면 NUC에서 Infisical로 가는 네트워크, 자격 Secret을 못 읽으면 docs/runbooks-public/bootstrap.md 2.2";
+type Opts = { esList?: string[]; pods?: unknown[]; esReady?: boolean; infisicalKeys?: Record<string, string>; migrate?: "ok" | "failed"; http?: number; argo?: unknown; store?: unknown; storesRead?: Rule; infisical?: Rule[] };
 function world(o: Opts = {}): Rule[] {
-  const es = (name: string, ns = NS) => ({ metadata: { name, namespace: ns }, status: name === `${APP}-app` && o.esReady === false ? { conditions: [{ type: "Ready", status: "False", reason: "SecretSyncedError" }] } : READY });
+  const es = (name: string, ns = NS) => ({ metadata: { name, namespace: ns }, spec: STORE_REF, status: name === `${APP}-app` && o.esReady === false ? { conditions: [{ type: "Ready", status: "False", reason: "SecretSyncedError" }] } : READY });
   return [
     ...homelab({ [`apps/${APP}/values.yaml`]: VALUES, [`apps/${APP}/image.yaml`]: imageYaml(APP), [`data/${APP}/values.yaml`]: DATA }),
     ghGet(`repos/ukyi-app/${APP}/actions/runs?branch=main&per_page=1`, 200, { workflow_runs: [{ id: 5, run_number: 7, status: "completed", conclusion: "success" }] }),
@@ -27,8 +37,8 @@ function world(o: Opts = {}): Rule[] {
     kubectlRule(["-n", NS, "get", "pods", "-l", `homelab.ukyi.app/app=${APP}`, "-o", "json"], json({ items: o.pods ?? [READY_POD] })),
     kubectlRule(["-n", NS, "get", "externalsecrets.external-secrets.io", "-o", "json"], json({ items: (o.esList ?? ALL_ES).map((n) => es(n)) })),
     get("database", "externalsecrets.external-secrets.io", `pg-role-${APP}`, es(`pg-role-${APP}`, "database")),
-    ...folders({ "/apps": [APP] }),
-    infisicalList(`/apps/${APP}`, o.infisicalKeys ?? { API_TOKEN: FAKE_SECRETS[0] }),
+    o.storesRead ?? kubectlRule(STORES, json({ items: [{ metadata: { name: "infisical-apps" }, status: o.store ?? READY }] })),
+    ...(o.infisical ?? [...folders({ "/apps": [APP] }), infisicalList(`/apps/${APP}`, o.infisicalKeys ?? { API_TOKEN: FAKE_SECRETS[0] })]),
     get("database", "databaseroles.postgresql.cnpg.io", APP, { status: { applied: true } }),
     get("database", "databases.postgresql.cnpg.io", APP, { status: { applied: true } }),
     get(NS, "jobs.batch", `${APP}-migrate`, { status: o.migrate === "failed" ? { failed: 1 } : { succeeded: 1 } }),
@@ -58,6 +68,91 @@ describe("status <app>", () => {
     const s = r.json.steps.find((x: any) => x.id === "secrets");
     expect(s.detail).toContain("Infisical에 없음: API_TOKEN");
     expect(r.json.error.next).toBe(`homelab secret set ${APP} API_TOKEN`);
+  });
+
+  // T13 S6: 앞 줄(Argo CD)이 이 실패로 재시도 중이라 다음이 "잠시 뒤 다시"였다. 원인을 아는 줄이 먼저다.
+  test("시나리오 6: Argo CD 재시도 중이어도 다음은 secret set(T13 S6)", async () => {
+    const rules = world({ esReady: false, infisicalKeys: {}, argo: RETRYING });
+    const r = await runCli(["status", APP, "--json"], rules);
+    expect(r.code).toBe(1);
+    expectPlanReadOnly(r);
+    expect(r.json.steps.find((x: any) => x.id === `argocd-${APP}`).result).toBe("failed");
+    expect(r.json.error).toEqual({ message: `시크릿(ExternalSecret): 5/6 Ready: ${APP}-app. Infisical에 없음: API_TOKEN`, next: `homelab secret set ${APP} API_TOKEN` });
+    expect(r.json.next).toBe(`homelab secret set ${APP} API_TOKEN`);
+    const h = await runCli(["status", APP], rules);
+    expect(h.stdout).toContain(`다음: homelab secret set ${APP} API_TOKEN`);
+    expect(h.stdout).not.toContain("잠시 뒤 다시");
+  });
+
+  // T13 S7: ExternalSecret 실패만 보이고 원인(Store 준비 실패)을 말하지 않았다.
+  test("시나리오 7: Store Ready=False면 원인 줄과 원인을 가르는 안내(T13 S7)", async () => {
+    const r = await runCli(["status", APP, "--json"], world({ esReady: false, store: storeDown("InvalidProviderConfig"), argo: RETRYING }));
+    expect(r.code).toBe(1);
+    expectPlanReadOnly(r);
+    const detail = `5/6 Ready: ${APP}-app. ${STORE_DETAIL}`;
+    expect(r.json.steps.find((x: any) => x.id === "secrets").detail).toBe(detail);
+    const next = STORE_NEXT;
+    expect(r.json.error).toEqual({ message: `시크릿(ExternalSecret): ${detail}`, next });
+    expect(r.json.error.message).not.toContain("인증 실패");
+    // 키도 빠졌으면 둘 다 보이고 다음은 Store가 먼저다(인증이 풀리기 전에는 키를 넣어도 동기화되지 않는다).
+    const both = await runCli(["status", APP, "--json"], world({ esReady: false, store: storeDown("InvalidProviderConfig"), infisicalKeys: {} }));
+    expect(both.json.steps.find((x: any) => x.id === "secrets").detail).toBe(`${detail}. Infisical에 없음: API_TOKEN`);
+    expect(both.json.next).toBe(next);
+    // 다른 이유(폴더 없음 등)는 이유 이름과 Store를 보는 명령.
+    const other = await runCli(["status", APP, "--json"], world({ esReady: false, store: storeDown("ValidationFailed") }));
+    expect(other.json.steps.find((x: any) => x.id === "secrets").detail).toContain("ClusterSecretStore infisical-apps Ready=False ValidationFailed");
+    expect(other.json.next).toContain("kubectl get clustersecretstore infisical-apps -o yaml");
+    expect(other.json.next).toContain("docs/runbooks-public/bootstrap.md 2.2");
+  });
+
+  // #950 1라운드 P2: Store를 읽어 Ready=False를 확인했으면 뒤의 Infisical 조회가 실패해도 그 원인과 다음 행동이 남는다.
+  // 전에는 이 줄이 "읽지 못함"이 되고 Argo CD 재시도의 "잠시 뒤 다시"가 다시 다음이 됐다.
+  test("Store Ready=False 확인 뒤 Infisical 조회가 실패해도 다음은 Store 안내, 빠진 키는 단정하지 않는다", async () => {
+    const down = "error: dial tcp: connect: connection refused";
+    const cases: [string, Rule[], string][] = [
+      ["키 목록 실패", [...folders({ "/apps": [APP] }), infisicalList(`/apps/${APP}`, [{ code: 1, stderr: down }])], `Infisical /apps/${APP} 목록: exit 1`],
+      ["폴더 목록 실패", [rule(infArgv.folders(FAKE_PROJECT, "/apps"), { code: 1, stderr: down })], "Infisical /apps 폴더 목록: exit 1"],
+      ["로그인 만료", [...folders({ "/apps": [APP] }), infisicalList(`/apps/${APP}`, [{ code: 1, stderr: "status-code=401 Unauthorized" }])], "Infisical 로그인이 만료됐거나 거부됐다"],
+    ];
+    for (const [what, infisical, why] of cases) {
+      const rules = world({ esReady: false, store: storeDown("InvalidProviderConfig"), argo: RETRYING, infisical });
+      const r = await runCli(["status", APP, "--json"], rules);
+      expect([what, r.code]).toEqual([what, 1]);
+      expectPlanReadOnly(r);
+      expect(r.json.steps.find((x: any) => x.id === `argocd-${APP}`).result).toBe("failed");
+      const s = r.json.steps.find((x: any) => x.id === "secrets");
+      expect(s.detail.startsWith(`5/6 Ready: ${APP}-app. ${STORE_DETAIL}. 빠진 키 확인 못 함(`)).toBe(true);
+      expect(s.detail).toContain(why);
+      expect(s.detail).not.toContain("Infisical에 없음");
+      expect(r.json.error).toEqual({ message: `시크릿(ExternalSecret): ${s.detail}`, next: STORE_NEXT });
+      expect(r.json.next).toBe(STORE_NEXT);
+      const h = await runCli(["status", APP], rules);
+      expect(h.stdout).toContain(`다음: ${STORE_NEXT}`);
+      expect(h.stdout).not.toContain("잠시 뒤 다시");
+    }
+    // Store가 Ready면 확인된 원인이 없으니 Infisical 조회 실패는 기존 관례대로 이 줄의 읽기 실패다.
+    const ok = await runCli(["status", APP, "--json"], world({ esReady: false, infisical: cases[0][1] }));
+    expect(ok.code).toBe(1);
+    const s = ok.json.steps.find((x: any) => x.id === "secrets");
+    expect([s.detail, s.result]).toEqual(["읽지 못함", "failed"]);
+  });
+
+  test("Store가 Ready면 원인으로 보지 않고, Store 읽기 실패는 그 줄의 읽기 실패다", async () => {
+    const r = await runCli(["status", APP, "--json"], world({ esReady: false }));
+    expect(r.code).toBe(1);
+    expect(r.json.next).toBe(`kubectl -n ${NS} describe externalsecret ${APP}-app`);
+    const down = await runCli(["status", APP, "--json"], world({ esReady: false, storesRead: kubectlRule(STORES, { code: 1, stderr: "Unable to connect to the server" }) }));
+    expect(down.code).toBe(1);
+    expectPlanReadOnly(down);
+    const s = down.json.steps.find((x: any) => x.id === "secrets");
+    expect([s.detail, s.result]).toEqual(["읽지 못함", "failed"]);
+    expect(down.json.error.message).toContain("시크릿(ExternalSecret)");
+  });
+
+  test("ExternalSecret이 모두 Ready면 Store를 읽지 않는다", async () => {
+    const r = await runCli(["status", APP, "--json"], world());
+    expect(r.code).toBe(0);
+    expect(r.calls.some((c) => c.argv.includes("clustersecretstores.external-secrets.io"))).toBe(false);
   });
 
   test("마이그레이션 실패는 logs --job migrate로, 공개 URL 실패도 문제로", async () => {
@@ -174,5 +269,23 @@ describe("status(전체·--platform)", () => {
     expect(plat.code).toBe(0);
     expectPlanReadOnly(plat);
     expect(plat.json.steps.map((s: any) => s.detail)).toEqual(["1개 Synced·Healthy", "1개 Ready", "Cluster in healthy state", "1개 Ready"]);
+  });
+
+  // T13 S7: Store가 Degraded면 플랫폼 Application 줄이 먼저 실패한다. 다음은 원인(Store)의 것이다.
+  test("--platform: Store Ready=False면 원인 줄과 원인을 가르는 안내", async () => {
+    const down = storeDown("InvalidProviderConfig");
+    const rules = [
+      ...homelab({}),
+      kubectlRule(["-n", "argocd", "get", "applications.argoproj.io", "-o", "json"], json({ items: [{ metadata: { name: "external-secrets-stores" }, spec: { project: "platform" }, status: { sync: { status: "Synced" }, health: { status: "Degraded" } } }] })),
+      kubectlRule(["get", "nodes", "-A", "-o", "json"], json({ items: [{ metadata: { name: "nuc" }, status: READY }] })),
+      get("database", "clusters.postgresql.cnpg.io", "pg", { status: { phase: "Cluster in healthy state" } }),
+      kubectlRule(STORES, json({ items: [{ metadata: { name: "infisical-apps" }, status: down }, { metadata: { name: "infisical-platform" }, status: down }] })),
+    ];
+    const r = await runCli(["status", "--platform", "--json"], rules);
+    expect(r.code).toBe(1);
+    expectPlanReadOnly(r);
+    const detail = `${STORE_DETAIL}, ${STORE_DETAIL.replace("infisical-apps", "infisical-platform")}`;
+    expect(r.json.steps.find((s: any) => s.id === "secret-stores").detail).toBe(detail);
+    expect(r.json.error).toEqual({ message: `ClusterSecretStore: ${detail}`, next: STORE_NEXT });
   });
 });

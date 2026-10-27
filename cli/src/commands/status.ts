@@ -1,9 +1,10 @@
 // homelab status: 빌드·배포 PR·Argo CD·파드·시크릿·DB·Valkey·공개 URL의 준비 상태와 다음 행동(설계 C.7, D 9번 상자).
 // doctor처럼 확인 단계로 만든다: 준비됨은 same, 문제는 differs/missing + next. 하나라도 문제면 exit 1이고 error.next는
-// 첫 문제의 다음 행동이다. 진행 중(동기화·rollout 전)도 문제로 보인다(T12-02 결정, C.7에 적음).
+// 첫 문제의 다음 행동이다. 단 원인을 아는 시크릿 문제(Infisical에 없는 키, ClusterSecretStore 준비 안 됨)가 있으면 그것이
+// 먼저다(T13 S6·S7). 진행 중(동기화·rollout 전)도 문제로 보인다(T12-02 결정, C.7에 적음).
 // 읽는 것(T12-02 결정): GitHub(앱 저장소 Actions, homelab의 deploy/<app> PR), Argo CD Application CR, 파드 imageID와
-// main image.yaml, ExternalSecret Ready, CNPG DatabaseRole·Database status, 마이그레이션 Job, Valkey Deployment·백업 CronJob,
-// 공개 host의 /healthz. 파일은 homelab main에서 읽는다.
+// main image.yaml, ExternalSecret Ready(실패한 것이 쓰는 ClusterSecretStore Ready 포함), CNPG DatabaseRole·Database status,
+// 마이그레이션 Job, Valkey Deployment·백업 CronJob, 공개 host의 /healthz. 파일은 homelab main에서 읽는다.
 import { defineCommand, type Observation, type ReadCtx, type Step } from "../core/command";
 import { APP_NAME } from "../core/names";
 import { parseYaml } from "../core/values";
@@ -33,6 +34,28 @@ function ghList(c: ReadCtx, path: string, what: string, field?: string): any[] {
 const ready = (o: any) => (o?.status?.conditions ?? []).some((c: any) => c?.type === "Ready" && c?.status === "True");
 const wait = (app: string) => `잠시 뒤 다시: homelab status ${app}`;
 
+// 원인을 아는 시크릿 문제. 다음 행동은 첫 문제의 것이 원칙인데, 앞 줄(Argo CD)이 바로 이 원인 때문에 재시도 중이라
+// "잠시 뒤 다시"가 먼저 나왔다(T13 S6 빠진 키, S7 client secret 폐기로 Store 준비 실패). run이 이것을 첫 문제보다 먼저 안내한다.
+type Cause = { message: string; next: string };
+
+// InvalidProviderConfig는 인증 실패의 증거가 아니다. ESO v2.13.0은 provider client를 만들지 못하면 원인과 상관없이
+// (자격 Secret·CA 읽기, Infisical 접속, 로그인 거부) 이 이유와 메시지 "unable to create client"를 남기고, 실제 오류는
+// Warning 이벤트에만 쓴다(pkg/controllers/secretstore/common.go validateStore). client secret 폐기 때 이 이유였던 것은
+// T09·T10·T13 S7 실측일 뿐이라, 다음 행동은 이벤트로 원인을 가르는 것부터다. 폴더가 없을 때(bootstrap.md 2.2) 같은
+// 다른 이유는 이유 이름만 보인다.
+function storeProblem(name: string, store: any): { detail: string; next: string } | null {
+  if (store && ready(store)) return null;
+  const cond = store ? (store.status?.conditions ?? []).find((x: any) => x?.type === "Ready") : null;
+  const reason = store ? (cond?.reason ?? "조건 없음") : null;
+  if (reason === "InvalidProviderConfig") {
+    return {
+      detail: `Infisical Store 준비 실패: ClusterSecretStore ${name} Ready=False ${reason}${cond?.message ? `: ${short(cond.message, 80)}` : ""}`,
+      next: `kubectl describe clustersecretstore ${name}의 Events로 원인을 가른다. 인증 거부면 docs/runbooks-public/rotate.md 1절, 접속 오류(DNS·TLS·시간 초과)면 NUC에서 Infisical로 가는 네트워크, 자격 Secret을 못 읽으면 docs/runbooks-public/bootstrap.md 2.2`,
+    };
+  }
+  return { detail: `ClusterSecretStore ${name} ${reason ? `Ready=False ${reason}` : "없음"}`, next: `kubectl get clustersecretstore ${name} -o yaml로 원인을 본다(Infisical 폴더·부트스트랩 Secret: docs/runbooks-public/bootstrap.md 2.2)` };
+}
+
 function argoRow(name: string, app: string): Step {
   return {
     id: `argocd-${name}`,
@@ -51,7 +74,7 @@ function argoRow(name: string, app: string): Step {
   };
 }
 
-function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
+function appSteps(ctx: ReadCtx, app: string, main: string, causes: Cause[]): Step[] {
   const ns = `app-${app}`;
   const valuesText = ctx.repo.readFile(`apps/${app}/values.yaml`, main);
   const imageText = ctx.repo.readFile(`apps/${app}/image.yaml`, main);
@@ -112,9 +135,10 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
       return match ? ok(`${readyPods.length}/${pods.length} Ready, imageID = image.yaml`) : bad(`${readyPods.length}/${pods.length} Ready, imageID가 image.yaml과 다름`, wait(app));
     },
   });
+  const secretsTarget = "시크릿(ExternalSecret)";
   steps.push({
     id: "secrets",
-    target: "시크릿(ExternalSecret)",
+    target: secretsTarget,
     async read(c) {
       // DB 역할 ExternalSecret이 아직 없으면(데이터 Application 전) 빼지 않고 준비 안 됨으로 센다.
       const role = usesPg ? (c.k8s.get("externalsecret", "database", `pg-role-${app}`) ?? { metadata: { name: `pg-role-${app}`, namespace: "database" } }) : null;
@@ -133,14 +157,38 @@ function appSteps(ctx: ReadCtx, app: string, main: string): Step[] {
       const list = [...found, ...absent, ...(role ? [role] : [])];
       const notReady = list.filter((e: any) => !ready(e));
       if (notReady.length === 0) return ok(`${list.length}/${list.length} Ready`);
+      // 시나리오 7: 실패한 ExternalSecret이 쓰는 Store가 준비 안 됐으면 그것이 원인이다. 그동안은 키를 넣어도 동기화되지 않아
+      // 빠진 키보다 먼저 안내한다. 아직 없는 ExternalSecret(위 자리표시)은 spec이 없어 Store를 읽지 않는다.
+      const refs = [...new Set(notReady.map((e: any) => e?.spec?.secretStoreRef).filter((r: any) => r?.kind === "ClusterSecretStore" && typeof r?.name === "string").map((r: any) => String(r.name)))];
+      const stores = refs.length ? c.k8s.list("clustersecretstore", null) : [];
+      const storeBad = refs.flatMap((n) => storeProblem(n, stores.find((s: any) => s?.metadata?.name === n)) ?? []);
       // 시나리오 6: 빠진 키를 이름으로 보인다(값은 보지 않는다).
       const keys: string[] = Array.isArray(v.secrets) ? v.secrets : [];
-      const have = keys.length && c.infisical.folderExists(`/apps/${app}`) ? c.infisical.listKeys(`/apps/${app}`) : [];
-      const lost = keys.filter((k) => !have.includes(k));
+      let have: string[] = [];
+      let keysUnread: string | null = null;
+      try {
+        have = keys.length && c.infisical.folderExists(`/apps/${app}`) ? c.infisical.listKeys(`/apps/${app}`) : [];
+      } catch (e) {
+        // 이미 읽어 확인한 Store 원인은 키 조회 실패(Infisical 장애, 로컬 로그인 만료)로 지우지 않는다(#950 1라운드 P2).
+        // 키는 못 읽었으니 빠졌다고 하지 않는다. Store 원인이 없으면 기존 관례대로 이 줄의 읽기 실패다.
+        if (storeBad.length === 0) throw e;
+        keysUnread = (e as Error).message;
+      }
+      const lost = keysUnread === null ? keys.filter((k) => !have.includes(k)) : [];
       const names = notReady.map((e: any) => e?.metadata?.name).join(", ");
-      if (lost.length) return bad(`${list.length - notReady.length}/${list.length} Ready: ${names}. Infisical에 없음: ${lost.join(", ")}`, `homelab secret set ${app} ${lost[0]}`);
+      const detail = [
+        `${list.length - notReady.length}/${list.length} Ready: ${names}`,
+        ...storeBad.map((p) => p.detail),
+        ...(keysUnread !== null ? [`빠진 키 확인 못 함(${keysUnread})`] : []),
+        ...(lost.length ? [`Infisical에 없음: ${lost.join(", ")}`] : []),
+      ].join(". ");
+      const known = storeBad[0]?.next ?? (lost.length ? `homelab secret set ${app} ${lost[0]}` : null);
+      if (known) {
+        causes.push({ message: `${secretsTarget}: ${detail}`, next: known });
+        return bad(detail, known);
+      }
       const first = notReady[0];
-      return bad(`${list.length - notReady.length}/${list.length} Ready: ${names}`, `kubectl -n ${first?.metadata?.namespace ?? ns} describe externalsecret ${first?.metadata?.name}`);
+      return bad(detail, `kubectl -n ${first?.metadata?.namespace ?? ns} describe externalsecret ${first?.metadata?.name}`);
     },
   });
   if (usesPg) {
@@ -208,7 +256,7 @@ function overviewSteps(ctx: ReadCtx, main: string): Step[] {
   return [...new Set([...apps, ...data])].sort().flatMap((a) => [...(apps.includes(a) ? [argoRow(a, a)] : []), ...(data.includes(a) ? [argoRow(`${a}-data`, a)] : [])]);
 }
 
-function platformSteps(): Step[] {
+function platformSteps(causes: Cause[]): Step[] {
   return [
     {
       id: "platform-apps",
@@ -243,8 +291,11 @@ function platformSteps(): Step[] {
       target: "ClusterSecretStore",
       async read(c) {
         const stores = c.k8s.list("clustersecretstore", null);
-        const notReady = stores.filter((s: any) => !ready(s)).map((s: any) => s?.metadata?.name);
-        return notReady.length ? bad(`Ready 아님: ${notReady.join(", ")}`, "Infisical 자격을 본다(rotate.md 1절)") : ok(`${stores.length}개 Ready`);
+        const problems = stores.flatMap((s: any) => storeProblem(String(s?.metadata?.name), s) ?? []);
+        if (problems.length === 0) return ok(`${stores.length}개 Ready`);
+        const detail = problems.map((p) => p.detail).join(", ");
+        causes.push({ message: `ClusterSecretStore: ${detail}`, next: problems[0].next });
+        return bad(detail, problems[0].next);
       },
     },
   ];
@@ -259,7 +310,10 @@ export default defineCommand({
   async run(ctx, input) {
     const app = input.args.app;
     const main = ctx.repo.mainSha();
-    const steps = [...(app ? appSteps(ctx, app, main) : input.flags.platform ? [] : overviewSteps(ctx, main)), ...(input.flags.platform ? platformSteps() : [])];
-    return ctx.engine({ command: "status", app, title: app ? `homelab status ${app}` : "homelab status", steps });
+    const causes: Cause[] = [];
+    const steps = [...(app ? appSteps(ctx, app, main, causes) : input.flags.platform ? [] : overviewSteps(ctx, main)), ...(input.flags.platform ? platformSteps(causes) : [])];
+    const r = await ctx.engine({ command: "status", app, title: app ? `homelab status ${app}` : "homelab status", steps });
+    const cause = causes[0];
+    return r.status === "failed" && cause ? { ...r, error: cause, next: cause.next } : r;
   },
 });

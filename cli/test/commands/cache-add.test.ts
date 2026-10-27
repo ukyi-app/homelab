@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cacheOff, cacheOn, persistentData, usesValkey } from "../../src/commands/cache-add";
+import { cacheOff, cacheOn, cacheOnSummary, persistentData, usesValkey } from "../../src/commands/cache-add";
 import { FAKE_SECRETS, expectNoSecrets, expectPlanReadOnly, ghGet, ghResponse, infisicalSet, kubectlRule, runCli, type Rule } from "../harness";
 import { MAIN, R, chartTags, contentsPath, fileJson, folders, homelab, infisicalList, noPr, prCreate, prOpen } from "../fixtures/app-add-world/world";
 
@@ -22,8 +22,17 @@ describe("cache add(캐시)", () => {
     const r = await runCli(["cache", "add", APP, "--json"], [...homelab({ [A]: BASE, [D]: null }), ...chartTags(), ...fold(), infisicalList(VK, {}), noPr(BRANCH)]);
     expect(r.code).toBe(0);
     expectPlanReadOnly(r);
-    expect(r.json.steps.find((s: any) => s.id === "pr").detail).toContain("cache.enabled false → true, chart 1.1.0");
+    expect(r.json.steps.find((s: any) => s.id === "pr").detail).toContain(`${A}: cache.enabled false → true, uses.valkey false → true, chart 1.1.0`);
     expect(CACHED).toContain("uses: { postgres: true, valkey: true }");
+  });
+
+  // T13 S3 #932: 표에 cache.enabled만 보이고 uses.valkey 변경이 빠졌다. 바뀌는 키만, 빠짐없이.
+  test("PR 줄 요약: 바뀌는 키를 모두, 그대로인 키는 빼고", () => {
+    expect(cacheOnSummary(BASE, CACHED)).toBe("cache.enabled false → true, uses.valkey false → true, chart 1.1.0");
+    const valkeyOnly = "chartVersion: 1.1.0\nkind: web\nuses: { valkey: true }\n";
+    expect(cacheOnSummary(valkeyOnly, cacheOn(valkeyOnly, "1.1.0"))).toBe("cache.enabled false → true");
+    const cacheOnly = "chartVersion: 1.1.0\nkind: web\ncache: { enabled: true }\n";
+    expect(cacheOnSummary(cacheOnly, cacheOn(cacheOnly, "1.1.0"))).toBe("uses.valkey false → true");
   });
 
   test("apply: 비밀번호 → PR, 실패 주입, 다 된 상태 same", async () => {

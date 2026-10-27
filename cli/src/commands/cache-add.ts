@@ -52,6 +52,20 @@ function checked(text: string | null): string | null {
   return text;
 }
 
+// 계획·실행 표의 PR 줄. cacheOn이 바꾸는 키를 모두 적는다. cache.enabled만 적으면 VALKEY_URL을 켜는 uses.valkey
+// 변경이 표에서 안 보였다(T13 S3 #932).
+export function cacheOnSummary(before: string | null, after: string | null): string {
+  const b = obj(before);
+  const a = obj(after);
+  const flags: [string, (v: Obj) => boolean][] = [
+    ["cache.enabled", (v) => v.cache?.enabled === true],
+    ["uses.valkey", (v) => v.uses?.valkey === true],
+  ];
+  const parts = flags.filter(([, f]) => f(b) !== f(a)).map(([k, f]) => `${k} ${f(b)} → ${f(a)}`);
+  if (b.chartVersion !== a.chartVersion) parts.push(`chart ${a.chartVersion}`);
+  return parts.join(", ");
+}
+
 export function cacheOn(current: string, latestApp: string): string | null {
   const now = obj(current);
   const chart = typeof now.chartVersion === "string" && cmp(now.chartVersion, CACHE_MIN_CHART) < 0 ? latestApp : now.chartVersion;
@@ -172,7 +186,7 @@ export default defineCommand({
             if (obj(cur[dataPath]).valkey?.persistent === true) throw new Error("그사이 main에 영속 Valkey가 켜졌다(캐시와 함께 둘 수 없다)");
             return { [appPath]: cur[appPath] === null ? null : cacheOn(cur[appPath], appChart), [dataPath]: cur[dataPath] };
           },
-          describe: (_p, before, after) => `cache.enabled ${obj(before).cache?.enabled === true} → ${obj(after).cache?.enabled === true}${obj(before).chartVersion !== obj(after).chartVersion ? `, chart ${obj(after).chartVersion}` : ""}`,
+          describe: (_p, before, after) => cacheOnSummary(before, after),
         }),
       ];
       return ctx.engine({ command: "cache add", app, steps });
