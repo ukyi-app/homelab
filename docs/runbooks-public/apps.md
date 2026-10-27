@@ -10,7 +10,7 @@
 
 ### 1.1 되돌림 PR만으로는 바로 고쳐지지 않는 이유
 
-Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.source`(ApplicationSet이 넣은 `helm.valuesObject`, 차트 태그 `targetRevision` 포함)와 retry 설정을 작업에 복사한다. 재시도는 그 사본(`status.operationState.operation.sync.source`)으로 렌더하고 `spec.source`를 다시 읽지 않는다. 그래서 되돌림 PR이 병합되어 ApplicationSet이 `spec`을 고쳐도, 실패해 재시도 중인 작업은 옛 값으로 계속 실패한다. 고친 값은 그 작업이 끝나고 새 자동 sync가 시작될 때 쓰인다.
+Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.source`(ApplicationSet이 넣은 `helm.valuesObject`, 차트 태그 `targetRevision` 포함)와 retry 설정을 작업에 복사한다. 재시도는 그 사본(`status.operationState.operation.sync.source`)으로 렌더하고 `spec.source`를 다시 읽지 않는다. 그래서 되돌림 PR이 병합되어 ApplicationSet이 `spec`을 고쳐도, 실패해 재시도 중인 작업은 옛 값으로 계속 실패한다. 고친 값은 그 작업이 끝난 뒤의 새 자동 sync에서 쓰인다. 새 자동 sync는 Application이 `OutOfSync`일 때만 시작한다. 되돌린 목표가 라이브와 이미 같아 `Synced`면 새 작업 없이 끝난다(1.3의 5단계).
 
 - 근거(v3.5.5 소스): 작업 생성 `controller/appcontroller.go:2458-2479`, 재시도 `:1621-1663`, 재시도가 쓰는 source `controller/sync.go:79-92`. v3.2.0에서 들어온 동작이다. v3.1.x는 재시도마다 spec을 다시 읽었다.
 - `syncPolicy.retry.refresh: true`는 해법이 아니다. 재시도 전에 revision만 비워 같은 `targetRevision`을 다시 풀고, source 사본(values)은 그대로 둔다(`appcontroller.go:1649-1655`, `controller/state.go:310-313`). 봇 자리는 values가 Git 경로의 파일이라 refresh로 고쳐지지만(설계 C.8), 앱·데이터 Application은 values가 spec 안이라 고쳐지지 않는다.
@@ -20,11 +20,16 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
 
 | | 기다리기 | 진행 중 작업 끝내기(1.3의 4단계) |
 |---|---|---|
-| 고친 값 반영 | 재시도를 다 쓴 뒤 새 자동 sync | 끝낸 직후 새 자동 sync |
-| 걸리는 시간 | 앱·데이터 Application(limit 10, backoff 30s → 최대 5m)의 재시도 대기 합이 설정상 **약 37분**(30s+60s+120s+240s+300s×6 = 37분 30초). T13 실측은 작업 시작부터 실패까지 42분 44초, 되돌림 병합부터 반영까지 약 31분 | 수 초에서 1분 남짓으로 예상(**T13에서 실측 예정**) |
-| 위험 | 운영 쓰기가 없다 | 운영 실측 전이다. 2단계를 건너뛰면 새 작업이 옛 값으로 다시 시작해 재시도를 처음부터 한다 |
+| 고친 값 반영 | 재시도를 다 쓴 뒤. `OutOfSync`면 새 자동 sync | 끝낸 직후. `OutOfSync`면 새 자동 sync |
+| 걸리는 시간 | 앱·데이터 Application(limit 10, backoff 30s → 최대 5m)의 재시도 대기 합 **42분**(아래). T13 실측은 작업 시작부터 마지막 실패까지 42분 44초, 되돌림 병합부터 반영까지 약 31분 | 수 초에서 1분 남짓으로 예상(**T13에서 실측 예정**) |
+| 위험 | 운영 쓰기가 없다 | 운영 실측 전이다 |
 
-실패가 뒤 wave 적용 전에 났으면(시나리오 6의 ExternalSecret 실패처럼) 그동안 옛 파드가 그대로 돈다. 그러면 기다려도 된다. 새 파드가 이미 깨졌거나 37분이 길면 끝낸다.
+재시도 대기 42분은 v3.5.5에서 이렇게 나온다. 실패하면 `retryCount`를 먼저 1 올리고(`controller/appcontroller.go:1704-1715`), 대기할 때 올린 값으로 `30s × 2^retryCount`(최대 5m, factor 기본 2)를 다시 계산한다(`:1632-1646`, `pkg/apis/application/v1alpha1/types.go:1566-1594`, 같은 디렉터리의 `application_defaults.go:5-8`). retryCount 1~10의 대기가 60s+120s+240s+300s×7 = 2520초다.
+
+- 작업 시작부터 센 대기만의 합이다. 시도마다의 실행·health 대기와 컨트롤러 처리 시간은 따로 더해진다. 되돌림 병합부터 남은 시간도, 복구에 걸리는 시간의 상한도 아니다.
+- 실패 메시지의 `Retrying attempt #n at <시각>`은 올리기 전 값으로 계산한 시각이라 처음 네 번은 실제보다 이르다. 남은 시간을 그 시각으로 어림하지 않는다.
+
+실패가 뒤 wave 적용 전에 났으면(시나리오 6의 ExternalSecret 실패처럼) 그동안 옛 파드가 그대로 돈다. 그러면 기다려도 된다. 새 파드가 이미 깨졌거나 기다리기가 길면 끝낸다.
 
 ### 1.3 순서
 
@@ -43,7 +48,7 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
    kubectl -n argocd get application "$APP" -o json | jq '.spec.source.helm.valuesObject.secrets'
    ```
 
-   **고친 값이 보이기 전에 4단계로 가지 않는다.** 먼저 끝내면 새 자동 sync가 옛 값으로 시작해 재시도를 처음부터 다시 한다.
+   **고친 값이 보이기 전에 4단계로 가지 않는다.** 그때는 `spec`과 진행 중 작업의 source가 아직 같아 3단계 판정이 맞지 않고, 4단계 명령도 거부한다. 먼저 끝내도 옛 값으로 다시 시작하지는 않는다(같은 source로 실패한 작업은 자동 sync가 다시 하지 않는다, `alreadyAttemptedSync`). 새 작업은 `spec`이 바뀐 뒤에야 생긴다.
 
 3. 진행 중 작업이 옛 source로 도는지 본다.
 
@@ -64,7 +69,7 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
    | `operation: true`, `phase: "Running"`, `sameSource: false`, `finishedAt` 있음 | 옛 source로 실패하고 다음 재시도를 기다리는 중 | 4단계 |
    | 위와 같은데 `finishedAt: null` | 시도가 도는 중 | 끝내지 않는다. 몇 초 뒤 3단계를 다시 본다 |
    | `sameSource: true` | 진행 중 작업이 이미 지금 spec으로 돈다 | 끝내지 않는다. 5단계 |
-   | `operation: false`, phase가 `Succeeded`·`Failed`·`Error` | 작업이 끝났다 | 끝내지 않는다. 5단계(새 자동 sync가 곧 시작한다) |
+   | `operation: false`, phase가 `Succeeded`·`Failed`·`Error` | 작업이 끝났다 | 끝내지 않는다. 5단계(새 작업은 `OutOfSync`일 때만 생긴다) |
    | 그 밖 | 이 절이 다루지 않는 상태 | 멈추고 `kubectl -n argocd get application "$APP" -o yaml`의 `status.conditions`·`operationState`를 본다 |
 
    두 값을 직접 대조하려면 `jq '{spec: .spec.source.helm.valuesObject, running: .status.operationState.operation.sync.source.helm.valuesObject}'`로 본다. values는 공개 저장소의 파일이고 `secrets`는 키 이름뿐이라 출력해도 된다.
@@ -78,26 +83,35 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
    - 같은 패치(merge patch)로 2026-10-23 `sandbox`의 멈춘 작업을 끝낸 적이 있다(approvals 01:49 행). 그때는 시도 중 health 대기였고, 재시도 대기 중에 끝내는 것은 아직 운영에서 하지 않았다.
 
    ```bash
-   # 3단계에서 본 작업의 시작·실패 시각. 패치는 그 작업이 아직 같은 재시도 대기 중일 때만 적용된다(JSON patch test).
-   # 그사이 다음 시도가 시작됐거나 작업이 끝났으면 test가 실패하고 아무것도 바뀌지 않는다. 그때는 3단계부터 다시.
+   # 한 번 읽은 JSON(SNAP)에서 3단계 표 첫 줄의 조건을 모두 다시 보고, 맞을 때만 그 JSON의 시각으로 패치를 묶는다.
+   # 시각만 따로 다시 읽으면 안 된다. 3단계 뒤 옛 작업이 끝나고 고친 source의 새 작업이 재시도 대기에 들어갔으면
+   # 그 새 작업을 끝내게 되고, 고친 source로 실패한 작업은 자동 sync가 다시 하지 않는다(alreadyAttemptedSync,
+   # appcontroller.go:2485-2500·2596-2600). startedAt이 작업을 가린다(새 작업은 옛 작업이 끝난 뒤에 시작한다).
+   # 그사이 다음 시도가 시작됐거나 작업이 끝났거나 다른 작업으로 바뀌었으면 test가 실패하고 아무것도 바뀌지 않는다.
    # 끝난 작업에 Terminating을 쓰면 .operation 없이 진행 중 표시만 남는다(컨트롤러는 .operation이 있을 때만 작업을
    # 처리한다, appcontroller.go:1138-1140). 시도 중에 끝내면 마이그레이션 Job 같은 hook을 중간에 지울 수 있다
-   # (Terminate는 hook을 먼저 정리한다, gitops-engine sync_context.go:725-745). test가 둘 다 막는다.
-   STARTED=$(kubectl -n argocd get application "$APP" -o jsonpath='{.status.operationState.startedAt}')
-   FINISHED=$(kubectl -n argocd get application "$APP" -o jsonpath='{.status.operationState.finishedAt}')
-   : "${STARTED:?작업 없음}" "${FINISHED:?재시도 대기 중이 아니다. 몇 초 뒤 3단계부터}"
-   kubectl -n argocd patch application "$APP" --type=json -p "$(jq -nc --arg s "$STARTED" --arg f "$FINISHED" '[
-     {op: "test", path: "/status/operationState/phase", value: "Running"},
-     {op: "test", path: "/status/operationState/startedAt", value: $s},
-     {op: "test", path: "/status/operationState/finishedAt", value: $f},
-     {op: "replace", path: "/status/operationState/phase", value: "Terminating"}]')"
+   # (Terminate는 hook을 먼저 정리한다, gitops-engine sync_context.go:725-745). 판정과 test가 둘 다 막는다.
+   SNAP=$(kubectl -n argocd get application "$APP" -o json)
+   STARTED=$(jq -r '.status.operationState.startedAt' <<<"$SNAP")
+   PATCH=$(jq -ec '.status.operationState as $s
+     | if .operation != null and $s.phase == "Running" and $s.finishedAt != null
+          and .spec.source != $s.operation.sync.source
+       then [
+         {op: "test", path: "/status/operationState/phase", value: "Running"},
+         {op: "test", path: "/status/operationState/startedAt", value: $s.startedAt},
+         {op: "test", path: "/status/operationState/finishedAt", value: $s.finishedAt},
+         {op: "replace", path: "/status/operationState/phase", value: "Terminating"}]
+       else error("끝낼 작업이 아니다(3단계 표 첫 줄이 아님). 3단계부터 다시") end' <<<"$SNAP") &&
+     kubectl -n argocd patch application "$APP" --type=json -p "$PATCH"
    ```
 
-   test 연산의 거부(다른 `finishedAt`, 끝난 작업, 시도 중)는 `kubectl patch --local`로 확인했다(2026-10-27). 운영 Application에 적용한 결과는 아직 없다.
+   `jq`가 거부하면 `&&` 때문에 패치하지 않는다. `test failed`가 나오면 아무것도 바뀌지 않은 것이다. 둘 다 3단계부터 다시 본다.
+
+   판정의 거부(고친 source의 작업, 시도 중, 끝난 작업, spec 반영 전)와 test의 거부(3단계 뒤 고친 source의 새 작업으로 바뀜, 다른 `finishedAt`, 시도 중, 끝난 작업)는 로컬 사본과 `kubectl patch --local`로 확인했다(2026-10-27). 운영 Application에 적용한 결과는 아직 없다.
 
    하지 않는 것: `.operation`을 지우지 않는다(작업이 정상 종료되지 않고 `Running` 표시가 남을 수 있다). 컨트롤러 파드를 다시 시작하지 않는다(작업 상태는 `status`에 남아 이어진다). `retry` 설정을 바꿔도 이미 만든 작업에는 적용되지 않는다(작업에 복사되어 있다).
 
-5. 새 자동 sync가 고친 값으로 시작하는지 본다.
+5. 끝난 뒤를 본다. 끝낸 작업은 몇 초 안에 `Terminating` → `Failed`("Operation terminated")가 된다. 그다음은 `sync`로 갈린다. 새 자동 sync는 Application이 `OutOfSync`일 때만 시작하기 때문이다(v3.5.5 `appcontroller.go:2437-2442`).
 
    ```bash
    kubectl -n argocd get application "$APP" -o json | jq '{
@@ -106,11 +120,19 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
      message: .status.operationState.message,
      sameSource: (.spec.source == .status.operationState.operation.sync.source),
      sync: .status.sync.status,
-     health: .status.health.status
+     health: .status.health.status,
+     conditions: [.status.conditions[]?.type]
    }'
    ```
 
-   - 기대: 몇 초 안에 `Terminating` → `Failed`("Operation terminated")가 되고, 이어 `startedAt`이 4단계의 `$STARTED`보다 뒤인 새 작업이 `sameSource: true`로 돈다. 끝에 `phase: "Succeeded"`, Synced/Healthy다.
+   | `sync` | 뜻 | 할 일 |
+   |---|---|---|
+   | `OutOfSync` | 고친 목표가 라이브와 달라 새 자동 sync가 돈다 | `startedAt`이 4단계의 `$STARTED`보다 뒤인 새 작업이 `sameSource: true`로 돌고, 끝에 `phase: "Succeeded"`, Synced/Healthy인지 본다 |
+   | `Synced` | 되돌린 목표가 라이브와 이미 같다. 새 작업이 생기지 않는 것이 정상이다 | 새 작업을 기다리지 않는다. 아래 리소스 상태로 복귀를 본다 |
+   | `Unknown`, 또는 `conditions`에 `ComparisonError` | 비교가 되지 않는다 | 멈추고 `status.conditions`를 본다 |
+
+   - `Synced`로 끝나는 예: 이미지와 `migration.command`를 함께 바꾼 배포가 wave 1의 마이그레이션 Job에서 실패하고 그 PR 전체를 되돌린 경우. Deployment(wave 2)는 옛 이미지 그대로라 되돌린 목표와 같고, hook은 sync 상태에 들어가지 않는다(`controller/state.go:980-998`, 설계 C.5.4). 되돌린 설정으로 실패한 migrate Job은 다음 hook을 만들 때까지 남는다(`BeforeHookCreation`). `homelab status`가 그 Job의 실패를 보여도 복귀 판정은 아래 리소스 상태로 한다.
+   - 라이브와 다른 것이 hook(마이그레이션 Job)뿐이면 새 자동 sync가 시작하지 않는다(설계 C.5.4의 `migration`만 바꾼 PR과 같다). hook을 다시 돌려야 하면 다음 배포 PR의 sync를 기다리거나 명시 sync가 필요하다. 이 절은 명시 sync를 다루지 않는다.
    - `phase`가 같은 `startedAt`으로 `Running`에 돌아갔으면 컨트롤러의 쓰기가 패치를 덮은 것이다. 3단계부터 다시 한다.
-   - `Failed`("Operation terminated")에서 2분 넘게 새 작업이 없으면 멈추고 원인을 본다. 자동 sync는 마지막 시도와 source가 같으면 다시 하지 않는다(`alreadyAttemptedSync`, `appcontroller.go:2568-2600`). 2단계에서 spec이 바뀐 것을 봤다면 여기에 해당하지 않아야 한다.
-   - 반영은 리소스 상태로 확인한다(설계 B.8 E7): 되돌린 것이 ExternalSecret이면 `Ready=True`, 이미지면 파드 imageID가 `image.yaml`의 digest와 같은지.
+   - `OutOfSync`인데 `Failed`("Operation terminated")에서 2분 넘게 새 작업이 없으면 멈추고 원인을 본다. 자동 sync는 마지막 시도와 revision·source가 같으면 다시 하지 않는다(`alreadyAttemptedSync`, `appcontroller.go:2568-2600`). 2단계에서 spec이 바뀐 것을 봤다면 여기에 해당하지 않아야 한다.
+   - 복귀는 리소스 상태로 확인한다(설계 B.8 E7): 되돌린 것이 ExternalSecret이면 `Ready=True`, 이미지면 파드 imageID가 `image.yaml`의 digest와 같은지. `Synced`로 끝난 경우도 같다.
