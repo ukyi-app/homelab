@@ -35,17 +35,23 @@ const ready = (o: any) => (o?.status?.conditions ?? []).some((c: any) => c?.type
 const wait = (app: string) => `잠시 뒤 다시: homelab status ${app}`;
 
 // 원인을 아는 시크릿 문제. 다음 행동은 첫 문제의 것이 원칙인데, 앞 줄(Argo CD)이 바로 이 원인 때문에 재시도 중이라
-// "잠시 뒤 다시"가 먼저 나왔다(T13 S6 빠진 키, S7 Infisical 인증 실패). run이 이것을 첫 문제보다 먼저 안내한다.
+// "잠시 뒤 다시"가 먼저 나왔다(T13 S6 빠진 키, S7 client secret 폐기로 Store 준비 실패). run이 이것을 첫 문제보다 먼저 안내한다.
 type Cause = { message: string; next: string };
 
-// ESO는 Store마다 Infisical에 로그인한다. client secret이 폐기되면 Ready=False InvalidProviderConfig였다(T09·T10·T13 S7
-// 실측). Infisical에 닿지 못해도 같은 이유일 수 있어, 다음 행동은 런북의 로그인 확인으로 둘을 가르게 한다.
-// 폴더가 없을 때(bootstrap.md 2.2) 같은 다른 이유는 이유 이름만 보인다.
+// InvalidProviderConfig는 인증 실패의 증거가 아니다. ESO v2.13.0은 provider client를 만들지 못하면 원인과 상관없이
+// (자격 Secret·CA 읽기, Infisical 접속, 로그인 거부) 이 이유와 메시지 "unable to create client"를 남기고, 실제 오류는
+// Warning 이벤트에만 쓴다(pkg/controllers/secretstore/common.go validateStore). client secret 폐기 때 이 이유였던 것은
+// T09·T10·T13 S7 실측일 뿐이라, 다음 행동은 이벤트로 원인을 가르는 것부터다. 폴더가 없을 때(bootstrap.md 2.2) 같은
+// 다른 이유는 이유 이름만 보인다.
 function storeProblem(name: string, store: any): { detail: string; next: string } | null {
   if (store && ready(store)) return null;
-  const reason = store ? ((store.status?.conditions ?? []).find((x: any) => x?.type === "Ready")?.reason ?? "조건 없음") : null;
+  const cond = store ? (store.status?.conditions ?? []).find((x: any) => x?.type === "Ready") : null;
+  const reason = store ? (cond?.reason ?? "조건 없음") : null;
   if (reason === "InvalidProviderConfig") {
-    return { detail: `Infisical 인증 실패: ClusterSecretStore ${name} Ready=False ${reason}`, next: "부트스트랩 Secret external-secrets/infisical-universal-auth의 ESO 자격을 확인한다(docs/runbooks-public/rotate.md 1절)" };
+    return {
+      detail: `Infisical Store 준비 실패: ClusterSecretStore ${name} Ready=False ${reason}${cond?.message ? `: ${short(cond.message, 80)}` : ""}`,
+      next: `kubectl describe clustersecretstore ${name}의 Events로 원인을 가른다. 인증 거부면 docs/runbooks-public/rotate.md 1절, 접속 오류(DNS·TLS·시간 초과)면 NUC에서 Infisical로 가는 네트워크, 자격 Secret을 못 읽으면 docs/runbooks-public/bootstrap.md 2.2`,
+    };
   }
   return { detail: `ClusterSecretStore ${name} ${reason ? `Ready=False ${reason}` : "없음"}`, next: `kubectl get clustersecretstore ${name} -o yaml로 원인을 본다(Infisical 폴더·부트스트랩 Secret: docs/runbooks-public/bootstrap.md 2.2)` };
 }
@@ -158,10 +164,24 @@ function appSteps(ctx: ReadCtx, app: string, main: string, causes: Cause[]): Ste
       const storeBad = refs.flatMap((n) => storeProblem(n, stores.find((s: any) => s?.metadata?.name === n)) ?? []);
       // 시나리오 6: 빠진 키를 이름으로 보인다(값은 보지 않는다).
       const keys: string[] = Array.isArray(v.secrets) ? v.secrets : [];
-      const have = keys.length && c.infisical.folderExists(`/apps/${app}`) ? c.infisical.listKeys(`/apps/${app}`) : [];
-      const lost = keys.filter((k) => !have.includes(k));
+      let have: string[] = [];
+      let keysUnread: string | null = null;
+      try {
+        have = keys.length && c.infisical.folderExists(`/apps/${app}`) ? c.infisical.listKeys(`/apps/${app}`) : [];
+      } catch (e) {
+        // 이미 읽어 확인한 Store 원인은 키 조회 실패(Infisical 장애, 로컬 로그인 만료)로 지우지 않는다(#950 1라운드 P2).
+        // 키는 못 읽었으니 빠졌다고 하지 않는다. Store 원인이 없으면 기존 관례대로 이 줄의 읽기 실패다.
+        if (storeBad.length === 0) throw e;
+        keysUnread = (e as Error).message;
+      }
+      const lost = keysUnread === null ? keys.filter((k) => !have.includes(k)) : [];
       const names = notReady.map((e: any) => e?.metadata?.name).join(", ");
-      const detail = [`${list.length - notReady.length}/${list.length} Ready: ${names}`, ...storeBad.map((p) => p.detail), ...(lost.length ? [`Infisical에 없음: ${lost.join(", ")}`] : [])].join(". ");
+      const detail = [
+        `${list.length - notReady.length}/${list.length} Ready: ${names}`,
+        ...storeBad.map((p) => p.detail),
+        ...(keysUnread !== null ? [`빠진 키 확인 못 함(${keysUnread})`] : []),
+        ...(lost.length ? [`Infisical에 없음: ${lost.join(", ")}`] : []),
+      ].join(". ");
       const known = storeBad[0]?.next ?? (lost.length ? `homelab secret set ${app} ${lost[0]}` : null);
       if (known) {
         causes.push({ message: `${secretsTarget}: ${detail}`, next: known });
