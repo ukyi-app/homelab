@@ -63,7 +63,7 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 
 설계 G 14행과 T13 할 일 6(D-08)의 기록 항목이다. LAN은 C.3.6의 AC-P6 기준으로 판정하고, 적용률은 기록만 한다. 실행 2026-10-28 23:21~23:44. 셀룰러·Wi-Fi 기기는 운영자 맥(Tailscale 1.104.2)이고, 셀룰러는 폰 핫스팟이다. LAN 기기는 NUC 자신이 공유기에 묻는 방식이다(T08a와 같다).
 
-- LAN 기기, AdGuard 정지 중 10초 간격 30회(`dig "am$(date +%s)-$i.example.com" +tries=1 +time=5`):
+- LAN 기기, AdGuard 정지 중 30회(`dig "am$(date +%s)-$i.example.com" +tries=1 +time=5`). 설계는 10초 간격이지만 실제는 질의마다 5초 시간 초과를 기다린 뒤 10초 쉬어 **15초 간격**이었다(23:34:42~23:41:57, T08a 스크립트와 같은 구조). 판정에는 영향이 없다:
   - 실패 수(시간 초과·SERVFAIL·REFUSED): 30/30(모두 5초 시간 초과). 공유기 경유 `doubleclick.net`도 응답 없음.
   - 응답 시간(`Query time`): 응답 0건이라 없음. 공유기는 보조 DNS(1.1.1.1)로 넘어가지 않는다(U19, T08a와 같다).
 - 셀룰러 Tailscale 기기, AdGuard 정지 중:
@@ -109,7 +109,7 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 - **15** 15-11에서 배포 App 키를 로컬에서 한 번 읽어 유출을 흉내 냈다. 키는 회전하지 않는다. (한계, 사용자 승인 approvals 2026-10-27 같은 행)
 - **15** 15-13(결과 PR에서 owner 자기 승인 거부)은 아직 하지 않았다. (후속: T13 결과 PR <!-- TODO lead: 15-13 결과 -->)
 - **12** 재부팅 직후 ApplicationSet 컨트롤러가 repo-server보다 먼저 떠 Git 생성에 실패했고, `appset-apps`·`appset-data`·`root-prod`가 약 3분 Degraded였다. 첫 실패 3분 뒤 재시도로 사람 손 없이 회복했고, 복귀 5분 24초 중 대부분이 이 대기다. `ArgoCDAppDegraded`(30분) 기준 안이라 경보는 나지 않았다. (후속: 복귀 시간을 줄이려면 ApplicationSet 재시도 간격 검토, 지금은 조치 없음)
-- **14** LAN 기기는 AdGuard 정지 동안 이름 해석이 전부 실패한다(30/30). (한계, 사용자 승인 approvals 2026-10-20 18:58 무렵 "AC-P6(LAN DNS) 한계 승인" 행. 완화: 런북 `nuc-dns-outage.md`, `AdGuardDown` 경보는 이번에도 23:36 발화·Telegram 전송)
+- **14** LAN 기기는 AdGuard 정지 동안 이름 해석이 전부 실패한다(30/30, 설계의 10초 대신 15초 간격으로 7분 15초 동안). (한계, 사용자 승인 approvals 2026-10-20 18:58 무렵 "AC-P6(LAN DNS) 한계 승인" 행. 완화: 런북 `nuc-dns-outage.md`, `AdGuardDown` 경보는 이번에도 23:36 발화·Telegram 전송)
 - **14** 사용자 규칙 적용률이 2026-10-21(Wi-Fi 20/20, 셀룰러 19/20)보다 크게 낮다(Wi-Fi 0/20, 셀룰러 1/20). 맥의 시험 질의가 NUC AdGuard로 가지 않고 AdGuard 공용 DNS가 답했다. 원인은 확인하지 못했다(후보: 맥에서 DNS를 가로채는 앱, 질의 로그의 `local.adguard.org` 44건. Tailscale 1.104 전달자 동작). 판정 기준이 없는 기록 항목이다. (후속: 원인 조사)
 - **14** 설계 명령 `sudo k3s crictl pull` 대신 시험 파드의 이미지 받기로 봤다(같은 containerd·노드 DNS 경로). (편차, lead 판단: 정지 중 sudo 입력을 피함)
 - **17** 아직 실행하지 않았다. NUC는 Wi-Fi로만 연결돼 있어 랜선 차단 대신 전원을 끈다. 실행 직전에 다시 승인받는다. (후속: T13 시나리오 17, 사용자 결정 approvals 2026-10-29)
