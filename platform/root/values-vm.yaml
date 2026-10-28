@@ -26,10 +26,6 @@ cluster:
   # 정리 PR이 recoverySource를 지운다(시나리오 13, E8 VM 격리 3번, 설계 C.6.4, restore.md 3절).
   cnpg:
     serverName: pg-vm-20261027
-    recoverySource:
-      serverName: pg-20261023
-      bucket: homelab-backups
-      credentialsSecret: r2-source-readonly
 
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈춘다(restore.md 3절, 설계 C.6.4). 평소에는 빈 값이다.
   # apps/·data/의 values는 운영과 VM이 함께 읽어, VM 복구 PR이 거기에 suspended·running을 적으면 운영 앱도 멈춘다.
