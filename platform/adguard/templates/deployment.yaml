@@ -4,7 +4,7 @@ metadata:
   name: adguard
   namespace: adguard
 spec:
-  replicas: 0
+  replicas: 1
   # RWO 설정 파일에 두 프로세스가 동시에 쓰지 않게 한다. 갱신 중 DNS가 잠시 끊긴다.
   # 공유기는 보조 DNS로 넘어가지 않아 그동안 Tailscale 없는 LAN 기기의 DNS가 모두 끊긴다(2026-10-20 실측).
   # 길어지면 docs/runbooks-public/nuc-dns-outage.md.
