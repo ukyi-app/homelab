@@ -1146,7 +1146,7 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
          valkey: {<앱>: stopped}                      # 영속 Valkey가 있는 앱만
      ```
 
-     `r2-source-readonly`는 운영 백업 버킷에만 한정한 R2 Object Read 토큰이다(복구 자산, Infisical 밖). VM에 운영 버킷에 쓰는 자격이 없게 하려는 것이다. 키 이름은 `r2-backup`과 같은 `ACCESS_KEY_ID`·`SECRET_ACCESS_KEY`·`ENDPOINT_URL`이다(차트가 이 이름으로 읽는다). 같은 Cloudflare 계정이라 `ENDPOINT_URL`은 VM 버킷 자격과 같은 값이다. plugin sidecar는 두 ObjectStore의 env를 이름으로 합치고 먼저 온 값을 쓰므로 다르면 한쪽이 무시된다.
+     `r2-source-readonly`는 **운영 백업 버킷 `homelab-backups`에만 한정한** R2 Object Read 토큰이다(복구 자산, Infisical 밖). VM 버킷(`homelab-backups-vm`) 토큰이 아니다(3단계). VM에 운영 버킷에 쓰는 자격이 없게 하려는 것이다. 키 이름은 `r2-backup`과 같은 `ACCESS_KEY_ID`·`SECRET_ACCESS_KEY`·`ENDPOINT_URL`이다(차트가 이 이름으로 읽는다). 같은 Cloudflare 계정이라 `ENDPOINT_URL`은 VM 버킷 자격과 같은 값이다. plugin sidecar는 두 ObjectStore의 env를 이름으로 합치고 먼저 온 값을 쓰므로 다르면 한쪽이 무시된다.
 
    렌더 결과는 `bootstrap.recovery` + 원본 전용 ObjectStore `r2-source`(옛 serverName) + 아카이브 plugin(새 serverName)이다. 새 serverName을 빠뜨리면 렌더가 실패한다(같은 prefix에 두 세대가 섞이면 되돌릴 수 없다). `cnpg.io/skipEmptyWalArchiveCheck` 주석은 쓰지 않는다.
 
@@ -1156,6 +1156,8 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
 3. [bootstrap.md](bootstrap.md) 순서로 host → k3s → Argo CD → ESO 부트스트랩 Secret → root apply.
 
    **VM 시험: root apply 전에 복구 원본 자격을 넣고 쓰기 거부를 본다.** bootstrap.md 2.2 vm 분기 3단계와 같은 블록이다(한쪽을 고치면 다른 쪽도). root가 먼저 뜨면 cnpg-cluster(wave -3)가 자격 없는 `r2-source`로 복구를 시작하므로 root apply보다 앞에 둔다. `database` ns는 namespaces(wave -9)가 나중에 PSA 라벨을 붙여 넘겨받는다. 값은 복구 자산의 읽기 전용 토큰에서 `export`로 넣고 출력하지 않는다. 명령행 인자로 넘기지 않는다(`ps`·`/proc`로 보인다).
+
+   **넣는 토큰은 운영 버킷 `homelab-backups`에 묶인 읽기 전용 토큰이다. VM 버킷(`homelab-backups-vm`)에 묶인 토큰을 넣지 않는다.** 둘 다 같은 Cloudflare 계정의 R2 토큰이고 endpoint도 같아 헷갈리기 쉽다. 2026-10-28 시험에서 VM 버킷 토큰을 두 번 넣었고, 아래 쓰기 거부 시험의 읽기 단계가 403으로 막았다. 그때는 운영 버킷 토큰으로 이 블록을 다시 돌려 Secret을 덮어쓰고 쓰기 거부 시험을 다시 한다.
 
    ```bash
    bash -euo pipefail <<'EOF'
@@ -1222,7 +1224,7 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
    x() { kubectl -n database exec -i "job/$J" -- rclone --retries 1 --low-level-retries 1 "$@"; }
    # 읽기: 운영 아카이브의 base backup 디렉터리가 보인다(복구가 읽을 것)
    n=$(x lsf --dirs-only "src:homelab-backups/pg/$SRV/base/" </dev/null 2>/dev/null | wc -l) \
-     || { echo "읽기 실패: 토큰 범위·버킷·serverName을 본다" >&2; exit 1; }
+     || { echo "읽기 실패: 토큰이 운영 버킷 homelab-backups에 묶였는지(VM 버킷 토큰이 아닌지), serverName을 본다" >&2; exit 1; }
    [ "$n" -gt 0 ] || { echo "운영 아카이브 pg/$SRV/base/에 base backup이 없다" >&2; exit 1; }
    # 쓰기: 시험 객체 업로드가 403으로 거부돼야 한다
    KEY="t13-write-check/$J"

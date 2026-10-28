@@ -450,7 +450,7 @@ NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있�
    EOF
    ```
 
-3. **root apply 전에 복구 원본 R2 읽기 전용 Secret을 넣는다.** 복구 자산의 운영 버킷(`homelab-backups`) 읽기 전용 토큰을 2단계처럼 `R2_RO_ACCESS_KEY_ID`·`R2_RO_SECRET_ACCESS_KEY`·`R2_RO_ENDPOINT`(S3 API endpoint URL)로 export한다. Infisical에 두지 않는 Secret 하나다(설계 E8 VM 격리 3번). 이름과 키는 values-vm의 `recoverySource.credentialsSecret`, CNPG 차트가 읽는 키(`platform/cnpg/cluster/templates/_helpers.tpl`)와 같다. 그래서 main의 values-vm에 복구 PR이 없으면 넣지 않고 멈춘다. `database` ns는 root의 namespaces(wave -9)가 만들기 전이라 여기서 만들고, 나중에 root가 라벨을 붙여 인수한다. 같은 블록이 [restore.md](restore.md) 3절에도 있다. 고치면 둘을 함께 고친다.
+3. **root apply 전에 복구 원본 R2 읽기 전용 Secret을 넣는다.** **토큰은 운영 버킷 `homelab-backups`에 묶인 읽기 전용 토큰이다. VM 버킷(`homelab-backups-vm`) 토큰을 넣지 않는다**(같은 계정·같은 endpoint라 헷갈리기 쉽다. 2026-10-28 시험에서 두 번 잘못 넣었고 restore.md 3절의 쓰기 거부 시험이 읽기 403으로 막았다. 그때는 맞는 토큰으로 이 블록을 다시 돌린다). 복구 자산의 그 토큰을 2단계처럼 `R2_RO_ACCESS_KEY_ID`·`R2_RO_SECRET_ACCESS_KEY`·`R2_RO_ENDPOINT`(S3 API endpoint URL)로 export한다. Infisical에 두지 않는 Secret 하나다(설계 E8 VM 격리 3번). 이름과 키는 values-vm의 `recoverySource.credentialsSecret`, CNPG 차트가 읽는 키(`platform/cnpg/cluster/templates/_helpers.tpl`)와 같다. 그래서 main의 values-vm에 복구 PR이 없으면 넣지 않고 멈춘다. `database` ns는 root의 namespaces(wave -9)가 만들기 전이라 여기서 만들고, 나중에 root가 라벨을 붙여 인수한다. 같은 블록이 [restore.md](restore.md) 3절에도 있다. 고치면 둘을 함께 고친다.
 
    ```bash
    bash -euo pipefail <<'EOF'
