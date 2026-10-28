@@ -2,7 +2,7 @@
 
 T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.md) G절의 시나리오 1~17과 C.8의 봇 자리 표다. 봇·병합·알림 자리의 최종 확인은 [T13](../issues/T13-platform-integration.md) 할 일 4·5다.
 
-**중간 결과(2026-10-28).** 시나리오 1~11·13·16과 15의 15-1~15-12를 실행했다. 12·14·17과 15-13은 사용자 일정에 맞춰 따로 실행하므로 아직 `설계상 기대`다(사용자 결정 2026-10-28, [approvals.md](../approvals.md)). 실행한 뒤 같은 표를 채우고, T13은 그때까지 진행 중이다. 결과표는 PR로 main에 병합한다(AC-X1).
+**중간 결과(2026-10-29).** 시나리오 1~14·16과 15의 15-1~15-12를 실행했다. 17과 15-13은 사용자 일정에 맞춰 따로 실행하므로 아직 `설계상 기대`다(사용자 결정 2026-10-28·29, [approvals.md](../approvals.md)). 실행한 뒤 같은 표를 채우고, T13은 그때까지 진행 중이다. 결과표는 PR로 main에 병합한다(AC-X1).
 
 - 무엇: 시험 앱 `homelab-smoke`(두 번째 DB는 `homelab-smoke2`)로 G의 시나리오를 다시 실행한 결과다. 시나리오 13은 NUC 위 임시 VM(D-12), 나머지는 운영에서 했다.
 - 언제: 2026-10-27~28(KST). 준비는 2026-10-26에 시작했다. 줄마다 실행 시각을 적었고, `Z`가 붙은 시각은 UTC다.
@@ -51,9 +51,9 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 | 9 | 앱을 삭제해도 DB·영속 데이터 보존 | 운영 | 기준: 표식 행 1,2,3,1313, Valkey 키 3·`t13:s13:marker`, PVC `valkey-data` uid 18bbfc5d. `homelab app remove homelab-smoke` PR #965(`apps/homelab-smoke/` 두 파일 삭제) → Application NotFound, 앱 파드 0 → Database·DatabaseRole 그대로, PVC 같은 uid Bound, 영속 Valkey 1/1(데이터 앱 Synced/Healthy), 표식 행 그대로, `homelab data list` "`data/<app>`은 있고 `apps/<app>`은 없음: homelab-smoke, homelab-smoke2", Infisical `/apps/homelab-smoke` 키 그대로 → `app add` 재등록 PR #966(비밀번호 "있음(그대로 사용)") → 07:30:57Z 앱 Ready, `/healthz`·`/healthz/db`·`/healthz/cache` 200, 표식 행·PVC uid·Valkey 키 같음 | 2026-10-28 16:2x~16:31 | 실제 검증 완료 | 재등록은 `app remove`가 지운 `values.yaml`을 CLI가 다루는 키로 새로 써서 사람이 더한 migration 줄이 사라졌다(문서 경고, 아래). 시험 키 둘이 secrets로 다시 들어갔다 |
 | 10 | 공유 PostgreSQL에서 특정 앱만 복원 | 운영 | `homelab-smoke2`(DB만, 손 PR #939) → 표식 smoke {1,2,3}, smoke2 {1001,1002}(앱 역할 소유) → 온디맨드 Backup → T1 = 2026-10-27T02:15:56Z → T1 뒤 smoke id 1 삭제·스키마 `t13_after`·테이블 둘(앱 역할), smoke2 1003 추가, `pg_switch_wal` → `homelab db restore homelab-smoke --to T1`(T1 뒤 completed base backup이 없어 처음엔 멈춤 → 온디맨드 `t13-s10-post-20261027021733` 뒤 통과) → 되돌림 사본 R2 `pgdump/homelab-smoke/pre-restore-20261027021820741de2.dump`, R2에서 만든 임시 Cluster 내용이 T1 상태 → 멈춤 #940 → 재개 #941 → `--finish`. 결과: smoke {1,2,3}, 스키마 public만, 테이블 `public.t13_smoke`(owner homelab-smoke)뿐, smoke2 {1001,1002,1003}, DB owner homelab-smoke, PUBLIC CONNECT f. 임시 Cluster·PVC 0, restore 라벨 Job·Pod·PVC 0, `/healthz/db`·`/healthz/cache` 200. 교차 접속: 각 앱 역할 → 자기 DB 성공, 상대 DB "permission denied for database"(복원 전·후 같음) | 2026-10-27 11:13~11:32 | 실제 검증 완료 | 되돌림 사본 삭제는 사람 작업이다(명령은 저장소 밖). `db restore`가 T1 뒤 base backup을 요구하는 것은 설계 G 10행에 없었다 |
 | 11 | 빌드 완료 순서가 바뀌어도 과거 이미지로 배포되지 않음 | 운영 | 두 번째 시도: 앱 PR smoke#5(A2 b86f8ba, 느린 시험 표시 `.slow-build` 남음 → test 150초) 04:05:44Z 병합, 이어 main에서 만든 smoke#6(B2 6ec09ca, 표시 삭제) 04:06:28Z 병합 → B2 빌드 04:07:35Z 먼저 끝남·배포 PR #943(deploy App 작성, merge App 병합) → A2 빌드 04:09:22Z 늦게 끝남, deploy-pr "열린 deploy/homelab-smoke의 revision 6ec09ca 대비 behind: 갱신하지 않는다", 새 PR 없음 → `gh run rerun`(attempt 2, 04:15:25Z) "main의 배포 revision 6ec09ca 대비 behind: 갱신하지 않는다" → 배포 PR은 #928·#931·#942·#943뿐, main `image.yaml` revision 6ec09ca·digest 534f9554, 파드 imageID 534f955400ba | 2026-10-27 13:05~13:15 | 실제 검증 완료 | 첫 시도(smoke#3·#4)는 무효다: B를 A 브랜치에 쌓은 채 squash해 B가 빈 커밋이 됐고 표시 파일이 main에 남아 두 빌드 모두 느렸다(lead 실수). 그때 A의 deploy-pr이 B의 대기 job에 concurrency(cancel-in-progress)로 취소되는 것도 봤다(보조 장치, 순서는 compare가 지킨다). `src/slow.test.ts`는 앱 저장소 main에 남아 있다(표시가 없으면 즉시 끝) |
-| 12 | NUC 재부팅 후 의존 서비스 준비 | 운영·기기 | | | 설계상 기대 | 실행 예정(사용자 일정, approvals 2026-10-28) <!-- TODO lead: S12 결과 --> |
+| 12 | NUC 재부팅 후 의존 서비스 준비 | 운영·기기 | 기준(23:45): 노드 Ready, Argo CD 22개 Synced/Healthy, `pg` healthy, ExternalSecret 미준비 0, AdGuard `dig`·`/healthz/db` 200. 부팅 직후 측정은 cron `@reboot` 스크립트(부팅 뒤 갱신된 상태만 통과로 셈, 사용자 승인, 측정 뒤 삭제). `sudo reboot` 지시 23:50:37 → 부팅 23:52:28 → k3s active 23:52:47 → 파드 Ready(ESO 23:52:50, AdGuard 23:52:51, 앱 23:52:56, `pg-1` 23:52:59, Valkey 23:53:01, cloudflared 23:53:03) → 첫 통과: 노드·CNPG·ExternalSecret·AdGuard `dig @192.168.117.15` 23:53:04, `curl https://smoke.ukyi.app/healthz/db` 200 23:53:05, tailnet Grafana 302 23:53:10, Argo CD 22개 Synced/Healthy 23:56:01. **복귀 5분 24초**(부팅 뒤 3분 33초). 뒤 확인(23:58~23:59): `bootstrap.md` 3절 블록 확인 통과(`preflight --after`·`verify` 통과), 1.1 egress 시험 통과(시험 파드 15/15), vm.md 6.3 남은 것 0 | 2026-10-28 23:45~23:59 | 실제 검증 완료 | 목표 10분(제안) 안. Argo CD가 가장 늦었다: ApplicationSet 컨트롤러가 repo-server보다 먼저 떠 Git 생성에 실패(23:52:58)해 `appset-apps`·`appset-data`·`root-prod`가 약 3분 Degraded, 23:55:59 재시도로 사람 손 없이 회복(아래) |
 | 13 | 빈 NUC에서 문서 절차만으로 재구축 후 테스트 앱 배포 | VM·기기 | VM 격리 조건 여섯: (1) values-vm·root-vm·vm.env, (2) `homelab-dev` 키 대조 빠진 키 0(운영 키 23), ESO `eso-homelab-dev`, (3) VM 버킷 `homelab-backups-vm`·serverName `pg-vm-20261027`에만 아카이브, 운영 원본은 `r2-source-readonly`로만(쓰기 403 거부, base backup 11개 보임), (4) `vm-*` 기기 5개(vm-adguard·vm-argocd·vm-grafana tag:k8s, vm-go tag:k8s-go, vm-tailscale-operator tag:k8s-operator, 콘솔 확인), VM 호스트 `tailscale0` 없음, 운영 tailnet 기기 사라짐 0, D-30 `vm-go/argocd` 리다이렉트(사용자 브라우저), (5) 시험 터널 `/ready` 200·HA 4, Traefik `Host: smoke.ukyi.app` `/healthz`·`/healthz/db`·`/healthz/cache` 200·없는 host 404, 운영 공개 URL 200·DNS 레코드 2개 그대로, (6) context `homelab-vm`. 순서: vm.md 1절(패키지 78개, 네트워크·격리 표, VM, 격리 확인) → VM 안 bootstrap 0.0·1절(verify 통과) → Argo CD → ESO·복구 원본 Secret → 쓰기 거부 → root-vm(02:31Z) → pg healthy 02:35Z → U27 통과(운영 표식 행 1313이 VM에 있음, smoke2 1001~1003) → 새 base backup(VM 버킷) → Valkey: 운영 RDB를 VM 버킷으로 복사·대조 → restore.md 1절 2~6단계(#961 복원 모드, #962 끄기) → 표식 키 `t13:s13:marker` 일치·AOF ok → 앱 재개 #963 → Argo CD 22개 Synced/Healthy, imageID = `image.yaml`, 교차 DB 거부, VM bootstrap 3절 확인 통과 → 정리 PR #964: U26 Argo CD 경로(initdb로 바뀌어도 pg-1 uid·재시작 0 그대로) → `r2-source-readonly` 삭제 → 할 일 7 운영 ESO 로그인 HTTP 200 | 2026-10-28 09:4x~15:0x(VM 복구 PR #959·운영 표식 행 2026-10-27 19:34) | 실제 검증 완료(편차 승인) | 문서에 없는 단계 1개: 운영 NUC의 inotify 인스턴스 한도 128 소진으로 libvirt dnsmasq가 뜨지 못해 #960을 실행 중에 병합·적용하고 libvirtd를 재시작했다(런북 밖). 지금 런북이면 vm.md 1.1이 먼저 막는다. 사용자가 편차로 승인했고 재실행하지 않는다(2026-10-28). 그 밖 넷(1.5 첫 SSH가 pam_nologin에 실패, 첫 verify의 podCIDR 경쟁, 읽기 전용 토큰 두 번 잘못 넣음, Pending PVC가 데이터 sync를 막음)은 #968로 보강. U40 2회차는 하지 않았다 |
-| 14 | AdGuard가 멈췄을 때 LAN·Tailscale 기기의 이름 해석 | 운영·기기 | | | 설계상 기대 | 실행 예정(사용자 일정, approvals 2026-10-28). 측정 항목은 표 아래 "시나리오 14 측정값" <!-- TODO lead: S14 결과 --> |
+| 14 | AdGuard가 멈췄을 때 LAN·Tailscale 기기의 이름 해석 | 운영·기기 | 적용률(AdGuard 켠 채) → 정지 PR #970(23:34:03 병합, 파드 0) → LAN·셀룰러·노드·내부 UI 측정 → 되돌림 #976(23:42:23 병합) → 파드 Ready 23:42:30 → 차단 복귀·질의 로그 → 시험 규칙 삭제. 값은 표 아래 "시나리오 14 측정값" | 2026-10-28 23:21~23:44 | 승인된 한계(LAN, AC-P6) | LAN은 정지 동안 30회 모두 시간 초과(2026-10-20 실측과 같음, AC-P6 한계 사용자 승인 2026-10-20). 셀룰러 Tailscale 기기·노드·내부 UI는 기대대로. 적용률이 2026-10-21보다 크게 낮다(아래). 집 LAN DNS 정지 약 8분 30초 |
 | 15 | 자동 병합 조건 밖의 PR은 사람 승인 뒤에만 병합 | 운영 | 대역 App `ukyi-homelab-bot-standin-2`(ID 5491621, homelab·homelab-smoke만 설치). 15-1 설정 확인 24줄 PASS(automerge secret·배포 브랜치 main, repo·org secret 0, `allow_auto_merge` false, bypass, main-checks 필수 `ci`, 태그 ruleset 3패턴, smoke·template `app-main` 4규칙·관리자 bypass `pull_request`만·CODEOWNERS, workflow-guard 음성 fixture 32개). 15-2 homelab 브랜치 job의 `automerge`·`AutoMerge` 선언 둘 다 "not allowed to deploy to automerge"(run 40467209857). 15-3 test 권한 job에 OIDC 없음, 시험 브랜치의 배포 identity 로그인 403. 15-4 사람 PR #952 `deploy-merge` 조건 1(·2) 불일치. 15-5 `ci` 실패 PR #951 `--admin` 거부("Required status check ci is failing"), #952 `--match-head-commit` 검토 SHA ≠ head 거부. 15-6 `app-chart-v1.0.0` 이동·삭제 push GH013, 태그 그대로. 15-7 대역 App PR #953 조건 1로 미병합, `PUT merge` 405, homelab main·`deploy/s15-x`·smoke main push GH013. 15-8 배포 App 토큰의 `ci.yaml` 변경 push "without workflows permission" 거부. 15-9 smoke가 homelab 워크플로를 부를 때 `HOMELAB_MERGE_KEY` length=0. 15-10 smoke `app-main` disabled 07:37:01Z → 배포 PR #954 조건 9만 불일치 → active 복귀 → 재판정 병합. 15-11 커밋 C 6ad9ddcf([skip ci], 빌드 없음) → 브랜치 워크플로가 C를 빌드·push(revision=C·source 라벨, attestation 없음 404) → 대조 main 빌드 verify 0 → 배포 App 토큰(키 유출 대역)으로 PR #955 → 조건 5만 불일치, 미병합 → 닫기 → 정상 배포 PR #956 병합. 15-12 `homelab github verify` exit 0 → 사용자가 선언 밖 ruleset `s15-drift` 생성 → exit 1 "guard 3: homelab의 ruleset 이름 집합·개수가 선언과 다르다" → 삭제 → exit 0(main 499fe6e). 정리: 시험 PR 3개 닫음, 브랜치 7개·smoke automerge environment 삭제, 대역 App·GHCR 시험 버전 삭제 | 2026-10-27 16:2x~17:1x, 15-12 보충 17:2x~17:4x | 실제 검증 완료(15-1~15-12) <!-- TODO lead: 15-13 뒤 "실제 검증 완료"로 --> | 15-10·15-11은 lead 실행이 분류기에 막혀 사용자가 탭에서 실행했다. 15-11에서 배포 App 키를 로컬에서 한 번 읽었다(회전 안 함, 사용자 결정). 15-7e(대역 App 승인 + 병합)는 설계 행 밖이라 하지 않았다. 15-2의 FAIL 한 줄은 스크립트가 job 완료 전에 읽은 것이다(다시 읽어 PASS) |
 | 15-13 | (15의 일부) 결과 PR: owner 자기 승인 거부, `deploy-merge` 조건 1 불일치, 관리자 bypass 병합만 성공 | 운영 | | | 설계상 기대 | 실행 예정(사용자 일정, approvals 2026-10-28) <!-- TODO lead: 15-13 결과 --> |
 | 16 | 봇이 없거나 멈춘 상태에서 테스트 경보가 비AI 경로로 도착 | 운영·기기 | 봇 없음(homelab-bot 미배포, E4b 시점과 같음). `amtool alert add alertname=PlatformTest severity=warning` 04:01:14Z → `alertmanager_notifications_total{integration="telegram"}` 4→5, failed_total 합 0 그대로. Telegram 수신 13:01(발송 13:01:14, 2분 안), 해소 13:06(amtool 기본 만료 5분) | 2026-10-27 13:01 | 실제 검증 완료 | 수신은 사용자 화면으로 확인했다 |
@@ -61,23 +61,24 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 
 ### 시나리오 14 측정값
 
-설계 G 14행과 T13 할 일 6(D-08)의 기록 항목이다. LAN은 C.3.6의 AC-P6 기준으로 판정하고, 적용률은 기록만 한다. <!-- TODO lead: S14 실행 뒤 채운다 -->
+설계 G 14행과 T13 할 일 6(D-08)의 기록 항목이다. LAN은 C.3.6의 AC-P6 기준으로 판정하고, 적용률은 기록만 한다. 실행 2026-10-28 23:21~23:44. 셀룰러·Wi-Fi 기기는 운영자 맥(Tailscale 1.104.2)이고, 셀룰러는 폰 핫스팟이다. LAN 기기는 NUC 자신이 공유기에 묻는 방식이다(T08a와 같다).
 
 - LAN 기기, AdGuard 정지 중 10초 간격 30회(`dig "am$(date +%s)-$i.example.com" +tries=1 +time=5`):
-  - 실패 수(시간 초과·SERVFAIL·REFUSED):
-  - 응답 시간(`Query time`):
+  - 실패 수(시간 초과·SERVFAIL·REFUSED): 30/30(모두 5초 시간 초과). 공유기 경유 `doubleclick.net`도 응답 없음.
+  - 응답 시간(`Query time`): 응답 0건이라 없음. 공유기는 보조 DNS(1.1.1.1)로 넘어가지 않는다(U19, T08a와 같다).
 - 셀룰러 Tailscale 기기, AdGuard 정지 중:
-  - `nslookup doubleclick.net`(차단 응답 `0.0.0.0` 또는 NXDOMAIN):
-  - `nslookup example.com`(정상 응답):
+  - `nslookup doubleclick.net`(차단 응답 `0.0.0.0` 또는 NXDOMAIN): `0.0.0.0`(`dig @100.100.100.100`). **U33 통과.**
+  - `nslookup example.com`(정상 응답): `104.20.23.154`.
 - 노드:
-  - `resolvectl query example.com`:
-  - `sudo k3s crictl pull docker.io/library/busybox:1.37`:
-- tailnet 기기의 내부 UI(`curl -sI https://argocd.<tailnet>.ts.net`):
-- 원복(revert PR) 뒤 차단 복귀와 AdGuard Home 질의 로그:
+  - `resolvectl query example.com`: 정상(노드 DNS는 공용 DNS 직접).
+  - `sudo k3s crictl pull docker.io/library/busybox:1.37`: 같은 이미지를 시험 파드(`imagePullPolicy: Always`)로 받아 1.1초에 성공. 같은 containerd·노드 DNS 경로이고, 정지 중 sudo 입력을 피하려고 바꿨다(T08a에서 정지 중 sudo가 시간 초과).
+- tailnet 기기의 내부 UI(`curl -sI https://argocd.<tailnet>.ts.net`): NUC에서 Argo CD 200·Grafana 302. 운영자 맥(셀룰러)의 브라우저로 Grafana·Argo CD가 열렸다.
+- 원복(revert PR) 뒤 차단 복귀와 AdGuard Home 질의 로그: 공유기 경유 `doubleclick.net` → `0.0.0.0`(23:42:41부터), `example.com` NOERROR. 원복 뒤 tailnet 출처(svclb 파드 IP, U32) 질의 52건이 질의 로그에 있다. `AdGuardDown` pending 23:35:00·firing 23:36:00·해소 23:42:45, Telegram 전송 20→21.
 - 사용자 규칙 적용률(`adg-<날짜>-<회차>.ukyi.app`, `0.0.0.0` 응답만 셈):
-  - 규칙 전 두 경로 정상 주소 확인:
-  - 집 Wi-Fi 20회 중 차단:
-  - 셀룰러 20회 중 차단:
+  - 규칙 전 두 경로 정상 주소 확인: `adg-20261028-t1`·`-t2`가 NUC AdGuard·`1.1.1.1`·AdGuard 공용(`94.140.14.14`) 모두 정상 주소. 규칙(`||adg-20261028-*.ukyi.app^`)은 23:25:58 적용 확인(공용 DNS는 계속 정상 주소).
+  - 집 Wi-Fi 20회 중 차단: **0/20**(2026-10-21 T08a: 20/20).
+  - 셀룰러 20회 중 차단: **1/20**(2026-10-21 T08a: 19/20).
+  - 질의 로그 대조: Wi-Fi 20개는 NUC AdGuard에 하나도 오지 않았고, 셀룰러는 `c1` 하나만 왔다(그것이 차단 1건). 같은 시간 맥의 일반 앱 질의는 tailnet 출처로 4분에 444건 왔다. 맥의 시스템 리졸버·macOS API·`@100.100.100.100` 세 경로 모두 시험 이름에 정상 주소를 받았다.
 
 ## 한계와 후속
 
@@ -85,8 +86,8 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 
 - **1** tailnet 불통 확인 대상을 설계 G 1행의 운영자 노트북(`nc -l`) 대신 Argo CD tailnet 프록시 443으로 바꿨다. 운영자 기기에 SSH로 닿지 못했다. 노드에서 같은 대상이 열리는 것으로 대조했다. 노드 nftables가 파드 대역 → tailnet 대역 전체를 막으므로 대상에 따라 결과가 달라지지 않는다. (한계, 사용자 승인 2026-10-28)
 - **1** 새 파드 시작 직후 약 1초 egress 창(T13 할 일 9): 사용자 결정 1안대로 노드 nftables로 파드 대역의 LAN·tailnet·공개 비443 출발을 막았다(#919, 커널 판정 보강 #926). 2026-10-26 운영 적용 뒤 시작 즉시 연결하는 시험 파드가 15/15 통과했다(LAN·tailnet·공개 80/22·다른 DNS·노드 SSH 차단, 443·7844·DNS·6443·API 열림). 시나리오 1은 이 규칙을 켠 뒤 실행했다. 런북 `bootstrap.md` 1.1의 남는 한계 1~4(파드 → 노드 6443·10250, 업스트림 DNS 53, 공개 443·7844, Tailscale DERP 전용)는 1안 범위다. (한계, 사용자 승인 approvals 2026-10-26 "T13 P4 노드 nftables 1안")
-- **1** 같은 규칙의 남는 한계 5(부팅 때 규칙이 못 올라와도 k3s는 뜨는 fail-open)는 1안 승인 문구 밖이었다. 시나리오 12(NUC 재부팅) 뒤 `bootstrap.md` 1.1의 시작 즉시 연결하는 시험 파드 블록으로 규칙이 돌아왔는지 본다. (한계, 사용자 승인 2026-10-28. 후속: T13 시나리오 12)
-- **1** 1안이 요구한 "적용 뒤 tailnet UI(DERP) 실측"은 운영자 기기 확인 기록이 없다. 노드에서 grafana tailnet 주소 HTTPS 200만 있다. (후속: T13 시나리오 14의 내부 UI 확인과 함께 <!-- TODO lead: S14 결과 -->)
+- **1** 같은 규칙의 남는 한계 5(부팅 때 규칙이 못 올라와도 k3s는 뜨는 fail-open)는 1안 승인 문구 밖이었다. 시나리오 12(NUC 재부팅) 뒤 `bootstrap.md` 1.1의 시작 즉시 연결하는 시험 파드 블록으로 규칙이 돌아왔는지 본다. 시나리오 12 뒤(2026-10-28 23:58) 그 블록이 통과했다(시험 파드 15/15, `verify`의 커널 표 해시 일치). (한계, 사용자 승인 2026-10-28. 확인: 시나리오 12)
+- **1** 1안이 요구한 "적용 뒤 tailnet UI(DERP) 실측": 시나리오 14 중(2026-10-28 23:3x) 운영자 맥(셀룰러, Tailscale)의 브라우저로 Grafana·Argo CD tailnet 주소가 열렸다. (해결: 시나리오 14)
 - **2** migration만 바꾼 PR(#930)은 Application을 OutOfSync로 만들지 않아 마이그레이션이 다음 sync(#931)에서 돌았다. 설계 C.5.4에 적었고, Job 확인 기준을 migrate 컨테이너 command·image 대조로 고쳤다. (해결: #950, #957)
 - **2** "데이터 Application이 늦으면 Job이 한 번 실패하고 retry로 수렴"은 이번에 나오지 않았다(DB가 먼저 있었다). T11 시나리오 2(동등 절차: 앱 PR을 데이터 PR보다 먼저 병합해 Job이 `auth_failed`로 실패하고 retry로 성공)에서 같은 수렴을 봤다. (갈음, 사용자 결정 2026-10-28: T11 증거)
 - **6** 한계 1: 되돌림 #946이 병합 31분 뒤에야 반영됐다. 실패한 자동 sync 작업은 만들 때 복사한 옛 source로 재시도하고, retry 한도(10회, backoff 30초→5분)를 다 쓸 때까지 새 values를 적용하지 않는다. 원인을 설계 B.8 E2·C.3.3에, 진행 중 작업 종료 절차를 런북 `apps.md` 1절에 적었다. (해결: #957)
@@ -104,10 +105,14 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 - **13** 설계 G 13행은 "문서에 없는 수동 단계가 하나라도 있으면 실패로 기록"이다. 이번에 하나 있었다: 운영 NUC의 inotify 인스턴스 한도 128 소진으로 libvirt dnsmasq가 뜨지 못해, #960(호스트 sysctl 8192, vm.md 1.1 사전 확인)을 실행 중에 병합·적용하고 libvirtd를 재시작했다. 운영 NUC 위에 VM을 띄운 시험 환경이 원인이고, 지금 런북이면 1.1 사전 확인이 먼저 막아 이 단계가 필요 없다. 판정은 "실제 검증 완료(편차 승인)"이고 재실행하지 않는다. (편차 승인, 사용자 결정 2026-10-28)
 - **13** 첫 SSH 대기가 pam_nologin에 실패(1분 뒤 통과), VM 첫 verify의 podCIDR 경쟁(재실행 통과, 런북이 허용), 복구 원본 자리에 VM 버킷 토큰을 두 번 넣음(블록이 403으로 막음), Valkey 멈춤 중 Pending PVC가 `homelab-smoke-data` sync를 막음(복원 Job 뒤 풀림). vm.md 1.5 로그인 대기, install의 podCIDR 대기, 토큰 버킷 강조, 데이터 차트 1.0.4(pg-acl Sync wave 3, 영속 Valkey wave 4)로 보강했고 시험 앱 둘에 적용했다(#969). #968 리뷰 P3(pg-acl hook이 실패할 때 막히는 것을 wave 4의 Valkey PVC·서버로 한정하는 설명)는 #971로 고쳤다(2026-10-28 병합 d9c7303). (해결: #968, #971)
 - **13** U40(클러스터 유실과 Infisical 장애가 겹친 복구) 2회차는 하지 않았다. 후속 티켓은 아직 없다(T13 할 일 3). (한계, 사용자 승인 approvals 2026-10-27 "T13 S13 묶음·U40 2회차·AC-P12 리뷰 App 구조·15-11 배포 키" 행)
-- **13** VM 정리 뒤 libvirt iptables 체인만 남았다(재부팅하면 사라짐). (후속: T13 시나리오 12 뒤 vm.md 6.3 다시 확인)
+- **13** VM 정리 뒤 libvirt iptables 체인만 남았다(재부팅하면 사라짐). 시나리오 12 뒤 vm.md 6.3이 "남은 것 0"이었다. (해결: 시나리오 12)
 - **15** 15-11에서 배포 App 키를 로컬에서 한 번 읽어 유출을 흉내 냈다. 키는 회전하지 않는다. (한계, 사용자 승인 approvals 2026-10-27 같은 행)
 - **15** 15-13(결과 PR에서 owner 자기 승인 거부)은 아직 하지 않았다. (후속: T13 결과 PR <!-- TODO lead: 15-13 결과 -->)
-- **12·14·17** 아직 실행하지 않았다. 실행 직전에 다시 승인받는다. <!-- TODO lead: 실행 뒤 한계를 여기에 --> (후속: T13, 사용자 결정 approvals 2026-10-28 "T13 S9·S14·S12·S17 순서" 행)
+- **12** 재부팅 직후 ApplicationSet 컨트롤러가 repo-server보다 먼저 떠 Git 생성에 실패했고, `appset-apps`·`appset-data`·`root-prod`가 약 3분 Degraded였다. 첫 실패 3분 뒤 재시도로 사람 손 없이 회복했고, 복귀 5분 24초 중 대부분이 이 대기다. `ArgoCDAppDegraded`(30분) 기준 안이라 경보는 나지 않았다. (후속: 복귀 시간을 줄이려면 ApplicationSet 재시도 간격 검토, 지금은 조치 없음)
+- **14** LAN 기기는 AdGuard 정지 동안 이름 해석이 전부 실패한다(30/30). (한계, 사용자 승인 approvals 2026-10-20 18:58 무렵 "AC-P6(LAN DNS) 한계 승인" 행. 완화: 런북 `nuc-dns-outage.md`, `AdGuardDown` 경보는 이번에도 23:36 발화·Telegram 전송)
+- **14** 사용자 규칙 적용률이 2026-10-21(Wi-Fi 20/20, 셀룰러 19/20)보다 크게 낮다(Wi-Fi 0/20, 셀룰러 1/20). 맥의 시험 질의가 NUC AdGuard로 가지 않고 AdGuard 공용 DNS가 답했다. 원인은 확인하지 못했다(후보: 맥에서 DNS를 가로채는 앱, 질의 로그의 `local.adguard.org` 44건. Tailscale 1.104 전달자 동작). 판정 기준이 없는 기록 항목이다. (후속: 원인 조사)
+- **14** 설계 명령 `sudo k3s crictl pull` 대신 시험 파드의 이미지 받기로 봤다(같은 containerd·노드 DNS 경로). (편차, lead 판단: 정지 중 sudo 입력을 피함)
+- **17** 아직 실행하지 않았다. NUC는 Wi-Fi로만 연결돼 있어 랜선 차단 대신 전원을 끈다. 실행 직전에 다시 승인받는다. (후속: T13 시나리오 17, 사용자 결정 approvals 2026-10-29)
 
 ## 봇 자리 확인
 
