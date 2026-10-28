@@ -13,8 +13,13 @@ metadata:
     {{- include "data.labels" . | nindent 4 }}
   annotations:
     {{- include "data.protect" . | nindent 4 }}
-    # 서버 Deployment와 같은 wave. WaitForFirstConsumer라 앞 wave면 Pending을 기다리며 멈춘다(platform/sandbox 실측).
-    argocd.argoproj.io/sync-wave: "1"
+    # 서버 Deployment와 같은 wave이고 PostgreSQL 쪽(Database, wave 2) 뒤다.
+    # 서버와 같은 wave: WaitForFirstConsumer라 앞 wave면 Pending을 기다리며 멈춘다(platform/sandbox 실측).
+    # Database 뒤: running: false로 새 PVC를 만들면(빈 클러스터 복구) 쓰는 파드가 없어 Pending이고, Argo CD v3.5.5는
+    # Pending PVC를 Progressing으로 보며(gitops-engine health_pvc.go) 앞 wave가 Healthy가 되기 전에는 뒤 wave를 적용하지
+    # 않는다(sync_context.go:576-577). wave 1에 있을 때 Database CR이 복원 Job이 PVC를 묶을 때까지 멈췄다(T13 S13).
+    # 함정: 뒤로 옮겨도 PostSync(pg-acl)와 sync 작업은 PVC가 묶일 때까지 기다린다(docs/runbooks-public/restore.md 3절 5단계).
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   accessModes: ["ReadWriteOnce"]
   storageClassName: local-retain
