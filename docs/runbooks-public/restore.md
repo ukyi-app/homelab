@@ -1426,4 +1426,4 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
      EOF
      ```
 
-**U40(클러스터 유실과 Infisical 장애가 겹친 복구)은 이번 시나리오 13에서 하지 않는다(한계·후속).** 설계 C.6.4 마지막 행과 부록 1 U40은 복구 PR의 root 값 `externalSecrets.enabled: false` 하나로 ClusterSecretStore와 모든 ExternalSecret을 렌더하지 않는다고 전제한다. 지금 root에는 그 전역 스위치가 없다. `components.externalSecrets.enabled`는 ESO operator와 Store Application만 끄고, ExternalSecret은 앱·데이터 공유 차트와 플랫폼 구성 요소(Kustomize 포함) 여러 곳에 따로 있다. 그래서 Infisical 접근을 막은 VM은 손 Secret이 있어도 Store(wave -7)에서 root가 멈춘다. 스위치를 만들고 VM에서 다시 시험하는 일은 후속 티켓이다.
+**U40(클러스터 유실과 Infisical 장애가 겹친 복구)은 이번 시나리오 13에서 하지 않는다(한계·후속).** 설계 C.6.4 마지막 행과 부록 1 U40은 복구 PR의 root 값 `externalSecrets.enabled: false` 하나로 ClusterSecretStore와 모든 ExternalSecret을 렌더하지 않는다고 전제한다. 지금 root에는 그 전역 스위치가 없다. `components.externalSecrets.enabled`는 ESO operator와 Store Application만 끄고, ExternalSecret은 앱·데이터 공유 차트와 플랫폼 구성 요소(Kustomize 포함) 여러 곳에 따로 있다. 그래서 Infisical 접근을 막은 VM은 손 Secret이 있어도 Store(wave -7)에서 root가 멈춘다. 스위치를 만들고 VM에서 다시 시험하는 일은 후속 티켓 T23이다(`docs/plans/2026-10-17-homelab-rebuild/issues/T23-platform-followups.md`).
