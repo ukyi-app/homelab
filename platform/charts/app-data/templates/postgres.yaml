@@ -81,7 +81,8 @@ spec:
 # Database(wave 2) 바로 뒤 wave 3, 영속 Valkey(PVC·서버, wave 4) 앞이다. 1.0.3의 PostSync는 모든 Sync 리소스가 Healthy여야
 # 돌아, 새 앱의 Valkey PVC가 Pending이면 새 DB가 PUBLIC CONNECT를 가진 채 남았다(PR #968 리뷰). wave 2 이상 3 미만에
 # Healthy가 늦을 수 있는 리소스를 두지 않는다(tools/ci/data.ts checkPgAclOrder).
-# 함정: 이 hook이 실패하면 그 sync는 wave 4를 적용하지 않는다. PostgreSQL 앱의 Valkey 변경도 이 hook이 성공해야 들어간다.
+# 함정: 이 hook이 실패하면 그 sync는 wave 4(Valkey PVC·서버 Deployment)를 적용하지 않는다. 앞 wave의 Valkey 리소스
+# (ExternalSecret·Service·ConfigMap·NetworkPolicy는 wave 0, 백업 CronJob은 wave 1)는 이미 적용됐을 수 있다.
 # 함정: GitOps 밖에서 DB를 다시 만들면(restore.md 2절 4-3, homelab db restore) 기본 ACL로 돌아가는데 이 hook은 sync 때만
 # 돈다. 그래서 그 절차가 같은 REVOKE·GRANT를 한다. 바꿀 때 셋을 함께 바꾼다(cli/src/core/pgrestore.ts).
 # cnpg_metrics_exporter는 CNPG 1.30의 지표 수집 역할이다. target_databases '*'(기본 쿼리 pg_extensions)는 CONNECT 없는
