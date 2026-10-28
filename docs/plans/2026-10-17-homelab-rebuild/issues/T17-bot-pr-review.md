@@ -19,7 +19,7 @@
 ## 할 일
 
 1. 시작 전에 사람 작업을 확인한다. 모두 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
-   - 리뷰 전용 App 생성·설치(시험 저장소부터)와 키의 Infisical `/apps/homelab-bot/` 등록.
+   - 리뷰 전용 App 생성·설치(시험 저장소부터)와 키의 Infisical `/apps/homelab-bot/` 등록. 권한은 설계 C.8 표대로 `issues read`(PR 댓글 리뷰 요청의 `issue_comment` 구독용)까지 넣는다. T10 시험 App에는 이 권한이 빠져 있었다(T13 봇 자리 확인, 2026-10-27).
    - 봇이 리뷰하는 저장소마다 저장소별 Codex 설정에서 Codex 자동 리뷰를 끈다. 수동 `@codex review`는 남긴다(D-16).
    - Codex Connector 설치 범위 축소는 확인만 한다. 축소는 사람이 T15에서 `homelab-bot-ops`에 운영 산출물을 처음 올리기 전에 했다(2026-10-18 17:45, D-16, D-26 연계. 시점은 확정(사용자 2026-10-18, T15)). 설치 범위가 선택 저장소이고 `homelab-bot-ops`가 없는지, 그 기록이 approvals에 있는지 본다. 그 기록에서 API로 확인한 것은 `repository_selection` = `selected`뿐이다. 남긴 저장소 목록은 사용자 보고이고 API 확인은 아직이다(`read:user` 권한 없음).
    - D-14 봇 전용 구독 계정 준비와 작업자 `auth.json` 첫 시드가 T16b 전(모델을 처음 쓰는 단계 전)에 끝났고 approvals에 기록돼 있는지 본다. 리뷰어는 같은 작업자와 같은 `auth.json`을 쓴다(동시성 1).
