@@ -39,7 +39,7 @@ spec:
       kind: NetworkPolicy
     - group: ""
       kind: ServiceAccount
-    # 데이터 차트 1.0.3의 PUBLIC CONNECT PostSync hook(database ns의 pg-acl-<앱>) 하나 때문이다(설계 C.5.3).
+    # 데이터 차트의 PUBLIC CONNECT hook(database ns의 pg-acl-<앱>, 1.0.4부터 Sync hook) 하나 때문이다(설계 C.5.3).
     # 복원 Job은 여전히 GitOps 밖이다. Argo CD 추적 표시가 없어 이 허용이 있어도 selfHeal·prune 대상이 아니다(설계 C.5.7).
     - group: batch
       kind: Job

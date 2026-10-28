@@ -262,13 +262,32 @@ vmssh() { ssh -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" 
 
 ```bash
 bash -euo pipefail <<'EOF'
-# -n: 이 bash의 stdin은 스크립트라, 없으면 ssh가 남은 줄을 VM으로 보내 버린다
-vmssh() { ssh -n -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" -o StrictHostKeyChecking=accept-new ubuntu@192.168.122.10 "$@"; }
-i=0
-until timeout 3 bash -c '</dev/tcp/192.168.122.10/22' 2>/dev/null; do
-  [ "$i" -lt 60 ] || { echo "5분 안에 SSH가 열리지 않았다. sudo virsh console homelab-vm으로 본다"; exit 1; }
-  sleep 5; i=$((i + 1))
+# -n: 이 bash의 stdin은 스크립트라, 없으면 ssh가 남은 줄을 VM으로 보내 버린다.
+# ConnectTimeout: 아래 대기의 시도 하나가 VM 네트워크가 뜨기 전 TCP 재전송으로 길어지지 않게
+ssh_args=(-n -o ConnectTimeout=5 -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" -o StrictHostKeyChecking=accept-new ubuntu@192.168.122.10)
+vmssh() { ssh "${ssh_args[@]}" "$@"; }
+# 포트가 아니라 로그인을 기다린다. 22번이 열린 뒤에도 부팅이 끝나기 전에는 pam_nologin이 일반 사용자를
+# 거절한다("System is booting up", 2026-10-28 첫 시도가 여기서 실패, 1분 뒤 통과).
+# 호스트 키가 다르면 기다려도 바뀌지 않으므로 바로 멈춘다(VM을 다시 만들며 6절의 상태 디렉터리를 지우지 않은 경우)
+# 출력은 파이프($(...)) 대신 파일로 받는다. --foreground는 ssh의 자식(ControlPersist 마스터, ProxyCommand)을 끝내지
+# 않아, 그 자식이 파이프를 잡고 있으면 ssh를 끝낸 뒤에도 기한을 넘겨 기다린다
+out="$(mktemp)"; trap 'rm -f "$out"' EXIT
+end=$((SECONDS + 300))
+rc=1 err="시도 전"
+while left=$((end - SECONDS)); [ "$left" -gt 0 ]; do
+  # ssh 한 번 전체를 남은 시간으로 묶는다. ConnectTimeout은 키 교환까지만 막아 인증·세션에서 멈추면 기한을 넘긴다.
+  # --foreground: 키 passphrase를 터미널에서 물을 수 있게. 빼면 ssh가 배경 프로세스 그룹이 돼 tty를 읽다 멈춘다.
+  # -k 5: TERM을 무시하는 ssh도 5초 뒤 KILL로 끝낸다
+  rc=0; timeout --foreground -k 5 "$left" ssh "${ssh_args[@]}" true >"$out" 2>&1 || rc=$?
+  err="$(cat "$out")"
+  [ "$rc" -ne 0 ] || break
+  case "$rc" in 124|137) err="ssh 한 번이 남은 ${left}초 안에 끝나지 않았다${err:+: ${err}}" ;; esac
+  case "$err" in *'Host key verification failed'*) echo "VM 호스트 키가 known_hosts와 다르다: ${err}"; exit 1 ;; esac
+  left=$((end - SECONDS))
+  [ "$left" -le 0 ] || sleep $((left < 5 ? left : 5))
 done
+# 성공도 기한 안이어야 한다. 기한이 지나 반복이 끝났으면 rc는 마지막 실패 값이다
+[ "$rc" -eq 0 ] && [ "$SECONDS" -le "$end" ] || { echo "5분 안에 SSH 로그인이 되지 않았다(마지막: ${err}). sudo virsh console homelab-vm으로 본다"; exit 1; }
 # cloud-init이 끝났는지, vm.env 값(이름·인터페이스·주소)이 그대로인지 본다.
 # status --wait는 경고만 있어도 2로 끝나므로 종료 코드 대신 출력을 본다
 st="$(vmssh 'cloud-init status --wait' || true)"

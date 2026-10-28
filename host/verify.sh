@@ -177,11 +177,15 @@ check_egress() {
     bad "${EGRESS_UNIT}가 없거나 host/egress/${EGRESS_UNIT_NAME}와 다르다"
   fi
 
-  pod="$(kc get node "$NODE_NAME" -o jsonpath='{.spec.podCIDR}')" || pod=""
-  if [ -n "$pod" ] && cidr_within "$POD_CIDR" "$pod"; then
+  if ! pod="$(kc get node "$NODE_NAME" -o jsonpath='{.spec.podCIDR}')"; then
+    bad "노드 ${NODE_NAME}의 podCIDR를 읽지 못했다"
+  elif [ -z "$pod" ]; then
+    # install.sh --k3s가 배정까지 기다린 뒤 끝나므로(wait_pod_cidr) 여기서 비었으면 일시 상태가 아니다.
+    bad "노드 podCIDR가 없다. 파드 네트워크(flannel)가 시작하지 않는다. journalctl -u k3s -g PodCIDR로 node-ipam 로그를 본다"
+  elif cidr_within "$POD_CIDR" "$pod"; then
     ok "노드 podCIDR ${pod}가 POD_CIDR ${POD_CIDR} 안에 있다"
   else
-    bad "노드 podCIDR '${pod:-없음}'가 POD_CIDR ${POD_CIDR} 밖이다. egress 규칙이 파드에 걸리지 않는다"
+    bad "노드 podCIDR '${pod}'가 POD_CIDR ${POD_CIDR} 밖이다. egress 규칙이 파드에 걸리지 않는다"
   fi
   svc="$(kc -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}')" || svc=""
   if [ -n "$svc" ] && cidr_within "$SERVICE_CIDR" "$svc"; then
@@ -259,6 +263,13 @@ main() {
   require_cmds kubectl jq awk sed grep git
   assert_host_tree_clean
   export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/${KUBE_CONTEXT}.yaml}"
+  # 노드의 kubectl은 k3s 멀티콜 바이너리다(설치 스크립트가 kubectl -> k3s 심링크를 건다). 멀티콜은 kubectl로 넘기기
+  # 전에 debug·data-dir·prefer-bundled-bin을 config 파일에서 찾고(k3s v1.36.5+k3s1 cmd/k3s/main.go:114·134·152),
+  # 비root는 /etc/rancher/k3s/config.yaml(0600)을 못 읽어 호출마다 "WARN open ...: permission denied"를 낸다
+  # (pkg/configfilearg/defaultparser.go MustFindString). 판정에는 영향이 없고 출력만 덮는다. 셋 다 host/k3s-config.yaml에
+  # 없어, 빈 파일을 config로 가리켜도 정해지는 값(기본값)은 지금과 같다. k3s가 아닌 kubectl은 이 변수를 보지 않는다.
+  # 안쪽 kubectl의 k3s.yaml 권한 경고(pkg/kubectl/main.go:31-38)는 위처럼 KUBECONFIG를 늘 주므로 나지 않는다.
+  export K3S_CONFIG_FILE=/dev/null
 
   log "verify (cluster=${CLUSTER}, context=${KUBE_CONTEXT}, kubeconfig=${KUBECONFIG})"
   check_identity

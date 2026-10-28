@@ -23,8 +23,10 @@ valkeyServer:
     create: false
     automount: false
   # PVC(templates/valkey.yaml)와 같은 wave. local-retain은 WaitForFirstConsumer라 PVC를 앞 wave에 두면 파드를 기다리며 멈춘다.
+  # 둘 다 PostgreSQL 쪽(Database wave 2, pg-acl wave 3) 뒤인 까닭은 그 PVC 주석. Deployment metadata에만 붙어 바꿔도
+  # 파드가 다시 뜨지 않는다.
   workloadAnnotations:
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "4"
   # RWO PVC를 두 파드가 함께 잡는 RollingUpdate 교착을 피한다(설계 C.5.6).
   deploymentStrategy: Recreate
   resources:

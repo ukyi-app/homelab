@@ -114,7 +114,7 @@ host/preflight.sh --cluster <이름> --before \
 - `--host-config`: `host/etc/` drop-in 복사, sysctl(inotify 인스턴스 한도 8192)을 `sysctl --load`로 바로 걸기, 스왑 끄기, 타임존, `tailscale set --accept-dns=false`(`TAILNET_JOIN=true`일 때), resolv.conf, networkd drop-in 적용. **이때 클러스터 인터페이스가 약 2초 끊긴다.** 원격 세션이 잠깐 멈췄다 돌아오는 것이 정상이다.
 - `--after`: 스왑 없음, 타임존, resolved 스텁 꺼짐, resolv.conf가 loopback·tailnet·자기 주소 아님, 링크가 DHCP DNS를 거부.
 - `--egress`: 파드 egress 규칙(1.1절)을 `/etc/homelab/egress.nft`로 렌더하고 `homelab-egress.service`(k3s보다 먼저 뜸)로 올린다. k3s보다 먼저 두어 첫 파드부터 규칙 아래서 뜬다.
-- `--k3s`: `host/versions.env`의 `INSTALL_K3S_VERSION` 고정 설치(채널 없음), `host/k3s-config.yaml`을 렌더해 `/etc/rancher/k3s/config.yaml`(0600)로 씀, `local-retain` StorageClass를 자동 배포 매니페스트로 둠, kubeconfig를 `~/.kube/<KUBE_CONTEXT>.yaml`(0600)로 씀. 이미 깔린 k3s에 다시 돌려 config 값이 바뀌면 이전 config를 `/var/lib/homelab/backup/k3s-config.<시각>.yaml`(root 0600)에 두고 경로를 출력한다. 같은 버전에서 tls-san만 바뀌면 설치 스크립트 없이 config만 바꿔 재시작한다(1절 끝).
+- `--k3s`: `host/versions.env`의 `INSTALL_K3S_VERSION` 고정 설치(채널 없음), `host/k3s-config.yaml`을 렌더해 `/etc/rancher/k3s/config.yaml`(0600)로 씀, `local-retain` StorageClass를 자동 배포 매니페스트로 둠, `/readyz` 뒤 노드에 podCIDR가 배정될 때까지 기다림(처음 설치 포함, 120초 상한. 2026-10-28 VM 첫 설치에서는 바로 돌린 verify가 "podCIDR 없음"으로 실패했다), kubeconfig를 `~/.kube/<KUBE_CONTEXT>.yaml`(0600)로 씀. 이미 깔린 k3s에 다시 돌려 config 값이 바뀌면 이전 config를 `/var/lib/homelab/backup/k3s-config.<시각>.yaml`(root 0600)에 두고 경로를 출력한다. 같은 버전에서 tls-san만 바뀌면 설치 스크립트 없이 config만 바꿔 재시작한다(1절 끝).
 - `verify`: 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 config, serving cert SAN, `local-retain`, egress 유닛·규칙 파일·대역·커널 표, inotify 인스턴스 한도(설치된 sysctl 파일과 커널 값). 커널 표는 `sudo -n nft`로 읽는다. 앞 단계의 sudo 자격이 남아 있으면 그대로 읽고, 없으면 실패 없이 **종료 코드 2(미검증)** 로 끝난다. 2는 통과가 아니다.
 - `--k3s`가 중간에 실패하면 `/etc/rancher/k3s`가 남아 `--before`가 막힌다. `--k3s`를 그대로 다시 실행하거나, `k3s-uninstall.sh`로 지우고 잔여 경로가 없는지 본 뒤 1부터 다시 한다.
 
@@ -450,7 +450,7 @@ NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있�
    EOF
    ```
 
-3. **root apply 전에 복구 원본 R2 읽기 전용 Secret을 넣는다.** 복구 자산의 운영 버킷(`homelab-backups`) 읽기 전용 토큰을 2단계처럼 `R2_RO_ACCESS_KEY_ID`·`R2_RO_SECRET_ACCESS_KEY`·`R2_RO_ENDPOINT`(S3 API endpoint URL)로 export한다. Infisical에 두지 않는 Secret 하나다(설계 E8 VM 격리 3번). 이름과 키는 values-vm의 `recoverySource.credentialsSecret`, CNPG 차트가 읽는 키(`platform/cnpg/cluster/templates/_helpers.tpl`)와 같다. 그래서 main의 values-vm에 복구 PR이 없으면 넣지 않고 멈춘다. `database` ns는 root의 namespaces(wave -9)가 만들기 전이라 여기서 만들고, 나중에 root가 라벨을 붙여 인수한다. 같은 블록이 [restore.md](restore.md) 3절에도 있다. 고치면 둘을 함께 고친다.
+3. **root apply 전에 복구 원본 R2 읽기 전용 Secret을 넣는다.** **토큰은 운영 버킷 `homelab-backups`에 묶인 읽기 전용 토큰이다. VM 버킷(`homelab-backups-vm`) 토큰을 넣지 않는다**(같은 계정·같은 endpoint라 헷갈리기 쉽다. 2026-10-28 시험에서 두 번 잘못 넣었고 restore.md 3절의 쓰기 거부 시험이 읽기 403으로 막았다. 그때는 맞는 토큰으로 이 블록을 다시 돌린다). 복구 자산의 그 토큰을 2단계처럼 `R2_RO_ACCESS_KEY_ID`·`R2_RO_SECRET_ACCESS_KEY`·`R2_RO_ENDPOINT`(S3 API endpoint URL)로 export한다. Infisical에 두지 않는 Secret 하나다(설계 E8 VM 격리 3번). 이름과 키는 values-vm의 `recoverySource.credentialsSecret`, CNPG 차트가 읽는 키(`platform/cnpg/cluster/templates/_helpers.tpl`)와 같다. 그래서 main의 values-vm에 복구 PR이 없으면 넣지 않고 멈춘다. `database` ns는 root의 namespaces(wave -9)가 만들기 전이라 여기서 만들고, 나중에 root가 라벨을 붙여 인수한다. 같은 블록이 [restore.md](restore.md) 3절에도 있다. 고치면 둘을 함께 고친다.
 
    ```bash
    bash -euo pipefail <<'EOF'

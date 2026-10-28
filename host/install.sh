@@ -34,6 +34,7 @@ NET_WAIT_MAX=30
 RESTART_WAIT_MAX=180
 NET_CHECK_MAX=60
 SAN_WAIT_MAX=60
+PODCIDR_WAIT_MAX=120
 # --k3s 실행 전 상태: 이미 설치된 k3s(config와 바이너리)인지, 그 버전이 핀과 다르면 그 버전, tls-san이 바뀌는지.
 K3S_INSTALLED=false
 K3S_OLD_VERSION=""
@@ -524,6 +525,30 @@ wait_serving_sans() {
   echo "    서빙 인증서에 tls-san $(grep -c . <<<"$want")개가 모두 있다($((($(now_ms) - start) / 1000))초)"
 }
 
+# 노드에 podCIDR가 배정될 때까지 기다린다. 처음 설치에서 /readyz는 kubelet의 노드 등록과 kube-controller-manager
+# node-ipam의 배정(k3s가 allocate-node-cidrs=true로 띄운다, k3s v1.36.5+k3s1 pkg/daemons/control/server.go:116)보다
+# 먼저 통과한다. 배정 전에는 k3s의 flannel이 시작하지 않아(pkg/agent/flannel/setup.go:109 waitForPodCIDR) 파드
+# 네트워크가 없다. 2026-10-28 VM 첫 설치에서 install 직후 verify가 "노드 podCIDR 없음"으로 FAIL, 다시 돌린 verify는
+# 통과했다. SAN 대기(wait_serving_sans)와 같은 기준이다: 설치가 막 띄운 k3s의 일시 상태는 install이 끝나기 전에
+# 기다리고, verify는 한 번만 본다(다시 보면 진짜 누락의 FAIL만 늦어진다). 배정은 노드 spec에 남아 재실행·재시작에서는
+# 첫 조회로 끝난다. 값이 POD_CIDR 안인지는 verify check_egress가 본다.
+# PODCIDR_WAIT_MAX: 걸리는 시간은 재지 않았다. 위 VM에서는 verify가 앞 검사들(노드 Ready 대기 포함)을 마친 뒤에도
+# 비어 있었다. 120초는 verify가 노드 Ready를 기다리는 상한과 같고, 넘으면 배정이 막힌 것으로 보고 멈춘다.
+wait_pod_cidr() {
+  local got="" start end left
+  start="$(now_ms)"
+  end=$((start + PODCIDR_WAIT_MAX * 1000))
+  # 노드가 아직 등록되지 않았으면 kubectl이 NotFound로 실패한다. 그것도 기다릴 일이라 오류 문구는 버린다.
+  until left="$(left_s "$end" 5)" \
+    && got="$(timeout "$left" "$K3S_BIN" kubectl get node "$NODE_NAME" -o jsonpath='{.spec.podCIDR}' 2>/dev/null)" \
+    && [ -n "$got" ]; do
+    left="$(left_s "$end" 2)" \
+      || die "노드 ${NODE_NAME}에 podCIDR가 ${PODCIDR_WAIT_MAX}초 안에 배정되지 않았다. journalctl -u k3s -g PodCIDR로 node-ipam 로그를 본다. 되돌리기: $(rollback_hint)"
+    sleep "$left"
+  done
+  echo "    노드 podCIDR ${got}($((($(now_ms) - start) / 1000))초)"
+}
+
 k3s_install() {
   local cfg pairs exact url installer f ver i restart=false restarted=false path=installer start_before start_after
 
@@ -635,6 +660,10 @@ k3s_install() {
   # 못 보고, 평소 생존은 외부 생존 감시(Watchdog)가 본다.
   ver="$("$K3S_BIN" --version)"
   [[ "$ver" == *"$INSTALL_K3S_VERSION"* ]] || die "설치된 k3s 버전이 핀과 다르다: ${ver%%$'\n'*}"
+
+  # 처음 설치를 포함해 늘 본다(wait_pod_cidr 주석).
+  log "노드 podCIDR 대기(${PODCIDR_WAIT_MAX}초 상한)"
+  wait_pod_cidr
 
   # 이미 설치된 k3s가 이번에 다시 떴으면 데이터 경로를 본다. config 값을 바꾼 재시작(두 경로)과 버전만 올려
   # 설치 스크립트가 한 재시작이 모두 여기 걸린다. 처음 설치는 CoreDNS가 아직 없어 건너뛴다. config만 있고

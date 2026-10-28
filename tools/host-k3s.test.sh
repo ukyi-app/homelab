@@ -7,7 +7,9 @@
 #   재시작 뒤 확인: 이미 설치된 k3s가 다시 뜨면(config 값 변경, 버전만 변경, 설치 스크립트가 스스로 재시작) 경로와
 #   상관없이 DNS·Service를 본다. 처음 설치는 보지 않는다. NET_CHECK_MAX가 조회·DNS·TCP·재시도 전체의 상한이다.
 #   SAN 대기: tls-san을 바꾼 재시작 뒤 서빙 인증서에 새 SAN이 나올 때까지 SAN_WAIT_MAX까지 기다린다.
+#   podCIDR 대기: 처음 설치를 포함해 노드에 podCIDR가 배정될 때까지 PODCIDR_WAIT_MAX까지 기다린다.
 #   verify.sh check_san: 렌더 tls-san이 인증서에 줄 전체로 모두 있어야 ok다.
+#   verify.sh의 kubectl: k3s 멀티콜이 비root로 config.yaml을 읽다 내는 WARN이 출력에 섞이지 않는다.
 #   --host-config sysctl: 60-inotify.conf 값(8192), apply_services가 그 파일만 sysctl --load로 바로 걸고 실패하면 멈춤,
 #   verify.sh check_inotify가 설치된 파일과 커널 값(한도라 이상이면 통과)을 따로 본다.
 set -euo pipefail
@@ -166,6 +168,18 @@ case " $* " in
   # STUB_K3S_HANG: /readyz 뒤 API가 멈춘 경우. 상한이 없으면 20초 뒤에야 끝나 시험이 시간으로 잡는다.
   *" svc kube-dns "*) [ -z "${STUB_K3S_HANG:-}" ] || exec sleep 20; printf '10.43.0.10' ;;
   *" svc kubernetes "*) printf '10.43.0.1' ;;
+  # 노드 podCIDR. 처음 STUB_PODCIDR_LATE번은 배정 전이다(첫 번째는 노드 등록 전이라 NotFound, 그 뒤는 빈 값).
+  # 읽을 때마다 로그에 "podcidr read <번째>"를 남긴다.
+  *" get node "*)
+    n=$(($(cat "$STUB_STATE/podcidr_reads") + 1))
+    echo "$n" >"$STUB_STATE/podcidr_reads"
+    echo "podcidr read $n" >>"$STUB_LOG"
+    if [ "$n" -le "${STUB_PODCIDR_LATE:-0}" ]; then
+      [ "$n" -gt 1 ] || { echo 'Error from server (NotFound): nodes "t-node" not found' >&2; exit 1; }
+      exit 0
+    fi
+    printf '10.42.0.0/24'
+    ;;
   *) exit 9 ;;
 esac
 EOF
@@ -203,6 +217,7 @@ san_line() {
 #   T_NET_MAX(기본 5)·T_HANG·T_DIG_SLEEP으로 NET_CHECK_MAX와 가짜 k3s·dig의 지연을 정한다. 걸린 시간은 TMP/<이름>/ms.
 #   T_SAN_MAX(기본 5)는 SAN_WAIT_MAX, T_SAN_STALE은 재시작 뒤 옛 인증서가 나가는 횟수, T_NOBIN이면 k3s 바이너리가
 #   없다(config만 남은 첫 설치), T_UNIT_CHANGE면 가짜 설치 스크립트가 같은 버전에서도 재시작한다.
+#   T_PODCIDR_MAX(기본 5)는 PODCIDR_WAIT_MAX, T_PODCIDR_LATE는 podCIDR가 배정되기 전에 읽히는 횟수다.
 k3s_run() {
   local name="$1" shape="$2" d="$TMP/$1" t0
   mkdir -p "$d/etc" "$d/backup" "$d/tmpd" "$d/bin" "$d/state"
@@ -228,6 +243,7 @@ k3s_run() {
     printf '%s\n' "${3:-$PIN}" >"$d/state/version"
   fi
   echo 0 >"$d/state/san_reads"
+  echo 0 >"$d/state/podcidr_reads"
   san_line "$RENDER" >"$d/state/sans"
   if [ -e "$d/old.yaml" ]; then san_line "$(cat "$d/old.yaml")"; else san_line "$RENDER"; fi >"$d/state/sans.old"
   : >"$d/log"
@@ -235,13 +251,13 @@ k3s_run() {
   (
     export PATH="$STUB_PATH" STUB_DIR="$STUB" STUB_LOG="$d/log" STUB_STATE="$d/state" STUB_BIN="$d/bin/k3s" \
       STUB_DIG_ANSWER="${4:-10.43.0.1}" STUB_K3S_HANG="${T_HANG:-}" STUB_DIG_SLEEP="${T_DIG_SLEEP:-}" \
-      STUB_SAN_STALE="${T_SAN_STALE:-}" STUB_UNIT_CHANGE="${T_UNIT_CHANGE:-}"
+      STUB_SAN_STALE="${T_SAN_STALE:-}" STUB_UNIT_CHANGE="${T_UNIT_CHANGE:-}" STUB_PODCIDR_LATE="${T_PODCIDR_LATE:-}"
     # shellcheck source=../host/install.sh
     . "$TMP/host/install.sh"
     load_cluster t
     K3S_ETC="$d/etc" K3S_CONFIG="$d/etc/config.yaml" K3S_SERVER_DIR="$d/server" K3S_MANIFESTS="$d/server/manifests"
     K3S_BIN="$d/bin/k3s" K3S_BACKUP_DIR="$d/backup/homelab" TMPD="$d/tmpd" NET_CHECK_MAX="${T_NET_MAX:-5}"
-    SAN_WAIT_MAX="${T_SAN_MAX:-5}"
+    SAN_WAIT_MAX="${T_SAN_MAX:-5}" PODCIDR_WAIT_MAX="${T_PODCIDR_MAX:-5}"
     tcp_open() { echo "tcp $*" >>"$STUB_LOG"; }
     write_user_kubeconfig() { KUBECONFIG_OUT="$d/kubeconfig"; }
     k3s_install
@@ -289,14 +305,25 @@ k3s_run ver san v1.0.0+k3s1
 expect_run "버전이 다르면 tls-san만 달라도 설치 스크립트, 재시작 뒤 확인" ver \
   'log:installer force=true' 'log:installer restart' '!log:systemctl restart' 'log:tcp 10.43.0.1 443' '!log:rc=' backup:1
 k3s_run same same
-expect_run "바뀐 것 없음: 설치 스크립트가 재시작하지 않는다, 확인·백업 없음" same \
-  'log:installer force=false' '!log:installer restart' '!log:systemctl restart' '!log:tcp ' backup:0
+expect_run "바뀐 것 없음: 설치 스크립트가 재시작하지 않는다, 확인·백업 없음, 배정된 podCIDR는 한 번만 읽는다" same \
+  'log:installer force=false' '!log:installer restart' '!log:systemctl restart' '!log:tcp ' backup:0 \
+  'log:podcidr read 1' '!log:podcidr read 2'
 k3s_run comment comment
 expect_run "주석만 다름: 재시작 안 함, 백업은 남김" comment \
   'log:installer force=false' '!log:installer restart' '!log:systemctl restart' '!log:tcp ' backup:1 config=render
 k3s_run fresh none
-expect_run "처음 설치: 설치 스크립트가 k3s를 띄워도 백업·DNS 확인 없음" fresh \
-  'log:installer force=false' 'log:installer restart' '!log:tcp ' '!log:san read' '!log:rc=' backup:0 config=render
+expect_run "처음 설치: 설치 스크립트가 k3s를 띄워도 백업·DNS 확인 없음, podCIDR는 본다" fresh \
+  'log:installer force=false' 'log:installer restart' '!log:tcp ' '!log:san read' '!log:rc=' backup:0 config=render \
+  'log:podcidr read 1' 'out:노드 podCIDR 10.42.0.0/24'
+
+# 처음 설치 직후 노드 podCIDR 배정 전에 끝나 verify가 FAIL했다(2026-10-28 VM). 배정될 때까지 기다린다.
+T_PODCIDR_LATE=2 k3s_run cidrwait none
+expect_run "처음 설치: 노드 등록 전(NotFound)·배정 전(빈 값)을 지나 세 번째에 podCIDR를 보고 끝난다" cidrwait \
+  'log:podcidr read 3' '!log:podcidr read 4' '!log:rc=' 'out:노드 podCIDR 10.42.0.0/24' 'out:kubeconfig:'
+T_PODCIDR_MAX=1 T_PODCIDR_LATE=99 k3s_run cidrtimeout none
+expect_run "podCIDR가 PODCIDR_WAIT_MAX(1초) 안에 배정되지 않으면 멈추고 로그 위치를 알린다" cidrtimeout \
+  'log:rc=1' 'out:podCIDR가 1초 안에 배정되지 않았다' 'out:journalctl -u k3s -g PodCIDR' \
+  'out:이전 config 백업 없음(처음 설치)' '!out:kubeconfig:' maxms:3500
 T_NET_MAX=1 k3s_run netfail san "" 10.43.0.99
 expect_run "재시작 뒤 DNS 답이 틀리면 NET_CHECK_MAX(1초) 뒤 멈추고 되돌리기를 알린다" netfail \
   'log:rc=1' 'log:systemctl restart k3s.service' 'out:1초 안에 돌아오지 않았다' 'out:되돌리기: sudo install -m 0600' \
@@ -367,6 +394,38 @@ vsan "모두 있음: ok" "$(san_line "$RENDER")" 'ok   serving cert SAN에 tls-s
 vsan "짧은 이름이 FQDN 안에만 있음: 부분 일치는 통과가 아니다" \
   'DNS:kubernetes, DNS:localhost, DNS:t-node.example.invalid, IP Address:192.0.2.10' 'FAIL serving cert에 없는 SAN: t-node.'
 vsan "SAN을 3개 미만 읽음: 형식 문제로 가른다" 'DNS:t-node, IP Address:192.0.2.10' 'SAN을 2개만 읽었다'
+
+# ------------------------------------------------------------------ verify.sh의 kubectl(k3s 멀티콜) 경고
+# 노드의 kubectl은 k3s 심링크다. 멀티콜은 kubectl로 넘기기 전에 config 파일을 세 번 찾고, 비root는 0600 config를 못 읽어
+# 호출마다 WARN을 낸다(2026-10-28 VM verify). 가짜 kubectl이 그 동작을 흉내 낸다: K3S_CONFIG_FILE이 없으면 기본
+# 경로(노드에서는 root 0600)를 읽다 WARN, 읽을 수 있는 파일을 가리키면 조용하다.
+VK="$TMP/vk"
+mkdir -p "$VK/bin"
+cat >"$VK/bin/kubectl" <<'EOF'
+#!/usr/bin/env bash
+cfg="${K3S_CONFIG_FILE:-/etc/rancher/k3s/config.yaml}"
+if [ "$cfg" = /etc/rancher/k3s/config.yaml ] || [ ! -r "$cfg" ]; then
+  for _ in debug data-dir prefer-bundled-bin; do echo "level=warning msg=\"open ${cfg}: permission denied\"" >&2; done
+fi
+case " $* " in
+  *" config get-contexts "*) echo t ;;
+  *" get nodes "*) echo t-node ;;
+  *) exit 9 ;;
+esac
+EOF
+chmod +x "$VK/bin/kubectl"
+: >"$VK/kubeconfig"
+# shellcheck disable=SC2016  # $1은 안쪽 bash가 펼친다
+out="$(env -u K3S_CONFIG_FILE PATH="$VK/bin:$STUB_PATH" KUBECONFIG="$VK/kubeconfig" \
+  bash -c '. "$1/host/verify.sh" && assert_host_tree_clean() { :; } && main --cluster t --identity' _ "$TMP" 2>&1)" || true
+# 대조: 가짜 kubectl은 변수 없이 부르면 WARN을 낸다(이 시험이 WARN을 잡을 수 있다)
+ctl="$(env -u K3S_CONFIG_FILE "$VK/bin/kubectl" config get-contexts 2>&1)"
+if grep -qF 'permission denied' <<<"$ctl" && grep -qF 'ok   정체성: context t, 노드 t-node' <<<"$out" \
+  && ! grep -qF 'permission denied' <<<"$out"; then
+  pass "verify가 부르는 kubectl에 K3S_CONFIG_FILE을 줘 k3s config 읽기 WARN이 없다"
+else
+  fail "verify kubectl WARN:"$'\n'"${out}"
+fi
 
 # ------------------------------------------------------------------ --host-config sysctl(inotify 한도)
 # 2026-10-27 운영 NUC에서 기본 128 때문에 libvirt dnsmasq가 inotify를 못 만들었다. 값은 사용자 결정이다.

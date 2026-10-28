@@ -89,3 +89,57 @@ export function checkValkeyWiring(): Violation[] {
   }
   return out;
 }
+
+// PUBLIC CONNECT hook(pg-acl, 데이터 차트 templates/postgres.yaml)의 순서(설계 C.5.3). Database가 적용된 뒤 이 hook보다 먼저
+// Healthy를 기다리는 리소스가 있으면, 그것이 늦는 동안(Pending PVC 등) 새 DB가 PUBLIC CONNECT를 가진 채 남는다(PR #968 리뷰).
+// 그래서 hook은 Sync 단계이고(PostSync는 모든 Sync 리소스가 Healthy여야 돈다) Database 뒤 wave이며, Database wave 이상
+// hook wave 미만에는 Database 말고 Sync 단계 리소스가 없어야 한다. wave 해석은 Argo CD와 같다(정수가 아니면 0).
+// data:<앱> 렌더는 chartVersion 태그(바꿀 수 없다, 1.0.3 이하는 PostSync)라 보지 않는다. 차트는 시험 values 렌더로 본다.
+const HOOK = "argocd.argoproj.io/hook";
+export function checkPgAclOrder(docs: Doc[]): Violation[] {
+  const out: Violation[] = [];
+  const byOrigin = new Map<string, Doc[]>();
+  for (const d of docs) {
+    if (d.origin.startsWith("data:")) continue;
+    byOrigin.set(d.origin, [...(byOrigin.get(d.origin) ?? []), d]);
+  }
+  const ann = (d: Doc, k: string): string | undefined => d.obj.metadata?.annotations?.[k];
+  const wave = (d: Doc) => {
+    const w = ann(d, "argocd.argoproj.io/sync-wave") ?? "";
+    return /^[+-]?\d+$/.test(w) ? Number(w) : 0;
+  };
+  // Sync 단계에서 도는 것: hook이 아닌 리소스와 Sync hook. Skip은 적용하지 않고, Helm hook은 다른 단계로 옮겨진다.
+  const syncPhase = (d: Doc) => {
+    const h = ann(d, HOOK);
+    if (h !== undefined) return h.split(",").map((t) => t.trim()).includes("Sync");
+    return ann(d, "helm.sh/hook") === undefined;
+  };
+  const name = (d: Doc) => `${d.obj.kind}/${d.obj.metadata?.namespace ? `${d.obj.metadata.namespace}/` : ""}${d.obj.metadata?.name}`;
+  for (const [origin, ds] of byOrigin) {
+    const acl = ds.find((d) => d.obj.kind === "Job" && d.obj.spec?.template?.metadata?.labels?.["homelab.ukyi.app/role"] === "pg-acl");
+    if (!acl) continue;
+    const where = `${origin} ${name(acl)}`;
+    if (ann(acl, HOOK) !== "Sync") {
+      out.push({ rule: "pg-acl-order", where, message: `hook이 Sync가 아니다(${ann(acl, HOOK) ?? "hook 주석 없음"}). PostSync는 Pending PVC 같은 Sync 리소스를 기다려 새 DB의 PUBLIC CONNECT가 남는다` });
+    }
+    const db = ds.filter((d) => d.obj.kind === "Database" && String(d.obj.apiVersion ?? "").startsWith("postgresql.cnpg.io/"));
+    if (db.length !== 1) {
+      out.push({ rule: "pg-acl-order", where, message: `같은 렌더의 CNPG Database가 ${db.length}개다(1개여야 순서를 본다)` });
+      continue;
+    }
+    const d = wave(db[0]);
+    const a = wave(acl);
+    if (a <= d) {
+      out.push({ rule: "pg-acl-order", where, message: `Database보다 뒤 wave가 아니다(pg-acl ${a}, Database ${d}). DB가 생기기 전에 hook이 끝날 수 있다` });
+      continue;
+    }
+    for (const x of ds) {
+      if (x === acl || x === db[0] || !syncPhase(x)) continue;
+      const w = wave(x);
+      if (w >= d && w < a) {
+        out.push({ rule: "pg-acl-order", where, message: `${name(x)}(wave ${w})가 Database(wave ${d})와 pg-acl(wave ${a}) 사이에 있다. Healthy가 늦으면 새 DB의 PUBLIC CONNECT가 남는다` });
+      }
+    }
+  }
+  return out;
+}
