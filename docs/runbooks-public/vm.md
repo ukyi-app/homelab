@@ -262,12 +262,17 @@ vmssh() { ssh -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" 
 
 ```bash
 bash -euo pipefail <<'EOF'
-# -n: 이 bash의 stdin은 스크립트라, 없으면 ssh가 남은 줄을 VM으로 보내 버린다
-vmssh() { ssh -n -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" -o StrictHostKeyChecking=accept-new ubuntu@192.168.122.10 "$@"; }
-i=0
-until timeout 3 bash -c '</dev/tcp/192.168.122.10/22' 2>/dev/null; do
-  [ "$i" -lt 60 ] || { echo "5분 안에 SSH가 열리지 않았다. sudo virsh console homelab-vm으로 본다"; exit 1; }
-  sleep 5; i=$((i + 1))
+# -n: 이 bash의 stdin은 스크립트라, 없으면 ssh가 남은 줄을 VM으로 보내 버린다.
+# ConnectTimeout: 아래 대기의 시도 하나가 VM 네트워크가 뜨기 전 TCP 재전송으로 길어지지 않게
+vmssh() { ssh -n -o ConnectTimeout=5 -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" -o StrictHostKeyChecking=accept-new ubuntu@192.168.122.10 "$@"; }
+# 포트가 아니라 로그인을 기다린다. 22번이 열린 뒤에도 부팅이 끝나기 전에는 pam_nologin이 일반 사용자를
+# 거절한다("System is booting up", 2026-10-28 첫 시도가 여기서 실패, 1분 뒤 통과).
+# 호스트 키가 다르면 기다려도 바뀌지 않으므로 바로 멈춘다(VM을 다시 만들며 6절의 상태 디렉터리를 지우지 않은 경우)
+end=$((SECONDS + 300))
+until err="$(vmssh true 2>&1)"; do
+  case "$err" in *'Host key verification failed'*) echo "VM 호스트 키가 known_hosts와 다르다: ${err}"; exit 1 ;; esac
+  [ "$SECONDS" -lt "$end" ] || { echo "5분 안에 SSH 로그인이 되지 않았다(마지막: ${err}). sudo virsh console homelab-vm으로 본다"; exit 1; }
+  sleep 5
 done
 # cloud-init이 끝났는지, vm.env 값(이름·인터페이스·주소)이 그대로인지 본다.
 # status --wait는 경고만 있어도 2로 끝나므로 종료 코드 대신 출력을 본다
