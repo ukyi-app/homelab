@@ -78,7 +78,7 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
   - 규칙 전 두 경로 정상 주소 확인: `adg-20261028-t1`·`-t2`가 NUC AdGuard·`1.1.1.1`·AdGuard 공용(`94.140.14.14`) 모두 정상 주소. 규칙(`||adg-20261028-*.ukyi.app^`)은 23:25:58 적용 확인(공용 DNS는 계속 정상 주소).
   - 집 Wi-Fi 20회 중 차단: **0/20**(2026-10-21 T08a: 20/20).
   - 셀룰러 20회 중 차단: **1/20**(2026-10-21 T08a: 19/20).
-  - 질의 로그 대조: Wi-Fi 20개는 NUC AdGuard에 하나도 오지 않았고, 셀룰러는 `c1` 하나만 왔다(그것이 차단 1건). 같은 시간 맥의 일반 앱 질의는 tailnet 출처로 4분에 444건 왔다. 맥의 시스템 리졸버·macOS API·`@100.100.100.100` 세 경로 모두 시험 이름에 정상 주소를 받았다.
+  - 질의 로그 대조: Wi-Fi 20개는 NUC AdGuard에 하나도 오지 않았고, 셀룰러는 `c1` 하나만 왔다(그것이 차단 1건). 같은 시간 맥의 일반 앱 질의는 tailnet 출처로 4분에 444건 왔다. 맥의 시스템 리졸버·macOS API·`@100.100.100.100` 세 경로 모두 시험 이름에 정상 주소를 받았다. 원인은 맥의 AdGuard for Mac DNS 보호(제공자 AdGuard DNS DoH)였다(아래 "한계와 후속" 14).
 
 ## 한계와 후속
 
@@ -104,13 +104,13 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 - **11** 느린 시험 `src/slow.test.ts`가 `homelab-smoke` main에 남아 있다(표시 파일이 없으면 즉시 끝). (후속: T13 정리, `homelab-smoke` 저장소 정리 때)
 - **13** 설계 G 13행은 "문서에 없는 수동 단계가 하나라도 있으면 실패로 기록"이다. 이번에 하나 있었다: 운영 NUC의 inotify 인스턴스 한도 128 소진으로 libvirt dnsmasq가 뜨지 못해, #960(호스트 sysctl 8192, vm.md 1.1 사전 확인)을 실행 중에 병합·적용하고 libvirtd를 재시작했다. 운영 NUC 위에 VM을 띄운 시험 환경이 원인이고, 지금 런북이면 1.1 사전 확인이 먼저 막아 이 단계가 필요 없다. 판정은 "실제 검증 완료(편차 승인)"이고 재실행하지 않는다. (편차 승인, 사용자 결정 2026-10-28)
 - **13** 첫 SSH 대기가 pam_nologin에 실패(1분 뒤 통과), VM 첫 verify의 podCIDR 경쟁(재실행 통과, 런북이 허용), 복구 원본 자리에 VM 버킷 토큰을 두 번 넣음(블록이 403으로 막음), Valkey 멈춤 중 Pending PVC가 `homelab-smoke-data` sync를 막음(복원 Job 뒤 풀림). vm.md 1.5 로그인 대기, install의 podCIDR 대기, 토큰 버킷 강조, 데이터 차트 1.0.4(pg-acl Sync wave 3, 영속 Valkey wave 4)로 보강했고 시험 앱 둘에 적용했다(#969). #968 리뷰 P3(pg-acl hook이 실패할 때 막히는 것을 wave 4의 Valkey PVC·서버로 한정하는 설명)는 #971로 고쳤다(2026-10-28 병합 d9c7303). (해결: #968, #971)
-- **13** U40(클러스터 유실과 Infisical 장애가 겹친 복구) 2회차는 하지 않았다. 후속 티켓은 아직 없다(T13 할 일 3). (한계, 사용자 승인 approvals 2026-10-27 "T13 S13 묶음·U40 2회차·AC-P12 리뷰 App 구조·15-11 배포 키" 행)
+- **13** U40(클러스터 유실과 Infisical 장애가 겹친 복구) 2회차는 하지 않았다. 후속은 [T23](../issues/T23-platform-followups.md)이다(T13 할 일 3, 사용자 결정 2026-10-29). (한계, 사용자 승인 approvals 2026-10-27 "T13 S13 묶음·U40 2회차·AC-P12 리뷰 App 구조·15-11 배포 키" 행)
 - **13** VM 정리 뒤 libvirt iptables 체인만 남았다(재부팅하면 사라짐). 시나리오 12 뒤 vm.md 6.3이 "남은 것 0"이었다. (해결: 시나리오 12)
 - **15** 15-11에서 배포 App 키를 로컬에서 한 번 읽어 유출을 흉내 냈다. 키는 회전하지 않는다. (한계, 사용자 승인 approvals 2026-10-27 같은 행)
 - **15** 15-13(결과 PR에서 owner 자기 승인 거부)은 아직 하지 않았다. (후속: T13 결과 PR <!-- TODO lead: 15-13 결과 -->)
-- **12** 재부팅 직후 ApplicationSet 컨트롤러가 repo-server보다 먼저 떠 Git 생성에 실패했고, `appset-apps`·`appset-data`·`root-prod`가 약 3분 Degraded였다. 첫 실패 3분 뒤 재시도로 사람 손 없이 회복했고, 복귀 5분 24초 중 대부분이 이 대기다. `ArgoCDAppDegraded`(30분) 기준 안이라 경보는 나지 않았다. (후속: 복귀 시간을 줄이려면 ApplicationSet 재시도 간격 검토, 지금은 조치 없음)
+- **12** 재부팅 직후 ApplicationSet 컨트롤러가 repo-server보다 먼저 떠 Git 생성에 실패했고, `appset-apps`·`appset-data`·`root-prod`가 약 3분 Degraded였다. 첫 실패 3분 뒤 재시도로 사람 손 없이 회복했고, 복귀 5분 24초 중 대부분이 이 대기다. `ArgoCDAppDegraded`(30분) 기준 안이라 경보는 나지 않았다. 3분은 Argo CD v3.5.5 `applicationset/controllers/applicationset_controller.go`의 생성 오류 재시도 상수(`ReconcileRequeueOnValidationError`)라 설정·spec 값으로 바꿀 수 없고, 줄이려면 컨트롤러에 repo-server를 기다리는 initContainer를 더해야 한다. (한계, 사용자 결정 2026-10-29: 조치 없음)
 - **14** LAN 기기는 AdGuard 정지 동안 이름 해석이 전부 실패한다(30/30, 설계의 10초 대신 15초 간격으로 7분 15초 동안). (한계, 사용자 승인 approvals 2026-10-20 18:58 무렵 "AC-P6(LAN DNS) 한계 승인" 행. 완화: 런북 `nuc-dns-outage.md`, `AdGuardDown` 경보는 이번에도 23:36 발화·Telegram 전송)
-- **14** 사용자 규칙 적용률이 2026-10-21(Wi-Fi 20/20, 셀룰러 19/20)보다 크게 낮다(Wi-Fi 0/20, 셀룰러 1/20). 맥의 시험 질의가 NUC AdGuard로 가지 않고 AdGuard 공용 DNS가 답했다. 원인은 확인하지 못했다(후보: 맥에서 DNS를 가로채는 앱, 질의 로그의 `local.adguard.org` 44건. Tailscale 1.104 전달자 동작). 판정 기준이 없는 기록 항목이다. (후속: 원인 조사)
+- **14** 사용자 규칙 적용률이 2026-10-21(Wi-Fi 20/20, 셀룰러 19/20)보다 크게 낮다(Wi-Fi 0/20, 셀룰러 1/20). 맥의 시험 질의가 NUC AdGuard로 가지 않고 AdGuard 공용 DNS가 답했다. 원인은 운영자 맥의 AdGuard for Mac 앱이다: DNS 보호의 제공자가 AdGuard DNS(DNS-over-HTTPS)라 시스템 DNS(Tailscale 리졸버 100.100.100.100)로 가는 질의를 가로채 AdGuard DNS로 보냈다. 같은 맥에서 `tailscale dns query`와 NUC 주소로 직접 보낸 질의는 NUC에 도착했고, 2026-10-29 제공자를 "시스템 기본 설정"으로 바꾼 뒤 `dig @100.100.100.100` 질의도 도착했다. 플랫폼 결함이 아니다. Tailscale 기기의 적용률이 낮으면 그 기기에서 DNS를 가로채는 앱부터 본다. (해결: 원인 확정, 운영자 기기 설정 변경 2026-10-29)
 - **14** 설계 명령 `sudo k3s crictl pull` 대신 시험 파드의 이미지 받기로 봤다(같은 containerd·노드 DNS 경로). (편차, lead 판단: 정지 중 sudo 입력을 피함)
 - **17** 아직 실행하지 않았다. NUC는 Wi-Fi로만 연결돼 있어 랜선 차단 대신 전원을 끈다. 실행 직전에 다시 승인받는다. (후속: T13 시나리오 17, 사용자 결정 approvals 2026-10-29)
 
