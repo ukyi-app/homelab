@@ -1,0 +1,10 @@
+# 시험 values: DB와 영속 Valkey를 쓰는 앱의 빈 클러스터 복구(restore.valkey stopped). 새 PVC가 Pending이어도
+# pg-acl(wave 3)이 Valkey(wave 4)보다 앞인지 tools/ci/data.ts checkPgAclOrder가 본다.
+chartVersion: 1.0.4
+postgres:
+  enabled: true
+valkey:
+  persistent: true
+  running: false
+backup:
+  bucket: homelab-backups

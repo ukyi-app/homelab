@@ -1333,7 +1333,9 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
 
 5. 영속 Valkey가 있는 앱은 1절로 RDB를 복원한다. 1단계(`running: false`)는 복구 PR이 이미 했으므로 2단계(복원 Job)부터 한다. 1절 5단계까지 끝나 데이터(키 0개 아님, 표식 키를 적었으면 그 키)를 확인한 뒤에 그 앱의 `suspended` 줄을 지우는 PR로 앱을 재개한다. VM 시험은 1절 3·5단계의 PR과 앱 재개를 1단계의 VM 줄대로 `values-vm.yaml`의 `cluster.restore`로 한다.
 
-   **2단계 전까지 `<앱>-data`가 PVC를 기다리는 것은 정상이다.** 빈 클러스터의 새 PVC `valkey-data`는 `local-retain`(WaitForFirstConsumer)이라 쓰는 파드가 생길 때까지 Pending이고, Argo CD는 Pending PVC를 Progressing으로 본다. 데이터 차트 1.0.4부터는 PVC가 마지막 wave라 Database·DatabaseRole은 먼저 적용된다. 앱이 PostgreSQL도 쓰면 PostSync(`pg-acl`)가 남아 sync가 `waiting for healthy state of PersistentVolumeClaim/valkey-data`로 Running에 머문다(1.0.3 이하는 Database CR도 여기서 멈췄다, T13 시나리오 13). 2단계 복원 Job이 PVC를 묶으면 풀린다. sync를 끝내거나 PVC를 손대지 않는다. 그 사이 데이터 Application은 새 values를 적용하지 않지만, 3단계 PR(복원 모드)은 2단계 뒤라 이 대기가 먼저 풀린다.
+   **2단계 전까지 `<앱>-data`가 PVC를 기다리는 것은 정상이다.** 빈 클러스터의 새 PVC `valkey-data`는 `local-retain`(WaitForFirstConsumer)이라 쓰는 파드가 생길 때까지 Pending이고, Argo CD는 Pending PVC를 Progressing으로 본다. 2단계 복원 Job이 PVC를 묶으면 풀린다. sync를 끝내거나 PVC를 손대지 않는다. 기다리는 모양은 데이터 차트 버전마다 다르다.
+   - **1.0.4부터:** Database(wave 2)와 PUBLIC CONNECT를 막는 Sync hook `pg-acl`(wave 3)이 먼저 끝나고, PVC·서버는 hook 없는 마지막 wave(4)라 sync는 적용만 하고 끝난다. Application health만 PVC가 묶일 때까지 Progressing이다. 앱이 PostgreSQL도 쓰면 각 단계 PR의 Valkey 변경은 `pg-acl`이 성공한 sync에서만 들어간다. `pg-acl-<앱>` Job이 실패하면(PostgreSQL에 접속 못 함) 그 sync는 실패하고 Valkey를 바꾸지 않는다. 4단계 Cluster가 healthy인지 먼저 본다.
+   - **1.0.3 이하:** sync가 `waiting for healthy state of PersistentVolumeClaim/valkey-data`로 Running에 머물고 Database CR도 여기서 멈춘다(T13 시나리오 13). 그 사이 데이터 Application은 새 values를 적용하지 않지만, 3단계 PR(복원 모드)은 2단계 뒤라 이 대기가 먼저 풀린다.
 
    **VM 시험: 1절 2단계 전에 운영 RDB를 VM 버킷으로 가져온다.** 1절 2단계는 백업 CronJob의 `BUCKET`(VM은 VM 버킷)에서 앱 자격(VM 버킷 토큰)으로 `valkey/<앱>/`를 읽는다. VM의 Valkey와 백업 CronJob은 복구 PR부터 멈춰 있어 VM 버킷에는 복원할 RDB가 없다. 그래서 운영 버킷의 RDB 하나를 읽기 전용 원본 자격(`r2-source-readonly`)으로 읽어 VM 버킷의 같은 키에 VM 자격(`r2-backup`)으로 쓰고, 내려받아 바이트를 대조한다. 공용 values와 운영 쓰기 자격은 쓰지 않는다. 운영 백업은 매일 03:30 KST라, 표식 키는 고른 백업 시각 전에 있던 것만 확인할 수 있다. `OBJECT=latest`면 운영의 가장 최근 것, 특정 시점이면 파일 이름(`dump-<UTC>.rdb`)을 적는다. 가져온 이름을 1절 2단계의 `OBJECT`로 쓴다.
 

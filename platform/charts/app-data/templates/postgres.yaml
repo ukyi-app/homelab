@@ -77,7 +77,11 @@ spec:
 # PUBLIC CONNECT를 막는다(T13, 사용자 결정 2026-10-26). PostgreSQL은 새 DB에 PUBLIC CONNECT를 기본으로 줘 공유 Cluster의
 # 다른 앱 역할도 이 DB에 접속한다(테이블 권한은 없다). CNPG 1.30.1 Database에는 DB 권한 필드가 없다(allowConnections는
 # 모두를 막는다). 그래서 DB owner인 앱 역할 자격으로 REVOKE하는 hook을 둔다. 슈퍼유저 자격은 쓰지 않는다.
-# PostSync라 sync마다 다시 돈다(멱등). 이미 있는 DB는 chartVersion을 올린 sync에서 막힌다.
+# Sync hook이라 sync마다 다시 돈다(멱등). 이미 있는 DB는 chartVersion을 올린 sync에서 막힌다.
+# Database(wave 2) 바로 뒤 wave 3, 영속 Valkey(PVC·서버, wave 4) 앞이다. 1.0.3의 PostSync는 모든 Sync 리소스가 Healthy여야
+# 돌아, 새 앱의 Valkey PVC가 Pending이면 새 DB가 PUBLIC CONNECT를 가진 채 남았다(PR #968 리뷰). wave 2 이상 3 미만에
+# Healthy가 늦을 수 있는 리소스를 두지 않는다(tools/ci/data.ts checkPgAclOrder).
+# 함정: 이 hook이 실패하면 그 sync는 wave 4를 적용하지 않는다. PostgreSQL 앱의 Valkey 변경도 이 hook이 성공해야 들어간다.
 # 함정: GitOps 밖에서 DB를 다시 만들면(restore.md 2절 4-3, homelab db restore) 기본 ACL로 돌아가는데 이 hook은 sync 때만
 # 돈다. 그래서 그 절차가 같은 REVOKE·GRANT를 한다. 바꿀 때 셋을 함께 바꾼다(cli/src/core/pgrestore.ts).
 # cnpg_metrics_exporter는 CNPG 1.30의 지표 수집 역할이다. target_databases '*'(기본 쿼리 pg_extensions)는 CONNECT 없는
@@ -91,7 +95,8 @@ metadata:
   labels:
     {{- include "data.labels" . | nindent 4 }}
   annotations:
-    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "3"
     # 성공한 Job은 지운다. 데이터 Application에는 finalizer가 없어 폐기(data/<앱> 삭제) 뒤에도 남는다.
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:

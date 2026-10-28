@@ -1,0 +1,49 @@
+# check: pg-acl-order
+# expect: fail
+# rule: pg-acl-order
+# match: Sync가 아니다
+# 1.0.3 모양: PostSync는 Pending PVC가 Healthy가 될 때까지 돌지 않는다(PR #968 리뷰).
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: smoke
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  cluster: { name: pg }
+  name: smoke
+  owner: smoke
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pg-acl-smoke
+  namespace: database
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  template:
+    metadata:
+      labels:
+        homelab.ukyi.app/role: pg-acl
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: acl
+          image: x
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valkey-data
+  namespace: app-smoke
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-retain
+  resources:
+    requests:
+      storage: 1Gi

@@ -1,0 +1,81 @@
+# check: pg-acl-order
+# expect: pass
+# 데이터 차트 1.0.4 모양: Database 2 → pg-acl Sync hook 3 → Valkey PVC 4. 앞 wave의 CronJob, PostSync hook은 상관없다.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: smoke
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  cluster: { name: pg }
+  name: smoke
+  owner: smoke
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pg-acl-smoke
+  namespace: database
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  template:
+    metadata:
+      labels:
+        homelab.ukyi.app/role: pg-acl
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: acl
+          image: x
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valkey-data
+  namespace: app-smoke
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-retain
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: smoke-valkey-backup
+  namespace: app-smoke
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  schedule: "30 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: x
+              image: x
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: other-post
+  namespace: app-smoke
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: x
+          image: x
