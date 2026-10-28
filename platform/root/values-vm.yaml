@@ -41,4 +41,4 @@ cluster:
   # 이름 오타는 조용히 아무 앱도 멈추지 않으므로 ci가 apps/<앱>·data/<앱>이 있는지 본다(tools/ci/render.ts).
   restore:
     suspendedApps: [homelab-smoke]
-    valkey: { homelab-smoke: stopped }
+    valkey: { homelab-smoke: restoreMode }
