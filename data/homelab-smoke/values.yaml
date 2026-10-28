@@ -1,4 +1,4 @@
 # homelab CLI가 만들었다(설계 C.5). 이 앱 데이터는 앱을 지워도 남는다(data purge로만 지운다).
-chartVersion: 1.0.3
+chartVersion: 1.0.4
 postgres: { enabled: true }
 valkey: { persistent: true }
