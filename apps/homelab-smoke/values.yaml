@@ -1,0 +1,8 @@
+# homelab app add가 만들었다(설계 C.7). 이 파일은 사람이 고쳐도 된다. CLI는 다루는 키만 바꾼다.
+chartVersion: 1.1.0
+kind: web
+port: 8080
+resources: { cpu: "50m", memory: "128Mi" }
+public: { host: smoke.ukyi.app }
+secrets: [T13_S7_NEWKEY, T13_SMOKE_TOKEN]
+uses: { postgres: true, valkey: true }
