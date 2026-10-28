@@ -40,5 +40,5 @@ cluster:
   #   영속 Valkey(valkey.persistent: true)인 앱만. 항목을 지우면 data values 그대로다(1절 5단계).
   # 이름 오타는 조용히 아무 앱도 멈추지 않으므로 ci가 apps/<앱>·data/<앱>이 있는지 본다(tools/ci/render.ts).
   restore:
-    suspendedApps: [homelab-smoke]
+    suspendedApps: []
     valkey: {}
