@@ -33,7 +33,7 @@
       - 시점: T16b 전(모델을 처음 쓰는 단계 전)이다. 이 티켓의 대화 레인이 모델을 쓰므로 이 티켓을 시작하기 전에 끝나 있어야 한다(설계 E9와 같다. 시점은 에이전트가 맞춘 정리이고 사용자 결정이 아니다). T17·T18은 이 준비가 끝났다고 전제한다.
    3. 봇 자리 Application `platform/bot-slot`의 `target` 변경 PR을 봇 등록 PR보다 먼저 병합한다(아래 "봇 자리 `target` 변경"). 병합 뒤 검증의 콜드스타트 (2) 앞부분으로 `bot-slot`이 봇 ns를 기다리는 상태인지 본다.
    4. 사람이 승인한 뒤 봇 등록 PR을 병합해 첫 배포를 한다. ArgoCDAppDegraded 경보(30분)가 울리기 전에 병합한다.
-   5. T08b의 시험 수신기를 봇으로 바꾸고, 격리 공간에 작업자를 둔다(설계 E9). Alertmanager 봇 route를 켤 때 Telegram 형제 route를 함께 켠다. `continue: true`는 부모 receiver로 되돌려 보내지 않아, 형제 route가 없으면 경보가 봇으로만 가고 비AI 경로(AC-P11)가 끊긴다(설계 C.3.7).
+   5. T08b의 시험 수신기를 봇으로 바꾸고, 격리 공간에 작업자를 둔다(설계 E9). 공개 webhook 경로 `hooks.ukyi.app/github`도 T08a의 시험 수신기 `platform/edge-probe`에서 봇 Service로 넘기고, edge-probe는 그 디렉터리·root 템플릿 `edge-probe.yaml`·values의 `edgeProbe` 블록·Infisical 키를 함께 지운다(`platform/edge-probe/kustomization.yaml` 머리 주석, T13 봇 자리 확인). Alertmanager 봇 route를 켤 때 Telegram 형제 route를 함께 켠다. `continue: true`는 부모 receiver로 되돌려 보내지 않아, 형제 route가 없으면 경보가 봇으로만 가고 비AI 경로(AC-P11)가 끊긴다(설계 C.3.7).
       - App 설치 시점: 이 티켓은 App을 만들거나 설치하지 않는다(설계 E9). 리뷰 App(D-16) 생성·설치는 T17이 시험 저장소부터 한다. 변경 PR App(D-24)은 이름·설치 저장소를 T19에서 정하므로 T19 할 일에서 설치한다. 두 App은 HANDOFF에 해소 티켓(T17, T19)과 함께 적는다.
       - 작업자 배치(D-14, D-15): `sandbox` ns의 상주 파드 하나(동시성 1, replicas 1. `strategy: Recreate`는 T08b의 [제안]), 작업자 포트 8080. 작업자 egress의 코드 읽기는 T08b의 `codeload.github.com`만 그대로이고 `github.com`·`api.github.com`·`gist.github.com`은 뺀다. 작업자에는 GitHub 자격이 없다. 개인 `~/.codex*`는 쓰거나 복사하지 않는다.
       - 영속 공간과 첫 시드(D-14): T08b가 `platform/sandbox`에 만든 작업자 전용 영속 쓰기 공간(`CODEX_HOME`용 PVC 하나)을 쓴다. 작업자는 그 공간에 `auth.json`이 없을 때만 Infisical `/apps/homelab-bot/worker`의 시드를 복사한다. 그래서 처음 배치 때 미리 등록한 시드(할 일 4.2)가 영속 공간에 들어가고, 파드를 다시 만들 때는 갱신본을 시드로 덮지 않는다(설계 C.8 격리 행).
