@@ -90,7 +90,7 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 - **2** migration만 바꾼 PR(#930)은 Application을 OutOfSync로 만들지 않아 마이그레이션이 다음 sync(#931)에서 돌았다. 설계 C.5.4에 적었고, Job 확인 기준을 migrate 컨테이너 command·image 대조로 고쳤다. (해결: #950, #957)
 - **2** "데이터 Application이 늦으면 Job이 한 번 실패하고 retry로 수렴"은 이번에 나오지 않았다(DB가 먼저 있었다). T11 시나리오 2(동등 절차: 앱 PR을 데이터 PR보다 먼저 병합해 Job이 `auth_failed`로 실패하고 retry로 성공)에서 같은 수렴을 봤다. (갈음, 사용자 결정 2026-10-28: T11 증거)
 - **6** 한계 1: 되돌림 #946이 병합 31분 뒤에야 반영됐다. 실패한 자동 sync 작업은 만들 때 복사한 옛 source로 재시도하고, retry 한도(10회, backoff 30초→5분)를 다 쓸 때까지 새 values를 적용하지 않는다. 원인을 설계 B.8 E2·C.3.3에, 진행 중 작업 종료 절차를 런북 `apps.md` 1절에 적었다. (해결: #957)
-- **6** 런북 `apps.md` 1.3 4단계의 작업 종료 패치(`phase`를 `Terminating`으로)는 사용자 승인으로 운영 실측 중이다. <!-- TODO lead: Argo 종료 패치 실측 결과 -->
+- **6** 런북 `apps.md` 1.3 4단계의 작업 종료 패치(`phase`를 `Terminating`으로)를 운영에서 실측했다(사용자 승인 2026-10-28). `homelab-smoke`에 Infisical에 없는 키를 요구한 #972(12:23:10Z 병합) → 작업 12:23:42Z 시작, ExternalSecret SecretSyncedError, 재시도 3회째 대기 → 되돌림 #973(12:28:39Z 병합) → spec 반영 12:28:45Z → 3단계 판정 첫 줄(`sameSource: false`, `finishedAt` 있음) → 4단계 패치 12:29:09Z → 이벤트 "Operation terminated (retried 3 times)", 같은 초에 새 작업, 12:29:14Z Succeeded·Synced/Healthy, ExternalSecret Ready. 되돌림 병합부터 복구까지 36초(시나리오 6에서 기다린 31분). 앱 파드 재시작 없음, 실패 구간 약 5분 30초라 `ExternalSecretNotReady`(for 10m)는 나지 않았다. (해결: #957, 실측 #972·#973)
 - **6** 한계 2: 키 누락과 Argo CD 재시도가 겹치면 `homelab status`의 "다음"이 "잠시 뒤 다시"였다. 이제 `homelab secret set <app> <KEY>`를 먼저 안내한다. (해결: #950)
 - **6** 설계 G 6행 검증의 "Telegram 수신"은 시각 기록이 없다. 전송 지표 telegram 5→7·실패 0이 있다. (갈음, 사용자 결정 2026-10-28: 전송 지표)
 - **7** 운영 ESO 자격 로그인을 시나리오 7 직후에는 따로 하지 않았다. 할 일 7 로그인은 시나리오 13 뒤 HTTP 200이다(토큰은 버림). (해결: 할 일 7, approvals 2026-10-28 "U26 Argo 경로·r2-source prune·r2-source-readonly·운영 ESO 자격" 행)

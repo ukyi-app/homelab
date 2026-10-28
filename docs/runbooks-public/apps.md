@@ -21,8 +21,8 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
 | | 기다리기 | 진행 중 작업 끝내기(1.3의 4단계) |
 |---|---|---|
 | 고친 값 반영 | 재시도를 다 쓴 뒤. `OutOfSync`면 새 자동 sync | 끝낸 직후. `OutOfSync`면 새 자동 sync |
-| 걸리는 시간 | 앱·데이터 Application(limit 10, backoff 30s → 최대 5m)의 재시도 대기 합 **42분**(아래). T13 실측은 작업 시작부터 마지막 실패까지 42분 44초, 되돌림 병합부터 반영까지 약 31분 | 수 초에서 1분 남짓으로 예상(**T13에서 실측 예정**) |
-| 위험 | 운영 쓰기가 없다 | 운영 실측 전이다 |
+| 걸리는 시간 | 앱·데이터 Application(limit 10, backoff 30s → 최대 5m)의 재시도 대기 합 **42분**(아래). T13 실측은 작업 시작부터 마지막 실패까지 42분 44초, 되돌림 병합부터 반영까지 약 31분 | T13 실측(2026-10-28): 패치부터 Synced/Healthy까지 5초, 되돌림 병합부터 36초 |
+| 위험 | 운영 쓰기가 없다 | Application status를 직접 고친다(아래 판정·test가 다른 작업을 끝내지 않게 막는다). T13에서 한 번 운영 실측했다 |
 
 재시도 대기 42분은 v3.5.5에서 이렇게 나온다. 실패하면 `retryCount`를 먼저 1 올리고(`controller/appcontroller.go:1704-1715`), 대기할 때 올린 값으로 `30s × 2^retryCount`(최대 5m, factor 기본 2)를 다시 계산한다(`:1632-1646`, `pkg/apis/application/v1alpha1/types.go:1566-1594`, 같은 디렉터리의 `application_defaults.go:5-8`). retryCount 1~10의 대기가 60s+120s+240s+300s×7 = 2520초다.
 
@@ -74,13 +74,13 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
 
    두 값을 직접 대조하려면 `jq '{spec: .spec.source.helm.valuesObject, running: .status.operationState.operation.sync.source.helm.valuesObject}'`로 본다. values는 공개 저장소의 파일이고 `secrets`는 키 이름뿐이라 출력해도 된다.
 
-4. 진행 중 작업을 끝낸다(**T13에서 실측 예정**).
+4. 진행 중 작업을 끝낸다(T13 운영 실측 2026-10-28, 이 단계 끝).
 
    공식 길은 `argocd app terminate-op <앱>`(owner 로그인 UI의 Terminate도 같은 서버 호출)이다. 서버는 `status.operationState.phase`를 `Terminating`으로 바꿔 쓰기만 하고, 정리는 컨트롤러가 한다(v3.5.5 `server/application/application.go:2508-2521`, `controller/sync.go:358-362`). 이 저장소는 argocd CLI를 고정 도구(`.tool-versions`)에 두지 않으므로 kubectl로 같은 필드를 쓴다.
 
    - Application CRD에 status subresource가 없어(`subresources: {}`) 일반 patch가 status를 바꾼다.
    - 권한은 Argo CD RBAC이 아니라 Kubernetes RBAC이다. 운영자 kubeconfig는 `kubectl auth can-i patch applications.argoproj.io -n argocd`가 `yes`다. 봇 계정 `bot-reader`는 할 수 없다.
-   - 같은 패치(merge patch)로 2026-10-23 `sandbox`의 멈춘 작업을 끝낸 적이 있다(approvals 01:49 행). 그때는 시도 중 health 대기였고, 재시도 대기 중에 끝내는 것은 아직 운영에서 하지 않았다.
+   - 같은 패치(merge patch)로 2026-10-23 `sandbox`의 멈춘 작업을 끝낸 적이 있다(approvals 01:49 행). 그때는 시도 중 health 대기였고, 재시도 대기 중에 끝낸 것은 T13 실측(2026-10-28)이 처음이다.
 
    ```bash
    # 한 번 읽은 JSON(SNAP)에서 3단계 표 첫 줄의 조건을 모두 다시 보고, 맞을 때만 그 JSON의 시각으로 패치를 묶는다.
@@ -107,7 +107,7 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
 
    `jq`가 거부하면 `&&` 때문에 패치하지 않는다. `test failed`가 나오면 아무것도 바뀌지 않은 것이다. 둘 다 3단계부터 다시 본다.
 
-   판정의 거부(고친 source의 작업, 시도 중, 끝난 작업, spec 반영 전)와 test의 거부(3단계 뒤 고친 source의 새 작업으로 바뀜, 다른 `finishedAt`, 시도 중, 끝난 작업)는 로컬 사본과 `kubectl patch --local`로 확인했다(2026-10-27). 운영 Application에 적용한 결과는 아직 없다.
+   판정의 거부(고친 source의 작업, 시도 중, 끝난 작업, spec 반영 전)와 test의 거부(3단계 뒤 고친 source의 새 작업으로 바뀜, 다른 `finishedAt`, 시도 중, 끝난 작업)는 로컬 사본과 `kubectl patch --local`로 확인했다(2026-10-27). 운영 적용(T13, 2026-10-28, `homelab-smoke`): 없는 키를 요구한 작업이 재시도 3회째를 기다릴 때 되돌림 병합 → spec 반영(6초) → 3단계 판정 첫 줄 → 이 블록으로 패치 → 같은 초에 "Operation terminated (retried 3 times)"와 새 자동 sync, 5초 뒤 Succeeded·Synced/Healthy. 되돌림 병합부터 복구까지 36초다(approvals 같은 날 행).
 
    하지 않는 것: `.operation`을 지우지 않는다(작업이 정상 종료되지 않고 `Running` 표시가 남을 수 있다). 컨트롤러 파드를 다시 시작하지 않는다(작업 상태는 `status`에 남아 이어진다). `retry` 설정을 바꿔도 이미 만든 작업에는 적용되지 않는다(작업에 복사되어 있다).
 
