@@ -7,7 +7,7 @@
 | 경로 | 무엇 | 기준이 되는 것 |
 |---|---|---|
 | [spec.md](spec.md) | 전체 계획 | 현재 상태, 결정(C-xx와 §5.1로 옮긴 D-xx는 확정, §5.2·§5.3의 D-xx는 미정), 단계 순서, 인수 조건, 티켓 그래프 |
-| [issues/](issues/) | 티켓 T01~T22, 25개(T08은 T05 재분해로 [T08a](issues/T08a-network.md)·[T08b](issues/T08b-observability.md)로 나뉘고 2026-10-20 D-30으로 [T08c](issues/T08c-internal-short-links.md)가 더해짐, T16은 T15의 V1 범위 조정으로 [T16a](issues/T16a-bot-foundation-local.md)·[T16b](issues/T16b-bot-foundation-deploy.md)로 나뉨) | 각 작업의 범위, 선행 관계, 완료 조건. 목록과 상태는 [spec.md](spec.md) §8.1 |
+| [issues/](issues/) | 티켓 T01~T23, 26개(T08은 T05 재분해로 [T08a](issues/T08a-network.md)·[T08b](issues/T08b-observability.md)로 나뉘고 2026-10-20 D-30으로 [T08c](issues/T08c-internal-short-links.md)가 더해짐, T16은 T15의 V1 범위 조정으로 [T16a](issues/T16a-bot-foundation-local.md)·[T16b](issues/T16b-bot-foundation-deploy.md)로 나뉨. 2026-10-29 T13 후속으로 [T23](issues/T23-platform-followups.md)이 더해짐) | 각 작업의 범위, 선행 관계, 완료 조건. 목록과 상태는 [spec.md](spec.md) §8.1 |
 | [approvals.md](approvals.md) | 외부 변경 승인 기록 | 계정·App·삭제·배포·병합·공개 같은 외부 변경의 승인과 그 전제가 되는 사용자 결정 (AC-X2) |
 | [platform/design-prompt.md](platform/design-prompt.md) | 플랫폼 설계 프롬프트 (T04가 실행) | 플랫폼 설계 지시, 검증 시나리오 1~17 |
 | [platform/design.md](platform/design.md) | 플랫폼 설계 결과 (T04 산출물, T05 결정 반영) | 새 플랫폼의 실제 구성, 구축 단계(E절)와 티켓 대응 |
