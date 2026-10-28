@@ -33,7 +33,7 @@ homelab doctor                    # 도구·로그인·kubectl context
 - `--json`은 `schema: homelab-cli/v1` 문서 하나를 stdout에 낸다. 진행 줄은 stderr.
 - PR은 GitHub API로 `cli/<명령>-<app>` 브랜치에 만든다(로컬 체크아웃 없음). 파일 내용은 그때의 main 스냅샷에서 다시 계산하고, 열린 PR은 머리 커밋의 `Homelab-CLI:` 트레일러와 PR 전체 변경 집합까지 본다. 갱신은 force 없이 부모 [main 스냅샷, 확인한 머리]의 fast-forward라, 확인 뒤 사람 push가 끼면 GitHub가 거부하고 CLI는 덮지 않고 멈춘다. 병합은 사람이 한다.
 - 시크릿 입력(예: `secret set`의 stdin)은 16자 이상만 받는다. 생성 비밀번호는 영숫자 40자.
-- `app add`는 `apps/<app>/values.yaml`이 있으면 다루는 키(`chartVersion`·`public`·`internal`·`secrets`·`uses`·`cache`)만 바꾸고 사람이 더한 키·주석은 둔다. `app remove` 뒤 재등록은 그 파일을 기본값(`chartVersion`·`kind`·`port`·`resources`)과 플래그·Infisical `/apps/<app>`의 키로 새로 써서, 사람이 더한 키(`migration`·`env`, 고친 `resources` 등)가 사라진다. 필요하면 `app remove` PR에서 지운 내용을 보고 재등록 PR 병합 뒤 따로 PR로 되살린다(T13 시나리오 9).
+- `app add`는 `apps/<app>/values.yaml`이 있으면 다루는 키(`chartVersion`·`public`·`internal`·`secrets`·`uses`·`cache`)만 바꾸고 사람이 더한 키·주석은 둔다. `app remove` 뒤 재등록은 그 파일을 기본값(`chartVersion`·`kind`·`port`·`resources`)과 플래그·Infisical `/apps/<app>`의 키로 새로 써서, 사람이 더한 키(`migration`·`env`, 고친 `resources` 등)가 사라진다. 필요하면 `app remove` PR에서 지운 내용을 보고 **재등록 PR(CLI가 만든 PR)에 되살린 커밋을 더한 뒤** 검토·병합한다. main 병합이 곧 배포라, 재등록 PR을 먼저 병합하면 빠진 설정으로 먼저 배포된다. 이미 병합했으면 따로 PR로 되살리되, `migration`만 되살린 PR은 자동 sync를 일으키지 않아 Job이 다음 배포 때 돈다(설계 C.5.4, T13 시나리오 9).
 
 ## 명령 더하기
 

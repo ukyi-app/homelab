@@ -14,14 +14,14 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
 
 - 근거(v3.5.5 소스): 작업 생성 `controller/appcontroller.go:2458-2479`, 재시도 `:1621-1663`, 재시도가 쓰는 source `controller/sync.go:79-92`. v3.2.0에서 들어온 동작이다. v3.1.x는 재시도마다 spec을 다시 읽었다.
 - `syncPolicy.retry.refresh: true`는 해법이 아니다. 재시도 전에 revision만 비워 같은 `targetRevision`을 다시 풀고, source 사본(values)은 그대로 둔다(`appcontroller.go:1649-1655`, `controller/state.go:310-313`). 봇 자리는 values가 Git 경로의 파일이라 refresh로 고쳐지지만(설계 C.8), 앱·데이터 Application은 values가 spec 안이라 고쳐지지 않는다.
-- 실측(T13 시나리오 6, 2026-10-27): Infisical에 없는 키를 요구한 #945의 작업(04:34:39Z 시작)이 재시도하는 동안 되돌림 #946(04:46:18Z 병합)이 반영되지 않았다. 재시도 10회를 다 쓴 05:17:23Z에 새 작업이 시작되어 05:17:34Z에 Synced가 됐다. 병합부터 약 31분이다.
+- 실측(T13 시나리오 6, 2026-10-27): Infisical에 없는 키를 요구한 #945의 작업(04:34:39Z 시작)이 재시도하는 동안 되돌림 #946(04:46:16Z 병합)이 반영되지 않았다. 재시도 10회를 다 쓴 05:17:23Z에 새 작업이 시작되어 05:17:34Z에 Synced가 됐다. 병합부터 약 31분이다.
 
 ### 1.2 기다릴지, 끝낼지
 
 | | 기다리기 | 진행 중 작업 끝내기(1.3의 4단계) |
 |---|---|---|
 | 고친 값 반영 | 재시도를 다 쓴 뒤. `OutOfSync`면 새 자동 sync | 끝낸 직후. `OutOfSync`면 새 자동 sync |
-| 걸리는 시간 | 앱·데이터 Application(limit 10, backoff 30s → 최대 5m)의 재시도 대기 합 **42분**(아래). T13 실측은 작업 시작부터 마지막 실패까지 42분 44초, 되돌림 병합부터 반영까지 약 31분 | T13 실측(2026-10-28): 패치부터 Synced/Healthy까지 5초, 되돌림 병합부터 36초 |
+| 걸리는 시간 | 앱·데이터 Application(limit 10, backoff 30s → 최대 5m)의 재시도 대기 합 **42분**(아래). T13 실측은 작업 시작부터 마지막 실패까지 42분 44초, 되돌림 병합부터 반영까지 약 31분 | T13 실측(2026-10-28): 패치 뒤 작업 완료 5초, Synced/Healthy 관측 6초, 되돌림 병합부터 정상 상태 관측까지 36초 |
 | 위험 | 운영 쓰기가 없다 | Application status를 직접 고친다(아래 판정·test가 다른 작업을 끝내지 않게 막는다). T13에서 한 번 운영 실측했다 |
 
 재시도 대기 42분은 v3.5.5에서 이렇게 나온다. 실패하면 `retryCount`를 먼저 1 올리고(`controller/appcontroller.go:1704-1715`), 대기할 때 올린 값으로 `30s × 2^retryCount`(최대 5m, factor 기본 2)를 다시 계산한다(`:1632-1646`, `pkg/apis/application/v1alpha1/types.go:1566-1594`, 같은 디렉터리의 `application_defaults.go:5-8`). retryCount 1~10의 대기가 60s+120s+240s+300s×7 = 2520초다.
@@ -107,7 +107,7 @@ Argo CD v3.5.5 자동 sync는 작업(operation)을 만들 때 그때의 `spec.so
 
    `jq`가 거부하면 `&&` 때문에 패치하지 않는다. `test failed`가 나오면 아무것도 바뀌지 않은 것이다. 둘 다 3단계부터 다시 본다.
 
-   판정의 거부(고친 source의 작업, 시도 중, 끝난 작업, spec 반영 전)와 test의 거부(3단계 뒤 고친 source의 새 작업으로 바뀜, 다른 `finishedAt`, 시도 중, 끝난 작업)는 로컬 사본과 `kubectl patch --local`로 확인했다(2026-10-27). 운영 적용(T13, 2026-10-28, `homelab-smoke`): 없는 키를 요구한 작업이 재시도 3회째를 기다릴 때 되돌림 병합 → spec 반영(6초) → 3단계 판정 첫 줄 → 이 블록으로 패치 → 같은 초에 "Operation terminated (retried 3 times)"와 새 자동 sync, 5초 뒤 Succeeded·Synced/Healthy. 되돌림 병합부터 복구까지 36초다(approvals 같은 날 행).
+   판정의 거부(고친 source의 작업, 시도 중, 끝난 작업, spec 반영 전)와 test의 거부(3단계 뒤 고친 source의 새 작업으로 바뀜, 다른 `finishedAt`, 시도 중, 끝난 작업)는 로컬 사본과 `kubectl patch --local`로 확인했다(2026-10-27). 운영 적용(T13, 2026-10-28, `homelab-smoke`): 없는 키를 요구한 작업이 재시도 3회째를 기다릴 때 되돌림 병합 → spec 반영(6초) → 3단계 판정 첫 줄 → 이 블록으로 패치 → 같은 초에 "Operation terminated (retried 3 times)"와 새 자동 sync, 5초 뒤 작업 Succeeded, 6초 뒤 Synced/Healthy·ExternalSecret Ready 관측. 되돌림 병합부터 정상 상태 관측까지 36초다(approvals 같은 날 행).
 
    하지 않는 것: `.operation`을 지우지 않는다(작업이 정상 종료되지 않고 `Running` 표시가 남을 수 있다). 컨트롤러 파드를 다시 시작하지 않는다(작업 상태는 `status`에 남아 이어진다). `retry` 설정을 바꿔도 이미 만든 작업에는 적용되지 않는다(작업에 복사되어 있다).
 
