@@ -158,6 +158,46 @@ export type RenderOptions = { rootOverlay?: RootOverlay; chartOverlay?: Record<s
 export const EXTERNAL_SECRETS_OFF = { externalSecrets: { enabled: false } };
 const ES_PATCH_LINE = '{{- $_ := set $v "externalSecrets" (dict "enabled" false) }}';
 
+// 복구 스위치를 아는 첫 공유 차트 버전. 그 전 태그는 닫힌 schema가 externalSecrets를 거부하고 ExternalSecret도 그대로 낸다.
+// 기존 앱은 옛 태그에 머물 수 있으므로(설계 C.4.5) 스위치를 실제로 끈 클러스터에서만 실패다. 일반 PR의 가상 끔 렌더에서는
+// tools/ci/switch.ts가 이 rule을 정보 줄로 바꾼다.
+export const ES_SWITCH_SINCE = { app: "1.2.0", data: "1.1.0" } as const;
+export const ES_CHART_RULE = "external-secrets-chart";
+function esSwitchUnsupported(kind: "app" | "data", app: string, version: unknown): string | undefined {
+  const parse = (s: string) => (/^\d+\.\d+\.\d+$/.test(s) ? s.split(".").map(Number) : undefined);
+  const have = parse(String(version));
+  const since = parse(ES_SWITCH_SINCE[kind])!;
+  // 형식이 틀린 chartVersion은 아래 태그 조회가 실패로 막는다.
+  if (!have) return undefined;
+  const i = have.findIndex((n, k) => n !== since[k]);
+  if (i < 0 || have[i] > since[i]) return undefined;
+  const file = kind === "app" ? `apps/${app}/values.yaml` : `data/${app}/values.yaml`;
+  const chart = kind === "app" ? "앱 차트" : "데이터 차트";
+  return `복구 스위치(cluster.restore.externalSecrets: false)는 ${chart} ${ES_SWITCH_SINCE[kind]}부터 지원한다(지금 chartVersion ${version}). 스위치를 끄기 전에 ${file}의 chartVersion을 올린다`;
+}
+
+// ApplicationSet apps의 templatePatch가 만드는 앱 values(아래 5.).
+// params는 values.yaml + image.yaml 키(생성기 변수 path·values 제외)다. tailnetPrefix는 클러스터 값이 이긴다.
+export function appValues(app: string, params: Record<string, any>, prefix: string, restore: Restore): Record<string, any> {
+  const values: Record<string, any> = { ...params, tailnetPrefix: prefix };
+  if (restore.suspendedApps.includes(app)) values.suspended = true;
+  if (restore.externalSecretsOff) Object.assign(values, structuredClone(EXTERNAL_SECRETS_OFF));
+  return values;
+}
+
+// ApplicationSet data의 templatePatch가 만드는 데이터 values(아래 6.).
+// 복구 멈춤 맵에 있으면 사람 values의 valkey.running·restoreMode를 버리고 모드 값으로 다시 쓴다.
+export function dataValues(app: string, human: Record<string, any>, bucket: string, restore: Restore): Record<string, any> {
+  const values: Record<string, any> = { ...human, backup: { bucket } };
+  const mode = restore.valkey[app];
+  if (mode !== undefined) {
+    const { running: _running, restoreMode: _restoreMode, ...rest } = (human.valkey ?? {}) as Record<string, any>;
+    values.valkey = { ...rest, running: mode === "restoreMode", ...(mode === "restoreMode" ? { restoreMode: true } : {}) };
+  }
+  if (restore.externalSecretsOff) Object.assign(values, structuredClone(EXTERNAL_SECRETS_OFF));
+  return values;
+}
+
 // ApplicationSet apps(platform/appsets/apps/files/applicationset.yaml). 아래 5.가 그 Application을 대신 렌더하므로
 // 생성기·템플릿·값 합치기가 그 전개와 같은지 본다. 하나를 바꾸면 이 함수와 5.를 함께 바꾼다.
 APPSET_RENDERERS.apps = (set, restore) => {
@@ -480,6 +520,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
   // 5. 등록된 앱(apps/<앱>/values.yaml). ApplicationSet apps(platform/appsets/apps/files/applicationset.yaml)와
   //    같게 values.yaml + image.yaml + 클러스터 tailnet 접두를 values로, 차트는 그 앱의 태그로 렌더한다.
   //    그 클러스터의 복구 멈춤 목록(cluster.restore.suspendedApps)에 있으면 suspended: true로 덮는다.
+  //    복구 스위치를 끈 클러스터에서 스위치를 모르는 옛 차트 앱은 렌더하지 않고 원인을 적어 실패로 둔다(ES_SWITCH_SINCE).
   //    앱이 0개인 것은 정상이라 세지 않는다.
   for (const vf of gitFiles("apps/*/values.yaml")) {
     const app = basename(dirname(vf));
@@ -501,9 +542,12 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
         const badImage = Object.keys(image).filter((k) => !imageKeys.includes(k));
         if (badHuman.length > 0) throw new Error(`values.yaml에 둘 수 없는 키: ${badHuman.join(", ")}(생성기 변수·클러스터 값·복구 스위치·image.yaml 키)`);
         if (badImage.length > 0) throw new Error(`image.yaml에는 ${imageKeys.join(", ")}만 둔다: ${badImage.join(", ")}`);
-        const values: Record<string, any> = { ...human, ...image, tailnetPrefix: prefix };
-        if (restore.suspendedApps.includes(app)) values.suspended = true;
-        if (restore.externalSecretsOff) Object.assign(values, structuredClone(EXTERNAL_SECRETS_OFF));
+        const values = appValues(app, { ...human, ...image }, prefix, restore);
+        const old = restore.externalSecretsOff ? esSwitchUnsupported("app", app, values.chartVersion) : undefined;
+        if (old) {
+          res.violations.push({ rule: ES_CHART_RULE, where, message: old });
+          continue;
+        }
         const chartDir = pathAtRevision(`app-chart-v${values.chartVersion}`, "platform/charts/app", tmp);
         const vfile = join(tmp, `app-${app}-${cluster}.json`);
         writeFileSync(vfile, JSON.stringify(values));
@@ -519,6 +563,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
   // 6. 등록된 데이터(data/<앱>/values.yaml). ApplicationSet data(platform/appsets/data/files/applicationset.yaml)와
   //    같게 values.yaml + 클러스터 백업 버킷을 values로, 릴리스 이름은 앱 이름, 차트는 그 앱의 태그로 렌더한다.
   //    그 클러스터의 복구 멈춤 맵(cluster.restore.valkey)에 있으면 valkey.running·restoreMode를 모드 값으로 다시 쓴다.
+  //    복구 스위치를 끈 클러스터의 옛 차트는 5.와 같다.
   for (const vf of gitFiles("data/*/values.yaml")) {
     const app = basename(dirname(vf));
     for (const [cluster, bucket] of clusterBuckets(clusterFiles)) {
@@ -531,13 +576,12 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
         const bad = Object.keys(human).filter((k) => ["path", "values", "backup", "valkeyServer", "global", "externalSecrets"].includes(k));
         if (bad.length > 0) throw new Error(`data values.yaml에 둘 수 없는 키: ${bad.join(", ")}(생성기 변수·클러스터 값·차트 내부 값·복구 스위치)`);
         if (bucket === undefined) throw new Error(`platform/root/values-${cluster}.yaml에 cluster.backup.bucket이 없다`);
-        const values: Record<string, any> = { ...human, backup: { bucket } };
-        const mode = restore.valkey[app];
-        if (mode !== undefined) {
-          const { running: _running, restoreMode: _restoreMode, ...rest } = (human.valkey ?? {}) as Record<string, any>;
-          values.valkey = { ...rest, running: mode === "restoreMode", ...(mode === "restoreMode" ? { restoreMode: true } : {}) };
+        const values = dataValues(app, human, bucket, restore);
+        const old = restore.externalSecretsOff ? esSwitchUnsupported("data", app, values.chartVersion) : undefined;
+        if (old) {
+          res.violations.push({ rule: ES_CHART_RULE, where, message: old });
+          continue;
         }
-        if (restore.externalSecretsOff) Object.assign(values, structuredClone(EXTERNAL_SECRETS_OFF));
         const chartDir = pathAtRevision(`data-chart-v${values.chartVersion}`, "platform/charts/app-data", tmp);
         const vfile = join(tmp, `data-${app}-${cluster}.json`);
         writeFileSync(vfile, JSON.stringify(values));

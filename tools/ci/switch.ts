@@ -6,11 +6,13 @@
 // 3. 값 파일에 스위치가 없는 클러스터는 기본 렌더가 켠 렌더와 같고, 어느 Application에도 스위치 값이 들어가지 않는다.
 //    운영 Application spec이 스위치 전과 같다는 장치를 지킨다.
 // 4. 끈 렌더도 정책을 통과한다(복구 PR이 가장 급할 때 막히지 않게). kubeconform은 리소스를 빼기만 하므로 생략한다.
+// 등록 앱·데이터가 스위치를 모르는 옛 차트(render.ts ES_SWITCH_SINCE)면 가상 끔 렌더에서는 정보 줄만 낸다. 기존 앱은 옛 태그에
+// 머물 수 있다(설계 C.4.5). 값 파일에서 스위치를 실제로 끈 클러스터는 기본 렌더(render 단계)와 여기서 함께 실패한다.
 // 끌 때 빠지는 Secret 대상 목록을 출력한다. 손으로 만들 Secret의 이름과 ns다(restore.md 3절 U40).
 import { checkSecretPaths } from "./data";
 import { type Doc, type Violation, gitFiles, readText } from "./lib";
 import { checkAll } from "./policy";
-import { EXTERNAL_SECRETS_OFF, renderAll } from "./render";
+import { ES_CHART_RULE, EXTERNAL_SECRETS_OFF, renderAll } from "./render";
 
 const SECRET_KINDS = new Set(["ExternalSecret", "ClusterSecretStore"]);
 // 끌 때 Application째 빠지는 것(platform/root/templates/external-secrets.yaml, edge-probe.yaml).
@@ -83,14 +85,33 @@ function carriesSwitch(d: Doc): boolean {
 export function checkExternalSecretsSwitch(): Violation[] {
   const out: Violation[] = [];
   const v = (where: string, message: string) => out.push({ rule: "external-secrets-switch", where, message });
+  const onOverlay = { cluster: { restore: { externalSecrets: true } } };
+  const offOverlay = { cluster: { restore: { externalSecrets: false } } };
   const base = renderAll();
-  const on = renderAll({ rootOverlay: { cluster: { restore: { externalSecrets: true } } } });
-  const off = renderAll({ rootOverlay: { cluster: { restore: { externalSecrets: false } } }, chartOverlay: EXTERNAL_SECRETS_OFF });
+  const on = renderAll({ rootOverlay: onOverlay });
+  const off = renderAll({ rootOverlay: offOverlay, chartOverlay: EXTERNAL_SECRETS_OFF });
+  // 값 파일에서 스위치를 이미 끈 클러스터(복구 PR). 렌더가 아니라 값 파일로 판정한다(아래 3. 주석).
+  const switchedOff = new Set(
+    gitFiles("platform/root/values-*.yaml")
+      .filter((f) => (Bun.YAML.parse(readText(f)) as any)?.cluster?.restore?.externalSecrets === false)
+      .map((f) => f.replace(/^platform\/root\/values-/, "").replace(/\.yaml$/, "")),
+  );
+  for (const c of switchedOff) console.log(`참고: ${c}는 값 파일에서 복구 스위치가 꺼져 있다. 복구 PR이면 정상이다`);
   for (const x of on.violations) v(`켬:${x.where}`, x.message);
-  // 등록 앱·데이터가 스위치를 모르는 옛 차트(앱 1.2.0 미만, 데이터 1.1.0 미만)면 닫힌 schema로 렌더가 실패한다.
-  // 복구 PR이 가장 급할 때 막히는 일이라 원인을 같이 적는다(restore.md 3절 U40).
-  const OLD_CHART = "복구 스위치는 앱 차트 1.2.0·데이터 차트 1.1.0부터다. 그 전 chartVersion이면 끄기 전에 올린다";
-  for (const x of off.violations) v(`끔:${x.where}`, /^(app|data):/.test(x.where) && x.message.includes("schema") ? `${OLD_CHART}: ${x.message}` : x.message);
+  // 스위치를 모르는 옛 차트 앱·데이터: 스위치를 끈 클러스터만 실패, 나머지는 앱마다 정보 줄 한 번.
+  const unsupported = new Map<string, { message: string; clusters: string[] }>();
+  for (const x of off.violations) {
+    const cluster = /\[([a-z0-9-]+)\]$/.exec(x.where)?.[1];
+    if (x.rule !== ES_CHART_RULE || !cluster || switchedOff.has(cluster)) {
+      v(`끔:${x.where}`, x.message);
+      continue;
+    }
+    const app = x.where.replace(/\[[a-z0-9-]+\]$/, "");
+    const u = unsupported.get(app) ?? { message: x.message, clusters: [] };
+    u.clusters.push(cluster);
+    unsupported.set(app, u);
+  }
+  for (const [app, u] of unsupported) console.log(`참고: ${app}: ${u.message}. 스위치를 끄지 않은 클러스터(${u.clusters.join(", ")})라 실패로 두지 않는다`);
   const offFailed = new Set(off.violations.map((x) => x.where));
 
   // 1. 끄면 0개, 켜면 0이 아님(0건 통과 금지, 설계 B.8 E7).
@@ -129,12 +150,6 @@ export function checkExternalSecretsSwitch(): Violation[] {
   // 3. 값 파일에 스위치가 없는 클러스터는 기본 렌더 = 켠 렌더, 스위치 값 없음.
   // 값 파일이 이미 끈 클러스터(복구 PR)는 기본 렌더가 끈 렌더라 비교하지 않는다. 판정은 렌더가 아니라 값 파일로 한다.
   // 렌더로 판정하면 스위치 값이 새는 실수(늘 넘기는 템플릿)가 "복구 PR"로 보여 이 검사를 건너뛴다.
-  const switchedOff = new Set(
-    gitFiles("platform/root/values-*.yaml")
-      .filter((f) => (Bun.YAML.parse(readText(f)) as any)?.cluster?.restore?.externalSecrets === false)
-      .map((f) => f.replace(/^platform\/root\/values-/, "").replace(/\.yaml$/, "")),
-  );
-  for (const c of switchedOff) console.log(`참고: ${c}는 값 파일에서 복구 스위치가 꺼져 있다. 복구 PR이면 정상이다`);
   const baseG = byGroup(base.docs.filter((d) => !d.origin.startsWith("kustomize:")));
   for (const [g, baseDocs] of baseG) {
     const info = group([...baseDocs.values()][0].origin);
@@ -156,10 +171,10 @@ export function checkExternalSecretsSwitch(): Violation[] {
   // 4. 끈 렌더의 정책.
   for (const x of [...checkAll(off.docs), ...checkSecretPaths(off.docs)]) v(`끔:${x.where}`, `${x.rule}: ${x.message}`);
 
-  // 끌 때 손으로 만들 Secret(클러스터별, root 아래만. 등록 앱·데이터는 app:·data: 출처).
+  // 끌 때 손으로 만들 Secret(클러스터별, root 아래와 등록 앱·데이터). 옛 차트 앱은 끄기 전에 올려야 해 빼고 위 정보 줄로 낸다.
   for (const c of clusters) {
     const targets = on.docs
-      .filter((d) => isSecret(d) && group(d.origin).cluster === c)
+      .filter((d) => isSecret(d) && group(d.origin).cluster === c && !unsupported.has(d.origin.replace(/\[[a-z0-9-]+\]$/, "")))
       .map((d) => (d.obj.kind === "ClusterSecretStore" ? `Store ${d.obj.metadata?.name}` : `${d.obj.metadata?.namespace ?? d.ns}/${d.obj.spec?.target?.name ?? d.obj.metadata?.name}`))
       .sort();
     console.log(`끌 때 빠지는 것[${c}] ${targets.length}개: ${targets.join(", ")}`);
