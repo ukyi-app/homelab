@@ -26,6 +26,9 @@ uv 0.13.3
 github:VictoriaMetrics/VictoriaMetrics[asset_pattern=vmutils-linux-amd64-v1.154.1.tar.gz,bin=vmalert-tool-prod] 1.154.1
 # Terraform: apply·plan은 owner 로컬에서만. CI는 자격 없이 fmt·validate·test만 한다(설계 C.3.9).
 terraform 1.16.6
+# age: Infisical 암호화 내보내기의 암호화·복호화(age 암호문구, docs/runbooks-public/restore.md 3.1, recovery-assets.md).
+# U40(2026-10-29)에서 실측한 버전이다. CI는 받지 않아 ci.yaml sha256 대상이 아니다.
+age 1.3.2
 # Infisical CLI: Terraform 자격을 infisical run으로 환경변수에만 넣는다(infra/README.md). 0.44.3은 나온 지 하루라
 # mise minimum_release_age가 숨긴다. CI는 받지 않아 ci.yaml sha256 대상이 아니다.
 infisical 0.44.2

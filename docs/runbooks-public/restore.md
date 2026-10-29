@@ -1426,4 +1426,439 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
      EOF
      ```
 
-**U40(클러스터 유실과 Infisical 장애가 겹친 복구)은 이번 시나리오 13에서 하지 않았다(한계·후속, T23 할 일 2).** 스위치는 T23 할 일 1에서 만들었다. 복구 PR이 그 클러스터 값 파일의 `cluster.restore`에 `externalSecrets: false`를 넣는다(따옴표 없는 bool. 문자열이면 root 렌더가 실패한다). VM 시험은 `values-vm.yaml`에만 넣고 운영 values는 그대로 둔다. 끄면 ClusterSecretStore 셋과 모든 ExternalSecret이 렌더되지 않고, Store Application(`external-secrets-stores`)과 시험 수신기 `edge-probe`는 Application째 빠지며, ESO operator(wave -8)는 남는다. 같은 이름의 Secret은 암호화 내보내기에서 손으로 만든다. 그 목록은 `bun run ci --only external`이 출력하는 "끌 때 빠지는 것" 줄이다(Argo CD owner 자격은 새 Secret이 아니라 `argocd-secret`에 두 키를 합친다). 등록 앱이 앱 차트 1.2.0·데이터 차트 1.1.0 미만이면 복구 PR의 ci `render`가 그 앱과 chartVersion을 적고 실패한다. 끄기 전에 그 앱의 chartVersion을 올리는 PR을 먼저 병합한다(`apps/<앱>/values.yaml`·`data/<앱>/values.yaml`은 두 클러스터 공용이라 일반 PR이다). 평소 PR은 옛 차트를 막지 않고 `bun run ci --only external`의 `참고:` 줄로만 알린다. 함정: 살아 있는 클러스터에서 끄면 `edge-probe`의 resources-finalizer가 ns `app-edge-probe`까지 지우고, Store와 `argocd-owner`는 추적 없이 남는다. 설계한 쓰임은 빈 클러스터 복구다. 이 스위치로 root가 손 Secret만으로 끝까지 진행하는지, 되돌릴 때 ESO가 같은 이름의 기존 Secret을 넘겨받는지는 아직 VM에서 보지 않았다(T23 할 일 2, `docs/plans/2026-10-17-homelab-rebuild/issues/T23-platform-followups.md`).
+### 3.1 클러스터 유실 + Infisical 장애 (U40)
+
+빈 클러스터를 복구해야 하는데 Infisical에도 닿지 못할 때다(설계 C.6.4 "클러스터 유실 + Infisical 장애" 행). ESO가 값을 읽지 못하므로 복구 PR이 ClusterSecretStore와 ExternalSecret을 끄고, 같은 이름의 Secret을 저장소 밖 암호화 내보내기에서 손으로 만든 뒤 root를 apply한다. 장애가 끝나면 스위치를 켜는 PR 하나로 ESO 관리로 돌아간다. **손 Secret은 지우지 않는다.** ESO가 소유자 없는 같은 이름 Secret을 넘겨받는다. 2026-10-29 VM에서 아래 순서 그대로 실행해 통과했다(T23 할 일 2, 결과는 [verification.md](../plans/2026-10-17-homelab-rebuild/platform/verification.md) "한계와 후속" 13). 3절 순서에 아래 0)~7)이 더해진다.
+
+**스위치.** 복구 PR이 그 클러스터 값 파일의 `cluster.restore`에 `externalSecrets: false`를 넣는다(따옴표 없는 bool. 문자열이면 root 렌더가 실패한다). VM 시험은 `values-vm.yaml`에만 넣고 운영 values는 그대로 둔다. 끄면 ClusterSecretStore 셋과 모든 ExternalSecret이 렌더되지 않고, Store Application(`external-secrets-stores`)과 시험 수신기 `edge-probe`는 Application째 빠지며, ESO operator(wave -8)는 남는다. 등록 앱이 앱 차트 1.2.0·데이터 차트 1.1.0 미만이면 복구 PR의 ci `render`가 그 앱과 chartVersion을 적고 실패한다. 끄기 전에 그 앱의 chartVersion을 올리는 PR을 먼저 병합한다(`apps/<앱>/values.yaml`·`data/<앱>/values.yaml`은 두 클러스터 공용이라 일반 PR이다). 평소 PR은 옛 차트를 막지 않고 `bun run ci --only external`의 `참고:` 줄로만 알린다.
+
+**함정: 살아 있는 클러스터에서 끄지 않는다.** `edge-probe`의 resources-finalizer가 ns `app-edge-probe`까지 지우고, Store와 `argocd-owner`는 추적 없이 남는다. 설계한 쓰임은 빈 클러스터 복구다. 시험을 다시 할 때도 살아 있는 VM 클러스터에 끄는 PR을 다시 넣지 않고 VM을 새로 만든다.
+
+**손으로 만들 것은 10개다.** `bun run ci --only external`이 출력하는 "끌 때 빠지는 것" 줄은 14개(Store 3 + ExternalSecret 대상 11)다. Store 셋은 Secret이 아니라 만들 것이 없고, `app-edge-probe/edge-probe`는 Application째 빠져 쓰는 쪽도 없다(켤 때 ESO가 새로 만든다. 넘겨받기 대상이 아니다). 남는 10개는 Owner 9개와, 새 Secret이 아니라 Argo CD 설치가 만든 `argocd/argocd-secret`에 owner 자격 두 키를 합치는 Merge 1개다. 키는 17개다(운영 ExternalSecret 키는 edge-probe 1개를 더해 18개). 모든 ExternalSecret의 `target.template`은 `engineVersion: v2`, `mergePolicy: Merge`뿐이라(ES 라벨·Argo CD 추적 주석이 Secret에 복사되지 않게 하는 용도, 설계 B.8 E3), 손 Secret을 키 그대로, type Opaque, 라벨·주석·`ownerReferences`·`immutable` 없이 만들면 ESO 결과와 같다.
+
+**한계: 앱 0개에서만 실행했다.** 공유 차트·ApplicationSet 생성 Application 경로는 라이브로 보지 않았다(ci가 templatePatch를 sprig v3.3.0으로 실행해 끄면 ExternalSecret이 0개인지만 본다). 등록 앱이 생기면 그 앱의 Secret도 손으로 만들어야 한다. 그런데 앱 차트의 `<앱>-db`·`<앱>-valkey-url`과 데이터 차트의 `pg-role-<앱>`은 template에 `data`·`type`·`metadata`가 있어 1)의 지도가 "손으로 같은 결과를 만들 수 없는 모양"에서 멈추고, 개수 검사(10개)도 멈춘다. 그때는 이 절을 앱 경로까지 넓힌 뒤 쓴다.
+
+**블록 공통.**
+
+- 블록은 NUC 작업 사본의 뿌리에서 돌린다(`host/verify.sh`와 `tools/ci/render.ts`를 상대 경로로 부른다). age는 `.tool-versions`의 버전이다.
+- 먼저 `export U40_DIR=<저장소 밖 0700 폴더>`를 한 번 한다(NUC의 상태 폴더 아래 등. 실제 경로는 기록에 남기지 않는다). 지도, 내보내기, 스냅숏, 기대 해시가 여기 생긴다. 지도에는 값이 없다. 스냅숏의 UID·해시는 실행 기록에만 두고 저장소에 옮기지 않는다(값 공간이 작은 키는 해시로 거꾸로 찾을 수 있다).
+- `CLUSTER`는 `prod`(실제 복구) 또는 `vm`(VM 시험)이다. 클러스터에 쓰는 블록은 이 값으로 kubeconfig(`~/.kube/homelab.yaml` 또는 `~/.kube/homelab-vm.yaml`, bootstrap.md 1절)를 고정하고 `host/verify.sh --cluster "$CLUSTER" --identity`로 대상을 본다. **2026-10-29에 실행한 것은 `vm` 경로다.** `prod` 경로는 같은 블록의 값만 바꾼 것이고 실행하지 않았다. 살아 있는 운영에서 잘못 돌리면 손 Secret 블록은 Owner 대상이 이미 있어 쓰기 전에 멈춘다.
+- 값은 파이프 안에만 있다. 평문 파일·명령행 인자·화면 출력이 없다. jq·kubectl 오류 문구는 값 조각을 담을 수 있어 버리고 종료 코드로만 멈춘다. 디버깅하려고 이 리다이렉트를 빼지 않는다. 필요하면 키 이름만 내는 jq로 따로 본다.
+
+**0) 복구 PR(끔).** 3절 1단계의 복구 PR에 `cluster.restore.externalSecrets: false`를 함께 넣는다. ci `external secrets switch`가 "참고: <클러스터>는 값 파일에서 복구 스위치가 꺼져 있다"와 templatePatch 실행 줄(끔 건수 포함)을 낸다. 로컬 렌더 기준 끈 VM의 자식 Application은 16개다(켠 렌더 18개에서 `external-secrets-stores`·`edge-probe`가 빠짐). VM 시험: #988(`values-vm.yaml` 한 파일. serverName `pg-vm-20261029`, `recoverySource`, `externalSecrets: false`).
+
+**1) 손 Secret 지도.** 대상 ns/이름, ExternalSecret 이름, creationPolicy, 키 → Infisical 경로를 Git 렌더에서 모은다. 값은 없다. 실제 재해에는 운영 클러스터가 없으므로 Git에서 만든다. 복구 스위치를 켠 렌더(`rootOverlay`)를 쓰므로 복구 PR이 스위치를 꺼 둔 뒤에도 같은 결과다.
+
+```bash
+CLUSTER=vm bash -euo pipefail <<'EOF'
+umask 077
+case "$CLUSTER" in prod|vm) ;; *) echo "CLUSTER는 prod 또는 vm"; exit 1 ;; esac
+: "${U40_DIR:?U40_DIR가 비었다(저장소 밖 0700 폴더)}"
+# 맨 끝 폴더만 0700으로 만든다(-p의 상위 폴더는 umask). 이미 있던 폴더면 권한을 보고 멈춘다
+mkdir -p -m 0700 "$U40_DIR"
+[ "$(stat -c %a "$U40_DIR")" = 700 ] || { echo "U40_DIR이 0700 폴더가 아니다"; exit 1; }
+map="$U40_DIR/map.json"
+[ ! -e "$map" ] || { echo "지도가 이미 있다. 다시 만들지는 사람이 정한다"; exit 1; }
+trap 'rm -f "$map.part"' EXIT
+CLUSTER="$CLUSTER" bun -e "$(cat <<'TS'
+import { renderAll } from "./tools/ci/render.ts";
+const cluster = process.env.CLUSTER;
+const r = renderAll({ rootOverlay: { cluster: { restore: { externalSecrets: true } } } });
+if (r.violations.length) throw new Error(`렌더 위반 ${r.violations.length}개`);
+const docs = r.docs.filter((d) => d.origin.includes(`[${cluster}]`));
+const path = new Map(docs.filter((d) => d.obj.kind === "ClusterSecretStore")
+  .map((d) => [d.obj.metadata.name, d.obj.spec.provider.infisical.secretsScope.secretsPath]));
+const out = [];
+for (const d of docs.filter((d) => d.obj.kind === "ExternalSecret")) {
+  const s = d.obj.spec, ns = d.obj.metadata.namespace ?? d.ns, target = s.target?.name ?? d.obj.metadata.name;
+  if (ns === "app-edge-probe") continue; // 끌 때 edge-probe Application째 빠진다. 쓰는 쪽도 없다
+  const t = s.target?.template;
+  if (s.secretStoreRef?.kind !== "ClusterSecretStore" || s.dataFrom?.length || t?.data || t?.templateFrom?.length || t?.metadata || t?.type)
+    throw new Error(`손으로 같은 결과를 만들 수 없는 모양: ${ns}/${d.obj.metadata.name}`);
+  const base = path.get(s.secretStoreRef.name);
+  if (base === undefined) throw new Error(`store 경로 모름: ${s.secretStoreRef.name}`);
+  out.push({ ns, target, es: d.obj.metadata.name, creationPolicy: s.target?.creationPolicy ?? "Owner",
+    keys: s.data.map((x) => ({ secretKey: x.secretKey, path: x.remoteRef.key.startsWith("/") ? x.remoteRef.key : `${base}/${x.remoteRef.key}` })) });
+}
+out.sort((a, b) => `${a.ns}/${a.target}`.localeCompare(`${b.ns}/${b.target}`));
+if (out.length !== 10) throw new Error(`손 Secret ${out.length}개(앱 0개일 때 10개. 등록 앱이 생겼으면 restore.md 3.1을 고친다)`);
+console.log(JSON.stringify(out, null, 2));
+TS
+)" >"$map.part"
+mv "$map.part" "$map"; trap - EXIT
+echo "지도: 손 Secret $(jq length "$map")개, 키 $(jq '[.[].keys[]] | length' "$map")개"
+EOF
+```
+
+출력은 "지도: 손 Secret 10개, 키 17개"다. 2026-10-29 시험은 같은 스크립트를 저장소 밖에 두고 돌렸고(이 블록은 경로와 `CLUSTER`만 바꿨다), 운영 클러스터의 ExternalSecret(읽기만)에서 같은 모양을 만들어 정렬·대조해 같았다. 2026-10-30 이 블록의 `vm`·`prod` 로컬 렌더 결과도 그때 지도와 같았다.
+
+**2) 암호화 내보내기.** 장애 전에 있어야 한다(복구 자산 "Infisical 암호화 내보내기", [recovery-assets.md](recovery-assets.md)). 형식은 `{project, env, at, secrets: {"<Infisical 경로>": "<값>"}}` JSON을 age 암호문구로 암호화한 파일 하나다. 아래 블록이 지도의 키만 담아 `$U40_DIR/<프로젝트>-export.age`로 만든다. 4)의 손 Secret 블록은 지도의 경로만 읽으므로 같은 형식에 키가 더 있는 내보내기도 그대로 쓴다. 실제 장애에서는 복구 자산의 최신 사본을 `$U40_DIR/homelab-export.age`로 둔다.
+
+- 사람이 `infisical login`한 NUC에서 돌린다(Infisical CLI는 NUC의 mise에만 있다). 암호문구는 터미널로만 넣는다(만들 때 두 번, 이름 대조 때 한 번). **암호문구는 비워 두지 않는다.** 비우면 age가 만든 암호문구를 화면에 찍는다.
+- 암호문구는 비밀번호 관리자에 둔다. 암호화된 메모도 된다. 시험용이면 시험 뒤 지운다.
+- 로그인 사용자의 Infisical CLI 0.44.2가 읽은 값을 `~/.infisical/secrets-backup/`에 남기는 문제는 bootstrap.md 2.2 vm 1단계와 같은 잠금으로 막는다.
+- VM 시험: **`homelab-dev`/`dev`만 내보낸다.** 운영 내보내기를 VM에 넣으면 운영 터널 토큰·체크 URL·operator OAuth가 VM에 들어가 VM이 운영 터널에 붙는다(설계 B.8 E1, E8 VM 격리). 4)의 블록도 `vm`에서는 `homelab-dev`/`dev`가 아닌 내보내기를 거부한다. 시험 전(외부 자격을 다 넣고 bootstrap.md 2.2 vm 1단계 키 대조가 "빠진 키 0"인 뒤)에 만들고, 시험 뒤 파일과 암호문구를 지운다.
+
+```bash
+CLUSTER=vm bash -euo pipefail <<'EOF'
+umask 077
+case "$CLUSTER" in prod) project=homelab; env=prod; idvar=HOMELAB_PROJECT_ID ;; vm) project=homelab-dev; env=dev; idvar=HOMELAB_DEV_PROJECT_ID ;; *) echo "CLUSTER는 prod 또는 vm"; exit 1 ;; esac
+: "${U40_DIR:?U40_DIR가 비었다(저장소 밖 0700 폴더)}"
+map="$U40_DIR/map.json"; out="$U40_DIR/$project-export.age"
+test -s "$map" || { echo "먼저 1) 지도를 만든다"; exit 1; }
+[ ! -e "$out" ] || { echo "이미 있다. 다시 만들지는 사람이 정한다"; exit 1; }
+# 이 bash의 stdin은 스크립트 자체라 터미널에서 읽는다. ID는 저장소에 두지 않는다
+pid="${!idvar:-}"
+[ -n "$pid" ] || read -r -p "Infisical $project project ID: " pid </dev/tty
+[[ "$pid" =~ ^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$ ]] || { echo "UUID가 아니다"; exit 1; }
+# bootstrap.md 2.2 vm 1단계와 같은 잠금. 로그인 사용자의 CLI 0.44.2는 읽은 값을 secrets-backup에 남긴다
+mkdir -p ~/.infisical
+if [ -d ~/.infisical/secrets-backup ]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi
+mkdir -p ~/.infisical/secrets-backup && chmod 0500 ~/.infisical/secrets-backup
+if touch ~/.infisical/secrets-backup/.probe 2>/dev/null; then rm -f ~/.infisical/secrets-backup/.probe; echo "백업 폴더가 쓰기 가능하다"; exit 1; fi
+trap 'rm -f "$out.part"' EXIT
+want="$(jq -r '[.[].keys[].path] | unique[]' "$map")"          # 경로(키 이름)만
+while IFS= read -r dir; do
+  infisical secrets --path "$dir" --env "$env" --projectId "$pid" --silent -o json \
+      --include-imports=false --expand=false --secret-overriding=false </dev/null 2>/dev/null \
+    | jq -c --arg dir "$dir" '[(. // [])[] | {key: "\($dir)/\(.secretKey)", value: .secretValue}] | from_entries' 2>/dev/null
+  [ "$(find ~/.infisical/secrets-backup -type f | wc -l)" -eq 0 ] || { echo "백업 파일이 생겼다" >&2; exit 1; }
+done < <(sed 's|/[^/]*$||' <<<"$want" | LC_ALL=C sort -u) \
+  | jq -cs --arg want "$want" --arg project "$project" --arg env "$env" '(add // {}) as $all | ($want | split("\n")) as $w
+      | if ($w - ($all | keys)) != [] then error("missing")
+        else {project: $project, env: $env, at: (now | todate), secrets: ($all | with_entries(select(.key | IN($w[]))))} end' 2>/dev/null \
+  | age -p -o "$out.part"
+# 복호화해 키 이름만 대조(값은 jq가 버린다). 암호문구를 한 번 더 묻는다
+age -d "$out.part" | jq -r '.secrets | keys[]' 2>/dev/null | LC_ALL=C sort | cmp -s - <(LC_ALL=C sort <<<"$want") \
+  || { echo "내보내기 키 이름이 지도와 다르다"; exit 1; }
+mv "$out.part" "$out"; trap - EXIT
+echo "내보내기 만듦: 키 $(wc -l <<<"$want")개(이름만 대조)"
+EOF
+```
+
+출력은 "내보내기 만듦: 키 17개(이름만 대조)"다. 지도의 키 수라 운영 ExternalSecret 키 18개보다 하나 적다(끈 상태에 없는 edge-probe `GITHUB_WEBHOOK_SECRET`). 멈춤: "missing"(지도 경로가 Infisical에 없음), 백업 파일 생김, 키 이름 불일치. 출력은 개수뿐이다.
+
+**3) Argo CD와 ESO 부트스트랩 Secret.** 3절 3단계 순서(host → k3s → Argo CD → ESO 부트스트랩 Secret)대로 하고 root apply 앞에서 멈춘다. 장애 중이라 Store는 아직 없지만 부트스트랩 Secret은 켜는 PR 때 필요하니 지금 넣는다(값은 복구 자산에서 오고 Infisical이 없어도 된다).
+
+- VM 시험: 3절 3단계의 복구 원본 자격(`r2-source-readonly`)과 쓰기 거부 시험도 root apply 전이다. 2026-10-29 순서는 Argo CD → ESO 부트스트랩 Secret → 복구 원본 자격 → 쓰기 거부 → 4) 손 Secret → 손 Secret 점검 → root apply였다.
+- VM 시험: ESO 부트스트랩 Secret을 넣기 전에 NUC에서 그 자격으로 로그인해 볼 수 있다(bootstrap.md 2.2 vm 2단계의 선택 단계). 막는 것은 VM 클러스터 DNS뿐이라 NUC에서는 Infisical에 닿는다.
+
+**4) 손 Secret(root apply 전).** `argocd-secret`이 있어야 두 키를 합칠 수 있어 Argo CD 설치 뒤, 첫 소비자보다 먼저 있어야 해서 root apply 전이다. 대상 ns는 이 블록이 먼저 만든다. root의 namespaces(wave -9)가 나중에 PSA 라벨을 붙여 넘겨받는다(3절 3단계의 `database`와 같은 방식). root apply 뒤에 넣으면 첫 소비자(wave -5: cloudflared·tailscale·adguard)가 `CreateContainerConfigError`·볼륨 대기에 들고, Deployment는 `progressDeadlineSeconds`(이 저장소는 모두 기본 600초) 뒤 Degraded가 된다. 그때 root가 sync를 실패로 끝내고 재시도하는지는 확인하지 않았다. 먼저 넣으면 이 경합이 없다.
+
+- VM 시험: **canary.** `sandbox/worker-seed`의 `WORKER_PROBE` 하나만 비밀이 아닌 고정 문자열 `u40-canary`로 넣는다(`vm`에서만). 켠 뒤 그 해시가 내보내기 값으로 바뀌면 ESO가 data를 실제로 썼다는 직접 증거다. 나머지 9개는 값이 같아 ESO가 아무것도 쓰지 않아도 해시가 같다. optional 볼륨의 시험 키라 영향이 없다.
+- VM 시험: Alertmanager 수신자 Secret 둘(`alertmanager-healthchecks`, `alertmanager-telegram`)은 optional 볼륨이고 Alertmanager가 보낼 때 파일을 읽어, 값이 틀려도 파드는 뜨고 그 전송만 실패한다. **알림 판정을 안 하면 `homelab-dev`의 그 키에 가짜 값(`.invalid` 주소 등)을 넣는 것으로 충분하다**(2026-10-29 시험은 시험 체크·봇을 만들지 않았다).
+
+```bash
+CLUSTER=vm bash -euo pipefail <<'EOF'
+case "$CLUSTER" in prod) ctx=homelab; project=homelab; env=prod ;; vm) ctx=homelab-vm; project=homelab-dev; env=dev ;; *) echo "CLUSTER는 prod 또는 vm"; exit 1 ;; esac
+export KUBECONFIG=~/.kube/$ctx.yaml
+host/verify.sh --cluster "$CLUSTER" --identity   # 다른 클러스터에서 돌면 그 클러스터의 Secret을 덮는다. 이 줄을 빼지 않는다
+: "${U40_DIR:?U40_DIR가 비었다(저장소 밖 0700 폴더)}"
+map="$U40_DIR/map.json"; exp="$U40_DIR/$project-export.age"
+if [ "$CLUSTER" = vm ]; then canary=u40-canary; else canary=; fi
+[ "$(jq length "$map")" -eq 10 ] || { echo "지도가 10개가 아니다"; exit 1; }
+[ "$(jq -c '[.[] | select(.creationPolicy == "Merge") | .ns + "/" + .target]' "$map")" = '["argocd/argocd-secret"]' ] \
+  || { echo "Merge 대상이 argocd/argocd-secret 하나가 아니다"; exit 1; }
+# Owner 대상이 이미 있으면 멈춘다. 다시 돌릴 때 ESO가 넘겨받은 Secret을 덮지 않게
+for t in $(jq -r '.[] | select(.creationPolicy == "Owner") | .ns + "/" + .target' "$map"); do
+  if kubectl -n "${t%/*}" get secret "${t#*/}" >/dev/null 2>&1; then echo "이미 있다: $t"; exit 1; fi
+done
+kubectl -n argocd get secret argocd-secret -o name >/dev/null
+for ns in $(jq -r '[.[].ns] | unique[]' "$map"); do
+  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+done
+# 복호화(암호문구는 터미널) → jq가 지도대로 Secret 목록 → kubectl stdin. 값은 파이프 안에만 있다.
+# 내보내기의 project·env가 이 클러스터 것이 아니면 jq가 멈춘다(운영 내보내기를 VM에 넣지 않는다, 설계 B.8 E1).
+# jq·kubectl 오류 문구는 값 조각을 담을 수 있어 버리고 종료 코드로만 멈춘다. --server-side라 last-applied 주석에 값이 복사되지 않는다
+age -d "$exp" \
+  | jq -c --slurpfile m "$map" --arg project "$project" --arg env "$env" --arg canary "$canary" '
+      if .project != $project or .env != $env then error("wrong export") else . end
+      | .secrets as $s
+      | {apiVersion: "v1", kind: "List", items: [$m[0][] | . as $e
+          | {apiVersion: "v1", kind: "Secret", metadata: {name: $e.target, namespace: $e.ns},
+             stringData: ([$e.keys[] | {key: .secretKey, value: ($s[.path] // error("missing"))}] | from_entries)}
+            + (if $e.creationPolicy == "Owner" then {type: "Opaque"} else {} end)
+          | if $canary != "" and $e.ns == "sandbox" and $e.target == "worker-seed"
+            then .stringData.WORKER_PROBE = $canary else . end]}' 2>/dev/null \
+  | kubectl apply --server-side --field-manager=u40-hand -f - 2>/dev/null \
+  || { echo "손 Secret 만들기 실패(오류 문구는 값을 담을 수 있어 버렸다)" >&2; exit 1; }
+echo "손 Secret: Owner 9개 만듦${canary:+(worker-seed는 canary)}, argocd-secret에 두 키 합침"
+EOF
+```
+
+- 출력은 `secret/<이름> serverside-applied` 줄과 개수뿐이다.
+- 실패해 다시 돌릴 때는 만들어진 Owner Secret을 지우고 돌린다(블록 머리의 "이미 있다" 검사가 막는다). `argocd-secret`은 지우지 않는다(Argo CD 서버 키가 들어 있다).
+- **ESO가 넘겨받은 뒤에는 이 블록을 다시 돌리지 않는다.** 손 field manager `u40-hand`의 줄이 managedFields에 남아, ESO가 바꾼 필드에서 SSA 충돌이 난다.
+
+**손 Secret 점검(스냅숏).** 같은 블록을 `PHASE=hand`(손 Secret 직후), `PHASE=before`(켜는 PR 전), `PHASE=after`(켠 뒤)로 돌린다. Secret마다 UID, 지도 키만의 data 해시(앞 12자), controller 소유자, `managed` 라벨, `data-hash` 주석, 키 집합이 지도와 같은지를 `$U40_DIR/snap-<PHASE>.tsv`에 남긴다. 값은 파이프 안에서만 해시된다.
+
+```bash
+CLUSTER=vm PHASE=hand bash -euo pipefail <<'EOF'
+case "$CLUSTER" in prod) ctx=homelab ;; vm) ctx=homelab-vm ;; *) echo "CLUSTER는 prod 또는 vm"; exit 1 ;; esac
+case "$PHASE" in hand|before|after) ;; *) echo "PHASE는 hand, before, after"; exit 1 ;; esac
+export KUBECONFIG=~/.kube/$ctx.yaml
+host/verify.sh --cluster "$CLUSTER" --identity
+: "${U40_DIR:?U40_DIR가 비었다(저장소 밖 0700 폴더)}"
+map="$U40_DIR/map.json"; out="$U40_DIR/snap-$PHASE.tsv"; : >"$out"
+jq -c '.[] | {ns, target, es, keys: ([.keys[].secretKey] | sort)}' "$map" | while IFS= read -r e; do
+  ns=$(jq -r .ns <<<"$e"); name=$(jq -r .target <<<"$e"); keys=$(jq -c .keys <<<"$e")
+  h=$(kubectl -n "$ns" get secret "$name" -o json \
+      | jq -cS --argjson k "$keys" '(.data // {}) | with_entries(select(.key | IN($k[])))' | sha256sum | cut -c1-12)
+  kubectl -n "$ns" get secret "$name" -o json | jq -r --arg h "$h" --argjson k "$keys" '[
+      "\(.metadata.namespace)/\(.metadata.name)", .metadata.uid, $h,
+      ([.metadata.ownerReferences[]? | select(.controller) | "\(.kind)/\(.name)"] | first // "none"),
+      (.metadata.labels["reconcile.external-secrets.io/managed"] // "-"),
+      (if .metadata.annotations["reconcile.external-secrets.io/data-hash"] then "ann" else "-" end),
+      (if ((.data // {}) | keys) == $k then "keys=map" else "keys!=map" end)] | @tsv' >>"$out"
+done
+cat "$out"   # UID·해시는 실행 기록에만 둔다
+EOF
+```
+
+`hand` 통과: 10줄 모두 소유자 `none`, 라벨·주석 `-`·`-`, Owner 9개 `keys=map`. `argocd-secret`은 서버 키가 더 있어 `keys!=map`이 정상이다. 그다음 root를 apply한다(bootstrap.md 2.3, vm은 2.2 vm 4단계). 셸의 자격 변수는 `unset`한다.
+
+**5) 끈 상태 확인(root가 손 Secret만으로 끝까지 가는지).** 읽기만 한다.
+
+```bash
+CLUSTER=vm bash -euo pipefail <<'EOF'
+case "$CLUSTER" in prod) ctx=homelab ;; vm) ctx=homelab-vm ;; *) echo "CLUSTER는 prod 또는 vm"; exit 1 ;; esac
+export KUBECONFIG=~/.kube/$ctx.yaml
+host/verify.sh --cluster "$CLUSTER" --identity
+echo "--- Store·ExternalSecret(끈 동안 빈 출력)"
+kubectl get clustersecretstore,externalsecret -A -o name
+echo "--- root: phase retryCount sync health"
+kubectl -n argocd get application "root-$CLUSTER" \
+  -o jsonpath='{.status.operationState.phase} {.status.operationState.retryCount} {.status.sync.status} {.status.health.status}{"\n"}'
+echo "--- Application"
+kubectl -n argocd get applications -o json | jq -r '.items[] | "\(.metadata.name) \(.status.sync.status) \(.status.health.status)"' | sort
+echo "--- 스위치 값이 라이브 Application에 남았는지(구성 요소 차트의 valuesObject)"
+kubectl -n argocd get applications -o json | jq -r '.items[] | .metadata.name as $n | [.spec.source?, .spec.sources[]?]
+  | map(select(.) | .helm.valuesObject.externalSecrets.enabled) | map(select(. != null) | tostring)
+  | select(length > 0) | "\($n) \(join(","))"'
+echo "--- ApplicationSet templatePatch에 주입 줄이 있는지"
+kubectl -n argocd get applicationsets apps data -o json | jq -r '.items[] | "\(.metadata.name) \(.spec.templatePatch // "" | test("externalSecrets"))"'
+EOF
+```
+
+- 통과(VM 시험, 앱 0개): Store·ExternalSecret 빈 출력, root `Succeeded`·`Synced`·`Healthy`(retryCount 빈 값), Application 17개(root + 16) 모두 `Synced Healthy`, `external-secrets-stores`·`edge-probe` 없음, `false`인 Application 9개(adguard, appset-apps, appset-data, cloudflared, cnpg-cluster, go, observability, sandbox, tailscale), templatePatch 둘 다 `true`. 10분 넘게 지나 다시 봐도 같고 `.status.history` 길이가 늘지 않는다(플립플롭 없음). 2026-10-29: root apply 10:38:50Z, root operation 10:38:54Z~10:41:38Z, 10:43:00Z에 17개 모두 Synced/Healthy, 33분 뒤 다시 봐도 같음, 손 sync 0회.
+- 손 Secret이 실제로 쓰이는지는 쓰는 쪽으로 본다: cloudflared `/ready` 200과 HA 연결, tailscale operator Ready와 내부 Ingress hostname(이름은 출력하지 않고 수만 센다), adguard·grafana·go·sandbox 파드 Ready, Cluster `pg` healthy와 새 serverName 첫 Backup `completed`(3절 4단계, `r2-backup`을 쓴다).
+- 실패하면 7)의 표에서 관측을 찾는다.
+- VM 시험: 끈 상태 관찰 끝(켜는 PR 전)에 확인 파드 `MODE=blocked`로 차단이 유지됐는지 보고, ESO 파드가 클러스터 DNS를 쓰는지 본다: `kubectl -n external-secrets get deploy -o jsonpath='{range .items[*]}{.metadata.name} {.spec.template.spec.dnsPolicy} {.spec.template.spec.hostNetwork}{"\n"}{end}'`가 모두 `ClusterFirst`이고 hostNetwork가 빈 값. 차단이 새고 있었으면 결과가 무효다.
+
+**6) 장애가 끝나면 켜는 PR, 넘겨받기 확인.**
+
+1. 스냅숏 `PHASE=before`를 돌리고, 아래 블록으로 내보내기의 기대 해시와 쓰는 파드의 재시작 수를 남긴다(암호문구 한 번). 기대 해시는 스냅숏과 같은 꼴(키 정렬, 값 base64, `jq -c` 한 줄 + 개행)로 계산하고, 값은 셸 변수와 파이프에만 있다. 통과: before와 대조해 다른 것 없음(VM 시험은 canary `sandbox/worker-seed` 하나만 다름). 다른 것이 있으면 내보내기와 손 Secret이 다른 것이니 켜기 전에 원인을 본다. 2026-10-29: 10개 중 canary만 다름, 손 Secret ns 파드 27개 재시작 합 0.
+
+   ```bash
+   CLUSTER=vm bash -euo pipefail <<'EOF'
+   case "$CLUSTER" in prod) ctx=homelab; project=homelab ;; vm) ctx=homelab-vm; project=homelab-dev ;; *) echo "CLUSTER는 prod 또는 vm"; exit 1 ;; esac
+   export KUBECONFIG=~/.kube/$ctx.yaml
+   host/verify.sh --cluster "$CLUSTER" --identity
+   : "${U40_DIR:?U40_DIR가 비었다(저장소 밖 0700 폴더)}"
+   umask 077
+   D=$U40_DIR; map="$D/map.json"; exp="$D/$project-export.age"
+   test -s "$D/snap-before.tsv" || { echo "먼저 스냅숏 PHASE=before"; exit 1; }
+   age -d "$exp" | jq -r --slurpfile m "$map" '.secrets as $s | $m[0][] | . as $e
+     | "\($e.ns)/\($e.target)\t" + ([$e.keys[] | {key: .secretKey, value: ($s[.path] | @base64)}] | sort_by(.key) | from_entries | tojson)' 2>/dev/null \
+     | while IFS=$'\t' read -r id json; do printf '%s\t%s\n' "$id" "$(printf '%s\n' "$json" | sha256sum | cut -c1-12)"; done >"$D/expected.tsv"
+   [ "$(wc -l <"$D/expected.tsv")" -eq 10 ] || { echo "기대 해시가 10줄이 아니다"; exit 1; }
+   # 쓰는 파드의 재시작 수(손 Secret이 있는 ns 전체, 파드 이름과 합계만)
+   kubectl get pods -A -o json | jq -r --argjson ns "$(jq -c '[.[].ns] | unique' "$map")" \
+     '.items[] | select(.metadata.namespace | IN($ns[])) | "\(.metadata.namespace)/\(.metadata.name)\t\([.status.containerStatuses[]?.restartCount] | add // 0)"' \
+     | LC_ALL=C sort >"$D/restarts-before.tsv"
+   echo "restartCount 기록: $(wc -l <"$D/restarts-before.tsv")개 파드, 합 $(awk -F'\t' '{s+=$2} END{print s+0}' "$D/restarts-before.tsv")"
+   # before 해시와 기대 해시 대조. VM 시험은 canary(sandbox/worker-seed)만 달라야 한다
+   join -t $'\t' <(cut -f1,3 "$D/snap-before.tsv" | LC_ALL=C sort) <(LC_ALL=C sort "$D/expected.tsv") \
+     | awk -F'\t' '{ s = ($2 == $3) ? "같음" : "다름"; print $1, s; if ($2 != $3) d = d " " $1; n++ } END { print "대조 " n "개, 다름:" (d ? d : " 없음") }'
+   EOF
+   ```
+
+2. VM 시험: 켜는 PR 전에 Infisical 차단을 푼다(아래 "VM 시험: Infisical 차단"의 해제 → 확인 파드 `MODE=open`). 열림이 확인되지 않으면 켜는 PR을 열지 않는다.
+3. 켜는 PR: 값 파일에서 `externalSecrets: false` 한 줄만 지운다(diff 한 줄). 손 Secret은 지우지 않는다. VM 시험: #989.
+4. Store: 동기화 뒤 `kubectl get clustersecretstore`가 셋 다 READY True. Store Ready는 Universal Auth 로그인과 폴더 목록 읽기가 성공해야 나오므로 Infisical에 다시 닿는다는 최종 증거다. False면 Infisical 폴더·부트스트랩 Secret(VM은 차단 해제)을 본다. 넘겨받기 실패가 아니다.
+5. 스냅숏 `PHASE=after`를 돌린 뒤 아래 판정 블록을 돌린다. 마지막 줄이 "넘겨받기 10/10 통과, 실패 0"이고 파드 재시작 수가 바뀐 것 0, 사라진 것 0이면 넘겨받은 것이다.
+
+   ```bash
+   CLUSTER=vm bash -uo pipefail <<'EOF'
+   # 넘겨받기 판정. snap-before/after, expected, ES 상태, 파드 재시작 수를 대조한다. 값은 보지 않는다.
+   # set -e를 쓰지 않는다. 항목마다 실패 이유를 모아 한 줄로 낸다
+   case "$CLUSTER" in prod) ctx=homelab ;; vm) ctx=homelab-vm ;; *) echo "CLUSTER는 prod 또는 vm"; exit 1 ;; esac
+   export KUBECONFIG=~/.kube/$ctx.yaml
+   host/verify.sh --cluster "$CLUSTER" --identity >/dev/null || { echo "identity 실패"; exit 1; }
+   D=${U40_DIR:?U40_DIR가 비었다(저장소 밖 0700 폴더)}
+   for f in map.json snap-before.tsv snap-after.tsv expected.tsv restarts-before.tsv; do
+     test -s "$D/$f" || { echo "없다: $f"; exit 1; }
+   done
+   pass=0; fail=0
+   while IFS=$'\t' read -r id uid h own lab ann keys; do
+     ns=${id%/*}; name=${id#*/}
+     es=$(jq -r --arg ns "$ns" --arg n "$name" '.[] | select(.ns == $ns and .target == $n) | .es' "$D/map.json")
+     pol=$(jq -r --arg ns "$ns" --arg n "$name" '.[] | select(.ns == $ns and .target == $n) | .creationPolicy' "$D/map.json")
+     IFS=$'\t' read -r _ buid bh _ _ _ _ < <(grep -P "^\Q$id\E\t" "$D/snap-before.tsv")
+     exp=$(awk -F'\t' -v k="$id" '$1 == k {print $2}' "$D/expected.tsv")
+     st=$(kubectl -n "$ns" get externalsecret "$es" -o json 2>/dev/null | jq -r '[.status.conditions[]? | select(.type == "Ready") | "\(.status)/\(.reason)"] | first // "none"')
+     why=""
+     [ "$uid" = "$buid" ] || why="$why uid"
+     [ "$lab" = true ] && [ "$ann" = ann ] || why="$why label/ann($lab,$ann)"
+     [ "$h" = "$exp" ] || why="$why hash!=expected"
+     [ "$st" = "True/SecretSynced" ] || why="$why es=$st"
+     if [ "$pol" = Owner ]; then
+       [ "$own" = "ExternalSecret/$es" ] || why="$why owner=$own"
+       [ "$keys" = keys=map ] || why="$why $keys"
+       # canary는 VM 시험에만 있다. 켜기 전 해시가 내보내기 값과 달라야 ESO가 data를 쓴 증거가 된다
+       if [ "$CLUSTER" = vm ] && [ "$id" = sandbox/worker-seed ]; then [ "$bh" != "$exp" ] || why="$why canary-before-same"
+       else [ "$bh" = "$h" ] || why="$why before!=after"; fi
+     else
+       [ "$own" = none ] || why="$why owner=$own"
+       [ "$bh" = "$h" ] || why="$why before!=after"
+       kubectl -n "$ns" get secret "$name" -o json | jq -e '.data | has("server.secretkey")' >/dev/null || why="$why no-server.secretkey"
+     fi
+     if [ -z "$why" ]; then echo "통과  $id ($pol, $own)"; pass=$((pass+1)); else echo "실패  $id:$why"; fail=$((fail+1)); fi
+   done <"$D/snap-after.tsv"
+   # 쓰는 파드 재시작 수(켜기 전과 같은 ns, 같은 파드). 새로 생긴 파드는 따로 적는다
+   kubectl get pods -A -o json | jq -r --argjson ns "$(jq -c '[.[].ns] | unique' "$D/map.json")" \
+     '.items[] | select(.metadata.namespace | IN($ns[])) | "\(.metadata.namespace)/\(.metadata.name)\t\([.status.containerStatuses[]?.restartCount] | add // 0)"' \
+     | LC_ALL=C sort >"$D/restarts-after.tsv"
+   chg=$(join -t $'\t' "$D/restarts-before.tsv" "$D/restarts-after.tsv" | awk -F'\t' '$2 != $3' | wc -l)
+   gone=$(LC_ALL=C comm -23 <(cut -f1 "$D/restarts-before.tsv") <(cut -f1 "$D/restarts-after.tsv") | wc -l)
+   new=$(LC_ALL=C comm -13 <(cut -f1 "$D/restarts-before.tsv") <(cut -f1 "$D/restarts-after.tsv") | tr '\n' ' ')
+   echo "파드: 재시작 수 바뀐 것 $chg, 사라진 것 $gone, 새로 생긴 것: ${new:-없음}"
+   echo "넘겨받기 ${pass}/10 통과, 실패 $fail"
+   [ "$pass" -eq 10 ] && [ "$fail" -eq 0 ]
+   EOF
+   ```
+
+   판정이 보는 것:
+
+   | 항목 | Owner 9개 | `argocd-secret`(Merge) |
+   |---|---|---|
+   | UID | before = after(다시 만들지 않음) | 같음 |
+   | 소유자 | none → `ExternalSecret/<지도의 es>`, `created-by` 라벨 | none 그대로 |
+   | 라벨·주석 | `managed=true`, `data-hash` 주석 | 같음 |
+   | 키 | `keys=map` | 두 키 + `server.secretkey`가 남아 있음 |
+   | 해시 | after = 기대(VM canary는 before ≠ 기대 → after = 기대, 나머지는 before = after) | before = after = 기대 |
+   | ES | `Ready=True`, reason `SecretSynced` | 같음 |
+
+6. 전체: 5)의 확인 블록을 다시 돌린다. Application이 켠 렌더 수(VM 시험 앱 0개: 19개 = root + 18)로 모두 `Synced Healthy`, 스위치 값 줄이 빈 출력이다. `edge-probe`의 ExternalSecret은 새 Secret을 만든다(넘겨받기 대상이 아니다).
+7. 지금도 동기화하는지: [rotate.md](rotate.md) 1절 4단계처럼 `argocd-owner`에 `force-sync` 주석을 달고 `refreshTime`이 그 뒤인지 본다.
+
+2026-10-29: Store 3개 Ready, ExternalSecret 11개 `SecretSynced`, 넘겨받기 10/10, 파드 재시작 0·교체 0, Application 19개 Synced/Healthy, 스위치 값 줄 빈 출력, force-sync 11:34:21Z → `refreshTime` 11:34:21Z.
+
+근거(ESO v2.13.0 소스, `externalsecret_controller.go`): 소유자 없는 기존 Secret에 `reconcile.external-secrets.io/managed=true` 라벨을 PATCH로 붙이고 다시 돌아와(318~331행), Owner 정책이면 `SetControllerReference`로 ES를 controller 소유자로 넣고(836~838행) data를 ES 키로 통째로 바꿔 쓴다(템플릿 파일 77행. Merge는 두 키만 덮는다). 막히는 경우는 셋이다: 다른 컨트롤러가 이미 controller 소유자, 다른 ExternalSecret이 소유자, `immutable: true`. 손 Secret은 셋 다 아니게 만든다.
+
+**7) 대안(2026-10-29에는 쓰지 않았다).** 설계 부록 1 U40 행의 대안 둘, (가) 넘겨받지 않으면 그 손 Secret을 지운다, (나) root가 진행하지 않으면 필요한 Application만 손으로 sync한다를 관측에 따라 고른다.
+
+| 관측 | 뜻 | 할 것 |
+|---|---|---|
+| 어떤 파드가 지도에 없는 Secret 이름으로 멈춤 | 지도 누락 | 멈춘다. 내보내기에 그 키가 있으면 손 Secret을 더하고 기록한다. 없으면 ci `external secrets switch`가 놓친 것이라 고친다 |
+| ExternalSecret·Store가 생김, 또는 `valuesObject`의 `false`가 사라짐 | 스위치가 라이브에서 전달되지 않음 | 손 sync로는 못 고친다. 멈추고 코드부터 고친다 |
+| 자식은 결국 모두 Healthy인데 root `operationState`가 `Failed`(retry 소진)이거나 30분 넘게 `Running` | root 진행만 막힘 | **(나)** root를 다시 sync한다. 막힌 자식만 먼저 적용할 때는 root operation에 `resources`를 준다(아래). 손 sync를 한 사실과 횟수를 기록한다 |
+| Store Ready=False | Infisical 쪽(폴더, 부트스트랩 Secret, VM은 차단 해제) | 고치고 계속한다. 넘겨받기와 무관하다 |
+| ES가 `SecretSyncedError`("could not set ownerReference", immutable)나 `SecretOwnedByOther`, 또는 5분 넘게 `managed` 라벨 없음 | 넘겨받기 실패 | **(가)** 그 Owner Secret만 지우고 `force-sync`한 뒤 새 UID로 생기는지, 쓰는 파드가 Ready로 남는지 본다(실행 중 파드는 env를 유지한다. 볼륨 파드는 확인하지 않았다). **`argocd-secret`은 지우지 않는다**(서버 키). Merge에서 막히면 두 키만 지운다 |
+| ES는 Ready인데 UID가 바뀜 | 누가 지우고 다시 만듦(Argo CD prune 등) | 기록하고 원인을 본다. 파드 영향을 본다 |
+
+(나)의 명령 모양이다. **Argo CD v3.5.5에서 확인하지 않았다.** 쓰기 전에 문서·소스로 확인한다. argocd CLI는 `.tool-versions`에 없어 kubectl로 한다.
+
+```bash
+# 진행 중 operation 끝내기(argocd app terminate-op와 같은 효과로 알고 있음, 미확인)
+kubectl -n argocd patch application root-<클러스터> --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
+# 막힌 자식 Application 하나만 적용하는 root sync
+kubectl -n argocd patch application root-<클러스터> --type merge -p \
+  '{"operation":{"initiatedBy":{"username":"u40-manual"},"sync":{"revision":"main","resources":[{"group":"argoproj.io","kind":"Application","name":"<자식>","namespace":"argocd"}]}}}'
+```
+
+**정리.** 3절 7단계(정리 PR)는 그대로다. 넘겨받은 Secret은 ESO 소유라 따로 지우지 않는다.
+
+- VM 시험: VM을 지우기 전에 `$U40_DIR`의 tsv·지도를 실행 기록으로 옮기고, 그다음 내보내기 파일과 암호문구를 지운다. 외부 자원 정리 순서는 [vm.md](vm.md) 6절 머리다.
+
+**VM 시험: Infisical 차단(VM 클러스터 DNS만).** 실제 장애에는 필요 없다. VM 클러스터의 CoreDNS가 `infisical.com` 존 전체를 NXDOMAIN으로 답하게 한다. k3s v1.36.5의 CoreDNS는 `kube-system/coredns-custom` ConfigMap의 `*.server`를 읽는다(Corefile의 `import /etc/coredns/custom/*.server`, 볼륨 optional). 이름으로 막아 Infisical 앞단(Cloudflare)의 주소가 바뀌거나 공유돼도 새거나 다른 서비스를 같이 막지 않고, sudo도 필요 없다. 새는 길은 클러스터 DNS를 쓰지 않는 것(VM 호스트, `dnsPolicy: Default` 파드)뿐인데 둘 다 Infisical을 부르지 않는다. Corefile에 import 줄이 없으면 이 방법을 쓸 수 없다. 그때 대안은 ESO 부트스트랩 Secret을 켜는 PR 직전까지 넣지 않는 것이고, 네트워크 장애가 아니라 인증 부재라는 차이를 결과에 적는다.
+
+**운영 kubeconfig로 돌리면 운영 ESO 동기화가 멈춘다**(기존 Secret은 유지). 블록 첫 두 줄을 빼지 않는다. 운영에 `coredns-custom`이 없는지는 시험 전후에 읽기만으로 본다: `kubectl --kubeconfig ~/.kube/homelab.yaml --context homelab -n kube-system get configmap coredns-custom`이 NotFound.
+
+순서: 확인 파드 `MODE=open`(기준선. 실패하면 차단 확인이 무의미하므로 멈춘다) → 차단(root apply 전, ESO가 생기기 전이라 이미 맺힌 연결이 없다) → `MODE=blocked`(차단 직후와 5)의 관찰 끝) → 6)의 해제 → `MODE=open`. 켠 뒤 Store Ready 3/3이 해제의 최종 증거다.
+
+차단:
+
+```bash
+bash -euo pipefail <<'EOF'
+export KUBECONFIG=~/.kube/homelab-vm.yaml
+host/verify.sh --cluster vm --identity   # 운영에서 돌면 운영 ESO 동기화가 멈춘다. 이 줄을 빼지 않는다
+cf="$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}')"
+grep -qF 'import /etc/coredns/custom/*.server' <<<"$cf" || { echo "Corefile이 custom *.server를 읽지 않는다. 이 차단 방법을 쓸 수 없다"; exit 1; }
+if kubectl -n kube-system get configmap coredns-custom >/dev/null 2>&1; then echo "coredns-custom이 이미 있다. 덮지 않는다"; exit 1; fi
+kubectl apply -f - <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: coredns-custom, namespace: kube-system }
+data:
+  # U40 시험 동안만. infisical.com과 그 아래 모든 이름을 NXDOMAIN으로 답한다(이 VM 클러스터 DNS만)
+  u40-infisical.server: |
+    infisical.com:53 {
+        errors
+        template ANY ANY {
+            rcode NXDOMAIN
+        }
+    }
+YAML
+kubectl -n kube-system rollout restart deploy/coredns
+kubectl -n kube-system rollout status deploy/coredns --timeout=180s
+EOF
+```
+
+확인 파드: `MODE=open`은 닿아야 통과, `MODE=blocked`는 막혀야 통과다. 같은 파드가 github.com 443을 대조군으로 본다(`github=fail`이면 과차단). bootstrap.md 1절의 확인 파드와 같은 이미지·PSA다. 출력에 비밀은 없다(공개 호스트와 응답 코드).
+
+```bash
+MODE=blocked bash -euo pipefail <<'EOF'
+export KUBECONFIG=~/.kube/homelab-vm.yaml
+host/verify.sh --cluster vm --identity
+case "$MODE" in open|blocked) ;; *) echo "MODE는 open 또는 blocked"; exit 1 ;; esac
+kubectl create namespace u40-dns-check
+trap 'kubectl delete namespace u40-dns-check --wait=false >/dev/null' EXIT
+kubectl label namespace u40-dns-check pod-security.kubernetes.io/enforce=restricted >/dev/null
+kubectl -n u40-dns-check apply -f - <<'YAML'
+apiVersion: v1
+kind: Pod
+metadata: { name: probe }
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext: { runAsNonRoot: true, runAsUser: 65532, seccompProfile: { type: RuntimeDefault } }
+  containers:
+    - name: probe
+      image: docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70
+      securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+      command: [sh, -c]
+      args:
+        - |
+          r=$(dig +time=3 +tries=1 app.infisical.com | sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -n 1)
+          h=$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://app.infisical.com/); rc=$?
+          # nc는 성공 문구를 stderr로 낸다. 버리지 않으면 kubectl logs에 섞여 아래 판정이 어긋난다(2026-10-29 첫 시도)
+          nc -z -w 3 github.com 443 >/dev/null 2>&1 && g=ok || g=fail
+          echo "dns=${r:-none} http=$h rc=$rc github=$g"
+YAML
+kubectl -n u40-dns-check wait --for=jsonpath='{.status.phase}'=Succeeded pod/probe --timeout=120s
+line="$(kubectl -n u40-dns-check logs probe)"
+case "$MODE:$line" in
+  "blocked:dns=NXDOMAIN http=000 rc=6 github=ok") echo "차단 확인: $line" ;;
+  open:dns=NOERROR\ http=[1-5][0-9][0-9]\ rc=0\ github=ok) echo "열림 확인: $line" ;;
+  *) echo "기대와 다르다($MODE): $line"; exit 1 ;;
+esac
+EOF
+```
+
+2026-10-29: 기준선 "열림 확인: dns=NOERROR http=200 rc=0 github=ok", 차단 직후와 관찰 끝 "차단 확인: dns=NXDOMAIN http=000 rc=6 github=ok", 해제 뒤 "열림 확인: dns=NOERROR http=200 rc=0 github=ok".
+
+해제:
+
+```bash
+bash -euo pipefail <<'EOF'
+export KUBECONFIG=~/.kube/homelab-vm.yaml
+host/verify.sh --cluster vm --identity
+kubectl -n kube-system delete configmap coredns-custom
+kubectl -n kube-system rollout restart deploy/coredns
+kubectl -n kube-system rollout status deploy/coredns --timeout=180s
+kubectl -n kube-system get pods -l k8s-app=kube-dns
+EOF
+```
+
+**해제 뒤 coredns 파드가 하나로 안정될 때까지 기다린 뒤 `MODE=open`을 돌린다.** 마지막 줄이 Running 하나이고 Terminating이 없으며, 잠시 뒤 다시 봐도 같은 파드여야 한다. 2026-10-29에는 `rollout status`가 끝난 직후의 첫 `MODE=open`이 `dns=none`이었다. coredns가 한 번 더 교체되는 중이었고 15초 뒤에는 `NOERROR`였다. k3s가 coredns 매니페스트를 다시 적용해 두 번째 rollout이 생긴 것으로 보지만 확인하지 못했다(추측). `dns=none`이면 기다렸다 다시 돌린다.

@@ -437,6 +437,8 @@ NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있�
 
 2. **ESO Secret의 값은 `eso-homelab-dev`이다.** VM 준비 자산의 client ID·secret을 대화형 셸에서 `read -rs ESO_CLIENT_ID`, `read -rs ESO_CLIENT_SECRET`로 받고 `export ESO_CLIENT_ID ESO_CLIENT_SECRET`한 뒤 돌린다. 운영 자격을 잘못 넣으면 그 identity가 `homelab-dev`에 없어 Store가 Ready가 되지 않는다(조용히 운영 값을 읽지 않는다).
 
+   **선택: 넣기 전에 NUC에서 로그인해 본다.** 같은 셸에서 [rotate.md](rotate.md) 1절 2단계 블록을 돌려 200인지 본다(토큰은 버리고 응답 코드만). Client ID 자리에 identity ID를 넣는 실수(T09에서 401 두 번, approvals 2026-10-19 20:55 행)를 Store가 Ready가 안 되는 것으로 VM에서 처음 알게 되는 대신 여기서 잡는다. U40 시험(2026-10-29)에서도 했다(200). VM 클러스터 DNS만 막은 시험이라 NUC에서는 Infisical에 닿는다.
+
    ```bash
    bash -euo pipefail <<'EOF'
    export KUBECONFIG=~/.kube/homelab-vm.yaml

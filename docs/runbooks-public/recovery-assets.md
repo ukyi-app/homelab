@@ -20,10 +20,12 @@
 | 계정 접근 수단(로그인과 2FA 복구 코드) | 모든 복구의 출발점 |
 | ESO 부트스트랩 자격 | 클러스터 재구축([bootstrap.md](bootstrap.md) 2.2). 회전은 [rotate.md](rotate.md) 1절 |
 | Terraform state 버킷 자격 사본 | Infisical 없이 네트워크 설정 복구 |
-| Infisical 암호화 내보내기(분기 1회) | Infisical 계정 잠김·영구 손실, Infisical 장애 중 급한 재구축 |
+| Infisical 암호화 내보내기(분기 1회) | Infisical 계정 잠김·영구 손실, Infisical 장애 중 급한 재구축(클러스터 유실과 겹치면 [restore.md](restore.md) 3.1의 손 Secret) |
 | 관리자 비밀번호 원문 | 플랫폼 UI 로그인. 회전은 [rotate.md](rotate.md) 2절 |
 | R2 백업 읽기 자격 사본 | Infisical 없이 DB 복원, 시나리오 13. 백업 버킷을 만드는 T11이 더한다 |
 | DNS 필터 라이브 설정 내보내기(선택) | UI에서만 바꾼 규칙 복구. T08a 뒤 |
+
+**Infisical 암호화 내보내기의 형식.** `{project, env, at, secrets: {"<Infisical 경로>": "<값>"}}` JSON 하나를 age 암호문구로 암호화한 파일이다(age 버전은 `.tool-versions`). 만드는 블록은 [restore.md](restore.md) 3.1 2)다. 그 블록은 손 Secret 지도의 키만 담는다. 운영 분기 내보내기도 이 형식으로 만든다. 키가 더 있어도 되고, 프로젝트·환경 값(`homelab`/`prod`)이 맞아야 restore.md 3.1의 손 Secret 블록이 그대로 쓴다. 암호문구는 비워 두지 않는다(비우면 age가 만든 암호문구를 화면에 찍는다). 2026-10-29 U40 시험이 이 형식(`homelab-dev`/`dev`, 키 17개)으로 실제로 복호화·사용했다.
 
 ## 신선도 확인 (분기 1회)
 
