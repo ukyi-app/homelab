@@ -405,7 +405,16 @@ export KUBECONFIG=~/.kube/homelab-vm.yaml && host/verify.sh --cluster vm --ident
 
 ## 6. 지우기 (NUC, sudo)
 
-VM 밖 자원(tailnet의 `vm-*` 기기, VM 전용 R2 버킷, `eso-homelab-dev` client secret, 읽기 전용 R2 토큰, values-vm 복구 원본 정리 PR)은 설계 E8 "되돌리는 방법"을 따른다. VM을 먼저 지우면 VM operator가 기기를 정리하지 못하므로 `vm-*` 기기는 Tailscale 콘솔에서 지운다. 이 절은 NUC에 남는 것을 0으로 만든다.
+VM 밖 자원은 설계 E8 "되돌리는 방법"을 따른다. 이 절은 NUC에 남는 것을 0으로 만든다. VM 밖 정리는 이 순서로 한다(2026-10-29 U40):
+
+1. Tailscale: VM operator OAuth client는 콘솔에 삭제가 없고 **Revoke**만 있다. Revoke해도 기기는 남으므로 `vm-*` 기기(VM operator·프록시)를 따로 **Remove**한다. VM을 먼저 지우면 VM operator가 기기를 정리하지 못하므로 콘솔에서 지운다.
+2. R2: VM 전용 버킷을 비우고 지운 뒤, 그 버킷 토큰과 운영 버킷 읽기 전용 토큰을 폐기한다.
+3. Cloudflare: 시험 터널을 지운다.
+4. Infisical: `eso-homelab-dev` client secret을 폐기하고, `homelab-dev`/`dev`의 외부 자격 키(VM 버킷·터널·operator OAuth·알림 수신자)를 지운다. 생성 시험 값(bcrypt 해시, 시험 키 등)은 남겨도 된다.
+5. U40 시험이면 암호화 내보내기 파일과 암호문구를 지운다([restore.md](restore.md) 3.1).
+6. values-vm 복구 원본은 정리 PR로 지운다(restore.md 3절 7단계).
+
+VM 준비 자산 중 Infisical 밖 값(ESO client secret, 운영 버킷 읽기 전용 토큰, VM 콘솔 비밀번호, 내보내기 암호문구)은 비밀번호 관리자에 둔다. 암호화된 메모도 되고, 시험 뒤 지운다.
 
 VM은 운영 DB 사본을 담고 있다. 지운 뒤에는 되돌릴 수 없다. 남길 증거(결과표, 로그)를 먼저 옮긴다.
 
@@ -432,7 +441,7 @@ EOF
 
 ### 6.2 패키지와 libvirt 잔여
 
-1.1이 기록한 목록만 지운다. 그사이 다른 패키지가 이 목록에 기대게 됐으면 그것까지 지워지므로 먼저 흉내로 보고 멈춘다. libvirt 경로는 1.1이 "시험 전에 libvirt가 없었다"를 확인했으므로 이 시험이 만든 것뿐이다.
+1.1이 기록한 목록만 지운다. 그사이 다른 패키지가 이 목록에 기대게 됐으면 그것까지 지워지므로 먼저 흉내로 보고 멈춘다. libvirt 경로는 1.1이 "시험 전에 libvirt가 없었다"를 확인했으므로 이 시험이 만든 것뿐이다. `/etc/apparmor.d/libvirt`도 같다: libvirt의 `virt-aa-helper`가 VM마다 만든 AppArmor 프로필(`libvirt-<uuid>`)은 패키지 파일이 아니라 purge가 남긴다(2026-10-29 U40 정리 때 2026-10-28 T13 VM의 것까지 남아 있었다).
 
 ```bash
 bash -euo pipefail <<'EOF'
@@ -446,6 +455,16 @@ if [ "$sim" != "$(LC_ALL=C sort "$state/packages-new")" ]; then
 fi
 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get purge -y "${new[@]}"
 sudo rm -rf /etc/libvirt /var/lib/libvirt /var/log/libvirt /var/cache/libvirt
+# VM별 AppArmor 프로필: 커널에 올라간 것을 먼저 내리고 폴더를 지운다(purge가 남긴다).
+# 목록을 따로 읽어 읽기 실패는 set -e로 멈춘다. 이름 고르기는 awk라 "없음"도 0이다.
+# grep에 || true를 붙이면 일치 없음(1)과 함께 읽기 오류(2)까지 삼켜 확인 없이 폴더를 지운다
+sudo bash -euo pipefail <<'B'
+profiles="$(cat /sys/kernel/security/apparmor/profiles)"
+awk '$1 ~ /^libvirt-[0-9a-f-]+$/ { print $1 }' <<<"$profiles" | sort -u | while read -r p; do
+  printf '%s' "$p" > /sys/kernel/security/apparmor/.remove
+done
+rm -rf /etc/apparmor.d/libvirt
+B
 # libvirt nft 테이블은 실행 중 상태라 패키지를 지워도 재부팅 전까지 남을 수 있다. libvirt 것만 지운다
 sudo nft list tables | awk '$3 ~ /^libvirt/ { print $2, $3 }' | while read -r fam name; do
   sudo nft delete table "$fam" "$name"
@@ -463,9 +482,13 @@ while IFS= read -r p; do
   s="$(dpkg-query -W -f='${db:Status-Abbrev}' "$p" 2>/dev/null || true)"
   if [ -n "$s" ] && [ "${s:1:1}" != n ]; then echo "패키지가 남았다: ${p} (${s})"; left=1; fi
 done <"$state/packages-new"
-for d in /etc/libvirt /var/lib/libvirt /var/log/libvirt /var/cache/libvirt; do
+for d in /etc/libvirt /var/lib/libvirt /var/log/libvirt /var/cache/libvirt /etc/apparmor.d/libvirt; do
   if sudo test -e "$d"; then echo "경로가 남았다: ${d}"; left=1; fi
 done
+# 커널에 올라간 libvirt VM별 AppArmor 프로필. 목록은 root만 읽을 수 있어 sudo로 읽는다.
+# 읽기를 if 밖에서 해야 읽기 실패가 "없음"으로 바뀌지 않고 set -e로 멈춘다(상태 폴더도 남는다)
+aa="$(sudo cat /sys/kernel/security/apparmor/profiles)"
+if grep -q '^libvirt-' <<<"$aa"; then echo "libvirt AppArmor 프로필이 커널에 남았다"; left=1; fi
 for b in virbr-hlvm virbr0; do
   if ip link show "$b" >/dev/null 2>&1; then echo "브리지가 남았다: ${b}"; left=1; fi
 done
