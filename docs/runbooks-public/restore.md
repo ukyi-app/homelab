@@ -1676,7 +1676,7 @@ EOF
 2. VM 시험: 켜는 PR 전에 Infisical 차단을 푼다(아래 "VM 시험: Infisical 차단"의 해제 → 확인 파드 `MODE=open`). 열림이 확인되지 않으면 켜는 PR을 열지 않는다.
 3. 켜는 PR: 값 파일에서 `externalSecrets: false` 한 줄만 지운다(diff 한 줄). 손 Secret은 지우지 않는다. VM 시험: #989.
 4. Store: 동기화 뒤 `kubectl get clustersecretstore`가 셋 다 READY True. Store Ready는 Universal Auth 로그인과 폴더 목록 읽기가 성공해야 나오므로 Infisical에 다시 닿는다는 최종 증거다. False면 Infisical 폴더·부트스트랩 Secret(VM은 차단 해제)을 본다. 넘겨받기 실패가 아니다.
-5. 스냅숏 `PHASE=after`를 돌린 뒤 아래 판정 블록을 돌린다. 마지막 줄이 "넘겨받기 10/10 통과, 실패 0"이고 파드 재시작 수가 바뀐 것 0, 사라진 것 0이면 넘겨받은 것이다.
+5. 스냅숏 `PHASE=after`를 돌린 뒤 아래 판정 블록을 돌린다. 마지막 줄이 "넘겨받기 10/10 통과, 실패 0"이고 파드 재시작 수가 바뀐 것 0, 사라진 것 0이면 넘겨받은 것이다. 블록은 둘 중 하나라도 어긋나거나 파드 목록을 읽지 못하면 0이 아닌 코드로 끝난다.
 
    ```bash
    CLUSTER=vm bash -uo pipefail <<'EOF'
@@ -1715,16 +1715,19 @@ EOF
      fi
      if [ -z "$why" ]; then echo "통과  $id ($pol, $own)"; pass=$((pass+1)); else echo "실패  $id:$why"; fail=$((fail+1)); fi
    done <"$D/snap-after.tsv"
-   # 쓰는 파드 재시작 수(켜기 전과 같은 ns, 같은 파드). 새로 생긴 파드는 따로 적는다
-   kubectl get pods -A -o json | jq -r --argjson ns "$(jq -c '[.[].ns] | unique' "$D/map.json")" \
+   # 쓰는 파드 재시작 수(켜기 전과 같은 ns, 같은 파드). 새로 생긴 파드는 따로 적는다.
+   # set -e가 없으므로 조회·해석 실패를 직접 멈춘다. 빈 목록은 "사라진 것"으로만 보여 판정이 흐려진다
+   pods=$(kubectl get pods -A -o json) || { echo "파드 목록을 읽지 못했다"; exit 1; }
+   jq -r --argjson ns "$(jq -c '[.[].ns] | unique' "$D/map.json")" \
      '.items[] | select(.metadata.namespace | IN($ns[])) | "\(.metadata.namespace)/\(.metadata.name)\t\([.status.containerStatuses[]?.restartCount] | add // 0)"' \
-     | LC_ALL=C sort >"$D/restarts-after.tsv"
+     <<<"$pods" | LC_ALL=C sort >"$D/restarts-after.tsv" || { echo "파드 목록을 해석하지 못했다"; exit 1; }
    chg=$(join -t $'\t' "$D/restarts-before.tsv" "$D/restarts-after.tsv" | awk -F'\t' '$2 != $3' | wc -l)
    gone=$(LC_ALL=C comm -23 <(cut -f1 "$D/restarts-before.tsv") <(cut -f1 "$D/restarts-after.tsv") | wc -l)
    new=$(LC_ALL=C comm -13 <(cut -f1 "$D/restarts-before.tsv") <(cut -f1 "$D/restarts-after.tsv") | tr '\n' ' ')
    echo "파드: 재시작 수 바뀐 것 $chg, 사라진 것 $gone, 새로 생긴 것: ${new:-없음}"
    echo "넘겨받기 ${pass}/10 통과, 실패 $fail"
-   [ "$pass" -eq 10 ] && [ "$fail" -eq 0 ]
+   # Secret 판정과 파드 영향이 둘 다 통과해야 0으로 끝난다
+   [ "$pass" -eq 10 ] && [ "$fail" -eq 0 ] && [ "$chg" -eq 0 ] && [ "$gone" -eq 0 ]
    EOF
    ```
 

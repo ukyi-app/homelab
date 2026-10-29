@@ -456,9 +456,11 @@ fi
 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get purge -y "${new[@]}"
 sudo rm -rf /etc/libvirt /var/lib/libvirt /var/log/libvirt /var/cache/libvirt
 # VM별 AppArmor 프로필: 커널에 올라간 것을 먼저 내리고 폴더를 지운다(purge가 남긴다).
-# grep은 일치가 없으면 1로 끝나 set -e·pipefail이 블록을 멈추므로 || true로 받는다(없는 것이 정상인 경우다)
+# 목록을 따로 읽어 읽기 실패는 set -e로 멈춘다. 이름 고르기는 awk라 "없음"도 0이다.
+# grep에 || true를 붙이면 일치 없음(1)과 함께 읽기 오류(2)까지 삼켜 확인 없이 폴더를 지운다
 sudo bash -euo pipefail <<'B'
-{ grep -o '^libvirt-[0-9a-f-]\{36\}' /sys/kernel/security/apparmor/profiles || true; } | sort -u | while read -r p; do
+profiles="$(cat /sys/kernel/security/apparmor/profiles)"
+awk '$1 ~ /^libvirt-[0-9a-f-]+$/ { print $1 }' <<<"$profiles" | sort -u | while read -r p; do
   printf '%s' "$p" > /sys/kernel/security/apparmor/.remove
 done
 rm -rf /etc/apparmor.d/libvirt
@@ -483,8 +485,10 @@ done <"$state/packages-new"
 for d in /etc/libvirt /var/lib/libvirt /var/log/libvirt /var/cache/libvirt /etc/apparmor.d/libvirt; do
   if sudo test -e "$d"; then echo "경로가 남았다: ${d}"; left=1; fi
 done
-# 커널에 올라간 libvirt VM별 AppArmor 프로필. 목록은 root만 읽을 수 있어 sudo로 읽고, 일치 없음(1)은 if가 받는다
-if sudo grep -q '^libvirt-' /sys/kernel/security/apparmor/profiles; then echo "libvirt AppArmor 프로필이 커널에 남았다"; left=1; fi
+# 커널에 올라간 libvirt VM별 AppArmor 프로필. 목록은 root만 읽을 수 있어 sudo로 읽는다.
+# 읽기를 if 밖에서 해야 읽기 실패가 "없음"으로 바뀌지 않고 set -e로 멈춘다(상태 폴더도 남는다)
+aa="$(sudo cat /sys/kernel/security/apparmor/profiles)"
+if grep -q '^libvirt-' <<<"$aa"; then echo "libvirt AppArmor 프로필이 커널에 남았다"; left=1; fi
 for b in virbr-hlvm virbr0; do
   if ip link show "$b" >/dev/null 2>&1; then echo "브리지가 남았다: ${b}"; left=1; fi
 done
