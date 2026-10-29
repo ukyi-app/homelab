@@ -2,3 +2,4 @@
 chartVersion: 1.0.4
 postgres: { enabled: true }
 valkey: { persistent: true }
+purge: true
