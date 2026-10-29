@@ -45,4 +45,3 @@ cluster:
   restore:
     suspendedApps: []
     valkey: {}
-    externalSecrets: false
