@@ -1,7 +1,7 @@
 # T13 테스트 앱 통합 검증
 
 - 단계: P2 플랫폼 구축 (플랫폼 통합 검증 담당, 재분해 T05 2026-10-18)
-- 상태: 완료(2026-10-29. 2026-10-26 착수. 시나리오 1~17 실행, 모든 줄이 실제 검증 완료 또는 사용자가 승인한 한계·편차·갈음. 결과표 `platform/verification.md`. U40 2회차는 T23. 시험 앱 정리는 되돌리는 방법대로 따로)
+- 상태: 완료(2026-10-29. 2026-10-26 착수. 시나리오 1~17 실행, 모든 줄이 실제 검증 완료 또는 사용자가 승인한 한계·편차·갈음. 결과표 `platform/verification.md`. U40 2회차는 T23. 시험 앱은 되돌리는 방법대로 정리(2026-10-29), R2 되돌림 사본 삭제는 사람 작업으로 남음)
 - 명세: [../spec.md](../spec.md) §9
 - Blocked by: T08a, T08b, T08c, T10, T11, T12
 - 선행 결정: D-12 (확정(사용자 2026-10-18, T05): 빈 NUC 검증은 VM, 설계 E8 VM 격리 조건 여섯, VM 호스트는 tailnet 밖), D-08 (확정(사용자 2026-10-18): 시나리오 14 추가 확인), D-29 (확정(사용자 2026-10-18): 시험 앱 저장소도 public), D-30 (확정(사용자 2026-10-20): 내부 UI 짧은 주소 리다이렉터 `go`, VM은 `vm-go`)
@@ -71,7 +71,7 @@
   - 할 일 7: 시나리오 13 정리 뒤(2026-10-28) 복구 자산의 운영 ESO client ID·secret으로 Universal Auth 로그인 HTTP 200(토큰은 버림). 시나리오 7 직후에는 따로 로그인하지 않고 원복 뒤 ClusterSecretStore Ready=True와 원본 해시 일치를 봤다.
   - 할 일 8: VM 격리 값 검사는 #916(values-vm VM 프로필 단언)으로 넣었고, `root-vm` apply는 그 뒤(2026-10-28 02:31Z)다.
   - 할 일 9: 사용자 결정 1안(2026-10-26)대로 노드 nftables로 파드 대역의 LAN·tailnet·공개 비443 출발을 막았다(#919, 커널 판정 보강 #926). 2026-10-26 운영 적용 뒤 시작 즉시 연결하는 시험 파드가 15/15 통과했다. 남는 한계는 런북 `bootstrap.md` 1.1이다. 그중 부팅 fail-open(한계 5)은 사용자가 한계로 승인했고(2026-10-28), 시나리오 12 뒤 1.1의 시험 파드 블록이 통과했다(2026-10-28, 15/15). 1안이 요구한 운영자 기기의 tailnet UI(DERP) 실측은 시나리오 14 중 운영자 맥(셀룰러)의 브라우저로 Grafana·Argo CD가 열린 것으로 확인했다.
-  - 정리: VM·VM 버킷·`vm-*` 기기·`eso-homelab-dev` client secret·시험 터널·체크·Telegram 봇과 `homelab-dev` 외부 자격 키는 지웠다(2026-10-28). 대역 App·GHCR 시험 버전(2026-10-27), values-vm 복구 원본(#964)도 지웠다. 남은 것: `homelab-smoke`·`homelab-smoke2` 정리(`app remove` → `data purge`, Infisical 시험 키 포함), R2 되돌림 사본(사람 작업), `homelab-smoke` main의 `src/slow.test.ts`. libvirt iptables 체인은 시나리오 12 뒤 vm.md 6.3 "남은 것 0"으로 확인했다(2026-10-28 23:59).
+  - 정리: VM·VM 버킷·`vm-*` 기기·`eso-homelab-dev` client secret·시험 터널·체크·Telegram 봇과 `homelab-dev` 외부 자격 키는 지웠다(2026-10-28). 대역 App·GHCR 시험 버전(2026-10-27), values-vm 복구 원본(#964)도 지웠다. `homelab-smoke`·`homelab-smoke2`는 되돌리는 방법대로 지웠다(2026-10-29): `app remove`(#980) → 온디맨드 백업(CNPG Backup·Valkey 백업 Job) → `data purge` PR 1(#981·#982)·PR 2(#983·#984) → Infisical 키(smoke 4개, 시험 키 둘 포함, smoke2 1개)와 purge 기록 ConfigMap 삭제(두 경로 키 0개). `homelab-smoke` main의 `src/slow.test.ts`는 smoke#10으로 지웠다. 남은 것: R2 되돌림 사본(사람 작업, 되돌릴 수 없음). `homelab-smoke` 저장소와 GHCR 패키지는 되돌리는 방법에 없어 그대로 둔다. libvirt iptables 체인은 시나리오 12 뒤 vm.md 6.3 "남은 것 0"으로 확인했다(2026-10-28 23:59).
 - 후속(이 티켓 밖으로 넘김):
   - T16b: 시험 수신기 `edge-probe`를 봇으로 바꾸고 지운다(`platform/edge-probe` 주석). 봇 경보 route, Grafana·Argo CD `bot-reader` 토큰, `auth.json` 시드는 이미 T16b 할 일이다.
   - T17: 실제 리뷰 App 권한에 `issues read`(설계 C.8에 있음, T10 시험 App에는 빠져 있었다).
