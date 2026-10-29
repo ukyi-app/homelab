@@ -14,6 +14,9 @@
 # wave는 각 템플릿에 적혀 있고 설계 C.3.1 표의 "순서" 열이다.
 components:
   # T09. external-secrets(ESO operator, wave -8)와 external-secrets-stores(ClusterSecretStore, wave -7)
+  # 이 값은 ESO 자체를 뺀다. 구성 요소·앱의 ExternalSecret은 그대로 남아, CRD가 없으면 적용되지 않는다.
+  # 복구(클러스터 유실 + Infisical 장애)에서 Store와 모든 ExternalSecret을 끄는 값은 이것이 아니라 values-<클러스터>.yaml의
+  # cluster.restore.externalSecrets: false다(templates/_helpers.tpl, restore.md 3절 U40).
   externalSecrets:
     enabled: true
 

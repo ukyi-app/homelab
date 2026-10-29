@@ -34,7 +34,10 @@ cluster:
   #   1.0.0 앱을 넣으면 VM 렌더가 schema로 실패한다.
   # - valkey: 앱 이름 → stopped(running: false, 1절 1단계) 또는 restoreMode(running: true + restoreMode: true, 1절 3단계).
   #   영속 Valkey(valkey.persistent: true)인 앱만. 항목을 지우면 data values 그대로다(1절 5단계).
-  # 이름 오타는 조용히 아무 앱도 멈추지 않으므로 ci가 apps/<앱>·data/<앱>이 있는지 본다(tools/ci/render.ts).
+  # - externalSecrets: false(따옴표 없이)면 Store와 모든 ExternalSecret을 렌더하지 않는다(클러스터 유실 + Infisical 장애, U40).
+  #   ESO operator는 남고 같은 이름 Secret은 손으로 만든다. 앱 차트 1.2.0·데이터 차트 1.1.0 미만 앱이 있으면 VM 렌더가
+  #   schema로 실패한다. 평소에는 키를 두지 않는다(없으면 켬). 순서는 restore.md 3절 U40.
+  # 앱 이름 오타는 조용히 아무 앱도 멈추지 않으므로 ci가 apps/<앱>·data/<앱>이 있는지 본다(tools/ci/render.ts).
   restore:
     suspendedApps: []
     valkey: {}
