@@ -26,6 +26,7 @@ spec:
       valuesObject:
         tailscale:
           prefix: {{ $tailscale.prefix | quote }}
+        {{- with include "homelab.externalSecretsValues" . }}{{ . | nindent 8 }}{{- end }}
   destination:
     server: https://kubernetes.default.svc
     namespace: adguard

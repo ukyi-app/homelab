@@ -1,7 +1,9 @@
-# 관측 스택 곁의 Grafana 내부 Ingress. 스택 본체는 ../stack(kustomize)이고 root의 observability Application이 둘을 묶는다.
-# 차트인 이유: Ingress 이름의 접두가 클러스터마다 달라 root가 valuesObject로 넘긴다(E8 VM 격리 1번).
+# 관측 스택 곁의 Grafana 내부 Ingress와 스택 자격 ExternalSecret 셋. 스택 본체는 ../stack(kustomize)이고 root의
+# observability Application이 둘을 묶는다.
+# 차트인 이유: Ingress 이름의 접두가 클러스터마다 달라 root가 valuesObject로 넘긴다(E8 VM 격리 1번). 복구 스위치
+# (externalSecrets.enabled)도 같은 길로 받는다(T23).
 apiVersion: v2
 name: observability-ingress
-description: Grafana internal Ingress through the Tailscale operator for one homelab cluster
+description: Grafana internal Ingress and observability credentials (ExternalSecret) for one homelab cluster
 type: application
 version: 0.1.0

@@ -4,6 +4,14 @@
   "additionalProperties": false,
   "required": ["backup", "cnpg"],
   "properties": {
+    "externalSecrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
     "backup": {
       "type": "object",
       "additionalProperties": false,

@@ -1,6 +1,6 @@
 # 관측 스택(설계 C.3.7, D-09 최소 구성). root의 observability Application이 이 디렉터리와
-# ../ingress(Grafana 내부 Ingress, 클러스터 접두가 필요해 Helm)를 두 source로 묶는다.
-# 클러스터마다 다른 값은 여기 두지 않는다(E8 VM 격리 1번). 자격은 ExternalSecret이 같은 키 이름으로
+# ../ingress(Grafana 내부 Ingress와 자격 ExternalSecret. 클러스터 접두와 복구 스위치를 받아야 해서 Helm)를 두 source로 묶는다.
+# 클러스터마다 다른 값은 여기 두지 않는다(E8 VM 격리 1번). 자격은 ../ingress의 ExternalSecret이 같은 키 이름으로
 # 클러스터의 Infisical 프로젝트에서 읽는다.
 #
 # 룰·알림 템플릿의 {{ }}가 Helm 템플릿과 부딪히지 않게 Helm이 아니라 kustomize로 둔다.

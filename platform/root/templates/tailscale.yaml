@@ -69,6 +69,7 @@ spec:
         valuesObject:
           tailscale:
             prefix: {{ $ts.prefix | quote }}
+          {{- with include "homelab.externalSecretsValues" $ }}{{ . | nindent 10 }}{{- end }}
   destination:
     server: https://kubernetes.default.svc
     namespace: tailscale

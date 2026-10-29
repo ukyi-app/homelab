@@ -2,3 +2,8 @@
 # 빈 값으로 렌더되면 버킷 루트나 남의 prefix에 아카이브할 수 있어 기본값을 두지 않는다.
 backup: {}
 cnpg: {}
+
+# 복구 스위치(설계 C.6.4 "클러스터 유실 + Infisical 장애"). root가 cluster.restore.externalSecrets: false일 때만 false로 넘긴다.
+# 끄면 이 차트의 ExternalSecret(과 Store)을 내지 않는다. 같은 이름의 Secret은 사람이 손으로 만든다(restore.md 3절 U40).
+externalSecrets:
+  enabled: true
