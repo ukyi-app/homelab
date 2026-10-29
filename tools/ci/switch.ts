@@ -6,9 +6,12 @@
 // 3. 값 파일에 스위치가 없는 클러스터는 기본 렌더가 켠 렌더와 같고, 어느 Application에도 스위치 값이 들어가지 않는다.
 //    운영 Application spec이 스위치 전과 같다는 장치를 지킨다.
 // 4. 끈 렌더도 정책을 통과한다(복구 PR이 가장 급할 때 막히지 않게). kubeconform은 리소스를 빼기만 하므로 생략한다.
+// 5. ApplicationSet apps·data의 templatePatch를 실제로 실행해 위 렌더의 재현과 같은지, 끄면 공유 차트 ES가 0인지 본다
+//    (tools/ci/appset-patch.ts). 위 1.~3.의 등록 앱·데이터 렌더는 render.ts의 재현이라 그 단계를 대신 보지 못한다.
 // 등록 앱·데이터가 스위치를 모르는 옛 차트(render.ts ES_SWITCH_SINCE)면 가상 끔 렌더에서는 정보 줄만 낸다. 기존 앱은 옛 태그에
 // 머물 수 있다(설계 C.4.5). 값 파일에서 스위치를 실제로 끈 클러스터는 기본 렌더(render 단계)와 여기서 함께 실패한다.
 // 끌 때 빠지는 Secret 대상 목록을 출력한다. 손으로 만들 Secret의 이름과 ns다(restore.md 3절 U40).
+import { checkAppsetPatches } from "./appset-patch";
 import { checkSecretPaths } from "./data";
 import { type Doc, type Violation, gitFiles, readText } from "./lib";
 import { checkAll } from "./policy";
@@ -170,6 +173,14 @@ export function checkExternalSecretsSwitch(): Violation[] {
 
   // 4. 끈 렌더의 정책.
   for (const x of [...checkAll(off.docs), ...checkSecretPaths(off.docs)]) v(`끔:${x.where}`, `${x.rule}: ${x.message}`);
+
+  // 5. templatePatch 실행. 기본·켬 렌더는 복구 멈춤만 쓰는 경우와 주입 없는 경우, 끔 렌더는 스위치 단독·동시 사용을 낸다.
+  for (const x of checkAppsetPatches([
+    { label: "기본", docs: base.docs },
+    { label: "켬", docs: on.docs, rootOverlay: onOverlay },
+    { label: "끔", docs: off.docs, rootOverlay: offOverlay, chartOverlay: EXTERNAL_SECRETS_OFF },
+  ]))
+    v(x.where, x.message);
 
   // 끌 때 손으로 만들 Secret(클러스터별, root 아래와 등록 앱·데이터). 옛 차트 앱은 끄기 전에 올려야 해 빼고 위 정보 줄로 낸다.
   for (const c of clusters) {

@@ -27,7 +27,7 @@ export function kubeVersion(): string {
   return toolVersion("kubectl");
 }
 
-function helmTemplate(release: string, chartDir: string, namespace: string | undefined, valueFiles: string[]): { ok: boolean; out: string } {
+export function helmTemplate(release: string, chartDir: string, namespace: string | undefined, valueFiles: string[]): { ok: boolean; out: string } {
   // --include-crds: Argo CD는 skipCrds 기본값이 false라 차트의 crds/도 적용한다.
   // --skip-tests: Argo CD는 helm.sh/hook: test 리소스를 hook으로 보지만 맞는 단계가 없어 적용하지 않는다
   // (v3.5.5 gitops-engine/pkg/sync/hook/helm/type.go는 pre/post-install·upgrade만 단계로 바꾼다). 공식 valkey 차트의
@@ -136,8 +136,8 @@ function clusterPrefixes(clusterFiles: string[]): [string, string][] {
 // 복구 동안 이 클러스터에서만 바꿀 값(cluster.restore). 비어 있지 않으면 ApplicationSet apps·data의 templatePatch가
 // files/restore-patch.tpl·external-secrets-patch.tpl로 바뀌어 그 앱의 values를 덮어쓴다(platform/appsets/*/templates/applicationset.yaml).
 // externalSecretsOff: 복구 스위치 cluster.restore.externalSecrets가 bool false(platform/root/templates/_helpers.tpl과 같은 판정).
-type Restore = { suspendedApps: string[]; valkey: Record<string, string>; externalSecretsOff: boolean };
-function clusterRestore(vf: string, overlay?: RootOverlay): Restore {
+export type Restore = { suspendedApps: string[]; valkey: Record<string, string>; externalSecretsOff: boolean };
+export function clusterRestore(vf: string, overlay?: RootOverlay): Restore {
   const r = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) as any)?.cluster?.restore ?? {};
   const o = overlay?.cluster?.restore ?? {};
   const es = "externalSecrets" in o ? o.externalSecrets : r.externalSecrets;
@@ -176,7 +176,7 @@ function esSwitchUnsupported(kind: "app" | "data", app: string, version: unknown
   return `복구 스위치(cluster.restore.externalSecrets: false)는 ${chart} ${ES_SWITCH_SINCE[kind]}부터 지원한다(지금 chartVersion ${version}). 스위치를 끄기 전에 ${file}의 chartVersion을 올린다`;
 }
 
-// ApplicationSet apps의 templatePatch가 만드는 앱 values(아래 5.).
+// ApplicationSet apps의 templatePatch가 만드는 앱 values(아래 5.와 tools/ci/appset-patch.ts가 함께 쓴다).
 // params는 values.yaml + image.yaml 키(생성기 변수 path·values 제외)다. tailnetPrefix는 클러스터 값이 이긴다.
 export function appValues(app: string, params: Record<string, any>, prefix: string, restore: Restore): Record<string, any> {
   const values: Record<string, any> = { ...params, tailnetPrefix: prefix };
@@ -185,7 +185,7 @@ export function appValues(app: string, params: Record<string, any>, prefix: stri
   return values;
 }
 
-// ApplicationSet data의 templatePatch가 만드는 데이터 values(아래 6.).
+// ApplicationSet data의 templatePatch가 만드는 데이터 values(아래 6.와 tools/ci/appset-patch.ts가 함께 쓴다).
 // 복구 멈춤 맵에 있으면 사람 values의 valkey.running·restoreMode를 버리고 모드 값으로 다시 쓴다.
 export function dataValues(app: string, human: Record<string, any>, bucket: string, restore: Restore): Record<string, any> {
   const values: Record<string, any> = { ...human, backup: { bucket } };
@@ -521,6 +521,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
   //    같게 values.yaml + image.yaml + 클러스터 tailnet 접두를 values로, 차트는 그 앱의 태그로 렌더한다.
   //    그 클러스터의 복구 멈춤 목록(cluster.restore.suspendedApps)에 있으면 suspended: true로 덮는다.
   //    복구 스위치를 끈 클러스터에서 스위치를 모르는 옛 차트 앱은 렌더하지 않고 원인을 적어 실패로 둔다(ES_SWITCH_SINCE).
+  //    값 합치기가 실제 templatePatch 실행 결과와 같은지는 tools/ci/appset-patch.ts가 본다.
   //    앱이 0개인 것은 정상이라 세지 않는다.
   for (const vf of gitFiles("apps/*/values.yaml")) {
     const app = basename(dirname(vf));
@@ -563,7 +564,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
   // 6. 등록된 데이터(data/<앱>/values.yaml). ApplicationSet data(platform/appsets/data/files/applicationset.yaml)와
   //    같게 values.yaml + 클러스터 백업 버킷을 values로, 릴리스 이름은 앱 이름, 차트는 그 앱의 태그로 렌더한다.
   //    그 클러스터의 복구 멈춤 맵(cluster.restore.valkey)에 있으면 valkey.running·restoreMode를 모드 값으로 다시 쓴다.
-  //    복구 스위치를 끈 클러스터의 옛 차트는 5.와 같다.
+  //    복구 스위치와 옛 차트, templatePatch 실행 대조는 5.와 같다.
   for (const vf of gitFiles("data/*/values.yaml")) {
     const app = basename(dirname(vf));
     for (const [cluster, bucket] of clusterBuckets(clusterFiles)) {
