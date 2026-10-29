@@ -1,7 +1,7 @@
 # T20 봇 MEMORY_BRIEFING
 
 - 단계: P4 봇 V1
-- 상태: 착수 가능 (선행 T16a 완료 2026-10-20. 로컬·mock 구현부터, 완료는 T16b 뒤)
+- 상태: 진행 중 (로컬·mock 구현 병합 2026-10-29, 봇 저장소 PR #8 `82e2a45`, 시험 333. 완료는 T16b 뒤. 삭제 원장 위치는 사용자 결정 대기, 봇 저장소 `docs/ai-bot/DECISIONS.md` T20)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T16a(착수), T16b(완료)
   - 착수: [T16a](T16a-bot-foundation-local.md) 뒤. 이 티켓을 실제로 막는 FOUNDATION의 예약 기능을 T16a가 로컬·mock으로 만든다(V1 범위 조정 안 3).

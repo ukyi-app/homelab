@@ -51,6 +51,11 @@
    - **marker 검색 실패 backoff(`src/discord.ts`):** `external_id`가 없는 unknown 행이 매 `reconcile()`마다 최대 10페이지 history를 다시 조회한다. 검색 실패 때도 다음 대조 시각을 저장하고 조회 조건에 쓴다.
    - **`/retry` 큐 상한(`src/store.ts`):** 재시도 전이가 queued 개수를 보지 않아 `DEFAULTS.maxQueue`(100)를 넘을 수 있다. scheduler 행 잠금 아래에서 개수를 확인한 뒤 전이한다.
    - **read 타임아웃 중단(`src/read.ts`):** 5초 `Promise.race()`가 실제 요청을 멈추지 않아 반복 timeout에서 요청이 직렬성 밖에 쌓인다. `ReadTransport`에 `AbortSignal`을 넘겨 abort한다.
+7. T17·T18·T20 봇 저장소 PR(#7·#8·#9, 2026-10-29)에서 이월한 Codex 리뷰 P2와 T16a 변경 요청을 봇 저장소 PR로 고친다. 같은 멈춤 규칙(1라운드 수정 → 재리뷰 → P1 없으면 병합)에 따른 것이고 스레드마다 답글을 남겼다. 각 STAGE를 실연동하기 전에 고친다.
+   - **T17(`src/review.ts`·`src/review-input.ts`):** 중복 세대에 댓글 명시 요청의 `trigger`를 `comment`로 올림. 원격 조회 뒤 POST 직전 최신 정책(저장소 허용·revision·출력 분류·게시 상한) 재확인. `unknown` 게시 행 대조 대상을 커서로 순환(지금은 최신 20개만). 보안: `editScript` diff 계산의 메모리 상한(linear-space diff 또는 계산 전 복잡도 한도·deadline, 입력 한도 `maxDiffBytes`는 계산 뒤에만 본다).
+   - **T18(`src/codex-process.ts`, 보안):** 작업 셸과 Codex `auth.json` 분리(별도 UID·컨테이너나 credential broker), 작업별 cgroup이 빌 때까지 완료·취소·해제 금지. 둘 다 실제 `TaskLane` 연결 전 필수이고, T18 사용자 결정 (2) 인증 파일 분리·(4) 작업별 세션 공간과 같은 범위다.
+   - **T20(`src/briefing.ts`):** 예약을 끌 때(시각·시간대 설정을 비울 때) 이미 큐에 넣은 미전송 브리핑 outbox도 막는다. 기동 순서(원장 재적용 → 첫 tick → 게시자)와 함께 본다.
+   - **T16a 변경 요청(`src/store.ts` `accept()`):** 스케줄러 행을 먼저 잠근 뒤 `jobs` 삽입의 외래 키 검사로 대화 행을 기다려, 같은 대화의 `/cancel`·`/model-status` 등과 잠금 순서가 역전된다(T18 작업자가 로컬 PostgreSQL 18.6에서 `55P03` 재현). 대화 행을 먼저 잠근다. 봇 저장소 `ARCHITECTURE.md` §12 T16a 변경 요청 6번.
 
 ### 봇 자리 `target` 변경 (설계 E9, C.8)
 
