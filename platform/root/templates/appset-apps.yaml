@@ -4,6 +4,8 @@ AppProject apps는 project-apps.yaml(wave -11)이라 ApplicationSet보다 먼저
 클러스터 값 cluster.tailscale.prefix를 넘긴다. 앱 내부 Ingress 이름의 접두다(운영 "", VM "vm-").
 복구 동안 이 클러스터에서만 멈출 앱(cluster.restore.suspendedApps)은 비어 있지 않을 때만 넘긴다. 빈 값을 넘기면
 운영의 이 Application spec이 바뀐다(values-prod.yaml 주석).
+복구 스위치(cluster.restore.externalSecrets: false)도 끌 때만 넘긴다. 받으면 모든 앱에 externalSecrets.enabled: false가
+들어가 앱 차트 1.2.0 미만 앱은 schema로 렌더 실패한다(ci가 복구 PR에서 잡는다).
 켜기: values.yaml의 components.appsetApps.enabled.
 이 Application에 resources-finalizer를 붙이지 않는다. ApplicationSet이 지워지면 생성된 앱 Application이 모두
 cascade로 지워지기 때문이다(앱 Application에는 ApplicationSet이 resources-finalizer를 붙인다). 끄면 ApplicationSet이 남는다.
@@ -35,6 +37,7 @@ spec:
         suspendedApps:
           {{- toYaml . | nindent 10 }}
         {{- end }}
+        {{- with include "homelab.externalSecretsValues" . }}{{ . | nindent 8 }}{{- end }}
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

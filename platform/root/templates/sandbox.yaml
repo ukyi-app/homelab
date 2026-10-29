@@ -26,6 +26,7 @@ spec:
         infisical:
           projectSlug: {{ required "cluster.infisical.projectSlug is missing in values-<cluster>.yaml" $infisical.projectSlug | quote }}
           environmentSlug: {{ required "cluster.infisical.environmentSlug is missing in values-<cluster>.yaml" $infisical.environmentSlug | quote }}
+        {{- with include "homelab.externalSecretsValues" . }}{{ . | nindent 8 }}{{- end }}
   destination:
     server: https://kubernetes.default.svc
   syncPolicy:

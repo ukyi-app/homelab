@@ -2,3 +2,5 @@
 tailscale: {}
 # 복구 동안 이 클러스터에서만 멈출 앱 이름(root가 비어 있지 않은 cluster.restore.suspendedApps만 넘긴다).
 suspendedApps: []
+# 복구 스위치. root가 cluster.restore.externalSecrets: false일 때만 {enabled: false}를 넘긴다(templates/applicationset.yaml).
+externalSecrets: {}

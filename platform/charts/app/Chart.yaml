@@ -8,7 +8,7 @@ apiVersion: v2
 name: app
 description: Shared chart for homelab apps
 type: application
-version: 1.1.0
+version: 1.2.0
 # 캐시 Valkey(설계 C.5.6). 공식 차트를 cacheServer라는 이름으로 넣고 cache.enabled로 켠다. 사람이 적는 키는 cache이고
 # cacheServer는 차트 내부 값이다(앱 values에 적으면 ci가 막는다, tools/ci/render.ts).
 # CI는 외부 레지스트리를 조회하지 않고, Argo CD v3.5.5는 charts/에 묶음이 있으면 dependency build를 하지 않는다

@@ -1,8 +1,0 @@
-# 원격 관리 터널 커넥터(설계 C.3.4, T08a). 터널·ingress 규칙·DNS는 infra/cloudflare(Terraform) 한 곳에만 있다.
-# 클러스터에는 Cloudflare API 토큰을 두지 않고 터널 토큰만 ESO로 받는다. VM은 같은 키 이름을 homelab-dev에서 읽는다.
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - externalsecret.yaml
-  - deployment.yaml
-  - networkpolicy.yaml

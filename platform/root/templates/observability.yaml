@@ -1,7 +1,8 @@
 {{- /*
 observability: T08b, wave -4(설계 C.3.1). 메트릭·로그·경보 스택(설계 C.3.7).
 source 둘을 한 Application으로 묶는다: platform/observability/stack(kustomize. 룰·알림 템플릿의 {{ }}가 Helm과
-부딪히지 않게)과 platform/observability/ingress(Grafana 내부 Ingress. 클러스터 접두를 valuesObject로 받는다).
+부딪히지 않게)과 platform/observability/ingress(Grafana 내부 Ingress와 스택 자격 ExternalSecret 셋. 클러스터 접두와
+복구 스위치를 valuesObject로 받는다).
 켜기: values.yaml의 components.observability.enabled. 켜기 전에 Infisical에 /platform/alerting·/platform/observability
 키를 넣는다. 키가 없으면 ExternalSecret이 Degraded라 이 Application도 Degraded이고 root가 뒤 wave를 기다린다.
 */}}
@@ -31,6 +32,7 @@ spec:
         valuesObject:
           tailscale:
             prefix: {{ $ts.prefix | quote }}
+          {{- with include "homelab.externalSecretsValues" $ }}{{ . | nindent 10 }}{{- end }}
   destination:
     server: https://kubernetes.default.svc
     namespace: observability

@@ -1,5 +1,7 @@
 {{- if .Values.postgres.enabled }}
 {{- $name := include "data.name" . }}
+{{- /* 복구 스위치(externalSecrets.enabled: false, ApplicationSet data가 넣음)면 내지 않는다. DatabaseRole은 같은 이름 Secret을 손으로 만들어 읽는다. */}}
+{{- if .Values.externalSecrets.enabled }}
 # 앱 역할의 비밀번호(설계 C.5.1). 원본은 Infisical /apps/<앱>/postgres/PASSWORD 하나이고, 앱 ns의 연결 Secret
 # (앱 차트 <앱>-db)과 이 Secret이 사본이다. database ns는 store infisical-apps만 쓸 수 있다(conditions).
 # cnpg.io/reload: 값이 바뀌면 CNPG가 바로 ALTER ROLE 한다[S31]. 회전 순서는 docs/runbooks-public/rotate.md.
@@ -34,6 +36,7 @@ spec:
     - secretKey: password
       remoteRef:
         key: {{ $name }}/postgres/PASSWORD
+{{- end }}
 ---
 # 역할 이름 = 앱 이름 = DB owner. 앱끼리 owner를 공유하지 않는다(L10). reclaim retain이라 CR이 지워져도 역할이 남는다[S31](purge: true만 delete).
 apiVersion: postgresql.cnpg.io/v1

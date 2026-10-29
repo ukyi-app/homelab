@@ -4,7 +4,9 @@ Helm이 렌더하지 않게 하려는 것이다. Helm은 클러스터 값 자리
 운영 접두는 빈 문자열이라 required를 쓸 수 없다. 키가 있는지로 확인한다.
 
 복구 동안 멈출 앱(suspendedApps)이 있으면 templatePatch의 값 합치기 줄을 files/restore-patch.tpl로 바꿔 그 앱에만
-suspended: true를 넣는다. 없으면(운영) 본문을 그대로 내므로 렌더가 이 기능 전과 같다.
+suspended: true를 넣는다. 복구 스위치(externalSecrets.enabled: false)면 같은 자리에 files/external-secrets-patch.tpl을 더해
+모든 앱에 externalSecrets.enabled: false를 넣는다(둘을 함께 쓸 수 있다). 둘 다 없으면(운영) 본문을 그대로 내므로
+렌더가 이 기능 전과 같다.
 바꿀 줄은 본문에 정확히 한 번 있어야 한다. 본문을 고쳐 줄이 달라지면 주입이 조용히 빠지지 않게 실패한다.
 tools/ci/render.ts가 같은 전개를 재현한다(APPSET_RENDERERS.apps, 5.). 하나를 바꾸면 함께 바꾼다.
 */}}
@@ -16,6 +18,21 @@ tools/ci/render.ts가 같은 전개를 재현한다(APPSET_RENDERERS.apps, 5.). 
 {{- fail (printf "tailscale.prefix %q는 소문자·숫자·-만" $prefix) }}
 {{- end }}
 {{- $body := .Files.Get "files/applicationset.yaml" | replace "__TAILNET_PREFIX__" (quote $prefix) }}
+{{- $esOff := false }}
+{{- with .Values.externalSecrets }}
+{{- if not (kindIs "bool" .enabled) }}
+{{- fail "externalSecrets.enabled는 bool이다(root가 복구 스위치를 끌 때만 false로 넘긴다)" }}
+{{- end }}
+{{- $esOff = not .enabled }}
+{{- end }}
+{{- if or .Values.suspendedApps $esOff }}
+{{- $line := `            {{- omit . "path" "values" "tailnetPrefix" | toYaml | nindent 8 }}` }}
+{{- if ne (len (splitList $line $body)) 2 }}
+{{- fail "files/applicationset.yaml의 templatePatch에 값 합치기 줄이 한 번 있어야 한다(suspendedApps·externalSecrets 주입 자리)" }}
+{{- end }}
+{{- $toYaml := `            {{- $v | toYaml | nindent 8 }}` }}
+{{- /* 멈출 앱이 없으면 restore-patch.tpl의 omit 줄과 마지막 줄만으로 같은 값 합치기를 만든다. */}}
+{{- $patch := printf "%s\n%s" `            {{- $v := omit . "path" "values" "tailnetPrefix" }}` $toYaml }}
 {{- with .Values.suspendedApps }}
 {{- $names := list }}
 {{- range . }}
@@ -24,10 +41,14 @@ tools/ci/render.ts가 같은 전개를 재현한다(APPSET_RENDERERS.apps, 5.). 
 {{- end }}
 {{- $names = append $names (quote .) }}
 {{- end }}
-{{- $line := `            {{- omit . "path" "values" "tailnetPrefix" | toYaml | nindent 8 }}` }}
-{{- if ne (len (splitList $line $body)) 2 }}
-{{- fail "files/applicationset.yaml의 templatePatch에 값 합치기 줄이 한 번 있어야 한다(suspendedApps 주입 자리)" }}
+{{- $patch = $.Files.Get "files/restore-patch.tpl" | replace "__SUSPENDED_APPS__" (join " " $names) | trimSuffix "\n" }}
 {{- end }}
-{{- $body = replace $line ($.Files.Get "files/restore-patch.tpl" | replace "__SUSPENDED_APPS__" (join " " $names) | trimSuffix "\n") $body }}
+{{- if $esOff }}
+{{- if ne (len (splitList $toYaml $patch)) 2 }}
+{{- fail "files/restore-patch.tpl의 마지막 줄이 $v를 내는 줄이 아니다(externalSecrets 주입 자리)" }}
+{{- end }}
+{{- $patch = replace $toYaml (printf "%s\n%s" ($.Files.Get "files/external-secrets-patch.tpl" | trimSuffix "\n") $toYaml) $patch }}
+{{- end }}
+{{- $body = replace $line $patch $body }}
 {{- end }}
 {{ $body }}

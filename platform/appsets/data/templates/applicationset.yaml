@@ -3,7 +3,9 @@ ApplicationSet 본문은 files/applicationset.yaml에 그대로 둔다. Argo CD�
 (platform/appsets/apps와 같은 방식). Helm은 클러스터 값 자리표시만 바꾼다.
 
 복구 동안 멈출 영속 Valkey(valkeyRestore, 앱 이름 → stopped | restoreMode)가 있으면 templatePatch의 값 합치기 줄을
-files/restore-patch.tpl로 바꿔 그 앱의 valkey.running·restoreMode만 덮어쓴다. 없으면(운영) 본문을 그대로 낸다.
+files/restore-patch.tpl로 바꿔 그 앱의 valkey.running·restoreMode만 덮어쓴다. 복구 스위치(externalSecrets.enabled: false)면
+같은 자리에 files/external-secrets-patch.tpl을 더해 모든 데이터에 externalSecrets.enabled: false를 넣는다(둘을 함께 쓸 수 있다).
+둘 다 없으면(운영) 본문을 그대로 낸다.
 apps와 같은 이유로 바꿀 줄이 정확히 한 번 있어야 하고, tools/ci/render.ts(APPSET_RENDERERS.data, 6.)를 함께 고친다.
 */}}
 {{- $bucket := (.Values.backup | default dict).bucket | default "" | toString }}
@@ -11,6 +13,21 @@ apps와 같은 이유로 바꿀 줄이 정확히 한 번 있어야 하고, tools
 {{- fail (printf "backup.bucket %q는 R2 버킷 이름이어야 한다(root가 cluster.backup.bucket을 넘긴다)" $bucket) }}
 {{- end }}
 {{- $body := .Files.Get "files/applicationset.yaml" | replace "__BACKUP_BUCKET__" (quote $bucket) }}
+{{- $esOff := false }}
+{{- with .Values.externalSecrets }}
+{{- if not (kindIs "bool" .enabled) }}
+{{- fail "externalSecrets.enabled는 bool이다(root가 복구 스위치를 끌 때만 false로 넘긴다)" }}
+{{- end }}
+{{- $esOff = not .enabled }}
+{{- end }}
+{{- if or .Values.valkeyRestore $esOff }}
+{{- $line := `            {{- omit . "path" "values" "backup" | toYaml | nindent 8 }}` }}
+{{- if ne (len (splitList $line $body)) 2 }}
+{{- fail "files/applicationset.yaml의 templatePatch에 값 합치기 줄이 한 번 있어야 한다(valkeyRestore·externalSecrets 주입 자리)" }}
+{{- end }}
+{{- $toYaml := `            {{- $v | toYaml | nindent 8 }}` }}
+{{- /* 멈출 Valkey가 없으면 restore-patch.tpl의 omit 줄과 마지막 줄만으로 같은 값 합치기를 만든다. */}}
+{{- $patch := printf "%s\n%s" `            {{- $v := omit . "path" "values" "backup" }}` $toYaml }}
 {{- with .Values.valkeyRestore }}
 {{- $pairs := list }}
 {{- range $app, $mode := . }}
@@ -22,10 +39,14 @@ apps와 같은 이유로 바꿀 줄이 정확히 한 번 있어야 하고, tools
 {{- end }}
 {{- $pairs = append $pairs (printf "%q %q" $app (toString $mode)) }}
 {{- end }}
-{{- $line := `            {{- omit . "path" "values" "backup" | toYaml | nindent 8 }}` }}
-{{- if ne (len (splitList $line $body)) 2 }}
-{{- fail "files/applicationset.yaml의 templatePatch에 값 합치기 줄이 한 번 있어야 한다(valkeyRestore 주입 자리)" }}
+{{- $patch = $.Files.Get "files/restore-patch.tpl" | replace "__VALKEY_RESTORE__" (join " " $pairs) | trimSuffix "\n" }}
 {{- end }}
-{{- $body = replace $line ($.Files.Get "files/restore-patch.tpl" | replace "__VALKEY_RESTORE__" (join " " $pairs) | trimSuffix "\n") $body }}
+{{- if $esOff }}
+{{- if ne (len (splitList $toYaml $patch)) 2 }}
+{{- fail "files/restore-patch.tpl의 마지막 줄이 $v를 내는 줄이 아니다(externalSecrets 주입 자리)" }}
+{{- end }}
+{{- $patch = replace $toYaml (printf "%s\n%s" ($.Files.Get "files/external-secrets-patch.tpl" | trimSuffix "\n") $toYaml) $patch }}
+{{- end }}
+{{- $body = replace $line $patch $body }}
 {{- end }}
 {{ $body }}

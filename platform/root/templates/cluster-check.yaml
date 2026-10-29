@@ -18,6 +18,11 @@
 {{- if and (hasPrefix "root-" .Release.Name) (ne .Release.Name (printf "root-%s" $name)) }}
 {{- fail (printf "%s Application이 cluster.name %q인 값 파일을 읽었다. root-<클러스터>는 values-<클러스터>.yaml만 읽는다" .Release.Name $name) }}
 {{- end }}
+{{- /* 복구 스위치(_helpers.tpl homelab.externalSecretsOff)는 bool만 끔으로 읽는다. 문자열 "false"는 켬으로 읽혀 조용히 지나가므로 막는다. */}}
+{{- $es := dig "restore" "externalSecrets" true $cluster }}
+{{- if not (kindIs "bool" $es) }}
+{{- fail (printf "cluster.restore.externalSecrets는 true 또는 false다(지금 %v, %s). 따옴표를 붙이면 문자열이라 스위치가 켜진 채 남는다" $es (kindOf $es)) }}
+{{- end }}
 {{- if ne $name "prod" }}
 {{- $prod := get (.Files.Get "values-prod.yaml" | fromYaml) "cluster" | default dict }}
 {{- $prodProject := dig "infisical" "projectSlug" "" $prod | toString }}

@@ -28,6 +28,9 @@ spec:
     requests:
       storage: 1Gi
 ---
+{{- /* 복구 스위치(externalSecrets.enabled: false, ApplicationSet data가 넣음)면 이 파일의 ExternalSecret 둘을 내지 않는다.
+     서버·백업 CronJob은 같은 이름 Secret을 손으로 만들어 읽는다. */}}
+{{- if .Values.externalSecrets.enabled }}
 # 서버 default 사용자와 백업 Job의 비밀번호. 원본은 앱 차트 연결 Secret과 같은 /apps/<앱>/valkey/PASSWORD다.
 # 서버는 시작 때 이 값으로 ACL 파일을 만든다. 값을 바꾸면 Valkey 파드를 다시 띄운다(설계 C.6.5).
 apiVersion: external-secrets.io/v1
@@ -51,6 +54,7 @@ spec:
     - secretKey: password
       remoteRef:
         key: {{ $name }}/valkey/PASSWORD
+{{- end }}
 ---
 # 복원 모드(설계 C.5.6 3단계). appendonly yes인 채 AOF를 지우고 dump.rdb만 두면 Valkey 9.1.2는 RDB를 읽지 않고
 # 빈 데이터로 시작해 빈 AOF를 새로 만든다(U18 로컬 실측). 그래서 RDB를 읽을 때만 appendonly no로 띄운다.
@@ -69,6 +73,7 @@ data:
     # 덮어쓸 설정 없음
     {{- end }}
 ---
+{{- if .Values.externalSecrets.enabled }}
 # R2 백업 자격(설계 C.3.8). 앱 ns는 플랫폼 store를 못 써서 앱 store에서 절대 경로로 읽는다(ESO는 /로 시작하는 키에
 # secretsPath를 붙이지 않는다, v2.13.0 providers/v1/infisical/client.go). 이 경로는 tools/ci/data.ts가
 # 데이터 차트와 platform/cnpg에서만 허용한다. 남는 위험: 이 ns가 버킷 전체를 읽고 쓸 수 있다(F D-06).
@@ -95,6 +100,7 @@ spec:
       remoteRef:
         key: /platform/backup/{{ . }}
     {{- end }}
+{{- end }}
 ---
 # 하루 1회 RDB를 R2 valkey/<앱>/로(설계 C.3.8). 보존 14일은 R2 lifecycle(infra/cloudflare, prefix valkey/)이 맡는다.
 # 이름에 valkey-backup을 넣는다. ValkeyBackupStale 경보가 이 이름으로 찾는다(platform/observability/stack/vmalert/rules/platform.yaml).

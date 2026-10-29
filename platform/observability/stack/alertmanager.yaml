@@ -1,59 +1,8 @@
 # Alertmanager. 설정 본문은 alertmanager/alertmanager.yml이고 configMapGenerator가 해시 이름으로 굽는다.
 # 설정을 고치면 볼륨이 가리키는 ConfigMap 이름이 바뀌어 sync만으로 롤아웃된다.
 #
-# 자격은 receiver마다 다른 ExternalSecret과 optional 볼륨이다. Alertmanager는 *_file을 보낼 때마다 읽는다
-# (0.34.1 notify/telegram, notify/webhook). 그래서 Secret이 아직 없어도 파드는 뜨고 그 receiver만 실패하며
-# (alertmanager_notifications_failed_total), Secret이 생기면 kubelet이 볼륨을 채워 재시작 없이 보낸다.
-# 키 하나가 없을 때 다른 receiver까지 막지 않으려고 ExternalSecret을 receiver별로 나눴다.
-# 다만 키가 없는 ExternalSecret은 Degraded라 observability Application도 Degraded이고, root가 뒤 wave를 기다린다.
-# 켜기 전에 Infisical 키를 먼저 넣는다.
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: alertmanager-telegram
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: infisical-platform
-  target:
-    name: alertmanager-telegram
-    creationPolicy: Owner
-    deletionPolicy: Retain
-    # template이 없으면 ES의 Argo CD tracking 주석까지 Secret으로 복사된다(설계 B.8 E3).
-    template:
-      engineVersion: v2
-      mergePolicy: Merge
-  data:
-    - secretKey: token
-      remoteRef:
-        key: alerting/TELEGRAM_BOT_TOKEN
-    # chat ID는 비밀은 아니지만 개인 식별자라 공개 저장소에 두지 않는다(chat_id_file).
-    - secretKey: chat_id
-      remoteRef:
-        key: alerting/TELEGRAM_CHAT_ID
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: alertmanager-healthchecks
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: infisical-platform
-  target:
-    name: alertmanager-healthchecks
-    creationPolicy: Owner
-    deletionPolicy: Retain
-    template:
-      engineVersion: v2
-      mergePolicy: Merge
-  data:
-    - secretKey: ping_url
-      remoteRef:
-        key: alerting/HEALTHCHECKS_PING_URL
----
+# 자격(receiver별 ExternalSecret)은 같은 Application의 ../ingress 차트에 있다(복구 스위치를 Helm 값으로 받으려고, T23).
+# 볼륨이 optional이라 Secret이 없어도 파드는 뜨고 그 receiver만 실패한다.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

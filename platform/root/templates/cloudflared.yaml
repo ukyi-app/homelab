@@ -18,6 +18,12 @@ spec:
     repoURL: {{ include "homelab.repoURL" . }}
     targetRevision: main
     path: platform/cloudflared
+    {{- /* platform/cloudflared는 Helm 차트다. helm 블록은 복구 스위치가 끌 때만 넣어 평소 spec이 차트 변환 전과 같다. */}}
+    {{- with include "homelab.externalSecretsValues" . }}
+    helm:
+      valuesObject:
+        {{- . | nindent 8 }}
+    {{- end }}
   destination:
     server: https://kubernetes.default.svc
     namespace: cloudflared

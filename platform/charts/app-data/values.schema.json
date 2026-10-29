@@ -48,6 +48,15 @@
         "bucket": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" }
       }
     },
+    "externalSecrets": {
+      "description": "복구 스위치(설계 C.6.4). ApplicationSet data가 root의 cluster.restore.externalSecrets: false일 때만 {enabled: false}를 넣는다. false면 ExternalSecret을 내지 않고 같은 이름 Secret을 손으로 만든다. 사람이 적지 않는다(ci가 막는다, tools/ci/render.ts). 1.1.0부터.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
     "valkeyServer": {
       "description": "차트 내부 값(공식 valkey 차트의 values). data values에 적지 않는다. ci가 막는다(tools/ci/render.ts).",
       "type": "object"

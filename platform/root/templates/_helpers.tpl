@@ -28,6 +28,29 @@ https://github.com/ukyi-app/homelab
 {{- end }}
 
 {{/*
+복구 스위치 cluster.restore.externalSecrets(설계 C.6.4 "클러스터 유실 + Infisical 장애"). false일 때만 "off"를 낸다.
+없거나 true면 빈 문자열이라 템플릿이 아무것도 넘기지 않고, 운영 Application spec이 이 스위치가 생기기 전과 같다.
+끌 때 받는 쪽: 구성 요소 차트와 ApplicationSet 차트에 externalSecrets.enabled: false, Store Application과 edge-probe는
+렌더하지 않는다. ESO operator는 남긴다. 새 ExternalSecret을 더하면 이 값으로 함께 꺼지게 한다(ci 단계 external secrets switch).
+bool이 아닌 값(문자열 "false" 등)은 여기서 켬으로 읽히므로 cluster-check.yaml이 렌더를 막는다.
+*/}}
+{{- define "homelab.externalSecretsOff" -}}
+{{- $v := dig "restore" "externalSecrets" true (.Values.cluster | default dict) -}}
+{{- if and (kindIs "bool" $v) (not $v) -}}off{{- end -}}
+{{- end }}
+
+{{/*
+끌 때 구성 요소 차트의 valuesObject에 더하는 값. 켬이면 빈 문자열이라 호출 자리에 아무것도 남지 않는다.
+쓰는 법: {{- with include "homelab.externalSecretsValues" . }}{{ . | nindent 8 }}{{- end }}
+*/}}
+{{- define "homelab.externalSecretsValues" -}}
+{{- if include "homelab.externalSecretsOff" . -}}
+externalSecrets:
+  enabled: false
+{{- end -}}
+{{- end }}
+
+{{/*
 모든 자식 Application의 retry: limit 10, backoff 30s에서 최대 5m(factor는 기본 2라 적지 않는다).
 retry가 소진되면 Argo CD는 다시 시도하지 않는다. 그때는 명시 sync가 필요하다(설계 B.8 E2).
 */}}

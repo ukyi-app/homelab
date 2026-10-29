@@ -2,8 +2,12 @@
 edge-probe: 공개 경로 시험 앱(T08a 검증, 설계 C.3.4 준비 확인·C.8 webhook 경로). wave 0, 원본 platform/edge-probe.
 켜기: values.yaml의 components.edgeProbe.enabled. 정리 PR은 이 파일, platform/edge-probe, values.yaml의 edgeProbe 블록을
 함께 지운다.
+
+복구 스위치(cluster.restore.externalSecrets: false, _helpers.tpl)가 끄면 이 Application째 렌더하지 않는다(T23 결정. 시험
+수신기라 Helm으로 바꾸지 않았다). 함정: 아래 resources-finalizer 때문에 살아 있는 클러스터에서 끄면 ns app-edge-probe까지
+지워진다. 설계한 쓰임은 빈 클러스터 복구다(restore.md 3절 U40).
 */}}
-{{- if .Values.components.edgeProbe.enabled }}
+{{- if and .Values.components.edgeProbe.enabled (not (include "homelab.externalSecretsOff" .)) }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
