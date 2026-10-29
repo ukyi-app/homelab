@@ -12,6 +12,7 @@ import { checkPgAclOrder, checkSecretPaths, checkValkeyWiring, checkVendoredChar
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
 import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkSandbox, checkWorkloads } from "./policy";
 import { kubeconform, renderAll } from "./render";
+import { checkExternalSecretsSwitch } from "./switch";
 import { RULES, checkActionFile, checkWorkflow, checkWorkflows } from "./workflow-guard";
 import { type Facts, evaluate } from "../deploy-merge/conditions";
 
@@ -404,6 +405,12 @@ const steps: Step[] = [
       for (const s of r.skipped) console.log(`외부 차트(렌더하지 않음): ${s}`);
       return [...r.violations, ...checkAll(r.docs), ...checkSecretPaths(r.docs), ...checkPgAclOrder(r.docs), ...kubeconform(r.targets)];
     },
+  },
+  {
+    name: "external secrets switch",
+    // 복구 스위치 cluster.restore.externalSecrets(T23, 설계 C.6.4). 끄면 Store·ExternalSecret 0개, 켬과의 차이는 시크릿뿐,
+    // 스위치가 없으면 렌더가 그대로인지(tools/ci/switch.ts). 위 단계의 렌더 캐시를 함께 쓴다.
+    run: checkExternalSecretsSwitch,
   },
   {
     name: "vendored charts",
