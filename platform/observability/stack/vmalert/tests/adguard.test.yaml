@@ -170,6 +170,39 @@ tests:
         alertname: AdGuardTailnetQueriesMissing
         exp_alerts: []
 
+  # NUC 재부팅(T13 시나리오 17): 파드 객체는 이름·시작 시각 그대로이고 샌드박스만 새로 만들어 IP가 바뀐다.
+  # 파드 시작 시각만 보면 새 IP 항목이 파일에 쓰일 때까지 오경보가 난다. 컨테이너는 다시 시작하므로 그 시각이 기준이다.
+  - name: 재부팅으로 같은 svclb 파드가 새 IP를 받으면 컨테이너 시작 시각을 기준으로 삼는다. 이탈은 여전히 울린다
+    interval: 1m
+    input_series:
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.1"}'
+        values: "946690000x10 946700000x10"
+      # 재부팅 전 IP. 지금 svclb IP가 아니라 세지 않는다.
+      - series: 'adguard_querylog_last_query_timestamp_seconds{job="adguard-querylog", client="10.42.0.9"}'
+        values: "946689400x20"
+      - series: 'kube_pod_info{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde", pod_ip="10.42.0.20", created_by_kind="DaemonSet", created_by_name="svclb-adguard-dns-c41016c6"}'
+        values: "1x20"
+      - series: 'kube_pod_start_time{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde"}'
+        values: "946000000x20"
+      - series: 'kube_pod_container_state_started{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde", container="lb-tcp-53"}'
+        values: "946689500x20"
+      - series: 'kube_pod_container_state_started{namespace="kube-system", pod="svclb-adguard-dns-c41016c6-abcde", container="lb-udp-53"}'
+        values: "946689500x20"
+    alert_rule_test:
+      - eval_time: 5m
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts: []
+      - eval_time: 15m
+        groupname: adguard
+        alertname: AdGuardTailnetQueriesMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
+
   # 파일이 멈추면 첫째 조건의 두 값이 함께 멈춘다. 벽시계 6시간 안전망이 잡는다.
   - name: 파일이 멈춰도 벽시계 6시간이 지나면 발화한다
     interval: 10m
