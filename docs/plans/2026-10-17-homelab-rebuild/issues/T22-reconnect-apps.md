@@ -1,7 +1,7 @@
 # T22 기존 앱 저장소 재연결·옛 저장소 정리
 
 - 단계: P5 후속 (P4와 병행)
-- 상태: 대기
+- 상태: 대기 (T16b. T13 완료 2026-10-29)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T13, T16b (봇 첫 배포 증거)
 - 선행 결정: D-10 (확정(사용자 2026-10-18, T05): 옛 Telegram 봇·토큰은 `mac-uptime-guard`를 처리하는 이 티켓까지 둔다), D-13 (확정(사용자 2026-10-18). 이 티켓에 걸리는 것은 옛 aiops 저장소·App 제거), D-18 (의존성 업데이트 방식. 확정(사용자 2026-10-18, T05): 호스팅형 Renovate App 저장소별 설치, 자동 병합 모두 끔), D-21 (확정(사용자 2026-10-18, T05): `homelab-app-template` 재사용, 내용 교체는 T10), D-28 (확정(사용자 2026-10-18): 보호 설정 대조), D-29 (확정(사용자 2026-10-18): 앱 저장소 public만, 비앱 저장소는 `aiops`·`mac-uptime-guard` 제거와 `aiops-autodeploy-canary` private 보관, `page`·`trip-mate-api` 삭제. `mac-uptime-guard` 제거는 사용자 2026-10-18 17:46)

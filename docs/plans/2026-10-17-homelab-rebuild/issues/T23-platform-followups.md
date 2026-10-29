@@ -1,16 +1,16 @@
 # T23 플랫폼 후속(T13에서 넘김)
 
 - 단계: P2 후속
-- 상태: 대기
+- 상태: 착수 가능 (T13 완료 2026-10-29)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T13
 - 선행 결정: D-12 (확정(사용자 2026-10-18, T05): 빈 NUC 검증은 VM, 설계 E8 VM 격리 조건 여섯, VM 호스트는 tailnet 밖)
-- 연결 AC: AC-P5, AC-P10
+- 연결 AC: AC-P5, AC-P6, AC-P10
 - 수행: 에이전트 + 사람
 
 ## 목표
 
-T13이 끝내지 않고 넘긴 플랫폼 후속을 처리한다(T13 할 일 3, 사용자 결정 2026-10-29). 지금은 U40 2회차 하나다. T13 결과표 [../platform/verification.md](../platform/verification.md) "한계와 후속"의 13 U40 줄이 출처다.
+T13이 끝내지 않고 넘긴 플랫폼 후속을 처리한다(T13 할 일 3, 사용자 결정 2026-10-29). U40 2회차(할 일 1~3)와 시나리오 17의 재부팅 오경보(할 일 4) 둘이다. T13 결과표 [../platform/verification.md](../platform/verification.md) "한계와 후속"의 13 U40 줄과 17 `AdGuardTailnetQueriesMissing` 줄이 출처다.
 
 ## 할 일
 
@@ -24,10 +24,13 @@ T13이 끝내지 않고 넘긴 플랫폼 후속을 처리한다(T13 할 일 3, �
    - 넘겨받지 않거나 root가 진행하지 않으면 설계 부록 1 U40 행의 대안(되돌리는 PR 직전 손 Secret 삭제, 필요한 Application만 손으로 sync)을 `restore.md`에 절차로 둔다. 설계 C.6.4 행과 맞춘다.
    - 손으로 만드는 Secret의 값은 저장소 밖 암호화 내보내기에서 온다. 화면·파일·인자에 남기지 않는다.
 3. 결과를 T13 결과표의 13 U40 줄, 설계 부록 1 U40 행, `restore.md` 3절 U40 문단에 기록한다.
+4. `AdGuardTailnetQueriesMissing`(`platform/observability/stack/vmalert/rules/adguard.yaml`)의 재부팅 오경보를 없앤다(T13 시나리오 17, 2026-10-29). 재부팅으로 svclb 파드가 새 IP를 받아도 파드 객체가 그대로면 `kube_pod_start_time`이 옛 값이라, 새 IP 출처 질의가 질의 로그 파일에 쓰일 때까지(이번에 약 2분) 울린다.
+   - 기준 시각을 파드 시작 대신 svclb 컨테이너 시작 시각(예: `kube_pod_container_state_started`)으로 바꾸거나 짧은 `for`를 둔다. `for`는 실제 이탈 감지도 그만큼 늦춘다.
+   - 규칙 시험(`platform/observability/stack/vmalert/tests/adguard.test.yaml`)에 "같은 파드, 새 IP" 경우를 더하고, 기존 이탈 경우가 계속 울리는지 본다.
 
 ## 필요한 자격
 
-T13 시나리오 13과 같다. T13이 끝나며 VM 자원과 시험 자격을 지웠으므로(T13 결과 절 "정리", 2026-10-28) 다시 만든다(사람).
+할 일 4는 자격이 필요 없다. 할 일 1~3은 T13 시나리오 13과 같다. T13이 끝나며 VM 자원과 시험 자격을 지웠으므로(T13 결과 절 "정리", 2026-10-28) 다시 만든다(사람).
 
 - `eso-homelab-dev` Universal Auth client secret(VM 전용, 시험 뒤 폐기).
 - VM 전용 R2 버킷과 그 버킷 전용 토큰, VM operator OAuth client, 시험 터널 토큰, 시험 healthchecks 체크, 시험 Telegram 봇 토큰(모두 `homelab-dev`).
@@ -39,11 +42,16 @@ T13 시나리오 13과 같다. T13이 끝나며 VM 자원과 시험 자격을 �
 - 할 일 1의 스위치가 기본값에서 운영 렌더를 바꾸지 않고, 끄면 Store와 모든 ExternalSecret이 렌더되지 않는다(ci 렌더 비교).
 - U40이 `실제 검증 완료`이거나, 사용자가 승인한 한계로 기록돼 있다.
 - 가정이 틀렸으면 `restore.md`의 클러스터 유실 + Infisical 장애 절차가 실제로 한 순서와 같다.
+- svclb 파드가 같은 객체로 새 IP를 받아도 `AdGuardTailnetQueriesMissing`이 울리지 않고, tailnet 이탈 경우는 여전히 울린다(규칙 시험).
 
 ## 검증
 
 VM에서 Infisical 접근을 막은 상태로 시나리오 13의 확인(설계 G 13행, T13 할 일 2)을 다시 한다. 결과는 T13 결과표에 PR로 남긴다(명세 AC-X1). 공개하면 안 되는 증거는 저장소 밖에 두고 위치만 적는다.
 
+할 일 4는 `ci`의 vmalert 규칙 시험으로 보고, 다음 NUC 재부팅 때 그 경보가 나지 않았는지 지표(`ALERTS`)로 본다.
+
 ## 되돌리는 방법
 
 T13 "되돌리는 방법"의 VM 항목과 같다: VM을 폐기하고, VM 전용 R2 버킷과 tailnet의 `vm-*` 기기를 지우고, `eso-homelab-dev` client secret을 폐기한다.
+
+할 일 4는 규칙을 바꾼 PR을 되돌린다.

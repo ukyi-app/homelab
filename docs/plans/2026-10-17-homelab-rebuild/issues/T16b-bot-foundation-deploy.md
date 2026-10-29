@@ -1,7 +1,7 @@
 # T16b 봇 FOUNDATION 실연동·첫 배포
 
 - 단계: P4 봇 V1
-- 상태: 대기
+- 상태: 착수 가능 (T13 완료 2026-10-29, T16a 완료 2026-10-20)
 - 명세: [../spec.md](../spec.md)
 - 설계: [../platform/design.md](../platform/design.md) E.1 E9, C.8 "봇 자리 Application"
 - Blocked by: T13, T16a

@@ -2,10 +2,10 @@
 
 T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.md) G절의 시나리오 1~17과 C.8의 봇 자리 표다. 봇·병합·알림 자리의 최종 확인은 [T13](../issues/T13-platform-integration.md) 할 일 4·5다.
 
-**중간 결과(2026-10-29).** 시나리오 1~14·16과 15의 15-1~15-12를 실행했다. 17과 15-13은 사용자 일정에 맞춰 따로 실행하므로 아직 `설계상 기대`다(사용자 결정 2026-10-28·29, [approvals.md](../approvals.md)). 실행한 뒤 같은 표를 채우고, T13은 그때까지 진행 중이다. 결과표는 PR로 main에 병합한다(AC-X1).
+**최종 결과(2026-10-29).** 시나리오 1~17(15는 15-1~15-13)을 모두 실행했다. 모든 줄이 `실제 검증 완료`이거나 사용자가 승인한 한계·편차·갈음이다(아래 "한계와 후속", [approvals.md](../approvals.md)). T13은 이 결과로 완료다. 결과표는 PR로 main에 병합한다(AC-X1).
 
 - 무엇: 시험 앱 `homelab-smoke`(두 번째 DB는 `homelab-smoke2`)로 G의 시나리오를 다시 실행한 결과다. 시나리오 13은 NUC 위 임시 VM(D-12), 나머지는 운영에서 했다.
-- 언제: 2026-10-27~28(KST). 준비는 2026-10-26에 시작했다. 줄마다 실행 시각을 적었고, `Z`가 붙은 시각은 UTC다.
+- 언제: 2026-10-27~29(KST). 준비는 2026-10-26에 시작했다. 줄마다 실행 시각을 적었고, `Z`가 붙은 시각은 UTC다.
 
 ## 판정 값
 
@@ -57,7 +57,7 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 | 15 | 자동 병합 조건 밖의 PR은 사람 승인 뒤에만 병합 | 운영 | 대역 App `ukyi-homelab-bot-standin-2`(ID 5491621, homelab·homelab-smoke만 설치). 15-1 설정 확인 24줄 PASS(automerge secret·배포 브랜치 main, repo·org secret 0, `allow_auto_merge` false, bypass, main-checks 필수 `ci`, 태그 ruleset 3패턴, smoke·template `app-main` 4규칙·관리자 bypass `pull_request`만·CODEOWNERS, workflow-guard 음성 fixture 32개). 15-2 homelab 브랜치 job의 `automerge`·`AutoMerge` 선언 둘 다 "not allowed to deploy to automerge"(run 40467209857). 15-3 test 권한 job에 OIDC 없음, 시험 브랜치의 배포 identity 로그인 403. 15-4 사람 PR #952 `deploy-merge` 조건 1(·2) 불일치. 15-5 `ci` 실패 PR #951 `--admin` 거부("Required status check ci is failing"), #952 `--match-head-commit` 검토 SHA ≠ head 거부. 15-6 `app-chart-v1.0.0` 이동·삭제 push GH013, 태그 그대로. 15-7 대역 App PR #953 조건 1로 미병합, `PUT merge` 405, homelab main·`deploy/s15-x`·smoke main push GH013. 15-8 배포 App 토큰의 `ci.yaml` 변경 push "without workflows permission" 거부. 15-9 smoke가 homelab 워크플로를 부를 때 `HOMELAB_MERGE_KEY` length=0. 15-10 smoke `app-main` disabled 07:37:01Z → 배포 PR #954 조건 9만 불일치 → active 복귀 → 재판정 병합. 15-11 커밋 C 6ad9ddcf([skip ci], 빌드 없음) → 브랜치 워크플로가 C를 빌드·push(revision=C·source 라벨, attestation 없음 404) → 대조 main 빌드 verify 0 → 배포 App 토큰(키 유출 대역)으로 PR #955 → 조건 5만 불일치, 미병합 → 닫기 → 정상 배포 PR #956 병합. 15-12 `homelab github verify` exit 0 → 사용자가 선언 밖 ruleset `s15-drift` 생성 → exit 1 "guard 3: homelab의 ruleset 이름 집합·개수가 선언과 다르다" → 삭제 → exit 0(main 499fe6e). 정리: 시험 PR 3개 닫음, 브랜치 7개·smoke automerge environment 삭제, 대역 App·GHCR 시험 버전 삭제 | 2026-10-27 16:2x~17:1x, 15-12 보충 17:2x~17:4x | 실제 검증 완료(15-1~15-12) <!-- TODO lead: 15-13 뒤 "실제 검증 완료"로 --> | 15-10·15-11은 lead 실행이 분류기에 막혀 사용자가 탭에서 실행했다. 15-11에서 배포 App 키를 로컬에서 한 번 읽었다(회전 안 함, 사용자 결정). 15-7e(대역 App 승인 + 병합)는 설계 행 밖이라 하지 않았다. 15-2의 FAIL 한 줄은 스크립트가 job 완료 전에 읽은 것이다(다시 읽어 PASS) |
 | 15-13 | (15의 일부) 결과 PR: owner 자기 승인 거부, `deploy-merge` 조건 1 불일치, 관리자 bypass 병합만 성공 | 운영 | | | 설계상 기대 | 실행 예정(사용자 일정, approvals 2026-10-28) <!-- TODO lead: 15-13 결과 --> |
 | 16 | 봇이 없거나 멈춘 상태에서 테스트 경보가 비AI 경로로 도착 | 운영·기기 | 봇 없음(homelab-bot 미배포, E4b 시점과 같음). `amtool alert add alertname=PlatformTest severity=warning` 04:01:14Z → `alertmanager_notifications_total{integration="telegram"}` 4→5, failed_total 합 0 그대로. Telegram 수신 13:01(발송 13:01:14, 2분 안), 해소 13:06(amtool 기본 만료 5분) | 2026-10-27 13:01 | 실제 검증 완료 | 수신은 사용자 화면으로 확인했다 |
-| 17 | NUC 전체가 멈추면 외부 생존 감시가 감지해 알림 | 현장·기기 | | | 설계상 기대 | 실행 예정(사용자 일정, approvals 2026-10-28) <!-- TODO lead: S17 결과 --> |
+| 17 | NUC 전체가 멈추면 외부 생존 감시가 감지해 알림 | 현장·기기 | 전원 차단(NUC는 Wi-Fi로만 연결): root 일회성 타이머의 `rtcwake -m off -s 900`(정상 종료 뒤 RTC로 15분 뒤 기상, 사용자 승인). 종료 지시 07:00:01. healthchecks webhook 마지막 전송 07:00:00 무렵(`alertmanager_notifications_total{receiver_name="healthchecks"}` 213→214, 2분 간격) → healthchecks.io down 알림 수신 07:09(NUC가 꺼진 동안, 마지막 ping 뒤 약 10분 = Period 5분 + Grace 5분) → RTC 기상 부팅 07:15:09(사람 손 없음), k3s active 07:15:28, 파드 Ready 07:15:30~07:15:56 → up 알림 수신 07:15(Alertmanager 첫 수집 07:16:30에 healthchecks 전송 이미 1, 실패 0) → `appset-apps`·`appset-data`·`root-prod` Healthy 07:18:39로 Argo CD 22개 Synced/Healthy. 켠 뒤 확인(10:18): 노드 Ready, `pg` healthy, ExternalSecret 미준비 0, `dig @192.168.117.15` 정상 주소·`doubleclick.net` `0.0.0.0`, `/healthz/db` 200, tailnet Argo CD 200·Grafana 302 | 2026-10-29 07:00~07:18 | 실제 검증 완료(갈음, 아래) | 수신 시각은 사용자 폰 알림(분 단위)으로 갈음했다(사용자 결정 2026-10-29). 부팅 직후 `AdGuardTailnetQueriesMissing` 오경보 1건(아래). ApplicationSet 3분 Degraded는 시나리오 12와 같다 |
 
 ### 시나리오 14 측정값
 
@@ -112,7 +112,10 @@ T13(테스트 앱 통합 검증)의 결과표다. 기준은 [design.md](design.m
 - **14** LAN 기기는 AdGuard 정지 동안 이름 해석이 전부 실패한다(30/30, 설계의 10초 대신 15초 간격으로 7분 15초 동안). (한계, 사용자 승인 approvals 2026-10-20 18:58 무렵 "AC-P6(LAN DNS) 한계 승인" 행. 완화: 런북 `nuc-dns-outage.md`, `AdGuardDown` 경보는 이번에도 23:36 발화·Telegram 전송)
 - **14** 사용자 규칙 적용률이 2026-10-21(Wi-Fi 20/20, 셀룰러 19/20)보다 크게 낮다(Wi-Fi 0/20, 셀룰러 1/20). 맥의 시험 질의가 NUC AdGuard로 가지 않고 AdGuard 공용 DNS가 답했다. 원인은 운영자 맥의 AdGuard for Mac 앱이다: DNS 보호의 제공자가 AdGuard DNS(DNS-over-HTTPS)라 시스템 DNS(Tailscale 리졸버 100.100.100.100)로 가는 질의를 가로채 AdGuard DNS로 보냈다. 같은 맥에서 `tailscale dns query`와 NUC 주소로 직접 보낸 질의는 NUC에 도착했고, 2026-10-29 제공자를 "시스템 기본 설정"으로 바꾼 뒤 `dig @100.100.100.100` 질의도 도착했다. 플랫폼 결함이 아니다. Tailscale 기기의 적용률이 낮으면 그 기기에서 DNS를 가로채는 앱부터 본다. (해결: 원인 확정, 운영자 기기 설정 변경 2026-10-29)
 - **14** 설계 명령 `sudo k3s crictl pull` 대신 시험 파드의 이미지 받기로 봤다(같은 containerd·노드 DNS 경로). (편차, lead 판단: 정지 중 sudo 입력을 피함)
-- **17** 아직 실행하지 않았다. NUC는 Wi-Fi로만 연결돼 있어 랜선 차단 대신 전원을 끈다. 실행 직전에 다시 승인받는다. (후속: T13 시나리오 17, 사용자 결정 approvals 2026-10-29)
+- **17** 설계 G 17행의 두 방법 중 전원 차단을 골랐다(NUC는 Wi-Fi로만 연결돼 랜선을 뽑을 수 없다). 현장에 사람이 없어도 되게 `rtcwake`로 정상 종료와 RTC 기상을 묶었다. 정상 종료라 갑작스러운 전원 손실은 이 시험 범위 밖이다. (설계 G 17행의 방법 안, 사용자 승인 approvals 2026-10-29 01:2x)
+- **17** 설계 G 17행 검증의 "healthchecks.io 대시보드와 이벤트 기록"은 보지 않았다. 사용자 폰 알림 수신 시각(down 07:09, up 07:15, 분 단위, Telegram·이메일 구분 없음)과 NUC 쪽 전송 지표(마지막 07:00:00 무렵, 부팅 뒤 실패 0)가 있다. down 알림이 NUC가 꺼진 동안 와서 NUC를 거치지 않는 경로임은 그대로 보인다. (갈음, 사용자 결정 2026-10-29: 수신 시각)
+- **17** 부팅 직후 `AdGuardTailnetQueriesMissing`이 07:16:30~07:18:15 firing해 Telegram 경보(07:17:30)와 해소(07:22:30)가 갔다. svclb 파드가 재부팅으로 새 IP(10.42.0.8 → 10.42.0.20)를 받았지만 파드 객체와 `kube_pod_start_time`(2026-10-20)은 그대로라 규칙의 기준 시각이 옛 시작 시각으로 떨어졌다. 새 IP 출처 질의가 질의 로그 파일에 쓰일 때까지 울렸고, 규칙에 `for`가 없다. 시나리오 12 재부팅에서는 나지 않았다. (후속: T23 할 일 4)
+- **17** 재부팅 뒤 ApplicationSet 3분 Degraded(07:15:38 Git 생성 실패 → 07:18:39 회복)는 시나리오 12와 같다. (한계, 사용자 결정 2026-10-29: 조치 없음, 위 12 줄)
 
 ## 봇 자리 확인
 
@@ -120,7 +123,7 @@ AC-P12 다섯 자리와 AC-P8·AC-P11 자리다. 자리·준비 티켓·확인 �
 
 T13 할 일 4·5로 2026-10-27 17:47~17:50(KST)에 운영에서 읽기만으로 다시 확인했다. 쓰기, 시험 경보, App 생성은 하지 않았다. "읽기 전용 접근" 한 자리를 Kubernetes·관측·Argo CD 세 줄로 나눴다.
 
-**요약:** 아홉 자리 중 일곱은 실제 검증 완료다. 리뷰 전용 App 저장소별 설치 구조는 지금 다시 볼 수 없어 T10 증거로 갈음했다(승인된 한계). 외부 생존 감시는 경로와 대체 차단 시험까지 확인했고, NUC 전체 중단을 보는 시나리오 17만 남았다.
+**요약:** 아홉 자리 중 여덟은 실제 검증 완료다. 리뷰 전용 App 저장소별 설치 구조는 지금 다시 볼 수 없어 T10 증거로 갈음했다(승인된 한계). 외부 생존 감시는 NUC 전체 중단(시나리오 17, 2026-10-29)까지 확인했다.
 
 ### AC-P12
 
@@ -146,7 +149,7 @@ T13 할 일 4·5로 2026-10-27 17:47~17:50(KST)에 운영에서 읽기만으로 
 | 자리 | 준비 티켓 | 확인 방법(설계 C.8) | 판정 | 근거(핵심 값) | 남은 일 |
 |---|---|---|---|---|---|
 | 비AI 알림 경로 | T08b | C.8 `비AI 알림 경로` 행: 시나리오 16. 봇 없이 Telegram에 2분 안 도착, `alertmanager_notifications_total{integration="telegram"}` 증가, 실패 지표 불변. | 실제 검증 완료 | receiver `telegram`, 전송 20·실패 0(17:4x 조회). 시나리오 16: 4→5, 수신 13:01 | 없음 |
-| 외부 생존 감시 | T08b | C.8 `외부 생존 감시` 행: 시나리오 17. Period+Grace(10분) 뒤 healthchecks.io가 down으로 바꾸고 NUC를 거치지 않는 경로로 알림, 복구 뒤 up. | 경로 실제 검증 완료, 시나리오 17은 설계상 기대 <!-- TODO lead: S17 결과 --> | Watchdog firing, healthchecks webhook 최근 1시간 30회. T08b: ping 차단 20분에 down 알림, 해제 뒤 up 알림 | 시나리오 17 현장 차단 |
+| 외부 생존 감시 | T08b | C.8 `외부 생존 감시` 행: 시나리오 17. Period+Grace(10분) 뒤 healthchecks.io가 down으로 바꾸고 NUC를 거치지 않는 경로로 알림, 복구 뒤 up. | 실제 검증 완료(시나리오 17, 수신 시각 갈음) | Watchdog firing, healthchecks webhook 최근 1시간 30회. T08b: ping 차단 20분에 down 알림, 해제 뒤 up 알림. 시나리오 17: 전원 차단 07:00:01 → down 알림 07:09, RTC 기상 07:15:09 → up 알림 07:15 | 없음 |
 
 - **할 일 5(AC-P8):** 배포 갱신 주체가 아닌 신원의 digest PR이 자동 병합되지 않는지는 새로 만든 대역 App `ukyi-homelab-bot-standin-2`(contents·pull_requests write, webhook 없음, homelab·homelab-smoke 선택 설치)로 시나리오 15-7에서 봤다. App과 키는 시험 뒤 지웠다(approvals 2026-10-27 삭제 행).
 - **AC-P12 리뷰 App 구조를 T10 증거로 갈음한 근거:** 시험 App `ukyi-homelab-review-probe`는 T10 시험(2026-10-21 20:12~20:24) 뒤 20:26에 삭제됐다. lead는 2026-10-26에 probe App을 다시 만들어 확인하는 안을 세웠지만, 사용자가 2026-10-27에 "T10 증거로 갈음(한계)"으로 정했다(approvals 같은 날 사용자 결정 행). T10 증거는 실제 설치·토큰 시험이고, 지금 운영 App들도 같은 저장소별(`selected`) 설치를 쓴다. 실제 리뷰 App의 설치와 확인은 T17이다.
