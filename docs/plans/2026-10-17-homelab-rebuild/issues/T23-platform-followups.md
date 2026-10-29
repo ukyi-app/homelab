@@ -1,7 +1,7 @@
 # T23 플랫폼 후속(T13에서 넘김)
 
 - 단계: P2 후속
-- 상태: 진행 중 (2026-10-29 착수. 할 일 4 규칙 수정, 다음 재부팅 때 `ALERTS` 확인 남음. 할 일 1 작업 중. 할 일 2·3은 VM 자격 재발급(사람) 뒤)
+- 상태: 진행 중 (2026-10-29 착수. 할 일 4 규칙 수정, 다음 재부팅 때 `ALERTS` 확인 남음. 할 일 1 스위치 구현(차트 태그는 사람 승인 뒤). 할 일 2·3은 VM 자격 재발급(사람) 뒤)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T13
 - 선행 결정: D-12 (확정(사용자 2026-10-18, T05): 빈 NUC 검증은 VM, 설계 E8 VM 격리 조건 여섯, VM 호스트는 tailnet 밖)
@@ -19,6 +19,7 @@ T13이 끝내지 않고 넘긴 플랫폼 후속을 처리한다(T13 할 일 3, �
    - 기본값은 지금 렌더와 같아야 한다. 운영 렌더가 바뀌지 않는 것을 ci 렌더 비교로 보인다.
    - 공유 차트를 바꾸면 차트 버전과 git 태그를 올린다(설계 C.4.5). 태그 생성은 사람 승인 뒤다.
    - VM 격리 조건(T13 할 일 2, 설계 E8)대로 이 값은 VM의 복구 PR(`values-vm`)에서만 끈다. 운영 values는 바꾸지 않는다.
+   - 결과(2026-10-29): 스위치는 `cluster.restore.externalSecrets: false`(복구 PR이 `values-<클러스터>.yaml`에만, 없으면 켜짐)다. 끄면 Store 3개와 ExternalSecret 11개(클러스터마다), 공유 차트의 ExternalSecret 전부가 렌더되지 않고 `external-secrets-stores`·`edge-probe` Application이 빠진다. ESO operator는 남는다. cloudflared는 로컬 Helm 차트로, 관측 ExternalSecret 셋은 같은 Application의 Helm source로 옮겼다. 공유 차트 `app` 1.2.0·`app-data` 1.1.0. 기본값 렌더는 바뀌지 않는다(root 아래 410개 바이트 동일, ci 단계 `external secrets switch`가 지킨다). 스위치를 끄지 않은 PR은 옛 chartVersion 앱도 통과하고, 끈 클러스터에서만 원인을 말하며 실패한다. 로컬 codex 리뷰 2라운드(1라운드 P2 둘 수정, 2라운드 지적 없음).
 2. U40(설계 부록 1)을 VM에서 실제로 해 본다. T13 시나리오 13과 같은 VM 격리 조건 여섯으로 하되, VM이 Infisical에 닿지 못하게 막고 빈 클러스터를 복구한다.
    - 확인할 가정(설계 부록 1 U40 행): 할 일 1의 스위치를 끄면 root wave가 손으로 만든 Secret만으로 끝까지 진행하고, 값을 되돌렸을 때 ESO가 같은 이름의 기존 Secret을 넘겨받는다.
    - 넘겨받지 않거나 root가 진행하지 않으면 설계 부록 1 U40 행의 대안(되돌리는 PR 직전 손 Secret 삭제, 필요한 Application만 손으로 sync)을 `restore.md`에 절차로 둔다. 설계 C.6.4 행과 맞춘다.
