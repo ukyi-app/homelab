@@ -1,7 +1,7 @@
 # T23 플랫폼 후속(T13에서 넘김)
 
 - 단계: P2 후속
-- 상태: 착수 가능 (T13 완료 2026-10-29)
+- 상태: 진행 중 (2026-10-29 착수. 할 일 4 규칙 수정, 다음 재부팅 때 `ALERTS` 확인 남음. 할 일 1 작업 중. 할 일 2·3은 VM 자격 재발급(사람) 뒤)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T13
 - 선행 결정: D-12 (확정(사용자 2026-10-18, T05): 빈 NUC 검증은 VM, 설계 E8 VM 격리 조건 여섯, VM 호스트는 tailnet 밖)
@@ -27,6 +27,7 @@ T13이 끝내지 않고 넘긴 플랫폼 후속을 처리한다(T13 할 일 3, �
 4. `AdGuardTailnetQueriesMissing`(`platform/observability/stack/vmalert/rules/adguard.yaml`)의 재부팅 오경보를 없앤다(T13 시나리오 17, 2026-10-29). 재부팅으로 svclb 파드가 새 IP를 받아도 파드 객체가 그대로면 `kube_pod_start_time`이 옛 값이라, 새 IP 출처 질의가 질의 로그 파일에 쓰일 때까지(이번에 약 2분) 울린다.
    - 기준 시각을 파드 시작 대신 svclb 컨테이너 시작 시각(예: `kube_pod_container_state_started`)으로 바꾸거나 짧은 `for`를 둔다. `for`는 실제 이탈 감지도 그만큼 늦춘다.
    - 규칙 시험(`platform/observability/stack/vmalert/tests/adguard.test.yaml`)에 "같은 파드, 새 IP" 경우를 더하고, 기존 이탈 경우가 계속 울리는지 본다.
+   - 결과(2026-10-29): 기준 시각 후보에 svclb 컨테이너 시작 시각(`kube_pod_container_state_started`)을 더했다. 파드 시작 시각은 컨테이너 지표가 없을 때의 기준으로 남겼고 `for`는 두지 않았다. 규칙 시험 "같은 파드, 새 IP"는 바꾸기 전 규칙에서 5분 시점 오경보로 실패하고 바꾼 뒤 통과하며, 같은 시험의 이탈(15분)은 여전히 울린다. 운영 지표로 다시 평가: S17 오경보 시각(2026-10-28 22:16:30Z~22:18:00Z)에 옛 식은 741992초로 발화, 새 식은 빈 결과. 남은 것: 다음 NUC 재부팅 때 `ALERTS`로 확인.
 
 ## 필요한 자격
 

@@ -25,9 +25,14 @@ groups:
       # 가장 새 항목과 비교한다: "파일에 쌓인 마지막 1시간 동안 svclb 출처가 0건". 버퍼 크기(1000이든 100이든)는
       # 감지를 늦출 뿐 오경보를 만들지 않는다. 버퍼는 순서대로 한꺼번에 비워져 tailnet 항목만 남는 일이 없다.
       #
-      # 기준 시각은 "지금 svclb IP 출처의 마지막 질의"와 "지금 svclb 파드 시작 시각" 중 더 최근 값이다. 재시작한 svclb가
-      # 옛 IP를 다시 받아도 그 옛 항목으로 비교하지 않는다. svclb 파드 정보가 아예 없으면 0이라 울린다(svclb가 없으면
+      # 기준 시각은 "지금 svclb IP 출처의 마지막 질의"와 "지금 svclb 파드·컨테이너 시작 시각" 중 가장 최근 값이다. 재시작한
+      # svclb가 옛 IP를 다시 받아도 그 옛 항목으로 비교하지 않는다. svclb 파드 정보가 아예 없으면 0이라 울린다(svclb가 없으면
       # tailnet 경로도 없다). 리더가 없으면 AdGuardQuerylogReaderDown이 본다.
+      #
+      # 컨테이너 시작 시각이 필요한 이유: NUC 재부팅 뒤에는 파드 객체가 그대로라 kube_pod_start_time이 재부팅 전 값이다.
+      # 샌드박스만 새로 만들어 IP가 바뀌고 컨테이너는 다시 시작한다. 파드 시작만 보면 새 IP 항목이 파일에 쓰일 때까지
+      # (T13 시나리오 17에서 약 2분) 오경보가 난다. 파드 시작 시각은 컨테이너 지표가 없을 때(실행 중이 아님)의 기준으로 남긴다.
+      # 함정: svclb 컨테이너가 계속 재시작하면 기준이 계속 밀려 이 경보가 늦는다. 그 경우는 KubePodCrashLooping(5분)이 본다.
       #
       # 둘째 조건은 벽시계 안전망이다. LAN 질의까지 끊기거나 버퍼가 차지 않아 파일이 멈추면 첫째 조건의 두 값이 함께 멈춰
       # 영원히 울리지 않는다. 그래서 기준 시각이 지금보다 6시간 넘게 오래되면 파일과 상관없이 울린다. 6시간 동안 집 전체
@@ -43,6 +48,7 @@ groups:
                 max by (client) (label_replace(kube_pod_info{namespace="kube-system", created_by_kind="DaemonSet", created_by_name=~"svclb-adguard-dns-.+"}, "client", "$1", "pod_ip", "(.+)"))
               ), "base", "query", "", "")
               or label_replace(max(kube_pod_start_time{namespace="kube-system", pod=~"svclb-adguard-dns-.+"}), "base", "start", "", "")
+              or label_replace(max(kube_pod_container_state_started{namespace="kube-system", pod=~"svclb-adguard-dns-.+"}), "base", "container", "", "")
               or label_replace(vector(0), "base", "none", "", "")
             )
             > 3600
@@ -57,6 +63,7 @@ groups:
                 max by (client) (label_replace(kube_pod_info{namespace="kube-system", created_by_kind="DaemonSet", created_by_name=~"svclb-adguard-dns-.+"}, "client", "$1", "pod_ip", "(.+)"))
               ), "base", "query", "", "")
               or label_replace(max(kube_pod_start_time{namespace="kube-system", pod=~"svclb-adguard-dns-.+"}), "base", "start", "", "")
+              or label_replace(max(kube_pod_container_state_started{namespace="kube-system", pod=~"svclb-adguard-dns-.+"}), "base", "container", "", "")
               or label_replace(vector(0), "base", "none", "", "")
             )
             > 6 * 3600
