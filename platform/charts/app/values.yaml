@@ -1,6 +1,9 @@
 # 기본값. 앱이 반드시 정할 값(kind, resources, 이미지)에는 기본값을 두지 않는다. 빠지면 schema가 렌더를 막는다.
 # 키 설명은 values.schema.json의 description에 있다.
 secrets: []
+# 복구 스위치. ApplicationSet apps가 root의 cluster.restore.externalSecrets: false일 때만 false로 넣는다. 사람이 적지 않는다.
+externalSecrets:
+  enabled: true
 env: {}
 uses:
   postgres: false

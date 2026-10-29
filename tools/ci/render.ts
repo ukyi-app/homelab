@@ -133,17 +133,30 @@ function clusterPrefixes(clusterFiles: string[]): [string, string][] {
   });
 }
 
-// 복구 동안 이 클러스터에서만 멈출 앱(cluster.restore). 비어 있지 않으면 ApplicationSet apps·data의 templatePatch가
-// files/restore-patch.tpl로 바뀌어 그 앱의 values를 덮어쓴다(platform/appsets/*/templates/applicationset.yaml).
-type Restore = { suspendedApps: string[]; valkey: Record<string, string> };
-function clusterRestore(vf: string): Restore {
+// 복구 동안 이 클러스터에서만 바꿀 값(cluster.restore). 비어 있지 않으면 ApplicationSet apps·data의 templatePatch가
+// files/restore-patch.tpl·external-secrets-patch.tpl로 바뀌어 그 앱의 values를 덮어쓴다(platform/appsets/*/templates/applicationset.yaml).
+// externalSecretsOff: 복구 스위치 cluster.restore.externalSecrets가 bool false(platform/root/templates/_helpers.tpl과 같은 판정).
+type Restore = { suspendedApps: string[]; valkey: Record<string, string>; externalSecretsOff: boolean };
+function clusterRestore(vf: string, overlay?: RootOverlay): Restore {
   const r = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) as any)?.cluster?.restore ?? {};
+  const o = overlay?.cluster?.restore ?? {};
+  const es = "externalSecrets" in o ? o.externalSecrets : r.externalSecrets;
   // 모양이 틀린 값(목록·맵이 아님)은 ApplicationSet 차트 렌더가 실패로 막는다. 여기서는 빈 값으로 본다.
+  // bool이 아닌 스위치 값은 root의 cluster-check.yaml이 렌더를 막는다.
   return {
     suspendedApps: Array.isArray(r.suspendedApps) ? r.suspendedApps.map(String) : [],
     valkey: r.valkey && typeof r.valkey === "object" && !Array.isArray(r.valkey) ? r.valkey : {},
+    externalSecretsOff: es === false,
   };
 }
+
+// 끈 렌더(tools/ci/switch.ts). root 값 위에 얹는 값과, 로컬 차트 시험 values 위에 얹는 값이다.
+// 덧씌우기가 있으면 3.(남은 kustomization) build는 건너뛴다. 배포되지 않는 디렉터리라 스위치와 상관없고, 켠 렌더가 이미 본다.
+export type RootOverlay = { cluster?: { restore?: Record<string, unknown> } };
+export type RenderOptions = { rootOverlay?: RootOverlay; chartOverlay?: Record<string, unknown> };
+// 복구 스위치를 끈 값. ApplicationSet이 생성 Application에 넣는 값과 같다(platform/appsets/*/files/external-secrets-patch.tpl).
+export const EXTERNAL_SECRETS_OFF = { externalSecrets: { enabled: false } };
+const ES_PATCH_LINE = '{{- $_ := set $v "externalSecrets" (dict "enabled" false) }}';
 
 // ApplicationSet apps(platform/appsets/apps/files/applicationset.yaml). 아래 5.가 그 Application을 대신 렌더하므로
 // 생성기·템플릿·값 합치기가 그 전개와 같은지 본다. 하나를 바꾸면 이 함수와 5.를 함께 바꾼다.
@@ -168,14 +181,19 @@ APPSET_RENDERERS.apps = (set, restore) => {
     return "템플릿 이름·ns·source가 render.ts의 앱 렌더(app-<앱>, platform/charts/app@app-chart-v<chartVersion>)와 다르다";
   }
   const patch = String(set.spec?.templatePatch ?? "");
-  if (restore.suspendedApps.length === 0) {
+  // 복구 스위치 주입은 끈 클러스터에만 있어야 한다. 켠 클러스터에 있으면 아래 5.가 재현하지 않는 값이 앱에 들어간다.
+  if (patch.includes(ES_PATCH_LINE) !== restore.externalSecretsOff) return "templatePatch의 복구 스위치 주입(externalSecrets)이 클러스터 값과 다르다";
+  if (restore.suspendedApps.length === 0 && !restore.externalSecretsOff) {
     if (!patch.includes('omit . "path" "values" "tailnetPrefix" | toYaml')) return "templatePatch의 값 합치기가 render.ts와 다르다";
     return true;
   }
+  const want = ['{{- $v := omit . "path" "values" "tailnetPrefix" }}', "{{- $v | toYaml | nindent 8 }}"];
   // 복구 멈춤: 목록의 앱에만 suspended: true(아래 5.와 같은 전개).
-  const list = restore.suspendedApps.map((a) => JSON.stringify(a)).join(" ");
-  const want = ['{{- $v := omit . "path" "values" "tailnetPrefix" }}', `{{- if has .values.app (list ${list}) }}`, '{{- $_ := set $v "suspended" true }}', "{{- $v | toYaml | nindent 8 }}"];
-  if (want.some((w) => !patch.includes(w))) return "templatePatch의 복구 멈춤 주입(suspendedApps)이 render.ts의 전개와 다르다";
+  if (restore.suspendedApps.length > 0) {
+    const list = restore.suspendedApps.map((a) => JSON.stringify(a)).join(" ");
+    want.push(`{{- if has .values.app (list ${list}) }}`, '{{- $_ := set $v "suspended" true }}');
+  }
+  if (want.some((w) => !patch.includes(w))) return "templatePatch의 복구 주입(suspendedApps·externalSecrets)이 render.ts의 전개와 다르다";
   return true;
 };
 
@@ -199,23 +217,25 @@ APPSET_RENDERERS.data = (set, restore) => {
     return "템플릿 이름·ns·source가 render.ts의 데이터 렌더(<앱>-data, 릴리스 <앱>, platform/charts/app-data@data-chart-v<chartVersion>)와 다르다";
   }
   const patch = String(set.spec?.templatePatch ?? "");
+  if (patch.includes(ES_PATCH_LINE) !== restore.externalSecretsOff) return "templatePatch의 복구 스위치 주입(externalSecrets)이 클러스터 값과 다르다";
   const apps = Object.keys(restore.valkey).sort();
-  if (apps.length === 0) {
+  if (apps.length === 0 && !restore.externalSecretsOff) {
     if (!patch.includes('omit . "path" "values" "backup" | toYaml')) return "templatePatch의 값 합치기가 render.ts와 다르다";
     return true;
   }
+  const want = ['{{- $v := omit . "path" "values" "backup" }}', "{{- $v | toYaml | nindent 8 }}"];
   // 복구 멈춤: 맵의 앱에만 valkey.running·restoreMode를 모드 값으로 다시 쓴다(아래 6.과 같은 전개).
-  const pairs = apps.map((a) => `${JSON.stringify(a)} ${JSON.stringify(String(restore.valkey[a]))}`).join(" ");
-  const want = [
-    '{{- $v := omit . "path" "values" "backup" }}',
-    `{{- $mode := get (dict ${pairs}) .values.app }}`,
-    '{{- $vk := omit (get $v "valkey" | default dict) "running" "restoreMode" }}',
-    '{{- $_ := set $vk "running" (eq $mode "restoreMode") }}',
-    '{{- $_ := set $vk "restoreMode" true }}',
-    '{{- $_ := set $v "valkey" $vk }}',
-    "{{- $v | toYaml | nindent 8 }}",
-  ];
-  if (want.some((w) => !patch.includes(w))) return "templatePatch의 복구 멈춤 주입(valkeyRestore)이 render.ts의 전개와 다르다";
+  if (apps.length > 0) {
+    const pairs = apps.map((a) => `${JSON.stringify(a)} ${JSON.stringify(String(restore.valkey[a]))}`).join(" ");
+    want.push(
+      `{{- $mode := get (dict ${pairs}) .values.app }}`,
+      '{{- $vk := omit (get $v "valkey" | default dict) "running" "restoreMode" }}',
+      '{{- $_ := set $vk "running" (eq $mode "restoreMode") }}',
+      '{{- $_ := set $vk "restoreMode" true }}',
+      '{{- $_ := set $v "valkey" $vk }}',
+    );
+  }
+  if (want.some((w) => !patch.includes(w))) return "templatePatch의 복구 주입(valkeyRestore·externalSecrets)이 render.ts의 전개와 다르다";
   return true;
 };
 
@@ -229,10 +249,16 @@ function clusterBuckets(clusterFiles: string[]): [string, string | undefined][] 
   });
 }
 
-export function renderAll(): RenderResult {
+// 렌더 결과 캐시. 같은 차트·값이면 결과가 같으므로 켠 렌더와 끈 렌더(tools/ci/switch.ts)가 함께 쓴다.
+// kustomize 원격 base(argocd install.yaml)를 두 번 받지 않는다. 기본 렌더 결과도 한 번만 만든다.
+const cache = new Map<string, { ok: boolean; out: string }>();
+let defaultResult: RenderResult | undefined;
+
+export function renderAll(opts: RenderOptions = {}): RenderResult {
+  const plain = !opts.rootOverlay && !opts.chartOverlay;
+  if (plain && defaultResult) return defaultResult;
   const res: RenderResult = { targets: [], docs: [], violations: [], skipped: [] };
   const tmp = tempDir("render");
-  const cache = new Map<string, { ok: boolean; out: string }>();
   const covered = new Set<string>();
 
   const add = (origin: string, text: string, ns?: string) => {
@@ -375,13 +401,14 @@ export function renderAll(): RenderResult {
     }
     valueFiles.delete(`platform/root/${want}`);
     clusterFiles.push(`platform/root/${want}`);
-    const out = renderSource(roots[0], cluster, src);
+    // 덧씌우기는 valuesObject로 넘긴다. Argo CD와 같이 valueFiles 위에 합쳐진다(renderSource). root 파일 검사는 위에서 끝났다.
+    const out = renderSource(roots[0], cluster, opts.rootOverlay ? { ...src, helm: { ...src.helm, valuesObject: opts.rootOverlay } } : src);
     if (out === undefined) continue;
     // 2. root가 만든 Application의 자기 저장소 source. 렌더 결과에 다시 Application이 있으면(app-of-apps) 그것도 따라간다.
     const visit = (text: string, depth: number) => {
       // ApplicationSet이 만드는 Application도 검사해야 한다. 어느 단계에서 나오든 여기서 전개하는 것만 받는다(아래 5.).
       for (const set of parseAll(text).filter((d) => d?.kind === "ApplicationSet")) {
-        const ok = APPSET_RENDERERS[set.metadata?.name]?.(set, clusterRestore(`platform/root/values-${cluster}.yaml`));
+        const ok = APPSET_RENDERERS[set.metadata?.name]?.(set, clusterRestore(`platform/root/values-${cluster}.yaml`, opts.rootOverlay));
         if (ok !== true) fail(`${set.metadata?.name}[${cluster}]`, `ApplicationSet ${set.metadata?.name}: ${ok ?? "render.ts가 전개하지 않는 ApplicationSet이다"}`);
       }
       for (const app of parseAll(text).filter((d) => d?.kind === "Application")) {
@@ -409,8 +436,8 @@ export function renderAll(): RenderResult {
     for (const a of Object.keys(r.valkey).filter((a) => !dataDirs.has(a))) fail(vf, `cluster.restore.valkey의 ${a}: data/${a}/values.yaml이 없다`);
   }
 
-  // 3. 나머지 kustomization
-  for (const f of gitFiles(...KUSTOMIZATION_FILES.map((n) => `:(glob)platform/**/${n}`))) {
+  // 3. 나머지 kustomization(덧씌운 렌더는 건너뛴다, RenderOptions)
+  for (const f of plain ? gitFiles(...KUSTOMIZATION_FILES.map((n) => `:(glob)platform/**/${n}`)) : []) {
     const dir = dirname(f);
     if (covered.has(dir)) continue;
     covered.add(dir);
@@ -428,14 +455,23 @@ export function renderAll(): RenderResult {
     if (dirname(dir).endsWith("/charts") && existsSync(join(ROOT, dirname(dirname(dir)), "Chart.yaml"))) continue;
     const ciFiles = gitFiles(`${dir}/ci/*.yaml`);
     if (ciFiles.length === 0) {
-      if (dir.startsWith("platform/charts/") || !covered.has(dir)) fail(dir, "차트 시험 values(ci/*.yaml)가 없다(공유 차트이거나 root가 아직 렌더하지 않는 차트)");
+      // 덧씌운 렌더에서는 끄는 Application(Store 등)의 차트가 렌더되지 않는다. 이 검사는 켠 렌더가 한다.
+      if (plain && (dir.startsWith("platform/charts/") || !covered.has(dir))) fail(dir, "차트 시험 values(ci/*.yaml)가 없다(공유 차트이거나 root가 아직 렌더하지 않는 차트)");
       continue;
     }
     const chart = relative(dirname(dir), dir);
     if (!capsOk(`chart:${relative("platform", dir)}`, dir)) continue;
     for (const f of ciFiles) {
       const origin = `chart:${relative("platform", dir)}/${relative(dir, f)}`;
-      const r = helmTemplate(chart, dir, `app-${chart}`, [f]);
+      const files = [f];
+      if (opts.chartOverlay) {
+        const vfile = join(tmp, `chart-overlay-${relative("platform", dir).replaceAll("/", "_")}.json`);
+        writeFileSync(vfile, JSON.stringify(opts.chartOverlay));
+        files.push(vfile);
+      }
+      const key = JSON.stringify(["chart-ci", dir, f, opts.chartOverlay ?? null]);
+      const r = cache.get(key) ?? helmTemplate(chart, dir, `app-${chart}`, files);
+      cache.set(key, r);
       if (!r.ok) fail(origin, r.out.trim());
       else add(origin, r.out);
     }
@@ -449,7 +485,7 @@ export function renderAll(): RenderResult {
     const app = basename(dirname(vf));
     for (const [cluster, prefix] of clusterPrefixes(clusterFiles)) {
       const where = `app:${app}[${cluster}]`;
-      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`);
+      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`, opts.rootOverlay);
       try {
         // ApplicationSet은 path·values를 생성기 변수로 덮고 tailnetPrefix는 클러스터 값으로 덮는다. 사람이 적은 같은 키는
         // 조용히 사라지므로(예: probe 경로를 최상위 path로 적음) 지우지 않고 실패로 둔다. 두 파일의 키도 서로 겹치지 않는다.
@@ -458,14 +494,16 @@ export function renderAll(): RenderResult {
         const image = (existsSync(imageFile) ? Bun.YAML.parse(readFileSync(imageFile, "utf8")) ?? {} : {}) as Record<string, any>;
         // cacheServer는 차트 내부 값(공식 valkey 차트)이다. 앱 values가 덮으면 이미지·인증·크기를 바꿀 수 있다.
         // global도 의존 차트로 내려간다(global.imageRegistry가 고정한 이미지 레지스트리를 덮는다).
-        const reserved = ["path", "values", "tailnetPrefix", "cacheServer", "global"];
+        // externalSecrets는 복구 스위치라 ApplicationSet만 넣는다. 공용 values에 적으면 운영 앱도 꺼진다.
+        const reserved = ["path", "values", "tailnetPrefix", "cacheServer", "global", "externalSecrets"];
         const imageKeys = ["repository", "digest", "revision", "hold"];
         const badHuman = Object.keys(human).filter((k) => reserved.includes(k) || imageKeys.includes(k));
         const badImage = Object.keys(image).filter((k) => !imageKeys.includes(k));
-        if (badHuman.length > 0) throw new Error(`values.yaml에 둘 수 없는 키: ${badHuman.join(", ")}(생성기 변수·클러스터 값·image.yaml 키)`);
+        if (badHuman.length > 0) throw new Error(`values.yaml에 둘 수 없는 키: ${badHuman.join(", ")}(생성기 변수·클러스터 값·복구 스위치·image.yaml 키)`);
         if (badImage.length > 0) throw new Error(`image.yaml에는 ${imageKeys.join(", ")}만 둔다: ${badImage.join(", ")}`);
         const values: Record<string, any> = { ...human, ...image, tailnetPrefix: prefix };
         if (restore.suspendedApps.includes(app)) values.suspended = true;
+        if (restore.externalSecretsOff) Object.assign(values, structuredClone(EXTERNAL_SECRETS_OFF));
         const chartDir = pathAtRevision(`app-chart-v${values.chartVersion}`, "platform/charts/app", tmp);
         const vfile = join(tmp, `app-${app}-${cluster}.json`);
         writeFileSync(vfile, JSON.stringify(values));
@@ -485,12 +523,13 @@ export function renderAll(): RenderResult {
     const app = basename(dirname(vf));
     for (const [cluster, bucket] of clusterBuckets(clusterFiles)) {
       const where = `data:${app}[${cluster}]`;
-      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`);
+      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`, opts.rootOverlay);
       try {
         const human = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) ?? {}) as Record<string, any>;
         // valkeyServer·global은 차트 내부 값(공식 valkey 차트로 내려간다)이다. backup은 클러스터 값이라 ApplicationSet이 덮는다.
-        const bad = Object.keys(human).filter((k) => ["path", "values", "backup", "valkeyServer", "global"].includes(k));
-        if (bad.length > 0) throw new Error(`data values.yaml에 둘 수 없는 키: ${bad.join(", ")}(생성기 변수·클러스터 값·차트 내부 값)`);
+        // externalSecrets는 복구 스위치라 ApplicationSet만 넣는다(앱과 같은 이유).
+        const bad = Object.keys(human).filter((k) => ["path", "values", "backup", "valkeyServer", "global", "externalSecrets"].includes(k));
+        if (bad.length > 0) throw new Error(`data values.yaml에 둘 수 없는 키: ${bad.join(", ")}(생성기 변수·클러스터 값·차트 내부 값·복구 스위치)`);
         if (bucket === undefined) throw new Error(`platform/root/values-${cluster}.yaml에 cluster.backup.bucket이 없다`);
         const values: Record<string, any> = { ...human, backup: { bucket } };
         const mode = restore.valkey[app];
@@ -498,6 +537,7 @@ export function renderAll(): RenderResult {
           const { running: _running, restoreMode: _restoreMode, ...rest } = (human.valkey ?? {}) as Record<string, any>;
           values.valkey = { ...rest, running: mode === "restoreMode", ...(mode === "restoreMode" ? { restoreMode: true } : {}) };
         }
+        if (restore.externalSecretsOff) Object.assign(values, structuredClone(EXTERNAL_SECRETS_OFF));
         const chartDir = pathAtRevision(`data-chart-v${values.chartVersion}`, "platform/charts/app-data", tmp);
         const vfile = join(tmp, `data-${app}-${cluster}.json`);
         writeFileSync(vfile, JSON.stringify(values));
@@ -511,6 +551,7 @@ export function renderAll(): RenderResult {
   }
 
   if (res.targets.length === 0) fail("render", "렌더 대상이 0개다(찾는 식이 깨졌을 수 있다, L40)");
+  if (plain) defaultResult = res;
   return res;
 }
 

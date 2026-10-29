@@ -8,6 +8,9 @@ valkey:
 purge: false
 # ApplicationSet data가 클러스터 값 cluster.backup.bucket으로 채운다(운영 homelab-backups, VM은 전용 버킷). 사람이 적지 않는다.
 backup: {}
+# 복구 스위치. ApplicationSet data가 root의 cluster.restore.externalSecrets: false일 때만 false로 넣는다. 사람이 적지 않는다.
+externalSecrets:
+  enabled: true
 
 # 영속 Valkey(공식 차트 valkey, Chart.yaml의 valkeyServer) 내부 값. data values에 적지 않는다(ci가 막는다).
 # 이미지·인증 모양은 앱 차트의 cacheServer와 같다. 바꿀 때 둘을 함께 바꾼다.
