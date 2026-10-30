@@ -352,7 +352,7 @@ U01(원격 터널 와일드카드), U02(R2 잠금과 중첩 자격), U34(실제 
 자격 없는 fmt/init/validate로 확인할 수 없다. 사람 검증 결과를 따로 남긴다.
 U01은 시험 host 200·없는 host 404·cloudflared `/ready` 200을 확인한다.
 WAF는 `GET https://hooks.ukyi.app/github`와 다른 경로 POST를 차단하고,
-정상 경로 POST의 HMAC 검증은 봇/시험 수신기가 담당한다.
+정상 경로 POST의 HMAC 검증은 봇(`apps/homelab-bot`, 틀린 서명 401)이 담당한다.
 
 ## 7. 자격 없는 로컬 검사
 

@@ -1,7 +1,7 @@
 // 복구 스위치 cluster.restore.externalSecrets 검사(T23, 설계 C.6.4 "클러스터 유실 + Infisical 장애").
 // 같은 저장소를 스위치를 켠 값과 끈 값으로 한 번씩 더 렌더해(render.ts RenderOptions) 다음을 본다.
 // 1. 끄면 ExternalSecret·ClusterSecretStore가 0개(root 아래 전부, 등록 앱·데이터, 로컬 차트 시험 values).
-// 2. 켬과 끔의 차이는 그 둘과 허용한 Application 둘(Store, edge-probe), 스위치 값 자리뿐이다. Deployment 같은 것이 함께
+// 2. 켬과 끔의 차이는 그 둘과 허용한 Application 하나(Store), 스위치 값 자리뿐이다. Deployment 같은 것이 함께
 //    빠지면 복구 때 그 구성 요소가 뜨지 않는다.
 // 3. 값 파일에 스위치가 없는 클러스터는 기본 렌더가 켠 렌더와 같고, 어느 Application에도 스위치 값이 들어가지 않는다.
 //    운영 Application spec이 스위치 전과 같다는 장치를 지킨다.
@@ -10,8 +10,8 @@
 //    (tools/ci/appset-patch.ts). 위 1.~3.의 등록 앱·데이터 렌더는 render.ts의 재현이라 그 단계를 대신 보지 못한다.
 // 등록 앱·데이터가 스위치를 모르는 옛 차트(render.ts ES_SWITCH_SINCE)면 가상 끔 렌더에서는 정보 줄만 낸다. 기존 앱은 옛 태그에
 // 머물 수 있다(설계 C.4.5). 값 파일에서 스위치를 실제로 끈 클러스터는 기본 렌더(render 단계)와 여기서 함께 실패한다.
-// 끌 때 빠지는 것(Store와 ExternalSecret 대상 Secret)을 출력한다. 손으로 만들 Secret은 이 중 Store와 Application째 빠지는
-// edge-probe를 뺀 것이다(앱 0개일 때 14개 중 10개, restore.md 3.1).
+// 끌 때 빠지는 것(Store와 ExternalSecret 대상 Secret)을 출력한다. 손으로 만들 Secret은 이 중 Store를 뺀 것이다
+// (앱 0개일 때 13개 중 10개, restore.md 3.1).
 import { checkAppsetPatches } from "./appset-patch";
 import { checkSecretPaths } from "./data";
 import { type Doc, type Violation, gitFiles, readText } from "./lib";
@@ -19,8 +19,8 @@ import { checkAll } from "./policy";
 import { ES_CHART_RULE, EXTERNAL_SECRETS_OFF, renderAll } from "./render";
 
 const SECRET_KINDS = new Set(["ExternalSecret", "ClusterSecretStore"]);
-// 끌 때 Application째 빠지는 것(platform/root/templates/external-secrets.yaml, edge-probe.yaml).
-const REMOVED_APPS = new Set(["external-secrets-stores", "edge-probe"]);
+// 끌 때 Application째 빠지는 것(platform/root/templates/external-secrets.yaml).
+const REMOVED_APPS = new Set(["external-secrets-stores"]);
 const ES_PATCH = "externalSecrets";
 
 const isSecret = (d: Doc) => SECRET_KINDS.has(d.obj?.kind) && String(d.obj?.apiVersion ?? "").startsWith("external-secrets.io/");
@@ -135,7 +135,7 @@ export function checkExternalSecretsSwitch(): Violation[] {
     const info = group([...onDocs.values()][0].origin);
     const offDocs = offG.get(g);
     if (!offDocs) {
-      if (!(info.app && REMOVED_APPS.has(info.app)) && !offFailed.has(g)) v(g, "끄면 이 렌더가 통째로 사라진다(허용: external-secrets-stores, edge-probe)");
+      if (!(info.app && REMOVED_APPS.has(info.app)) && !offFailed.has(g)) v(g, "끄면 이 렌더가 통째로 사라진다(허용: external-secrets-stores)");
       continue;
     }
     for (const [k, d] of onDocs) {
