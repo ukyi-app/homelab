@@ -24,6 +24,20 @@ proxy:
     - files.pythonhosted.org
     # 모델 API·구독 인증 호스트는 T16b가 E9 실측으로 더한다(설계 C.8, D-14).
 
+# 작업자(templates/worker-deployment.yaml). 봇 이미지 하나를 게시 서버와 함께 쓰고 command만 작업자 진입점으로 바꾼다(T16b D2).
+worker:
+  # main 빌드(app-build)가 GHCR에 올린 digest만 쓴다. 로컬 빌드 digest는 CI 빌드와 다르다.
+  # 사람 PR로만 바꾼다(D2). 게시 서버는 apps/homelab-bot/image.yaml 자동 병합으로 따라가지만, auth.json을 든 sandbox까지
+  # 자동 경로를 넓히지 않는다(설계 C.4.4·C.4.7). 작업자 요청 계약(version)을 바꾸는 봇 PR은 이 값을 바꾸는 PR과 짝으로 낸다.
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:b9a8555a538acb985d562062730302dcb54145bdb732a1501c9891b145f7fb7f
+  # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
+  # WORKER_CONTROL_PRIVATE_KEY다. 둘이 어긋나면 작업자가 모든 실행 요청을 403으로 거부하니 회전은 두 값을 함께 바꾼다.
+  # 모양이 틀리면 작업자가 기동하지 못해(종료 1) sandbox가 Degraded가 되므로 values.schema.json이 Ed25519 공개 키 모양만 받는다.
+  controlPublicKey: |
+    -----BEGIN PUBLIC KEY-----
+    MCowBQYDK2VwAyEA48/F2Z0cCfqLbEGfQY3aoDWCRtgzFLLsY9kskMFFqRs=
+    -----END PUBLIC KEY-----
+
 # 복구 스위치(설계 C.6.4 "클러스터 유실 + Infisical 장애"). root가 cluster.restore.externalSecrets: false일 때만 false로 넘긴다.
 # 끄면 이 차트의 ExternalSecret(과 Store)을 내지 않는다. 같은 이름의 Secret은 사람이 손으로 만든다(restore.md 3절 U40).
 externalSecrets:

@@ -1,9 +1,9 @@
 {{- /*
-작업자 자리(설계 C.8 격리 행, D-14, D-15). 이 티켓은 시험 작업자로 모양만 확인한다. 실제 작업자 이미지는 T16b가 넣는다.
-netshoot v0.16(2026-07-01 기준 최신, 멀티 아키텍처 index, 2026-10-22 Docker Hub에서 확인). iptables(nft)·curl·nslookup·nc와
-busybox httpd가 있어 init 방화벽과 시험 작업자(HTTP 8080, 준비 확인의 curl)를 한 이미지로 한다. 시험용이라 운영 작업자에는 쓰지 않는다.
+작업자(설계 C.8 격리 행, D-14, D-15). 본 컨테이너는 봇 이미지의 작업자 진입점이다(T16b, 이미지는 values.yaml worker.image).
+init 방화벽만 netshoot v0.16(2026-07-01 기준 최신, 멀티 아키텍처 index, 2026-10-22 Docker Hub에서 확인)을 쓴다. iptables(nft)가 있고,
+tools/ci/policy.ts가 이 이미지·명령을 고정본과 맞춘다. 봇 이미지에는 iptables가 없다.
 */}}
-{{- $image := "docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70" }}
+{{- $firewallImage := "docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70" }}
 {{- $proxy := printf "http://%s:%d" .Values.proxy.clusterIP (int .Values.proxy.port) }}
 apiVersion: apps/v1
 kind: Deployment
@@ -42,7 +42,7 @@ spec:
         # NET_ADMIN은 이 컨테이너에만 있다. 본 컨테이너는 규칙을 못 바꾸고, 규칙은 파드 netns에 남아 본 컨테이너 재시작에도 유지된다.
         # 규칙을 못 걸면 여기서 실패해 파드가 뜨지 않는다(열린 채로 뜨지 않는다).
         - name: egress-firewall
-          image: {{ $image }}
+          image: {{ $firewallImage }}
           command: ["/bin/sh", "-euc"]
           args:
             - |
@@ -84,37 +84,47 @@ spec:
               memory: 64Mi
       containers:
         - name: worker
-          image: {{ $image }}
-          command: ["/bin/sh", "-ec"]
-          args:
-            - |
-              mkdir -p /tmp/www
-              echo ok > /tmp/www/index.html
-              exec /usr/sbin/httpd -f -p 8080 -h /tmp/www
+          image: {{ .Values.worker.image }}
+          # 이미지 기본 CMD는 게시 서버다. ENTRYPOINT가 비어 있어 이 command가 그대로 돈다(작업 디렉터리는 이미지의 /app).
+          # 기동: codex 버전 확인 → 시드 복사 → nonce 저장소 → 8080. 어느 단계든 실패하면 사유 코드 한 줄만 남기고 종료 1이다.
+          # 종료 1이 반복되면 CrashLoop → Deployment Degraded → root가 sandbox wave(-2)에서 멈춘다.
+          command: ["node", "dist/src/worker-main.js"]
           ports:
             - name: http
               containerPort: 8080
               protocol: TCP
           env:
-            # 이름 해석은 프록시가 한다(U29). 대문자·소문자를 모두 둔다. 도구마다 읽는 쪽이 다르다(curl은 https_proxy를 둘 다 읽는다).
-            # HTTP_PROXY는 두지 않는다. 프록시가 평문 HTTP를 거부한다.
+            # 이름 해석은 프록시가 한다(U29). 작업자는 대문자 HTTPS_PROXY·NO_PROXY만 읽어 codex 프로세스에만 넘긴다(모델 셸에는 안 넘김).
+            # 소문자 변수는 읽는 쪽이 없어 뺐다. HTTP_PROXY는 두지 않는다. 프록시가 평문 HTTP를 거부한다.
             - name: HTTPS_PROXY
-              value: {{ $proxy | quote }}
-            - name: https_proxy
               value: {{ $proxy | quote }}
             # loopback은 프록시를 거치지 않는다. 없으면 127.0.0.1로 가는 HTTPS 요청이 프록시에서 거부된다.
             - name: NO_PROXY
               value: 127.0.0.1,localhost
-            - name: no_proxy
-              value: 127.0.0.1,localhost
+            # 영속 CODEX_HOME(PVC). Codex가 갱신한 auth.json이 여기 남는다(D-14).
             - name: CODEX_HOME
               value: /codex-home
+            # 시드는 <WORKER_SEED_DIR>/<WORKER_SEED_KEY> 파일(Secret worker-seed의 키, Infisical 키 이름 그대로)이다.
+            # CODEX_HOME에 auth.json이 없을 때만 복사한다. 있으면 시드가 바뀌어도 덮지 않는다(갱신된 토큰을 지킨다).
+            - name: WORKER_SEED_DIR
+              value: /run/worker-seed
+            - name: WORKER_SEED_KEY
+              value: CODEX_AUTH_JSON
+            # 쓴 capability nonce(62초 보관). 파드를 다시 만들어도 재사용을 막으려고 PVC 안 별도 디렉터리에 둔다(D3).
+            # CODEX_HOME 자체는 작업자가 거부한다. 모델 셸이 읽을 수 있는 자리지만 nonce는 비밀이 아니다.
+            - name: WORKER_NONCE_DIR
+              value: /codex-home/.homelab-worker/nonces
+            - name: WORKER_CONTROL_PUBLIC_KEY
+              value: {{ .Values.worker.controlPublicKey | quote }}
+          # /readyz는 CODEX_HOME에 auth.json(일반 파일)이 있을 때만 200, 아니면 503이다.
           # kubelet 프로브는 노드에서 오므로 NetworkPolicy에 막히지 않는다(설계 B.8). 응답 패킷은 init 규칙의 ESTABLISHED로 나간다.
           readinessProbe:
             httpGet:
-              path: /
+              path: /readyz
               port: http
             periodSeconds: 10
+          # 이미지 USER(65532)를 덮는다. 이미지 파일은 root 소유·누구나 읽기라 uid가 달라도 돈다.
+          # PVC(local-path, hostPath)는 fsGroup이 적용되지 않는다. 폴더가 0777로 만들어져 쓸 수 있다. 저장소 클래스를 바꾸면 다시 본다.
           securityContext:
             runAsNonRoot: true
             runAsUser: 10001
@@ -131,26 +141,31 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+          # 2026-10-30 로컬 이미지 실측: 대기 중 cgroup 36MB(node RSS 85MB), codex --version 26MB, exec --help 60MB.
+          # 대화 실행 중 메모리는 아직 모른다(S12). 그때까지 limit 1Gi [가정]. 넘으면 컨테이너가 OOM으로 재시작되고,
+          # 반복되면 CrashLoop로 위와 같이 root가 멈춘다. 실측 뒤 줄인다.
           resources:
             requests:
               cpu: 10m
-              memory: 32Mi
-            limits:
               memory: 128Mi
+            limits:
+              memory: 1Gi
       volumes:
         - name: codex-home
           persistentVolumeClaim:
             claimName: codex-home
-        # optional: 시드는 CODEX_HOME에 auth.json이 없을 때만 쓴다(D-14). 필수로 두면 시드가 없을 때 파드가 못 떠
-        # Deployment가 Degraded가 되고, root sync가 wave -2에서 실패해 뒤 wave Application 변경이 막힌다.
+        # optional: 시드는 CODEX_HOME에 auth.json이 없을 때만 쓴다(D-14). PVC에 auth.json이 있으면 Secret이 없어도 뜬다.
+        # 함정: auth.json도 시드도 없으면 작업자가 seed_missing으로 종료 1이다(파드는 떠도 CrashLoop). 첫 배포 전에 시드가 있어야 한다.
         - name: seed
           secret:
             secretName: worker-seed
             optional: true
             defaultMode: 0440
+        # 실행마다 작업 공간·출력·codex TMPDIR을, 기동 때 버전 확인 디렉터리를 쓴다. codex 임시 사용량을 아직 몰라(S12) 256Mi [가정].
+        # 넘으면 kubelet이 파드를 쫓아낸다.
         - name: tmp
           emptyDir:
-            sizeLimit: 64Mi
+            sizeLimit: 256Mi
         - name: firewall-run
           emptyDir:
             medium: Memory
