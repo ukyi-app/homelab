@@ -1,0 +1,75 @@
+# vmalert-tool unittest(ci: tools/ci). 시각은 2000-01-01 UTC(946684800)에서 시작한다.
+# 라벨은 bot-slot job이 붙이는 모양이다(instance는 Service 이름, namespace는 봇 ns).
+rule_files:
+  - ../rules/bot.yaml
+evaluation_interval: 1m
+tests:
+  - name: HomelabBotGatewayDisconnected는 10분 지나야 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_gateway_connected{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x2 0x15"
+    alert_rule_test:
+      - eval_time: 11m
+        groupname: bot
+        alertname: HomelabBotGatewayDisconnected
+        exp_alerts: []
+      - eval_time: 13m
+        groupname: bot
+        alertname: HomelabBotGatewayDisconnected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+            exp_annotations:
+              summary: 봇 Discord Gateway가 10분 넘게 끊겼다. Discord 메시지·명령을 받지 못한다
+              description: 봇은 Ready라 webhook·경보 수신은 계속된다. 봇 로그의 gateway_retry·gateway_drop 사유와 파드의 인터넷 443을 본다.
+
+  # 재연결이 중간에 성공하면 for가 처음부터 다시 센다. 짧은 단절이 쌓여 울리지 않는다.
+  - name: HomelabBotGatewayDisconnected는 재연결되면 다시 센다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_gateway_connected{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0x7 1 0x7"
+    alert_rule_test:
+      - eval_time: 15m
+        groupname: bot
+        alertname: HomelabBotGatewayDisconnected
+        exp_alerts: []
+
+  - name: HomelabBotOutboxUnknown은 15분 지나야 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_outbox_unknown{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0x2 2x20"
+    alert_rule_test:
+      - eval_time: 16m
+        groupname: bot
+        alertname: HomelabBotOutboxUnknown
+        exp_alerts: []
+      - eval_time: 18m
+        groupname: bot
+        alertname: HomelabBotOutboxUnknown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+            exp_annotations:
+              summary: 봇 게시 2건의 Discord 전달 여부를 15분 넘게 확인하지 못했다
+              description: 자동 재전송은 하지 않는다. 해당 스레드에 답이 올라갔는지 Discord에서 보고, 봇 감사 로그를 확인한다.
+
+  # 첫 대조에서 sent가 되는 unknown(응답만 잃은 게시)은 울리지 않는다.
+  - name: HomelabBotOutboxUnknown은 곧 풀리는 unknown에 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_outbox_unknown{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0 1 1 0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        groupname: bot
+        alertname: HomelabBotOutboxUnknown
+        exp_alerts: []

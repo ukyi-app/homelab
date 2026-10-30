@@ -1,0 +1,27 @@
+{{- /*
+봇 지표 수집 대상(T16b D7 (a)). vmsingle의 bot-slot job은 ns·앱 이름이 아니라 이 Service의 라벨
+(app.kubernetes.io/part-of: bot-slot)과 포트 이름 metrics로 고른다(vmsingle/scrape.yaml). 그래서 봇 값은 여기 하나에만 있다.
+공유 차트의 앱 Service는 차트 라벨만 달려 있어 봇만 고를 수 없어 따로 만든다.
+대상이 Service 주소라 파드가 없어도(suspended, 크래시) 대상은 남고 up == 0이 된다. 파드 단위 발견이면 대상이 사라져 조용하다.
+selector에 matchExpressions가 없어 마이그레이션 Job 파드도 고른다(alert-service.yaml과 같은 한계). Job이 도는 몇 초 동안
+수집 한 번이 그 파드로 가 실패할 수 있다. TargetDown은 5분 지속이라 울리지 않는다.
+시험 값(probe: true)에서는 만들지 않는다. 시험 파드는 /metrics를 내지 않아 TargetDown이 울린다.
+*/}}
+{{- if not .Values.probe }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.target.app }}-metrics
+  namespace: {{ .Values.target.namespace }}
+  labels:
+    {{- include "botSlot.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "botSlot.targetSelector" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.target.metricsPort }}
+      targetPort: {{ .Values.target.metricsPort }}
+      protocol: TCP
+{{- end }}

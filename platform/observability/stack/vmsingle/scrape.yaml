@@ -117,6 +117,26 @@ scrape_configs:
       - source_labels: [__meta_kubernetes_pod_name]
         target_label: instance
 
+  # 봇 지표(T16b D7 (a)). 봇 자리 Application(platform/bot-slot)이 만든 Service를 라벨로 고른다. 봇 ns·앱 이름을 여기 적지
+  # 않아 봇 값은 bot-slot values 한곳에 남는다(설계 C.8). 파드가 아니라 Service 주소를 수집해 파드가 없으면 대상이 사라지지
+  # 않고 up == 0이 된다(TargetDown). Service가 아예 없으면 TargetMissing이 본다.
+  # 받는 쪽 허용(vmsingle → 봇 지표 포트)은 bot-slot target-networkpolicy.yaml이 연다.
+  # bot-slot의 경보 수신 Service도 같은 라벨이라 포트 이름 metrics로 거른다.
+  - job_name: bot-slot
+    kubernetes_sd_configs:
+      - role: service
+        selectors:
+          - role: service
+            label: app.kubernetes.io/part-of=bot-slot
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_port_name]
+        regex: metrics
+        action: keep
+      - source_labels: [__meta_kubernetes_service_name]
+        target_label: instance
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+
   # 컨테이너 메모리·CPU(limit 여유 산정용). metrics-server는 k3s에서 껐다.
   # kubelet 인증서는 k3s server CA가 서명해 SA의 ca.crt로 검증한다. 검증을 끄면 그 주소로 답하는 무엇에든
   # SA 토큰이 넘어간다(옛 vmagent 정정 2026-09-02).

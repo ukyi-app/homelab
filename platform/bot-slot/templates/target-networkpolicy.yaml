@@ -2,7 +2,7 @@
 (1) 봇 ns 정책(설계 C.8 담는 것 (1)). 공유 차트의 기본 거부·허용 목록(C.4.5)에 봇만 쓰는 경로를 더한다.
 차트의 인터넷 443 규칙이 사설 대역(10/8·172.16/12·192.168/16)을 빼서 이 경로들은 차트만으로는 막힌다. NetworkPolicy는 허용의 합집합이다.
 포트는 Service 포트가 아니라 DNAT 뒤 실제 목적지 포트다(이 k3s의 kube-router는 kube-proxy DNAT 뒤 패킷에 정책을 건다).
-vmsingle·VictoriaLogs·Alertmanager API는 열지 않는다. Alertmanager API는 침묵을 만들 수 있다.
+봇 → vmsingle·VictoriaLogs·Alertmanager API는 열지 않는다(반대 방향 vmsingle → 봇 지표 포트만 연다). Alertmanager API는 침묵을 만들 수 있다.
 Argo CD API(argocd-server)도 열지 않는다. 봇은 Application 상태를 SA로 Kubernetes API에서 읽는다(T16b D9).
 Kubernetes API는 노드 로컬 경로지만 이 k3s(v1.36.5+k3s1)의 kube-router는 INPUT 체인에서도 파드 egress를 검사한다.
 허용이 없으면 거부된다(T16b D8, 시험 파드 실측). 여는 것은 Endpoint IP의 TCP 6443뿐이고, 읽을 수 있는 범위는
@@ -37,6 +37,18 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.target.alertPort }}
+    # 지표 수집(metrics-service.yaml). vmsingle은 egress 정책이 없어 받는 쪽 허용만 더한다(observability networkpolicy.yaml 머리).
+    # 이 포트는 앱 서버라 vmsingle이 /github·/readyz에도 닿는다. 서명 검증이 /github를 막고, vmsingle은 /metrics만 부른다.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vmsingle
+      ports:
+        - protocol: TCP
+          port: {{ .Values.target.metricsPort }}
   egress:
     # 작업 전달. 받는 쪽 허용은 sandbox-networkpolicy.yaml.
     - to:

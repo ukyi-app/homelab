@@ -27,6 +27,8 @@ groups:
       # up == 0은 발견된 대상만 본다. 파드가 사라지거나 라벨·포트 이름이 바뀌어 발견 대상이 0개면 up이 없어 조용하다.
       # 늘 있어야 하는 job을 적는다(vmsingle/scrape.yaml의 job 이름). cnpg는 T11 전이라 넣지 않았다.
       # adguard-querylog는 AdGuardQuerylogReaderDown이 본다.
+      # bot-slot은 봇 자리 Application의 지표 Service다. 봇이 suspended여도 Service는 남아(up == 0) 여기서 울리지 않는다.
+      # 봇을 지우고 bot-slot을 시험 값(probe: true)으로 되돌리면 Service가 없어지므로 이 줄을 함께 지운다(bot-slot values.yaml).
       - alert: TargetMissing
         expr: |
           absent(up{job="kube-state-metrics"})
@@ -40,6 +42,7 @@ groups:
           or absent(up{job="argocd"})
           or absent(up{job="external-secrets"})
           or absent(up{job="kubelet-cadvisor"})
+          or absent(up{job="bot-slot"})
         for: 10m
         labels:
           severity: warning

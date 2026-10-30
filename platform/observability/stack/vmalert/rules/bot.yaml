@@ -1,0 +1,31 @@
+# 봇(homelab-bot) 자신의 상태 경보(T16b, 봇 ARCHITECTURE §8 (c)). 지표는 vmsingle/scrape.yaml의 bot-slot job이 모은다.
+# service 라벨을 붙이지 않는다. 봇 receiver는 등록 서비스가 아닌 경보를 감사만 남기고 202로 버려 Telegram(형제 route)만 받는다.
+# 봇이 자기 장애를 Discord로 알리지 못하고(Gateway 단절), 자기 게시 불확실 경보를 다시 게시하는 되먹임도 막는다.
+# 수집이 끊기면 아래 시계열이 없어져 이 룰들은 조용하다. 그 경우는 TargetDown(up == 0)과 TargetMissing(Service 없음)이 본다.
+groups:
+  - name: bot
+    rules:
+      # 봇은 Gateway가 끊겨도 Ready를 유지해(webhook·경보 수신 계속) KubePodNotReady로는 안 잡힌다. 이 지표가 유일한 클러스터 안 신호다.
+      # 10분: 정상 재연결은 RESUME 몇 초, 재시도 backoff 상한이 60초 + 지터 1초라 연속 실패 9번 남짓을 넘겨야 운다.
+      # 하트비트(healthchecks.io)는 Gateway가 5분 넘게 끊기면 ping을 멈춘다(봇 gatewayGraceMs). 이 경보는 같은 사건의 클러스터 안 경로다.
+      # 함정: 봇은 소켓 close 이벤트에서만 0으로 바꾼다. 망이 패킷을 버리면(DROP) close가 TCP 재전송 한도까지 늦어 0이 늦게 될 수 있다.
+      - alert: HomelabBotGatewayDisconnected
+        expr: homelab_bot_gateway_connected == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 봇 Discord Gateway가 10분 넘게 끊겼다. Discord 메시지·명령을 받지 못한다
+          description: "봇은 Ready라 webhook·경보 수신은 계속된다. 봇 로그의 gateway_retry·gateway_drop 사유와 파드의 인터넷 443을 본다."
+
+      # unknown은 Discord 전송 결과를 모르는 게시다. 자동 재전송은 0회이고, 대조가 30초마다 마커를 찾는다(간격 1초부터 두 배, 상한 15분).
+      # 15분: 응답만 잃은 게시는 첫 대조(1분 안)에서 sent가 된다. 15분이면 검색 9번 남짓이 지나 사람이 볼 일이다.
+      # 24시간 지나거나 100건을 넘으면 봇이 blocked로 닫아(감사 delivery_unresolved_retired) 이 경보가 풀린다. 풀렸다고 전달된 것은 아니다.
+      - alert: HomelabBotOutboxUnknown
+        expr: homelab_bot_outbox_unknown > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "봇 게시 {{ $value }}건의 Discord 전달 여부를 15분 넘게 확인하지 못했다"
+          description: "자동 재전송은 하지 않는다. 해당 스레드에 답이 올라갔는지 Discord에서 보고, 봇 감사 로그를 확인한다."
