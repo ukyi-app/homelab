@@ -1,7 +1,10 @@
-# 작업자 전용 CODEX_HOME(D-14). Codex가 갱신한 auth.json을 실행 사이에 남긴다. ESO 한 방향 전달로는 갱신본을 못 지킨다.
-# local-retain: PVC·Application이 지워져도 노드의 폴더가 남아 갱신본을 잃지 않는다. 다시 붙이려면 PV를 손으로 다시 묶는다.
-# 1Gi: auth.json은 수 KB이고 나머지는 Codex 세션 기록(sessions/)이다. 차면 작업이 실패하니 봇 코드가 오래된 기록을 지운다(T16b).
-# 백업하지 않는다: 살아 있는 구독 자격을 R2 백업으로 옮기면 노출 면이 늘어난다. 잃으면 사람이 다시 시드한다(설계 C.8, S219).
+# 작업자 전용 영속 공간(D-14, D3). 쓴 capability nonce(.homelab-worker/nonces, 62초 보관)를 파드 재생성 사이에 남긴다.
+# Claude 프로필(지금)은 자격을 여기 두지 않는다(토큰은 Secret 볼륨에서 실행마다 읽는다). Codex 프로필이면 CODEX_HOME이 되어
+# Codex가 갱신한 auth.json도 여기 남는다(ESO 한 방향 전달로는 갱신본을 못 지킨다). 이름은 Codex 때 그대로다.
+# local-retain: PVC·Application이 지워져도 노드의 폴더가 남는다. 다시 붙이려면 PV를 손으로 다시 묶는다.
+# 1Gi: nonce 기록과 (Codex면) 수 KB의 auth.json뿐이다. 대화 레인은 세션 기록을 남기지 않는다.
+# 차면 nonce 기록이 실패한다(기동 때면 작업자가 뜨지 못한다).
+# 백업하지 않는다: Codex 프로필이면 살아 있는 구독 자격이 여기 있어 R2 백업으로 옮기면 노출 면이 늘어난다(설계 C.8, S219).
 # wave는 작업자 Deployment와 같아야 한다. local-retain은 WaitForFirstConsumer라 파드가 생겨야 Bound가 되는데,
 # 앞 wave에 두면 Argo CD가 Pending(Progressing)인 PVC를 기다리며 Deployment wave로 넘어가지 않는다(2026-10-23 첫 배포 실측).
 apiVersion: v1

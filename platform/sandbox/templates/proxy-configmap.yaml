@@ -10,7 +10,8 @@ CDN의 동작이지 이 설정의 보장이 아니다(REPORT, 설계 C.8).
 허용 이름이 사설 주소로 풀리는 경우(DNS 재바인딩)는 Envoy가 막지 않는다. templates/proxy-networkpolicy.yaml의 except가 막는다.
 관리(admin) 리스너는 두지 않는다. 파드 안에서 설정·통계를 바꾸거나 /quitquitquit로 멈출 길을 남기지 않는다.
 */}}
-{{- $names := .Values.proxy.allowedDomains }}
+{{- /* 허용 이름 = 공통 목록 + 작업자 실행기 프로필의 이름(values.yaml). 같은 이름이 두 곳에 있으면 Envoy가 중복 domains로 설정을 거부해 하나로 줄인다. */}}
+{{- $names := concat .Values.proxy.allowedDomains .Values.worker.profile.egressHosts | uniq }}
 {{- $authorities := list }}
 {{- range $names }}{{ $authorities = append $authorities (printf "%s:443" .) }}{{ end }}
 apiVersion: v1

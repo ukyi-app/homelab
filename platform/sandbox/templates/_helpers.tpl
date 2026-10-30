@@ -33,3 +33,11 @@ app: worker
 {{- define "sandbox.proxyLabels" -}}
 app: egress-proxy
 {{- end }}
+
+{{/*
+작업자 자격 Secret 이름(ExternalSecret 대상, 작업자 볼륨). 프로필 id를 넣는다. 프로필을 바꾸면 새 이름이 생겨, ESO가 아직
+옛 값을 들고 있는 같은 이름 Secret을 새 실행기가 읽는 일이 없다.
+*/}}
+{{- define "sandbox.workerCredentialSecret" -}}
+worker-credential-{{ .Values.worker.profile.id }}
+{{- end }}
