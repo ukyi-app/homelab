@@ -65,6 +65,21 @@ export function checkAlerting(): Violation[] {
   console.log((am.stdout + am.stderr).trim());
   if (am.code !== 0) out.push({ rule: "alertmanager-config", where: AM_CONFIG, message: `amtool check-config exit ${am.code}` });
 
+  // 라벨별 receiver(설계 C.8, D-10). check-config는 route 결과를 보지 않는다. 봇 route의 continue만 남고 Telegram 형제
+  // route가 빠지면 warning·critical이 봇에만 가서, 봇이 멈출 때 아무 데도 안 온다. 기대 순서는 amtool 출력(route 순서) 그대로다.
+  const ROUTES: [string[], string][] = [
+    [["severity=warning"], "bot,telegram"],
+    [["severity=critical"], "bot,telegram"],
+    [["severity=info"], "telegram"],
+    [["alertname=Watchdog", "severity=none"], "healthchecks"],
+  ];
+  for (const [labels, want] of ROUTES) {
+    const r = run(["amtool", "config", "routes", "test", `--config.file=${AM_CONFIG}`, `--verify.receivers=${want}`, ...labels], { cwd: ROOT });
+    if (r.code !== 0) {
+      out.push({ rule: "alertmanager-routes", where: AM_CONFIG, message: `${labels.join(" ")}: ${(r.stdout + r.stderr).trim().split("\n")[0]}(기대 ${want})` });
+    }
+  }
+
   console.log(`경보 룰 ${alerts.size}개, 시험 파일 ${testFiles.length}개`);
   return out;
 }
