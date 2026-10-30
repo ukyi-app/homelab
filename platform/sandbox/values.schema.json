@@ -1,5 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "host": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+      "not": {
+        "allOf": [
+          { "pattern": "(^|\\.)github\\.com$" },
+          { "not": { "const": "codeload.github.com" } }
+        ]
+      }
+    }
+  },
   "type": "object",
   "additionalProperties": false,
   "required": ["infisical", "proxy", "worker"],
@@ -7,12 +19,42 @@
     "worker": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["image", "controlPublicKey"],
+      "required": ["image", "controlPublicKey", "profile"],
       "properties": {
         "image": { "type": "string", "pattern": "^ghcr\\.io/ukyi-app/homelab-bot@sha256:[0-9a-f]{64}$" },
         "controlPublicKey": {
           "type": "string",
           "pattern": "^-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA[A-Za-z0-9+/]{43}=\\n-----END PUBLIC KEY-----\\n?$"
+        },
+        "profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "executor", "model", "credentialKey", "egressHosts"],
+          "properties": {
+            "id": { "type": "string" },
+            "executor": { "type": "string" },
+            "model": { "type": "string" },
+            "credentialKey": { "type": "string" },
+            "egressHosts": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/host" } }
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "id": { "const": "claude-subscription" },
+                "executor": { "const": "claude" },
+                "credentialKey": { "const": "CLAUDE_CODE_OAUTH_TOKEN" },
+                "model": { "pattern": "^claude-[a-z0-9]+(-[a-z0-9]+){1,8}$" }
+              }
+            },
+            {
+              "properties": {
+                "id": { "const": "codex-subscription" },
+                "executor": { "const": "codex" },
+                "credentialKey": { "const": "CODEX_AUTH_JSON" },
+                "model": { "const": "cli-default" }
+              }
+            }
+          ]
         }
       }
     },
@@ -48,16 +90,7 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
-            "not": {
-              "allOf": [
-                { "pattern": "(^|\\.)github\\.com$" },
-                { "not": { "const": "codeload.github.com" } }
-              ]
-            }
-          }
+          "items": { "$ref": "#/definitions/host" }
         }
       }
     }

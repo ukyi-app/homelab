@@ -3,9 +3,12 @@ sandbox: 격리 작업 공간(ns sandbox)과 허용 목록 egress 프록시(ns e
 두 ns에 걸쳐 destination.namespace를 비운다. 리소스마다 metadata.namespace를 적는다.
 켜기: values.yaml의 components.sandbox.enabled. 클러스터 값 cluster.infisical을 받는다(작업자 전용 store infisical-sandbox).
 
-켜기 전 사람 작업: Infisical(운영 homelab/prod, VM homelab-dev/dev)에 폴더 /apps/homelab-bot/worker와 키 CODEX_AUTH_JSON(작업자 시드).
+켜기 전 사람 작업: Infisical(운영 homelab/prod, VM homelab-dev/dev)에 폴더 /apps/homelab-bot/worker와 작업자 자격 키
+(platform/sandbox/values.yaml worker.profile.credentialKey, 지금 CLAUDE_CODE_OAUTH_TOKEN: 봇 전용 Claude 구독 장기 토큰).
 없으면 store·ExternalSecret이 Ready=False(Degraded)라 root가 이 wave에서 멈추고 뒤 wave(appset-apps·appset-data, bot-slot, go)가 적용되지 않는다.
-VM에는 실제 시드를 넣지 않는다. 같은 시드를 두 곳에서 쓰면 갱신 토큰이 어긋난다. 작업자가 받는 모양({"tokens":{"refresh_token":"..."}})의 가짜 값을 둔다.
+VM에는 실제 토큰을 넣지 않는다. VM 작업자도 그 토큰으로 구독 한도를 쓰고, 개발 프로젝트에 운영 자격이 하나 더 생긴다.
+작업자가 받는 모양(앞뒤 공백을 뺀 인쇄 가능한 ASCII 한 줄, 공백 없이 16자 이상)의 가짜 문자열을 둔다. 모양이 틀리면 VM 작업자가
+credential_invalid로 종료 1 → CrashLoop → sandbox Degraded라 root가 이 wave에서 멈춘다(docs/runbooks-public/bootstrap.md 2.2 vm 1단계).
 */}}
 {{- if .Values.components.sandbox.enabled }}
 {{- $infisical := .Values.cluster.infisical | default dict }}
