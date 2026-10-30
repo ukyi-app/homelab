@@ -15,13 +15,14 @@ route:
       # 다시 보내기는 group_interval 틱에서만 일어난다. 빼면 기본 5m이 실제 간격이 되어 Period 5분과 같아진다.
       group_interval: 1m
       repeat_interval: 1m
-    # 봇 자리(설계 C.8): 봇이 생기면 아래 네 줄을 함께 켠다(T16b). continue: true는 다음 형제 route를 계속
-    # 검사하게 할 뿐, 일치한 자식이 있으면 부모 receiver(telegram)로는 보내지 않는다. 그래서 Telegram 형제 route를 둔다.
-    # - matchers: ['severity=~"warning|critical"']
-    #   receiver: bot
-    #   continue: true
-    # - matchers: ['severity=~"warning|critical"']
-    #   receiver: telegram
+    # 봇(설계 C.8, T16b). 두 route는 함께 둔다. continue: true는 다음 형제 route를 계속 검사하게 할 뿐,
+    # 일치한 자식이 있으면 부모 receiver(telegram)로는 보내지 않는다. Telegram 형제 route가 없으면 warning·critical이
+    # 봇에만 가고, 봇이 멈추면 아무 데도 안 온다(D-10). tools/ci/alerting.ts가 route 결과를 시험한다.
+    - matchers: ['severity=~"warning|critical"']
+      receiver: bot
+      continue: true
+    - matchers: ['severity=~"warning|critical"']
+      receiver: telegram
 
 receivers:
   - name: telegram
@@ -48,6 +49,17 @@ receivers:
           → {{ .Annotations.runbook }}
           {{- end }}
           {{- end }}
+  - name: bot
+    webhook_configs:
+      # 봇 경보 수신(봇 저장소 src/http.ts, POST /alerts만 받음). Service는 bot-slot이 만든다
+      # (platform/bot-slot/templates/alert-service.yaml, <target.app>-alerts.<target.namespace>:<alertPort>). 비밀이 아니라 url로 둔다.
+      # 봇 값이 바뀌면(봇 교체·삭제) 이 주소도 같은 PR에서 바꾼다. 닿지 않으면 Alertmanager가 다시 보내기만 하고 Telegram은 그대로 간다.
+      - url: http://homelab-bot-alerts.app-homelab-bot:8081/alerts
+        send_resolved: true
+        # 봇은 한 번에 경보 100개·본문 64KiB까지만 받고 넘으면 거부한다(400·503). 그러면 그 묶음은 봇에 안 간다.
+        # 경보 하나는 0.5~2KiB다(2026-10-30 Watchdog 실측 0.5KiB, 한글 주석은 글자당 3바이트). 25개면 64KiB 안에 든다.
+        # 잘리면 봇 글의 건수가 실제보다 적다(Telegram은 전부 받는다).
+        max_alerts: 25
   - name: healthchecks
     webhook_configs:
       # healthchecks.io ping은 POST도 받는다. URL 자체가 자격이라 파일로 읽는다.
