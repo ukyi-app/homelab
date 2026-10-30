@@ -1497,7 +1497,7 @@ EOF
 - 사람이 `infisical login`한 NUC에서 돌린다(Infisical CLI는 NUC의 mise에만 있다). 암호문구는 터미널로만 넣는다(만들 때 두 번, 이름 대조 때 한 번). **암호문구는 비워 두지 않는다.** 비우면 age가 만든 암호문구를 화면에 찍는다.
 - 암호문구는 비밀번호 관리자에 둔다. 암호화된 메모도 된다. 시험용이면 시험 뒤 지운다.
 - 로그인 사용자의 Infisical CLI 0.44.2가 읽은 값을 `~/.infisical/secrets-backup/`에 남기는 문제는 bootstrap.md 2.2 vm 1단계와 같은 잠금으로 막는다.
-- **H2(봇 작업자 시드) 전에 뜬 내보내기는 4)에서 못 쓴다.** sandbox가 실제 작업자로 바뀐 뒤(T16b S11)부터 지도의 `sandbox/worker-seed` 키는 `/apps/homelab-bot/worker/CODEX_AUTH_JSON`이다(전에는 시험 키 `WORKER_PROBE`). 그 전 내보내기에는 이 경로가 없어 4)의 손 Secret 블록이 `missing`으로 멈춘다. H2 뒤 운영(`homelab`/`prod`)과 VM(`homelab-dev`/`dev`) 내보내기를 이 블록으로 새로 뜬다. Infisical에 키가 아직 없으면 이 블록도 `missing`으로 멈춘다. VM의 값은 실제 시드가 아니라 작업자가 받는 모양의 가짜 값이다(`platform/root/templates/sandbox.yaml` 머리 주석).
+- **H2(봇 작업자 자격) 전에 뜬 내보내기는 4)에서 못 쓴다.** sandbox가 실제 작업자로 바뀐 뒤(T16b S11)부터 지도의 sandbox 항목은 `sandbox/worker-credential-claude-subscription`이고 키는 `/apps/homelab-bot/worker/CLAUDE_CODE_OAUTH_TOKEN`이다(전에는 `sandbox/worker-seed`의 시험 키 `WORKER_PROBE`). 그 전 내보내기에는 이 경로가 없어 4)의 손 Secret 블록이 `missing`으로 멈춘다. H2 뒤 운영(`homelab`/`prod`)과 VM(`homelab-dev`/`dev`) 내보내기를 이 블록으로 새로 뜬다. Infisical에 키가 아직 없으면 이 블록도 `missing`으로 멈춘다. VM의 값은 실제 토큰이 아니라 작업자가 받는 모양의 가짜 문자열이다(`platform/root/templates/sandbox.yaml` 머리 주석). 실행기 프로필(`platform/sandbox/values.yaml`의 `worker.profile`)을 바꾸면 이 Secret 이름과 키가 함께 바뀌므로 그 뒤에도 내보내기를 새로 뜬다.
 - VM 시험: **`homelab-dev`/`dev`만 내보낸다.** 운영 내보내기를 VM에 넣으면 운영 터널 토큰·체크 URL·operator OAuth가 VM에 들어가 VM이 운영 터널에 붙는다(설계 B.8 E1, E8 VM 격리). 4)의 블록도 `vm`에서는 `homelab-dev`/`dev`가 아닌 내보내기를 거부한다. 시험 전(외부 자격을 다 넣고 bootstrap.md 2.2 vm 1단계 키 대조가 "빠진 키 0"인 뒤)에 만들고, 시험 뒤 파일과 암호문구를 지운다.
 
 ```bash
@@ -1546,11 +1546,11 @@ EOF
 
 **4) 손 Secret(root apply 전).** `argocd-secret`이 있어야 두 키를 합칠 수 있어 Argo CD 설치 뒤, 첫 소비자보다 먼저 있어야 해서 root apply 전이다. 대상 ns는 이 블록이 먼저 만든다. root의 namespaces(wave -9)가 나중에 PSA 라벨을 붙여 넘겨받는다(3절 3단계의 `database`와 같은 방식). root apply 뒤에 넣으면 첫 소비자(wave -5: cloudflared·tailscale·adguard)가 `CreateContainerConfigError`·볼륨 대기에 들고, Deployment는 `progressDeadlineSeconds`(이 저장소는 모두 기본 600초) 뒤 Degraded가 된다. 그때 root가 sync를 실패로 끝내고 재시도하는지는 확인하지 않았다. 먼저 넣으면 이 경합이 없다.
 
-- VM 시험: **canary.** `sandbox/worker-seed`의 `CODEX_AUTH_JSON` 값만 비밀이 아닌 고정 JSON `{"tokens":{"refresh_token":"u40-canary"}}`으로 바꿔 넣는다(`vm`에서만). 켠 뒤 그 해시가 내보내기 값으로 바뀌면 ESO가 data를 실제로 썼다는 직접 증거다. 나머지 9개는 값이 같아 ESO가 아무것도 쓰지 않아도 해시가 같다.
-  - **canary는 이 JSON 모양이어야 한다.** 작업자는 PVC에 `auth.json`이 없으면 이 값을 복사하고, `tokens.refresh_token`이 없으면 `seed_invalid`로 종료 1이다. 그냥 문자열이면 VM sandbox 파드가 CrashLoop → Degraded가 되어 root가 wave -2에서 멈추고 5)가 실패한다.
-  - 키를 더하지 않고 있는 키의 값만 바꾼다. 스냅숏 해시는 지도 키만 보지만 `keys=map`은 Secret의 키 집합 전체를 본다. 여분 키가 있으면 `hand`·`before`가 `keys!=map`이고, 넘겨받을 때 ESO가 여분 키를 지우는지는 라이브로 보지 않았다 [미확인](6)의 소스 근거는 data를 통째로 바꿔 쓴다고 읽는다). 블록은 지도의 `worker-seed` 키가 `CODEX_AUTH_JSON` 하나가 아니면 쓰기 전에 멈춘다.
-  - 켠 뒤에도 VM PVC의 `auth.json`은 canary 사본 그대로다(작업자는 없을 때만 복사한다). 시험에는 영향이 없다.
-- 실제 복구(`prod`): sandbox 파드는 내보내기의 시드를 복사해(`seeded`) Ready가 된다. 그러나 잃은 PVC의 갱신본이 그 시드의 갱신 토큰을 이미 바꿨을 수 있다. Ready는 시드 모양만 본 결과다. 모델 호출이 인증 실패면 사람이 다시 시드한다(T18 할 일 3).
+- VM 시험: **canary.** sandbox 작업자 자격 Secret(지도에서 ns `sandbox` 항목 하나, 지금 `worker-credential-claude-subscription`)의 `CLAUDE_CODE_OAUTH_TOKEN` 값만 비밀이 아닌 고정 문자열 `u40-canary-not-a-real-token`으로 바꿔 넣는다(`vm`에서만). 켠 뒤 그 해시가 내보내기 값으로 바뀌면 ESO가 data를 실제로 썼다는 직접 증거다. 나머지 9개는 값이 같아 ESO가 아무것도 쓰지 않아도 해시가 같다.
+  - **canary는 작업자가 받는 토큰 모양이어야 한다.** 앞뒤 공백을 뺀 인쇄 가능한 ASCII 한 줄, 공백 없이 16~8192자다. 모양이 틀리면 VM 작업자가 `credential_invalid`로 종료 1 → CrashLoop → Degraded가 되어 root가 wave -2에서 멈추고 5)가 실패한다.
+  - 키를 더하지 않고 있는 키의 값만 바꾼다. 스냅숏 해시는 지도 키만 보지만 `keys=map`은 Secret의 키 집합 전체를 본다. 여분 키가 있으면 `hand`·`before`가 `keys!=map`이고, 넘겨받을 때 ESO가 여분 키를 지우는지는 라이브로 보지 않았다 [미확인](6)의 소스 근거는 data를 통째로 바꿔 쓴다고 읽는다). 블록은 지도의 sandbox 항목 키가 `CLAUDE_CODE_OAUTH_TOKEN` 하나가 아니면 쓰기 전에 멈춘다. 실행기 프로필을 바꾸면 canary 값과 이 검사도 그 자격의 모양·키로 함께 바꾼다.
+  - 켠 뒤 ESO가 값을 내보내기 값으로 바꾸면 작업자는 파드 재시작 없이 다음 실행부터 새 값을 읽는다(실행마다 파일을 다시 읽는다). 6)의 "재시작 수 바뀐 것 0" 판정과 맞는다.
+- 실제 복구(`prod`): sandbox 파드는 내보내기의 토큰 모양만 보고 Ready가 된다(모델 호출 없음). 장기 토큰이라 Codex 시드처럼 갱신으로 낡지는 않지만, 내보내기 뒤 철회·재발급했거나 만료(발급 뒤 1년)됐으면 첫 대화가 `auth_expired`다. 그때는 새 토큰을 발급해 Infisical에 넣고, 장애가 끝나 ESO가 넘겨받으면 반영된다. 이 경우 6) 판정에서 이 항목은 `hash!=expected`로 나온다(내보내기와 Infisical 값이 달라서다. 넘겨받기 실패가 아니다).
 - VM 시험: Alertmanager 수신자 Secret 둘(`alertmanager-healthchecks`, `alertmanager-telegram`)은 optional 볼륨이고 Alertmanager가 보낼 때 파일을 읽어, 값이 틀려도 파드는 뜨고 그 전송만 실패한다. **알림 판정을 안 하면 `homelab-dev`의 그 키에 가짜 값(`.invalid` 주소 등)을 넣는 것으로 충분하다**(2026-10-29 시험은 시험 체크·봇을 만들지 않았다).
 
 ```bash
@@ -1560,12 +1560,12 @@ export KUBECONFIG=~/.kube/$ctx.yaml
 host/verify.sh --cluster "$CLUSTER" --identity   # 다른 클러스터에서 돌면 그 클러스터의 Secret을 덮는다. 이 줄을 빼지 않는다
 : "${U40_DIR:?U40_DIR가 비었다(저장소 밖 0700 폴더)}"
 map="$U40_DIR/map.json"; exp="$U40_DIR/$project-export.age"
-# canary는 작업자가 받는 auth.json 모양이어야 한다. 문자열이면 VM 작업자가 seed_invalid로 멈춘다
-if [ "$CLUSTER" = vm ]; then canary='{"tokens":{"refresh_token":"u40-canary"}}'; else canary=; fi
+# canary는 작업자가 받는 토큰 모양(인쇄 가능한 ASCII 한 줄, 공백 없이 16자 이상)이어야 한다. 틀리면 VM 작업자가 credential_invalid로 멈춘다
+if [ "$CLUSTER" = vm ]; then canary=u40-canary-not-a-real-token; else canary=; fi
 [ "$(jq length "$map")" -eq 10 ] || { echo "지도가 10개가 아니다"; exit 1; }
-# canary는 있는 키의 값만 바꾼다. 키를 더하면 스냅숏이 keys!=map이 된다
-[ -z "$canary" ] || [ "$(jq -c '[.[] | select(.ns == "sandbox" and .target == "worker-seed") | .keys[].secretKey]' "$map")" = '["CODEX_AUTH_JSON"]' ] \
-  || { echo "지도의 sandbox/worker-seed 키가 CODEX_AUTH_JSON 하나가 아니다(canary 자리)"; exit 1; }
+# canary는 sandbox 항목(작업자 자격 Secret 하나)의 있는 키 값만 바꾼다. 키를 더하면 스냅숏이 keys!=map이 된다
+[ -z "$canary" ] || [ "$(jq -c '[.[] | select(.ns == "sandbox") | .keys[].secretKey]' "$map")" = '["CLAUDE_CODE_OAUTH_TOKEN"]' ] \
+  || { echo "지도의 sandbox 항목 키가 CLAUDE_CODE_OAUTH_TOKEN 하나가 아니다(canary 자리, 프로필이 바뀌었으면 canary도 바꾼다)"; exit 1; }
 [ "$(jq -c '[.[] | select(.creationPolicy == "Merge") | .ns + "/" + .target]' "$map")" = '["argocd/argocd-secret"]' ] \
   || { echo "Merge 대상이 argocd/argocd-secret 하나가 아니다"; exit 1; }
 # Owner 대상이 이미 있으면 멈춘다. 다시 돌릴 때 ESO가 넘겨받은 Secret을 덮지 않게
@@ -1587,11 +1587,11 @@ age -d "$exp" \
           | {apiVersion: "v1", kind: "Secret", metadata: {name: $e.target, namespace: $e.ns},
              stringData: ([$e.keys[] | {key: .secretKey, value: ($s[.path] // error("missing"))}] | from_entries)}
             + (if $e.creationPolicy == "Owner" then {type: "Opaque"} else {} end)
-          | if $canary != "" and $e.ns == "sandbox" and $e.target == "worker-seed"
-            then .stringData.CODEX_AUTH_JSON = $canary else . end]}' 2>/dev/null \
+          | if $canary != "" and $e.ns == "sandbox"
+            then .stringData.CLAUDE_CODE_OAUTH_TOKEN = $canary else . end]}' 2>/dev/null \
   | kubectl apply --server-side --field-manager=u40-hand -f - 2>/dev/null \
   || { echo "손 Secret 만들기 실패(오류 문구는 값을 담을 수 있어 버렸다)" >&2; exit 1; }
-echo "손 Secret: Owner 9개 만듦${canary:+(worker-seed는 canary)}, argocd-secret에 두 키 합침"
+echo "손 Secret: Owner 9개 만듦${canary:+(sandbox 작업자 자격은 canary)}, argocd-secret에 두 키 합침"
 EOF
 ```
 
@@ -1656,7 +1656,7 @@ EOF
 
 **6) 장애가 끝나면 켜는 PR, 넘겨받기 확인.**
 
-1. 스냅숏 `PHASE=before`를 돌리고, 아래 블록으로 내보내기의 기대 해시와 쓰는 파드의 재시작 수를 남긴다(암호문구 한 번). 기대 해시는 스냅숏과 같은 꼴(키 정렬, 값 base64, `jq -c` 한 줄 + 개행)로 계산하고, 값은 셸 변수와 파이프에만 있다. 통과: before와 대조해 다른 것 없음(VM 시험은 canary `sandbox/worker-seed` 하나만 다름). 다른 것이 있으면 내보내기와 손 Secret이 다른 것이니 켜기 전에 원인을 본다. 2026-10-29: 10개 중 canary만 다름, 손 Secret ns 파드 27개 재시작 합 0.
+1. 스냅숏 `PHASE=before`를 돌리고, 아래 블록으로 내보내기의 기대 해시와 쓰는 파드의 재시작 수를 남긴다(암호문구 한 번). 기대 해시는 스냅숏과 같은 꼴(키 정렬, 값 base64, `jq -c` 한 줄 + 개행)로 계산하고, 값은 셸 변수와 파이프에만 있다. 통과: before와 대조해 다른 것 없음(VM 시험은 canary인 sandbox 작업자 자격 Secret 하나만 다름). 다른 것이 있으면 내보내기와 손 Secret이 다른 것이니 켜기 전에 원인을 본다. 2026-10-29: 10개 중 canary만 다름, 손 Secret ns 파드 27개 재시작 합 0.
 
    ```bash
    CLUSTER=vm bash -euo pipefail <<'EOF'
@@ -1677,7 +1677,7 @@ EOF
      '.items[] | select(.metadata.namespace | IN($ns[])) | "\(.metadata.namespace)/\(.metadata.name)\t\(.metadata.uid)\t\([.status.containerStatuses[]?.restartCount] | add // 0)"' \
      | LC_ALL=C sort >"$D/restarts-before.tsv"
    echo "파드 기록: $(wc -l <"$D/restarts-before.tsv")개, 재시작 합 $(awk -F'\t' '{s+=$3} END{print s+0}' "$D/restarts-before.tsv")"
-   # before 해시와 기대 해시 대조. VM 시험은 canary(sandbox/worker-seed)만 달라야 한다
+   # before 해시와 기대 해시 대조. VM 시험은 canary(sandbox ns의 작업자 자격 Secret)만 달라야 한다
    join -t $'\t' <(cut -f1,3 "$D/snap-before.tsv" | LC_ALL=C sort) <(LC_ALL=C sort "$D/expected.tsv") \
      | awk -F'\t' '{ s = ($2 == $3) ? "같음" : "다름"; print $1, s; if ($2 != $3) d = d " " $1; n++ } END { print "대조 " n "개, 다름:" (d ? d : " 없음") }'
    EOF
@@ -1716,7 +1716,7 @@ EOF
        [ "$own" = "ExternalSecret/$es" ] || why="$why owner=$own"
        [ "$keys" = keys=map ] || why="$why $keys"
        # canary는 VM 시험에만 있다. 켜기 전 해시가 내보내기 값과 달라야 ESO가 data를 쓴 증거가 된다
-       if [ "$CLUSTER" = vm ] && [ "$id" = sandbox/worker-seed ]; then [ "$bh" != "$exp" ] || why="$why canary-before-same"
+       if [ "$CLUSTER" = vm ] && [ "$ns" = sandbox ]; then [ "$bh" != "$exp" ] || why="$why canary-before-same"
        else [ "$bh" = "$h" ] || why="$why before!=after"; fi
      else
        [ "$own" = none ] || why="$why owner=$own"

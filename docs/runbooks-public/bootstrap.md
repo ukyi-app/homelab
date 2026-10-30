@@ -435,7 +435,7 @@ NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있�
    EOF
    ```
 
-   **작업자 시드 `/apps/homelab-bot/worker/CODEX_AUTH_JSON`에는 실제 시드를 넣지 않는다.** sandbox가 실제 작업자로 바뀐 뒤(T16b S11) 이 대조에 들어가는 키다. 같은 시드를 VM과 운영 두 곳에서 쓰면 갱신 토큰이 어긋나 운영 봇을 다시 시드해야 한다. 작업자가 받는 모양의 가짜 JSON `{"tokens":{"refresh_token":"<아무 문자열>"}}`을 넣는다(빈 문자열은 안 된다). 작업자는 이 모양만 보므로 VM sandbox 파드가 Ready가 된다(모델 호출은 인증 실패). 모양이 다르면 작업자가 `seed_invalid`로 종료 1 → CrashLoop → sandbox Degraded → root가 wave -2에서 멈춘다. 위 대조는 키 이름만 보므로 모양은 잡지 못한다.
+   **작업자 자격 `/apps/homelab-bot/worker/CLAUDE_CODE_OAUTH_TOKEN`에는 실제 토큰을 넣지 않는다.** sandbox가 실제 작업자로 바뀐 뒤(T16b S11) 이 대조에 들어가는 키다(키 이름은 `platform/sandbox/values.yaml`의 `worker.profile.credentialKey`). 실제 토큰을 넣으면 VM 작업자도 운영 봇과 같은 구독 한도를 쓰고, 개발 프로젝트에 운영 자격 사본이 하나 더 생긴다. 작업자가 받는 모양의 가짜 문자열을 넣는다: 인쇄 가능한 ASCII 한 줄, 공백 없이 16자 이상(예: `homelab-dev-fake-token-0000`). 작업자는 이 모양만 보므로 VM sandbox 파드가 Ready가 된다(모델 호출은 인증 실패). 모양이 다르면(짧음, 공백·줄바꿈 포함 등) 작업자가 `credential_invalid`로 종료 1 → CrashLoop → sandbox Degraded → root가 wave -2에서 멈춘다. 위 대조는 키 이름만 보므로 모양은 잡지 못한다.
 
 2. **ESO Secret의 값은 `eso-homelab-dev`이다.** VM 준비 자산의 client ID·secret을 대화형 셸에서 `read -rs ESO_CLIENT_ID`, `read -rs ESO_CLIENT_SECRET`로 받고 `export ESO_CLIENT_ID ESO_CLIENT_SECRET`한 뒤 돌린다. 운영 자격을 잘못 넣으면 그 identity가 `homelab-dev`에 없어 Store가 Ready가 되지 않는다(조용히 운영 값을 읽지 않는다).
 

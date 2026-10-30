@@ -27,7 +27,7 @@
 
 **Infisical 암호화 내보내기의 형식.** `{project, env, at, secrets: {"<Infisical 경로>": "<값>"}}` JSON 하나를 age 암호문구로 암호화한 파일이다(age 버전은 `.tool-versions`). 만드는 블록은 [restore.md](restore.md) 3.1 2)다. 그 블록은 손 Secret 지도의 키만 담는다. 운영 분기 내보내기도 이 형식으로 만든다. 키가 더 있어도 되고, 프로젝트·환경 값(`homelab`/`prod`)이 맞아야 restore.md 3.1의 손 Secret 블록이 그대로 쓴다. 암호문구는 비워 두지 않는다(비우면 age가 만든 암호문구를 화면에 찍는다). 2026-10-29 U40 시험이 이 형식(`homelab-dev`/`dev`, 키 17개)으로 실제로 복호화·사용했다.
 
-**H2(봇 작업자 시드) 뒤 운영·VM 내보내기를 새로 뜬다.** 분기를 기다리지 않는다. sandbox가 실제 작업자로 바뀐 뒤(T16b S11) 손 Secret 지도에 `/apps/homelab-bot/worker/CODEX_AUTH_JSON`이 들어가, 그 전 내보내기로는 restore.md 3.1 4)가 `missing`으로 멈춘다. 운영 사본을 바꾸는 순서는 아래 "신선도 확인"의 내보내기 항목과 같다(두 곳을 바로 덮어쓰지 않는다). VM 내보내기는 VM 시험 직전에 뜨므로 그때 `homelab-dev`에 이 키가 가짜 모양 값으로 있어야 한다([bootstrap.md](bootstrap.md) 2.2 vm 1단계).
+**H2(봇 작업자 자격) 뒤 운영·VM 내보내기를 새로 뜬다.** 분기를 기다리지 않는다. sandbox가 실제 작업자로 바뀐 뒤(T16b S11) 손 Secret 지도에 `/apps/homelab-bot/worker/CLAUDE_CODE_OAUTH_TOKEN`이 들어가, 그 전 내보내기로는 restore.md 3.1 4)가 `missing`으로 멈춘다. 작업자 실행기 프로필을 바꿔 자격 키가 바뀔 때(`platform/sandbox/values.yaml`의 `worker.profile`)도 같다. 운영 토큰을 재발급했을 때도 새로 뜬다(옛 내보내기는 철회된 토큰을 담는다). 운영 사본을 바꾸는 순서는 아래 "신선도 확인"의 내보내기 항목과 같다(두 곳을 바로 덮어쓰지 않는다). VM 내보내기는 VM 시험 직전에 뜨므로 그때 `homelab-dev`에 이 키가 가짜 모양 값으로 있어야 한다([bootstrap.md](bootstrap.md) 2.2 vm 1단계).
 
 ## 신선도 확인 (분기 1회)
 
