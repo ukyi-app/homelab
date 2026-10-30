@@ -1,6 +1,8 @@
 # 대상 값 하나(설계 C.8). E4b~E8은 시험 값이었고, E9(T16b)가 봇 등록 PR보다 먼저 봇 값으로 바꿨다(D-15).
 # 봇을 지울 때는 시험 값(namespace·app bot-slot-probe)과 probe: true로 되돌린다. 봇 ns 값을 남기면 다음 콜드스타트에서
 # 이 Application이 ns를 기다리며 끝없이 재시도한다(이 Application은 대상 ns를 만들지 않는다).
+# 그때 vmalert core.yaml TargetMissing의 job="bot-slot" 줄과 rules/bot.yaml도 함께 지운다. 시험 값에서는 지표 Service가
+# 없어 그 줄이 계속 울린다(templates/metrics-service.yaml).
 target:
   # 봇 파드가 도는 ns. 시험 값이면 probe: true가 이 ns를 만든다.
   namespace: app-homelab-bot
@@ -10,6 +12,9 @@ target:
   workerPort: 8080
   # 봇의 경보 수신 포트. 앱 포트(공개 webhook, 8080)와 갈라 Traefik과 Alertmanager의 허용을 포트로 나눈다(D-15).
   alertPort: 8081
+  # 봇 지표(GET /metrics) 포트. 봇은 /metrics를 앱 서버(8080, 봇 src/http.ts PORTS.publisher)에서만 낸다.
+  # apps/homelab-bot/values.yaml의 port와 같은 값이다(차트가 달라 참조하지 못해 schema가 8080으로 묶는다).
+  metricsPort: 8080
 
 # E4b~E8 준비 확인용. 시험 ns, 공유 차트 정책을 손으로 옮긴 정책, 시험 파드 둘을 만든다.
 # target.namespace가 bot-slot-probe일 때만 true다(values.schema.json).

@@ -10,8 +10,9 @@ kind: ClusterRole
 metadata:
   name: observability-vmsingle
 rules:
+  # services: 봇 지표 job(bot-slot)이 Service 라벨로 대상을 고른다(vmsingle/scrape.yaml). 읽기만이고 Service에 비밀은 없다.
   - apiGroups: [""]
-    resources: ["pods", "nodes"]
+    resources: ["pods", "nodes", "services"]
     verbs: ["get", "list", "watch"]
   # kubelet /metrics/cadvisor는 nodes/metrics로 인가된다. nodes/proxy는 kubelet exec까지 열어 주지 않는다.
   - apiGroups: [""]

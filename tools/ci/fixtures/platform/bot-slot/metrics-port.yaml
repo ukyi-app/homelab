@@ -1,0 +1,12 @@
+# expect: fail
+# match: '/target/metricsPort': value must be 8080
+# 지표 포트를 앱 포트와 다르게 둔다. 봇은 /metrics를 앱 서버(8080)에서만 내 수집이 실패하고, 정책이 엉뚱한 포트를 연다.
+target:
+  namespace: app-homelab-bot
+  app: homelab-bot
+  workerPort: 8080
+  alertPort: 8081
+  metricsPort: 9090
+kubernetesApi:
+  endpointCIDRs:
+    - 192.168.1.5/32
