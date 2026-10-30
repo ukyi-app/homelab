@@ -16,6 +16,10 @@ serviceAccountName: bot-reader
 # 비밀이 아닌 주소. 봇은 기본값 없이 이 env를 요구하고, 경로는 / 하나만 받는다.
 # 봇 파드 → 이 셋은 bot-slot NetworkPolicy가 연다(작업자 8080, Grafana 3000, API Endpoint 6443).
 env:
+  # 이 클러스터의 파드 egress는 IPv4만이다(공유 차트 정책). Node 기본 happy eyeballs는 주소마다 250ms만 기다려
+  # 먼 IPv4(hc-ping.com 독일, 왕복 약 300ms)를 모두 끊고 ETIMEDOUT을 낸다(2026-10-30 첫 배포 하트비트 실패 실측).
+  # IPv4를 먼저 고르고 시도당 2초를 준다. 클러스터 안 주소와 Discord(Cloudflare)는 영향 없다.
+  NODE_OPTIONS: "--dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000"
   WORKER_URL: "http://worker.sandbox:8080/"
   GRAFANA_URL: "http://grafana.observability:3000/"
   KUBERNETES_API_URL: "https://kubernetes.default.svc/"
