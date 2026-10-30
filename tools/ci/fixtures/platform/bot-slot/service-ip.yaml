@@ -1,0 +1,6 @@
+# expect: fail
+# match: '/kubernetesApi/endpointCIDRs/0': 'not' failed
+# kubernetes Service ClusterIP. 정책은 DNAT 뒤 Endpoint IP:6443에 걸려 이 주소로는 열리지 않는다(T16b D8 후보 B).
+kubernetesApi:
+  endpointCIDRs:
+    - 10.43.0.1/32

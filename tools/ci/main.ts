@@ -431,12 +431,13 @@ const steps: Step[] = [
     name: "chart fixtures",
     // 공유 차트의 음성 values(tools/ci/fixtures/charts/<차트>/*.yaml). 렌더가 실패해야 한다.
     // schema와 템플릿 검사(go·vm-go 예약, 63자, 다른 앱 이미지 등)가 빠지면 여기서 드러난다.
+    // root 아래 로컬 차트의 음성 values는 tools/ci/fixtures/platform/<이름>/*.yaml(platform/<이름>, 예: bot-slot의 API 주소 schema).
     run: () => {
       const out: Violation[] = [];
-      const files = gitFiles("tools/ci/fixtures/charts/*/*.yaml");
+      const files = gitFiles("tools/ci/fixtures/charts/*/*.yaml", "tools/ci/fixtures/platform/*/*.yaml");
       for (const f of files) {
         const chart = basename(dirname(f));
-        const chartDir = `platform/charts/${chart}`;
+        const chartDir = f.startsWith("tools/ci/fixtures/charts/") ? `platform/charts/${chart}` : `platform/${chart}`;
         if (!existsSync(join(ROOT, chartDir, "Chart.yaml"))) {
           out.push({ rule: "fixture", where: f, message: `${chartDir}가 없다` });
           continue;

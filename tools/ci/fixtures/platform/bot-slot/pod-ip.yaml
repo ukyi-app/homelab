@@ -1,0 +1,6 @@
+# expect: fail
+# match: '/kubernetesApi/endpointCIDRs/0': 'not' failed
+# 파드 대역 주소. API Endpoint는 파드가 아니고 파드 IP는 바뀐다. ipBlock으로 파드를 열면 ns·라벨 경계를 비켜 간다(설계 P19).
+kubernetesApi:
+  endpointCIDRs:
+    - 10.42.0.28/32
