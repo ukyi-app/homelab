@@ -1,0 +1,7 @@
+# homelab app add가 만들었다(설계 C.7). 이 파일은 사람이 고쳐도 된다. CLI는 다루는 키만 바꾼다.
+chartVersion: 1.2.0
+kind: web
+port: 8080
+resources: { cpu: "50m", memory: "128Mi" }
+secrets: [DISCORD_BOT_TOKEN, GITHUB_REVIEW_WEBHOOK_SECRET, GRAFANA_READER_TOKEN, HEALTHCHECKS_PING_URL, RUNTIME_POLICIES, WORKER_CONTROL_PRIVATE_KEY]
+uses: { postgres: true }
