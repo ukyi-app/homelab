@@ -1,0 +1,6 @@
+# expect: fail
+# match: '192.168.117.0/24' does not match pattern
+# 노드 대역 전체. 같은 LAN의 다른 서버 6443까지 열린다. Endpoint IP /32만 받는다.
+kubernetesApi:
+  endpointCIDRs:
+    - 192.168.117.0/24

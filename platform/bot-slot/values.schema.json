@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["target", "probe"],
+  "required": ["target", "probe", "kubernetesApi"],
   "properties": {
     "target": {
       "type": "object",
@@ -15,7 +15,23 @@
         "alertPort": { "type": "integer", "minimum": 1024, "maximum": 65535, "not": { "const": 8080 } }
       }
     },
-    "probe": { "type": "boolean" }
+    "probe": { "type": "boolean" },
+    "kubernetesApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpointCIDRs"],
+      "properties": {
+        "endpointCIDRs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/32$",
+            "not": { "pattern": "^(0|127)\\.|^10\\.4[23]\\." }
+          }
+        }
+      }
+    }
   },
   "allOf": [
     {

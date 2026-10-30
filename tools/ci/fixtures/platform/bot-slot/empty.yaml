@@ -1,0 +1,5 @@
+# expect: fail
+# match: kubernetesApi.endpointCIDRs가 비었다
+# root가 클러스터 값을 넘기지 않은 렌더(차트 기본값). 봇의 Kubernetes API egress가 없는 정책이 조용히 나가지 않게 막는다.
+kubernetesApi:
+  endpointCIDRs: []

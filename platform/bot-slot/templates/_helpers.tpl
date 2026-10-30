@@ -6,7 +6,7 @@ homelab.ukyi.app/app: {{ .Values.target.app }}
 {{/*
 NetworkPolicy가 봇 파드를 고르는 selector(matchLabels·matchExpressions 블록). 공유 차트의 마이그레이션 Job 파드도 같은
 app 라벨을 받으므로, 그 파드에만 붙는 homelab.ukyi.app/role(migration)이 없는 파드만 고른다. 빼지 않으면 Job이
-봇 전용 허용(작업자·Grafana·Argo CD)을 물려받는다.
+봇 전용 허용(작업자·Grafana·Kubernetes API)을 물려받는다.
 */}}
 {{- define "botSlot.targetPodSelector" -}}
 matchLabels:

@@ -1,0 +1,6 @@
+# expect: fail
+# match: items at 0 and 1 are equal
+kubernetesApi:
+  endpointCIDRs:
+    - 192.168.117.15/32
+    - 192.168.117.15/32
