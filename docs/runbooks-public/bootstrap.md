@@ -435,6 +435,8 @@ NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있�
    EOF
    ```
 
+   **작업자 시드 `/apps/homelab-bot/worker/CODEX_AUTH_JSON`에는 실제 시드를 넣지 않는다.** sandbox가 실제 작업자로 바뀐 뒤(T16b S11) 이 대조에 들어가는 키다. 같은 시드를 VM과 운영 두 곳에서 쓰면 갱신 토큰이 어긋나 운영 봇을 다시 시드해야 한다. 작업자가 받는 모양의 가짜 JSON `{"tokens":{"refresh_token":"<아무 문자열>"}}`을 넣는다(빈 문자열은 안 된다). 작업자는 이 모양만 보므로 VM sandbox 파드가 Ready가 된다(모델 호출은 인증 실패). 모양이 다르면 작업자가 `seed_invalid`로 종료 1 → CrashLoop → sandbox Degraded → root가 wave -2에서 멈춘다. 위 대조는 키 이름만 보므로 모양은 잡지 못한다.
+
 2. **ESO Secret의 값은 `eso-homelab-dev`이다.** VM 준비 자산의 client ID·secret을 대화형 셸에서 `read -rs ESO_CLIENT_ID`, `read -rs ESO_CLIENT_SECRET`로 받고 `export ESO_CLIENT_ID ESO_CLIENT_SECRET`한 뒤 돌린다. 운영 자격을 잘못 넣으면 그 identity가 `homelab-dev`에 없어 Store가 Ready가 되지 않는다(조용히 운영 값을 읽지 않는다).
 
    **선택: 넣기 전에 NUC에서 로그인해 본다.** 같은 셸에서 [rotate.md](rotate.md) 1절 2단계 블록을 돌려 200인지 본다(토큰은 버리고 응답 코드만). Client ID 자리에 identity ID를 넣는 실수(T09에서 401 두 번, approvals 2026-10-19 20:55 행)를 Store가 Ready가 안 되는 것으로 VM에서 처음 알게 되는 대신 여기서 잡는다. U40 시험(2026-10-29)에서도 했다(200). VM 클러스터 DNS만 막은 시험이라 NUC에서는 Infisical에 닿는다.
