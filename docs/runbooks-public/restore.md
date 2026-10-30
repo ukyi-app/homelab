@@ -1497,6 +1497,7 @@ EOF
 - 사람이 `infisical login`한 NUC에서 돌린다(Infisical CLI는 NUC의 mise에만 있다). 암호문구는 터미널로만 넣는다(만들 때 두 번, 이름 대조 때 한 번). **암호문구는 비워 두지 않는다.** 비우면 age가 만든 암호문구를 화면에 찍는다.
 - 암호문구는 비밀번호 관리자에 둔다. 암호화된 메모도 된다. 시험용이면 시험 뒤 지운다.
 - 로그인 사용자의 Infisical CLI 0.44.2가 읽은 값을 `~/.infisical/secrets-backup/`에 남기는 문제는 bootstrap.md 2.2 vm 1단계와 같은 잠금으로 막는다.
+- **H2(봇 작업자 시드) 전에 뜬 내보내기는 4)에서 못 쓴다.** sandbox가 실제 작업자로 바뀐 뒤(T16b S11)부터 지도의 `sandbox/worker-seed` 키는 `/apps/homelab-bot/worker/CODEX_AUTH_JSON`이다(전에는 시험 키 `WORKER_PROBE`). 그 전 내보내기에는 이 경로가 없어 4)의 손 Secret 블록이 `missing`으로 멈춘다. H2 뒤 운영(`homelab`/`prod`)과 VM(`homelab-dev`/`dev`) 내보내기를 이 블록으로 새로 뜬다. Infisical에 키가 아직 없으면 이 블록도 `missing`으로 멈춘다. VM의 값은 실제 시드가 아니라 작업자가 받는 모양의 가짜 값이다(`platform/root/templates/sandbox.yaml` 머리 주석).
 - VM 시험: **`homelab-dev`/`dev`만 내보낸다.** 운영 내보내기를 VM에 넣으면 운영 터널 토큰·체크 URL·operator OAuth가 VM에 들어가 VM이 운영 터널에 붙는다(설계 B.8 E1, E8 VM 격리). 4)의 블록도 `vm`에서는 `homelab-dev`/`dev`가 아닌 내보내기를 거부한다. 시험 전(외부 자격을 다 넣고 bootstrap.md 2.2 vm 1단계 키 대조가 "빠진 키 0"인 뒤)에 만들고, 시험 뒤 파일과 암호문구를 지운다.
 
 ```bash
@@ -1545,7 +1546,11 @@ EOF
 
 **4) 손 Secret(root apply 전).** `argocd-secret`이 있어야 두 키를 합칠 수 있어 Argo CD 설치 뒤, 첫 소비자보다 먼저 있어야 해서 root apply 전이다. 대상 ns는 이 블록이 먼저 만든다. root의 namespaces(wave -9)가 나중에 PSA 라벨을 붙여 넘겨받는다(3절 3단계의 `database`와 같은 방식). root apply 뒤에 넣으면 첫 소비자(wave -5: cloudflared·tailscale·adguard)가 `CreateContainerConfigError`·볼륨 대기에 들고, Deployment는 `progressDeadlineSeconds`(이 저장소는 모두 기본 600초) 뒤 Degraded가 된다. 그때 root가 sync를 실패로 끝내고 재시도하는지는 확인하지 않았다. 먼저 넣으면 이 경합이 없다.
 
-- VM 시험: **canary.** `sandbox/worker-seed`의 `WORKER_PROBE` 하나만 비밀이 아닌 고정 문자열 `u40-canary`로 넣는다(`vm`에서만). 켠 뒤 그 해시가 내보내기 값으로 바뀌면 ESO가 data를 실제로 썼다는 직접 증거다. 나머지 9개는 값이 같아 ESO가 아무것도 쓰지 않아도 해시가 같다. optional 볼륨의 시험 키라 영향이 없다.
+- VM 시험: **canary.** `sandbox/worker-seed`의 `CODEX_AUTH_JSON` 값만 비밀이 아닌 고정 JSON `{"tokens":{"refresh_token":"u40-canary"}}`으로 바꿔 넣는다(`vm`에서만). 켠 뒤 그 해시가 내보내기 값으로 바뀌면 ESO가 data를 실제로 썼다는 직접 증거다. 나머지 9개는 값이 같아 ESO가 아무것도 쓰지 않아도 해시가 같다.
+  - **canary는 이 JSON 모양이어야 한다.** 작업자는 PVC에 `auth.json`이 없으면 이 값을 복사하고, `tokens.refresh_token`이 없으면 `seed_invalid`로 종료 1이다. 그냥 문자열이면 VM sandbox 파드가 CrashLoop → Degraded가 되어 root가 wave -2에서 멈추고 5)가 실패한다.
+  - 키를 더하지 않고 있는 키의 값만 바꾼다. 스냅숏 해시는 지도 키만 보지만 `keys=map`은 Secret의 키 집합 전체를 본다. 여분 키가 있으면 `hand`·`before`가 `keys!=map`이고, 넘겨받을 때 ESO가 여분 키를 지우는지는 라이브로 보지 않았다 [미확인](6)의 소스 근거는 data를 통째로 바꿔 쓴다고 읽는다). 블록은 지도의 `worker-seed` 키가 `CODEX_AUTH_JSON` 하나가 아니면 쓰기 전에 멈춘다.
+  - 켠 뒤에도 VM PVC의 `auth.json`은 canary 사본 그대로다(작업자는 없을 때만 복사한다). 시험에는 영향이 없다.
+- 실제 복구(`prod`): sandbox 파드는 내보내기의 시드를 복사해(`seeded`) Ready가 된다. 그러나 잃은 PVC의 갱신본이 그 시드의 갱신 토큰을 이미 바꿨을 수 있다. Ready는 시드 모양만 본 결과다. 모델 호출이 인증 실패면 사람이 다시 시드한다(T18 할 일 3).
 - VM 시험: Alertmanager 수신자 Secret 둘(`alertmanager-healthchecks`, `alertmanager-telegram`)은 optional 볼륨이고 Alertmanager가 보낼 때 파일을 읽어, 값이 틀려도 파드는 뜨고 그 전송만 실패한다. **알림 판정을 안 하면 `homelab-dev`의 그 키에 가짜 값(`.invalid` 주소 등)을 넣는 것으로 충분하다**(2026-10-29 시험은 시험 체크·봇을 만들지 않았다).
 
 ```bash
@@ -1555,8 +1560,12 @@ export KUBECONFIG=~/.kube/$ctx.yaml
 host/verify.sh --cluster "$CLUSTER" --identity   # 다른 클러스터에서 돌면 그 클러스터의 Secret을 덮는다. 이 줄을 빼지 않는다
 : "${U40_DIR:?U40_DIR가 비었다(저장소 밖 0700 폴더)}"
 map="$U40_DIR/map.json"; exp="$U40_DIR/$project-export.age"
-if [ "$CLUSTER" = vm ]; then canary=u40-canary; else canary=; fi
+# canary는 작업자가 받는 auth.json 모양이어야 한다. 문자열이면 VM 작업자가 seed_invalid로 멈춘다
+if [ "$CLUSTER" = vm ]; then canary='{"tokens":{"refresh_token":"u40-canary"}}'; else canary=; fi
 [ "$(jq length "$map")" -eq 10 ] || { echo "지도가 10개가 아니다"; exit 1; }
+# canary는 있는 키의 값만 바꾼다. 키를 더하면 스냅숏이 keys!=map이 된다
+[ -z "$canary" ] || [ "$(jq -c '[.[] | select(.ns == "sandbox" and .target == "worker-seed") | .keys[].secretKey]' "$map")" = '["CODEX_AUTH_JSON"]' ] \
+  || { echo "지도의 sandbox/worker-seed 키가 CODEX_AUTH_JSON 하나가 아니다(canary 자리)"; exit 1; }
 [ "$(jq -c '[.[] | select(.creationPolicy == "Merge") | .ns + "/" + .target]' "$map")" = '["argocd/argocd-secret"]' ] \
   || { echo "Merge 대상이 argocd/argocd-secret 하나가 아니다"; exit 1; }
 # Owner 대상이 이미 있으면 멈춘다. 다시 돌릴 때 ESO가 넘겨받은 Secret을 덮지 않게
@@ -1579,7 +1588,7 @@ age -d "$exp" \
              stringData: ([$e.keys[] | {key: .secretKey, value: ($s[.path] // error("missing"))}] | from_entries)}
             + (if $e.creationPolicy == "Owner" then {type: "Opaque"} else {} end)
           | if $canary != "" and $e.ns == "sandbox" and $e.target == "worker-seed"
-            then .stringData.WORKER_PROBE = $canary else . end]}' 2>/dev/null \
+            then .stringData.CODEX_AUTH_JSON = $canary else . end]}' 2>/dev/null \
   | kubectl apply --server-side --field-manager=u40-hand -f - 2>/dev/null \
   || { echo "손 Secret 만들기 실패(오류 문구는 값을 담을 수 있어 버렸다)" >&2; exit 1; }
 echo "손 Secret: Owner 9개 만듦${canary:+(worker-seed는 canary)}, argocd-secret에 두 키 합침"
