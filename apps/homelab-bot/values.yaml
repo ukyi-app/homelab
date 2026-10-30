@@ -2,6 +2,20 @@
 chartVersion: 1.2.0
 kind: web
 port: 8080
-resources: { cpu: "50m", memory: "128Mi" }
+# 실측 전 값이다(Node 24 게시 서버, pg Pool·Gateway WebSocket). memory는 limit도 같다. 첫 배포 뒤 사용량을 보고 줄인다.
+resources: { cpu: "100m", memory: "256Mi" }
 secrets: [DISCORD_BOT_TOKEN, GITHUB_REVIEW_WEBHOOK_SECRET, GRAFANA_READER_TOKEN, HEALTHCHECKS_PING_URL, RUNTIME_POLICIES, WORKER_CONTROL_PRIVATE_KEY]
 uses: { postgres: true }
+# 봇은 /healthz가 없다. /readyz는 DB·루프 상태를 본다. Gateway가 끊겨도 Ready를 유지해야 webhook·경보 수신이
+# 계속된다(봇 ARCHITECTURE §8). 그래서 liveness는 두지 않는다(Gateway 단절은 지표 경보로 알린다).
+probes: { readiness: { path: /readyz } }
+# 적용된 버전은 건너뛰고 advisory lock으로 동시 실행을 막는다(봇 #12). Sync hook Job이라 매 sync마다 돈다.
+migration: { command: ["node", "dist/src/migrate-main.js"] }
+# K8s API 읽기(파드 상태·Argo CD Application CR, D8·D9)는 platform/bot-slot이 이 ns에 만든 읽기 전용 SA로 한다.
+serviceAccountName: bot-reader
+# 비밀이 아닌 주소. 봇은 기본값 없이 이 env를 요구하고, 경로는 / 하나만 받는다.
+# 봇 파드 → 이 셋은 bot-slot NetworkPolicy가 연다(작업자 8080, Grafana 3000, API Endpoint 6443).
+env:
+  WORKER_URL: "http://worker.sandbox:8080/"
+  GRAFANA_URL: "http://grafana.observability:3000/"
+  KUBERNETES_API_URL: "https://kubernetes.default.svc/"
