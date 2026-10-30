@@ -503,8 +503,9 @@ vino "파일 없이 커널만 8192(sysctl -w): 재부팅하면 돌아가므로 F
   'FAIL' '재부팅하면 커널 값이 돌아간다' 'ok   fs.inotify.max_user_instances 8192'
 vino "설치된 파일이 Git과 다름: FAIL" "$INO" "$TMP/ino-128.conf" 8192 '없거나 Git과 다르다'
 vino "커널 값을 못 읽음: FAIL" "$INO" "$INO" - 'FAIL fs.inotify.max_user_instances가 없음이다'
+# 'ok' 두 글자만 보면 FAIL 문구 속 mktemp 폴더 이름(예: tmp.1jVbokhWuJ)에 걸려 가끔 실패한다. ok() 접두어로 본다.
 vino "Git 파일에 키가 둘: 기대 값 없이 비교하지 않는다" "$TMP/ino-dup.conf" "$TMP/ino-dup.conf" 8192 \
-  '값 하나를 읽지 못했다' '!ok'
+  '값 하나를 읽지 못했다' '!ok   '
 # 출력을 다 받은 뒤 grep에 넘긴다. 파이프로 이으면 grep -q가 먼저 끝날 때 pipefail이 실패로 읽는다.
 # shellcheck disable=SC2016
 if grep -qw check_inotify <<<"$(bash -c '. "$1/host/verify.sh" && declare -f main' _ "$TMP")"; then

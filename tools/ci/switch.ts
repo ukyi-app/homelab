@@ -10,7 +10,8 @@
 //    (tools/ci/appset-patch.ts). 위 1.~3.의 등록 앱·데이터 렌더는 render.ts의 재현이라 그 단계를 대신 보지 못한다.
 // 등록 앱·데이터가 스위치를 모르는 옛 차트(render.ts ES_SWITCH_SINCE)면 가상 끔 렌더에서는 정보 줄만 낸다. 기존 앱은 옛 태그에
 // 머물 수 있다(설계 C.4.5). 값 파일에서 스위치를 실제로 끈 클러스터는 기본 렌더(render 단계)와 여기서 함께 실패한다.
-// 끌 때 빠지는 Secret 대상 목록을 출력한다. 손으로 만들 Secret의 이름과 ns다(restore.md 3절 U40).
+// 끌 때 빠지는 것(Store와 ExternalSecret 대상 Secret)을 출력한다. 손으로 만들 Secret은 이 중 Store와 Application째 빠지는
+// edge-probe를 뺀 것이다(앱 0개일 때 14개 중 10개, restore.md 3.1).
 import { checkAppsetPatches } from "./appset-patch";
 import { checkSecretPaths } from "./data";
 import { type Doc, type Violation, gitFiles, readText } from "./lib";
@@ -182,7 +183,8 @@ export function checkExternalSecretsSwitch(): Violation[] {
   ]))
     v(x.where, x.message);
 
-  // 끌 때 손으로 만들 Secret(클러스터별, root 아래와 등록 앱·데이터). 옛 차트 앱은 끄기 전에 올려야 해 빼고 위 정보 줄로 낸다.
+  // 끌 때 빠지는 것(클러스터별, root 아래와 등록 앱·데이터). 손 Secret과 같지 않다(파일 머리 주석). 옛 차트 앱은 끄기 전에
+  // 올려야 해 빼고 위 정보 줄로 낸다.
   for (const c of clusters) {
     const targets = on.docs
       .filter((d) => isSecret(d) && group(d.origin).cluster === c && !unsupported.has(d.origin.replace(/\[[a-z0-9-]+\]$/, "")))
