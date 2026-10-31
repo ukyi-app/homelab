@@ -30,8 +30,8 @@ worker:
   # main 빌드(app-build)가 GHCR에 올린 digest만 쓴다. 로컬 빌드 digest는 CI 빌드와 다르다.
   # 사람 PR로만 바꾼다(D2). 게시 서버는 apps/homelab-bot/image.yaml 자동 병합으로 따라가지만, 모델 자격을 든 sandbox까지
   # 자동 경로를 넓히지 않는다(설계 C.4.4·C.4.7). 작업자 요청 계약(version)을 바꾸는 봇 PR은 이 값을 바꾸는 PR과 짝으로 낸다.
-  # 지금 값: 봇 main f08bc9f(실행기 프로필, #18) 빌드. gh attestation verify로 app-build 서명과 소스 커밋을 확인했다.
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:c36c643cb2977f3da679925fff83565d133f83c3ce21c895e052f1e174078439
+  # 지금 값: 봇 main 2d5ad21(개선안 v2, #17) 빌드. gh attestation verify로 app-build 서명과 소스 커밋을 확인했다.
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:50fbc3808321f2c764bbf04d88395b2aefb24cc95067e8b482f4f41bc42ee3ce
   # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
   # WORKER_CONTROL_PRIVATE_KEY다. 둘이 어긋나면 작업자가 모든 실행 요청을 403으로 거부하니 회전은 두 값을 함께 바꾼다.
   # 모양이 틀리면 작업자가 기동하지 못해(종료 1) sandbox가 Degraded가 되므로 values.schema.json이 Ed25519 공개 키 모양만 받는다.
@@ -59,7 +59,8 @@ worker:
     # Infisical 키 이름 = Secret 키 = 작업자가 읽는 파일 이름(WORKER_CREDENTIAL_KEY). 인증 방식을 뜻한다(구독 장기 토큰).
     credentialKey: CLAUDE_CODE_OAUTH_TOKEN
     # 이 실행기가 프록시로 나가는 이름(proxy.allowedDomains에 더해진다). OAuth 교환·갱신 후보(platform.claude.com·claude.ai)는
-    # 열지 않았다. S12 첫 대화의 프록시 거부 로그가 필요를 보이면 그 근거와 함께 더한다.
+    # 열지 않았다. S12 첫 대화(2026-10-30, 실행 3회)에서 작업자는 api.anthropic.com에만 나갔고 프록시 거부는 0건이었다.
+    # 나중에 거부 로그가 필요를 보이면 그 근거와 함께 더한다.
     egressHosts:
       - api.anthropic.com
 
