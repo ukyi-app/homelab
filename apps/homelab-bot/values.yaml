@@ -6,6 +6,12 @@ port: 8080
 resources: { cpu: "100m", memory: "256Mi" }
 secrets: [DISCORD_BOT_TOKEN, GITHUB_REVIEW_WEBHOOK_SECRET, GRAFANA_READER_TOKEN, HEALTHCHECKS_PING_URL, RUNTIME_POLICIES, WORKER_CONTROL_PRIVATE_KEY]
 uses: { postgres: true }
+# GitHub webhook 공개 경로 https://hooks.ukyi.app/github(설계 C.8, D6 (a)). 차트 Ingress는 설계의 /github Exact가 아니라
+# / Prefix다. 밖에서는 Cloudflare WAF 규칙 1(infra/cloudflare/main.tf)이 /github POST 밖을 먼저 막고, 봇도 8080의 그 밖
+# 경로는 404로 답한다. 함정: WAF를 거치지 않는 클러스터 안 요청(Traefik web에 닿는 cloudflared 파드 등)이
+# Host: hooks.ukyi.app을 붙이면 /readyz·/metrics까지 닿는다. 이 host를 다른 Ingress가 함께 쓰면 Traefik은 규칙 길이가
+# 같을 때 어느 쪽으로 보낼지 정하지 않는다(edge-probe를 같은 PR에서 지운 이유).
+public: { host: hooks.ukyi.app }
 # 봇은 /healthz가 없다. /readyz는 DB·루프 상태를 본다. Gateway가 끊겨도 Ready를 유지해야 webhook·경보 수신이
 # 계속된다(봇 ARCHITECTURE §8). 그래서 liveness는 두지 않는다(Gateway 단절은 지표 경보로 알린다).
 probes: { readiness: { path: /readyz } }

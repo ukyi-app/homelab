@@ -1430,11 +1430,11 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
 
 빈 클러스터를 복구해야 하는데 Infisical에도 닿지 못할 때다(설계 C.6.4 "클러스터 유실 + Infisical 장애" 행). ESO가 값을 읽지 못하므로 복구 PR이 ClusterSecretStore와 ExternalSecret을 끄고, 같은 이름의 Secret을 저장소 밖 암호화 내보내기에서 손으로 만든 뒤 root를 apply한다. 장애가 끝나면 스위치를 켜는 PR 하나로 ESO 관리로 돌아간다. **손 Secret은 지우지 않는다.** ESO가 소유자 없는 같은 이름 Secret을 넘겨받는다. 2026-10-29 VM에서 아래 순서 그대로 실행해 통과했다(T23 할 일 2, 결과는 [verification.md](../plans/2026-10-17-homelab-rebuild/platform/verification.md) "한계와 후속" 13). 3절 순서에 아래 0)~7)이 더해진다.
 
-**스위치.** 복구 PR이 그 클러스터 값 파일의 `cluster.restore`에 `externalSecrets: false`를 넣는다(따옴표 없는 bool. 문자열이면 root 렌더가 실패한다). VM 시험은 `values-vm.yaml`에만 넣고 운영 values는 그대로 둔다. 끄면 ClusterSecretStore 셋과 모든 ExternalSecret이 렌더되지 않고, Store Application(`external-secrets-stores`)과 시험 수신기 `edge-probe`는 Application째 빠지며, ESO operator(wave -8)는 남는다. 등록 앱이 앱 차트 1.2.0·데이터 차트 1.1.0 미만이면 복구 PR의 ci `render`가 그 앱과 chartVersion을 적고 실패한다. 끄기 전에 그 앱의 chartVersion을 올리는 PR을 먼저 병합한다(`apps/<앱>/values.yaml`·`data/<앱>/values.yaml`은 두 클러스터 공용이라 일반 PR이다). 평소 PR은 옛 차트를 막지 않고 `bun run ci --only external`의 `참고:` 줄로만 알린다.
+**스위치.** 복구 PR이 그 클러스터 값 파일의 `cluster.restore`에 `externalSecrets: false`를 넣는다(따옴표 없는 bool. 문자열이면 root 렌더가 실패한다). VM 시험은 `values-vm.yaml`에만 넣고 운영 values는 그대로 둔다. 끄면 ClusterSecretStore 셋과 모든 ExternalSecret이 렌더되지 않고, Store Application(`external-secrets-stores`)은 Application째 빠지며, ESO operator(wave -8)는 남는다. 등록 앱이 앱 차트 1.2.0·데이터 차트 1.1.0 미만이면 복구 PR의 ci `render`가 그 앱과 chartVersion을 적고 실패한다. 끄기 전에 그 앱의 chartVersion을 올리는 PR을 먼저 병합한다(`apps/<앱>/values.yaml`·`data/<앱>/values.yaml`은 두 클러스터 공용이라 일반 PR이다). 평소 PR은 옛 차트를 막지 않고 `bun run ci --only external`의 `참고:` 줄로만 알린다.
 
-**함정: 살아 있는 클러스터에서 끄지 않는다.** `edge-probe`의 resources-finalizer가 ns `app-edge-probe`까지 지우고, Store와 `argocd-owner`는 추적 없이 남는다. 설계한 쓰임은 빈 클러스터 복구다. 시험을 다시 할 때도 살아 있는 VM 클러스터에 끄는 PR을 다시 넣지 않고 VM을 새로 만든다.
+**함정: 살아 있는 클러스터에서 끄지 않는다.** Store와 `argocd-owner`는 추적 없이 남는다. 설계한 쓰임은 빈 클러스터 복구다. 시험을 다시 할 때도 살아 있는 VM 클러스터에 끄는 PR을 다시 넣지 않고 VM을 새로 만든다.
 
-**손으로 만들 것은 10개다.** `bun run ci --only external`이 출력하는 "끌 때 빠지는 것" 줄은 14개(Store 3 + ExternalSecret 대상 11)다. Store 셋은 Secret이 아니라 만들 것이 없고, `app-edge-probe/edge-probe`는 Application째 빠져 쓰는 쪽도 없다(켤 때 ESO가 새로 만든다. 넘겨받기 대상이 아니다). 남는 10개는 Owner 9개와, 새 Secret이 아니라 Argo CD 설치가 만든 `argocd/argocd-secret`에 owner 자격 두 키를 합치는 Merge 1개다. 키는 17개다(운영 ExternalSecret 키는 edge-probe 1개를 더해 18개). 모든 ExternalSecret의 `target.template`은 `engineVersion: v2`, `mergePolicy: Merge`뿐이라(ES 라벨·Argo CD 추적 주석이 Secret에 복사되지 않게 하는 용도, 설계 B.8 E3), 손 Secret을 키 그대로, type Opaque, 라벨·주석·`ownerReferences`·`immutable` 없이 만들면 ESO 결과와 같다.
+**손으로 만들 것은 10개다.** `bun run ci --only external`이 출력하는 "끌 때 빠지는 것" 줄은 앱 0개일 때 13개(Store 3 + ExternalSecret 대상 10)다. 봇 등록(#995) 뒤로는 앱 몫 3개(`app-homelab-bot/homelab-bot-app`·`homelab-bot-db`, `database/pg-role-homelab-bot`)가 더해져 16개이고, 이 셋은 아래 "한계"대로 이 절이 아직 다루지 못한다. Store 셋은 Secret이 아니라 만들 것이 없다. 남는 10개는 Owner 9개와, 새 Secret이 아니라 Argo CD 설치가 만든 `argocd/argocd-secret`에 owner 자격 두 키를 합치는 Merge 1개다. 키는 17개로, 플랫폼 ExternalSecret 키 수와 같다(등록 앱 키는 따로다). 모든 ExternalSecret의 `target.template`은 `engineVersion: v2`, `mergePolicy: Merge`뿐이라(ES 라벨·Argo CD 추적 주석이 Secret에 복사되지 않게 하는 용도, 설계 B.8 E3), 손 Secret을 키 그대로, type Opaque, 라벨·주석·`ownerReferences`·`immutable` 없이 만들면 ESO 결과와 같다.
 
 **한계: 앱 0개에서만 실행했다.** 공유 차트·ApplicationSet 생성 Application 경로는 라이브로 보지 않았다(ci가 templatePatch를 sprig v3.3.0으로 실행해 끄면 ExternalSecret이 0개인지만 본다). 등록 앱이 생기면 그 앱의 Secret도 손으로 만들어야 한다. 그런데 앱 차트의 `<앱>-db`·`<앱>-valkey-url`과 데이터 차트의 `pg-role-<앱>`은 template에 `data`·`type`·`metadata`가 있어 1)의 지도가 "손으로 같은 결과를 만들 수 없는 모양"에서 멈추고, 개수 검사(10개)도 멈춘다. 그때는 이 절을 앱 경로까지 넓힌 뒤 쓴다.
 
@@ -1445,7 +1445,7 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
 - `CLUSTER`는 `prod`(실제 복구) 또는 `vm`(VM 시험)이다. 클러스터에 쓰는 블록은 이 값으로 kubeconfig(`~/.kube/homelab.yaml` 또는 `~/.kube/homelab-vm.yaml`, bootstrap.md 1절)를 고정하고 `host/verify.sh --cluster "$CLUSTER" --identity`로 대상을 본다. **2026-10-29에 실행한 것은 `vm` 경로다.** `prod` 경로는 같은 블록의 값만 바꾼 것이고 실행하지 않았다. 살아 있는 운영에서 잘못 돌리면 손 Secret 블록은 Owner 대상이 이미 있어 쓰기 전에 멈춘다.
 - 값은 파이프 안에만 있다. 평문 파일·명령행 인자·화면 출력이 없다. jq·kubectl 오류 문구는 값 조각을 담을 수 있어 버리고 종료 코드로만 멈춘다. 디버깅하려고 이 리다이렉트를 빼지 않는다. 필요하면 키 이름만 내는 jq로 따로 본다.
 
-**0) 복구 PR(끔).** 3절 1단계의 복구 PR에 `cluster.restore.externalSecrets: false`를 함께 넣는다. ci `external secrets switch`가 "참고: <클러스터>는 값 파일에서 복구 스위치가 꺼져 있다"와 templatePatch 실행 줄(끔 건수 포함)을 낸다. 로컬 렌더 기준 끈 VM의 자식 Application은 16개다(켠 렌더 18개에서 `external-secrets-stores`·`edge-probe`가 빠짐). VM 시험: #988(`values-vm.yaml` 한 파일. serverName `pg-vm-20261029`, `recoverySource`, `externalSecrets: false`).
+**0) 복구 PR(끔).** 3절 1단계의 복구 PR에 `cluster.restore.externalSecrets: false`를 함께 넣는다. ci `external secrets switch`가 "참고: <클러스터>는 값 파일에서 복구 스위치가 꺼져 있다"와 templatePatch 실행 줄(끔 건수 포함)을 낸다. 로컬 렌더 기준 끈 VM의 자식 Application은 16개다(켠 렌더 17개에서 `external-secrets-stores`가 빠짐). VM 시험: #988(`values-vm.yaml` 한 파일. serverName `pg-vm-20261029`, `recoverySource`, `externalSecrets: false`).
 
 **1) 손 Secret 지도.** 대상 ns/이름, ExternalSecret 이름, creationPolicy, 키 → Infisical 경로를 Git 렌더에서 모은다. 값은 없다. 실제 재해에는 운영 클러스터가 없으므로 Git에서 만든다. 복구 스위치를 켠 렌더(`rootOverlay`)를 쓰므로 복구 PR이 스위치를 꺼 둔 뒤에도 같은 결과다.
 
@@ -1537,7 +1537,7 @@ echo "내보내기 만듦: 키 $(wc -l <<<"$want")개(이름만 대조)"
 EOF
 ```
 
-출력은 "내보내기 만듦: 키 17개(이름만 대조)"다. 지도의 키 수라 운영 ExternalSecret 키 18개보다 하나 적다(끈 상태에 없는 edge-probe `GITHUB_WEBHOOK_SECRET`). 멈춤: "missing"(지도 경로가 Infisical에 없음), 백업 파일 생김, 키 이름 불일치. 출력은 개수뿐이다.
+출력은 "내보내기 만듦: 키 17개(이름만 대조)"다. 지도의 키 수라 플랫폼 ExternalSecret 키 수(17개)와 같다. 2026-10-29 시험 때는 운영 키가 그때 있던 edge-probe `GITHUB_WEBHOOK_SECRET`까지 18개였다. 멈춤: "missing"(지도 경로가 Infisical에 없음), 백업 파일 생김, 키 이름 불일치. 출력은 개수뿐이다.
 
 **3) Argo CD와 ESO 부트스트랩 Secret.** 3절 3단계 순서(host → k3s → Argo CD → ESO 부트스트랩 Secret)대로 하고 root apply 앞에서 멈춘다. 장애 중이라 Store는 아직 없지만 부트스트랩 Secret은 켜는 PR 때 필요하니 지금 넣는다(값은 복구 자산에서 오고 Infisical이 없어도 된다).
 
@@ -1649,7 +1649,7 @@ kubectl -n argocd get applicationsets apps data -o json | jq -r '.items[] | "\(.
 EOF
 ```
 
-- 통과(VM 시험, 앱 0개): Store·ExternalSecret 빈 출력, root `Succeeded`·`Synced`·`Healthy`(retryCount 빈 값), Application 17개(root + 16) 모두 `Synced Healthy`, `external-secrets-stores`·`edge-probe` 없음, `false`인 Application 9개(adguard, appset-apps, appset-data, cloudflared, cnpg-cluster, go, observability, sandbox, tailscale), templatePatch 둘 다 `true`. 10분 넘게 지나 다시 봐도 같고 `.status.history` 길이가 늘지 않는다(플립플롭 없음). 2026-10-29: root apply 10:38:50Z, root operation 10:38:54Z~10:41:38Z, 10:43:00Z에 17개 모두 Synced/Healthy, 33분 뒤 다시 봐도 같음, 손 sync 0회.
+- 통과(VM 시험, 앱 0개): Store·ExternalSecret 빈 출력, root `Succeeded`·`Synced`·`Healthy`(retryCount 빈 값), Application 17개(root + 16) 모두 `Synced Healthy`, `external-secrets-stores` 없음(2026-10-29에는 그때 있던 `edge-probe`도 없음), `false`인 Application 9개(adguard, appset-apps, appset-data, cloudflared, cnpg-cluster, go, observability, sandbox, tailscale), templatePatch 둘 다 `true`. 10분 넘게 지나 다시 봐도 같고 `.status.history` 길이가 늘지 않는다(플립플롭 없음). 2026-10-29: root apply 10:38:50Z, root operation 10:38:54Z~10:41:38Z, 10:43:00Z에 17개 모두 Synced/Healthy, 33분 뒤 다시 봐도 같음, 손 sync 0회.
 - 손 Secret이 실제로 쓰이는지는 쓰는 쪽으로 본다: cloudflared `/ready` 200과 HA 연결, tailscale operator Ready와 내부 Ingress hostname(이름은 출력하지 않고 수만 센다), adguard·grafana·go·sandbox 파드 Ready, Cluster `pg` healthy와 새 serverName 첫 Backup `completed`(3절 4단계, `r2-backup`을 쓴다).
 - 실패하면 7)의 표에서 관측을 찾는다.
 - VM 시험: 끈 상태 관찰 끝(켜는 PR 전)에 확인 파드 `MODE=blocked`로 차단이 유지됐는지 보고, ESO 파드가 클러스터 DNS를 쓰는지 본다: `kubectl -n external-secrets get deploy -o jsonpath='{range .items[*]}{.metadata.name} {.spec.template.spec.dnsPolicy} {.spec.template.spec.hostNetwork}{"\n"}{end}'`가 모두 `ClusterFirst`이고 hostNetwork가 빈 값. 차단이 새고 있었으면 결과가 무효다.
@@ -1756,10 +1756,10 @@ EOF
    | 해시 | after = 기대(VM canary는 before ≠ 기대 → after = 기대, 나머지는 before = after) | before = after = 기대 |
    | ES | `Ready=True`, reason `SecretSynced` | 같음 |
 
-6. 전체: 5)의 확인 블록을 다시 돌린다. Application이 켠 렌더 수(VM 시험 앱 0개: 19개 = root + 18)로 모두 `Synced Healthy`, 스위치 값 줄이 빈 출력이다. `edge-probe`의 ExternalSecret은 새 Secret을 만든다(넘겨받기 대상이 아니다).
+6. 전체: 5)의 확인 블록을 다시 돌린다. Application이 켠 렌더 수(VM 시험 앱 0개: 18개 = root + 17)로 모두 `Synced Healthy`, 스위치 값 줄이 빈 출력이다.
 7. 지금도 동기화하는지: [rotate.md](rotate.md) 1절 4단계처럼 `argocd-owner`에 `force-sync` 주석을 달고 `refreshTime`이 그 뒤인지 본다.
 
-2026-10-29: Store 3개 Ready, ExternalSecret 11개 `SecretSynced`, 넘겨받기 10/10, 파드 재시작 0·새로 생기거나 사라진 파드 0(그때 블록은 UID를 남기지 않아 같은 이름으로 다시 만들어진 StatefulSet 파드는 보지 못했다. 지금 블록은 UID로 본다), Application 19개 Synced/Healthy, 스위치 값 줄 빈 출력, force-sync 11:34:21Z → `refreshTime` 11:34:21Z.
+2026-10-29(그때는 `edge-probe`가 있어 ExternalSecret·Application이 하나씩 더 많다): Store 3개 Ready, ExternalSecret 11개 `SecretSynced`, 넘겨받기 10/10, 파드 재시작 0·새로 생기거나 사라진 파드 0(그때 블록은 UID를 남기지 않아 같은 이름으로 다시 만들어진 StatefulSet 파드는 보지 못했다. 지금 블록은 UID로 본다), Application 19개 Synced/Healthy, 스위치 값 줄 빈 출력, force-sync 11:34:21Z → `refreshTime` 11:34:21Z.
 
 근거(ESO v2.13.0 소스, `externalsecret_controller.go`): 소유자 없는 기존 Secret에 `reconcile.external-secrets.io/managed=true` 라벨을 PATCH로 붙이고 다시 돌아와(318~331행), Owner 정책이면 `SetControllerReference`로 ES를 controller 소유자로 넣고(836~838행) data를 ES 키로 통째로 바꿔 쓴다(템플릿 파일 77행. Merge는 두 키만 덮는다). 막히는 경우는 셋이다: 다른 컨트롤러가 이미 controller 소유자, 다른 ExternalSecret이 소유자, `immutable: true`. 손 Secret은 셋 다 아니게 만든다.
 
