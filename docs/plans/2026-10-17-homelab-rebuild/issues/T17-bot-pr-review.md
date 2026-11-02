@@ -34,6 +34,12 @@
    - 허용 작성자의 PR 본문도 비신뢰 자료로 다룬다. Renovate PR 본문에는 상류 릴리스 노트가 그대로 들어간다 [실측: T15].
 4. 리뷰어 작업자는 GitHub 자격 없이 `codeload.github.com`의 base·head 압축본만 받고, diff는 두 압축본으로 만든다(D-15). 게시는 게시 서버가 리뷰 App으로 한다.
 5. 끈 뒤 시험 저장소에서 Codex 자동 리뷰가 달리지 않는지 확인한다. 저장소 설정에서 어떤 작성자의 PR까지 Codex가 리뷰하는지(봇·Renovate PR 포함 여부)는 사람이 Codex 설정 화면에서 확인해 HANDOFF에 적는다.
+6. 실연동 전에 봇 저장소 PR #7(2026-10-29)에서 이월한 Codex 리뷰 P2를 고친다(`src/review.ts`·`src/review-input.ts`). T16b 할 일 7에서 옮겼다(lead 결정 2026-11-02. 리뷰 레인이 T16b에서 꺼져 있었다). 같은 멈춤 규칙(1라운드 수정 → 재리뷰 → P1 없으면 병합)을 따르고, 스레드 답글은 이미 남겼다.
+   - 중복 세대에 댓글 명시 요청의 `trigger`를 `comment`로 올린다.
+   - 원격 조회 뒤 POST 직전에 최신 정책(저장소 허용·revision·출력 분류·게시 상한)을 다시 확인한다.
+   - `unknown` 게시 행 대조 대상을 커서로 순환한다(지금은 최신 20개만).
+   - 보안: `editScript` diff 계산의 메모리 상한(linear-space diff 또는 계산 전 복잡도 한도·deadline). 입력 한도 `maxDiffBytes`는 계산 뒤에만 본다.
+7. T16b에서 `not_run`으로 남은 EVENT-01(같은 논리 이벤트 중복 전달 → 작업 1건)을 GitHub webhook 재전송(`duplicate_delivery`)으로 실연동한다. Discord에서는 중복 전달을 시점을 정해 만들 수 없었고, webhook 재전송은 재현할 수 있다(T16b "결과"). Discord 경로는 T21이다.
 
 ## 시범 운영 (완료 뒤)
 
