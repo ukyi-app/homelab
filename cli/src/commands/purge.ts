@@ -5,6 +5,7 @@
 // 함정: 보호 주석(Prune=false,Delete=false)이 살아 있는 리소스에서 빠지기 전에 PR 2가 병합되면 Argo CD가 리소스를 남긴 채
 // Application만 지운다. 그래서 PR 2는 동기화를 확인한 다음 실행에서만 연다(같은 PR에 넣지 않는다, 데이터 차트 _helpers.tpl).
 // 상태 저장소 없이 이어지도록 단계마다 main 파일과 살아 있는 리소스를 읽어 어디까지 왔는지 판단한다.
+// 기억 삭제 원장(T20, data values의 volumes.deletionLedger 또는 PVC deletion-ledger)이 있는 앱은 아무것도 하지 않고 멈춘다(ledgerStep).
 import { defineCommand, type Observation, type ReadCtx, type Step, type WriteCtx } from "../core/command";
 import { APP_NAME, newRunId } from "../core/names";
 import { prStep } from "../core/pr";
@@ -242,6 +243,31 @@ function invalidate(w: WriteCtx, n: Names, left: string[]): never {
 function seen(ctx: ReadCtx, n: Names, left: string[]): Observation {
   const r = ctx.k8s.restoreRecord(REC_NS, recordName(n.app));
   return { state: "differs", action: r ? "delete" : "none", detail: `${SEEN}(${left.join(", ")})${r ? " → 폐기 확인 기록이 무효가 된다. 지우고" : ""} 멈춘다` };
+}
+
+// T20 기억 삭제 원장(설계 C.5.5). 원장은 지운 기억이 DB 복원으로 되살아나지 않게 하는 표식이라 DB 백업(14일)과 pgdump 수동
+// 사본보다 오래 살아야 한다. 이 명령은 PostgreSQL·Valkey만 이해하고, PR 2가 data/<app>을 지워도 원장 PVC·PV는 보호 주석과
+// Retain으로 남는데 "모두 사라짐"으로 끝난다. 그래서 원장이 선언됐거나(main의 data values) 살아 있으면(PVC) 처음부터 멈춘다.
+// 선언을 enabled: false로 바꿔 비켜 가도 PVC는 Prune=false로 남으므로 클러스터도 본다.
+const LEDGER_PVC = "deletion-ledger";
+function ledgerStep(n: Names): Step {
+  return {
+    id: "deletion-ledger",
+    target: "기억 삭제 원장",
+    async read(ctx) {
+      const data = values(ctx, n.dataFile);
+      const declared = data?.volumes?.deletionLedger?.enabled === true;
+      const live = ctx.k8s.get("pvc", n.ns, LEDGER_PVC) !== null;
+      if (!declared && !live) return same("없음");
+      const where = [declared ? `data/${n.app}의 volumes.deletionLedger` : "", live ? `PVC ${n.ns}/${LEDGER_PVC}` : ""].filter(Boolean).join("·");
+      return {
+        state: "differs",
+        action: "none",
+        detail: `기억 삭제 원장이 있다(${where}). 원장은 일반 purge로 지우지 않는다`,
+        next: "원장 폐기는 별도 절차다(설계 C.5.5 원장 폐기): 그 앱의 DB가 든 base backup(14일)과 pgdump 수동 사본이 모두 사라진 뒤, 사람이 원장 파일을 보존 여부와 함께 확인하고 볼륨 선언·PV를 따로 지우는 PR을 낸다",
+      };
+    },
+  };
 }
 
 // 클러스터에서 앱 워크로드와 기록만 본다(GitHub·Infisical·백업 조회 없음). apply 때 본 엔진보다 먼저 따로 돈다(#893 r1 P1-2).
@@ -554,6 +580,9 @@ export default defineCommand({
         const pre = await ctx.engine({ command: "data purge", app, steps: [workloadStep(n)] });
         if (pre.status === "failed") return pre;
       }
+      // 원장이 있으면 폐기 확인 기록·PR·PV reclaim 어느 것도 하기 전에 멈춘다. 워크로드 무효화(위)는 그보다 먼저 돈다.
+      const ledger = await ctx.engine({ command: "data purge", app, steps: [ledgerStep(n)] });
+      if (ledger.status === "failed") return ledger;
       const listed = listDir(ctx, `data/${app}`);
       const dataFiles = listed.length ? listed : [n.dataFile];
       return ctx.engine({
