@@ -463,6 +463,8 @@ CLI `homelab cache restore <앱>`은 이 절의 검증 키를 복원 표식 키�
 
 CNPG 복원은 제자리가 아니라 항상 새 클러스터다. 그래서 임시 클러스터를 시각 T1로 PITR하고, 그 DB 하나만 덤프해 공유 Cluster `pg`에 다시 넣는다.
 
+**삭제 원장이 있는 앱(`homelab-bot`, T20)은 2.1을 함께 따른다.** DB만 T1로 되돌리고 SSD의 삭제 원장은 되감지 않는다. 재개의 끝은 Deployment Ready가 아니라 2.1의 원장 확인이다.
+
 **T1 뒤에 끝난 completed base backup이 있어야 한다.** 그 백업이 WAL이 T1까지 R2에 있다는 근거다(`pg_backup_stop`은 끝 WAL이 아카이브될 때까지 기다린다). CNPG 1.30.1 Cluster에는 마지막 아카이브 시각이 없어 다른 근거가 없고, 그래서 `homelab db restore`는 이 백업이 없으면 멈춘다(T13 시나리오 10). T1 뒤 정기 백업(매일 03:00 KST)이 아직 없으면 온디맨드 Backup CR을 하나 만들고 completed를 기다린 뒤 시작한다.
 
 ```bash
@@ -1045,6 +1047,8 @@ YAML
 
    그다음 PR로 `suspended` 줄을 지운다. 마이그레이션 Job이 다시 돌고 앱이 뜬다.
 
+   삭제 원장이 있는 앱(`homelab-bot`)은 재개 PR 병합 뒤 2.1의 재개 확인 블록이 통과해야 다음으로 간다. 봇 Ready는 원장과 묶이지 않아(T20 2단계 계약) Ready만으로는 지운 기억이 다시 지워졌는지 모른다.
+
 6. **정리:** 임시 Cluster, 그 PVC, 도우미 Job 둘, 잠금을 지우고 0개를 본다. 잠금은 앱을 재개한 뒤에 지운다(그 전에 지우면 다른 실행이 DB를 지울 수 있다). 잠금은 이 실행의 파드가 모두 없어진 것을 확인한 뒤 마지막에 지운다. `kubectl delete job`의 기본(background)은 Job 객체를 먼저 없애고 파드를 나중에 지워, 끝나지 않은 `pg_restore`·`psql`이 도는 동안 잠금이 풀릴 수 있다. 그래서 Job은 foreground로 지우고 기다린다. 앞의 삭제·확인이 하나라도 실패하면 잠금은 남는다(다음 실행이 멈춘다). 원인을 고치고 이 블록을 다시 돌린다.
 
    ```bash
@@ -1065,6 +1069,49 @@ YAML
    ```
 
 7. **확인:** 앱 readiness와 표식 행(시나리오 10). 다른 앱 DB(시나리오 10의 `homelab-probe2`)의 T1 뒤 쓰기가 남아 있는지도 본다.
+
+### 2.1 삭제 원장이 있는 앱 (`homelab-bot`, T20)
+
+봇은 기억을 지울 때 SSD의 삭제 원장(`/mnt/bulk/homelab-bot/deletion-ledger/deletions.jsonl`, 파드 안 `/var/lib/homelab-bot/ledger`)에 먼저 적고 DB 행을 지운다. DB를 T1로 되돌리면 T1 뒤에 지운 기억 행이 돌아온다. 봇은 기동 장벽에서 최신 원장을 다시 적용해 그 행을 다시 지우고, 그 뒤에야 기억·브리핑·게시를 연다(설계 C.5.7, 4절). 그래서 원장은 DB와 따로 최신 상태로 둔다.
+
+**하지 않는 것.**
+
+- 원장을 T1 시점으로 되감거나, 비우거나, 새로 초기화하지 않는다. 원장에는 DB 백업이 없다. 되감으면 T1 뒤 삭제가 영영 다시 적용되지 않는다.
+- 원장 PVC `deletion-ledger`에 복원 라벨(`homelab.ukyi.app/restore`)을 붙이지 않는다. 6단계 정리가 그 라벨로 PVC를 지운다. 원장 PV·PVC는 이 절차의 정리 대상이 아니다.
+- 원장 파일 내용(기억 ID·시각)을 출력하거나 기록에 옮기지 않는다. 아래 확인은 개수·상태만 본다.
+
+**3단계(앱 멈춤) 뒤, 4단계 전에 원장을 본다.** 멈춤으로 원장을 쓰는 파드가 없다. NUC에서 SSD 마운트와 원장 파일·표식이 계약 v1인지 본다. 원장 항목이 하나라도 FAIL이면 DB를 지우기 전에 멈추고 4절로 간다.
+
+```bash
+sudo -v && host/verify.sh --cluster prod     # 삭제 원장 SSD 항목이 모두 ok여야 한다(파일 모드·표식은 sudo 자격이 있어야 본다)
+```
+
+**원장 세대.** DB 표 `deletion_ledger_generation`(봇 migration 012)도 T1로 돌아간다. 봇은 SSD 표식의 `generation`과 이 행을 대조한다.
+
+- 행이 SSD 표식과 같으면 그대로 열린다.
+- T1이 첫 원장 연결 전이라 행이 없으면, 첫 열기가 지금 표식으로 다시 묶는다.
+- T1 뒤에 SSD를 잃고 새 세대를 받아들였으면(4.2) 옛 행이 돌아와 봇이 `generation_mismatch`로 원장을 열지 않는다. 4.2의 세대 수용(`MEMORY_LEDGER_ACCEPT_GENERATION`)을 다시 한다. 그 경우 새 원장에 없는 옛 삭제는 되살아날 수 있다(받아들인 위험).
+
+**재개 확인(5단계 재개 PR 병합 뒤, 7단계 전).** 원장 상태가 `ready`이고 삭제 대기가 0개일 때까지 본다. 봇은 열 때 원장 전체를 다시 적용하고, 못 끝낸 삭제는 60초마다 다시 한다. 지표는 봇 컨테이너 안에서 앱 포트로 읽는다(값은 상태·개수뿐이다). CLI `homelab db restore`의 재개 단계는 Deployment Ready만 보므로 이 블록을 따로 돌린다.
+
+```bash
+( set -euo pipefail
+  # 지표 이름은 T20 2단계 계약(봇 src/ops-metrics.ts). 상태는 one-hot이라 값이 1인 줄 하나가 지금 상태다.
+  m() { kubectl -n app-homelab-bot exec deploy/homelab-bot -c app -- node -e \
+    'fetch("http://127.0.0.1:8080/metrics").then(async r => { if (!r.ok) process.exit(1); process.stdout.write(await r.text()) }, () => process.exit(1))'; }
+  for i in $(seq 1 20); do
+    out=$(m)
+    state=$(printf '%s\n' "$out" | sed -n 's/^homelab_bot_deletion_ledger_state{state="\([a-z]*\)"} 1$/\1/p')
+    pending=$(printf '%s\n' "$out" | awk '$1 == "homelab_bot_memory_deletions_pending" { print $2 }')
+    echo "원장 ${state:-없음}, 삭제 대기 ${pending:-없음}"
+    if [ "$state" = ready ] && [ "$pending" = 0 ]; then echo "통과: 원장 ready, 삭제 대기 0"; exit 0; fi
+    # 재기동 직후의 failed(lock_held)는 재열기로 풀려 바로 멈추지 않는다. 쓰는 중의 failed·fenced는 재기동 전까지 닫힌다
+    sleep 30
+  done
+  echo "멈춤: 10분 안에 원장 ready·삭제 대기 0이 되지 않았다(완료로 기록하지 않는다). 봇 로그의 deletion_ledger_<사유>와 4절을 본다" >&2; exit 1 )
+```
+
+`disabled`가 나오면 봇 values에 `MEMORY_LEDGER_DIR`이 없는 것이다(원장·기억이 꺼져 있다). 재기동 직후 잠깐의 `failed`(옛 세션이 잠금을 쥔 `lock_held`)는 60초마다 다시 열어 풀린다. 이 확인이 통과하기 전에는 복원을 끝난 것으로 기록하지 않고, CLI `--finish`도 하지 않는다.
 
 ## 2a. 악성 스키마 복원 시험 (로컬)
 
@@ -1130,6 +1177,7 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
    - `recoverySource.serverName`에 지금 Git의 `serverName`을 옮겨 적고,
    - `serverName`을 새 세대 `pg-<복구일 YYYYMMDD>`로 바꾼다.
    - 영속 Valkey가 있는 앱마다 `data/<앱>/values.yaml`에 `valkey.running: false`, `apps/<앱>/values.yaml`에 `suspended: true`(앱 차트 1.1.0 이상)를 같은 PR에 넣는다. root apply가 ApplicationSet을 바로 동기화하므로, 넣지 않으면 빈 PVC 위의 Valkey와 앱이 먼저 떠 빈 큐로 돌거나 새로 쓴 데이터가 RDB 복원에서 사라진다.
+   - 삭제 원장을 쓰는 `homelab-bot`은 `apps/homelab-bot/values.yaml`에 `suspended: true`를 같은 PR에 넣는다. 원장 SSD를 확인하기 전에 봇이 뜨지 않게 한다(4.1). VM 시험에서는 넣지 않는다. VM에는 원장 PV가 없어 봇이 어차피 Pending이다(4절 머리).
    - **VM 시험(시나리오 13)은 위 두 값을 공용 `apps/`·`data/` values에 넣지 않는다**(운영 앱·Valkey도 멈춘다). `platform/root/values-vm.yaml`의 `cluster.restore`에 `suspendedApps: [<앱>]`와 `valkey: {<앱>: stopped}`를 넣는다. 1절 3단계(복원 모드로 올림)는 `valkey: {<앱>: restoreMode}`, 1절 5단계와 아래 5단계의 앱 재개는 그 항목을 지우는 values-vm PR이다. 공용 values를 고치는 CLI(`homelab cache restore`·`db restore`)는 VM에 쓰지 않는다.
    - **VM 시험의 복구 PR은 `values-vm.yaml` 하나만 고친다.** `values-prod.yaml`·`apps/`·`data/`는 그대로라 운영 렌더가 바뀌지 않는다. VM 격리 값은 root 렌더가 단언한다(`platform/root/templates/cluster-check.yaml`: 접두 `vm-`, `homelab-dev`/`dev`, 운영과 다른 버킷, 운영과 다른 `pg-vm-<YYYYMMDD>`).
 
@@ -1154,6 +1202,8 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
    - 실제 빈 NUC 복구: Tailscale 콘솔에서 잃은 클러스터의 operator·프록시 기기(`tag:k8s-operator`, `tag:k8s`)를 지운다. OS를 다시 깔았으면 `tailscale up` 전에 옛 NUC 호스트 기기도 지운다(남아 있으면 새 이름에 `-1`이 붙고 되돌아가지 않는다).
    - VM 시험: 이 단계를 건너뛴다. 그 기기들은 살아 있는 운영 클러스터의 것이다. 시험 뒤 `vm-*` 기기만 지운다.
 3. [bootstrap.md](bootstrap.md) 순서로 host → k3s → Argo CD → ESO 부트스트랩 Secret → root apply.
+
+   **실제 빈 NUC 복구에서 삭제 원장 SSD가 살아 있으면** host 단계(bootstrap.md 1절 사슬의 `--bulk-ssd`)가 포맷 없이 다시 마운트하고 기존 원장을 그대로 둔다. 확인과 봇 재개 순서는 4.1이다. VM은 SSD가 없어 그 단계를 건너뛴다.
 
    **VM 시험: root apply 전에 복구 원본 자격을 넣고 쓰기 거부를 본다.** bootstrap.md 2.2 vm 분기 3단계와 같은 블록이다(한쪽을 고치면 다른 쪽도). root가 먼저 뜨면 cnpg-cluster(wave -3)가 자격 없는 `r2-source`로 복구를 시작하므로 root apply보다 앞에 둔다. `database` ns는 namespaces(wave -9)가 나중에 PSA 라벨을 붙여 넘겨받는다. 값은 복구 자산의 읽기 전용 토큰에서 `export`로 넣고 출력하지 않는다. 명령행 인자로 넘기지 않는다(`ps`·`/proc`로 보인다).
 
@@ -1404,7 +1454,7 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
    echo "가져옴: VM 버킷 valkey/$APP/$obj (1절 2단계에 OBJECT=$obj)"
    EOF
    ```
-6. 앱이 뜬 뒤 시나리오 1·10을 확인한다.
+6. 앱이 뜬 뒤 시나리오 1·10을 확인한다. `homelab-bot`은 4.1의 원장 확인 뒤에 재개하고, 재개 뒤 2.1의 재개 확인 블록이 통과해야 복구 완료다.
 7. **정리 PR:** `recoverySource`를 지워 렌더 결과를 `initdb`로 되돌린다(새 serverName은 그대로). recovery를 남기면 나중에 볼륨을 잃고 Cluster를 다시 만들 때 옛 아카이브에서 낡은 데이터로 조용히 복구된다. 떠 있는 클러스터에는 영향이 없다(U26).
    - VM 시험: `values-vm.yaml`에서 `recoverySource`를 지우고, `cluster.restore`가 빈 값(`suspendedApps: []`, `valkey: {}`)인지 본다. 이 PR이 동기화되면 ObjectStore `r2-source`가 prune된다. 그 뒤 복구 원본 자격 Secret을 지운다. 컨테이너가 다시 시작될 때 참조하는 Secret이 없으면 `CreateContainerConfigError`가 나므로, 이 Secret을 참조하는 리소스가 0일 때만 지운다. 남아 있으면 그 파드를 VM에서만 지워 지금 spec으로 다시 띄운 뒤(단일 인스턴스라 잠깐 끊긴다) 다시 돌린다. 읽기 전용 토큰 자체는 Cloudflare에서 폐기한다(복구 자산 정리).
 
@@ -1879,3 +1929,136 @@ EOF
 ```
 
 **해제 뒤 coredns 파드가 하나로 안정될 때까지 기다린 뒤 `MODE=open`을 돌린다.** 마지막 줄이 Running 하나이고 Terminating이 없으며, 잠시 뒤 다시 봐도 같은 파드여야 한다. 2026-10-29에는 `rollout status`가 끝난 직후의 첫 `MODE=open`이 `dns=none`이었다. coredns가 한 번 더 교체되는 중이었고 15초 뒤에는 `NOERROR`였다. k3s가 coredns 매니페스트를 다시 적용해 두 번째 rollout이 생긴 것으로 보지만 확인하지 못했다(추측). `dns=none`이면 기다렸다 다시 돌린다.
+
+## 4. T20 삭제 원장 (`homelab-bot`)
+
+봇 기억 삭제 원장의 복구 분기다. 결정은 설계 F D-12 "T20 후속"(사용자 2026-11-02)과 원장 계약 v1, 배치는 설계 C.5.5·C.8이다. **기본은 멈춤·경보다.** 원장이 없거나 어긋나면 봇은 빈 원장으로 열지 않고 기억 경로만 닫는다(Ready는 유지해 경보·webhook 수신은 계속). 빈 원장을 새로 받아들이는 길은 4.2 하나이고 사람이 정한다.
+
+| 무엇 | 값 |
+|---|---|
+| 호스트 | SSD `LABEL=bulk-ssd`(ext4) → `/mnt/bulk`(fstab `nofail`). 원장 `/mnt/bulk/homelab-bot/deletion-ledger`(65532:65532 0750), `deletions.jsonl`·`ledger.json`(0600). `sudo host/install.sh --cluster prod --bulk-ssd`만 첫 초기화를 한다 |
+| 클러스터 | StorageClass `local-ledger`·PV `homelab-bot-deletion-ledger`(local, Retain, 노드 고정, `platform/bot-slot`) → PVC `app-homelab-bot/deletion-ledger`(`data/homelab-bot`) → 게시 서버 컨테이너 `/var/lib/homelab-bot/ledger` |
+| DB | 표 `deletion_ledger_generation`(봇 DB, 행 하나). 표식 `ledger.json`의 `generation`과 대조한다 |
+| 경보(vmalert `bot.yaml`) | `HomelabBotLedgerDiskNotMounted`·`HomelabBotLedgerDiskReadOnly`(SSD), `HomelabBotLedgerFailed`(failed·fenced 5분, 열기 실패도 failed), `HomelabBotLedgerNotReady`(closed·degraded 30분), `HomelabBotMemoryDeletionStuck`(삭제 대기 30분) |
+
+- 원장 내용(기억 ID·시각)과 디스크 UUID·시리얼은 출력·공개 기록에 옮기지 않는다. 아래 확인은 개수·모드·상태만 본다.
+- `mkfs`·`rm`처럼 지우는 명령은 사람이 대상을 확인한 뒤 친다(블록마다 표시). 에이전트는 실행하지 않는다.
+- 원장 파일·표식을 손으로 고치거나 만들지 않는다(4.4의 빈 파일 하나 지우기만 예외). 권한을 고치려고 chown·chmod하지 않는다. 원인(예: 파드 fsGroup)을 모른 채 고치면 같은 사고를 덮는다.
+- **VM:** VM에는 SSD가 없어 원장 PV·StorageClass가 없다(`values-vm.yaml` `deletionLedger: {}`). 공용 `data/homelab-bot`의 PVC와 봇 파드는 VM에서 Pending이고 `homelab-bot`·`homelab-bot-data` Application은 Progressing이다. 의도된 상태다. 원장 경보는 원장 PV가 있는 클러스터에서만 SSD를 기대해 VM에서 울리지 않는다. VM에서 봇을 띄우려면 VM 디스크에 합성 원장을 준비하고 `values-vm.yaml`에 노드·경로를 넣는다(그 준비 절차는 아직 없다).
+
+### 4.1 빈 NUC 복구에서 SSD가 살아 있을 때
+
+1. **복구 PR에 봇 멈춤.** 3절 1단계의 복구 PR에 `apps/homelab-bot/values.yaml`의 `suspended: true`를 넣는다. root apply 뒤 원장을 확인하기 전에 봇이 원장을 열지 않게 한다.
+2. **SSD 다시 마운트(포맷 없이).** host 단계에서 사람이 돌린다. bootstrap.md 1절 사슬에 이미 있다.
+
+   ```bash
+   lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS          # 라벨 bulk-ssd인 ext4가 하나인지 눈으로 본다
+   sudo host/install.sh --cluster prod --bulk-ssd
+   sudo -v && host/verify.sh --cluster prod             # 삭제 원장 SSD 항목이 모두 ok
+   ```
+
+   - 출력에 "원장이 이미 있다. 내용을 그대로 둔다"가 나와야 한다. 새 NUC에서 장치 번호가 바뀌어도 라벨로 찾는다.
+   - **"첫 초기화"가 나오면 봇을 재개하지 않는다.** 살아 있어야 할 원장 디렉터리가 비어 있었다는 뜻이다(다른 디스크·잘못된 장치). 복구한 DB에 원장 세대 행이 없을 때(봇이 원장을 연 적이 없음, 4.4 1의 조회)만 정상으로 보고 4단계로 간다. 행이 있으면 4.2의 판단으로 간다. 새로 생긴 빈 원장은 그대로 둔다.
+   - 설치기가 멈추면(라벨 장치 0개·2개, ext4 아님, 루트 쪽 `/mnt/bulk` 잔여물, 원장 일부 없음) 그 메시지대로 사람이 확인한다. `mkfs`·`tune2fs -L`·`wipefs`는 치지 않는다. 원장 일부 없음은 4.4다.
+3. **클러스터 객체.** root apply 뒤 Argo CD가 StorageClass·PV(`bot-slot`)와 PVC(`homelab-bot-data`)를 다시 만든다. Kubernetes UID는 새것이고 원장 경로는 같다. PV의 노드 고정 값은 `values-prod.yaml`의 `deletionLedger.nodeName`(= `host/clusters/prod.env`의 `NODE_NAME`, ci가 대조)이라 k3s 노드 이름이 이 값이어야 봇 파드가 스케줄된다.
+
+   ```bash
+   kubectl get sc local-ledger
+   kubectl get pv homelab-bot-deletion-ledger -o jsonpath='{.spec.local.path} {.spec.claimRef.namespace}/{.spec.claimRef.name} {.status.phase}{"\n"}'
+   kubectl -n app-homelab-bot get pvc deletion-ledger
+   ```
+
+   경로가 `/mnt/bulk/homelab-bot/deletion-ledger`, claimRef가 `app-homelab-bot/deletion-ledger`여야 한다. PVC는 `volumeName`으로 이 PV를 직접 고르므로 봇이 멈춰 있어도 `Bound`가 되는 것으로 안다(실측 전). 다른 PV에 묶였거나 `Lost`면 멈춘다.
+4. **DB 복구 확인 뒤 봇 재개.** 3절 4단계(Cluster healthy, 표식 행)가 끝난 뒤 `suspended` 줄을 지우는 PR을 올린다. 봇은 기동 장벽에서 SSD 원장을 R2에서 돌아온 DB에 다시 적용한다. 원장 세대가 복구한 DB의 행과 다르면 봇이 원장을 열지 않는다(2.1 "원장 세대").
+5. **재개 확인.** 2.1의 재개 확인 블록(원장 `ready`, 삭제 대기 0)이 통과해야 복구 완료다. 원장 파일을 R2 DB 백업으로 대체하지 않는다.
+
+### 4.2 SSD를 잃었을 때 (받아들인 위험)
+
+NUC 본체와 함께, 또는 SSD만 고장 나 원장을 되살릴 수 없을 때다. 원장 사본은 따로 없다(사용자 결정 2026-11-02). R2에서 돌아온 DB에는 그 뒤 지운 기억 행이 있을 수 있고, 새 원장에는 그 삭제가 없어 **지운 기억이 되살아날 수 있다.** 사용자가 받아들인 위험이다. 그래도 조용히 넘어가지 않는다.
+
+- **증상:** `install.sh --bulk-ssd`가 라벨 장치 0개로 멈춤, `HomelabBotLedgerDiskNotMounted`, 봇 원장 `failed`(사유 `missing`).
+- **기본은 그대로 멈춤·경보다.** 봇은 Ready이고 기억 경로만 닫혀 있다. 빈 원장을 만들어 경보를 끄지 않는다.
+
+1. **판단(사람, 사용자 승인).** 같은 SSD를 다른 포트·기기에서 라벨로 읽을 수 없는지 확인한다. 되살릴 수 있으면 4.1로 간다. 되살릴 수 없으면 사용자에게 "새 원장 세대를 시작하고, 그 전 삭제는 되살아날 수 있다"를 확인받고 approvals.md에 남긴다(날짜, 잃은 이유, 사용자 결정).
+2. **봇 멈춤 PR:** `apps/homelab-bot/values.yaml`에 `suspended: true`.
+3. **새 SSD 준비(파괴 명령, 사람).** 새 장치를 ext4 + 라벨 `bulk-ssd`로 만든다. 대상 장치를 눈으로 확인한다. 루트 LV가 있는 디스크를 고르지 않는다.
+
+   ```bash
+   lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINTS
+   # 파괴 명령: 그 파티션의 데이터를 모두 지운다. <새 파티션>은 위에서 확인한 이름
+   sudo mkfs.ext4 -L bulk-ssd /dev/<새 파티션>
+   ```
+
+4. **새 원장 초기화:** `sudo host/install.sh --cluster prod --bulk-ssd`. 빈 디렉터리라 빈 `deletions.jsonl`과 새 `ledger.json`을 만들고 "첫 초기화: … generation `<값>`"을 낸다. 이 `<값>`을 다음 단계에 쓴다. 그다음 `sudo -v && host/verify.sh --cluster prod`.
+5. **새 세대 수용 PR(한시).** 같은 PR에서 `suspended` 줄을 지우고 `env`에 `MEMORY_LEDGER_ACCEPT_GENERATION: "<값>"`을 넣는다. 봇은 이 값이 SSD 표식과 같을 때만 DB의 세대 행을 바꾸고 감사 `memory_ledger_generation_accepted`를 남긴다. 다르면 `generation_accept_mismatch`로 열지 않는다. 병합 뒤 2.1의 재개 확인 블록으로 `ready`를 본다.
+6. **해제 PR:** `MEMORY_LEDGER_ACCEPT_GENERATION` 줄을 지운다. 운영 값은 평소 이 키가 없는 상태다. 남겨 두면 다음 세대 변경 때 옛 값과 달라 열기가 거부되고, 언제 무엇을 받아들였는지가 값 파일에 남아 헷갈린다.
+7. **기록:** approvals.md에 새 세대 시작 시각과 "그 전 삭제는 DB 복원 때 되살아날 수 있음"을 남긴다. 되살아난 기억을 찾았으면 다시 지운다(새 원장에 기록된다).
+
+### 4.3 PVC만 지워졌을 때
+
+PVC `deletion-ledger`만 지워지고 PV·SSD·원장은 그대로인 경우다. PV는 Retain이라 `Released`로 남고 옛 PVC의 UID를 claimRef에 쥐고 있다. Argo CD가 같은 이름의 새 PVC를 만들지만 PV가 옛 UID를 쥐고 있어 새 PVC는 Pending이다. Argo CD는 claimRef의 UID를 고치지 않는다(원하는 상태에 UID가 없다). 원장 파일은 지워지지 않았다.
+
+1. **확인(읽기만).** PV가 봇 PVC 자리였고 지금 이 PV를 쓰는 파드가 없는지 본다.
+
+   ```bash
+   bash -euo pipefail <<'EOF'
+   PV=homelab-bot-deletion-ledger
+   phase=$(kubectl get pv $PV -o jsonpath='{.status.phase}')
+   ref=$(kubectl get pv $PV -o jsonpath='{.spec.claimRef.namespace}/{.spec.claimRef.name}')
+   old=$(kubectl get pv $PV -o jsonpath='{.spec.claimRef.uid}')
+   new=$(kubectl -n app-homelab-bot get pvc deletion-ledger -o jsonpath='{.metadata.uid} {.status.phase}')
+   echo "PV $phase, claimRef $ref uid $old / 새 PVC $new"
+   [ "$phase" = Released ] || { echo "PV가 Released가 아니다. 이 절이 아니다" >&2; exit 1; }
+   [ "$ref" = app-homelab-bot/deletion-ledger ] || { echo "claimRef가 봇 PVC가 아니다. 멈춘다" >&2; exit 1; }
+   [ "$old" != "${new%% *}" ] || { echo "PV가 이미 새 PVC를 가리킨다" >&2; exit 1; }
+   # 이 이름의 PVC를 쓰는 파드. 새 봇 파드는 PVC가 묶이지 않아 노드 없이 Pending이어야 한다
+   kubectl get pods -A -o json | jq -r '.items[] | select(any(.spec.volumes[]?; .persistentVolumeClaim.claimName == "deletion-ledger"))
+     | "\(.metadata.namespace)/\(.metadata.name) \(.status.phase) node=\(.spec.nodeName // "-")"'
+   EOF
+   ```
+
+   나온 파드가 모두 `app-homelab-bot`의 `Pending node=-`이어야 한다. Running이거나 노드가 있는 파드가 있으면 멈추고 무엇인지 본다. 같은 경로를 다른 PV로 붙인 것이 있는지도 본다(`kubectl get pv -o custom-columns=NAME:.metadata.name,PATH:.spec.local.path`).
+2. **다시 묶기(사람, 클러스터 쓰기).** 다른 소비자가 없음을 확인한 사람이 claimRef의 UID만 지운다. `test`가 하나라도 어긋나면 아무것도 바꾸지 않는다. `<옛 uid>`는 1의 출력이다.
+
+   ```bash
+   kubectl patch pv homelab-bot-deletion-ledger --type json -p '[
+     {"op":"test","path":"/spec/claimRef/namespace","value":"app-homelab-bot"},
+     {"op":"test","path":"/spec/claimRef/name","value":"deletion-ledger"},
+     {"op":"test","path":"/spec/claimRef/uid","value":"<옛 uid>"},
+     {"op":"remove","path":"/spec/claimRef/uid"}]'
+   ```
+
+   PV를 지우고 다시 만들거나 claimRef를 다른 PVC로 바꾸지 않는다. PV 컨트롤러가 이름·ns가 같은 새 PVC에 묶는다(PV·PVC `Bound`). 그다음 봇 파드가 뜬다.
+3. **확인:** `sudo -v && host/verify.sh --cluster prod`, 그리고 2.1의 재개 확인 블록.
+
+### 4.4 첫 초기화가 끊겨 `deletions.jsonl`만 남았을 때
+
+`install.sh --bulk-ssd`의 첫 초기화는 빈 `deletions.jsonl`을 먼저, `ledger.json`(표식)을 마지막에 만든다. 그 사이에 끊기면 표식 없는 빈 원장 파일만 남고, 다음 실행은 "비어 있지 않은데 ledger.json이 없다"로 멈춘다. 봇도 표식이 없으면 열지 않는다(`missing`). 그래서 그 파일에 기록이 들어간 적이 없다.
+
+1. **첫 초기화 끊김인지 확인(읽기만).** 디렉터리에 `deletions.jsonl` 하나만 있고 0바이트이며, 봇 DB에 원장 세대 행이 없어야 한다. 행이 있으면 이 원장이 한 번은 열렸던 것이라 이 절이 아니다(표식 유실, 4.5).
+
+   ```bash
+   sudo find /mnt/bulk/homelab-bot/deletion-ledger -mindepth 1 -maxdepth 1 -printf '%f %s %u:%g %m\n'
+   # 기대: deletions.jsonl 0 65532:65532 600 한 줄
+   PRIMARY=$(kubectl -n database get cluster pg -o jsonpath='{.status.currentPrimary}')
+   kubectl -n database exec "$PRIMARY" -c postgres -- psql -U postgres -d homelab-bot -v ON_ERROR_STOP=1 -tAc \
+     "select to_regclass('public.deletion_ledger_generation') is not null"
+   # t면 이어서 본다. 0이어야 한다
+   kubectl -n database exec "$PRIMARY" -c postgres -- psql -U postgres -d homelab-bot -v ON_ERROR_STOP=1 -tAc \
+     "select count(*) from public.deletion_ledger_generation"
+   ```
+
+2. **빈 파일 지우고 다시 초기화(파괴 명령, 사람).** 1이 모두 맞을 때만. 파일이 비어 있지 않으면 `rm`까지 가지 않는다.
+
+   ```bash
+   f=/mnt/bulk/homelab-bot/deletion-ledger/deletions.jsonl
+   sudo test -f "$f" && ! sudo test -s "$f" && sudo rm -- "$f"     # 0바이트 일반 파일일 때만 지운다
+   sudo host/install.sh --cluster prod --bulk-ssd                  # 빈 디렉터리라 원장과 표식을 함께 새로 만든다
+   sudo -v && host/verify.sh --cluster prod
+   ```
+
+   봇이 이미 원장을 붙인 채 떠 있으면(`failed`, 사유 `missing`) 60초 안에 다시 열어 `ready`가 된다. 2.1의 재개 확인 블록으로 본다.
+
+### 4.5 그 밖의 원장 손상
+
+표식만 없음(DB에 세대 행이 있음), 표식 형식·버전이 틀림(`marker_invalid`·`marker_version`), 소유·모드가 다름(`owner_mismatch`·`permissions_too_open`), 마지막 줄이 아닌 곳이 깨짐(`corrupt`), 세대가 DB와 다름(`generation_mismatch`)은 정해진 손 복구가 없다. 봇과 설치기는 멈춘 채로 둔다. 4.4 1의 `find` 출력(이름·크기·소유·모드)과 봇 로그의 `deletion_ledger_<사유>`·stage·errno를 모아 사람이 원인을 판단한다. 원장 내용은 옮기지 않는다. 원장을 버리고 새로 시작하는 것은 4.2와 같은 사용자 결정이다.

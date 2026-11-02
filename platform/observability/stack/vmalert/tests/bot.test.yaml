@@ -73,3 +73,251 @@ tests:
         groupname: bot
         alertname: HomelabBotOutboxUnknown
         exp_alerts: []
+
+  # T20 삭제 원장(rules/bot.yaml deletion-ledger 그룹). 라벨은 kube-state-metrics(honor_labels)·node-exporter(instance = 노드 이름)·
+  # bot-slot job이 붙이는 모양이다. 원장 PV는 운영에만 있다(VM은 values-vm.yaml deletionLedger: {}).
+  - name: HomelabBotLedgerDiskNotMounted는 원장 PV가 있는데 /mnt/bulk가 없으면 5분 뒤 발화한다
+    interval: 1m
+    input_series:
+      - series: 'kube_persistentvolume_info{job="kube-state-metrics", instance="kube-state-metrics", persistentvolume="homelab-bot-deletion-ledger", storageclass="local-ledger"}'
+        values: "1x20"
+      - series: 'up{job="node-exporter", instance="nuc-15-pro", namespace="observability"}'
+        values: "1x20"
+      - series: 'node_filesystem_size_bytes{job="node-exporter", instance="nuc-15-pro", namespace="observability", mountpoint="/", fstype="ext4"}'
+        values: "980000000000x20"
+    alert_rule_test:
+      - eval_time: 4m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerDiskNotMounted
+        exp_alerts: []
+      - eval_time: 6m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerDiskNotMounted
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              persistentvolume: homelab-bot-deletion-ledger
+            exp_annotations:
+              summary: 삭제 원장 PV homelab-bot-deletion-ledger가 있는데 /mnt/bulk(ext4)가 마운트돼 있지 않다
+              description: 봇 기억 삭제가 멈춘다. 파드를 재시작하지 말고 NUC에서 findmnt /mnt/bulk, sudo -v && host/verify.sh --cluster prod로 SSD를 본다.
+              runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+
+  # 사람이 다시 마운트하면 풀린다.
+  - name: HomelabBotLedgerDiskNotMounted는 /mnt/bulk가 마운트되면 풀린다
+    interval: 1m
+    input_series:
+      - series: 'kube_persistentvolume_info{job="kube-state-metrics", instance="kube-state-metrics", persistentvolume="homelab-bot-deletion-ledger", storageclass="local-ledger"}'
+        values: "1x20"
+      - series: 'up{job="node-exporter", instance="nuc-15-pro", namespace="observability"}'
+        values: "1x20"
+      - series: 'node_filesystem_size_bytes{job="node-exporter", instance="nuc-15-pro", namespace="observability", mountpoint="/mnt/bulk", fstype="ext4"}'
+        values: "_x8 1900000000000x12"
+    alert_rule_test:
+      - eval_time: 7m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerDiskNotMounted
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              persistentvolume: homelab-bot-deletion-ledger
+            exp_annotations:
+              summary: 삭제 원장 PV homelab-bot-deletion-ledger가 있는데 /mnt/bulk(ext4)가 마운트돼 있지 않다
+              description: 봇 기억 삭제가 멈춘다. 파드를 재시작하지 말고 NUC에서 findmnt /mnt/bulk, sudo -v && host/verify.sh --cluster prod로 SSD를 본다.
+              runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+      - eval_time: 10m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerDiskNotMounted
+        exp_alerts: []
+
+  # VM에는 원장 PV가 없다. /mnt/bulk가 없어도 울리지 않는다.
+  - name: HomelabBotLedgerDiskNotMounted는 원장 PV가 없는 클러스터(VM)에서 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'up{job="node-exporter", instance="vm-node", namespace="observability"}'
+        values: "1x20"
+      - series: 'node_filesystem_size_bytes{job="node-exporter", instance="vm-node", namespace="observability", mountpoint="/", fstype="ext4"}'
+        values: "80000000000x20"
+    alert_rule_test:
+      - eval_time: 15m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerDiskNotMounted
+        exp_alerts: []
+
+  # node-exporter를 못 읽으면 모든 파일시스템 시계열이 사라진다. 미마운트로 오인하지 않는다(TargetDown이 본다).
+  - name: HomelabBotLedgerDiskNotMounted는 node-exporter가 내려가 있으면 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_persistentvolume_info{job="kube-state-metrics", instance="kube-state-metrics", persistentvolume="homelab-bot-deletion-ledger", storageclass="local-ledger"}'
+        values: "1x20"
+      - series: 'up{job="node-exporter", instance="nuc-15-pro", namespace="observability"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 15m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerDiskNotMounted
+        exp_alerts: []
+
+  - name: HomelabBotLedgerDiskReadOnly는 /mnt/bulk가 읽기 전용이 되면 바로 발화한다
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_readonly{job="node-exporter", instance="nuc-15-pro", namespace="observability", mountpoint="/mnt/bulk", fstype="ext4"}'
+        values: "0x3 1x5"
+      # /mnt/bulk 밖 마운트의 읽기 전용은 이 경보의 대상이 아니다.
+      - series: 'node_filesystem_readonly{job="node-exporter", instance="nuc-15-pro", namespace="observability", mountpoint="/mnt/other", fstype="ext4"}'
+        values: "1x8"
+    alert_rule_test:
+      - eval_time: 3m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerDiskReadOnly
+        exp_alerts: []
+      - eval_time: 4m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerDiskReadOnly
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: node-exporter
+              instance: nuc-15-pro
+              namespace: observability
+              mountpoint: /mnt/bulk
+              fstype: ext4
+            exp_annotations:
+              summary: nuc-15-pro /mnt/bulk(삭제 원장 SSD)가 읽기 전용이다
+              description: 봇 기억 삭제가 원장에 기록되지 않는다. dmesg·journalctl -k에서 ext4 오류를 보고 사람이 fsck·재마운트를 판단한다.
+              runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+
+  # 지표는 one-hot이다(지금 상태만 1). failed·fenced는 5분 이어져야 운다.
+  - name: HomelabBotLedgerFailed는 fenced가 5분 이어지면 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="ready"}'
+        values: "1x2 0x10"
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="fenced"}'
+        values: "0x2 1x10"
+    alert_rule_test:
+      - eval_time: 6m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerFailed
+        exp_alerts: []
+      - eval_time: 8m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              state: fenced
+            exp_annotations:
+              summary: 봇 삭제 원장 상태가 fenced다. 기억 기능이 닫혔고 삭제가 끝나지 않는다
+              description: 봇 로그의 deletion_ledger_<사유>(stage·errno)를 본다. 쓰는 중의 failed·fenced는 재기동 전까지 닫혀 있다. 원장 파일을 지우거나 새로 만들지 않는다.
+              runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+
+  # Recreate 재기동 직후 옛 세션이 잠금을 쥐어(lock_held) 열기가 잠깐 failed가 되고, 60초 뒤 재열기에서 ready가 된다.
+  - name: HomelabBotLedgerFailed는 재기동 때 잠깐의 failed(lock_held)에 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="closed"}'
+        values: "1 0x20"
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="failed"}'
+        values: "0 1x2 0x18"
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="ready"}'
+        values: "0x3 1x18"
+    alert_rule_test:
+      - eval_time: 20m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerFailed
+        exp_alerts: []
+
+  # 열기 실패(예: missing, SSD 미마운트)도 failed다. 계속되면 울리고, 재열기가 성공해 ready가 되면 풀린다.
+  - name: HomelabBotLedgerFailed는 열기 실패가 이어지면 울리고 ready로 돌아오면 풀린다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="failed"}'
+        values: "1x7 0x5"
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="ready"}'
+        values: "0x7 1x5"
+    alert_rule_test:
+      - eval_time: 6m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              state: failed
+            exp_annotations:
+              summary: 봇 삭제 원장 상태가 failed다. 기억 기능이 닫혔고 삭제가 끝나지 않는다
+              description: 봇 로그의 deletion_ledger_<사유>(stage·errno)를 본다. 쓰는 중의 failed·fenced는 재기동 전까지 닫혀 있다. 원장 파일을 지우거나 새로 만들지 않는다.
+              runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+      - eval_time: 9m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerFailed
+        exp_alerts: []
+
+  - name: HomelabBotLedgerNotReady는 degraded가 30분 이어지면 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="degraded"}'
+        values: "0 1x35"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerNotReady
+        exp_alerts: []
+      - eval_time: 32m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              state: degraded
+            exp_annotations:
+              summary: 봇 삭제 원장이 30분 넘게 degraded 상태다
+              description: 기억 삭제가 대기로 남는다. 봇 로그의 deletion_ledger_<사유>와 /mnt/bulk 여유·읽기 전용 여부를 본다.
+              runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+
+  # 배포(Recreate) 뒤 첫 Gateway READY까지 잠깐 closed인 것은 울리지 않는다.
+  - name: HomelabBotLedgerNotReady는 기동 때 잠깐의 closed에 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="closed"}'
+        values: "1x2 0x35"
+      - series: 'homelab_bot_deletion_ledger_state{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", state="ready"}'
+        values: "0x2 1x35"
+    alert_rule_test:
+      - eval_time: 35m
+        groupname: deletion-ledger
+        alertname: HomelabBotLedgerNotReady
+        exp_alerts: []
+
+  - name: HomelabBotMemoryDeletionStuck은 가장 오래된 삭제 대기가 30분을 넘으면 발화한다
+    interval: 1m
+    input_series:
+      # 대기 없음(0) 뒤 삭제 하나가 1분마다 60초씩 늘어난다.
+      - series: 'homelab_bot_memory_deletion_pending_oldest_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0 60+60x40"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: deletion-ledger
+        alertname: HomelabBotMemoryDeletionStuck
+        exp_alerts: []
+      - eval_time: 32m
+        groupname: deletion-ledger
+        alertname: HomelabBotMemoryDeletionStuck
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+            exp_annotations:
+              summary: 봇 기억 삭제가 30분 넘게 끝나지 않았다
+              description: 삭제한 기억은 숨겨져 있지만 원장·DB 정리가 끝나지 않았다. HomelabBotLedger* 경보, DB 연결, 봇 로그의 원장·삭제 오류를 본다.
+              runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md

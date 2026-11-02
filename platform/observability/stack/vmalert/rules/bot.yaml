@@ -30,3 +30,79 @@ groups:
         annotations:
           summary: "봇 게시 {{ $value }}건의 Discord 전달 여부를 15분 넘게 확인하지 못했다"
           description: "자동 재전송은 하지 않는다. 해당 스레드에 답이 올라갔는지 Discord에서 보고, 봇 감사 로그를 확인한다."
+
+  # T20 기억 삭제 원장(D-12 후속, 원장 계약 v1). 원장이 열리지 않아도 봇은 Ready를 유지하고 기억 경로만 닫는다(T20 2단계 계약).
+  # 그래서 KubePodNotReady로는 안 잡히고 이 룰들이 유일한 신호다. 절차는 restore.md 4절.
+  - name: deletion-ledger
+    rules:
+      # 운영만 본다. VM에는 SSD가 없어 bot-slot이 원장 PV·StorageClass local-ledger를 만들지 않는다(values-vm.yaml).
+      # 그 PV가 있는 클러스터에서만 /mnt/bulk 시계열을 기대한다. 룰은 클러스터 값 없이 kustomize로 같으므로(E8 VM 격리 1번)
+      # 클러스터 이름 대신 원장 PV의 존재로 가른다.
+      # 미마운트면 node-exporter에 그 mountpoint 시계열이 없다(nofail이라 OS·k3s는 뜬다). local PV는 미마운트를 구분하지
+      # 못해 루트 디스크 쪽 같은 경로를 붙일 수 있다. node-exporter가 안 보일 때(up 없음·0)는 TargetDown이 보고 이 룰은 조용하다.
+      # 함정: /mnt/bulk는 host/clusters/prod.env의 BULK_MOUNT, PV 경로(values-prod.yaml deletionLedger.path)와 같아야 한다.
+      - alert: HomelabBotLedgerDiskNotMounted
+        expr: |
+          max by (persistentvolume) (kube_persistentvolume_info{storageclass="local-ledger"})
+          unless on() node_filesystem_size_bytes{mountpoint="/mnt/bulk", fstype="ext4"}
+          and on() up{job="node-exporter"} == 1
+        # 5분: fstab 줄이 nofail(장치 대기 10초)이라 부팅 때 마운트가 k3s보다 조금 늦을 수 있다. 그 틈과 수집 한두 번의 누락을 넘긴다.
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "삭제 원장 PV {{ $labels.persistentvolume }}가 있는데 /mnt/bulk(ext4)가 마운트돼 있지 않다"
+          description: "봇 기억 삭제가 멈춘다. 파드를 재시작하지 말고 NUC에서 findmnt /mnt/bulk, sudo -v && host/verify.sh --cluster prod로 SSD를 본다."
+          runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+
+      # ext4 errors=remount-ro 등으로 읽기 전용이 되면 원장 append가 EROFS로 실패한다. 기존 NodeFilesystemAlmostFull은
+      # 읽기 전용을 빼고 본다. 스스로 풀리지 않는 상태라 for 없이 바로 울린다. VM에는 이 mountpoint가 없어 조용하다.
+      - alert: HomelabBotLedgerDiskReadOnly
+        expr: node_filesystem_readonly{mountpoint="/mnt/bulk"} == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} /mnt/bulk(삭제 원장 SSD)가 읽기 전용이다"
+          description: "봇 기억 삭제가 원장에 기록되지 않는다. dmesg·journalctl -k에서 ext4 오류를 보고 사람이 fsck·재마운트를 판단한다."
+          runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+
+      # failed: 이 프로세스는 원장을 더 쓰지 않는다(fsync 실패 등). fenced: 단일 작성자 잠금(DB advisory lock)을 잃었다.
+      # 함정: 봇은 열기 실패(missing·generation_mismatch·lock_held 등)도 failed로 낸다. 재시도할 수 있는 열기 실패는 60초마다
+      # 다시 연다. Recreate 재기동 직후 옛 파드의 DB 세션이 잠금을 아직 쥐면(lock_held) 잠깐 failed가 된다.
+      # 5분: 재열기 4~5번이 모두 실패해야 운다. 정상 재기동의 lock_held는 옛 세션이 끝나면 다음 재열기에서 풀린다.
+      # 쓰는 중의 failed·fenced는 재기동 전까지 풀리지 않아 5분 뒤 그대로 운다.
+      - alert: HomelabBotLedgerFailed
+        expr: homelab_bot_deletion_ledger_state{state=~"failed|fenced"} == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "봇 삭제 원장 상태가 {{ $labels.state }}다. 기억 기능이 닫혔고 삭제가 끝나지 않는다"
+          description: "봇 로그의 deletion_ledger_<사유>(stage·errno)를 본다. 쓰는 중의 failed·fenced는 재기동 전까지 닫혀 있다. 원장 파일을 지우거나 새로 만들지 않는다."
+          runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+
+      # closed: 아직 열지 않았다(첫 Gateway READY 전) 또는 종료 중. degraded: 마지막 원장 작업이 재시도할 수 있는 오류(디렉터리
+      # fsync·쓰기·읽기)로 실패했다. 다음 성공에 ready가 된다.
+      # 30분: failed(5분)보다 길게 둔다. 둘 다 스스로 풀릴 수 있는 상태다. closed가 길어지는 흔한 원인(Gateway 단절로 첫 READY
+      # 지연)은 HomelabBotGatewayDisconnected(10분)가 먼저 알리고, degraded로 삭제가 밀리면 HomelabBotMemoryDeletionStuck(30분)이
+      # 함께 본다. 배포(Recreate) 뒤 첫 READY는 수십 초라 울리지 않는다.
+      - alert: HomelabBotLedgerNotReady
+        expr: homelab_bot_deletion_ledger_state{state=~"closed|degraded"} == 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "봇 삭제 원장이 30분 넘게 {{ $labels.state }} 상태다"
+          description: "기억 삭제가 대기로 남는다. 봇 로그의 deletion_ledger_<사유>와 /mnt/bulk 여유·읽기 전용 여부를 본다."
+          runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+
+      # 삭제 요청은 원장 기록과 DB 정리가 둘 다 끝나야 완료다. 못 끝낸 것은 pending으로 남고 resume이 60초마다 다시 한다.
+      # 30분: 정상이면 1~2분 안에 풀린다. 값이 대기 시간 자체라 시간에 따라 늘기만 해 for를 두지 않는다(없으면 봇이 0을 낸다).
+      - alert: HomelabBotMemoryDeletionStuck
+        expr: homelab_bot_memory_deletion_pending_oldest_seconds > 30 * 60
+        labels:
+          severity: warning
+        annotations:
+          summary: "봇 기억 삭제가 30분 넘게 끝나지 않았다"
+          description: "삭제한 기억은 숨겨져 있지만 원장·DB 정리가 끝나지 않았다. HomelabBotLedger* 경보, DB 연결, 봇 로그의 원장·삭제 오류를 본다."
+          runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
