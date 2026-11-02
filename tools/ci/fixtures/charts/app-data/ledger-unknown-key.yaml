@@ -1,0 +1,7 @@
+# expect: fail
+# match: additional properties 'path' not allowed
+# 원장 선언은 enabled·size만. 호스트 경로는 platform(bot-slot)의 클러스터 값이다.
+chartVersion: 1.2.0
+postgres: {enabled: true}
+volumes: {deletionLedger: {enabled: true, path: /mnt/bulk}}
+backup: {bucket: homelab-backups}

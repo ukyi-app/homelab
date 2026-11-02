@@ -1,0 +1,26 @@
+# check: volume
+# expect: fail
+# rule: volume
+# match: hostPath 볼륨
+# origin: bot-slot[prod]:platform/bot-slot
+# 앱 ns에서 원장을 hostPath로 직접 붙인다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes
+  namespace: app-notes
+  labels: {homelab.ukyi.app/chart: app-1.3.0}
+spec:
+  strategy: {type: Recreate}
+  replicas: 1
+  template:
+    metadata:
+      labels: {homelab.ukyi.app/app: notes}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 65532}
+      containers:
+        - name: app
+          image: ghcr.io/ukyi-app/notes@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      volumes:
+        - name: ledger
+          hostPath: {path: /mnt/bulk/homelab-bot/deletion-ledger, type: Directory}

@@ -17,7 +17,7 @@ const dataText = "chartVersion: 1.0.1\npostgres: { enabled: true }\n";
 const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z");
 const empty = JSON.stringify({ items: [] });
 
-function planRules(opts: { backupAfter?: boolean; noNs?: boolean } = {}): Rule[] {
+function planRules(opts: { backupAfter?: boolean; noNs?: boolean; data?: string } = {}): Rule[] {
   const gone = { metadata: { name: `data-purge-${APP}`, labels: { "homelab.ukyi.app/restore": "seed" }, resourceVersion: "1", creationTimestamp: ago(2.5) }, data: { run: "seed" } };
   return [
     kubectlRule(["get", "namespaces", NS, "-o", "json"], opts.noNs ? notFound : { stdout: JSON.stringify({ metadata: { name: NS } }) }),
@@ -26,7 +26,8 @@ function planRules(opts: { backupAfter?: boolean; noNs?: boolean } = {}): Rule[]
     ghGet(contents(`data/${APP}`), 200, [{ type: "file", path: DATA, name: "values.yaml" }]),
     ghGet(contents(`apps/${APP}`), 404, { message: "Not Found" }),
     kubectlRule(["-n", "argocd", "get", "applications.argoproj.io", APP, "-o", "json"], notFound),
-    ghGet(contents(DATA), 200, fileResp(dataText)),
+    ghGet(contents(DATA), 200, fileResp(opts.data ?? dataText)),
+    kubectlRule(["-n", NS, "get", "persistentvolumeclaims", "deletion-ledger", "-o", "json"], notFound),
     ghGet(`repos/ukyi-app/homelab/commits?path=apps%2F${APP}%2Fvalues.yaml&sha=main&per_page=1`, 200, [{ sha: "1".repeat(40), commit: { committer: { date: ago(3) } } }]),
     ghGet(`repos/ukyi-app/homelab/commits?path=data%2F${APP}%2Fvalues.yaml&sha=main&per_page=30`, 200, [{ sha: "2".repeat(40), commit: { committer: { date: ago(30) } } }]),
     ghGet(`repos/ukyi-app/homelab/commits/${"2".repeat(40)}`, 200, { files: [{ filename: DATA, status: "added" }] }),
@@ -69,6 +70,19 @@ describe("data purge: plan(PATH 스텁)", () => {
     expect(r.code).toBe(1);
     expectPlanReadOnly(r);
     expect(r.json.error.message).toContain("completed base backup");
+  });
+
+  test("T20: 기억 삭제 원장을 선언한 앱은 plan에서 멈추고 별도 폐기 절차를 안내한다(GitHub 이력·Infisical 조회 없음)", async () => {
+    const r = await runCli(["data", "purge", APP, "--json"], planRules({ data: `${dataText}volumes: { deletionLedger: { enabled: true } }\n` }));
+    expect(r.code).toBe(1);
+    expectPlanReadOnly(r);
+    expect(r.json.status).toBe("failed");
+    expect(r.json.error.message).toContain("기억 삭제 원장이 있다");
+    expect(r.json.error.message).toContain("volumes.deletionLedger");
+    expect(r.json.error.next).toContain("설계 C.5.5 원장 폐기");
+    // 일반 폐기 단계(이력·백업·PR·키)는 읽지도 않는다
+    expect(r.calls.some((c) => c.argv[0] === "infisical")).toBe(false);
+    expect(r.calls.some((c) => c.argv.join(" ").includes("commits"))).toBe(false);
   });
 
   test("--apply에 --confirm이 없거나 다르면 64(아무것도 부르지 않는다)", async () => {
@@ -201,6 +215,40 @@ describe("data purge: 흐름(가짜 세계)", () => {
     expect(a.status).toBe("failed");
     expect(a.error!.next).toBe(`homelab app remove ${APP}`);
     expect(g.writes).toEqual([]);
+  });
+
+  test("T20: 원장 선언이나 살아 있는 원장 PVC가 있으면 기록·PR·PV reclaim 없이 멈춘다", async () => {
+    // 선언(data values)
+    const w = purgeWorld();
+    w.main().set(DATA, `${w.main().get(DATA)}volumes:\n  deletionLedger:\n    enabled: true\n`);
+    w.records.clear();
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain(`data/${APP}의 volumes.deletionLedger`);
+    expect(r.error!.next).toContain("원장 폐기는 별도 절차다");
+    expect(w.writes).toEqual([]);
+    expect(w.openPrs()).toEqual([]);
+    expect(w.obj("pv", null, "pvc-9")!.spec.persistentVolumeReclaimPolicy).toBe("Retain");
+    // 선언을 enabled: false로 바꿔 비켜 가도 살아 있는 PVC(Prune=false로 남는다)를 보고 멈춘다
+    const g = purgeWorld();
+    g.main().set(DATA, `${g.main().get(DATA)}volumes:\n  deletionLedger:\n    enabled: false\n`);
+    g.put("pvc", NS, "deletion-ledger", { metadata: { name: "deletion-ledger" }, spec: { volumeName: `${APP}-deletion-ledger`, storageClassName: "local-ledger" } });
+    const a = await runIn(g, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(a.status).toBe("failed");
+    expect(a.error!.message).toContain(`PVC ${NS}/deletion-ledger`);
+    expect(a.error!.message).not.toContain("volumes.deletionLedger");
+    expect(g.writes).toEqual([]);
+    expect(g.openPrs()).toEqual([]);
+  });
+
+  test("T20: 원장 때문에 멈춰도 그 실행에서 본 앱 워크로드의 폐기 확인 기록은 지운다", async () => {
+    const w = purgeWorld();
+    w.main().set(DATA, `${w.main().get(DATA)}volumes:\n  deletionLedger:\n    enabled: true\n`);
+    w.put("application", "argocd", APP, { metadata: { name: APP } });
+    const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
+    expect(r.status).toBe("failed");
+    expect(w.writes).toEqual([`recordDelete database/data-purge-${APP}`]);
+    expect(w.openPrs()).toEqual([]);
   });
 
   test("차트 1.0.2 태그가 없으면 PR 1을 열지 않는다", async () => {

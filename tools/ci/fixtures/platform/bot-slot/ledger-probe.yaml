@@ -1,0 +1,9 @@
+# expect: fail
+# match: value must be false
+# 시험 값(probe)에는 원장을 켜지 않는다. 원장 PV는 봇 ns의 PVC만 예약한다.
+target: {namespace: bot-slot-probe, app: bot-slot-probe, workerPort: 8080, alertPort: 8081, metricsPort: 8080}
+probe: true
+kubernetesApi:
+  endpointCIDRs:
+    - 192.168.117.15/32
+deletionLedger: {enabled: true, nodeName: nuc-15-pro, path: /mnt/bulk/homelab-bot/deletion-ledger}

@@ -39,7 +39,7 @@ function upstreamArgocdWorkload(d: Doc, spec: any): boolean {
   );
 }
 
-const WORKLOAD_KINDS = new Set(["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController", "Job", "CronJob", "Pod"]);
+export const WORKLOAD_KINDS = new Set(["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController", "Job", "CronJob", "Pod"]);
 const DIGEST_IMAGE = /^[a-z0-9][a-z0-9._\-/:]*@sha256:[0-9a-f]{64}$/;
 const PUBLIC_HOST = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.ukyi\.app$/;
 // Tailscale 기기 이름: 문자로 시작하고 끝나는 DNS 라벨(tailscale.com custom-machine-names).
@@ -85,13 +85,13 @@ function coversReader(s: any): boolean {
 
 // kind: List의 items를 펼친다. kubectl·Argo CD는 List 안 리소스를 각각 적용한다.
 // kind: List를 펼친다. 항목은 List와 같은 Application에서 렌더됐으므로 부모의 유효 ns(destination)를 물려받는다.
-function expand(docs: Doc[]): Doc[] {
+export function expand(docs: Doc[]): Doc[] {
   return docs.flatMap((d) =>
     d.obj?.kind === "List" && Array.isArray(d.obj.items) ? expand(d.obj.items.map((obj: any) => ({ origin: d.origin, obj, ns: d.ns }))) : [d],
   );
 }
 
-function podSpec(obj: any): any | undefined {
+export function podSpec(obj: any): any | undefined {
   switch (obj.kind) {
     case "Pod":
       return obj.spec;
@@ -102,7 +102,7 @@ function podSpec(obj: any): any | undefined {
   }
 }
 
-function id(d: Doc): string {
+export function id(d: Doc): string {
   const ns = d.obj.metadata?.namespace ? `${d.obj.metadata.namespace}/` : "";
   return `${d.origin} ${d.obj.kind}/${ns}${d.obj.metadata?.name}`;
 }
@@ -224,7 +224,7 @@ export function checkRevisions(docs: Doc[]): Violation[] {
 // L30 읽기 전용 역할의 verb·자원과 roleRef. 라벨을 떼면 첫 검사를 피하므로, bot-reader 바인딩과 이름 homelab-readonly도 본다.
 // 렌더 맥락(클러스터). 역할과 바인딩은 같은 맥락 안에서만 잇는다. 클러스터마다 같은 이름의 역할이 렌더되므로
 // 하나의 맵에 넣으면 한쪽이 다른 쪽을 덮어 위반을 놓친다.
-function context(origin: string): string {
+export function context(origin: string): string {
   return origin.match(/\[([a-z0-9-]+)\]/)?.[1] ?? origin;
 }
 

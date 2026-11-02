@@ -24,10 +24,15 @@ spec:
     matchLabels:
       {{- include "app.selector" . | nindent 6 }}
   strategy:
+    {{- if eq (.Values.strategy | default "RollingUpdate") "Recreate" }}
+    # 옛 파드가 끝난 뒤 새 파드를 띄운다(단일 작성자, T20). 배포마다 잠깐 끊긴다.
+    type: Recreate
+    {{- else }}
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+    {{- end }}
   template:
     metadata:
       labels:
@@ -72,7 +77,17 @@ spec:
             # 루트 파일시스템이 읽기 전용이라 쓰기는 /tmp만.
             - name: tmp
               mountPath: /tmp
+            {{- with .Values.persistence }}
+            # 데이터 차트가 만든 PVC(값은 claim 이름과 경로뿐이다). 마이그레이션 Job에는 붙이지 않는다.
+            - name: persistence
+              mountPath: {{ .mountPath }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- with .Values.persistence }}
+        - name: persistence
+          persistentVolumeClaim:
+            claimName: {{ .existingClaim }}
+        {{- end }}

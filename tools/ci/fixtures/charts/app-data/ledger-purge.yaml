@@ -1,0 +1,8 @@
+# expect: fail
+# match: volumes.deletionLedger는 purge: true와 함께 쓰지 않는다
+# 원장은 일반 폐기 대상이 아니다(설계 C.5.5). purge가 원장 보호를 벗기지 못하게 한다.
+chartVersion: 1.2.0
+postgres: {enabled: true}
+volumes: {deletionLedger: {enabled: true}}
+purge: true
+backup: {bucket: homelab-backups}

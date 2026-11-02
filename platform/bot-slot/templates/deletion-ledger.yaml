@@ -1,0 +1,61 @@
+{{- /*
+(4) 봇 기억 삭제 원장 볼륨(T20, 설계 C.5.5·C.8). 정적 local PV와 그 StorageClass를 둔다. PVC는 데이터 차트(data/<봇>의
+volumes.deletionLedger)가, 마운트는 공유 차트 persistence가 맡는다. PV·SC는 cluster-scoped라 data·apps 프로젝트는 못 만들고
+platform 프로젝트인 이 Application이 맡는다(AppProject 권한을 넓히지 않는다).
+값은 root가 cluster.deletionLedger로 넘긴다(platform/root/templates/bot-slot.yaml). VM은 운영 SSD가 없어 값을 비우고, 그러면
+아무것도 렌더하지 않는다. 그때 VM의 봇 PVC는 Pending이고 봇 파드도 뜨지 않는다(VM에서 봇을 띄울 때 VM 전용 원장을 정한다).
+*/}}
+{{- with .Values.deletionLedger }}
+{{- if .enabled }}
+# no-provisioner: 동적 생성이 없어 이 클래스의 PVC는 아래 PV에만 묶인다. local-path-provisioner 경로와 섞이지 않는다.
+# WaitForFirstConsumer는 local 볼륨의 권장값이다. 다만 PVC가 volumeName으로 미리 묶여 실제로는 소비자를 기다리지 않는다.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-ledger
+  labels:
+    {{- include "botSlot.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: false
+---
+# 원장 원본은 SSD 위 디렉터리 하나다(전체 SSD를 파드에 내주지 않는다). 디렉터리·파일은 사람이 sudo host/install.sh로만 만든다.
+# 함정: local PV는 경로가 없으면 마운트가 실패하지만, SSD가 안 붙은 채 루트 디스크에 같은 경로가 있으면 구분하지 못한다.
+# 그래서 설치기가 마운트를 확인한 뒤에만 디렉터리를 만들고, 봇은 초기화 표식(ledger.json)이 없으면 열지 않는다.
+# Prune=false,Delete=false: bot-slot을 지우거나 이 파일을 지워도 PV가 남는다. 원장은 DB 백업보다 오래 살아야 한다.
+# claimRef는 이름·ns만 적는다. uid는 클러스터마다 새로 생기고, 적으면 재구축 때 새 PVC에 묶이지 않는다.
+# 용량은 계획용 표시일 뿐 디렉터리 상한이 아니다(local 볼륨은 크기를 강제하지 않는다).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ $.Values.target.app }}-deletion-ledger
+  labels:
+    {{- include "botSlot.labels" $ | nindent 4 }}
+    homelab.ukyi.app/volume: deletion-ledger
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-ledger
+  claimRef:
+    namespace: {{ $.Values.target.namespace }}
+    name: deletion-ledger
+  local:
+    path: {{ .path }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - {{ .nodeName }}
+{{- end }}
+{{- end }}

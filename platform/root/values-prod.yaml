@@ -44,6 +44,13 @@ cluster:
     endpointCIDRs:
       - 192.168.117.15/32
 
+  # T20 봇 기억 삭제 원장(원장 계약 v1, 사용자 결정 2026-11-02). bot-slot이 이 값으로 StorageClass local-ledger와 정적 local PV를
+  # 만든다(platform/bot-slot/templates/deletion-ledger.yaml). nodeName은 host/clusters/prod.env의 NODE_NAME이고 ci가 대조한다.
+  # path는 LABEL=bulk-ssd를 /mnt/bulk에 마운트한 SSD 안 디렉터리다. 마운트와 디렉터리는 사람이 sudo host/install.sh로 만든다.
+  deletionLedger:
+    nodeName: nuc-15-pro
+    path: /mnt/bulk/homelab-bot/deletion-ledger
+
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈추는 값(values-vm.yaml의 같은 블록에 쓰는 법).
   # 운영은 비워 둔다. 빈 값이면 root가 ApplicationSet에 넘기지 않아 렌더가 이 블록이 없을 때와 같다.
   # 빈 NUC 복구는 지금 restore.md 3절 1단계대로 apps/·data/ values를 쓴다(운영이 곧 복구 대상이라).

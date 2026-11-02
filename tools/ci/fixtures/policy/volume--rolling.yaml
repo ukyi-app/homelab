@@ -1,0 +1,26 @@
+# check: volume
+# expect: fail
+# rule: volume
+# match: strategy Recreate여야 한다(단일 작성자
+# origin: bot-slot[prod]:platform/bot-slot
+# 공유 차트 앱이 PVC를 RollingUpdate로 붙인다. 새·옛 파드가 함께 쓴다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes
+  namespace: app-notes
+  labels: {homelab.ukyi.app/chart: app-1.3.0}
+spec:
+  strategy: {type: RollingUpdate}
+  replicas: 1
+  template:
+    metadata:
+      labels: {homelab.ukyi.app/app: notes}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 65532}
+      containers:
+        - name: app
+          image: ghcr.io/ukyi-app/notes@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      volumes:
+        - name: persistence
+          persistentVolumeClaim: {claimName: notes-data}

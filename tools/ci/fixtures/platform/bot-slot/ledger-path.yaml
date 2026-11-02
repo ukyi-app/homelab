@@ -1,0 +1,7 @@
+# expect: fail
+# match: value must be '/mnt/bulk/homelab-bot/deletion-ledger'
+# 원장 계약 v1의 경로만. 루트 디스크(local-path 저장소 등)를 가리키면 SSD 없이 빈 원장이 생길 수 있다.
+kubernetesApi:
+  endpointCIDRs:
+    - 192.168.117.15/32
+deletionLedger: {enabled: true, nodeName: nuc-15-pro, path: /var/lib/rancher/k3s/storage/deletion-ledger}

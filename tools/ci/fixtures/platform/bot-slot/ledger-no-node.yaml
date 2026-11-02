@@ -1,0 +1,7 @@
+# expect: fail
+# match: missing property 'nodeName'
+# local PV는 노드 고정이 필수다. 노드 없이 켜지 않는다.
+kubernetesApi:
+  endpointCIDRs:
+    - 192.168.117.15/32
+deletionLedger: {enabled: true, path: /mnt/bulk/homelab-bot/deletion-ledger}

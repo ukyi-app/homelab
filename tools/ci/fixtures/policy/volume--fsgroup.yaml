@@ -1,0 +1,68 @@
+# check: volume
+# expect: fail
+# rule: volume
+# match: fsGroup
+# origin: bot-slot[prod]:platform/bot-slot
+# fsGroup이 있으면 kubelet이 원장 권한을 0660·2770으로 바꾼다.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-ledger
+  annotations: {argocd.argoproj.io/sync-options: "Prune=false,Delete=false"}
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: false
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: homelab-bot-deletion-ledger
+  annotations: {argocd.argoproj.io/sync-options: "Prune=false,Delete=false"}
+spec:
+  capacity: {storage: 1Gi}
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-ledger
+  claimRef: {namespace: app-homelab-bot, name: deletion-ledger}
+  local: {path: /mnt/bulk/homelab-bot/deletion-ledger}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: kubernetes.io/hostname, operator: In, values: [nuc-15-pro]}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deletion-ledger
+  namespace: app-homelab-bot
+  annotations: {argocd.argoproj.io/sync-options: "Prune=false,Delete=false"}
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Filesystem
+  storageClassName: local-ledger
+  volumeName: homelab-bot-deletion-ledger
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homelab-bot
+  namespace: app-homelab-bot
+  labels: {homelab.ukyi.app/chart: app-1.3.0}
+spec:
+  strategy: {type: Recreate}
+  replicas: 1
+  template:
+    metadata:
+      labels: {homelab.ukyi.app/app: homelab-bot}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 65532, fsGroup: 65532}
+      containers:
+        - name: app
+          image: ghcr.io/ukyi-app/homelab-bot@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      volumes:
+        - name: persistence
+          persistentVolumeClaim: {claimName: deletion-ledger}

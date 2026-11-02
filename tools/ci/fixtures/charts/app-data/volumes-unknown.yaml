@@ -1,0 +1,7 @@
+# expect: fail
+# match: additional properties 'cache' not allowed
+# 닫힌 schema. 볼륨 종류는 원장 하나뿐이다.
+chartVersion: 1.2.0
+postgres: {enabled: true}
+volumes: {cache: {enabled: true}}
+backup: {bucket: homelab-backups}

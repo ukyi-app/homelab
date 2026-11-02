@@ -1,0 +1,7 @@
+# expect: fail
+# match: '/deletionLedger': 'not' failed
+# 끈 채 경로만 남기지 않는다(켜진 줄 알고 넘어가는 실수).
+kubernetesApi:
+  endpointCIDRs:
+    - 192.168.117.15/32
+deletionLedger: {enabled: false, path: /mnt/bulk/homelab-bot/deletion-ledger}

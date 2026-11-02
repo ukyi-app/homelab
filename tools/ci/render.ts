@@ -486,6 +486,12 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     else if (JSON.stringify(got) !== JSON.stringify([`${nodeIp}/32`])) {
       fail(vf, `cluster.kubernetesApi.endpointCIDRs는 [${nodeIp}/32](${env}의 NODE_IP)이다. 지금 ${JSON.stringify(got)}`);
     }
+    // T20 원장 PV의 nodeAffinity 노드. 노드 이름이 다르면 PV에 묶인 봇 파드가 어느 노드에도 뜨지 못한다. 값이 없으면(VM) PV가 없다.
+    const ledgerNode = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) as any)?.cluster?.deletionLedger?.nodeName;
+    if (ledgerNode !== undefined) {
+      const nodeName = existsSync(join(ROOT, env)) ? readFileSync(join(ROOT, env), "utf8").match(/^NODE_NAME=["']?([a-z0-9-]+)["']?\s*$/m)?.[1] : undefined;
+      if (ledgerNode !== nodeName) fail(vf, `cluster.deletionLedger.nodeName은 ${env}의 NODE_NAME(${nodeName ?? "못 읽음"})이다. 지금 ${JSON.stringify(ledgerNode)}`);
+    }
   }
 
   // 3. 나머지 kustomization(덧씌운 렌더는 건너뛴다, RenderOptions)
