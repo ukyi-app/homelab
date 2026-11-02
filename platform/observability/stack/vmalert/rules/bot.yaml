@@ -8,7 +8,8 @@ groups:
       # 봇은 Gateway가 끊겨도 Ready를 유지해(webhook·경보 수신 계속) KubePodNotReady로는 안 잡힌다. 이 지표가 유일한 클러스터 안 신호다.
       # 10분: 정상 재연결은 RESUME 몇 초, 재시도 backoff 상한이 60초 + 지터 1초라 연속 실패 9번 남짓을 넘겨야 운다.
       # 하트비트(healthchecks.io)는 Gateway가 5분 넘게 끊기면 ping을 멈춘다(봇 gatewayGraceMs). 이 경보는 같은 사건의 클러스터 안 경로다.
-      # 함정: 봇은 소켓 close 이벤트에서만 0으로 바꾼다. 망이 패킷을 버리면(DROP) close가 TCP 재전송 한도까지 늦어 0이 늦게 될 수 있다.
+      # 봇이 heartbeat ACK 누락(약 45초)을 보면 close 응답을 기다리지 않고 바로 0으로 바꾸고 재연결한다(봇 #20). 그 전에는 close 이벤트에서만
+      # 0이 돼, 망이 패킷을 버리면(DROP) 13분 동안 1로 남아 이 경보가 울리지 않았다(S16 실측 2026-11-02).
       - alert: HomelabBotGatewayDisconnected
         expr: homelab_bot_gateway_connected == 0
         for: 10m
