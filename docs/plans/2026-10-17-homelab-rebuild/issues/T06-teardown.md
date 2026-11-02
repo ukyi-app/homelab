@@ -195,7 +195,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | Tailscale 부트스트랩 OAuth | owner 로컬용, Terraform 밖, 쓰기 스코프 | `.env.secrets` | | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
 | Tailscale operator OAuth | 옛 operator용(devices:core·auth_keys) | SOPS 파일(`platform/tailscale/prod/operator-oauth.enc.yaml`) | | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
 | Cloudflare 터널 실행 토큰 | 터널 `homelab-prod`의 실행 토큰 | SOPS Secret `cloudflared-tunnel` | 터널 삭제(할 일 3)로 무효 | 삭제됨(2026-10-19 13:56 터널 삭제로 무효) |
-| Telegram 봇 토큰 | 옛 알림 봇 | 정리 목록 "Telegram 봇" 줄 | `mac-uptime-guard`도 이 봇을 쓴다. T22가 그 장치를 끈 뒤 폐기한다(위 예외) | 보류(D-10, T22) |
+| Telegram 봇 토큰 | 옛 알림 봇 | 정리 목록 "Telegram 봇" 줄 | `mac-uptime-guard`도 이 봇을 쓴다. T22가 그 장치를 끈 뒤 폐기한다(위 예외) | 폐기(2026-11-02, T22. 장치는 이미 없어 사람이 BotFather에서 옛 봇을 지움. 사본이 있던 저장소·NUC 사본도 삭제) |
 | healthchecks ping URL | `homelab-watchdog` 체크 | SOPS Secret 2개(`alerting-secrets`, `restore-drill-alerting`), `.env.secrets` | 옛 체크 삭제도 T08b(D-11)(위 예외) | 삭제됨(2026-10-19, 사용자가 체크를 지워 URL 무효. 계획은 T08b에서 새 체크 초록 뒤 삭제였다) |
 | `trip-mate-api` Google OAuth client | `trip-mate-api` 로그인용 Google OAuth 클라이언트 | 후보: NUC 로컬 클론 `~/workspace/trip-mate-api/.env.local` | 앱 삭제로 폐기(D-29). Google Cloud 콘솔에서 지운다 | 유지(없음 확인, 2026-10-19, 사용자) |
 | `trip-mate-api` OXR app id | `trip-mate-api`가 쓰던 OXR app id | 후보: 같은 `.env.local` | 앱 삭제로 폐기(D-29). 발급처 계정에서 폐기한다 | 유지(없음 확인, 2026-10-19, 사용자) |
@@ -267,8 +267,8 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | GitHub | GHCR `aiops-autodeploy-canary` | private | 보류(D-29, T22) |
 | GitHub | 저장소 `page`, `trip-mate-api` | 404 | 삭제됨(D-29) |
 | 외부 감시·알림 | healthchecks `homelab-watchdog` | ping은 클러스터 안 `deadmanswitch-relay` | 삭제됨(2026-10-19, 사용자. 계획은 일시 정지 뒤 T08b 삭제였다) |
-| 외부 감시·알림 | Telegram 봇 | 사본 위치는 정리 목록 줄 | 보류(D-10, T22) |
-| 옛 AIOps | `aiops`와 App | private, secret 등 0. App은 GitHub 행 | 보류(D-13, T22) |
+| 외부 감시·알림 | Telegram 봇 | 사본 위치는 정리 목록 줄 | 폐기(2026-11-02, T22) |
+| 옛 AIOps | `aiops`와 App | private, secret 등 0. App은 GitHub 행 | 삭제(App 2026-10-19 이 티켓, 저장소 2026-11-02 T22) |
 | 옛 AIOps | `aiops-autodeploy-canary` | private | 보류(D-29, T22) |
 | 옛 AIOps | `mac-uptime-guard` | private, NUC 로컬 클론 있음 | 보류(담당 T22) |
 | NUC | H1 유닛 | nft 서비스·mount active, ingress·worker inactive | 삭제됨(2026-10-19 12:52 s2b, D-12. nft table 삭제, mount·loop 해제 확인) |

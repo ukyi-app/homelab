@@ -1,7 +1,7 @@
 # T22 기존 앱 저장소 재연결·옛 저장소 정리
 
 - 단계: P5 후속 (P4와 병행)
-- 상태: 착수 가능 (T13 완료 2026-10-29, T16b 완료 2026-11-02)
+- 상태: 완료 (2026-11-02. 결과는 아래 "결과")
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T13, T16b (봇 첫 배포 증거)
 - 선행 결정: D-10 (확정(사용자 2026-10-18, T05): 옛 Telegram 봇·토큰은 `mac-uptime-guard`를 처리하는 이 티켓까지 둔다), D-13 (확정(사용자 2026-10-18). 이 티켓에 걸리는 것은 옛 aiops 저장소·App 제거), D-18 (의존성 업데이트 방식. 확정(사용자 2026-10-18, T05): 호스팅형 Renovate App 저장소별 설치, 자동 병합 모두 끔), D-21 (확정(사용자 2026-10-18, T05): `homelab-app-template` 재사용, 내용 교체는 T10), D-28 (확정(사용자 2026-10-18): 보호 설정 대조), D-29 (확정(사용자 2026-10-18): 앱 저장소 public만, 비앱 저장소는 `aiops`·`mac-uptime-guard` 제거와 `aiops-autodeploy-canary` private 보관, `page`·`trip-mate-api` 삭제. `mac-uptime-guard` 제거는 사용자 2026-10-18 17:46)
@@ -57,3 +57,16 @@
 
 - 앱별 배포 결과와 실행 확인 기록.
 - `gh api repos/ukyi-app/<repo>`로 삭제(404), `archived`, `visibility`(`private`)를 다시 조회하고, `gh api orgs/ukyi-app/installations`로 App 설치 목록을 다시 조회해 approvals.md와 대조한다.
+
+## 결과 (2026-11-02)
+
+사용자 결정은 2026-11-02 T22 질문 응답이다. 시각·명령은 [../approvals.md](../approvals.md)의 같은 날 T22 행이다.
+
+- **`files`(할 일 1·2): 재연결하지 않는다.** 지금 쓰는 곳이 없어서다(사용자 결정). 데이터는 이미 폐기됐다(C-03). 저장소는 public으로 남기고, 필요해지면 그때 새 흐름(`app-build.yaml` 태그 호출, `homelab app add`)으로 등록한다. 남아 있는 `release.yaml`은 옛 `reusable-app-build.yaml@main`을 불러 push하면 실패한다. 배포 경로가 없어 단일 갱신 주체 제약에는 걸리지 않는다.
+- **`homelab-app-template`(할 일 3):** `.github/workflows/build.yaml`이 `app-build.yaml@app-build-v1.0.1`(태그)을 부르고, 옛 봉인 도구 사본과 main 의존이 없다(파일 15개, 2026-11-02 조회). T10 새 구조를 따른다.
+- **열린 옛 Renovate PR(할 일 4):** `homelab-app-template`의 5개(#33, #35~#38, 삭제된 옛 Renovate App이 2026-08~10에 T10 교체 전 main 기준으로 만듦)를 D-18대로 닫았다(댓글). 갱신은 저장소별로 설치한 호스팅형 Renovate(자동 병합 끔)가 다시 연다. `aiops-autodeploy-canary`의 4개는 저장소와 함께 없어졌다.
+- **`aiops`(할 일 5):** 삭제(404). App `ukyi-homelab-aiops`는 2026-10-19 T06에서 먼저 지웠다.
+- **`aiops-autodeploy-canary`(할 일 6):** 보관 대신 삭제(D-29가 허용, 사용자 결정). GHCR 패키지(private, 버전 12개)도 지웠다. 둘 다 404.
+- **`mac-uptime-guard`(할 일 7):** 장치(옛 맥 미니)가 이미 없어 7.1은 해당 없음. 사람이 BotFather에서 옛 Telegram 알림 봇을 지웠고(토큰 폐기), 저장소를 삭제했다(404). 토큰 사본이 있던 NUC의 옛 작업 사본도 지웠다. 이것으로 T06 자격 폐기 표의 `보류(D-10, T22)` 줄과 `보류(D-13, T22)` 줄을 닫았다.
+- **삭제 방법:** 사람이 탭에서 스크립트를 실행하고 단계마다 Enter를 눌렀다. gh 토큰에 `delete_repo`·`delete:packages`를 잠시 더했다가 끝에 뺐다.
+- **검증:** `gh api repos/ukyi-app/{aiops,aiops-autodeploy-canary,mac-uptime-guard}` → 404, 패키지 → not found. org 저장소는 `files`·`homelab`·`homelab-app-template`·`homelab-bot`·`homelab-probe`·`homelab-smoke`(public), `homelab-bot-ops`(private). App 설치는 `chatgpt-codex-connector`·`ukyi-homelab-deploy`·`ukyi-homelab-merge`·`renovate`(모두 선택 저장소)로 approvals와 맞다.
