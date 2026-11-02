@@ -1,4 +1,4 @@
 repository: ghcr.io/ukyi-app/homelab-bot
-digest: sha256:509a41d1643e95ea3b146438b8dac834a6c036899a79d004f84fbe7ca6375fb0
-revision: 097c93e6ecf0de0504e46f4b2a3b5920c092760d
+digest: sha256:77def3e1818fac5fb585d90cb019077e6f941a28f593da365e39229a702d831b
+revision: b83bab71f8e1271bc7c20733f6eb171bb7de370f
 hold: false
