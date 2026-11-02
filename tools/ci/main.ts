@@ -13,6 +13,7 @@ import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, error
 import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkSandbox, checkWorkloads } from "./policy";
 import { kubeconform, renderAll } from "./render";
 import { checkExternalSecretsSwitch } from "./switch";
+import { checkVolumes } from "./volume";
 import { RULES, checkActionFile, checkWorkflow, checkWorkflows } from "./workflow-guard";
 import { type Facts, evaluate } from "../deploy-merge/conditions";
 
@@ -403,7 +404,7 @@ const steps: Step[] = [
       const r = renderAll();
       for (const t of r.targets) console.log(`렌더: ${t.origin}`);
       for (const s of r.skipped) console.log(`외부 차트(렌더하지 않음): ${s}`);
-      return [...r.violations, ...checkAll(r.docs), ...checkSecretPaths(r.docs), ...checkPgAclOrder(r.docs), ...kubeconform(r.targets)];
+      return [...r.violations, ...checkAll(r.docs), ...checkSecretPaths(r.docs), ...checkPgAclOrder(r.docs), ...checkVolumes(r.docs), ...kubeconform(r.targets)];
     },
   },
   {
@@ -493,6 +494,7 @@ const steps: Step[] = [
         sandbox: checkSandbox,
         "secret-path": checkSecretPaths,
         "pg-acl-order": checkPgAclOrder,
+        volume: checkVolumes,
       };
       const out: Violation[] = [];
       const covered = new Set<string>();

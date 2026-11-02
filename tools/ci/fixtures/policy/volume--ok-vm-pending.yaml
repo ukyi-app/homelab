@@ -1,0 +1,16 @@
+# check: volume
+# expect: pass
+# origin: data:homelab-bot[vm]
+# VM에는 운영 SSD가 없어 PV 없이 PVC만 있다(Pending을 받아들인다, values-vm.yaml).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deletion-ledger
+  namespace: app-homelab-bot
+  annotations: {argocd.argoproj.io/sync-options: "Prune=false,Delete=false"}
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Filesystem
+  storageClassName: local-ledger
+  volumeName: homelab-bot-deletion-ledger
+  resources: {requests: {storage: 1Gi}}
