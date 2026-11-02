@@ -1,7 +1,7 @@
 # T16b 봇 FOUNDATION 실연동·첫 배포
 
 - 단계: P4 봇 V1
-- 상태: 완료 (2026-11-02. 2026-10-30 착수. 첫 배포(등록 PR #995, 2026-10-30), 콜드스타트 순서 재현, 시나리오 1(#1005·#1010), 실연동 시험 S16 실행. 배정 시험에 fail 없음: EVENT-03은 첫 실행 부분 fail → 봇 #20 → 재시험 pass, EVENT-01 not_run과 EVENT-02 부분은 사유·해소 티켓과 함께. 결과는 아래 "결과", 시험 표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T16b 실연동 결과". 시범 P-1은 2026-11-02 18:31 사용자 승인으로 진행 중(범위: 허용 채널의 `/read`와 대화). 공개 webhook 이전 PR #1003은 열림, 사용자 결정 대기)
+- 상태: 완료 (2026-11-02. 2026-10-30 착수. 첫 배포(등록 PR #995, 2026-10-30), 콜드스타트 순서 재현, 시나리오 1(#1005·#1010), 실연동 시험 S16 실행. 배정 시험에 fail 없음: EVENT-03은 첫 실행 부분 fail → 봇 #20 → 재시험 pass, EVENT-01 not_run과 EVENT-02 부분은 사유·해소 티켓과 함께. 결과는 아래 "결과", 시험 표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T16b 실연동 결과". 시범 P-1은 2026-11-02 18:31 사용자 승인으로 진행 중(범위: 허용 채널의 `/read`와 대화). 공개 webhook 이전 PR #1003은 2026-11-02 병합, 사람 정리 H7 끝)
 - 명세: [../spec.md](../spec.md)
 - 설계: [../platform/design.md](../platform/design.md) E.1 E9, C.8 "봇 자리 Application"
 - Blocked by: T13, T16a
@@ -150,7 +150,7 @@
 
 플랫폼·사람:
 
-- 공개 webhook 이전 PR #1003(edge-probe 삭제, `hooks.ukyi.app/github`을 봇으로): 사용자 결정 "진행해"(2026-11-02 18:4x)로 병합한다. ns `app-edge-probe`가 지워져 되돌리려면 되돌림 PR이 필요하다. `restore.md` 개수 정정은 그 PR 안에 있다. 3.1 지도 블록의 `app-edge-probe` 건너뛰기 줄은 남겨도 해가 없어 그대로 둔다. 병합 뒤 공개 경로 확인(서명 없는 POST `/github` → 봇 401)은 approvals에 남긴다.
-- 사람 정리(계획 H7): Infisical `/apps/homelab-bot/worker/WORKER_PROBE` 삭제, #1003 병합 뒤 `/apps/edge-probe/*`와 시험 webhook 정리. 후보: `/apps/homelab-bot/ARGOCD_READER_TOKEN`(D9 뒤 차트 secrets 목록과 봇 코드에 없다. 키가 남아 있으면 지운다).
+- 공개 webhook 이전 PR #1003(edge-probe 삭제, `hooks.ukyi.app/github`을 봇으로): 사용자 결정 "진행해"(2026-11-02 18:4x)로 19:40 병합(squash abc1f69). 19:42 edge-probe Application과 ns `app-edge-probe`가 지워지고 봇 Ingress `homelab-bot-public`(`hooks.ukyi.app`)이 생겼다. 되돌리려면 되돌림 PR이 필요하다. `restore.md` 개수 정정은 그 PR 안에 있다. 3.1 지도 블록의 `app-edge-probe` 건너뛰기 줄은 남겨도 해가 없어 그대로 둔다. 병합 뒤 공개 경로: GET `/github`·다른 경로 POST 403(WAF), 서명이 틀리거나 없는 POST `/github` 401(봇), `edge-probe.ukyi.app` 404.
+- 사람 정리(계획 H7) 끝(2026-11-02 19:4x): 사람이 Infisical `/apps/edge-probe/`(폴더와 `GITHUB_WEBHOOK_SECRET`), `/apps/homelab-bot/worker/WORKER_PROBE`, `/apps/homelab-bot/ARGOCD_READER_TOKEN`을 지웠다. lead가 키 이름만 다시 봐서 prod·VM 프로젝트 모두 남은 것이 없음을 확인했다. 시험 webhook(`ukyi-app/homelab`, 이벤트 `meta`, 비밀은 봇의 `GITHUB_REVIEW_WEBHOOK_SECRET`)의 ping이 202로 봇에 닿은 뒤 바로 지웠다(AC-P12를 봇 경로로 다시 확인). 봇 VERIFICATION 점검 11의 남은 부분도 이것으로 풀렸다.
 - D-14 변경(Claude 구독 실행기)을 봇 저장소 `docs/ai-bot/prompts/`, `platform/design-prompt.md`, T17·T18 티켓 머리말(선행 결정, `auth.json` 시드·재시드 문장)에 맞춘다: T17·T18 착수 때. spec §5.1·§10·§11과 설계 C.8·E9·F는 이 결과와 함께 고쳤다.
 - 시범 P-1: 2026-11-02 18:31 사용자 승인, 진행 중(위 "시범 운영").
