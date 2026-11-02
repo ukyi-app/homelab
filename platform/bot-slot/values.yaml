@@ -28,3 +28,8 @@ probe: false
 # 파드·Service 대역은 k3s 기본값(host/clusters/*.env의 POD_CIDR·SERVICE_CIDR)이다. 바꾸면 schema도 바꾼다.
 kubernetesApi:
   endpointCIDRs: []
+
+# 봇 기억 삭제 원장 볼륨(T20, templates/deletion-ledger.yaml). 클러스터 값이라 여기서는 끈다. root가 values-<클러스터>.yaml의
+# cluster.deletionLedger(nodeName·path)가 있을 때만 enabled: true와 함께 넘긴다. VM은 운영 SSD가 없어 비운다.
+deletionLedger:
+  enabled: false
