@@ -155,7 +155,7 @@ H7 로그인 MOTD의 k3s 상태 표시. 2026-10-18 실측으로 범위를 고쳤
 ### 옛 데이터 경로 (D-12, H8)
 
 - `/var/lib/rancher/k3s-storage`: 옛 PV 데이터(AdGuard 설정 포함). `k3s-uninstall.sh`는 `/var/lib/rancher/k3s`, `/var/lib/kubelet`, `/etc/rancher/k3s`만 지우고 이 경로를 남긴다.
-- `/mnt/bulk`와 그 fstab 항목: 별도 1.8T 디스크, 옛 files 데이터(C-03 폐기 대상). D-12대로 비우고 fstab 항목을 지운다. 새 구조에서는 쓰지 않는다. 2026-10-18 실측: ext4로 마운트돼 있고 2.2G를 쓴다. root 0710이라 목록은 sudo가 필요하다. 안에 `homelab-backups/`(SealedSecrets 봉인 키 백업 1개, 로컬 런북 암호화 사본 6개)가 있다(선행 확인 3).
+- `/mnt/bulk`와 그 fstab 항목: 별도 1.8T 디스크, 옛 files 데이터(C-03 폐기 대상). D-12대로 비우고 fstab 항목을 지운다. 새 구조에서는 쓰지 않는다(이 티켓 시점의 판단. 2026-11-02 T20 후속으로 같은 SSD를 삭제 원장 전용으로 다시 마운트한다: spec D-12, [T20](T20-bot-memory-briefing.md)). 2026-10-18 실측: ext4로 마운트돼 있고 2.2G를 쓴다. root 0710이라 목록은 sudo가 필요하다. 안에 `homelab-backups/`(SealedSecrets 봉인 키 백업 1개, 로컬 런북 암호화 사본 6개)가 있다(선행 확인 3).
 - `/mnt/bulk-new`: 2026-08-26에 만든 root 0700 디렉터리. 루트 디스크 위의 일반 디렉터리이고(마운트 아님) fstab과 옛 코드에 없다. 옛 bulk 이전 때의 임시 경로로 보인다(추측, 로컬 런북). sudo로 내용을 보고 비었거나 옛 데이터면 지운다.
 - `/var/backups/files-data`: `files-data-backup.timer`가 매일 쓴다.
 - `/var/lib/homelab-aiops.img`: AIOps loop 이미지(옛 AIOps 줄과 같은 파일).
@@ -280,7 +280,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | NUC | H7 MOTD | motd-refresh timer active. 범위를 고쳤다(H7 줄) | 삭제됨(2026-10-19 12:52 s2b, D-12, 사용자 결정 2026-10-19: k3s 상태 표시만 지움. `00-ukyi` 원본 복원, 고양이 MOTD 유지) |
 | NUC | H9 `k3s.service` | active·enabled. 옛 Argo CD 워크로드 6개 모두 replicas 1 | 삭제됨(2026-10-19 13:20 s2c, D-12) |
 | 옛 데이터 | `/var/lib/rancher/k3s-storage` | 있음. 2026-10-19 sudo 조회: `internal` 아래 PVC 4개(1.3G: AdGuard, `pg-1`, `pg-1-wal`, `trip-mate-data`) | 삭제됨(2026-10-19 13:21 s2d, H8. 항목 1402개. 빈 `/var/lib/rancher`도 지움) |
-| 옛 데이터 | `/mnt/bulk`와 fstab | ext4 마운트, 2.2G. 2026-10-19 sudo 조회: 항목 5개(옛 PVC 4개와 `homelab-backups`, 선행 확인 3), fstab 줄 1개 | 삭제됨(2026-10-19 13:21 s2d, H8. 항목 5273개, umount, fstab 줄 1개 삭제(백업 `/etc/fstab.t06-2026-10-19.bak`). 디스크·파일시스템과 빈 마운트 지점은 남김) |
+| 옛 데이터 | `/mnt/bulk`와 fstab | ext4 마운트, 2.2G. 2026-10-19 sudo 조회: 항목 5개(옛 PVC 4개와 `homelab-backups`, 선행 확인 3), fstab 줄 1개 | 삭제됨(2026-10-19 13:21 s2d, H8. 항목 5273개, umount, fstab 줄 1개 삭제(백업 `/etc/fstab.t06-2026-10-19.bak`). 디스크·파일시스템과 빈 마운트 지점은 남김). 이후: 2026-11-02 T20 후속으로 원장 전용 재마운트(spec D-12, [T20](T20-bot-memory-briefing.md)) |
 | 옛 데이터 | `/mnt/bulk-new` | root 0700 디렉터리, 마운트 아님. 2026-10-19 sudo 조회: 비어 있음 | 삭제됨(2026-10-19 13:21 s2d, H8) |
 | 옛 데이터 | `/var/backups/files-data` | 있음. 2026-10-19 sudo 조회: sha256 파일 55개와 `data`·`data.prev`(280K) | 삭제됨(2026-10-19 13:21 s2d, H8. 항목 71개) |
 | 옛 데이터 | `/var/lib/homelab-aiops.img` | loop로 마운트 중 | 삭제됨(2026-10-19 13:21 s2d, H8. mount 해제는 2b) |
