@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # k3s 설치 뒤 라이브 클러스터가 Git(host/)과 같은지 본다. 읽기만 하고 sudo 없이 실행한다(C.3.2 4번).
-# 예외 하나: 커널 nft 표는 root만 읽어서 sudo -n(비밀번호를 묻지 않음)으로 읽어 본다.
+# 예외 둘: 커널 nft 표와 삭제 원장 파일(0750 디렉터리 안)은 root만 읽어서 sudo -n(비밀번호를 묻지 않음)으로 읽어 본다.
 #
 # 사용: host/verify.sh --cluster <이름> [--identity]
 #   기본        정체성, 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 k3s-config.yaml,
 #               serving cert SAN, local-retain StorageClass, 파드 egress(유닛, 규칙 파일, 대역, 커널 표),
-#               inotify 인스턴스 한도(설치된 sysctl 파일, 커널 값), kubeconfig 권한.
+#               inotify 인스턴스 한도(설치된 sysctl 파일, 커널 값), T20 삭제 원장 SSD(마운트, fstab, 원장 디렉터리·
+#               파일 소유·모드, 표식 형식. BULK_SSD_LABEL이 빈 클러스터는 건너뜀), kubeconfig 권한.
 #   --identity  정체성만 본다. 파괴 명령(삭제, 복구, 제거) 앞에서 대상 클러스터를 확인할 때 쓴다.
 #
 # 종료 코드: 0 통과, 1 실패, 2 실패는 없지만 커널 표를 못 읽어 미검증(sudo 자격이 없다).
@@ -277,7 +278,7 @@ main() {
     return 0
   fi
 
-  require_cmds openssl timeout tr stat diff cmp systemctl sha256sum
+  require_cmds openssl timeout tr stat diff cmp systemctl sha256sum findmnt lsblk readlink
   resolve_magicdns
   K3S_CFG="$(render_k3s_config)"
   check_ready
@@ -287,8 +288,76 @@ main() {
   check_storageclass
   check_egress
   check_inotify
+  check_bulk_ssd
   check_kubeconfig_mode
   finish
+}
+
+# root만 읽는 것을 읽는다. root면 그대로, 아니면 sudo -n(비밀번호를 묻지 않는다). 자격이 없으면 2로 끝난다.
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif sudo -n true 2>/dev/null; then
+    sudo -n "$@"
+  else
+    return 2
+  fi
+}
+
+# T20 삭제 원장 SSD(install.sh --bulk-ssd). 읽기만 한다. 원장 파일 내용은 출력하지 않는다(기억 ID·시각).
+# 마운트가 없으면 원장을 더 보지 않고, 대신 루트 디스크 쪽에 원장 경로가 생겼는지 본다. 그것이 있으면
+# SSD 없이 PV가 붙어 봇이 빈 원장을 볼 수 있다.
+check_bulk_ssd() {
+  local n fl p parent dir f m out
+  if [ -z "$BULK_SSD_LABEL" ]; then
+    ok "삭제 원장 SSD: 이 클러스터는 쓰지 않는다(BULK_SSD_LABEL 빈 값)"
+    return
+  fi
+  parent="${BULK_MOUNT}/${LEDGER_PARENT_REL}"
+  dir="${BULK_MOUNT}/${LEDGER_DIR_REL}"
+  f="${dir}/${LEDGER_FILE}"
+  m="${dir}/${LEDGER_MARKER}"
+  # 비root는 장치를 직접 못 읽는다. lsblk는 udev가 읽어 둔 라벨을 낸다.
+  n="$(lsblk -r -n -o LABEL 2>/dev/null | grep -cxF -- "$BULK_SSD_LABEL" || true)"
+  if [ "$n" = 1 ]; then ok "라벨 ${BULK_SSD_LABEL} 블록 장치 1개"; else bad "라벨 ${BULK_SSD_LABEL} 블록 장치가 ${n}개다(기대 1)"; fi
+  fl="$(fstab_bulk_lines)"
+  if [ "$fl" = "$(bulk_fstab_line)" ]; then
+    ok "fstab ${BULK_MOUNT} 줄이 기대와 같다"
+  else
+    bad "fstab의 ${BULK_MOUNT}·LABEL=${BULK_SSD_LABEL} 줄이 기대와 다르다(지금: ${fl:-없음}). sudo host/install.sh --cluster ${CLUSTER} --bulk-ssd"
+  fi
+  p="$(bulk_mount_problem "")"
+  if [ -n "$p" ]; then
+    bad "${p}. sudo host/install.sh --cluster ${CLUSTER} --bulk-ssd"
+    if [ -e "$parent" ] || [ -L "$parent" ]; then
+      bad "마운트 안 된 루트 디스크 쪽에 ${parent}가 있다. SSD 없이 원장 PV가 이 디렉터리를 붙일 수 있다"
+    fi
+    return
+  fi
+  ok "${BULK_MOUNT} 마운트(ext4, rw, 라벨 ${BULK_SSD_LABEL})"
+  p="$(stat_problem "$(stat -c '%u:%g %a %F' -- "$parent" 2>/dev/null)" "$LEDGER_PARENT_OWNER" 755 directory "$parent")"
+  p+="$(stat_problem "$(stat -c '%u:%g %a %F' -- "$dir" 2>/dev/null)" "$LEDGER_OWNER" 750 directory "$dir")"
+  if [ -n "$p" ]; then
+    bad "원장 디렉터리가 계약 v1과 다르다:"$'\n'"${p}"
+    return
+  fi
+  ok "원장 디렉터리 ${dir}(${LEDGER_OWNER} 0750)"
+  if ! as_root true; then
+    skip "원장 파일 소유·모드·표식: 0750 디렉터리 안이라 root만 읽는다. sudo -v 뒤 같은 터미널에서 다시 실행한다"
+    return
+  fi
+  p="$(stat_problem "$(as_root stat -c '%u:%g %a %F' -- "$f" 2>/dev/null)" "$LEDGER_OWNER" 600 "regular file" "$f")"
+  p+="$(stat_problem "$(as_root stat -c '%u:%g %a %F' -- "$m" 2>/dev/null)" "$LEDGER_OWNER" 600 "regular file" "$m")"
+  if [ -n "$p" ]; then
+    bad "원장 파일이 계약 v1과 다르다:"$'\n'"${p}"
+    return
+  fi
+  read_exact out as_root cat -- "$m" 2>/dev/null || out=""
+  if ledger_marker_ok "$out"; then
+    ok "원장 파일 ${LEDGER_FILE}·${LEDGER_MARKER}(${LEDGER_OWNER} 0600), 표식 형식 v1"
+  else
+    bad "${m}가 원장 계약 v1의 한 줄 형식이 아니다"
+  fi
 }
 
 # 실패가 하나라도 있으면 1, 실패 없이 미검증이 있으면 2, 모두 확인했을 때만 0.

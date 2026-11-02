@@ -107,15 +107,17 @@ host/preflight.sh --cluster <이름> --before \
   && host/preflight.sh --cluster <이름> --after \
   && sudo host/install.sh --cluster <이름> --egress \
   && sudo host/install.sh --cluster <이름> --k3s \
+  && sudo host/install.sh --cluster <이름> --bulk-ssd \
   && host/verify.sh --cluster <이름>
 ```
 
 - `--before`: 노드 IP와 인터페이스, k3s 잔여 경로(`/var/lib/rancher/k3s`, `/var/lib/rancher/k3s-storage`, `/etc/rancher/k3s`) 부재.
 - `--host-config`: `host/etc/` drop-in 복사, sysctl(inotify 인스턴스 한도 8192)을 `sysctl --load`로 바로 걸기, 스왑 끄기, 타임존, `tailscale set --accept-dns=false`(`TAILNET_JOIN=true`일 때), resolv.conf, networkd drop-in 적용. **이때 클러스터 인터페이스가 약 2초 끊긴다.** 원격 세션이 잠깐 멈췄다 돌아오는 것이 정상이다.
 - `--after`: 스왑 없음, 타임존, resolved 스텁 꺼짐, resolv.conf가 loopback·tailnet·자기 주소 아님, 링크가 DHCP DNS를 거부.
+- `--bulk-ssd`: T20 삭제 원장 SSD(설계 F D-12 "T20 후속"). `host/clusters/<이름>.env`의 `BULK_SSD_LABEL`이 비면(VM) 건너뛴다. 라벨 장치가 정확히 하나이고 ext4인지 보고, fstab에 `LABEL=… /mnt/bulk … nofail …` 한 줄을 멱등하게 더한 뒤(백업 `/etc/fstab.pre-host-install.<시각>`, 같은 지점의 다른 줄이 있으면 멈춤) 마운트하고, `findmnt --mountpoint` 원본이 그 장치일 때만 `/mnt/bulk/homelab-bot/deletion-ledger`(65532 0750)를 만든다. 디렉터리가 비었을 때만 빈 `deletions.jsonl`과 `ledger.json`을 만들고, 있으면 그대로 둔다. 비어 있지 않은데 하나라도 없으면 멈춘다(복구는 [restore.md](restore.md)). **포맷하지 않는다.** 장치 UUID를 출력하지만 저장소·공개 기록에 옮기지 않는다. k3s와 순서가 묶이지 않아 이미 도는 클러스터에는 이것만 따로 실행한다. `--k3s` 뒤에 두는 까닭: SSD가 없거나 원장이 어긋나 여기서 멈춰도 플랫폼은 이미 떠 있고, 봇만 원장 PV가 붙지 않아 열리지 않는다.
 - `--egress`: 파드 egress 규칙(1.1절)을 `/etc/homelab/egress.nft`로 렌더하고 `homelab-egress.service`(k3s보다 먼저 뜸)로 올린다. k3s보다 먼저 두어 첫 파드부터 규칙 아래서 뜬다.
 - `--k3s`: `host/versions.env`의 `INSTALL_K3S_VERSION` 고정 설치(채널 없음), `host/k3s-config.yaml`을 렌더해 `/etc/rancher/k3s/config.yaml`(0600)로 씀, `local-retain` StorageClass를 자동 배포 매니페스트로 둠, `/readyz` 뒤 노드에 podCIDR가 배정될 때까지 기다림(처음 설치 포함, 120초 상한. 2026-10-28 VM 첫 설치에서는 바로 돌린 verify가 "podCIDR 없음"으로 실패했다), kubeconfig를 `~/.kube/<KUBE_CONTEXT>.yaml`(0600)로 씀. 이미 깔린 k3s에 다시 돌려 config 값이 바뀌면 이전 config를 `/var/lib/homelab/backup/k3s-config.<시각>.yaml`(root 0600)에 두고 경로를 출력한다. 같은 버전에서 tls-san만 바뀌면 설치 스크립트 없이 config만 바꿔 재시작한다(1절 끝).
-- `verify`: 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 config, serving cert SAN, `local-retain`, egress 유닛·규칙 파일·대역·커널 표, inotify 인스턴스 한도(설치된 sysctl 파일과 커널 값). 커널 표는 `sudo -n nft`로 읽는다. 앞 단계의 sudo 자격이 남아 있으면 그대로 읽고, 없으면 실패 없이 **종료 코드 2(미검증)** 로 끝난다. 2는 통과가 아니다.
+- `verify`: 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 config, serving cert SAN, `local-retain`, egress 유닛·규칙 파일·대역·커널 표, inotify 인스턴스 한도(설치된 sysctl 파일과 커널 값), 삭제 원장 SSD(라벨 장치 1개, fstab 줄, 마운트 원본·ext4·rw, 원장 디렉터리·파일 소유와 모드, 표식 형식). 커널 표와 원장 파일은 `sudo -n`으로 읽는다. 앞 단계의 sudo 자격이 남아 있으면 그대로 읽고, 없으면 실패 없이 **종료 코드 2(미검증)** 로 끝난다. 2는 통과가 아니다.
 - `--k3s`가 중간에 실패하면 `/etc/rancher/k3s`가 남아 `--before`가 막힌다. `--k3s`를 그대로 다시 실행하거나, `k3s-uninstall.sh`로 지우고 잔여 경로가 없는지 본 뒤 1부터 다시 한다.
 
 이후 `kubectl`은 이 kubeconfig로 부른다.

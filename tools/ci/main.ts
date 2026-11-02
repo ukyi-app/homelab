@@ -318,6 +318,12 @@ const steps: Step[] = [
     run: () => tool("host-egress", ["bash", "tools/host-egress.test.sh"]),
   },
   {
+    name: "host bulk ssd",
+    // install.sh --bulk-ssd(T20 삭제 원장 SSD)의 fstab 멱등·충돌 멈춤, 장치·마운트 대조 실패 때 원장 디렉터리 0,
+    // 원장 첫 초기화와 기존 원장 보존·누락 시 멈춤, VM 빈 값 건너뜀, verify.sh 판정을 가짜 명령과 임시 경로로 본다.
+    run: () => tool("host-bulk", ["bash", "tools/host-bulk.test.sh"]),
+  },
+  {
     name: "workflows",
     run: () => {
       const files = gitFiles(".github/workflows/*.yaml", ".github/workflows/*.yml").map((path) => ({ path, text: readText(path) }));

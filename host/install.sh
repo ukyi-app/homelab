@@ -6,6 +6,7 @@
 #   sudo host/install.sh --cluster <이름> --egress
 #   sudo host/install.sh --cluster <이름> --k3s
 #   sudo host/install.sh --cluster <이름> --egress-off   (되돌리기: 파드 egress 규칙을 끄고 지운다)
+#   sudo host/install.sh --cluster <이름> --bulk-ssd     (T20 삭제 원장 SSD 마운트와 원장 첫 초기화. 값이 빈 클러스터는 건너뜀)
 #
 # 순서가 계약이다: preflight --before -> install --host-config -> preflight --after
 #   -> install --egress -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
@@ -13,6 +14,10 @@
 #   --egress를 --k3s보다 먼저 두는 까닭: 첫 파드부터 규칙 아래서 뜬다. 이미 도는 클러스터에는 --egress만
 #   따로 실행해도 된다(k3s를 다시 시작하지 않는다). --host-config에 넣지 않은 까닭: 그 단계는 networkd를
 #   재구성해 링크가 끊길 수 있고 끄는 짝이 없다. egress는 켜고 끄는 한 쌍이 되돌리기 한 명령이어야 한다.
+#   --bulk-ssd는 k3s와 순서가 묶이지 않는다. bootstrap.md는 --k3s 뒤에 둔다: SSD가 없어 여기서 멈춰도 플랫폼은
+#   이미 떠 있고 봇만 열리지 않는다. 봇 원장 PV를 쓰기 전에는 한 번 끝나 있어야 한다.
+#   --host-config에 넣지 않은 까닭: 그 단계는 resolved·journald를 재시작하고 링크를 재구성한다. 마운트만
+#   다시 볼 때 그것까지 치르지 않는다.
 # 각 모드는 확인을 모두 먼저 하고, 하나라도 실패하면 아무것도 바꾸지 않고 멈춘다.
 # 실패를 파이프나 || true로 삼키지 않는다. 옛 bootstrap.sh는 helm 실패를 삼키고 성공을 찍었다(L21).
 #
@@ -44,7 +49,7 @@ TARGETS=""
 NET_DROPINS=""
 KUBECONFIG_OUT=""
 
-usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--egress|--k3s|--egress-off"; }
+usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--egress|--k3s|--egress-off|--bulk-ssd"; }
 cleanup() { [ -z "$TMPD" ] || rm -rf "$TMPD"; }
 trap cleanup EXIT
 
@@ -131,18 +136,25 @@ wait_net() {
   echo "    ${1} 뒤 ${NODE_IP} 복귀, drop-in 실림(${i}초)"
 }
 
+# fstab을 바꾸기 전 사본을 같은 디렉터리에 두고 경로를 낸다. 시각을 이름에 넣어 앞 사본을 덮지 않는다.
+fstab_backup() {
+  local bak
+  bak="${FSTAB}.pre-host-install.$(date +%Y%m%d%H%M%S)"
+  cp -p "$FSTAB" "$bak"
+  printf '%s' "$bak"
+}
+
 remove_fstab_swap() {
   local bak tmp
   # 주석 줄(#/swap.img ...)은 건드리지 않게 첫 필드의 #을 거르고, 셋째 필드(type)만 본다.
-  if ! awk 'NF && $1 !~ /^#/ && $3 == "swap" { f = 1 } END { exit !f }' /etc/fstab; then
+  if ! awk 'NF && $1 !~ /^#/ && $3 == "swap" { f = 1 } END { exit !f }' "$FSTAB"; then
     echo "    fstab에 swap 항목 없음"
     return
   fi
-  bak="/etc/fstab.pre-host-install.$(date +%Y%m%d%H%M%S)"
-  cp -p /etc/fstab "$bak"
+  bak="$(fstab_backup)"
   tmp="$TMPD/fstab"
-  awk 'NF && $1 !~ /^#/ && $3 == "swap" { next } { print }' /etc/fstab >"$tmp"
-  install -m 0644 -o root -g root "$tmp" /etc/fstab
+  awk 'NF && $1 !~ /^#/ && $3 == "swap" { next } { print }' "$FSTAB" >"$tmp"
+  install -m 0644 -o root -g root "$tmp" "$FSTAB"
   echo "    fstab에서 swap 항목을 지웠다(백업 ${bak})"
 }
 
@@ -693,6 +705,157 @@ k3s_install() {
   echo "    다음: KUBECONFIG=${KUBECONFIG_OUT} host/verify.sh --cluster ${CLUSTER} (sudo 없이)"
 }
 
+# ---------------------------------------------------------------------------- --bulk-ssd
+# T20 삭제 원장 SSD(D-12 후속, 사용자 2026-11-02). 원장 계약 v1: LABEL로 마운트하고, 마운트를 대조한 뒤에만
+# 원장 디렉터리를 만들며, 첫 초기화(빈 원장 + 표식)는 이 단계만 한다. 이 단계는 포맷·mkfs·라벨 변경을 하지 않는다.
+# 장치 번호(/dev/nvme1n1p1)는 부팅마다 바뀔 수 있어 설정에 쓰지 않는다. UUID·시리얼은 화면에만 내고 파일에 적지 않는다.
+
+# 라벨을 가진 블록 장치를 찾아 BULK_DEV로 둔다. 정확히 하나이고 ext4여야 한다.
+resolve_bulk_device() {
+  local devs n fstype uuid
+  # -c /dev/null: 캐시를 쓰지 않고 장치를 직접 읽는다. 캐시는 떼어 낸 디스크의 라벨을 남긴다.
+  # 찾은 것이 없으면 blkid가 2로 끝난다. 0개는 아래 개수 판정이 멈춘다.
+  devs="$(blkid -c /dev/null -t "LABEL=${BULK_SSD_LABEL}" -o device 2>/dev/null || true)"
+  n="$(grep -c . <<<"$devs" || true)"
+  [ "$n" -eq 1 ] || die "라벨 ${BULK_SSD_LABEL}인 블록 장치가 ${n}개다(기대 1): ${devs//$'\n'/ }. 0개면 SSD 연결을, 2개 이상이면 복제·옛 디스크를 사람이 확인한다"
+  fstype="$(blkid -c /dev/null -s TYPE -o value "$devs" 2>/dev/null || true)"
+  [ "$fstype" = ext4 ] \
+    || die "${devs}의 파일시스템이 ext4가 아니다(${fstype:-읽지 못함}). 포맷하지 않는다. 사람이 장치를 확인한다"
+  uuid="$(blkid -c /dev/null -s UUID -o value "$devs" 2>/dev/null || true)"
+  BULK_DEV="$devs"
+  echo "    장치 ${BULK_DEV}, ext4, UUID ${uuid:-읽지 못함} (UUID는 대조용 출력이다. 저장소·공개 기록에 옮기지 않는다)"
+}
+
+# 원장 디렉터리 초기화. 마운트 대조가 성공한 뒤에만 불린다.
+ledger_init() {
+  local parent="${BULK_MOUNT}/${LEDGER_PARENT_REL}" dir="${BULK_MOUNT}/${LEDGER_DIR_REL}"
+  local f m p gen ts marker missing="" extra
+  # 앞 단계와 사이에 마운트가 빠졌으면 루트 디스크에 만들게 된다. 만들기 직전에 다시 본다.
+  p="$(bulk_mount_problem "$BULK_DEV")"
+  [ -z "$p" ] || die "${p}. 원장 디렉터리를 만들지 않았다"
+  f="${dir}/${LEDGER_FILE}"
+  m="${dir}/${LEDGER_MARKER}"
+
+  if [ ! -e "$parent" ] && [ ! -L "$parent" ]; then
+    install -d -m 0755 -o "${LEDGER_PARENT_OWNER%:*}" -g "${LEDGER_PARENT_OWNER#*:}" "$parent"
+    echo "    만듦 ${parent}"
+  fi
+  # 소유·모드가 다르면 고치지 않는다. 누가 왜 바꿨는지 모르는 채 chown하면 원장 권한 사고를 덮는다.
+  p="$(stat_problem "$(stat -c '%u:%g %a %F' -- "$parent")" "$LEDGER_PARENT_OWNER" 755 directory "$parent")"
+  [ -z "$p" ] || die "${p}. 고치지 않고 멈춘다"
+  if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
+    install -d -m 0750 -o "${LEDGER_OWNER%:*}" -g "${LEDGER_OWNER#*:}" "$dir"
+    echo "    만듦 ${dir}"
+  fi
+  p="$(stat_problem "$(stat -c '%u:%g %a %F' -- "$dir")" "$LEDGER_OWNER" 750 directory "$dir")"
+  [ -z "$p" ] || die "${p}. 고치지 않고 멈춘다"
+
+  if [ -z "$(find "$dir" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    gen="$(cat "$UUID_SRC")"
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    marker="$(printf '{"format":"homelab-bot-deletion-ledger","version":1,"generation":"%s","initializedAt":"%s"}' "$gen" "$ts")"
+    ledger_marker_ok "${marker}"$'\n' || die "만든 표식이 원장 계약 v1 형식이 아니다(generation ${gen}). 아무 파일도 만들지 않았다"
+    # 원장 파일을 먼저, 표식을 마지막에 만든다. 중간에 끊기면 "표식 없음"이 남아 다음 실행과 봇이 멈춘다.
+    # set -C(noclobber): 그 사이 누가 만든 파일이 있으면 덮지 않고 실패한다. umask 077로 잠깐도 남이 읽지 못하게.
+    (umask 077 && set -C && : >"$f") || die "${f}를 만들지 못했다(이미 있으면 덮지 않는다)"
+    chown "$LEDGER_OWNER" "$f"
+    chmod 0600 "$f"
+    (umask 077 && set -C && printf '%s\n' "$marker" >"$m") \
+      || die "${m}를 만들지 못했다. ${LEDGER_FILE}만 남아 다음 실행은 멈춘다. restore.md의 T20 원장 절차를 따른다"
+    chown "$LEDGER_OWNER" "$m"
+    chmod 0600 "$m"
+    # 파일 내용과 각 디렉터리 항목을 디스크에 내린다(sync에 경로를 주면 그 파일·디렉터리를 fsync한다).
+    # 봇은 표식이 있으면 초기화된 원장으로 믿으므로, 전원이 나가도 표식만 남고 원장 파일이 사라지면 안 된다.
+    sync -- "$f" "$m" "$dir" "$parent" "$BULK_MOUNT"
+    echo "    첫 초기화: ${LEDGER_FILE}(빈 파일), ${LEDGER_MARKER} generation ${gen}, initializedAt ${ts}"
+  else
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then missing+=" ${LEDGER_FILE}"; fi
+    if [ ! -e "$m" ] && [ ! -L "$m" ]; then missing+=" ${LEDGER_MARKER}"; fi
+    if [ -n "$missing" ]; then
+      extra="$(find "$dir" -mindepth 1 -maxdepth 1 -printf '%f ')"
+      die "원장 디렉터리 ${dir}가 비어 있지 않은데${missing}이(가) 없다(있는 항목: ${extra}). 만들지 않고 멈춘다. 빈 원장을 새로 만들면 지운 기억이 DB 복원으로 되살아날 수 있다. 복구는 docs/runbooks-public/restore.md의 T20 삭제 원장 절차(H3)를 따른다"
+    fi
+    echo "    원장이 이미 있다. 내용을 그대로 둔다"
+  fi
+
+  # 새로 만들었든 있던 것이든 같은 판정으로 끝낸다.
+  p="$(stat_problem "$(stat -c '%u:%g %a %F' -- "$f")" "$LEDGER_OWNER" 600 "regular file" "$f")"
+  p+="$(stat_problem "$(stat -c '%u:%g %a %F' -- "$m")" "$LEDGER_OWNER" 600 "regular file" "$m")"
+  [ -z "$p" ] || die "원장 파일의 소유·모드가 계약 v1과 다르다. 고치지 않고 멈춘다:"$'\n'"${p}"
+  read_exact marker cat -- "$m" || marker=""
+  ledger_marker_ok "$marker" || die "${m}가 원장 계약 v1의 한 줄 형식이 아니다. 고치지 않고 멈춘다"
+  extra="$(find "$dir" -mindepth 1 -maxdepth 1 ! -name "$LEDGER_FILE" ! -name "$LEDGER_MARKER" -printf '%f ')"
+  if [ -n "$extra" ]; then echo "    알림: 원장 디렉터리에 계약 밖 항목이 있다(그대로 둔다): ${extra}"; fi
+  echo "    ${dir}: ${LEDGER_OWNER} 0750, ${LEDGER_FILE}·${LEDGER_MARKER} 0600, 표식 형식 v1"
+}
+
+bulk_ssd() {
+  local fstab_want fl lines others p mounted=false bak tmp
+
+  log "확인"
+  if [ -z "$BULK_SSD_LABEL" ]; then
+    echo "    BULK_SSD_LABEL이 비어 있다(host/clusters/${CLUSTER}.env). 이 클러스터에는 삭제 원장 SSD가 없다. 건너뛴다"
+    return 0
+  fi
+  require_cmds blkid findmnt mount systemctl stat sync readlink find chown chmod install
+  resolve_bulk_device
+  fstab_want="$(bulk_fstab_line)"
+  fl="$(fstab_bulk_lines)"
+  if [ -n "$fl" ] && [ "$fl" != "$fstab_want" ]; then
+    die "${FSTAB}에 ${BULK_MOUNT} 또는 LABEL=${BULK_SSD_LABEL}을 쓰는 다른 줄이 있다. 바꾸지 않고 멈춘다. 사람이 줄을 정리한 뒤 다시 실행한다:"$'\n'"${fl}"$'\n'"기대: ${fstab_want}"
+  fi
+  # 같은 장치가 다른 곳에 마운트돼 있으면 두 경로로 같은 원장을 쓰게 된다.
+  others="$(findmnt -n -r -o TARGET --source "$BULK_DEV" 2>/dev/null || true)"
+  others="$(grep -vxF -- "$BULK_MOUNT" <<<"$others" || true)"
+  [ -z "$others" ] || die "${BULK_DEV}가 ${BULK_MOUNT} 밖에도 마운트돼 있다: ${others//$'\n'/ }. umount를 사람이 판단한다"
+  lines="$(bulk_mount_lines)"
+  if [ -n "$lines" ]; then
+    p="$(bulk_mount_problem "$BULK_DEV")"
+    [ -z "$p" ] || die "${p}. 바꾸지 않고 멈춘다"
+    mounted=true
+  else
+    # 마운트 전의 /mnt/bulk는 루트 디스크다. 여기에 무엇이 있으면 SSD가 빠진 날 그것이 원장 자리로 드러나고
+    # local PV는 그 디렉터리를 그대로 붙인다. 마운트가 가리기 전에 멈춘다. 마운트 지점 자체만 만들 수 있다.
+    if [ -L "$BULK_MOUNT" ] || { [ -e "$BULK_MOUNT" ] && [ ! -d "$BULK_MOUNT" ]; }; then
+      die "${BULK_MOUNT}가 디렉터리가 아니다(심링크 또는 파일). 바꾸지 않고 멈춘다"
+    fi
+    if [ -d "$BULK_MOUNT" ] && [ -n "$(find "$BULK_MOUNT" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+      die "마운트 안 된 ${BULK_MOUNT}(루트 디스크 쪽)가 비어 있지 않다: $(find "$BULK_MOUNT" -mindepth 1 -maxdepth 1 -printf '%f '). 마운트로 가리지 않고 멈춘다. 사람이 내용을 확인한다"
+    fi
+  fi
+
+  log "[1/3] fstab ${BULK_MOUNT}"
+  if [ "$fl" = "$fstab_want" ]; then
+    echo "    이미 있다: ${fstab_want}"
+  else
+    bak="$(fstab_backup)"
+    tmp="$TMPD/fstab"
+    # 마지막 줄에 개행이 없어도 새 줄이 그 줄에 붙지 않게 awk로 한 번 거른다.
+    { awk '{ print }' "$FSTAB"; printf '%s\n' "$fstab_want"; } >"$tmp"
+    install -m 0644 -o root -g root "$tmp" "$FSTAB"
+    echo "    더함: ${fstab_want} (백업 ${bak})"
+  fi
+
+  log "[2/3] 마운트"
+  # fstab을 바꾼 뒤 reload하지 않으면 systemd가 옛 fstab의 mount unit을 들고 있다.
+  systemctl daemon-reload
+  if [ "$mounted" = true ]; then
+    echo "    이미 마운트돼 있다"
+  else
+    if [ ! -e "$BULK_MOUNT" ]; then mkdir -m 0755 -- "$BULK_MOUNT"; fi
+    mount -- "$BULK_MOUNT" || die "mount ${BULK_MOUNT}가 실패했다. 원장 디렉터리를 만들지 않았다. systemctl status ${BULK_MOUNT}와 journalctl -b -k를 본다"
+  fi
+  p="$(bulk_mount_problem "$BULK_DEV")"
+  [ -z "$p" ] || die "마운트 확인 실패: ${p}. 원장 디렉터리를 만들지 않았다"
+  echo "    ${BULK_MOUNT} <- ${BULK_DEV} (ext4, rw, findmnt --mountpoint)"
+
+  log "[3/3] 삭제 원장 디렉터리"
+  ledger_init
+
+  log "삭제 원장 SSD 준비 완료"
+  echo "    다음: host/verify.sh --cluster ${CLUSTER} (sudo 없이. 원장 파일은 sudo -n으로 읽는다)"
+}
+
 # ------------------------------------------------------------------------------ main
 
 main() {
@@ -700,7 +863,7 @@ main() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --cluster) [ "$#" -ge 2 ] || usage; cluster="$2"; shift 2 ;;
-      --host-config | --egress | --egress-off | --k3s) [ -z "$mode" ] || usage; mode="$1"; shift ;;
+      --host-config | --egress | --egress-off | --k3s | --bulk-ssd) [ -z "$mode" ] || usage; mode="$1"; shift ;;
       *) usage ;;
     esac
   done
@@ -718,6 +881,7 @@ main() {
     --egress) egress_on ;;
     --egress-off) egress_off ;;
     --k3s) k3s_install ;;
+    --bulk-ssd) bulk_ssd ;;
   esac
 }
 
