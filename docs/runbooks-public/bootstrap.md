@@ -147,7 +147,7 @@ sudo host/install.sh --cluster <이름> --k3s       # 경로, tls-san 차이, �
 sudo -v && host/verify.sh --cluster <이름>        # node-args·SAN ok
 openssl s_client -connect <NODE_IP>:6443 -noservername </dev/null 2>/dev/null \
   | openssl x509 -noout -ext subjectAltName       # 새 MagicDNS 이름이 있다. 출력에 tailnet 이름이 있어 공개 기록에 붙이지 않는다
-curl -s -o /dev/null -w '%{http_code}\n' https://edge-probe.ukyi.app/   # prod 공개 URL(터널) 200. VM은 E8 VM 격리 5번의 port-forward 확인
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -d '{}' https://hooks.ukyi.app/github   # prod 공개 URL(터널 → 봇) 401. VM은 E8 VM 격리 5번의 port-forward 확인
 ```
 
 **재시작 뒤 새 파드의 새 외부 연결.** 위 확인은 이미 맺힌 터널과 노드 출발 연결이라 flannel이 비웠다 다시 채운 MASQUERADE를 지나지 않는다. 재시작이 끝난 뒤 새 파드를 띄워 클러스터 DNS로 공개 이름을 풀고 공개 443에 새로 연결한다. 실패하면 ns가 남는다. `kubectl -n net-check describe pod probe`와 `logs`를 본 뒤 `kubectl delete namespace net-check`로 지운다.
@@ -249,7 +249,7 @@ EOF
 
 | 항목 | 확인 | 통과 |
 |---|---|---|
-| 공개 URL(터널 7844) | `curl -s -o /dev/null -w '%{http_code}\n' https://edge-probe.ukyi.app/`(prod. VM은 E8 VM 격리 5번의 port-forward 확인) | `200`, cloudflared 로그에 `Registered tunnel connection` |
+| 공개 URL(터널 7844) | `curl -s -o /dev/null -w '%{http_code}\n' -X POST -d '{}' https://hooks.ukyi.app/github`(prod, 서명 없는 POST. VM은 E8 VM 격리 5번의 port-forward 확인) | `401`(봇이 서명 검사에서 저장 없이 거절), cloudflared 로그에 `Registered tunnel connection`. GET은 Cloudflare WAF가 터널 앞에서 `403`을 내 터널 확인이 되지 않는다. `404`는 Traefik까지는 닿았고 봇 Ingress나 Ready 파드가 없는 것이다(Traefik은 Ready 엔드포인트가 없는 Service의 라우터를 만들지 않는다) |
 | 클러스터 DNS(53) | 아래 시험 파드의 `cluster-dns` 줄, `kubectl -n kube-system logs deploy/coredns --since=10m` | 해석 성공, 업스트림 `i/o timeout` 없음 |
 | Argo CD 동기화(GitHub 443) | 2분 뒤 3절의 `Synced/Healthy` 줄 | 모든 Application `Synced/Healthy` |
 | R2 백업(443) | `kubectl -n database get backups`, `kubectl -n database get cluster pg -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")].status}'` | `egress-check-*`가 `completed`, `True` |

@@ -146,7 +146,7 @@ failureThreshold: {{ $p.failureThreshold | default 3 }}
 {{- end }}
 
 {{/*
-ExternalSecret 공통(edge-probe와 같은 모양). template이 없으면 ExternalSecret의 라벨·주석(Argo CD tracking-id 포함)이
+ExternalSecret 공통(플랫폼 구성 요소의 ExternalSecret과 같은 모양). template이 없으면 ExternalSecret의 라벨·주석(Argo CD tracking-id 포함)이
 Secret에 복사돼 Argo CD가 그 Secret을 자기 리소스로 착각한다(설계 B.8 E3).
 remoteRef.key는 store secretsPath(/apps)에 이어 붙는 상대 경로다. /로 시작하면 secretsPath를 무시한다(U06).
 */}}

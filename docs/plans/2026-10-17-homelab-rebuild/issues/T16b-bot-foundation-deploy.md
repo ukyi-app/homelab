@@ -150,7 +150,7 @@
 
 플랫폼·사람:
 
-- 공개 webhook 이전 PR #1003(edge-probe 삭제, `hooks.ukyi.app/github`을 봇으로): 열림, 사용자 결정 대기. ns 삭제라 되돌리기 어렵다. `restore.md` 개수 정정은 그 PR 안에 있다.
+- 공개 webhook 이전 PR #1003(edge-probe 삭제, `hooks.ukyi.app/github`을 봇으로): 사용자 결정 "진행해"(2026-11-02 18:4x)로 병합한다. ns `app-edge-probe`가 지워져 되돌리려면 되돌림 PR이 필요하다. `restore.md` 개수 정정은 그 PR 안에 있다. 3.1 지도 블록의 `app-edge-probe` 건너뛰기 줄은 남겨도 해가 없어 그대로 둔다. 병합 뒤 공개 경로 확인(서명 없는 POST `/github` → 봇 401)은 approvals에 남긴다.
 - 사람 정리(계획 H7): Infisical `/apps/homelab-bot/worker/WORKER_PROBE` 삭제, #1003 병합 뒤 `/apps/edge-probe/*`와 시험 webhook 정리. 후보: `/apps/homelab-bot/ARGOCD_READER_TOKEN`(D9 뒤 차트 secrets 목록과 봇 코드에 없다. 키가 남아 있으면 지운다).
 - D-14 변경(Claude 구독 실행기)을 봇 저장소 `docs/ai-bot/prompts/`, `platform/design-prompt.md`, T17·T18 티켓 머리말(선행 결정, `auth.json` 시드·재시드 문장)에 맞춘다: T17·T18 착수 때. spec §5.1·§10·§11과 설계 C.8·E9·F는 이 결과와 함께 고쳤다.
 - 시범 P-1: 2026-11-02 18:31 사용자 승인, 진행 중(위 "시범 운영").
