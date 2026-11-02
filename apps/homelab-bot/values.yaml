@@ -41,5 +41,9 @@ env:
   KUBERNETES_API_URL: "https://kubernetes.default.svc/"
   # 위 persistence.mountPath와 같아야 한다. 봇은 /var/lib/homelab-bot/ 밖이면 기동하지 않고, 이 env가 없으면 기억·원장을 끈다.
   # 원장이 열리지 않아도 Ready는 그대로다(경보·webhook 수신 유지). 기억 경로만 닫고 지표로 알린다(vmalert bot.yaml).
-  # 브리핑 env(BRIEFING_TIME·BRIEFING_TIMEZONE)는 넣지 않는다. 실채널 발송은 사용자 승인 뒤 따로 넣는다.
   MEMORY_LEDGER_DIR: "/var/lib/homelab-bot/ledger"
+  # 일일 브리핑(D-17: 매일 08:50 Asia/Seoul, 알림·리뷰·브리핑 채널 = 정책 notificationChannel). 사용자 승인 2026-11-02.
+  # 둘 다 있거나 둘 다 없어야 한다(하나만이면 봇이 기동하지 않는다). 지우면 다음 기동 때 예약을 끄고 남은 미발송 사본을 막는다.
+  # 원장 env가 없으면 브리핑도 켤 수 없다(기억 칸이 원장에 기댄다).
+  BRIEFING_TIME: "08:50"
+  BRIEFING_TIMEZONE: "Asia/Seoul"
