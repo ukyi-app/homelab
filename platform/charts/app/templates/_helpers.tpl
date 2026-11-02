@@ -61,7 +61,12 @@ uid는 숫자로 준다. 이미지 USER가 이름(예: node)이면 runAsNonRoot�
 runAsNonRoot: true
 runAsUser: 65532
 runAsGroup: 65532
+{{- /* persistence 볼륨에는 fsGroup을 두지 않는다. 있으면 kubelet이 마운트 때 볼륨 전체를 g+rw, 디렉터리에 setgid로 바꿔
+       (Kubernetes volume_linux.go changeFilePermission, local PV도 같다) 원장 계약 v1의 0600·0750이 0660·2770이 된다.
+       소유자가 이미 65532라 fsGroup 없이도 쓴다. /tmp emptyDir은 0777이라 영향이 없다. */}}
+{{- if not .Values.persistence }}
 fsGroup: 65532
+{{- end }}
 seccompProfile:
   type: RuntimeDefault
 {{- end }}

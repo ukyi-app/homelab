@@ -7,7 +7,8 @@
   "required": ["chartVersion", "backup"],
   "anyOf": [
     { "required": ["postgres"], "properties": { "postgres": { "required": ["enabled"], "properties": { "enabled": { "const": true } } } } },
-    { "required": ["valkey"], "properties": { "valkey": { "required": ["persistent"], "properties": { "persistent": { "const": true } } } } }
+    { "required": ["valkey"], "properties": { "valkey": { "required": ["persistent"], "properties": { "persistent": { "const": true } } } } },
+    { "required": ["volumes"], "properties": { "volumes": { "required": ["deletionLedger"], "properties": { "deletionLedger": { "required": ["enabled"], "properties": { "enabled": { "const": true } } } } } } }
   ],
   "$comment": "anyOf: 리소스가 없는 데이터 Application을 만들지 않는다. 마지막 리소스 prune 거부 함정(설계 B.8 E2, C.5.5). 폐기는 data/<app> 삭제 PR로 한다.",
   "properties": {
@@ -34,6 +35,23 @@
         "persistent": { "description": "true면 영속 Valkey를 만든다. 비밀번호 원본은 Infisical /apps/<app>/valkey/PASSWORD.", "type": "boolean" },
         "running": { "description": "false면 서버만 내린다(복원 1단계, 설계 C.5.6). PVC는 남고 백업 CronJob은 suspend된다. 평소에는 적지 않는다.", "type": "boolean" },
         "restoreMode": { "description": "true면 appendonly no로 띄워 RDB를 읽는다(복원 3단계). 복원 뒤 false로 되돌린다.", "type": "boolean" }
+      }
+    },
+    "volumes": {
+      "description": "앱 ns의 영속 볼륨 선언(1.2.0부터). 평소에는 적지 않는다.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deletionLedger": {
+          "description": "봇 기억 삭제 원장(T20, 설계 C.5.5). enabled면 PVC deletion-ledger(StorageClass local-ledger, PV <app>-deletion-ledger에 미리 묶음)를 만든다. PV는 platform/bot-slot이 클러스터 값으로 만든다. 원장은 DB 백업보다 오래 살아야 해 purge: true와 함께 쓰지 못한다(일반 purge 제외).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "size": { "description": "요청 용량. PV 용량(1Gi) 이하. local 볼륨은 크기를 강제하지 않아 계획용이다. 기본 1Gi.", "type": "string", "pattern": "^0*[1-9][0-9]*(Mi|Gi)$" }
+          }
+        }
       }
     },
     "purge": {

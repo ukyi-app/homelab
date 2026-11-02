@@ -1,0 +1,7 @@
+# expect: fail
+# match: '1T' does not match pattern
+# 요청 용량은 Mi·Gi만(PV 용량 1Gi와 비교한다).
+chartVersion: 1.2.0
+postgres: {enabled: true}
+volumes: {deletionLedger: {enabled: true, size: 1T}}
+backup: {bucket: homelab-backups}

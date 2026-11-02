@@ -1,0 +1,31 @@
+{{- $ledger := (.Values.volumes | default dict).deletionLedger | default dict }}
+{{- if $ledger.enabled }}
+{{- $name := include "data.name" . }}
+{{- /* 원장은 지운 기억이 DB 복원으로 되살아나지 않게 하는 표식이라 DB 백업(14일)과 pgdump 수동 사본보다 오래 살아야 한다.
+       일반 폐기(purge: true)는 보호 주석을 벗기므로 함께 쓰지 못하게 막는다. 폐기는 설계 C.5.5의 원장 폐기 절차로 따로 한다. */}}
+{{- if .Values.purge }}
+{{- fail "volumes.deletionLedger는 purge: true와 함께 쓰지 않는다. 원장은 일반 폐기 대상이 아니다(설계 C.5.5 원장 폐기)" }}
+{{- end }}
+# 봇 기억 삭제 원장(T20, 설계 C.5.5·C.8). 게시 서버만 공유 차트 persistence로 이 PVC를 붙인다.
+# volumeName으로 bot-slot의 정적 PV에 미리 묶는다(PV의 claimRef도 이 PVC를 가리킨다). 다른 PV·동적 생성에 묶이지 않는다.
+# 보호 주석은 purge 값과 상관없이 늘 붙인다(data.protect를 쓰지 않는다).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deletion-ledger
+  labels:
+    {{- include "data.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    # 마지막 wave다(templates/valkey.yaml PVC 주석과 같은 이유). PostgreSQL 쪽(Database wave 2, pg-acl hook wave 3) 뒤라
+    # PV가 없어 Pending인 클러스터(VM)에서도 ACL hook이 막히지 않는다. 이 wave나 뒤에 hook을 두지 않는다.
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  volumeMode: Filesystem
+  storageClassName: local-ledger
+  volumeName: {{ $name }}-deletion-ledger
+  resources:
+    requests:
+      storage: {{ $ledger.size | default "1Gi" }}
+{{- end }}
