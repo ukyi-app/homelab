@@ -130,7 +130,7 @@
 - **봇 저장소 public·보안 설정·운영 산출물 없음:** 2026-11-02 읽기 확인: public, ruleset `app-main` active, secret scanning·push protection enabled, fork PR 승인 `all_external_contributors`. 운영 산출물(HANDOFF, 시험 원자료, 정책 실제 값)은 저장소 밖(`homelab-bot-ops`, Infisical, lead 작업 파일). 충족.
 - **Alertmanager 봇 route + Telegram 형제 route:** #1001(2026-10-31 00:03). 봇 정상: S14 시험 경보(2026-10-31 00:38) bot·telegram 각 +1, SEC-01 시험 경보(2026-11-02 12:42) 각 1, 실패 0. replicas 0: #1008(13:25) → TargetDown(bot-slot) 13:31 Telegram. 충족.
 - **Gateway만 끊긴 동안 Ready·8081 수신(할 일 5):** EVENT-03 재시험 차단(2026-11-02 14:10:04~14:24:04) 동안 vmsingle 기준(lead 실측 18:0x~18:1x): `kube_pod_container_status_ready{container="app"}` 1분 최솟값 계속 1, `up{job="bot-slot"}`(8080 `/metrics` 스크레이프) 계속 1, `alertmanager_notifications_total{receiver_name="bot"}` 14:22 8→9(HomelabBotGatewayDisconnected firing을 차단 중 8081로 받음)·14:27 9→10(해소), 실패 합계 0(bot·telegram·healthchecks). 봇 파드 재시작 0(시작 14:06:26). 충족.
-- **HANDOFF:** lead가 이 PR 병합 전에 `ukyi-app/homelab-bot-ops`의 `handoffs/foundation-deploy.md`로 넣는다(S19).
+- **HANDOFF:** `ukyi-app/homelab-bot-ops` `handoffs/foundation-deploy.md`(2026-11-02 18:20 push, 커밋 `a58a197`). 충족.
 
 ### 후속 (해소 티켓)
 
@@ -150,5 +150,6 @@
 플랫폼·사람:
 
 - 공개 webhook 이전 PR #1003(edge-probe 삭제, `hooks.ukyi.app/github`을 봇으로): 열림, 사용자 결정 대기. ns 삭제라 되돌리기 어렵다. `restore.md` 개수 정정은 그 PR 안에 있다.
-- 사람 정리(계획 H7): Infisical `/apps/homelab-bot/worker/WORKER_PROBE` 삭제, #1003 병합 뒤 `/apps/edge-probe/*`와 시험 webhook 정리.
+- 사람 정리(계획 H7): Infisical `/apps/homelab-bot/worker/WORKER_PROBE` 삭제, #1003 병합 뒤 `/apps/edge-probe/*`와 시험 webhook 정리. 후보: `/apps/homelab-bot/ARGOCD_READER_TOKEN`(D9 뒤 차트 secrets 목록과 봇 코드에 없다. 키가 남아 있으면 지운다).
+- D-14 변경(Claude 구독 실행기)을 봇 저장소 `docs/ai-bot/prompts/`, `platform/design-prompt.md`, T17·T18 티켓 머리말(선행 결정, `auth.json` 시드·재시드 문장)에 맞춘다: T17·T18 착수 때. spec §5.1·§10·§11과 설계 C.8·E9·F는 이 결과와 함께 고쳤다.
 - 시범 P-1(허용 채널 읽기 조회만): 사람 승인 대기. 승인하면 [../approvals.md](../approvals.md)에 기록한 뒤 시작한다.
