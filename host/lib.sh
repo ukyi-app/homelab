@@ -12,7 +12,8 @@ HOST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IFACE_TOKEN='@NODE_IFACE@'
 CLUSTER_KEYS="NODE_NAME NODE_IP NODE_IFACE TAILNET_JOIN KUBE_CONTEXT POD_CIDR SERVICE_CIDR"
 # 비워 둘 수 있는 클러스터 값. TAILNET_DEVICE_NAME이 비면 NODE_NAME을 쓴다.
-OPTIONAL_KEYS="TAILNET_DEVICE_NAME"
+# BULK_SSD_LABEL·BULK_MOUNT는 둘 다 비우거나 둘 다 채운다. 비면 SSD 단계(install --bulk-ssd, verify)를 건너뛴다.
+OPTIONAL_KEYS="TAILNET_DEVICE_NAME BULK_SSD_LABEL BULK_MOUNT"
 COMMON_KEYS="INSTALL_K3S_VERSION TIMEZONE NODE_UPSTREAM_DNS"
 NODE_MAGICDNS=""
 # 파드 egress 규칙(install.sh --egress). 표 이름은 k3s·Tailscale의 표와 겹치지 않게 따로 둔다.
@@ -24,6 +25,21 @@ EGRESS_RULES=/etc/homelab/egress.nft
 EGRESS_UNIT_NAME=homelab-egress.service
 # shellcheck disable=SC2034
 EGRESS_UNIT="/etc/systemd/system/${EGRESS_UNIT_NAME}"
+# T20 삭제 원장(원장 계약 v1). 경로·소유·파일 이름은 봇(B2)과 PV(platform)가 같은 값을 쓴다. 한쪽만 바꾸지 않는다.
+# 봇은 파일을 만들지 않는다. 첫 초기화는 install.sh --bulk-ssd만 한다.
+# 소유는 tools/host-bulk.test.sh가 root 없이 돌리려고 바꾼다.
+# shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
+{
+  FSTAB=/etc/fstab
+  LEDGER_PARENT_REL=homelab-bot
+  LEDGER_DIR_REL=homelab-bot/deletion-ledger
+  LEDGER_FILE=deletions.jsonl
+  LEDGER_MARKER=ledger.json
+  LEDGER_PARENT_OWNER=0:0
+  LEDGER_OWNER=65532:65532
+  # 첫 초기화의 generation 원천. 시험이 바꾼다.
+  UUID_SRC=/proc/sys/kernel/random/uuid
+}
 
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
@@ -99,6 +115,92 @@ load_cluster() {
     true | false) ;;
     *) die "TAILNET_JOIN은 true 또는 false다: ${TAILNET_JOIN}" ;;
   esac
+  BULK_SSD_LABEL="${BULK_SSD_LABEL:-}"
+  BULK_MOUNT="${BULK_MOUNT:-}"
+  if [ -n "$BULK_SSD_LABEL" ] || [ -n "$BULK_MOUNT" ]; then
+    [ -n "$BULK_SSD_LABEL" ] && [ -n "$BULK_MOUNT" ] \
+      || die "BULK_SSD_LABEL과 BULK_MOUNT는 둘 다 비우거나 둘 다 채운다(${file})"
+    # ext4 라벨은 16바이트까지다. 공백이 있으면 fstab의 LABEL= 필드가 갈라진다.
+    [[ "$BULK_SSD_LABEL" =~ ^[A-Za-z0-9_-]{1,16}$ ]] || die "BULK_SSD_LABEL 형식이 아니다: ${BULK_SSD_LABEL}"
+    # 루트(/)·상대 경로·..을 받지 않는다. 원장 경로가 이 아래에 붙는다.
+    [[ "$BULK_MOUNT" =~ ^(/[A-Za-z0-9_-]+)+$ ]] || die "BULK_MOUNT는 /로 시작하는 절대 경로다(/ 자체, ., 공백 금지): ${BULK_MOUNT}"
+  fi
+}
+
+# ------------------------------------------------------------------ T20 삭제 원장 SSD
+
+# 관리하는 fstab 줄. nofail이라 SSD가 없어도 부팅은 계속된다. 대신 마운트 안 된 /mnt/bulk는 루트 디스크의 빈
+# 디렉터리라, 그 아래에 원장을 만들면 봇이 빈 원장을 정상으로 읽는다. 그래서 원장 디렉터리는 마운트 대조 뒤에만
+# 만들고, PV(platform)도 원본 디렉터리가 없으면 파드가 뜨지 않는다. noexec·nodev·nosuid: 원장 파일만 둔다.
+bulk_fstab_line() {
+  printf 'LABEL=%s %s ext4 defaults,nodev,nosuid,noexec,nofail,x-systemd.device-timeout=10s 0 2' "$BULK_SSD_LABEL" "$BULK_MOUNT"
+}
+
+# FSTAB에서 이 마운트 지점이나 이 라벨을 쓰는 줄(주석 제외)을 공백을 하나로 맞춰 낸다. 빈 출력이 "없음"이다.
+# 한 줄이고 bulk_fstab_line과 같으면 "있음", 그 밖은 충돌이다(같은 지점의 다른 줄, 같은 라벨의 다른 지점, 중복).
+fstab_bulk_lines() {
+  awk -v mp="$BULK_MOUNT" -v spec="LABEL=${BULK_SSD_LABEL}" \
+    'NF && $1 !~ /^#/ && ($2 == mp || $1 == spec) { $1 = $1; print }' "$FSTAB"
+}
+
+# 지금 BULK_MOUNT에 걸린 마운트를 "원본 형식 옵션 라벨" 줄로 낸다. --mountpoint만 쓴다. findmnt -T는 마운트가 없으면
+# 상위 루트 파일시스템을 답해 "마운트됨"으로 읽힌다(설계 B.4 H8, 옛 TD:1166). 여러 줄이면 겹쳐 마운트된 것이다.
+# 마운트가 없으면 findmnt가 1로 끝난다. 그 경우는 빈 출력으로 낸다.
+bulk_mount_lines() {
+  findmnt -n -r -o SOURCE,FSTYPE,OPTIONS,LABEL --mountpoint "$BULK_MOUNT" 2>/dev/null || true
+}
+
+# bulk_mount_problem [기대 장치]: BULK_MOUNT가 라벨 장치의 ext4로 쓰기 가능하게 하나만 마운트돼 있으면 빈 출력,
+# 아니면 이유 한 줄. 기대 장치를 주면(install, root가 blkid로 찾은 것) 원본이 그 장치인지도 본다.
+# 라벨만 맞으면 같은 라벨의 다른 디스크(예: 복제한 디스크)를 받을 수 있어 install은 장치까지 맞춘다.
+bulk_mount_problem() {
+  local lines src fstype opts label
+  lines="$(bulk_mount_lines)"
+  if [ -z "$lines" ]; then
+    printf '%s에 마운트가 없다\n' "$BULK_MOUNT"
+    return
+  fi
+  if [ "$(grep -c . <<<"$lines")" -ne 1 ]; then
+    printf '%s에 마운트가 여러 개 겹쳐 있다: %s\n' "$BULK_MOUNT" "${lines//$'\n'/; }"
+    return
+  fi
+  read -r src fstype opts label <<<"$lines"
+  if [ -n "${1:-}" ] && [ "$(readlink -f -- "$src")" != "$(readlink -f -- "$1")" ]; then
+    printf '%s의 원본이 %s다(기대 %s)\n' "$BULK_MOUNT" "$src" "$1"
+  elif [ -z "$label" ]; then
+    printf '%s의 원본 %s 라벨을 읽지 못했다(기대 %s)\n' "$BULK_MOUNT" "$src" "$BULK_SSD_LABEL"
+  elif [ "$label" != "$BULK_SSD_LABEL" ]; then
+    printf '%s의 원본 %s 라벨이 %s다(기대 %s)\n' "$BULK_MOUNT" "$src" "$label" "$BULK_SSD_LABEL"
+  elif [ "$fstype" != ext4 ]; then
+    printf '%s의 형식이 %s다(기대 ext4)\n' "$BULK_MOUNT" "$fstype"
+  else
+    case ",${opts}," in
+      *,rw,*) ;;
+      *) printf '%s가 쓰기 가능(rw)이 아니다: %s. ext4 오류로 읽기 전용이 됐을 수 있다\n' "$BULK_MOUNT" "$opts" ;;
+    esac
+  fi
+}
+
+# stat_problem <stat -c '%u:%g %a %F' 출력> <기대 소유> <기대 모드> <기대 종류> <이름>: 다르면 한 줄 설명, 같으면 빈 출력.
+# 빈 파일은 %F가 "regular empty file"이라 regular file로 맞춘다. 심링크는 따라가지 않는다(stat에 -L 없음).
+stat_problem() {
+  local got="${1/regular empty file/regular file}" expect="$2 $3 $4"
+  [ "$got" = "$expect" ] || printf '%s: %s (기대 %s)\n' "$5" "${got:-없음}" "$expect"
+}
+
+# ledger_marker_ok <파일 내용>: 원장 계약 v1의 표식이면 0. 정확히 한 줄 + 개행이다. 봇(B2)이 같은 형식을 검사한다.
+ledger_marker_ok() {
+  local re
+  re='^\{"format":"homelab-bot-deletion-ledger","version":1,"generation":"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}","initializedAt":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"\}'$'\n''$'
+  [[ "$1" =~ $re ]]
+}
+
+# read_exact <변수> <명령...>: 명령 출력을 끝 개행까지 그대로 변수에 담는다. $(cat)은 끝 개행을 지워
+# "한 줄 + 개행"을 가릴 수 없다. 같은 이유로 이 함수의 결과도 $(...)로 받지 않고 변수로 넘긴다.
+read_exact() {
+  local __c
+  __c="$("${@:2}" && printf .)" || return 1
+  printf -v "$1" '%s' "${__c%.}"
 }
 
 tailscale_self_json() {
