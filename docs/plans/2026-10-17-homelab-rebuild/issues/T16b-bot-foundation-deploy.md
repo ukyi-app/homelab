@@ -1,7 +1,7 @@
 # T16b 봇 FOUNDATION 실연동·첫 배포
 
 - 단계: P4 봇 V1
-- 상태: 완료 (2026-11-02. 2026-10-30 착수. 첫 배포(등록 PR #995, 2026-10-30), 콜드스타트 순서 재현, 시나리오 1(#1005·#1010), 실연동 시험 S16 실행. 배정 시험에 fail 없음: EVENT-03은 첫 실행 부분 fail → 봇 #20 → 재시험 pass, EVENT-01 not_run과 EVENT-02 부분은 사유·해소 티켓과 함께. 결과는 아래 "결과", 시험 표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T16b 실연동 결과". 시범 P-1(허용 채널 읽기 조회만)은 사람 승인 대기. 공개 webhook 이전 PR #1003은 열림, 사용자 결정 대기)
+- 상태: 완료 (2026-11-02. 2026-10-30 착수. 첫 배포(등록 PR #995, 2026-10-30), 콜드스타트 순서 재현, 시나리오 1(#1005·#1010), 실연동 시험 S16 실행. 배정 시험에 fail 없음: EVENT-03은 첫 실행 부분 fail → 봇 #20 → 재시험 pass, EVENT-01 not_run과 EVENT-02 부분은 사유·해소 티켓과 함께. 결과는 아래 "결과", 시험 표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T16b 실연동 결과". 시범 P-1은 2026-11-02 18:31 사용자 승인으로 진행 중(범위: 허용 채널의 `/read`와 대화). 공개 webhook 이전 PR #1003은 열림, 사용자 결정 대기)
 - 명세: [../spec.md](../spec.md)
 - 설계: [../platform/design.md](../platform/design.md) E.1 E9, C.8 "봇 자리 Application"
 - Blocked by: T13, T16a
@@ -68,6 +68,7 @@
 
 - 이 티켓이 끝나면 허용 채널에서 읽기 조회만 실사용한다(V1 범위 조정 안 3, 확정(사용자 2026-10-18, T15)). V1 출시 판정 기준은 그대로다.
 - 시작 전에 사람이 승인하고 [../approvals.md](../approvals.md)에 기록한다.
+- **P-1 진행 중(사용자 승인 2026-11-02 18:31).** 범위는 허용 채널(작업공간·알림)에서 owner의 `/read`와 대화다. 대화는 도구를 실행하지 않아 읽기만 하고, 모델은 봇 전용 Claude 구독 한도를 쓴다. 작업·리뷰·브리핑 레인은 꺼진 채다. 허용 밖 사용자 응답이나 내부 자료 게시가 보이면 바로 멈추고 해당 시험을 `fail`로 기록한다. 증거 등급은 `authorized_external`·`production_observation`이고 V1 판정이 아니다(T21). 끝은 T17 완료 뒤 P-2 승인 때 다시 정한다.
 
 ## 완료 조건
 
@@ -152,4 +153,4 @@
 - 공개 webhook 이전 PR #1003(edge-probe 삭제, `hooks.ukyi.app/github`을 봇으로): 열림, 사용자 결정 대기. ns 삭제라 되돌리기 어렵다. `restore.md` 개수 정정은 그 PR 안에 있다.
 - 사람 정리(계획 H7): Infisical `/apps/homelab-bot/worker/WORKER_PROBE` 삭제, #1003 병합 뒤 `/apps/edge-probe/*`와 시험 webhook 정리. 후보: `/apps/homelab-bot/ARGOCD_READER_TOKEN`(D9 뒤 차트 secrets 목록과 봇 코드에 없다. 키가 남아 있으면 지운다).
 - D-14 변경(Claude 구독 실행기)을 봇 저장소 `docs/ai-bot/prompts/`, `platform/design-prompt.md`, T17·T18 티켓 머리말(선행 결정, `auth.json` 시드·재시드 문장)에 맞춘다: T17·T18 착수 때. spec §5.1·§10·§11과 설계 C.8·E9·F는 이 결과와 함께 고쳤다.
-- 시범 P-1(허용 채널 읽기 조회만): 사람 승인 대기. 승인하면 [../approvals.md](../approvals.md)에 기록한 뒤 시작한다.
+- 시범 P-1: 2026-11-02 18:31 사용자 승인, 진행 중(위 "시범 운영").
