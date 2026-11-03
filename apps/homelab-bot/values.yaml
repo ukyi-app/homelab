@@ -47,4 +47,3 @@ env:
   # 원장 env가 없으면 브리핑도 켤 수 없다(기억 칸이 원장에 기댄다).
   BRIEFING_TIME: "08:50"
   BRIEFING_TIMEZONE: "Asia/Seoul"
-suspended: true
