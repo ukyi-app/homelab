@@ -167,3 +167,86 @@ tests:
               cronjob: a-valkey-backup
             exp_annotations:
               summary: Valkey 백업 app-a/a-valkey-backup의 마지막 성공이 26시간보다 오래됐다
+
+  # 시각은 946684800(2000-01-01 UTC)에서 시작한다. 만료 시각 = 946684800 + 남은 초.
+  # 정상 15일(갱신 직전), 6일, 12시간, 발급 전(0) 인증서를 함께 둔다. eval_time 1h는 남은 시간을 거의 바꾸지 않는다.
+  - name: CertificateExpiring은 7일 미만 warning, 1일 미만 critical, 15일은 조용하다
+    interval: 1m
+    input_series:
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="cnpg-system", name="barman-cloud-client", issuer_name="selfsigned", issuer_kind="Issuer", issuer_group="cert-manager.io"}'
+        values: "947980800x70"
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="cnpg-system", name="barman-cloud-server", issuer_name="selfsigned", issuer_kind="Issuer", issuer_group="cert-manager.io"}'
+        values: "947203200x70"
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="cnpg-system", name="almost-gone", issuer_name="selfsigned", issuer_kind="Issuer", issuer_group="cert-manager.io"}'
+        values: "946728000x70"
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="cnpg-system", name="not-issued", issuer_name="selfsigned", issuer_kind="Issuer", issuer_group="cert-manager.io"}'
+        values: "0x70"
+    alert_rule_test:
+      - eval_time: 1h
+        groupname: certificates
+        alertname: CertificateExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: cnpg-system
+              name: barman-cloud-server
+            exp_annotations:
+              summary: 인증서 cnpg-system/barman-cloud-server가 7일 안에 만료된다
+              description: 만료 15일 전 갱신이 8일 넘게 실패했다. kubectl describe certificate·certificaterequest와 cert-manager 컨트롤러 로그를 본다.
+      - eval_time: 1h
+        groupname: certificates
+        alertname: CertificateExpiringCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: cnpg-system
+              name: almost-gone
+            exp_annotations:
+              summary: 인증서 cnpg-system/almost-gone가 1일 안에 만료된다(이미 만료됐을 수도 있다)
+              description: 갱신이 2주 가까이 실패했다. kubectl describe certificate·certificaterequest와 cert-manager 컨트롤러 로그를 본다.
+
+  - name: CertificateExpiring은 갱신 전 정상 인증서(15일 남음)에 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="cnpg-system", name="barman-cloud-client", issuer_name="selfsigned", issuer_kind="Issuer", issuer_group="cert-manager.io"}'
+        values: "947980800x70"
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="cnpg-system", name="barman-cloud-server", issuer_name="selfsigned", issuer_kind="Issuer", issuer_group="cert-manager.io"}'
+        values: "947980800x70"
+    alert_rule_test:
+      - eval_time: 1h
+        groupname: certificates
+        alertname: CertificateExpiringSoon
+        exp_alerts: []
+      - eval_time: 1h
+        groupname: certificates
+        alertname: CertificateExpiringCritical
+        exp_alerts: []
+
+  # cert-manager는 조건마다 True·False·Unknown 세 시계열을 내고 해당하는 쪽이 1이다.
+  - name: CertificateNotReady는 Ready=True 시계열이 10분 넘게 0일 때만
+    interval: 1m
+    input_series:
+      - series: 'certmanager_certificate_ready_status{namespace="cnpg-system", name="barman-cloud-client", condition="True"}'
+        values: "1x15"
+      - series: 'certmanager_certificate_ready_status{namespace="cnpg-system", name="barman-cloud-client", condition="False"}'
+        values: "0x15"
+      - series: 'certmanager_certificate_ready_status{namespace="cnpg-system", name="barman-cloud-server", condition="True"}'
+        values: "0x15"
+      - series: 'certmanager_certificate_ready_status{namespace="cnpg-system", name="barman-cloud-server", condition="False"}'
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 9m
+        groupname: certificates
+        alertname: CertificateNotReady
+        exp_alerts: []
+      - eval_time: 11m
+        groupname: certificates
+        alertname: CertificateNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: cnpg-system
+              name: barman-cloud-server
+            exp_annotations:
+              summary: 인증서 cnpg-system/barman-cloud-server가 10분 넘게 Ready가 아니다
+              description: kubectl describe certificate로 조건 메시지를 보고, Issuer와 cert-manager 컨트롤러 로그를 본다.

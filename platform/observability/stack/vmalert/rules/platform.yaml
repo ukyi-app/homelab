@@ -70,3 +70,37 @@ groups:
           severity: warning
         annotations:
           summary: "Valkey 백업 {{ $labels.namespace }}/{{ $labels.cronjob }}의 마지막 성공이 26시간보다 오래됐다"
+
+  # cert-manager 인증서(T24, 수집 job cert-manager). 클러스터 안 인증서만 본다(공개 TLS는 Cloudflare, ts.net은 Tailscale).
+  # 인증서는 만료 15일 전에 갱신된다. 7일 남았으면 갱신이 8일 넘게 실패한 것이다.
+  # 발급 전(status.notAfter 없음) 인증서는 만료 시각이 0이라 > 0으로 뺀다. 그 경우는 CertificateNotReady가 본다([미검증] v1.21.2 값).
+  # 1일 미만이면 warning도 함께 울리지 않게 warning을 1일 이상으로 자른다.
+  - name: certificates
+    rules:
+      - alert: CertificateExpiringSoon
+        expr: |
+          (max by (namespace, name) (certmanager_certificate_expiration_timestamp_seconds) > 0) - time() < 7 * 86400
+          and (max by (namespace, name) (certmanager_certificate_expiration_timestamp_seconds) > 0) - time() >= 86400
+        labels:
+          severity: warning
+        annotations:
+          summary: "인증서 {{ $labels.namespace }}/{{ $labels.name }}가 7일 안에 만료된다"
+          description: "만료 15일 전 갱신이 8일 넘게 실패했다. kubectl describe certificate·certificaterequest와 cert-manager 컨트롤러 로그를 본다."
+
+      - alert: CertificateExpiringCritical
+        expr: (max by (namespace, name) (certmanager_certificate_expiration_timestamp_seconds) > 0) - time() < 86400
+        labels:
+          severity: critical
+        annotations:
+          summary: "인증서 {{ $labels.namespace }}/{{ $labels.name }}가 1일 안에 만료된다(이미 만료됐을 수도 있다)"
+          description: "갱신이 2주 가까이 실패했다. kubectl describe certificate·certificaterequest와 cert-manager 컨트롤러 로그를 본다."
+
+      # condition="True" 시계열이 0이면 False·Unknown 어느 쪽이든 Ready가 아니다. 발급·갱신 중 잠깐 False라 10분 기다린다.
+      - alert: CertificateNotReady
+        expr: max by (namespace, name) (certmanager_certificate_ready_status{condition="True"}) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "인증서 {{ $labels.namespace }}/{{ $labels.name }}가 10분 넘게 Ready가 아니다"
+          description: "kubectl describe certificate로 조건 메시지를 보고, Issuer와 cert-manager 컨트롤러 로그를 본다."

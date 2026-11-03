@@ -87,6 +87,22 @@ scrape_configs:
       - target_label: instance
         replacement: external-secrets
 
+  # certmanager_certificate_*(T24). 컨트롤러만 인증서 지표를 낸다. webhook·cainjector도 http-metrics 포트가 있어
+  # component 라벨로 거른다. cert-manager ns에는 NetworkPolicy가 없다.
+  # honor_labels: 지표의 namespace·name은 인증서의 것이다. 덮으면 cert-manager가 되고 진짜 값은 exported_*로 밀린다.
+  - job_name: cert-manager
+    honor_labels: true
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [cert-manager]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component, __meta_kubernetes_pod_container_port_name]
+        regex: controller;http-metrics
+        action: keep
+      - target_label: instance
+        replacement: cert-manager
+
   # AdGuard 질의 로그 리더(platform/adguard). 클라이언트 IP별 마지막 질의 시각만 낸다.
   - job_name: adguard-querylog
     kubernetes_sd_configs:

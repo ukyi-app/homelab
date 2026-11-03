@@ -1113,6 +1113,50 @@ sudo -v && host/verify.sh --cluster prod     # 삭제 원장 SSD 항목이 모�
 
 `disabled`가 나오면 봇 values에 `MEMORY_LEDGER_DIR`이 없는 것이다(원장·기억이 꺼져 있다). 재기동 직후 잠깐의 `failed`(옛 세션이 잠금을 쥔 `lock_held`)는 60초마다 다시 열어 풀린다. 이 확인이 통과하기 전에는 복원을 끝난 것으로 기록하지 않고, CLI `--finish`도 하지 않는다.
 
+### 2.2 복원 시험 `homelab db restore-check`와 결과 기록 (T24)
+
+분기 1회 사람이 돌린다(설계 C.3.8). 2단계와 같은 임시 Cluster를 지금 − 10분까지 R2에서 복구하고, `cluster: pg`인 Database CR마다 그 DB가 있는지 본 뒤 임시 객체를 지우고 0개를 확인한다. 앱에는 쓰지 않는다. 실행 기록은 `database` ns의 ConfigMap `restore-check`이고, 중간에 멈추면 같은 명령이 잇는다. 앞 시도의 임시 Cluster는 다시 쓰지 않는다. 버리려면 `homelab db restore-check --abort`.
+
+```bash
+homelab db restore-check            # 미리보기(쓰기 0건)
+homelab db restore-check --apply
+```
+
+**결과는 Cluster `database/pg`의 annotation 두 키에 남는다.** 봇 일일 브리핑이 이미 읽는 Cluster라 봇 권한은 그대로다. CLI는 이 두 키 말고는 `pg`에 아무것도 쓰지 않는다. Argo CD `cnpg-cluster`는 이 두 키만 비교·동기화에서 뺀다(`ignoreDifferences` + `RespectIgnoreDifferences=true`). Git에는 초기값이 없다.
+
+- `homelab.ukyi.app/restore-check-last`: 마지막으로 **끝난** 시도(통과·실패).
+- `homelab.ukyi.app/restore-check-pass`: 마지막 **통과**. 실패는 이 키를 건드리지 않는다.
+
+값은 공백 없는 한 줄 JSON이고 키 순서가 고정이다. 시각은 초 단위 UTC다.
+
+```json
+{"v":1,"run":"<실행 id>","result":"pass","at":"<끝난 시각>","target":"<복구 목표 시각>","server":"<serverName>","dbs":<확인한 DB 수>,"cluster":"<pg metadata.uid>"}
+```
+
+실패면 `"result":"fail"`이고 끝에 `"reason"`이 붙는다.
+
+| reason | 언제 | `dbs` |
+| --- | --- | --- |
+| `no_db` | 확인할 Database CR이 0개(시작 때면 임시 Cluster를 만들지 않는다) | 0 |
+| `missing_db` | 임시 Cluster에 없는 DB가 있다. 임시 Cluster·실행 기록은 원인을 보라고 남는다 | 확인한 Database CR 수 |
+| `aborted` | `--abort`가 임시 객체 0개를 확인했다. 같은 실행의 실패(`missing_db`·`no_db`)가 이미 `last`에 있으면 쓰지 않는다 | 확인을 끝낸 시험이면 그 수, 아니면 0 |
+
+**쓰는 시점.** 결과는 시험을 시작할 때의 `pg`(실행 기록 `pguid`)에만 남긴다. 그사이 `pg`가 다시 만들어졌으면 통과를 남기지 않고 멈추며, `--abort`는 기록 없이 정리만 한다. 통과는 임시 객체 0개를 확인한 뒤, 실행 기록을 지우기 전에 쓰고 되읽어 같은지(그리고 `pg` uid가 그대로인지) 본다. 그 기록이 실패하면 명령은 실패로 끝나고 실행 기록이 남는다. 같은 명령을 다시 치면 복구 없이 정리·기록부터 잇는다. `--abort`도 같은 자리에서 `aborted`를 쓰고(같은 실행의 실패 기록이 이미 있으면 그대로 둔다), 기록이 실패하면 실행 기록을 남겨 다시 `--abort`로 잇는다.
+
+**조회.**
+
+```bash
+kubectl -n database get cluster pg -o jsonpath='{.metadata.annotations.homelab\.ukyi\.app/restore-check-last}{"\n"}{.metadata.annotations.homelab\.ukyi\.app/restore-check-pass}{"\n"}'
+```
+
+**한계.**
+
+- 기록은 CLI가 쓴 것이다. `database` ns에 쓰기 권한이 있는 사람이 손으로 바꿀 수 있고, 봇은 모양·`cluster` uid·미래 시각만 거른다. 그래서 브리핑은 "CLI 기록 기준"이라고 적는다. 손으로 쓰지 않는다.
+- Ready 시간 초과처럼 중간에 멈춘 시도는 기록하지 않는다. 다음 `--abort`가 `aborted`로 남긴다. `missing_db`·`no_db`로 멈춘 시험은 `--abort`가 그 실패 기록을 덮지 않아 이유가 남는다. 다만 `at`은 실패한 시각이고 정리한 시각이 아니다. 원인은 `--abort` 전에 남은 임시 Cluster에서 본다.
+- 이 런북을 손으로 따라 한 복원 시험은 기록을 남기지 않는다.
+- `pg`를 새로 만들면(빈 NUC 복구, 3절) 두 키도 없어진다. 봇은 다음 통과 전까지 "기록 없음"으로 본다.
+- `at`은 CLI를 돌린 기기의 시계다.
+
 ## 2a. 악성 스키마 복원 시험 (로컬)
 
 4단계를 앱 역할로 하는 이유를 확인하는 시험이다. 이 기기 안의 버리는 PostgreSQL에서만 돌린다. 앱 역할이 자기 DB에 "CHECK 제약이 호출하는 함수가 자기 역할을 superuser로 올린다"는 객체를 심고, 그 덤프를 두 방식으로 복원해 역할의 `rolsuper`를 본다. 2026-10-23 결과(postgres 18): 슈퍼유저 복원은 `t`(승격됨), 앱 역할 `--no-owner --no-privileges` 복원은 `f`. 둘 다 행 2개가 돌아왔다. 복원 방식을 바꾸면 다시 돌린다.

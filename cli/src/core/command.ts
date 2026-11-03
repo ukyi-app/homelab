@@ -46,6 +46,12 @@ export type RestoreRecordName = "restore-pg" | "restore-vk" | "restore-check" | 
 // created: API 서버가 정한 metadata.creationTimestamp(클러스터 시계). 만들기 전 검사에서는 "".
 export type RestoreRecord = { run: string; data: Record<string, string>; resourceVersion: string; uid: string; created: string };
 
+// db restore-check 결과(T24 계약 2). 대상(database/pg)·annotation 키·값 모양·cluster uid는 core가 정한다.
+// pass면 restore-check-last·restore-check-pass 둘, fail이면 last만 쓴다(실패가 마지막 통과를 지우지 않게).
+// at·target은 초 단위 RFC3339 UTC(…Z). reason은 fail에만 둔다.
+// cluster: 시험을 시작할 때 읽은 Cluster pg의 uid(실행 기록 pguid). 결과는 그 Cluster에만 귀속한다(#1035 리뷰 P2).
+export type RestoreCheckMark = { run: string; result: "pass" | "fail"; at: string; target: string; server: string; dbs: number; cluster: string; reason?: "missing_db" | "no_db" | "aborted" };
+
 // 파드 템플릿이 참조하는 Secret들의 resourceVersion이 템플릿 주석과 같은지(값은 읽지 않는다).
 export type PodSecrets = { current: boolean; rolledOut: boolean; secrets: string[] };
 
@@ -92,6 +98,8 @@ export type KubeWrite = {
   // GitOps 밖 일회성 복원 객체(C.5.7). 라벨 homelab.ukyi.app/restore 필수, 어디에도 Secret이 있으면 거부.
   createRestoreObject(ns: string, manifest: Record<string, unknown>): void;
   deleteRestoreObjects(ns: string, runId: string): void;
+  // restore-check 결과를 Cluster database/pg의 전용 annotation 두 키에만 쓰고 되읽어 확인한다(범용 patch가 아니다).
+  restoreCheckMark(m: RestoreCheckMark): void;
 };
 
 export type InfisicalRead = {

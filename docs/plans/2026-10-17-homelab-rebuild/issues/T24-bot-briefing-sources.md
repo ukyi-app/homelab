@@ -1,10 +1,10 @@
 # T24 봇 브리핑 관측 원본(인증서·복원 검증)
 
 - 단계: P4 후속
-- 상태: 대기 (2026-11-03 T20에서 넘김)
+- 상태: 진행 중 (2026-11-03 착수. 할 일 1 결정 끝: 인증서는 cert-manager 지표 수집과 만료 경보, 복원 검증은 `database/pg` annotation. 할 일 2·3 구현 중)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T20
-- 선행 결정: 없음. 원본과 읽는 경로는 이 티켓에서 정한다(할 일 1, 사용자 결정)
+- 선행 결정: 할 일 1 (확정(사용자 2026-11-03): 인증서 칸은 cert-manager 지표를 VictoriaMetrics로 수집하고 봇은 Grafana로 읽음, 만료 경보 함께. 복원 검증 칸은 `restore-check`가 `database/pg` Cluster annotation에 결과를 남기고 봇은 이미 읽는 Cluster에서 읽음. 봇 읽기 권한은 그대로)
 - 연결 AC: AC-B7 (BRIEF-01 관측 칸)
 - 수행: 에이전트 + 사람
 
@@ -23,7 +23,8 @@ V1 판정(T21)은 막지 않는다. 미확인 표시가 V1 규칙이라서다.
 ## 할 일
 
 1. 두 칸의 원본과 읽는 경로를 정한다(사용자 결정). 후보마다 함정을 비교한다. 인증서는 cert-manager `Certificate` 상태 읽기 권한 추가와 관측 지표 조회를 비교한다. 복원 검증은 `restore-check`가 결과를 남길 자리와, 그 자리가 Argo CD 동기화와 부딪히지 않는지 본다.
-2. 플랫폼 변경(읽기 권한, CLI 결과 기록)을 PR로 한다.
+   - 결과(2026-11-03, 사용자 결정): 조사 두 갈래(읽기 전용 Codex 작업자)의 비교로 골랐다. 인증서: (a) cert-manager 지표 → VictoriaMetrics → 봇은 Grafana Viewer로 집계 질의, 같은 지표로 vmalert 만료 경보(7일 warning, 1일 critical, Ready 아님). (b) `Certificate` 직접 읽기(`homelab-readonly`에 권한 추가)는 경보가 없어 고르지 않았다. 대상은 `cnpg-system`의 Barman 인증서 2개(만료 2027-01-21, 갱신 01-06)다. 복원 검증: (a) `database/pg` annotation `homelab.ukyi.app/restore-check-last`·`-pass`(한 줄 JSON, 스키마 v1), Argo CD는 두 키만 비교·동기화에서 뺀다. (b) 결과 전용 ConfigMap은 봇에 권한을 더해야 하고 CI `readonly-rbac` 정책 예외가 필요해 고르지 않았다. 지표(보존 30일)·`Backup` 객체(14일)는 분기 주기보다 짧다. 함께 찾은 결함: `restore-check`가 Database CR 0개에도 통과하고 결과를 남기지 않는다. 할 일 2에서 고친다. 실제로 쓴 base backup ID 고정은 범위 밖이다(기록은 복구 목표 시각과 serverName).
+2. 플랫폼 변경(지표 수집·경보, CLI 결과 기록, Argo CD 비교 제외)을 PR로 한다.
 3. 봇 브리핑 관측 어댑터에 두 원본을 더한다(봇 저장소 PR). 읽기 실패와 오래된 값은 지금처럼 미확인과 마지막 정상 수집 시각으로 둔다.
 4. BRIEF-01의 두 칸을 실연동으로 확인하고 봇 `VERIFICATION.md`에 적는다.
 

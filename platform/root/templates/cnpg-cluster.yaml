@@ -35,10 +35,25 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: database
+  # homelab db restore-check가 Cluster pg에 결과를 남기는 annotation 두 키(T24 계약 2, cli core kubectl.ts). Git에는 초기값을
+  # 두지 않는다. 두 키만 jsonPointers로 빼서 selfHeal·sync가 지우지도, OutOfSync로 보지도 않게 한다(~1은 키 안의 /).
+  ignoreDifferences:
+    - group: postgresql.cnpg.io
+      kind: Cluster
+      name: pg
+      namespace: database
+      jsonPointers:
+        - /metadata/annotations/homelab.ukyi.app~1restore-check-last
+        - /metadata/annotations/homelab.ukyi.app~1restore-check-pass
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    # 함정: ignoreDifferences는 diff만 가린다. 이 옵션이 없으면 다른 이유의 sync가 Git 매니페스트대로 덮어쓸 수 있다.
+    # 이 Application에는 전에 syncOptions가 없었다. 이 옵션은 위 ignoreDifferences에 든 필드만 sync에서 빼므로
+    # 다른 리소스와 다른 필드의 sync 동작은 그대로다(Argo CD sync-options 문서). 처음 만드는 리소스에는 적용되지 않는다.
+    syncOptions:
+      - RespectIgnoreDifferences=true
     retry:
       {{- include "homelab.retry" . | nindent 6 }}
 {{- end }}

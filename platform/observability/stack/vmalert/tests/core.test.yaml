@@ -143,6 +143,8 @@ tests:
         values: "1x15"
       - series: 'up{job="argocd", instance="argocd-application-controller"}'
         values: "1x15"
+      - series: 'up{job="cert-manager", instance="cert-manager"}'
+        values: "1x15"
       - series: 'up{job="kubelet-cadvisor", instance="nuc"}'
         values: "1x15"
       - series: 'up{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
@@ -163,3 +165,59 @@ tests:
               summary: 수집 대상 external-secrets이 10분 넘게 발견되지 않는다
               description: 파드가 없거나 수집 설정의 라벨·포트 선택이 맞지 않는다(vmsingle/scrape.yaml).
 
+
+  - name: TargetMissing·TargetDown은 cert-manager job도 본다
+    interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics", instance="kube-state-metrics"}'
+        values: "1x15"
+      - series: 'up{job="node-exporter", instance="nuc"}'
+        values: "1x15"
+      - series: 'up{job="vector", instance="nuc"}'
+        values: "1x15"
+      - series: 'up{job="vmalert", instance="vmalert"}'
+        values: "1x15"
+      - series: 'up{job="alertmanager", instance="alertmanager"}'
+        values: "1x15"
+      - series: 'up{job="victorialogs", instance="victorialogs"}'
+        values: "1x15"
+      - series: 'up{job="grafana", instance="grafana"}'
+        values: "1x15"
+      - series: 'up{job="vmauth", instance="vmauth"}'
+        values: "1x15"
+      - series: 'up{job="argocd", instance="argocd-application-controller"}'
+        values: "1x15"
+      - series: 'up{job="external-secrets", instance="external-secrets"}'
+        values: "1x15"
+      - series: 'up{job="kubelet-cadvisor", instance="nuc"}'
+        values: "1x15"
+      - series: 'up{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 11m
+        groupname: core
+        alertname: TargetMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: cert-manager
+            exp_annotations:
+              summary: 수집 대상 cert-manager이 10분 넘게 발견되지 않는다
+              description: 파드가 없거나 수집 설정의 라벨·포트 선택이 맞지 않는다(vmsingle/scrape.yaml).
+
+  - name: TargetDown은 cert-manager 컨트롤러가 응답하지 않으면 발화한다
+    interval: 1m
+    input_series:
+      - series: 'up{job="cert-manager", instance="cert-manager"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 6m
+        groupname: core
+        alertname: TargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: cert-manager
+              instance: cert-manager
+            exp_annotations:
+              summary: 수집 대상 cert-manager/cert-manager가 5분 넘게 응답하지 않는다
