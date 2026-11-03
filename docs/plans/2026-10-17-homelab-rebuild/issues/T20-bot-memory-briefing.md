@@ -1,7 +1,7 @@
 # T20 봇 MEMORY_BRIEFING
 
 - 단계: P4 봇 V1
-- 상태: 진행 중 (로컬·mock 구현 병합 2026-10-29, 봇 저장소 PR #8 `82e2a45`, 시험 333. 완료는 T16b 뒤. 삭제 원장 위치는 NUC 두 번째 NVMe SSD로 확정(사용자 2026-11-02, spec D-12 "T20 후속"). 봇 저장소 `docs/ai-bot/DECISIONS.md` T20의 "결정 대기"는 봇 저장소 PR이 고친다)
+- 상태: 진행 중 (실연동 2026-11-02~03. 원장(NUC SSD 계약 v1)·기동 장벽·기억 명령·일일 브리핑 운영 적용. MEM-01·BRIEF-01·DATA-02 live pass(DATA-02는 `homelab db restore`로 삭제 전 시각 복원 뒤 원장 재적용, homelab #1026·#1027), AUTH-02는 허용 밖 채널 not_run(owner 뜻, 다른 채널에 시험 글 없음). 결과표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T20 실연동 결과". 남은 것: AUTH-02 허용 밖 채널, HANDOFF, 시범 승인 요청. 로컬·mock 구현은 2026-10-29 봇 PR #8 `82e2a45`)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T16a(착수), T16b(완료)
   - 착수: [T16a](T16a-bot-foundation-local.md) 뒤. 이 티켓을 실제로 막는 FOUNDATION의 예약 기능을 T16a가 로컬·mock으로 만든다(V1 범위 조정 안 3).
