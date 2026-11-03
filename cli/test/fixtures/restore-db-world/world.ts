@@ -225,7 +225,8 @@ export class World {
         w.write(`restoreCheckMark ${m.result}`);
         const pg = w.obj("cluster", "database", "pg");
         if (!pg) throw new Error("Cluster database/pg가 없다");
-        const value = restoreCheckValue(m, pg.metadata?.uid);
+        const value = restoreCheckValue(m);
+        if (pg.metadata?.uid !== m.cluster) throw new Error("Cluster pg가 시험 시작 때와 다른 객체다");
         pg.metadata.annotations = { ...(pg.metadata.annotations ?? {}), [RESTORE_CHECK_LAST]: value, ...(m.result === "pass" ? { [RESTORE_CHECK_PASS]: value } : {}) };
       },
       createRestoreObject(ns: string, m: Obj) {

@@ -33,10 +33,15 @@ function utc(t1: string | undefined): string {
 }
 const nowUtc = () => new Date().toISOString().replace(/\.[0-9]{3}Z$/, "Z");
 const dbCount = (r: RestoreRecord) => (r.data.dbs ?? "").split(",").filter((x) => x && x !== "-").length;
-type Attempt = { run: string; to: string | undefined; srv: string | undefined };
+// cluster: 시험을 시작할 때의 Cluster pg uid(실행 기록 pguid). 결과는 그 Cluster에만 귀속한다(#1035 리뷰 P2).
+type Attempt = { run: string; to: string | undefined; srv: string | undefined; cluster: string | undefined };
+const UID = /^[0-9a-f-]{8,64}$/;
+const attempt = (r: RestoreRecord): Attempt => ({ run: r.run, to: r.data.to, srv: r.data.srv, cluster: r.data.pguid });
+// 지금 Cluster pg가 시험을 시작한 그 객체인지. 다시 만들어졌으면 이 시험의 결과는 새 Cluster에 쓰지 않는다.
+const samePg = (ctx: ReadCtx | WriteCtx, a: Attempt) => a.cluster !== undefined && ctx.k8s.get("cluster", NS, "pg")?.metadata?.uid === a.cluster;
 
 function mark(w: WriteCtx, a: Attempt, result: "pass" | "fail", dbs: number, reason?: RestoreCheckMark["reason"]): void {
-  w.k8s.restoreCheckMark({ run: a.run, result, at: nowUtc(), target: utc(a.to), server: a.srv ?? "", dbs, ...(reason ? { reason } : {}) });
+  w.k8s.restoreCheckMark({ run: a.run, result, at: nowUtc(), target: utc(a.to), server: a.srv ?? "", dbs, cluster: a.cluster ?? "", ...(reason ? { reason } : {}) });
 }
 
 // DB 확인 실패: 실패를 기록하고 멈춘다. 기록마저 실패하면 두 원인을 함께 보인다(확인 실패를 가리지 않게).
@@ -120,11 +125,11 @@ function stepsFor(inv: { created: boolean }): Step[] {
       async apply(w) {
         const pg = w.k8s.get("cluster", NS, "pg");
         const t1 = new Date(Date.now() - LOOKBACK_MS).toISOString().replace("T", " ").replace(/\.[0-9]{3}Z$/, "+00");
-        const v = { to: t1, srv: srvOf(pg) ?? "", img: pg?.spec?.imageName ?? "", size: pg?.spec?.storage?.size ?? "" };
-        if (!T1.test(v.to) || !SRV.test(v.srv) || !IMG.test(v.img) || !SIZE.test(v.size)) throw new Error("Cluster pg에서 읽은 serverName·이미지·크기 형식이 아니다");
+        const v = { to: t1, srv: srvOf(pg) ?? "", img: pg?.spec?.imageName ?? "", size: pg?.spec?.storage?.size ?? "", pguid: pg?.metadata?.uid ?? "" };
+        if (!T1.test(v.to) || !SRV.test(v.srv) || !IMG.test(v.img) || !SIZE.test(v.size) || !UID.test(v.pguid)) throw new Error("Cluster pg에서 읽은 serverName·이미지·크기·uid 형식이 아니다");
         const run = newRunId();
         // 확인할 DB가 없으면 임시 Cluster를 만들기 전에 실패로 남기고 멈춘다(30분 복구를 헛돌지 않는다. 남는 객체·기록 없음).
-        if (!databases(w).length) failCheck(w, { run, to: v.to, srv: v.srv }, 0, "no_db", NO_DB);
+        if (!databases(w).length) failCheck(w, { run, to: v.to, srv: v.srv, cluster: v.pguid }, 0, "no_db", NO_DB);
         if (w.k8s.restoreRecordCreate(NS, RECORD, run, v) === "exists") throw new Error("그사이 다른 시험이 기록을 만들었다. 다시 실행해 상태를 읽는다");
         inv.created = true;
       },
@@ -165,9 +170,9 @@ function stepsFor(inv: { created: boolean }): Step[] {
         if (r.data["ok.tmp"] !== "1") throw new Error("멈춤: 임시 클러스터 확인이 끝나지 않았다");
         const dbs = databases(w);
         // lock 뒤 Database CR이 모두 지워졌어도 통과로 치지 않는다.
-        if (!dbs.length) failCheck(w, { run: r.run, to: r.data.to, srv: r.data.srv }, 0, "no_db", NO_DB);
+        if (!dbs.length) failCheck(w, attempt(r), 0, "no_db", NO_DB);
         const missing = dbs.filter((db) => w.pgRestore.tmpDbCount(r.run, db) !== 1);
-        if (missing.length) failCheck(w, { run: r.run, to: r.data.to, srv: r.data.srv }, dbs.length, "missing_db", `임시 클러스터에 없는 DB: ${missing.join(", ")}`);
+        if (missing.length) failCheck(w, attempt(r), dbs.length, "missing_db", `임시 클러스터에 없는 DB: ${missing.join(", ")}`);
         w.k8s.restoreRecordUpdate(NS, RECORD, r.run, { "ok.contents": "1", dbs: dbs.join(",") || "-" });
       },
     },
@@ -184,11 +189,13 @@ function stepsFor(inv: { created: boolean }): Step[] {
         // 옛 CLI가 DB 0개로 확인을 끝낸 기록(dbs "-")은 통과로 남기지 않는다.
         const n = dbCount(r);
         if (!n) throw new Error("멈춤: 확인한 DB가 0개인 시험은 통과로 기록하지 않는다. 버리려면 --abort");
+        // 정리 전에 본다: 시험 시작 Cluster가 아니면(다시 만들어짐, 또는 uid를 남기지 않은 옛 실행 기록) 통과로 남길 곳이 없다.
+        if (!samePg(w, attempt(r))) throw new Error("멈춤: Cluster pg가 시험을 시작한 그 객체가 아니다(다시 만들어졌거나 옛 실행 기록). 이 시험은 통과로 남기지 않는다. 버리려면 --abort");
         w.k8s.deleteRestoreObjects(NS, r.run);
         const left = runObjects(w, r.run);
         if (left.length) throw new Error(`이 시험의 객체가 남았다(${left.join(", ")}). 기록은 그대로다`);
         // 통과 기록은 정리 0개를 본 뒤, 실행 기록을 지우기 전이다. 기록이 실패하면 여기서 멈춰 실행 기록이 남고 재실행이 이어 쓴다.
-        mark(w, { run: r.run, to: r.data.to, srv: r.data.srv }, "pass", n);
+        mark(w, attempt(r), "pass", n);
         w.k8s.restoreRecordDelete(NS, RECORD, r.run);
       },
     },
@@ -217,7 +224,8 @@ const abortSteps: Step[] = [
     async read(ctx) {
       const r = record(ctx);
       if (!r) return same("기록 없음");
-      const rec = failedAlready(ctx, r.run) ? "이 실행의 실패 기록은 그대로 둠" : "Cluster pg에 실패(aborted) 기록";
+      const rec = !samePg(ctx, attempt(r)) ? "Cluster pg가 시험 시작 때와 달라 결과 기록 없음"
+        : failedAlready(ctx, r.run) ? "이 실행의 실패 기록은 그대로 둠" : "Cluster pg에 실패(aborted) 기록";
       return { state: "differs", action: "delete", detail: `실행 ${r.run}: 임시 Cluster·PVC 지우고 0개 확인 → ${rec} → 실행 기록 지움` };
     },
     async apply(w) {
@@ -226,7 +234,8 @@ const abortSteps: Step[] = [
       const left = runObjects(w, r.run);
       if (left.length) throw new Error(`이 시험의 객체가 남았다(${left.join(", ")}). 기록은 그대로다`);
       // 확인까지 끝난 시험이면 그 DB 수, 아니면 0(확인한 것이 없다).
-      if (!failedAlready(w, r.run)) mark(w, { run: r.run, to: r.data.to, srv: r.data.srv }, "fail", r.data["ok.contents"] === "1" ? dbCount(r) : 0, "aborted");
+      // 시험 시작 Cluster가 아니면 쓰지 않는다(새 Cluster는 이 시험과 무관하다). 정리는 그대로 끝낸다.
+      if (samePg(w, attempt(r)) && !failedAlready(w, r.run)) mark(w, attempt(r), "fail", r.data["ok.contents"] === "1" ? dbCount(r) : 0, "aborted");
       w.k8s.restoreRecordDelete(NS, RECORD, r.run);
     },
   },

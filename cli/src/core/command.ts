@@ -49,7 +49,8 @@ export type RestoreRecord = { run: string; data: Record<string, string>; resourc
 // db restore-check 결과(T24 계약 2). 대상(database/pg)·annotation 키·값 모양·cluster uid는 core가 정한다.
 // pass면 restore-check-last·restore-check-pass 둘, fail이면 last만 쓴다(실패가 마지막 통과를 지우지 않게).
 // at·target은 초 단위 RFC3339 UTC(…Z). reason은 fail에만 둔다.
-export type RestoreCheckMark = { run: string; result: "pass" | "fail"; at: string; target: string; server: string; dbs: number; reason?: "missing_db" | "no_db" | "aborted" };
+// cluster: 시험을 시작할 때 읽은 Cluster pg의 uid(실행 기록 pguid). 결과는 그 Cluster에만 귀속한다(#1035 리뷰 P2).
+export type RestoreCheckMark = { run: string; result: "pass" | "fail"; at: string; target: string; server: string; dbs: number; cluster: string; reason?: "missing_db" | "no_db" | "aborted" };
 
 // 파드 템플릿이 참조하는 Secret들의 resourceVersion이 템플릿 주석과 같은지(값은 읽지 않는다).
 export type PodSecrets = { current: boolean; rolledOut: boolean; secrets: string[] };

@@ -382,11 +382,11 @@ export function updateRecord(exec: Exec, r: KubeRead, ns: string, name: RestoreR
 export const RESTORE_CHECK_LAST = "homelab.ukyi.app/restore-check-last";
 export const RESTORE_CHECK_PASS = "homelab.ukyi.app/restore-check-pass";
 const UTC_SEC = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
-const MARK_FIELDS = new Set(["run", "result", "at", "target", "server", "dbs", "reason"]);
+const MARK_FIELDS = new Set(["run", "result", "at", "target", "server", "dbs", "cluster", "reason"]);
 const UID = /^[0-9a-f-]{8,64}$/;
 
 // 값 스키마 v1을 검사하고 한 줄 JSON으로 만든다. 키 순서는 고정(봇·사람이 문자열로 비교해도 같게), reason은 fail에만 끝에.
-export function restoreCheckValue(m: RestoreCheckMark, clusterUid: string): string {
+export function restoreCheckValue(m: RestoreCheckMark): string {
   for (const k of Object.keys(m)) if (!MARK_FIELDS.has(k)) throw new Error(`restore-check 기록에 없는 필드다: ${k}`);
   checkRun(m.run);
   if (m.result !== "pass" && m.result !== "fail") throw new Error("restore-check 기록 result는 pass·fail만");
@@ -395,8 +395,8 @@ export function restoreCheckValue(m: RestoreCheckMark, clusterUid: string): stri
   if (!Number.isInteger(m.dbs) || m.dbs < 0 || m.dbs > 10_000) throw new Error("restore-check 기록 dbs는 0 이상 정수다");
   if (m.result === "pass" && m.reason !== undefined) throw new Error("restore-check 통과 기록에는 reason을 두지 않는다");
   if (m.result === "fail" && (typeof m.reason !== "string" || !/^[a-z][a-z_]{0,31}$/.test(m.reason))) throw new Error("restore-check 실패 기록에는 짧은 reason 코드가 있어야 한다");
-  if (typeof clusterUid !== "string" || !UID.test(clusterUid)) throw new Error("Cluster pg의 uid 형식이 아니다");
-  const v = { v: 1, run: m.run, result: m.result, at: m.at, target: m.target, server: m.server, dbs: m.dbs, cluster: clusterUid, ...(m.result === "fail" ? { reason: m.reason } : {}) };
+  if (typeof m.cluster !== "string" || !UID.test(m.cluster)) throw new Error("Cluster pg의 uid 형식이 아니다");
+  const v = { v: 1, run: m.run, result: m.result, at: m.at, target: m.target, server: m.server, dbs: m.dbs, cluster: m.cluster, ...(m.result === "fail" ? { reason: m.reason } : {}) };
   return jsonStringify(v);
 }
 
@@ -568,11 +568,13 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
     restoreCheckMark(m) {
       const pg = r.get("cluster", "database", "pg");
       if (!pg) throw new Error("Cluster database/pg가 없다. restore-check 결과를 남기지 못했다");
+      const value = restoreCheckValue(m);
+      // 시험을 시작한 Cluster에만 귀속한다. 그사이 pg가 다시 만들어졌으면 새 Cluster는 시험한 적이 없으니 쓰지 않는다(#1035 리뷰 P2).
       const uid = pg.metadata?.uid;
-      const value = restoreCheckValue(m, uid);
+      if (uid !== m.cluster) throw new Error(`Cluster pg가 시험 시작 때(uid ${m.cluster})와 다른 객체다(uid ${uid}). 이 시험의 결과를 남기지 않는다`);
       const keys = m.result === "pass" ? [RESTORE_CHECK_LAST, RESTORE_CHECK_PASS] : [RESTORE_CHECK_LAST];
       // annotate는 metadata.annotations의 그 키만 merge patch한다. spec·다른 annotation은 건드리지 않는다.
-      // 이름으로 쓰므로 그사이 pg가 다시 만들어졌으면 새 객체에 쓴다. 아래 되읽기의 uid 비교가 그것을 실패로 잡는다.
+      // 이름으로 쓰므로 위 확인과 annotate 사이에 pg가 다시 만들어지면 새 객체에 쓴다. 아래 되읽기의 uid 비교가 그것을 실패로 잡는다.
       const x = run(exec, ["-n", "database", "annotate", KINDS.cluster, "pg", ...keys.map((k) => `${k}=${value}`), "--overwrite"]);
       if (x.errKind === "timeout") throw new ExecTimeout("restore-check 결과 기록: 시간 초과(결과 미상)");
       must(x, "restore-check 결과 기록");

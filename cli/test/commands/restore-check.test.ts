@@ -257,6 +257,32 @@ describe("db restore-check: 흐름(가짜 세계)", () => {
     expect(w.writes).toContain("pg createTmpCluster");
   });
 
+  test("#1035 리뷰 P2: 기록 실패 뒤 pg가 다시 만들어지면 재실행은 새 Cluster에 통과를 남기지 않는다. --abort는 기록 없이 정리만", async () => {
+    const w = checkWorld();
+    w.fail.set("restoreCheckMark pass", new Error("annotate 실패(주입)"));
+    expect((await runIn(w, cmd, "apply", {})).status).toBe("failed");
+    const rec = w.records.get("database/restore-check")!;
+    expect(rec.data.pguid).toBe(w.obj("cluster", "database", "pg")!.metadata.uid);
+    w.fail.delete("restoreCheckMark pass");
+    // 시험 시작 뒤 pg를 지우고 다시 만든 상황: 이름은 같고 uid만 새것.
+    w.obj("cluster", "database", "pg")!.metadata.uid = "99999999-8888-7777-6666-555555555555";
+    w.writes = [];
+    const again = await runIn(w, cmd, "apply", {});
+    expect(again.status).toBe("failed");
+    expect(again.error!.message).toContain("시험을 시작한 그 객체가 아니다");
+    expect(w.writes.some((x) => /restoreCheckMark|deleteRestoreObjects/.test(x))).toBe(false);
+    expect(ann(w, RESTORE_CHECK_PASS)).toBeUndefined();
+    expect(ann(w, RESTORE_CHECK_LAST)).toBeUndefined();
+    const plan = await runIn(w, cmd, "plan", {}, { abort: true });
+    expect(plan.steps[0].detail).toContain("결과 기록 없음");
+    w.writes = [];
+    const a = await runIn(w, cmd, "apply", {}, { abort: true });
+    expect(a.status).toBe("done");
+    expect(w.writes).toEqual(["deleteRestoreObjects database", "recordDelete database/restore-check"]);
+    expect(ann(w, RESTORE_CHECK_LAST)).toBeUndefined();
+    expect(w.records.size).toBe(0);
+  });
+
   test("확인까지 끝나고 정리만 실패한 시험은 다음 호출이 정리를 잇는다", async () => {
     const w = checkWorld();
     w.fail.set("deleteRestoreObjects database", new Error("delete 실패(주입)"));

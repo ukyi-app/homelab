@@ -6,7 +6,7 @@ import { RESTORE_CHECK_LAST, RESTORE_CHECK_PASS, restoreCheckValue } from "../..
 import { applyWith, kubectlRule, testCtx } from "../harness";
 
 const UID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
-const pass: RestoreCheckMark = { run: "run1", result: "pass", at: "2026-11-03T06:00:00Z", target: "2026-11-03T05:10:00Z", server: "pg-20261023", dbs: 2 };
+const pass: RestoreCheckMark = { run: "run1", result: "pass", at: "2026-11-03T06:00:00Z", target: "2026-11-03T05:10:00Z", server: "pg-20261023", dbs: 2, cluster: UID };
 const fail: RestoreCheckMark = { ...pass, result: "fail", dbs: 0, reason: "aborted" };
 const getPg = ["-n", "database", "get", "clusters.postgresql.cnpg.io", "pg", "-o", "json"];
 const pgDoc = (annotations: Record<string, string> = {}, uid = UID) => ({ stdout: JSON.stringify({ metadata: { name: "pg", uid, annotations: { "argocd.argoproj.io/sync-options": "Prune=false,Delete=false", ...annotations } } }) });
@@ -14,8 +14,8 @@ const annotate = (pairs: string[]) => kubectlRule(["-n", "database", "annotate",
 
 describe("restoreCheckValue", () => {
   test("키 순서 고정·공백 없는 한 줄 JSON, reason은 fail에만 끝에", () => {
-    expect(restoreCheckValue(pass, UID)).toBe(`{"v":1,"run":"run1","result":"pass","at":"2026-11-03T06:00:00Z","target":"2026-11-03T05:10:00Z","server":"pg-20261023","dbs":2,"cluster":"${UID}"}`);
-    expect(restoreCheckValue(fail, UID)).toBe(`{"v":1,"run":"run1","result":"fail","at":"2026-11-03T06:00:00Z","target":"2026-11-03T05:10:00Z","server":"pg-20261023","dbs":0,"cluster":"${UID}","reason":"aborted"}`);
+    expect(restoreCheckValue(pass)).toBe(`{"v":1,"run":"run1","result":"pass","at":"2026-11-03T06:00:00Z","target":"2026-11-03T05:10:00Z","server":"pg-20261023","dbs":2,"cluster":"${UID}"}`);
+    expect(restoreCheckValue(fail)).toBe(`{"v":1,"run":"run1","result":"fail","at":"2026-11-03T06:00:00Z","target":"2026-11-03T05:10:00Z","server":"pg-20261023","dbs":0,"cluster":"${UID}","reason":"aborted"}`);
   });
 
   test("스키마 밖 값은 던진다", () => {
@@ -30,16 +30,16 @@ describe("restoreCheckValue", () => {
       [{ dbs: 1.5 }, "dbs"],
       [{ reason: "aborted" }, "reason을 두지 않는다"],
     ];
-    for (const [patch, msg] of bad) expect(() => restoreCheckValue({ ...pass, ...patch } as RestoreCheckMark, UID)).toThrow(msg);
-    expect(() => restoreCheckValue({ ...fail, reason: undefined }, UID)).toThrow("reason");
-    expect(() => restoreCheckValue({ ...fail, reason: "Bad Reason" as never }, UID)).toThrow("reason");
-    expect(() => restoreCheckValue(pass, "")).toThrow("uid");
+    for (const [patch, msg] of bad) expect(() => restoreCheckValue({ ...pass, ...patch } as RestoreCheckMark)).toThrow(msg);
+    expect(() => restoreCheckValue({ ...fail, reason: undefined })).toThrow("reason");
+    expect(() => restoreCheckValue({ ...fail, reason: "Bad Reason" as never })).toThrow("reason");
+    expect(() => restoreCheckValue({ ...pass, cluster: "" })).toThrow("uid");
   });
 });
 
 describe("kubeWrite.restoreCheckMark", () => {
   test("pass: pg에 annotate 하나로 두 키만 쓰고 되읽어 확인한다. 그 밖의 쓰기 0건", async () => {
-    const v = restoreCheckValue(pass, UID);
+    const v = restoreCheckValue(pass);
     const { ctx, calls } = testCtx("apply", [kubectlRule(getPg, [pgDoc(), pgDoc({ [RESTORE_CHECK_LAST]: v, [RESTORE_CHECK_PASS]: v })]), annotate([`${RESTORE_CHECK_LAST}=${v}`, `${RESTORE_CHECK_PASS}=${v}`])]);
     await applyWith(ctx, (w) => w.k8s.restoreCheckMark(pass));
     const c = calls();
@@ -48,8 +48,8 @@ describe("kubeWrite.restoreCheckMark", () => {
   });
 
   test("fail: last 키만 쓴다(pass 키는 argv에 없다)", async () => {
-    const v = restoreCheckValue(fail, UID);
-    const old = restoreCheckValue(pass, UID);
+    const v = restoreCheckValue(fail);
+    const old = restoreCheckValue(pass);
     const { ctx, calls } = testCtx("apply", [kubectlRule(getPg, [pgDoc({ [RESTORE_CHECK_PASS]: old }), pgDoc({ [RESTORE_CHECK_PASS]: old, [RESTORE_CHECK_LAST]: v })]), annotate([`${RESTORE_CHECK_LAST}=${v}`])]);
     await applyWith(ctx, (w) => w.k8s.restoreCheckMark(fail));
     const writes = calls().writes.map((x) => x.argv);
@@ -65,12 +65,18 @@ describe("kubeWrite.restoreCheckMark", () => {
   });
 
   test("되읽은 값이 다르거나 pg uid가 바뀌었으면 실패", async () => {
-    const v = restoreCheckValue(pass, UID);
+    const v = restoreCheckValue(pass);
     const pairs = [`${RESTORE_CHECK_LAST}=${v}`, `${RESTORE_CHECK_PASS}=${v}`];
     const lost = testCtx("apply", [kubectlRule(getPg, [pgDoc(), pgDoc({ [RESTORE_CHECK_LAST]: v })]), annotate(pairs)]);
     await expect(applyWith(lost.ctx, (w) => w.k8s.restoreCheckMark(pass))).rejects.toThrow(RESTORE_CHECK_PASS);
     const moved = testCtx("apply", [kubectlRule(getPg, [pgDoc(), pgDoc({ [RESTORE_CHECK_LAST]: v, [RESTORE_CHECK_PASS]: v }, "11111111-2222-3333-4444-555555555555")]), annotate(pairs)]);
     await expect(applyWith(moved.ctx, (w) => w.k8s.restoreCheckMark(pass))).rejects.toThrow("다른 객체");
+  });
+
+  test("pg가 시험 시작 때와 다른 객체면(다시 만들어짐) 쓰기 0건", async () => {
+    const { ctx, calls } = testCtx("apply", [kubectlRule(getPg, pgDoc({}, "11111111-2222-3333-4444-555555555555"))]);
+    await expect(applyWith(ctx, (w) => w.k8s.restoreCheckMark(pass))).rejects.toThrow("시험 시작 때");
+    expect(calls().writes).toEqual([]);
   });
 
   test("pg가 없으면 쓰지 않고 실패", async () => {
