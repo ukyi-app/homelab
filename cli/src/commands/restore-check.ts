@@ -4,7 +4,9 @@
 // 지금 − 10분: archive_timeout(5분)보다 넉넉히 앞이라 WAL까지 시험한다. 아카이브가 밀렸으면 Ready가 되지 않아 실패로 드러난다.
 // 실행 기록은 database ns의 ConfigMap restore-check. 중간에 멈추면 같은 명령이 그 실행을 잇고, 끝나면 기록까지 지운다
 // (시험이라 다시 치면 새 시험이다).
-import { defineCommand, type Observation, type ReadCtx, type RestoreRecord, type Step, type WriteCtx } from "../core/command";
+// 결과는 Cluster pg의 annotation 두 키에 남긴다(T24 계약 2, 봇 브리핑이 읽는다). 통과는 정리 0개 확인 뒤·실행 기록 삭제 전에
+// 쓰고, 그 기록이 실패하면 완료가 아니다(실행 기록이 남아 다시 치면 정리부터 잇는다). 실패는 DB 확인 실패와 --abort만 남긴다.
+import { defineCommand, type Observation, type ReadCtx, type RestoreCheckMark, type RestoreRecord, type Step, type WriteCtx } from "../core/command";
 import { newRunId } from "../core/names";
 
 const NS = "database";
@@ -23,6 +25,32 @@ const same = (detail: string, extra: Partial<Observation> = {}): Observation => 
 const hasTrue = (o: any, type: string) => (o?.status?.conditions ?? []).some((c: any) => c?.type === type && c?.status === "True");
 const record = (ctx: ReadCtx | WriteCtx): RestoreRecord | null => ctx.k8s.restoreRecord(NS, RECORD);
 const tmpName = (run: string) => `pg-restore-${run}`;
+// 실행 기록의 시각(T1 꼴, lock이 늘 +00으로 만든다) → 결과 기록의 RFC3339 UTC.
+function utc(t1: string | undefined): string {
+  const m = /^([0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2})\+00$/.exec(t1 ?? "");
+  if (!m) throw new Error("실행 기록의 복구 시각이 UTC(+00) 꼴이 아니다");
+  return `${m[1]}T${m[2]}Z`;
+}
+const nowUtc = () => new Date().toISOString().replace(/\.[0-9]{3}Z$/, "Z");
+const dbCount = (r: RestoreRecord) => (r.data.dbs ?? "").split(",").filter((x) => x && x !== "-").length;
+type Attempt = { run: string; to: string | undefined; srv: string | undefined };
+
+function mark(w: WriteCtx, a: Attempt, result: "pass" | "fail", dbs: number, reason?: RestoreCheckMark["reason"]): void {
+  w.k8s.restoreCheckMark({ run: a.run, result, at: nowUtc(), target: utc(a.to), server: a.srv ?? "", dbs, ...(reason ? { reason } : {}) });
+}
+
+// DB 확인 실패: 실패를 기록하고 멈춘다. 기록마저 실패하면 두 원인을 함께 보인다(확인 실패를 가리지 않게).
+function failCheck(w: WriteCtx, a: Attempt, dbs: number, reason: "missing_db" | "no_db", message: string): never {
+  try {
+    mark(w, a, "fail", dbs, reason);
+  } catch (e) {
+    throw new Error(`${message} (실패 결과 기록도 못 남겼다: ${(e as Error).message})`);
+  }
+  throw new Error(message);
+}
+// 키 이름은 core(kubectl.ts RESTORE_CHECK_LAST)와 같다. 명령은 core 내부를 import하지 못해 여기 다시 둔다(읽기만 한다).
+const LAST_KEY = "homelab.ukyi.app/restore-check-last";
+const NO_DB = "확인할 Database CR(cluster pg)이 0개다. 복원을 확인할 DB가 없어 통과로 치지 않는다";
 
 function mine(w: WriteCtx): RestoreRecord {
   const r = record(w);
@@ -94,7 +122,10 @@ function stepsFor(inv: { created: boolean }): Step[] {
         const t1 = new Date(Date.now() - LOOKBACK_MS).toISOString().replace("T", " ").replace(/\.[0-9]{3}Z$/, "+00");
         const v = { to: t1, srv: srvOf(pg) ?? "", img: pg?.spec?.imageName ?? "", size: pg?.spec?.storage?.size ?? "" };
         if (!T1.test(v.to) || !SRV.test(v.srv) || !IMG.test(v.img) || !SIZE.test(v.size)) throw new Error("Cluster pg에서 읽은 serverName·이미지·크기 형식이 아니다");
-        if (w.k8s.restoreRecordCreate(NS, RECORD, newRunId(), v) === "exists") throw new Error("그사이 다른 시험이 기록을 만들었다. 다시 실행해 상태를 읽는다");
+        const run = newRunId();
+        // 확인할 DB가 없으면 임시 Cluster를 만들기 전에 실패로 남기고 멈춘다(30분 복구를 헛돌지 않는다. 남는 객체·기록 없음).
+        if (!databases(w).length) failCheck(w, { run, to: v.to, srv: v.srv }, 0, "no_db", NO_DB);
+        if (w.k8s.restoreRecordCreate(NS, RECORD, run, v) === "exists") throw new Error("그사이 다른 시험이 기록을 만들었다. 다시 실행해 상태를 읽는다");
         inv.created = true;
       },
     },
@@ -125,15 +156,18 @@ function stepsFor(inv: { created: boolean }): Step[] {
       async read(ctx) {
         const r = record(ctx);
         if (r?.data["ok.contents"] === "1") return same(`DB ${r.data.dbs ?? ""} 있음`);
-        return { state: "missing", action: "update", detail: `Database CR ${databases(ctx).length}개의 DB가 임시 클러스터에 있는지` };
+        const n = databases(ctx).length;
+        return { state: "missing", action: "update", detail: n ? `Database CR ${n}개의 DB가 임시 클러스터에 있는지(없으면 실패 기록)` : "Database CR 0개: 실패(no_db)로 기록하고 멈춘다" };
       },
       async apply(w) {
         fresh();
         const r = mine(w);
         if (r.data["ok.tmp"] !== "1") throw new Error("멈춤: 임시 클러스터 확인이 끝나지 않았다");
         const dbs = databases(w);
+        // lock 뒤 Database CR이 모두 지워졌어도 통과로 치지 않는다.
+        if (!dbs.length) failCheck(w, { run: r.run, to: r.data.to, srv: r.data.srv }, 0, "no_db", NO_DB);
         const missing = dbs.filter((db) => w.pgRestore.tmpDbCount(r.run, db) !== 1);
-        if (missing.length) throw new Error(`임시 클러스터에 없는 DB: ${missing.join(", ")}`);
+        if (missing.length) failCheck(w, { run: r.run, to: r.data.to, srv: r.data.srv }, dbs.length, "missing_db", `임시 클러스터에 없는 DB: ${missing.join(", ")}`);
         w.k8s.restoreRecordUpdate(NS, RECORD, r.run, { "ok.contents": "1", dbs: dbs.join(",") || "-" });
       },
     },
@@ -142,34 +176,57 @@ function stepsFor(inv: { created: boolean }): Step[] {
       target: "이 시험의 객체와 기록",
       async read(ctx) {
         const r = record(ctx);
-        return r ? { state: "missing", action: "delete", detail: "임시 Cluster·PVC 지우고 0개 확인 → 기록 지움" } : same("없음");
+        return r ? { state: "missing", action: "delete", detail: "임시 Cluster·PVC 지우고 0개 확인 → Cluster pg에 통과 기록 → 실행 기록 지움" } : same("없음");
       },
       async apply(w) {
         const r = mine(w);
         if (r.data["ok.contents"] !== "1") throw new Error("멈춤: 시험이 끝나지 않았다(임시 클러스터를 남겨 원인을 본다. 버리려면 --abort)");
+        // 옛 CLI가 DB 0개로 확인을 끝낸 기록(dbs "-")은 통과로 남기지 않는다.
+        const n = dbCount(r);
+        if (!n) throw new Error("멈춤: 확인한 DB가 0개인 시험은 통과로 기록하지 않는다. 버리려면 --abort");
         w.k8s.deleteRestoreObjects(NS, r.run);
         const left = runObjects(w, r.run);
         if (left.length) throw new Error(`이 시험의 객체가 남았다(${left.join(", ")}). 기록은 그대로다`);
+        // 통과 기록은 정리 0개를 본 뒤, 실행 기록을 지우기 전이다. 기록이 실패하면 여기서 멈춰 실행 기록이 남고 재실행이 이어 쓴다.
+        mark(w, { run: r.run, to: r.data.to, srv: r.data.srv }, "pass", n);
         w.k8s.restoreRecordDelete(NS, RECORD, r.run);
       },
     },
   ];
 }
 
-// 멈춘 시험을 버린다: 이 시험의 객체를 지우고 0개를 본 뒤 기록을 지운다(앱·pg에는 쓰지 않으니 언제든 된다).
+// 이 실행의 실패가 이미 last에 있는지(missing_db·no_db로 멈춘 시험). 읽지 못하거나 모양이 다르면 없는 것으로 본다(aborted를 쓴다).
+function failedAlready(ctx: ReadCtx | WriteCtx, run: string): boolean {
+  const raw = ctx.k8s.get("cluster", NS, "pg")?.metadata?.annotations?.[LAST_KEY];
+  if (typeof raw !== "string") return false;
+  try {
+    const v = JSON.parse(raw);
+    return v?.run === run && v?.result === "fail";
+  } catch {
+    return false;
+  }
+}
+
+// 멈춘 시험을 버린다: 이 시험의 객체를 지우고 0개를 본 뒤 실패(aborted)를 기록하고 실행 기록을 지운다
+// (앱에는 쓰지 않고 pg에는 결과 annotation만 쓰니 언제든 된다). 결과 기록이 실패하면 실행 기록을 남겨 다시 --abort로 잇는다.
+// 같은 실행의 실패가 이미 last에 있으면 덮지 않는다(missing_db·no_db 이유를 aborted로 지우지 않게, lead 결정 T24-W2 후속).
 const abortSteps: Step[] = [
   {
     id: "abort",
     target: "이 시험의 객체와 기록",
     async read(ctx) {
       const r = record(ctx);
-      return r ? { state: "differs", action: "delete", detail: `실행 ${r.run}: 임시 Cluster·PVC 지우고 0개 확인 → 기록 지움` } : same("기록 없음");
+      if (!r) return same("기록 없음");
+      const rec = failedAlready(ctx, r.run) ? "이 실행의 실패 기록은 그대로 둠" : "Cluster pg에 실패(aborted) 기록";
+      return { state: "differs", action: "delete", detail: `실행 ${r.run}: 임시 Cluster·PVC 지우고 0개 확인 → ${rec} → 실행 기록 지움` };
     },
     async apply(w) {
       const r = mine(w);
       w.k8s.deleteRestoreObjects(NS, r.run);
       const left = runObjects(w, r.run);
       if (left.length) throw new Error(`이 시험의 객체가 남았다(${left.join(", ")}). 기록은 그대로다`);
+      // 확인까지 끝난 시험이면 그 DB 수, 아니면 0(확인한 것이 없다).
+      if (!failedAlready(w, r.run)) mark(w, { run: r.run, to: r.data.to, srv: r.data.srv }, "fail", r.data["ok.contents"] === "1" ? dbCount(r) : 0, "aborted");
       w.k8s.restoreRecordDelete(NS, RECORD, r.run);
     },
   },
@@ -186,7 +243,7 @@ export default defineCommand({
     return ctx.engine({
       command: "db restore-check",
       steps: stepsFor({ created: false }),
-      notes: ["앱과 공유 Cluster pg에는 쓰지 않는다. 임시 Cluster(R2 읽기)와 그 PVC만 만들고 지운다."],
+      notes: ["앱에는 쓰지 않는다. 임시 Cluster(R2 읽기)와 그 PVC만 만들고 지운다. 공유 Cluster pg에는 결과 annotation 두 키(restore-check-last·restore-check-pass)만 쓴다."],
       // 끝나면 기록까지 지우므로 다시 치면 새 시험이다(재실행이 same이 아닌 명령).
       next: (status) => (status === "done" ? null : (undefined as unknown as string | null)),
     });

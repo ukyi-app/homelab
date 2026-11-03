@@ -2,11 +2,12 @@
 // 실제 엔진(runEngine)과 실제 PR 작성기(prStep)로 명령을 돌린다.
 // 가짜 pgRestore는 core의 파괴 단계 재확인을 흉내 내지 않는다. 그래서 "확인 실패면 DROP 0건" 시험은 명령의 확인만 본다
 // (core의 재확인은 core 시험 cli/test/core가 본다). argv 모양과 plan 부수효과 0은 명령 시험의 runCli(스텁) 쪽이 본다.
-import type { CommandSpec, Plan, ReadCtx, WriteCtx } from "../../../src/core/command";
+import type { CommandSpec, Plan, ReadCtx, RestoreCheckMark, WriteCtx } from "../../../src/core/command";
 import type { Input } from "../../../src/core/args";
 import type { Exec } from "../../../src/core/exec";
 import { ExecTimeout } from "../../../src/core/exec";
 import { runEngine } from "../../../src/core/engine";
+import { RESTORE_CHECK_LAST, RESTORE_CHECK_PASS, restoreCheckValue } from "../../../src/core/kubectl";
 import { registerWriteExec } from "../../../src/core/runtime-internal";
 import type { Result } from "../../../src/core/result";
 
@@ -218,6 +219,14 @@ export class World {
       },
       rolloutRestart(ns: string, d: string) {
         w.write(`rolloutRestart ${ns}/${d}`);
+      },
+      // 값 검사·직렬화는 실제 core 함수다. 쓰기 실패 주입은 fail.set("restoreCheckMark <result>"). 쓰는 것은 그 annotation 키뿐이다.
+      restoreCheckMark(m: RestoreCheckMark) {
+        w.write(`restoreCheckMark ${m.result}`);
+        const pg = w.obj("cluster", "database", "pg");
+        if (!pg) throw new Error("Cluster database/pg가 없다");
+        const value = restoreCheckValue(m, pg.metadata?.uid);
+        pg.metadata.annotations = { ...(pg.metadata.annotations ?? {}), [RESTORE_CHECK_LAST]: value, ...(m.result === "pass" ? { [RESTORE_CHECK_PASS]: value } : {}) };
       },
       createRestoreObject(ns: string, m: Obj) {
         w.write(`create ${m.kind} ${ns}/${m.metadata.name}`);

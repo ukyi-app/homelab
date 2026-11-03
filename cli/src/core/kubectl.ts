@@ -2,7 +2,7 @@
 // argv는 여기서만 만든다. 리소스는 KINDS 표의 이름뿐이라 범용 조회로 Secret을 읽을 수 없고(#873 2라운드 P1),
 // --raw·config view 같은 원문 출력 옵션은 쓰지 않는다. 모든 호출에 --request-timeout(서버가 멈추면 기본으로 오래 기다린다).
 import { entries, isArray, jsonParse, jsonStringify, strIncludes } from "./intrinsics";
-import type { KubeKind, KubeRead, KubeWrite, LogTarget, RestoreRecord, RestoreRecordName } from "./command";
+import type { KubeKind, KubeRead, KubeWrite, LogTarget, RestoreCheckMark, RestoreRecord, RestoreRecordName } from "./command";
 import { ExecTimeout, must, why, type Exec, type ExecOpts } from "./exec";
 import { findSecretPath } from "./guard";
 import { APP_NAME, fullMatch, hasControl } from "./names";
@@ -377,6 +377,29 @@ export function updateRecord(exec: Exec, r: KubeRead, ns: string, name: RestoreR
   must(x, `복원 기록 ${name} 고치기`);
 }
 
+// restore-check 결과 기록(T24 계약 2). 봇이 Cluster pg GET 응답에서 읽는다(봇 권한은 그대로). 대상과 키는 여기 고정이고
+// 명령은 값만 넘긴다. Argo CD는 이 두 키를 ignoreDifferences로 뺐다(platform/root/templates/cnpg-cluster.yaml).
+export const RESTORE_CHECK_LAST = "homelab.ukyi.app/restore-check-last";
+export const RESTORE_CHECK_PASS = "homelab.ukyi.app/restore-check-pass";
+const UTC_SEC = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
+const MARK_FIELDS = new Set(["run", "result", "at", "target", "server", "dbs", "reason"]);
+const UID = /^[0-9a-f-]{8,64}$/;
+
+// 값 스키마 v1을 검사하고 한 줄 JSON으로 만든다. 키 순서는 고정(봇·사람이 문자열로 비교해도 같게), reason은 fail에만 끝에.
+export function restoreCheckValue(m: RestoreCheckMark, clusterUid: string): string {
+  for (const k of Object.keys(m)) if (!MARK_FIELDS.has(k)) throw new Error(`restore-check 기록에 없는 필드다: ${k}`);
+  checkRun(m.run);
+  if (m.result !== "pass" && m.result !== "fail") throw new Error("restore-check 기록 result는 pass·fail만");
+  for (const [k, v] of [["at", m.at], ["target", m.target]] as const) if (typeof v !== "string" || !UTC_SEC.test(v) || !Number.isFinite(Date.parse(v))) throw new Error(`restore-check 기록 ${k}는 초 단위 RFC3339 UTC다`);
+  if (typeof m.server !== "string" || !/^[a-z0-9-]{1,63}$/.test(m.server)) throw new Error("restore-check 기록 server 형식이 아니다");
+  if (!Number.isInteger(m.dbs) || m.dbs < 0 || m.dbs > 10_000) throw new Error("restore-check 기록 dbs는 0 이상 정수다");
+  if (m.result === "pass" && m.reason !== undefined) throw new Error("restore-check 통과 기록에는 reason을 두지 않는다");
+  if (m.result === "fail" && (typeof m.reason !== "string" || !/^[a-z][a-z_]{0,31}$/.test(m.reason))) throw new Error("restore-check 실패 기록에는 짧은 reason 코드가 있어야 한다");
+  if (typeof clusterUid !== "string" || !UID.test(clusterUid)) throw new Error("Cluster pg의 uid 형식이 아니다");
+  const v = { v: 1, run: m.run, result: m.result, at: m.at, target: m.target, server: m.server, dbs: m.dbs, cluster: clusterUid, ...(m.result === "fail" ? { reason: m.reason } : {}) };
+  return jsonStringify(v);
+}
+
 export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
   const pollMs = opts.pollMs ?? POLL_MS;
   const r = kubeRead(exec, opts);
@@ -541,6 +564,21 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       // 남아 엔진의 실행 뒤 재조회가 성공한 삭제를 실패로 본다. [미검증] --request-timeout(20s)이 긴 대기의 watch를 끊어도
       // kubectl이 다시 watch해 이어 가는지는 T12-05 운영 실행에서 본다.
       must(run(exec, ["-n", ns, "delete", RESTORE_RESOURCES, "-l", `${RESTORE_LABEL}=${runId}`, "--ignore-not-found", "--wait=true", "--timeout=300s"], { timeoutMs: 330_000 }), "복원 객체 지우기");
+    },
+    restoreCheckMark(m) {
+      const pg = r.get("cluster", "database", "pg");
+      if (!pg) throw new Error("Cluster database/pg가 없다. restore-check 결과를 남기지 못했다");
+      const uid = pg.metadata?.uid;
+      const value = restoreCheckValue(m, uid);
+      const keys = m.result === "pass" ? [RESTORE_CHECK_LAST, RESTORE_CHECK_PASS] : [RESTORE_CHECK_LAST];
+      // annotate는 metadata.annotations의 그 키만 merge patch한다. spec·다른 annotation은 건드리지 않는다.
+      // 이름으로 쓰므로 그사이 pg가 다시 만들어졌으면 새 객체에 쓴다. 아래 되읽기의 uid 비교가 그것을 실패로 잡는다.
+      const x = run(exec, ["-n", "database", "annotate", KINDS.cluster, "pg", ...keys.map((k) => `${k}=${value}`), "--overwrite"]);
+      if (x.errKind === "timeout") throw new ExecTimeout("restore-check 결과 기록: 시간 초과(결과 미상)");
+      must(x, "restore-check 결과 기록");
+      const back = r.get("cluster", "database", "pg");
+      if (back?.metadata?.uid !== uid) throw new Error("restore-check 결과를 쓴 뒤 Cluster pg가 다른 객체로 바뀌었다");
+      for (const k of keys) if (back?.metadata?.annotations?.[k] !== value) throw new Error(`restore-check 결과를 되읽었더니 ${k}가 쓴 값과 다르다`);
     },
   };
 }
