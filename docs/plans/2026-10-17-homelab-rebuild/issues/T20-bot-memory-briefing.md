@@ -1,7 +1,7 @@
 # T20 봇 MEMORY_BRIEFING
 
 - 단계: P4 봇 V1
-- 상태: 진행 중 (실연동 2026-11-02~03. 원장(NUC SSD 계약 v1)·기동 장벽·기억 명령·일일 브리핑 운영 적용. MEM-01·BRIEF-01·DATA-02 live pass(DATA-02는 `homelab db restore`로 삭제 전 시각 복원 뒤 원장 재적용, homelab #1026·#1027), AUTH-02는 허용 밖 채널 not_run(owner 뜻, 다른 채널에 시험 글 없음). 결과표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T20 실연동 결과". HANDOFF는 private 운영 저장소 `handoffs/memory-briefing.md`. 시범 P-1 확장 진행 중(2026-11-03, 아래 "시범 운영"). 남은 것: AUTH-02 허용 밖 채널. 로컬·mock 구현은 2026-10-29 봇 PR #8 `82e2a45`)
+- 상태: 진행 중 (실연동 2026-11-02~03. 원장(NUC SSD 계약 v1)·기동 장벽·기억 명령·일일 브리핑 운영 적용. MEM-01·BRIEF-01·DATA-02 live pass(DATA-02는 `homelab db restore`로 삭제 전 시각 복원 뒤 원장 재적용, homelab #1026·#1027), AUTH-02(기억 명령 경로) live pass(2026-11-03 허용 밖 채널 `/memory-search`를 봇이 처리하지 않음, 공개 글 없음). 결과표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T20 실연동 결과". HANDOFF는 private 운영 저장소 `handoffs/memory-briefing.md`. 시범 P-1 확장 진행 중(2026-11-03, 아래 "시범 운영"). 남은 것: 완료 판정 전에 VERIFICATION "T20 남은 것"의 미확인 칸(브리핑 인증서·복원 검증 원본, 기억의 모델 맥락 주입)에 해소 티켓을 붙인다. 로컬·mock 구현은 2026-10-29 봇 PR #8 `82e2a45`)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T16a(착수), T16b(완료)
   - 착수: [T16a](T16a-bot-foundation-local.md) 뒤. 이 티켓을 실제로 막는 FOUNDATION의 예약 기능을 T16a가 로컬·mock으로 만든다(V1 범위 조정 안 3).
@@ -29,7 +29,7 @@ DATA-02: 봇 DB는 공유 PostgreSQL 백업(14일 보존, spec §5.1 "설계 기
 ## 시범 운영
 
 - **P-1 확장 진행 중(사용자 승인 2026-11-03).** T16b 시범 P-1(허용 채널에서 owner의 `/read`와 대화)에 기억 명령 `memory-*`와 일일 브리핑(매일 08:50 Asia/Seoul, 알림 채널)을 더한다. owner만 대화 채널에서 실제 정보를 저장·검색·정정·제외·삭제한다. PR 리뷰·Codex 작업 레인은 T17·T18 전이라 꺼진 채다.
-- 실사용 전에 owner가 실연동 시험 기억(8건)을 `memory-delete`로 지운다.
+- 실사용 전에 실연동 시험 기억 8건을 지웠다(2026-11-03 13:08~13:12, owner 맥의 Codex가 `memory-delete`. 8건 `deleted`, 원장 recorded 8, 삭제 대기 0).
 - 멈춤 조건: 기억이 허용 밖 채널이나 owner 밖 사용자에게 보임, 지우거나 저장 제외한 기억이 검색·브리핑에 나옴, 원장 경보(failed·fenced 5분, closed·degraded 30분), 브리핑 중복 발송. 보이면 바로 멈추고 해당 시험을 `fail`로 기록한다. 멈춤은 `apps/homelab-bot/values.yaml`에서 브리핑만이면 `BRIEFING_*` 두 줄, 기억까지면 `MEMORY_LEDGER_DIR`도 지우는 PR이다(원장 env가 없으면 기억과 브리핑이 함께 닫힌다).
 - 증거 등급은 `authorized_external`·`production_observation`이고 V1 판정이 아니다(T21). 끝은 T17 완료 뒤 P-2 승인 때 다시 정한다.
 
