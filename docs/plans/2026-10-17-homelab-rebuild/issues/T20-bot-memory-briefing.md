@@ -1,7 +1,7 @@
 # T20 봇 MEMORY_BRIEFING
 
 - 단계: P4 봇 V1
-- 상태: 진행 중 (실연동 2026-11-02~03. 원장(NUC SSD 계약 v1)·기동 장벽·기억 명령·일일 브리핑 운영 적용. MEM-01·BRIEF-01·DATA-02 live pass(DATA-02는 `homelab db restore`로 삭제 전 시각 복원 뒤 원장 재적용, homelab #1026·#1027), AUTH-02(기억 명령 경로) live pass(2026-11-03 허용 밖 채널 `/memory-search`를 봇이 처리하지 않음, 공개 글 없음). 결과표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T20 실연동 결과". HANDOFF는 private 운영 저장소 `handoffs/memory-briefing.md`. 시범 P-1 확장 진행 중(2026-11-03, 아래 "시범 운영"). 남은 것: 완료 판정 전에 VERIFICATION "T20 남은 것"의 미확인 칸(브리핑 인증서·복원 검증 원본, 기억의 모델 맥락 주입)에 해소 티켓을 붙인다. 로컬·mock 구현은 2026-10-29 봇 PR #8 `82e2a45`)
+- 상태: 완료 (2026-11-03. 실연동 2026-11-02~03: 원장(NUC SSD 계약 v1)·기동 장벽·기억 명령·일일 브리핑 운영 적용. MEM-01·BRIEF-01·DATA-02·AUTH-02(기억 명령 경로) live pass, fail 없음. DATA-02는 `homelab db restore`로 삭제 전 시각 복원 뒤 원장 재적용(homelab #1026·#1027), AUTH-02는 허용 밖 채널 `/memory-search`를 봇이 처리하지 않음. 미확인 칸의 해소 티켓: 브리핑 인증서·복원 검증 원본 T24, Codex 작업 상태·질문 대기 칸 T18, 기억을 모델 맥락에 넣는 경로(SEC-01)는 V1 코드에 없어 T21이 다시 확인. 결과표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T20 실연동 결과", HANDOFF는 private 운영 저장소 `handoffs/memory-briefing.md`. 시범 P-1 확장 진행 중(2026-11-03, 아래 "시범 운영"). 로컬·mock 구현은 2026-10-29 봇 PR #8 `82e2a45`)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T16a(착수), T16b(완료)
   - 착수: [T16a](T16a-bot-foundation-local.md) 뒤. 이 티켓을 실제로 막는 FOUNDATION의 예약 기능을 T16a가 로컬·mock으로 만든다(V1 범위 조정 안 3).
@@ -25,6 +25,7 @@ DATA-02: 봇 DB는 공유 PostgreSQL 백업(14일 보존, spec §5.1 "설계 기
 ## 할 일
 
 1. 브리핑을 실연동하기 전에 봇 저장소 PR #8(2026-10-29)에서 이월한 Codex 리뷰 P2를 고친다(`src/briefing.ts`): 예약을 끌 때(시각·시간대 설정을 비울 때) 이미 큐에 넣은 미전송 브리핑 outbox도 막는다. 기동 순서(원장 재적용 → 첫 tick → 게시자)와 함께 본다. T16b 할 일 7에서 옮겼다(lead 결정 2026-11-02. 브리핑이 T16b에서 꺼져 있었다). 같은 멈춤 규칙(1라운드 수정 → 재리뷰 → P1 없으면 병합)을 따른다.
+   - 결과(2026-11-02): 봇 PR #24 `cd49182`(Codex 지적 없음). 실연동 뒤 브리핑 회차·사본 중복 없음은 재기동 세 번(11-03 10:18·10:45·14:09)으로 확인.
 
 ## 시범 운영
 
