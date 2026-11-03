@@ -320,11 +320,11 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | [T14](issues/T14-bot-docs-refresh.md) | 봇 문서 정비 | P3 | T05 | 완료 (2026-10-18) | 에이전트 + 사람 |
 | [T15](issues/T15-bot-discovery.md) | 봇 V1 DISCOVERY | P3 | T14 | 완료 (2026-10-18) | 에이전트 + 사람 |
 | [T16a](issues/T16a-bot-foundation-local.md) | 봇 FOUNDATION 로컬·mock | P4 | T15 | 완료 (2026-10-20. 봇 저장소 PR #5·#6, DM 끔·브리핑 08:50) | 에이전트 + 사람 |
-| [T16b](issues/T16b-bot-foundation-deploy.md) | 봇 FOUNDATION 실연동·첫 배포 | P4 | T13, T16a | 완료(2026-11-02. 첫 배포·시나리오 1·실연동 시험, fail 없음(EVENT-01 not_run·EVENT-02 부분은 해소 티켓 T17·T21). 시범 P-1 승인 대기, webhook 이전 #1003 사용자 결정 대기) | 에이전트 + 사람 |
+| [T16b](issues/T16b-bot-foundation-deploy.md) | 봇 FOUNDATION 실연동·첫 배포 | P4 | T13, T16a | 완료(2026-11-02. 첫 배포·시나리오 1·실연동 시험, fail 없음(EVENT-01 not_run·EVENT-02 부분은 해소 티켓 T17·T21). 시범 P-1 진행 중(2026-11-02 18:31 승인, 2026-11-03 T20 기억·브리핑으로 확장), webhook 이전 #1003 사용자 결정 대기) | 에이전트 + 사람 |
 | [T17](issues/T17-bot-pr-review.md) | 봇 PR_REVIEW | P4 | T16a(착수), T16b(완료) | 진행 중 (로컬·mock 병합 2026-10-29, 봇 저장소 PR #7. 완료는 T16b 뒤) | 에이전트 + 사람 |
 | [T18](issues/T18-bot-codex-bridge.md) | 봇 CODEX_BRIDGE | P4 | T16a(착수), T16b(완료) | 진행 중 (로컬·mock 병합 2026-10-29, 봇 저장소 PR #9. SEC-02 부분, 완료는 T16b 뒤) | 에이전트 + 사람 |
 | [T19](issues/T19-bot-change-pr.md) | 봇 CHANGE_PR | P4 | T17, T18 | 대기 | 에이전트 + 사람 |
-| [T20](issues/T20-bot-memory-briefing.md) | 봇 MEMORY_BRIEFING | P4 | T16a(착수), T16b(완료) | 진행 중 (로컬·mock 병합 2026-10-29, 봇 저장소 PR #8. 완료는 T16b 뒤) | 에이전트 |
+| [T20](issues/T20-bot-memory-briefing.md) | 봇 MEMORY_BRIEFING | P4 | T16a(착수), T16b(완료) | 진행 중 (실연동 2026-11-02~03: MEM-01·BRIEF-01·DATA-02 live pass, AUTH-02 허용 밖 채널 남음. 시범 P-1 확장으로 기억·브리핑 실사용 2026-11-03~) | 에이전트 |
 | [T21](issues/T21-bot-release-audit.md) | 봇 V1 RELEASE_AUDIT | P4 | T17, T18, T19, T20 | 대기 | 독립 감사 에이전트 + 사람 |
 | [T22](issues/T22-reconnect-apps.md) | 기존 앱 저장소 재연결·옛 저장소 정리 | P5 | T13, T16b | 완료 (2026-11-02) | 에이전트 + 사람 |
 | [T23](issues/T23-platform-followups.md) | 플랫폼 후속(T13에서 넘김: U40 2회차, 재부팅 오경보) | P2 | T13 | 완료(2026-10-30. U40 `실제 검증 완료`(앱 0개 한계), 재부팅 오경보 해결) | 에이전트 + 사람 |
