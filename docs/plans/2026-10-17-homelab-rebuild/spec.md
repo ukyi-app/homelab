@@ -322,7 +322,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | [T16a](issues/T16a-bot-foundation-local.md) | 봇 FOUNDATION 로컬·mock | P4 | T15 | 완료 (2026-10-20. 봇 저장소 PR #5·#6, DM 끔·브리핑 08:50) | 에이전트 + 사람 |
 | [T16b](issues/T16b-bot-foundation-deploy.md) | 봇 FOUNDATION 실연동·첫 배포 | P4 | T13, T16a | 완료(2026-11-02. 첫 배포·시나리오 1·실연동 시험, fail 없음(EVENT-01 not_run·EVENT-02 부분은 해소 티켓 T17·T21). 시범 P-1 진행 중(2026-11-02 18:31 승인, 2026-11-03 T20 기억·브리핑으로 확장), webhook 이전 #1003 병합(2026-11-02)) | 에이전트 + 사람 |
 | [T17](issues/T17-bot-pr-review.md) | 봇 PR_REVIEW | P4 | T16a(착수), T16b(완료) | 완료(2026-11-04. 실가동 구현 봇 #38~#53, homelab #1053~#1071. 리뷰는 `homelab-smoke`만 켬(시범 P-2 진행 중). 배정 시험 12개 fail 없음, 운영 not_run 4건은 로컬 증거와 해소 티켓 T21) | 에이전트 + 사람 |
-| [T18](issues/T18-bot-codex-bridge.md) | 봇 CODEX_BRIDGE | P4 | T16a(착수), T16b(완료) | 진행 중 (로컬·mock 병합 2026-10-29, 봇 저장소 PR #9. SEC-02 부분, 완료는 T16b 뒤) | 에이전트 + 사람 |
+| [T18](issues/T18-bot-codex-bridge.md) | 봇 CODEX_BRIDGE | P4 | T16a(착수), T16b(완료) | 진행 중 (로컬·mock 병합 2026-10-29, 봇 저장소 PR #9. SEC-02 부분, 완료는 T16b 뒤. 작업 레인 격리 파드 실측 통과 2026-11-04(전용 Localhost 프로필), 운영 반영 남음) | 에이전트 + 사람 |
 | [T19](issues/T19-bot-change-pr.md) | 봇 CHANGE_PR | P4 | T17, T18 | 대기 | 에이전트 + 사람 |
 | [T20](issues/T20-bot-memory-briefing.md) | 봇 MEMORY_BRIEFING | P4 | T16a(착수), T16b(완료) | 완료(2026-11-03. MEM-01·BRIEF-01·DATA-02·AUTH-02(기억 경로) live pass, fail 없음. 미확인 칸 해소는 T24·T18·T21. 시범 P-1 확장으로 기억·브리핑 실사용 2026-11-03~) | 에이전트 |
 | [T21](issues/T21-bot-release-audit.md) | 봇 V1 RELEASE_AUDIT | P4 | T17, T18, T19, T20 | 대기 | 독립 감사 에이전트 + 사람 |

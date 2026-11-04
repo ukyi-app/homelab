@@ -1,7 +1,7 @@
 # T18 봇 CODEX_BRIDGE
 
 - 단계: P4 봇 V1
-- 상태: 진행 중 (로컬·mock 구현 병합 2026-10-29, 봇 저장소 PR #9 `1dba78e`, 시험 347. SEC-02는 부분이라 AC-B5 완료 아님. 완료는 T16b 뒤. 공개 저장소 내용으로 구독 모델을 부르는 작업의 D-14 차단 조건은 2026-11-04 해제(Claude 구독 프로필). 결정 4건은 2026-11-04 사용자 확정(Claude 실행기 기준, 봇 저장소 `docs/ai-bot/DECISIONS.md` "T18 결정 (Claude 실행기 기준)": R08 읽기 전용 알림, 작업 레인 자격 분리는 파드 실측 먼저(실패하면 API 키 + LLM gateway 전까지 작업 레인 닫음), 작업 레인을 열 때 파드 둘, 작업별 `CLAUDE_CONFIG_DIR`))
+- 상태: 진행 중 (로컬·mock 구현 병합 2026-10-29, 봇 저장소 PR #9 `1dba78e`, 시험 347. SEC-02는 부분이라 AC-B5 완료 아님. 완료는 T16b 뒤. 공개 저장소 내용으로 구독 모델을 부르는 작업의 D-14 차단 조건은 2026-11-04 해제(Claude 구독 프로필). 결정 4건은 2026-11-04 사용자 확정(Claude 실행기 기준, 봇 저장소 `docs/ai-bot/DECISIONS.md` "T18 결정 (Claude 실행기 기준)": R08 읽기 전용 알림, 작업 레인 자격 분리는 파드 실측 먼저(실패하면 API 키 + LLM gateway 전까지 작업 레인 닫음), 작업 레인을 열 때 파드 둘, 작업별 `CLAUDE_CONFIG_DIR`). 작업 레인 격리 파드 실측 통과(2026-11-04): 기본 보안 설정에서는 bwrap이 돌지 않아, 사용자가 전용 Localhost seccomp·AppArmor 프로필을 골랐고 진짜 토큰 시험에서 샌드박스 Bash의 토큰 노출 0건(대조군 1건). 유닉스 소켓 차단 없음·Ubuntu `bwrap` 프로필 의존·호스트 프로필 유지는 사용자 수용. 근거는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T18 작업 레인 격리 파드 실측"·`DECISIONS.md` "(2) 파드 실측 결과와 대가 수용". 운영 반영(호스트 프로필, 이미지 bubblewrap·socat, 작업 레인 설정·파드)이 남음)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T16a(착수), T16b(완료)
   - 착수: [T16a](T16a-bot-foundation-local.md) 뒤. 작업자 계약(T16a)에 Codex 어댑터를 붙이는 로컬·mock 구현을 시작한다(V1 범위 조정 안 3).
@@ -23,6 +23,12 @@
 4. `shell_environment_policy`를 `inherit = "none"` 또는 명시 `include`로 고정한다. 기본값은 `KEY`·`SECRET`·`TOKEN` 이름의 변수를 모델이 띄우는 명령에 넘긴다 [확인: https://learn.chatgpt.com/docs/config-file/config-advanced , 2026-10-18].
 5. 봇 저장소 `ARCHITECTURE.md` §5.1의 열린 항목 둘을 판단한다. (1) 인증 파일(`auth.json`)을 작업 레인의 비신뢰 코드 실행(패키지 설치·시험, 모델이 띄우는 셸)에서 떼는 방법. (2) 대화 레인과 작업 레인의 분리. 판단과 근거는 `DECISIONS.md`에 적는다. 설계 C.8(작업자 상주 파드 하나, 동시성 1, 작업자 자격 하나)을 바꿔야 하면 사용자가 정한다. T19는 비신뢰 코드를 가장 많이 돌리므로 이 판단을 따른다(T19 제약). (1)은 봇 저장소 PR #9(2026-10-29)의 Codex 보안 P2 "작업 셸과 Codex `auth.json` 분리(별도 UID·컨테이너나 credential broker)"와 같은 범위다. 그 P2는 T16b 할 일 7에서 옮겼다(lead 결정 2026-11-02. 작업 레인이 T16b에서 꺼져 있었다). 실제 `TaskLane` 연결 전 필수이고 T18 사용자 결정 (2) 인증 파일 분리와 같다.
 6. 실제 `TaskLane`을 연결하기 전에 같은 PR #9의 보안 P2를 고친다(`src/codex-process.ts`): 작업별 cgroup이 빌 때까지 완료·취소·해제하지 않는다. T18 사용자 결정 (4) 작업별 세션 공간과 같은 범위이고, T16b 할 일 7에서 옮겼다(위와 같은 결정). 같은 멈춤 규칙(1라운드 수정 → 재리뷰 → P1 없으면 병합)을 따른다.
+7. 작업 레인 격리를 운영에 반영한다(파드 실측 통과·대가 수용 2026-11-04, 봇 저장소 `DECISIONS.md` "(2) 파드 실측 결과와 대가 수용"). 노드에 없는 Localhost 프로필을 main이 참조하면 파드가 뜨지 않으므로 호스트가 먼저다.
+   1. `host/`: 전용 seccomp JSON·AppArmor 프로필과 그 생성 절차(containerd 버전 고정)를 둔다. `install.sh`가 kubelet seccomp 디렉터리와 `/etc/apparmor.d`에 설치·적재하고 재부팅 뒤에도 남게 한다. 사람이 `sudo host/install.sh`로 적용한다. 프로필 이름에 버전을 붙여 옛 버전과 함께 둘 수 있게 한다.
+   2. 봇 이미지: bubblewrap(`/usr/bin/bwrap`)·socat을 Debian 패키지로 넣고 버전을 고정한다. 작업자에는 `platform/sandbox` digest 사람 PR로 반영한다.
+   3. 봇 작업 레인 실행 설정: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, `--settings` 샌드박스(`failIfUnavailable`, `allowUnsandboxedCommands: false`, `network.allowAllUnixSockets: true`, 자격 디렉터리·다른 작업 세션 `denyRead`), `Read(...)` deny, `--allowedTools`. 저장소 스냅샷의 설정·hook·MCP는 읽지 않는다: hook·로컬 MCP는 샌드박스 밖에서 같은 uid로 돌아 scrub·`denyRead`·`--allowedTools`가 막지 못하고 자격 파일을 읽을 수 있다. 그래서 작업마다 빈 전용 `CLAUDE_CONFIG_DIR`, `--setting-sources user`, `--safe-mode`, `--strict-mcp-config`(빈 MCP 설정), `--disable-slash-commands`를 강제한다(대화·리뷰 레인과 같은 방식). 악성 `.claude/settings.json` hook·`.mcp.json`·CLAUDE.md를 넣은 스냅샷으로 hook이 돌지 않고 결과에 자격이 없음을 회귀 시험하고, 이 플래그들 아래에서도 `--settings`의 샌드박스 설정이 그대로 걸리는지 함께 확인한다. `TaskLane` 연결과 함께 한다.
+   4. `platform/sandbox`: 작업 레인 파드(결정 (3) 파드 둘)에 `hostUsers: false`, worker 컨테이너만 `procMount: Unmasked`와 Localhost 두 프로필. init 방화벽은 RuntimeDefault다. 설계 C.8을 같은 변경에서 고친다.
+   5. 운영 작업 레인에서 같은 조합으로 SEC-02 작업 레인 사례를 다시 확인한다. 2026-11-04 시험에서 호스트에 남긴 자원(커널에 적재한 AppArmor `homelab-worker-bwrap-v4`, kubelet seccomp 디렉터리의 v4 JSON, containerd 시험 이미지)은 정식 프로필로 바꾼 뒤 정리한다.
 
 ## 실행 경로 (T15 조사)
 
