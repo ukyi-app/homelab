@@ -1,5 +1,5 @@
 {{- /*
-Envoy 1.40.0(2026-10-13, 최신 안정판), 공식 envoyproxy/envoy의 distroless 변형, 멀티 아키텍처 index(2026-10-22 Docker Hub에서 확인).
+Envoy 1.40.0, 공식 envoyproxy/envoy의 distroless 변형, Docker Hub 멀티 아키텍처 index.
 distroless는 셸이 없고 nonroot(65532)로 envoy만 실행한다. 디버그가 필요하면 같은 버전의 v1.40.0 태그(셸 있음)를 lab에서 쓴다(U14, REPORT).
 */}}
 {{- $image := "docker.io/envoyproxy/envoy:distroless-v1.40.0@sha256:23b72ac1fa94908b2ca7ebf194cc6083cd0d4913210c7d7453e4b2008ca26c84" }}

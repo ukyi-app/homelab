@@ -1,4 +1,4 @@
-# 대상 값 하나(설계 C.8). E4b~E8은 시험 값이었고, E9(T16b)가 봇 등록 PR보다 먼저 봇 값으로 바꿨다(D-15).
+# 대상 값 하나(설계 C.8). 지금은 봇 값이다. 봇 등록 PR보다 먼저 봇 값으로 둔다(D-15).
 # 봇을 지울 때는 시험 값(namespace·app bot-slot-probe)과 probe: true로 되돌린다. 봇 ns 값을 남기면 다음 콜드스타트에서
 # 이 Application이 ns를 기다리며 끝없이 재시도한다(이 Application은 대상 ns를 만들지 않는다).
 # 그때 vmalert core.yaml TargetMissing의 job="bot-slot" 줄과 rules/bot.yaml도 함께 지운다. 시험 값에서는 지표 Service가
@@ -29,7 +29,7 @@ probe: false
 kubernetesApi:
   endpointCIDRs: []
 
-# 봇 기억 삭제 원장 볼륨(T20, templates/deletion-ledger.yaml). 클러스터 값이라 여기서는 끈다. root가 values-<클러스터>.yaml의
+# 봇 기억 삭제 원장 볼륨(templates/deletion-ledger.yaml). 클러스터 값이라 여기서는 끈다. root가 values-<클러스터>.yaml의
 # cluster.deletionLedger(nodeName·path)가 있을 때만 enabled: true와 함께 넘긴다. VM은 운영 SSD가 없어 비운다.
 deletionLedger:
   enabled: false

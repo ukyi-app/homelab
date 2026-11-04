@@ -5,7 +5,7 @@ kind: ConfigMap
 metadata:
   name: argocd-cm
 data:
-  # 공개 webhook 없이 main을 60초마다 폴링한다(확정(사용자 2026-10-18, T05)).
+  # 공개 webhook 없이 main을 60초마다 폴링한다(사용자 결정).
   # application-controller(이 값과 jitter)와 repo-server(이 값)는 시작할 때 env로 읽는다(install.yaml의 configMapKeyRef).
   # 그래서 이 ConfigMap만 바뀌어서는 반영되지 않고, 바꾼 뒤 두 파드를 재시작해야 한다.
   timeout.reconciliation: 60s
@@ -19,8 +19,8 @@ data:
   accounts.owner: login
   accounts.bot-reader: apiKey
 
-  # install.yaml이 이미 기본 목록을 이 키에 둔다. 키를 통째로 덮어쓰므로 기본 목록을 그대로 옮기고 Event만 더했다.
-  # 설계 표의 Endpoints·EndpointSlice는 기본 목록에 있다. Event는 옛 실측이다(옛 bootstrap-values.yaml).
+  # install.yaml이 이미 기본 목록을 이 키에 둔다. 키를 통째로 덮어쓰므로 기본 목록을 그대로 옮기고 Event를 더해 둔다.
+  # 설계 표의 Endpoints·EndpointSlice는 기본 목록에 있다. Event는 실측으로 더한다.
   # Argo CD를 올릴 때 새 install.yaml의 기본 목록과 대조한다.
   resource.exclusions: |
     - apiGroups:
@@ -79,9 +79,9 @@ data:
 
   # Application health. Argo CD 1.8에서 빠졌고 공식 문서의 Lua를 그대로 되살린다.
   # 이것이 없으면 root가 자식 Application의 Healthy를 기다리지 않아, wave가 생성 순서만 정한다.
-  # 옛 구성은 이것이 없어 콜드스타트에서 앱 5개가 Missing에 고착했다(옛 SYNC-WAVES.md:7-15).
+  # 이것이 없으면 콜드스타트에서 앱이 Missing에 고착한다(실측 앱 5개).
   # 그래도 Application 사이 순서는 health를 기다리는 것뿐이다. 음수 wave를 붙일 때는 "그 리소스를 Healthy로
-  # 만드는 주체가 더 앞 wave에 있는가"를 확인한다. 아니면 교착이다(옛 콜드스타트 17시간, 설계 B.8 E2).
+  # 만드는 주체가 더 앞 wave에 있는가"를 확인한다. 아니면 교착이다(콜드스타트 17시간 실측, 설계 B.8 E2).
   resource.customizations.health.argoproj.io_Application: |
     hs = {}
     hs.status = "Progressing"
@@ -96,7 +96,7 @@ data:
     end
     return hs
 
-  # ExternalSecret health 덮어쓰기(설계 C.3.3 표). T09 시나리오 6·7(E3 동등 절차, 2026-10-20)에서
+  # ExternalSecret health 덮어쓰기(설계 C.3.3 표). 시나리오 6·7(E3 동등 절차)에서
   # Ready=True, 이력 있는 실패(Healthy), 이력 없는 실패(Degraded)를 확인했다.
   # 내장 health는 Ready=False를 바로 Degraded로 본다. 그러면 Infisical 장애 때 이미지만 바꾸는 배포까지
   # 뒤 wave에서 멈출 수 있다. 장애는 ExternalSecretNotReady 경보가 따로 알린다.

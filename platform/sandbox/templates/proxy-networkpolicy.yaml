@@ -1,7 +1,7 @@
 # 프록시: 들어오는 것은 sandbox 작업자에서 프록시 포트뿐, 나가는 것은 DNS와 인터넷 443뿐이다.
 # egress ns의 다른 파드(지금은 없다)에는 걸지 않는다. ns 기본 거부를 두지 않은 이유: 이 ns에는 프록시만 둔다.
 # 인터넷 443의 except는 공유 차트(platform/charts/app/templates/networkpolicy.yaml, 설계 C.4.5 "tailnet 차단")에
-# link-local(169.254.0.0/16)과 loopback 대역을 더했다(2026-10-22 lab 실험에서 쓴 목록).
+# link-local(169.254.0.0/16)과 loopback 대역을 더한 것이다(lab 실험에서 쓴 목록).
 # 파드가 tailnet으로 나가면 출발 주소가 NUC의 Tailscale 주소로 바뀐다(U28). IPv6 허용 줄은 두지 않는다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

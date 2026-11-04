@@ -6,7 +6,7 @@ metadata:
 spec:
   replicas: 1
   # RWO 설정 파일에 두 프로세스가 동시에 쓰지 않게 한다. 갱신 중 DNS가 잠시 끊긴다.
-  # 공유기는 보조 DNS로 넘어가지 않아 그동안 Tailscale 없는 LAN 기기의 DNS가 모두 끊긴다(2026-10-20 실측).
+  # 공유기는 보조 DNS로 넘어가지 않아 그동안 Tailscale 없는 LAN 기기의 DNS가 모두 끊긴다(실측).
   # 길어지면 docs/runbooks-public/nuc-dns-outage.md.
   strategy:
     type: Recreate
@@ -31,7 +31,7 @@ spec:
         nameservers: ["1.1.1.1", "9.9.9.9"]
       initContainers:
         - name: prepare-config
-          # 4.54.1, Docker Hub 멀티 아키텍처 index 확인: 2026-10-20.
+          # 4.54.1, Docker Hub 멀티 아키텍처 index.
           image: mikefarah/yq:4.54.1@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
           command: ["/bin/sh", "-ec"]
           args:
@@ -86,7 +86,7 @@ spec:
               memory: 128Mi
       containers:
         - name: adguard
-          # v0.107.79, Docker Hub 멀티 아키텍처 index 확인: 2026-10-20.
+          # v0.107.79, Docker Hub 멀티 아키텍처 index.
           image: adguard/adguardhome:v0.107.79@sha256:aba9e3bf0613be3ba3755e1fc311b126e2c24bec25e18b6483894a88283074f0
           ports:
             - name: dns-tcp
@@ -124,7 +124,7 @@ spec:
             requests:
               cpu: 25m
               memory: 48Mi
-            # 옛 30초 해상도 실측 peak 124.4Mi의 약 두 배. CPU 제한은 필터 갱신 때 DNS 지연을 늘린다.
+            # 30초 해상도 실측 peak 124.4Mi의 약 두 배. CPU 제한은 필터 갱신 때 DNS 지연을 늘린다.
             limits:
               memory: 256Mi
       volumes:

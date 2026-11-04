@@ -1,4 +1,4 @@
-{{- /* nginx 1.30.6(2026-10-21 기준 stable), alpine-slim 멀티 아키텍처 index(2026-10-21 Docker Hub에서 확인). init도 같은 이미지다. */}}
+{{- /* nginx 1.30.6(stable), alpine-slim, Docker Hub 멀티 아키텍처 index. init도 같은 이미지다. */}}
 {{- $image := "docker.io/nginxinc/nginx-unprivileged:1.30.6-alpine-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6" }}
 apiVersion: apps/v1
 kind: Deployment

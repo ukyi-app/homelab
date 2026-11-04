@@ -18,7 +18,7 @@ metadata:
     # 같은 Application 안의 ns 리소스보다 먼저.
     argocd.argoproj.io/sync-wave: "-1"
 ---
-# platform/charts/app/templates/networkpolicy.yaml(1.0.0)을 kind: web, 공개·내부 노출·DB 없음으로 옮겼다(설계 C.4.5 네트워크 행).
+# platform/charts/app/templates/networkpolicy.yaml(1.0.0)을 kind: web, 공개·내부 노출·DB 없음으로 손으로 옮긴 정책이다(설계 C.4.5 네트워크 행).
 # 차트를 바꾸면 여기도 맞춘다. 인터넷 443은 사설 대역과 tailnet(100.64.0.0/10)을 빼고, IPv6 허용 줄은 두지 않는다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

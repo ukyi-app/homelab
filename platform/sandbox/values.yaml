@@ -14,13 +14,13 @@ proxy:
   # 실제 허용 목록은 이 목록 + worker.profile.egressHosts(모델 실행기가 쓰는 이름)다. 둘 다 같은 schema 규칙을 받는다.
   # 프록시(Envoy)는 CONNECT 이름과 터널 안 TLS SNI를 둘 다 그 목록과 맞춘다(templates/proxy-configmap.yaml).
   # 남는 위험: SNI는 허용 이름이고 TLS 안 HTTP Host만 다른 요청은 못 본다. CDN 뒤 이름을 더할 때는 그 CDN이
-  # SNI·Host 불일치를 거부하는지 본다(2026-10-22 lab: registry.npmjs.org 앞 Cloudflare는 403. npm은 아래 이유로 뺐다).
+  # SNI·Host 불일치를 거부하는지 본다(lab 실측: registry.npmjs.org 앞 Cloudflare는 403. npm은 아래 이유로 넣지 않는다).
   allowedDomains:
     # 작업자 코드 읽기. public 저장소 압축본만 받는다(D-15).
     - codeload.github.com
     # 패키지 레지스트리. 받기와 게시가 다른 호스트인 것만 둔다(설계 C.8 "남는 위험(쓰기 유출)").
     # npm(registry.npmjs.org)은 받기와 게시가 같은 호스트라 넣지 않는다. 작업 입력의 npm 토큰으로 auth.json을
-    # 게시할 수 있다(#836 보안 리뷰). PyPI 게시는 upload.pypi.org라 열리지 않는다.
+    # 게시할 수 있다. PyPI 게시는 upload.pypi.org라 열리지 않는다.
     - pypi.org
     - files.pythonhosted.org
     # 모델 API·구독 인증 호스트는 여기 두지 않는다. 프로필과 함께 바뀌므로 worker.profile.egressHosts에 둔다.
@@ -30,10 +30,10 @@ worker:
   # main 빌드(app-build)가 GHCR에 올린 digest만 쓴다. 로컬 빌드 digest는 CI 빌드와 다르다.
   # 사람 PR로만 바꾼다(D2). 게시 서버는 apps/homelab-bot/image.yaml 자동 병합으로 따라가지만, 모델 자격을 든 sandbox까지
   # 자동 경로를 넓히지 않는다(설계 C.4.4·C.4.7). 작업자 요청 계약(version)을 바꾸는 봇 PR은 이 값을 바꾸는 PR과 짝으로 낸다.
-  # 지금 값: 봇 main d77944e 빌드. 7a4dfe6(T17 리뷰 레인, #46 내장 플러그인 끔, #50 제외 파일 입력)에 #52(정책 위반으로 멈춘
-  # 실행의 위반 종류를 작업자 로그 run_policy_violation에 값 없이 남김)를 더했다. 결과 reason·요청 계약(version)·
-  # REVIEW_INSTRUCTIONS는 그대로다. 빌드 증명은 GitHub API의 SLSA provenance로 대조했다(소스 d77944e, build.yaml@main → app-build v1.0.1).
-  # gh attestation verify는 2026-11-04 sigstore 신뢰 루트 단계에서 실패해(옛 digest도 같음) 대신 썼다.
+  # 지금 값: 봇 main d77944e 빌드. 리뷰 레인, #46 내장 플러그인 끔, #50 제외 파일 입력, #52(정책 위반으로 멈춘
+  # 실행의 위반 종류를 작업자 로그 run_policy_violation에 값 없이 남김)가 들어 있다. 결과 reason·요청 계약(version)·
+  # REVIEW_INSTRUCTIONS는 7a4dfe6과 같다. 빌드 증명은 GitHub API의 SLSA provenance로 대조했다(소스 d77944e, build.yaml@main → app-build v1.0.1).
+  # gh attestation verify가 sigstore 신뢰 루트 단계에서 실패해(이전 digest도 같다) 대신 썼다.
   image: ghcr.io/ukyi-app/homelab-bot@sha256:2e73f8c6b65ad66dbfe76072fb04d2e072348cec09d30f8e57eeaddfd18e0659
   # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
   # WORKER_CONTROL_PRIVATE_KEY다. 둘이 어긋나면 작업자가 모든 실행 요청을 403으로 거부하니 회전은 두 값을 함께 바꾼다.
@@ -42,7 +42,7 @@ worker:
     -----BEGIN PUBLIC KEY-----
     MCowBQYDK2VwAyEA48/F2Z0cCfqLbEGfQY3aoDWCRtgzFLLsY9kskMFFqRs=
     -----END PUBLIC KEY-----
-  # 실행기 프로필(D-14 변경, 2026-10-30). 실행기·모델·자격·egress를 여기 한곳에서 고른다. 작업자 env(WORKER_EXECUTOR·WORKER_MODEL·
+  # 실행기 프로필(D-14). 실행기·모델·자격·egress를 여기 한곳에서 고른다. 작업자 env(WORKER_EXECUTOR·WORKER_MODEL·
   # WORKER_CREDENTIAL_KEY), 자격 ExternalSecret·Secret(worker-credential-<id>), 프록시 허용 이름이 모두 이 블록에서 나온다.
   # 봇 이미지의 프로필 표(봇 src/executor-profiles.ts PROFILES)에 있는 조합만 values.schema.json이 받는다. 틀린 조합은 작업자가
   # profile_unsupported로 기동하지 못해 root가 wave -2에서 멈추므로 렌더에서 막는다.
@@ -62,7 +62,7 @@ worker:
     # Infisical 키 이름 = Secret 키 = 작업자가 읽는 파일 이름(WORKER_CREDENTIAL_KEY). 인증 방식을 뜻한다(구독 장기 토큰).
     credentialKey: CLAUDE_CODE_OAUTH_TOKEN
     # 이 실행기가 프록시로 나가는 이름(proxy.allowedDomains에 더해진다). OAuth 교환·갱신 후보(platform.claude.com·claude.ai)는
-    # 열지 않았다. S12 첫 대화(2026-10-30, 실행 3회)에서 작업자는 api.anthropic.com에만 나갔고 프록시 거부는 0건이었다.
+    # 열지 않는다. S12 첫 대화(실행 3회)에서 작업자는 api.anthropic.com에만 나갔고 프록시 거부는 0건이었다.
     # 나중에 거부 로그가 필요를 보이면 그 근거와 함께 더한다.
     egressHosts:
       - api.anthropic.com
