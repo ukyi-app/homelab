@@ -1,5 +1,5 @@
 {{- /*
-tailscale: 내부 UI Ingress(*.ts.net)용 operator. 맡은 티켓 T08a, wave -5(설계 C.3.1, C.3.5).
+tailscale: 내부 UI Ingress(tailnet 주소)용 operator. wave -5(설계 C.3.1, C.3.5).
 source 둘을 한 Application으로 묶는다: 공식 operator 차트와 platform/tailscale(OAuth ExternalSecret, ProxyClass,
 Argo CD Ingress). 따로 두면 operator가 OAuth Secret을 기다리며 멈추고 root가 그 wave에서 교착한다.
 같은 Application 안에서는 ExternalSecret(wave -1) → operator(0) → ProxyClass(1) → Ingress(2) 순서다.
@@ -21,7 +21,7 @@ metadata:
 spec:
   project: platform
   sources:
-    # 1.104.1은 2026-10-20 기준 최신(pkgs.tailscale.com/helmcharts, U14).
+    # 1.104.1. 출처: pkgs.tailscale.com/helmcharts.
     - repoURL: https://pkgs.tailscale.com/helmcharts
       chart: tailscale-operator
       targetRevision: 1.104.1
@@ -33,14 +33,14 @@ spec:
             # tailnet 기기 이름. VM은 vm- 접두로 운영과 겹치지 않게 한다.
             hostname: {{ printf "%stailscale-operator" $ts.prefix | quote }}
             image:
-              # 멀티 아키텍처 index digest(2026-10-20 Docker Hub에서 확인). 태그는 아래 renovate 줄이 기준이다.
+              # Docker Hub 멀티 아키텍처 index digest. 태그는 아래 renovate 줄이 기준이다.
               # renovate: image=docker.io/tailscale/k8s-operator:v1.104.1
               digest: sha256:38351d6333edc490a832b27b244665d40f4a5fe1765ade76af2264c99dbbfe0e
             resources:
               requests:
                 cpu: 25m
                 memory: 64Mi
-              # 옛 실측 최대 35.3Mi의 약 2배(설계 P21).
+              # 실측 최대 35.3Mi의 약 2배(설계 P21).
               limits:
                 memory: 80Mi
             # ns는 프록시(NET_ADMIN) 때문에 privileged다. operator 자체는 권한이 필요 없어 줄인다.
@@ -54,7 +54,7 @@ spec:
                 type: RuntimeDefault
           proxyConfig:
             image:
-              # 멀티 아키텍처 index digest(2026-10-20 Docker Hub에서 확인). 태그는 아래 renovate 줄이 기준이다.
+              # Docker Hub 멀티 아키텍처 index digest. 태그는 아래 renovate 줄이 기준이다.
               # renovate: image=docker.io/tailscale/tailscale:v1.104.1
               digest: sha256:87c55d6be56ad85b3d8bceca5f87f73de288c609131460dd1be1874c250cc41d
             # 모든 프록시에 메모리 상한(platform/tailscale/templates/proxyclass.yaml).

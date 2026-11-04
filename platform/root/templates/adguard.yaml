@@ -1,5 +1,5 @@
 {{- /*
-adguard: T08a, wave -5(설계 C.3.1). LAN :53 DNS와 Tailscale 관리 UI.
+adguard: wave -5(설계 C.3.1). LAN :53 DNS와 Tailscale 관리 UI.
 켜기: values.yaml의 components.adguard.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
 */}}
 {{- if .Values.components.adguard.enabled }}

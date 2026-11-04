@@ -1,5 +1,5 @@
 {{- /*
-cert-manager: 클러스터 안 인증서만(Barman plugin TLS, T11이 쓴다). 맡은 티켓 T08a, wave -7(설계 C.3.1).
+cert-manager: 클러스터 안 인증서만(Barman plugin TLS가 쓴다). wave -7(설계 C.3.1).
 DNS-01용 Cloudflare 토큰과 ClusterIssuer는 두지 않는다(D-08). 공개 인증서는 Cloudflare가, 내부 UI는 Tailscale이 낸다.
 켜기: values.yaml의 components.certManager.enabled. 꺼져 있으면 아무것도 렌더하지 않는다.
 외부 차트 하나라 platform/cert-manager 디렉터리는 없다(external-secrets operator와 같은 방식).
@@ -15,7 +15,7 @@ metadata:
 spec:
   project: platform
   source:
-    # v1.21.2는 2026-10-20 기준 최신 안정판(charts.jetstack.io index, U14).
+    # v1.21.2. 출처: charts.jetstack.io index.
     repoURL: https://charts.jetstack.io
     chart: cert-manager
     targetRevision: v1.21.2

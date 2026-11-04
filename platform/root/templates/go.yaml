@@ -1,5 +1,5 @@
 {{- /*
-go: 내부 UI 짧은 주소 리다이렉터(T08c, 설계 C.3.5 "짧은 주소", D-30). 원본 platform/go, ns go.
+go: 내부 UI 짧은 주소 리다이렉터(설계 C.3.5 "짧은 주소", D-30). 원본 platform/go, ns go.
 켜기: values.yaml의 components.go.enabled. 클러스터 값 cluster.tailscale.prefix를 받는다(운영 "" → go, VM "vm-" → vm-go).
 
 platform/tailscale 차트에 넣지 않고 따로 둔 이유:
@@ -10,7 +10,7 @@ platform/tailscale 차트에 넣지 않고 따로 둔 이유:
 wave 1: 맨 뒤 wave(봇 자리와 같다). operator(-5)와 ClusterSecretStore(-7)가 Healthy가 된 뒤에 만들고,
 root sync는 마지막 wave의 health를 기다리지 않으므로 go가 Degraded여도 다른 구성 요소를 막지 않는다(설계 C.3.1).
 
-되돌리기(T08c): 이 Application에는 resources-finalizer가 없다. Application만 끄거나 지우면 Service가 남고 프록시 기기도 남는다.
+되돌리기: 이 Application에는 resources-finalizer가 없다. Application만 끄거나 지우면 Service가 남고 프록시 기기도 남는다.
 Application이 살아 있을 때 platform/go의 매니페스트를 지우는 PR로 prune을 확인한 뒤, 이 파일과 ACL 두 줄을 지운다.
 */}}
 {{- if .Values.components.go.enabled }}

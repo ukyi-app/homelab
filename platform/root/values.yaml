@@ -1,9 +1,9 @@
 # 클러스터와 무관한 기본값. 클러스터마다 다른 값은 values-prod.yaml·values-vm.yaml에만 둔다(E8 VM 격리 1번).
 #
-# 뒤 티켓의 자리(T07 할 일 1). 구성 요소마다 templates/<이름>.yaml 하나와 아래 enabled 하나가 있다.
-# 자리를 맡은 티켓은 자기 템플릿 파일과 자기 블록의 enabled만 고친다. 블록 사이에 빈 줄과 주석을 둬
-# 다른 티켓의 PR끼리 같은 줄이나 맞닿은 줄을 고치지 않게 했다(Git 병합 충돌이 나지 않는다).
-# 새 자리가 더 필요하면 새 템플릿 파일을 만든다. 파일을 새로 더하는 것은 충돌하지 않는다.
+# 구성 요소마다 templates/<이름>.yaml 하나와 아래 enabled 하나가 있다.
+# 구성 요소를 고치는 PR은 자기 템플릿 파일과 자기 블록의 enabled만 고친다. 블록 사이에 빈 줄과 주석을 둬
+# PR끼리 같은 줄이나 맞닿은 줄을 고치지 않게 한다(Git 병합 충돌이 나지 않는다).
+# 새 구성 요소는 새 템플릿 파일을 만든다. 파일을 새로 더하는 것은 충돌하지 않는다.
 #
 # enabled를 클러스터 값 파일이 아니라 여기 두는 이유: VM은 운영과 같은 Git 트리를 따르므로,
 # 어느 구성 요소가 켜졌는지는 두 클러스터가 같아야 한다. 값 파일에 두면 한쪽만 켜는 실수가 생긴다.
@@ -13,22 +13,22 @@
 #
 # wave는 각 템플릿에 적혀 있고 설계 C.3.1 표의 "순서" 열이다.
 components:
-  # T09. external-secrets(ESO operator, wave -8)와 external-secrets-stores(ClusterSecretStore, wave -7)
+  # external-secrets(ESO operator, wave -8)와 external-secrets-stores(ClusterSecretStore, wave -7)
   # 이 값은 ESO 자체를 뺀다. 구성 요소·앱의 ExternalSecret은 그대로 남아, CRD가 없으면 적용되지 않는다.
   # 복구(클러스터 유실 + Infisical 장애)에서 Store와 모든 ExternalSecret을 끄는 값은 이것이 아니라 values-<클러스터>.yaml의
   # cluster.restore.externalSecrets: false다(templates/_helpers.tpl, restore.md 3절 U40).
   externalSecrets:
     enabled: true
 
-  # T08a. cert-manager, wave -7
+  # cert-manager, wave -7
   certManager:
     enabled: true
 
-  # T11. cnpg-operator(CNPG operator와 Barman Cloud Plugin), wave -6
+  # cnpg-operator(CNPG operator와 Barman Cloud Plugin), wave -6
   cnpgOperator:
     enabled: true
 
-  # T08a. traefik, cloudflared, tailscale, adguard, 모두 wave -5
+  # traefik, cloudflared, tailscale, adguard, 모두 wave -5
   traefik:
     enabled: true
   cloudflared:
@@ -38,33 +38,33 @@ components:
   adguard:
     enabled: true
 
-  # T08b. observability, wave -4
+  # observability, wave -4
   observability:
     enabled: true
 
-  # T11. cnpg-cluster(Cluster pg, ObjectStore, ScheduledBackup), wave -3
-  # Infisical /platform/backup에 R2_ACCESS_KEY_ID·R2_SECRET_ACCESS_KEY·R2_ENDPOINT가 있어야 한다(2026-10-23 사람이 넣음).
+  # cnpg-cluster(Cluster pg, ObjectStore, ScheduledBackup), wave -3
+  # Infisical /platform/backup에 R2_ACCESS_KEY_ID·R2_SECRET_ACCESS_KEY·R2_ENDPOINT가 있어야 한다(사람이 넣는다).
   # 키가 빠지면 cnpg-cluster가 Degraded이고 root가 뒤 wave를 모두 기다린다.
   cnpgCluster:
     enabled: true
 
-  # T08b. sandbox(격리 작업 공간과 egress 프록시), wave -2
+  # sandbox(격리 작업 공간과 egress 프록시), wave -2
   sandbox:
     enabled: true
 
-  # T10. appset-apps(ApplicationSet apps), wave 0
+  # appset-apps(ApplicationSet apps), wave 0
   appsetApps:
     enabled: true
 
-  # T11. appset-data(ApplicationSet data), wave 0
+  # appset-data(ApplicationSet data), wave 0
   appsetData:
     enabled: true
 
-  # T08b. bot-slot(봇 자리, 설계 C.8), wave 1
+  # bot-slot(봇 자리, 설계 C.8), wave 1
   botSlot:
     enabled: true
 
-  # T08c. go(내부 UI 짧은 주소 리다이렉터, D-30), wave 1
+  # go(내부 UI 짧은 주소 리다이렉터, D-30), wave 1
   # 켜기 전에 Infisical /platform/go/TAILNET_DOMAIN이 있어야 한다. 없으면 go만 Degraded다(맨 뒤 wave라 다른 구성 요소는 막지 않는다).
   go:
     enabled: true

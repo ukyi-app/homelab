@@ -1,8 +1,8 @@
 {{- /*
-자리: bot-slot(봇 자리 Application, 설계 C.8). 맡은 티켓 T08b, wave 1(맨 뒤, 설계 C.3.1).
-작은 Helm 차트 platform/bot-slot이고 대상 값 target은 그 차트의 values.yaml에 둔다(T08b, T16b가 봇 ns로 바꿈).
+자리: bot-slot(봇 자리 Application, 설계 C.8). wave 1(맨 뒤, 설계 C.3.1).
+작은 Helm 차트 platform/bot-slot이고 대상 값 target은 그 차트의 values.yaml에 둔다(지금 봇 ns).
 대상 ns를 만들지 않는다(CreateNamespace 없음). 봇 ns는 앱 Application(ApplicationSet apps, wave 0)이 만든다.
-클러스터 값은 cluster.kubernetesApi.endpointCIDRs(봇 파드 → Kubernetes API egress, T16b D8)와 cluster.deletionLedger(T20 원장 PV)만
+클러스터 값은 cluster.kubernetesApi.endpointCIDRs(봇 파드 → Kubernetes API egress, T16b D8)와 cluster.deletionLedger(원장 PV)만
 넘긴다. target은 넘기지 않는다. deletionLedger는 nodeName이 있을 때만 enabled: true로 넘기고, 없으면(VM) 키를 넘기지 않아
 bot-slot 기본값(꺼짐)이 그대로다.
 켜기: values.yaml의 components.botSlot.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.

@@ -1,5 +1,5 @@
 {{- /*
-traefik: 공개 HTTP 라우팅. 맡은 티켓 T08a, wave -5(설계 C.3.1, C.3.4).
+traefik: 공개 HTTP 라우팅. wave -5(설계 C.3.1, C.3.4).
 cloudflared가 http://traefik.traefik.svc:80 으로 보낸 요청을 Ingress host로 나눈다. 모르는 host는 404다.
 Service는 ClusterIP라 LAN·tailnet에서 직접 닿지 않는다. Ingress class traefik 하나, 엔트리포인트 web 하나.
 Gateway API·내부 TLS 리스너·IngressRoute CRD는 쓰지 않는다(설계 A.4 8번).
@@ -16,7 +16,7 @@ metadata:
 spec:
   project: platform
   source:
-    # 차트 42.0.0(Traefik v3.7.14)은 2026-10-20 기준 최신(U14). 42의 깨지는 변경(Kubernetes 1.30 이상,
+    # 차트 42.0.0(Traefik v3.7.14). 42의 깨지는 변경(Kubernetes 1.30 이상,
     # Traefik Hub Secret 권한, 투명성 로그)은 이 구성에 해당하지 않는다.
     repoURL: https://traefik.github.io/charts
     chart: traefik
@@ -26,13 +26,13 @@ spec:
       skipCrds: true
       valuesObject:
         image:
-          # 멀티 아키텍처 index digest(2026-10-20 Docker Hub에서 확인). 태그는 아래 renovate 줄이 기준이다. 차트는 tag와 digest를 함께 렌더한다.
+          # Docker Hub 멀티 아키텍처 index digest. 태그는 아래 renovate 줄이 기준이다. 차트는 tag와 digest를 함께 렌더한다.
           # renovate: image=docker.io/library/traefik:v3.7.14
           digest: sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c
         deployment:
           replicas: 1
         # 차트 42는 Service 종류를 service.spec.type에서 읽는다. service.type은 무시되고 기본값 LoadBalancer가 되어
-        # k3s servicelb가 노드 LAN 주소 :80에 Traefik을 열었다(2026-10-20 실측). LAN에서 WAF를 거치지 않는 길을 막는다.
+        # k3s servicelb가 노드 LAN 주소 :80에 Traefik을 연다(실측). LAN에서 WAF를 거치지 않는 길을 막는다.
         service:
           spec:
             type: ClusterIP
@@ -66,7 +66,7 @@ spec:
             ingressEndpoint:
               hostname: traefik.traefik.svc.cluster.local
         # 차트 기본값은 Gateway·GatewayClass를 만든다. Gateway API CRD가 없고 쓰지도 않는다.
-        # 옛 구성은 Gateway CRD wave 순서로 17시간 교착했다(설계 P22).
+        # Gateway CRD wave 순서가 어긋나면 교착한다(실측 17시간, 설계 P22).
         gateway:
           enabled: false
         gatewayClass:
@@ -79,7 +79,7 @@ spec:
         log:
           format: json
           level: INFO
-        # JSON 접근 로그를 stdout으로. 수집은 T08b(관측).
+        # JSON 접근 로그를 stdout으로. 수집은 관측 스택(vector)이 한다.
         accessLog:
           enabled: true
           format: json
@@ -113,7 +113,7 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
-          # 옛 실측 최대 25Mi의 약 4배(설계 P22). GOMEMLIMIT은 차트가 limits.memory에서 만든다.
+          # 실측 최대 25Mi의 약 4배(설계 P22). GOMEMLIMIT은 차트가 limits.memory에서 만든다.
           limits:
             memory: 96Mi
   destination:

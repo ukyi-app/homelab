@@ -1,5 +1,5 @@
 {{- /*
-observability: T08b, wave -4(설계 C.3.1). 메트릭·로그·경보 스택(설계 C.3.7).
+observability: wave -4(설계 C.3.1). 메트릭·로그·경보 스택(설계 C.3.7).
 source 둘을 한 Application으로 묶는다: platform/observability/stack(kustomize. 룰·알림 템플릿의 {{ }}가 Helm과
 부딪히지 않게)과 platform/observability/ingress(Grafana 내부 Ingress와 스택 자격 ExternalSecret 셋. 클러스터 접두와
 복구 스위치를 valuesObject로 받는다).

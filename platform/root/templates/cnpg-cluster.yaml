@@ -1,5 +1,5 @@
 {{- /*
-cnpg-cluster: 공유 Cluster pg, ObjectStore, ScheduledBackup, R2 자격, database ns NetworkPolicy. 맡은 티켓 T11, wave -3(설계 C.3.1).
+cnpg-cluster: 공유 Cluster pg, ObjectStore, ScheduledBackup, R2 자격, database ns NetworkPolicy. wave -3(설계 C.3.1).
 클러스터 값 cluster.backup.bucket과 cluster.cnpg(serverName, 복구 때만 recoverySource)를 받는다(platform/cnpg/cluster).
 켜기 전에 Infisical /platform/backup의 R2 키 셋이 있어야 한다. 없으면 ExternalSecret이 Degraded라 이 Application이
 멈추고, root가 뒤 wave(sandbox, ApplicationSet, 봇 자리)를 기다린다.
@@ -35,7 +35,7 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: database
-  # homelab db restore-check가 Cluster pg에 결과를 남기는 annotation 두 키(T24 계약 2, cli core kubectl.ts). Git에는 초기값을
+  # homelab db restore-check가 Cluster pg에 결과를 남기는 annotation 두 키(cli core kubectl.ts). Git에는 초기값을
   # 두지 않는다. 두 키만 jsonPointers로 빼서 selfHeal·sync가 지우지도, OutOfSync로 보지도 않게 한다(~1은 키 안의 /).
   ignoreDifferences:
     - group: postgresql.cnpg.io
@@ -50,8 +50,8 @@ spec:
       prune: true
       selfHeal: true
     # 함정: ignoreDifferences는 diff만 가린다. 이 옵션이 없으면 다른 이유의 sync가 Git 매니페스트대로 덮어쓸 수 있다.
-    # 이 Application에는 전에 syncOptions가 없었다. 이 옵션은 위 ignoreDifferences에 든 필드만 sync에서 빼므로
-    # 다른 리소스와 다른 필드의 sync 동작은 그대로다(Argo CD sync-options 문서). 처음 만드는 리소스에는 적용되지 않는다.
+    # 이 옵션은 위 ignoreDifferences에 든 필드만 sync에서 빼므로
+    # 다른 리소스와 다른 필드의 sync 동작에는 영향이 없다(Argo CD sync-options 문서). 처음 만드는 리소스에는 적용되지 않는다.
     syncOptions:
       - RespectIgnoreDifferences=true
     retry:
