@@ -80,6 +80,12 @@
   ],
   "packageRules": [
     {
+      "description": "sandbox 작업자 이미지(platform/sandbox/values.yaml)는 모델 자격을 든 파드라 사람 PR로만 바꾼다(D2). 태그 없이 digest만 있고 이미지 태그는 sha-<커밋>뿐이라 Renovate가 비교할 태그도 없다. 게시 서버 이미지는 apps/homelab-bot/image.yaml(배포 App 몫, ignorePaths)이 맡는다.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/ukyi-app/homelab-bot"],
+      "enabled": false
+    },
+    {
       "description": "자기 저장소 참조(repoURL ukyi-app/homelab)의 revision은 main이다. 커밋이나 태그로 바꾸면 Argo CD가 main을 따라가지 않는다(옛 renovate.json:144-148, AGENTS.md).",
       "matchManagers": ["argocd"],
       "matchPackageNames": ["https://github.com/ukyi-app/homelab", "https://github.com/ukyi-app/homelab.git"],
