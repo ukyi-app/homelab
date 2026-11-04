@@ -1,4 +1,4 @@
-// 명령에 줄 문맥을 조립한다(사용자 결정 2026-10-23, #873 3라운드).
+// 명령에 줄 문맥을 조립한다(사용자 결정).
 // - ReadCtx: 읽기 어댑터만. 그 밑의 exec는 read exec라 쓰기 argv를 실행하지 않는다.
 // - WriteCtx: 엔진이 Step.apply() 한 번마다 newWrite()로 만들고 apply가 끝나면 revoke한다. 폐기 뒤에는 쓰기 어댑터·
 //   비밀번호 생성·시크릿 입력이 모두 막힌다. 전역 상태가 없어 다른 엔진·병렬 흐름이 이 쓰기 권한을 빌릴 수 없다.
@@ -65,7 +65,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       ghcr: ghcrRead(readExec),
       generatePassword: () => (alive(), newPassword()),
       readSecretInput: (prompt) => (alive(), readSecretInput(o.isTTY, (q) => writeStderr(q), prompt)),
-      // 파이프로 대신 답할 수 없게 tty만 받는다(03 purge의 Infisical 삭제 직전 확인).
+      // 파이프로 대신 답할 수 없게 tty만 받는다(purge의 Infisical 삭제 직전 확인).
       confirm: (question, expected) => (alive(), o.isTTY && o.ask(question) === expected),
       web: webRead(readExec),
       pg: pgWrite(exec, k8sRead),

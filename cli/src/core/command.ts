@@ -1,7 +1,7 @@
 // 명령 정의와 명령이 받는 문맥의 모양. 명령 파일 하나가 defineCommand 하나를 default로 내보내고 registry.ts가 정적 import한다.
 // (bun build --compile 실행 파일은 실행 때 파일을 찾지 못하므로 정적 import만 쓴다.)
 //
-// 구조(사용자 결정 2026-10-23, #873 3라운드): 명령은 외부 명령을 직접 실행할 수 없다. 받는 것은 타입 있는 어댑터뿐이고
+// 구조(사용자 결정): 명령은 외부 명령을 직접 실행할 수 없다. 받는 것은 타입 있는 어댑터뿐이고
 // 어댑터마다 argv 모양이 고정이다. 읽기 문맥(ReadCtx)에는 쓰기 함수가 아예 없고, 쓰기 문맥(WriteCtx)은 엔진이
 // Step.apply() 한 번마다 새로 만들어 넘긴 뒤 끝나면 폐기한다. 명령이 import할 수 있는 core 모듈은
 // command·names·result·pr뿐이다(정적 시험).
@@ -40,16 +40,16 @@ export type KubeKind =
 // 로그 대상. 앱 Deployment 또는 Job(마이그레이션·복원·백업).
 export type LogTarget = { deployment: string } | { job: string };
 
-// 복원 실행 기록 ConfigMap 이름(03, restore.md의 $W를 클러스터에 둔 것). 범용 ConfigMap 조회는 없다.
+// 복원 실행 기록 ConfigMap 이름(restore.md의 $W를 클러스터에 둔 것). 범용 ConfigMap 조회는 없다.
 // data-purge-<app>는 database ns에만 둔다(앱 ns가 없는 PostgreSQL 전용 데이터도 있다).
 export type RestoreRecordName = "restore-pg" | "restore-vk" | "restore-check" | `data-purge-${string}`;
 // created: API 서버가 정한 metadata.creationTimestamp(클러스터 시계). 만들기 전 검사에서는 "".
 export type RestoreRecord = { run: string; data: Record<string, string>; resourceVersion: string; uid: string; created: string };
 
-// db restore-check 결과(T24 계약 2). 대상(database/pg)·annotation 키·값 모양·cluster uid는 core가 정한다.
+// db restore-check 결과. 대상(database/pg)·annotation 키·값 모양·cluster uid는 core가 정한다.
 // pass면 restore-check-last·restore-check-pass 둘, fail이면 last만 쓴다(실패가 마지막 통과를 지우지 않게).
 // at·target은 초 단위 RFC3339 UTC(…Z). reason은 fail에만 둔다.
-// cluster: 시험을 시작할 때 읽은 Cluster pg의 uid(실행 기록 pguid). 결과는 그 Cluster에만 귀속한다(#1035 리뷰 P2).
+// cluster: 시험을 시작할 때 읽은 Cluster pg의 uid(실행 기록 pguid). 결과는 그 Cluster에만 귀속한다.
 export type RestoreCheckMark = { run: string; result: "pass" | "fail"; at: string; target: string; server: string; dbs: number; cluster: string; reason?: "missing_db" | "no_db" | "aborted" };
 
 // 봇 삭제 원장 지표에서 꺼낸 두 값(restore.md 2.1). 지표 본문은 core 밖으로 나오지 않는다.
@@ -157,7 +157,7 @@ export type ValkeyWrite = {
   markers(ns: string, deployment: string): string[];
 };
 
-// 공유 PostgreSQL 앱 DB 복원(restore.md 2절, 03 2부). 흐름·SQL·매니페스트는 core가 갖는다. 명령은 순서(단계)와 표식만 정한다.
+// 공유 PostgreSQL 앱 DB 복원(restore.md 2절). 흐름·SQL·매니페스트는 core가 갖는다. 명령은 순서(단계)와 표식만 정한다.
 // run은 복원 실행 id, 잠금·기록은 앱 ns의 ConfigMap restore-pg(이 실행의 것이어야 한다). 파괴 단계는 core가 잠금·앱 멈춤·입력 고정을 다시 본다.
 export type RestoreInputs = { ext: { name: string; schema: string; version: string; owner: string }[]; mainEntries: number; aclEntries: number; aclSuEntries: number };
 export type PgRestoreWrite = {
@@ -205,7 +205,7 @@ export type HttpWrite = {
   appStatus(ns: string, deployment: string, port: number, path: "/healthz" | "/healthz/db" | "/healthz/cache"): Promise<number>;
 };
 
-// app new(04)의 GitHub 쓰기. 본문·경로는 core 고정.
+// app new의 GitHub 쓰기. 본문·경로는 core 고정.
 export type AppRepoWrite = {
   createFromTemplate(app: string): void;
   setRepoSettings(app: string): void;

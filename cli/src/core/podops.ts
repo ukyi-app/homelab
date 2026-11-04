@@ -1,4 +1,4 @@
-// 파드 안 작업(쓰기 문맥만, 03 D3·D6·D7). kubectl exec·port-forward는 쓰기로 판정되어 plan에서 돌지 않는다(AC-2).
+// 파드 안 작업(쓰기 문맥만). kubectl exec·port-forward는 쓰기로 판정되어 plan에서 돌지 않는다(AC-2).
 // 셸 텍스트는 이 파일의 상수이고 명령이 넘기는 것은 정규식을 거친 이름과 Secret뿐이다. 이름은 셸에 끼우지 않고 위치 인자로
 // 넘긴다(sh -c '...' sh <인자>). 비밀번호는 stdin으로만 넘기고(-a·env는 ps에 보인다, restore.md 0.3), 거부 판정은 core 고정
 // 정규식(exec signals)으로 받는다(민감 호출의 stderr 원문은 버린다).
@@ -94,7 +94,7 @@ export function valkeyWrite(exec: Exec, k8s: KubeRead, pollMs: number): ValkeyWr
         const info = cli(ns, deployment, "INFO persistence");
         const field = (k: string) => new RegExp(`^${k}:(\\S+)`, "m").exec(info)?.[1];
         // 예약(aof_rewrite_scheduled:1)도 끝나지 않은 것이다. RDB 저장 중에 AOF를 켜면 Valkey 9.1.2는 첫 AOF 생성을 예약만 하고
-        // 나머지 값은 끝난 것처럼 보인다(aof.c startAppendOnly). 그때 재시작하면 옛 AOF나 빈 데이터로 뜬다(#889 r1 P1-1).
+        // 나머지 값은 끝난 것처럼 보인다(aof.c startAppendOnly). 그때 재시작하면 옛 AOF나 빈 데이터로 뜬다.
         // 값이 없으면(필드 이름이 바뀐 버전) 끝났다고 보지 않는다.
         if (field("aof_enabled") === "1" && field("aof_rewrite_in_progress") === "0" && field("aof_rewrite_scheduled") === "0" && field("aof_last_bgrewrite_status") === "ok") return true;
         if (Date.now() + pollMs > deadline) return false;

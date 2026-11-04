@@ -1,5 +1,5 @@
 // 입력 값 검증. 셸·파일·API로 넘기는 값은 줄바꿈(CR·LF)과 NUL을 먼저 거부하고 값 전체를 형식과 맞춘다.
-// 함정(#872 리뷰): 줄 단위 검사(grep -q, 앵커 없는 정규식)는 여러 줄 중 한 줄만 맞아도 통과한다.
+// 함정: 줄 단위 검사(grep -q, 앵커 없는 정규식)는 여러 줄 중 한 줄만 맞아도 통과한다.
 // 그래서 fullMatch는 정규식을 ^(?:...)$로 다시 감싸고 m 플래그를 버린다.
 import { jsonStringify } from "./intrinsics";
 
@@ -22,7 +22,7 @@ export const PUBLIC_HOST = /[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.ukyi\.app/;
 // 내부 이름(values.schema.json). 클러스터 접두를 붙인 길이와 예약어는 명령이 따로 본다(설계 C.4.4).
 export const INTERNAL_NAME = /[a-z]([a-z0-9-]{0,61}[a-z])?/;
 export const RESERVED_INTERNAL = ["go", "vm-go", "tailscale-operator", "vm-tailscale-operator"];
-// Infisical 키 이름. 앱 차트의 env 이름과 같은 꼴(platform/charts/app/values.schema.json envName, Connector 3라운드).
+// Infisical 키 이름. 앱 차트의 env 이름과 같은 꼴(platform/charts/app/values.schema.json envName).
 export const SECRET_KEY = /[A-Z_][A-Z0-9_]*/;
 export const GIT_SHA = /[0-9a-f]{40}/;
 export const IMAGE_DIGEST = /sha256:[0-9a-f]{64}/;
@@ -47,7 +47,7 @@ export function repoPathProblem(path: string): string | null {
   return null;
 }
 
-// 복원 실행 id(03 L8): UTC YYYYMMDDHHMMSS + 16진 6자 = 20자. 라벨 homelab.ukyi.app/restore의 ^[a-z0-9]{1,22}$에 맞는다.
+// 복원 실행 id: UTC YYYYMMDDHHMMSS + 16진 6자 = 20자. 라벨 homelab.ukyi.app/restore의 ^[a-z0-9]{1,22}$에 맞는다.
 export function newRunId(now: Date = new Date()): string {
   const stamp = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
   const rand = [...crypto.getRandomValues(new Uint8Array(3))].map((b) => b.toString(16).padStart(2, "0")).join("");

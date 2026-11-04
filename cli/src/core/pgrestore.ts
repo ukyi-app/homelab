@@ -1,6 +1,6 @@
-// 공유 PostgreSQL에서 앱 DB 하나 복원(restore.md 2절, 03 2부 D1·D2·D4·D5). 쓰기 문맥(w.pgRestore)만.
+// 공유 PostgreSQL에서 앱 DB 하나 복원(restore.md 2절). 쓰기 문맥(w.pgRestore)만.
 // 이 모듈이 흐름을 갖는다: SQL·셸 텍스트·Job·Cluster 매니페스트는 여기 상수이고, 명령은 (app, run)과 정규식을 거친 값만 넘긴다.
-// 명령이 만든 SQL·파일 텍스트를 실행하거나 파드에 쓰는 길은 없다(범용 applyAclSql·putList는 거절, REPORT-adapters 3절).
+// 명령이 만든 SQL·파일 텍스트를 실행하거나 파드에 쓰는 길은 없다(범용 applyAclSql·putList는 두지 않는다).
 //
 // - 4-2 산출물(확장 목록·본 복원 목록·ACL 목록·postgres용 ACL SQL)은 이 모듈이 만들어 기록 ConfigMap restore-pg의 in.*에
 //   두고 in.sha로 고정한다. in.*는 명령이 쓸 수 없다(kubectl.ts). 뒤 단계는 기록을 다시 읽어 sha와 형식을 확인한 뒤 쓴다.
@@ -18,7 +18,7 @@ const PRIMARY = /^pg-[0-9]+$/;
 const RT = "--request-timeout=20s";
 const RECORD = "restore-pg";
 const RESTORE_LABEL = "homelab.ukyi.app/restore";
-// 기록 ConfigMap 한도 1MiB. 다른 키를 위해 남긴다(03 2절).
+// 기록 ConfigMap 한도 1MiB. 다른 키를 위해 남긴다.
 const MAX_INPUTS = 900 * 1024;
 
 // restore.md 2절 머리의 fit 정규식과 같다.
@@ -63,7 +63,7 @@ exec sleep 7000
 const RCLONE_IMAGE = "docker.io/rclone/rclone:1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5";
 
 // pg_restore를 파이프 소비자로 쓸 때의 고정 셸. --list나 ACL만 고른 -L은 데이터 본문을 다 읽지 않고 끝나 생산자가 SIGPIPE(141)로
-// 죽는다(#885 리뷰 실측: 22MB 덤프, PostgreSQL 18.6). 끝난 뒤 남은 stdin을 읽어 버리고 pg_restore의 종료 코드를 그대로 낸다.
+// 죽는다(실측: 22MB 덤프, PostgreSQL 18.6). 끝난 뒤 남은 stdin을 읽어 버리고 pg_restore의 종료 코드를 그대로 낸다.
 // 생산자의 141을 성공으로 바꾸지 않는다(진짜 생산자 실패를 숨긴다).
 export const PG_RESTORE_DRAINED = 'pg_restore "$@"; rc=$?; cat >/dev/null; exit $rc';
 const drained = (args: string[]) => ["sh", "-c", PG_RESTORE_DRAINED, "sh", ...args];
@@ -173,7 +173,7 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
   const q = (pod: string, sql: string, vars: Record<string, string>, db?: string, extra: string[] = []) => must(exec(psqlArgv(pod, vars, db, extra), { input: sql }), "psql").trim();
   // 복원 Job(앱 역할) 안에서. 긴 흐름(파이프)에는 --request-timeout을 붙이지 않는다(스트림이 20초에 끊길 수 있다).
   const jobArgv = (app: string, run: string, cmd: string[], rt = true) => ["kubectl", "-n", appNs(app), "exec", "-i", `job/${dbJob(run)}`, ...(rt ? [RT] : []), "--", ...cmd];
-  // 덤프 원본은 2단계에서 고정한 임시 주 파드(기록 tmp)다. 지금 주 파드가 그와 다르면 멈춘다(#885 리뷰 P1: 다시 고르면
+  // 덤프 원본은 2단계에서 고정한 임시 주 파드(기록 tmp)다. 지금 주 파드가 그와 다르면 멈춘다(다시 고르면
   // 검증하지 않은 다른 파드의 덤프로 DB를 지울 수 있다. pg_restore -L은 OID를 대조하지 않아 목록이 읽힌다는 것은 증거가 아니다).
   const dumpArgv = (app: string, run: string) => ["kubectl", "-n", "database", "exec", pinnedTmp(app, run), "-c", "postgres", "--", "pg_dump", "-U", "postgres", "-Fc", "-d", app];
   const piped = async (producer: string[], consumer: string[], what: string): Promise<string> => {
@@ -199,8 +199,8 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
     if (!m) throw new Error("ObjectStore r2의 destinationPath에서 버킷을 읽지 못했다");
     return m[1];
   };
-  // 되돌림 사본 버킷은 이 실행에서 처음 한 번 기록(bucket)에 고정하고 조회·올리기·끝까지 읽기가 같은 값을 쓴다(#885 리뷰 P1,
-  // 런북 vars.env의 BUCKET). 그 뒤 ObjectStore가 바뀌어도 원래 사본 위치를 쓴다.
+  // 되돌림 사본 버킷은 이 실행에서 처음 한 번 기록(bucket)에 고정하고 조회·올리기·끝까지 읽기가 같은 값을 쓴다
+  // (런북 vars.env의 BUCKET). 그 뒤 ObjectStore가 바뀌어도 원래 사본 위치를 쓴다.
   const fixedBucket = (app: string, run: string): string => {
     const rec = record(app, run);
     const b = rec.data.bucket;
@@ -215,7 +215,7 @@ export function pgRestoreWrite(exec: Exec, k8s: KubeRead, pipe: Pipe, pollJob: (
   const r2Path = (app: string, run: string) => `/pgdump/${app}/pre-restore-${run}.dump`;
   const r2Argv = (run: string, cmd: string[], rt = true) => ["kubectl", "-n", "database", "exec", "-i", `job/${r2Job(run)}`, ...(rt ? [RT] : []), "--", ...cmd];
 
-  // 잠금(mine)과 기록. 기록은 앱 ns의 restore-pg, 값은 03 2절.
+  // 잠금(mine)과 기록. 기록은 앱 ns의 restore-pg.
   const record = (app: string, run: string) => {
     const r = k8s.restoreRecord(appNs(app), RECORD);
     if (!r || r.run !== run) throw new Error(`멈춤: 복원 잠금이 이 실행(${run})의 것이 아니다`);

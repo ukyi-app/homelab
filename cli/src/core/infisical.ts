@@ -1,7 +1,7 @@
 // Infisical 어댑터. 사람의 infisical login을 쓴다. 프로젝트 homelab, 환경 prod(설계 C.6).
 // 값은 메모리에서 Secret으로만 다룬다. 출력·argv·파일에 두지 않는다. argv는 여기서만 만든다.
 //
-// 실측(infisical 0.44.2, 로컬 가짜 API 서버, 2026-10-23):
+// 실측(infisical 0.44.2, 로컬 가짜 API 서버):
 // - `secrets get <없는 키>`는 exit 0에 값 "*not found*"를 낸다. 그래서 존재는 폴더 목록(`secrets --path`)으로 본다.
 // - 목록 JSON은 secretKey·secretValue뿐이다. 마지막 변경 시각(updatedAt)은 CLI로 읽을 수 없다(존재만, lead 결정).
 // - `secrets set --file /dev/stdin`은 stdin의 .env 줄을 읽어 값을 요청 본문으로만 보낸다(argv에 값 없음).
@@ -19,8 +19,8 @@ export const PROJECT_ENV = "HOMELAB_INFISICAL_PROJECT_ID";
 // /apps/<앱>, /apps/<앱>/postgres 같은 폴더 경로.
 const FOLDER = /\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*/;
 
-// 로그인 만료·인증 거부(T12-05 F9). 값이 실릴 수 있는 호출은 오류 원문을 버리므로, 고정 정규식에 맞았는지(이름)만 받는다
-// (exec signals). 원문은 계속 버린다. 0.44.2 바이너리 문구(strings 실측 2026-10-26): "Your login session has expired.
+// 로그인 만료·인증 거부. 값이 실릴 수 있는 호출은 오류 원문을 버리므로, 고정 정규식에 맞았는지(이름)만 받는다
+// (exec signals). 원문은 계속 버린다. 0.44.2 바이너리 문구(strings 실측): "Your login session has expired.
 // Please run [infisical login]", "You must be logged in ... run [infisical login]", "we couldn't find your logged in details,
 // try running [infisical login]". API가 토큰을 거부하면 오류 줄에 [status-code=401]이나 Unauthorized가 실린다.
 // 함정: signals는 stdout도 본다. 성공한 목록의 stdout은 값이라 맞을 수 있으니 실패(exit ≠ 0)일 때만 판정한다.
@@ -31,7 +31,7 @@ function loginExpired(r: ExecResult, what: string): void {
   if (r.code !== 0 && r.signals?.includes("login")) throw new CliError(`${what}: Infisical 로그인이 만료됐거나 거부됐다`, LOGIN_NEXT);
 }
 
-// 프로젝트 ID 정하기. lead 결정(2026-10-23): 환경변수, 없고 tty면 한 번 묻기, 아니면 실패 + 다음 행동. 값은 저장소에 두지 않는다.
+// 프로젝트 ID 정하기. lead 결정: 환경변수, 없고 tty면 한 번 묻기, 아니면 실패 + 다음 행동. 값은 저장소에 두지 않는다.
 export type ProjectSource = { env: Record<string, string | undefined>; isTTY: boolean; ask: (q: string) => string | null };
 
 export function projectResolver(src: ProjectSource): { id: () => string; status: () => "ok" | "missing" | "invalid" } {
@@ -81,7 +81,7 @@ function folderPieces(path: string): [string, string][] {
   return parts.map((name, i) => [i === 0 ? "/" : `/${parts.slice(0, i).join("/")}`, name]);
 }
 
-// 폴더 목록 JSON에서 이름만. 실측(0.44.2 바이너리 + 가짜 API, #880 리뷰, packages/cmd/folder.go): 항목은
+// 폴더 목록 JSON에서 이름만. 실측(0.44.2 바이너리 + 가짜 API, packages/cmd/folder.go): 항목은
 // {folderId, folderName, folderPath}이고 빈 목록은 null이다. 그 밖의 모양이면 던진다.
 function folderNames(exec: Exec, project: string, parent: string): string[] {
   const r = exec(argvFor.folders(project, parent), { signals: LOGIN_SIGNALS });
@@ -102,12 +102,12 @@ function folderNames(exec: Exec, project: string, parent: string): string[] {
   });
 }
 
-// .env 한 줄로 왕복하고 16자 이상인 값만 받는다(위 실측, 사용자 결정 2026-10-23). 틀리면 이유, 맞으면 null.
+// .env 한 줄로 왕복하고 16자 이상인 값만 받는다(위 실측, 사용자 결정). 틀리면 이유, 맞으면 null.
 export function valueProblem(value: Secret): string | null {
   const v = revealSecret(value);
   if (v.length < MIN_SECRET) return `값이 ${MIN_SECRET}자보다 짧다`;
   if (hasControl(v)) return "값에 줄바꿈·탭·제어 문자가 있다";
-  // U+FFFD는 잘못 디코딩된 입력의 흔적이다(바이트 단위 디코딩 함정, #873 3라운드). 받으면 입력과 다른 값이 저장된다.
+  // U+FFFD는 잘못 디코딩된 입력의 흔적이다(바이트 단위 디코딩 함정). 받으면 입력과 다른 값이 저장된다.
   if (v.includes("\uFFFD")) return "값에 깨진 문자(U+FFFD)가 있다";
   if (/^\s|\s$/.test(v)) return "값이 공백으로 시작하거나 끝난다(Infisical CLI가 자른다)";
   if (/^["'`]|["'`]$/.test(v)) return "값이 따옴표로 시작하거나 끝난다(Infisical CLI가 벗긴다)";
@@ -129,7 +129,7 @@ export function infisicalRead(exec: Exec, project: ReturnType<typeof projectReso
     } catch {
       throw new Error(`Infisical ${path} 목록: JSON이 아니다`);
     }
-    // 빈 폴더는 null이다(0.44.2 실측, #880 2라운드: packages/cmd/secrets.go가 빈 slice를 그대로 직렬화). 폴더 목록과 같다.
+    // 빈 폴더는 null이다(0.44.2 실측: packages/cmd/secrets.go가 빈 slice를 그대로 직렬화). 폴더 목록과 같다.
     if (parsed === null) parsed = [];
     if (!Array.isArray(parsed)) throw new Error(`Infisical ${path} 목록: 배열이 아니다`);
     const keys: string[] = [];

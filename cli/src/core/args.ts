@@ -36,7 +36,7 @@ function checkValue(what: string, value: string, spec: { values?: string[]; patt
   if (value === "") throw new UsageError(`${what}: 값이 비었다`);
   if (hasControl(value)) throw new UsageError(`${what}: 줄바꿈·제어 문자를 받지 않는다`);
   if (spec.values && !spec.values.includes(value)) throw new UsageError(`${what}: ${spec.values.join(" | ")} 중 하나`);
-  // 값은 되찍지 않는다. 시크릿을 인자로 잘못 넣은 경우 출력·로그로 다시 퍼진다(Connector 2라운드).
+  // 값은 되찍지 않는다. 시크릿을 인자로 잘못 넣은 경우 출력·로그로 다시 퍼진다.
   if (spec.pattern && !fullMatch(spec.pattern, value)) throw new UsageError(`${what}: 형식이 아니다`);
 }
 
@@ -66,7 +66,7 @@ export function parseInput(specFlags: FlagSpec[], specArgs: ArgSpec[], tokens: s
     const name = t.slice(2, eq === -1 ? undefined : eq);
     const inline = eq === -1 ? undefined : t.slice(eq + 1);
     const spec = byName.get(name);
-    // 모르는 이름은 되찍지 않는다. 시크릿을 플래그 자리에 잘못 넣으면(--hunter2…) 오류 출력에 실린다(Connector 4360754418).
+    // 모르는 이름은 되찍지 않는다. 시크릿을 플래그 자리에 잘못 넣으면(--hunter2…) 오류 출력에 실린다.
     if (!spec) throw new UsageError(`모르는 플래그다(받는 플래그: ${[...byName.keys()].map((n) => `--${n}`).join(", ")})`);
     if (flags[name] !== undefined) throw new UsageError(`--${name}를 두 번 줬다(중복 플래그는 받지 않는다)`);
     if (spec.kind === "bool") {
@@ -91,7 +91,7 @@ export function parseInput(specFlags: FlagSpec[], specArgs: ArgSpec[], tokens: s
   }
 
   const args: Record<string, string | undefined> = {};
-  // --help면 위치 인자를 보지 않는다(필수 인자를 몰라도 도움말을 본다, Connector 2라운드).
+  // --help면 위치 인자를 보지 않는다(필수 인자를 몰라도 도움말을 본다).
   if (flags.help === true) return { args, flags, apply: flags.apply === true, json: flags.json === true, help: true };
   if (positional.length > specArgs.length) throw new UsageError(`인자가 ${positional.length - specArgs.length}개 많다(값은 보이지 않는다. 시크릿은 stdin으로)`);
   specArgs.forEach((a, idx) => {

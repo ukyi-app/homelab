@@ -1,5 +1,5 @@
-// values YAML 편집(02 R1, 03 restore·purge). 사람이 쓴 주석이 있는 파일이라 다시 직렬화하지 않고, 바꿀 최상위 키 블록만
-// 한 줄 flow 꼴(`uses: { postgres: true }`, T11 꼴)로 바꾸거나 지우거나 끝에 더한다. 다른 줄과 주석은 그대로 둔다.
+// values YAML 편집. 사람이 쓴 주석이 있는 파일이라 다시 직렬화하지 않고, 바꿀 최상위 키 블록만
+// 한 줄 flow 꼴(`uses: { postgres: true }`)로 바꾸거나 지우거나 끝에 더한다. 다른 줄과 주석은 그대로 둔다.
 // 결과를 다시 parse해 "원래 객체 + 편집"과 다르면 던진다(블록 경계를 잘못 읽었거나 직렬화가 틀린 경우의 그물).
 // 명령이 import할 수 있는 core 모듈이다(정적 시험의 허용 목록).
 import { isArray, jsonStringify } from "./intrinsics";

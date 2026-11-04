@@ -45,7 +45,7 @@ export function toolsRead(exec: Exec, env: Record<string, string | undefined> = 
       return r.code === 0 ? "ok" : "no";
     },
     selfOnPath() {
-      // 함정: 옛 bun link(~/.bun/bin/homelab → 옛 tools/homelab.ts)가 PATH 앞에 남아 새 CLI를 가렸다(T12-05 운영).
+      // 함정: 옛 bun link(~/.bun/bin/homelab)가 PATH 앞에 남아 있으면 새 CLI를 가린다(운영 실측).
       // 사람이 homelab을 치면 그 옛 것이 돈다. 링크를 따라간 실제 파일로 비교한다.
       const first = Bun.which("homelab", { PATH: env.PATH ?? "" });
       return { first, running, same: first !== null && real(first) === real(running) };

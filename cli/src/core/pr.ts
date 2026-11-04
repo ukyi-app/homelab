@@ -1,12 +1,12 @@
-// GitHub API PR 작성기(PLAN D3). 로컬 체크아웃 없이 tree·commit을 API로 만들어 cli/<동사>-<app> 브랜치에 올리고 PR을 연다.
+// GitHub API PR 작성기. 로컬 체크아웃 없이 tree·commit을 API로 만들어 cli/<동사>-<app> 브랜치에 올리고 PR을 연다.
 // 작성자는 사람의 gh 로그인이고 병합하지 않는다(사람이 검토 후 병합, 설계 C.7·C.4.7).
 //
-// 파일 내용은 고정 문자열이 아니라 edit(현재 내용) 함수로 받는다(#873 2라운드 P2). 읽을 때와 apply 때 모두 그 시점의
+// 파일 내용은 고정 문자열이 아니라 edit(현재 내용) 함수로 받는다. 읽을 때와 apply 때 모두 그 시점의
 // main 스냅샷 하나에서 파일을 읽어 다시 계산하고, 커밋 tree도 같은 스냅샷 위에 만든다. 그래서 그사이 병합된 변경을
 // 되돌리지 않는다(예: app-repos.json에 다른 PR이 alpha를 더했으면 beta 계산에 alpha가 들어간다).
 //
-// 브랜치 갱신: 머리 커밋에 Homelab-CLI 트레일러가 없으면(사람이 push한 커밋) 멈춘다(lead 결정 2026-10-23).
-// force는 쓰지 않는다(#873 1라운드). 새 커밋의 부모를 [main 스냅샷, 확인한 브랜치 머리]로 두고 fast-forward로만 옮긴다.
+// 브랜치 갱신: 머리 커밋에 Homelab-CLI 트레일러가 없으면(사람이 push한 커밋) 멈춘다(lead 결정).
+// force는 쓰지 않는다. 새 커밋의 부모를 [main 스냅샷, 확인한 브랜치 머리]로 두고 fast-forward로만 옮긴다.
 // 확인과 PATCH 사이에 사람이 push하면 새 커밋이 그 push의 자손이 아니라 GitHub가 422로 거부한다.
 import { jsonStringify } from "./intrinsics";
 import type { Observation, ReadCtx, RepoRead, Step, WriteCtx } from "./command";
@@ -56,7 +56,7 @@ function openPr(ctx: ReadCtx | WriteCtx, branch: string): OpenPr | null {
   const list = Array.isArray(r.json) ? r.json : [];
   if (list.length > 1) throw new Error(`${branch}에 열린 PR이 ${list.length}개다. 하나만 남기고 닫는다`);
   if (list.length === 0) return null;
-  // base가 main이 아닌 PR을 같다고 보면 main에 반영할 PR 없이 영원히 기다린다(Connector 3라운드).
+  // base가 main이 아닌 PR을 같다고 보면 main에 반영할 PR 없이 영원히 기다린다.
   if (list[0].base?.ref !== "main") throw new Error(`PR #${list[0].number}의 base가 main이 아니다. 닫거나 base를 main으로 바꾼 뒤 다시 실행한다`);
   const headSha = list[0].head?.sha;
   if (typeof headSha !== "string" || !fullMatch(GIT_SHA, headSha)) throw new Error(`PR #${list[0].number} 머리 SHA를 읽지 못했다`);
@@ -78,7 +78,7 @@ function changedFiles(ctx: ReadCtx | WriteCtx, base: string, head: string): stri
   // compare는 파일 300개까지 준다. CLI PR은 몇 개뿐이라 그보다 많으면 사람 변경이 섞인 것으로 본다.
   if (files.length >= 300) throw new Error("PR 변경 파일이 300개 이상이다(CLI가 만든 PR이 아니다)");
   // rename은 새 경로가 filename, 원래 경로가 previous_filename이다. 둘 다 센다. 원래 경로를 빼면 명령 밖 파일을 명령의
-  // 경로로 옮긴 PR이 "같음"으로 보이고, 병합하면 원래 파일이 사라진다(Connector 4360396722).
+  // 경로로 옮긴 PR이 "같음"으로 보이고, 병합하면 원래 파일이 사라진다.
   return files.flatMap((f: { filename: string; previous_filename?: string }) => (typeof f.previous_filename === "string" ? [f.filename, f.previous_filename] : [f.filename]));
 }
 
@@ -93,7 +93,7 @@ export type PrSpec = {
   // 이 PR이 다루는 파일. edit는 이 파일들의 현재 내용(없으면 null)을 받아 원하는 내용(지우려면 null)을 같은 키로 돌려준다.
   files: string[];
   edit(current: FileContents): FileContents;
-  // 바뀌는 파일마다 사람용 요약(예 "uses.postgres: false → true"). 있으면 plan detail에 붙인다(설계 D 5번 상자, 02 R8).
+  // 바뀌는 파일마다 사람용 요약(예 "uses.postgres: false → true"). 있으면 plan detail에 붙인다(설계 D 5번 상자).
   describe?(path: string, before: string | null, after: string | null): string;
 };
 
@@ -140,7 +140,7 @@ export function prStep(spec: PrSpec): Step {
     const current = snapshot(ctx.repo, spec.files, base);
     const desired = desiredOf(spec, current);
     const onMain = sameContents(desired, current);
-    // 열린 PR을 main 비교보다 먼저 본다(Connector 2라운드): main에 이미 반영됐어도 위험한 PR이 열려 있을 수 있다.
+    // 열린 PR을 main 비교보다 먼저 본다: main에 이미 반영됐어도 위험한 PR이 열려 있을 수 있다.
     const pr = openPr(ctx, branch);
     if (pr) {
       requireCliHead(ctx, branch, pr.headSha);
@@ -175,12 +175,12 @@ export function prStep(spec: PrSpec): Step {
     }
 
     // tree 항목에 내용을 직접 넣으면 blob을 따로 만들지 않아도 된다. sha null은 삭제.
-    // 이 스냅샷과 같은 파일은 넣지 않는다. 명령이 PR 시점 확인용으로 읽기만 하는 파일(02 데이터 values·bot-slot)이 없으면
-    // null → null이고, 그것을 넣으면 없는 경로의 삭제라 GitHub가 tree를 거부한다(#890 1라운드 P2-4). base_tree가 나머지를 지킨다.
+    // 이 스냅샷과 같은 파일은 넣지 않는다. 명령이 PR 시점 확인용으로 읽기만 하는 파일(데이터 values·bot-slot)이 없으면
+    // null → null이고, 그것을 넣으면 없는 경로의 삭제라 GitHub가 tree를 거부한다. base_tree가 나머지를 지킨다.
     const tree = spec.files.filter((path) => desired[path] !== current[path]).map((path) => (desired[path] === null ? { path, mode: "100644", type: "blob", sha: null } : { path, mode: "100644", type: "blob", content: desired[path] }));
     // 읽은 뒤 그사이 main이 원하는 내용이 됐으면 바꿀 파일이 없다. 그래도 열린 CLI PR이 있으면 그 브랜치를 main tree 그대로의
     // 커밋으로 옮겨 PR 변경을 0으로 만든다. 그냥 돌아가면 옛 내용의 PR이 열린 채 남고, 병합하면 그 옛 내용이 들어간다
-    // (#892 1라운드 P2: rollback --release가 옛 이미지·hold true의 PR을 남기고 갱신했다고 알렸다). 재조회가 "PR #n은 이제
+    // (예: rollback --release가 옛 이미지·hold true의 PR을 남기고 갱신했다고 알린다). 재조회가 "PR #n은 이제
     // 필요 없다, 닫는다"를 warn으로 내고 엔진이 notes에 올린다. PR이 없으면(브랜치만 남았어도) 쓸 것이 없다.
     const stalePr = tree.length === 0 && head !== null ? openPr(w, branch) : null;
     if (tree.length === 0 && stalePr === null) return;
