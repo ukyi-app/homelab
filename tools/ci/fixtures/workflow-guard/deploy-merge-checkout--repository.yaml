@@ -1,0 +1,17 @@
+# path: .github/workflows/deploy-merge.yaml
+# expect: deploy-merge-checkout
+# repository를 주면 github.sha가 있어도 다른 저장소의 코드가 돈다.
+name: deploy-merge
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event.workflow_run.head_repository.full_name }}
+          ref: ${{ github.sha }}
+          persist-credentials: false

@@ -405,6 +405,19 @@ const steps: Step[] = [
     },
   },
   {
+    name: "deploy-merge merge",
+    // 병합 단계의 재시도·상태 확인(tools/deploy-merge/merge.ts). GitHub은 가짜라 네트워크를 쓰지 않는다. 0건 통과는 실패다(B.8 E7).
+    run: () => {
+      const r = run(["bun", "cli/test/run.ts", "tools/deploy-merge/"]);
+      const out = (r.stdout + r.stderr).trim();
+      console.log(out);
+      const pass = Number(out.match(/^\s*(\d+) pass$/m)?.[1] ?? 0);
+      if (r.code !== 0) return [{ rule: "deploy-merge-merge", where: "tools/deploy-merge/", message: `bun test exit ${r.code}` }];
+      if (pass === 0) return [{ rule: "deploy-merge-merge", where: "tools/deploy-merge/", message: "통과한 시험이 0건이다" }];
+      return [];
+    },
+  },
+  {
     name: "render, policy, kubeconform",
     run: () => {
       const r = renderAll();
