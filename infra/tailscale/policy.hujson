@@ -19,6 +19,8 @@
     // NUC에 태그를 붙이기 전에 이 두 줄이 먼저 적용돼 있어야 원격 접속이 끊기지 않는다.
     { "action": "accept", "src": ["autogroup:owner", "autogroup:admin"], "dst": ["tag:nuc:22,6443"] },
     { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:nuc:53"] },
+    // Mosh는 SSH로 mosh-server를 띄운 뒤 이 범위의 UDP로 붙는다. 없으면 SSH 로그인까지 성공하고 연결만 타임아웃난다(tailscaled 로그 "no rules matched").
+    { "action": "accept", "src": ["autogroup:owner", "autogroup:admin"], "proto": "udp", "dst": ["tag:nuc:60000-61000"] },
     { "action": "accept", "src": ["autogroup:member", "tag:nuc"], "dst": ["tag:k8s:443"] },
     // 짧은 주소 리다이렉터(D-30). 모든 프록시에 80을 열지 않으려고 태그를 나눈다.
     { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s-go:80"] }
