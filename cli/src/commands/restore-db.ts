@@ -6,7 +6,7 @@
 // 실행 기록은 앱 ns의 ConfigMap restore-pg(런북 $W를 클러스터에, REPORT-ops 2절). 이 명령이 쓰는 키는 to·srv·img·size·ok.*이고
 // bucket·tmp·in.*·dropped는 core가 쓴다. 끝나도 기록은 남고(다시 쳐도 모두 same) --finish가 지운다.
 // 확인할 수 없으면 멈춘다. 지금 DB를 지우는 단계(db)는 앞 표식이 모두 있고 되돌림 사본이 지금도 R2에 있을 때만 시작한다.
-import { defineCommand, type Observation, type ReadCtx, type RestoreRecord, type Step, type WriteCtx } from "../core/command";
+import { defineCommand, type LedgerMetrics, type Observation, type ReadCtx, type RestoreRecord, type Step, type WriteCtx } from "../core/command";
 import { APP_NAME, newRunId } from "../core/names";
 import { prStep } from "../core/pr";
 import { UsageError } from "../core/result";
@@ -52,10 +52,11 @@ function dependents(step: string): string[] {
 
 // inv: 이 호출이 받아들인 실행. to는 요청한 시각(--finish·--abort는 null), run은 처음 받아들인 기록의 실행 id.
 // 쓰기마다 지금 기록이 이것과 같은지 본다. 사전 검사 뒤 다른 --to의 기록이 생겨도 이어받지 않는다(#886 r2 P1-1).
-type Names = { app: string; ns: string; appsFile: string; dataFile: string; dbJob: (run: string) => string; r2Job: (run: string) => string; tmp: (run: string) => string; inv: { to: string | null; run: string | null } };
+// inv.ledgerHold: 이 호출의 재개 단계가 원장 지표를 보고 멈춘 이유. 호출마다 새로 만들어져 다시 치면 지표를 다시 본다.
+type Names = { app: string; ns: string; appsFile: string; dataFile: string; dbJob: (run: string) => string; r2Job: (run: string) => string; tmp: (run: string) => string; inv: { to: string | null; run: string | null; ledgerHold: string | null } };
 
 function namesOf(app: string, to: string | null): Names {
-  return { app, ns: `app-${app}`, appsFile: `apps/${app}/values.yaml`, dataFile: `data/${app}/values.yaml`, dbJob: (r) => `restore-${r}-db`, r2Job: (r) => `restore-${r}-r2`, tmp: (r) => `pg-restore-${r}`, inv: { to, run: null } };
+  return { app, ns: `app-${app}`, appsFile: `apps/${app}/values.yaml`, dataFile: `data/${app}/values.yaml`, dbJob: (r) => `restore-${r}-db`, r2Job: (r) => `restore-${r}-r2`, tmp: (r) => `pg-restore-${r}`, inv: { to, run: null, ledgerHold: null } };
 }
 
 function values(ctx: ReadCtx | WriteCtx, path: string): any | null {
@@ -135,6 +136,27 @@ function stopped(ctx: ReadCtx | WriteCtx, n: Names): boolean {
 function rolledOut(d: any): boolean {
   const want = d?.spec?.replicas;
   return Number.isInteger(want) && want >= 1 && d?.status?.updatedReplicas === want && d?.status?.readyReplicas === want && (d?.status?.observedGeneration ?? 0) >= (d?.metadata?.generation ?? 0);
+}
+
+// 삭제 원장이 있는 앱(restore.md 2.1, T20 homelab-bot). 원장 PVC 이름은 data 차트가 정한다.
+// 봇 Ready는 원장과 묶이지 않아(T20 2단계 계약) Deployment Ready만으로는 T1 뒤 지운 기억이 다시 지워졌는지 모른다.
+const LEDGER_PVC = "deletion-ledger";
+const hasLedger = (ctx: ReadCtx | WriteCtx, n: Names): boolean => ctx.k8s.get("pvc", n.ns, LEDGER_PVC) !== null;
+
+// 재개를 기록해도 되면 null, 아니면 멈출 이유. ready·삭제 대기 0만 통과다. 읽지 못한 것도 통과로 보지 않는다.
+// 지표는 상태·개수만 받는다(본문은 core 밖으로 나오지 않는다).
+function ledgerHold(w: WriteCtx, n: Names): string | null {
+  let m: LedgerMetrics;
+  try {
+    m = w.k8s.ledgerMetrics(n.ns, n.app);
+  } catch (e) {
+    return `원장 지표를 읽지 못했다(${(e as Error).message}). 통과로 보지 않는다`;
+  }
+  if (m.state === "ready" && m.pending === 0) return null;
+  // disabled는 봇이 원장을 끈 채 떴다는 뜻이라 기다려도 풀리지 않는다.
+  if (m.state === "disabled") return `원장 disabled: 원장 PVC ${LEDGER_PVC}가 있는데 ${n.appsFile} env에 MEMORY_LEDGER_DIR이 없다(원장·기억이 꺼져 있다)`;
+  const wait = `원장 재적용 대기(원장 ${m.state}, 삭제 대기 ${m.pending})`;
+  return m.state === "failed" ? `${wait}. 재기동 직후 lock_held는 60초마다 풀린다. 계속되면 봇 로그의 deletion_ledger_<사유>와 restore.md 4절` : wait;
 }
 
 // 이 실행의 복원 객체(두 ns, 지우는 중 포함). 기록을 지우기 직전에 0개여야 한다.
@@ -503,10 +525,20 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         if (!ok(r, "verify")) return later("재개 PR 병합 뒤 확인");
         if (values(ctx, n.appsFile)?.suspended === true) return same("PR 대기", { hold: "앱 재개 PR 병합 대기" });
         const d = ctx.k8s.get("deployment", n.ns, app);
-        return rolledOut(d) ? { state: "differs", action: "update", detail: "앱 Ready → 기록" } : same("main에서 suspended 지움", { hold: "앱 재개 반영 대기(Argo CD)" });
+        if (!rolledOut(d)) return same("main에서 suspended 지움", { hold: "앱 재개 반영 대기(Argo CD)" });
+        if (!hasLedger(ctx, n)) return { state: "differs", action: "update", detail: "앱 Ready → 기록" };
+        // 원장 지표는 kubectl exec라 apply에서만 읽는다. 이 호출의 apply가 통과를 못 봤으면 여기서 멈춰 정리(cleanup)로 가지 않는다.
+        if (n.inv.ledgerHold !== null) return same("앱 Ready, 원장 확인 안 됨", { hold: n.inv.ledgerHold });
+        return { state: "differs", action: "update", detail: "앱 Ready → 원장 ready·삭제 대기 0 확인 뒤 기록" };
       },
       async apply(w) {
-        await withLease(w, n, "resumed", async (r) => w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "ok.resumed": "1" }));
+        await withLease(w, n, "resumed", async (r) => {
+          if (hasLedger(w, n)) {
+            n.inv.ledgerHold = ledgerHold(w, n);
+            if (n.inv.ledgerHold !== null) return;
+          }
+          w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "ok.resumed": "1" });
+        });
       },
     },
     {

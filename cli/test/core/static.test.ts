@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { CommandSpec } from "../../src/core/command";
+import { LEDGER_FETCH } from "../../src/core/kubectl";
 import { REGISTRY } from "../../src/registry";
 import { testRoot } from "../harness";
 
@@ -24,9 +25,14 @@ export function code(text: string): string {
     .join("\n");
 }
 
+// 파드 안에서 node가 실행하는 스크립트 리터럴(restore.md 2.1 원장 지표)은 CLI 프로세스의 네트워크·출력이 아니다.
+// 그 리터럴 하나만 정확히 뺀다. 같은 파일의 다른 fetch(·process.stdout은 그대로 걸린다(아래 "파드 안 스크립트 예외" 시험).
+const IN_POD_SCRIPTS = [`'${LEDGER_FETCH}'`];
+export const withoutInPodScripts = (text: string): string => IN_POD_SCRIPTS.reduce((t, s) => t.replaceAll(s, "''"), text);
+
 const src = walk(SRC).filter((p) => p.endsWith(".ts"));
 const rel = (p: string) => relative(SRC, p);
-const body = (p: string) => code(readFileSync(p, "utf8"));
+const body = (p: string) => code(withoutInPodScripts(readFileSync(p, "utf8")));
 
 function offenders(re: RegExp, allowed: string[]): string[] {
   return src.filter((p) => !allowed.includes(rel(p)) && re.test(body(p))).map(rel);
@@ -220,6 +226,17 @@ describe("소스 규칙", () => {
 
   test("stdout·stderr는 core/output.ts에서만", () => {
     expect(offenders(/console\.|process\.stdout|process\.stderr/, ["core/output.ts"])).toEqual([]);
+  });
+
+  test("파드 안 스크립트 예외는 그 리터럴 하나뿐이다(같은 파일의 다른 fetch·stdout은 걸린다)", () => {
+    const rules = /\bfetch\(|process\.stdout/;
+    const decl = `export const LEDGER_FETCH = '${LEDGER_FETCH}';\n`;
+    expect(rules.test(withoutInPodScripts(decl))).toBe(false);
+    expect(rules.test(withoutInPodScripts(`${decl}const r = fetch("http://127.0.0.1/");\n`))).toBe(true);
+    expect(rules.test(withoutInPodScripts(`${decl}process.stdout.write("x");\n`))).toBe(true);
+    // 리터럴이 조금이라도 다르면(따옴표 없음·글자 바뀜) 빼지 않는다
+    expect(rules.test(withoutInPodScripts(`const s = ${JSON.stringify(LEDGER_FETCH)};\n`))).toBe(true);
+    expect(readFileSync(join(SRC, "core", "kubectl.ts"), "utf8")).toContain(IN_POD_SCRIPTS[0]);
   });
 
   test("exec 생성·문맥 조립·비밀번호 생성·쓰기 문맥 내부는 정해진 core 파일만", () => {
