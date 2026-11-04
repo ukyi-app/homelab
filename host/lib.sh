@@ -14,7 +14,7 @@ CLUSTER_KEYS="NODE_NAME NODE_IP NODE_IFACE TAILNET_JOIN KUBE_CONTEXT POD_CIDR SE
 # 비워 둘 수 있는 클러스터 값. TAILNET_DEVICE_NAME이 비면 NODE_NAME을 쓴다.
 # BULK_SSD_LABEL·BULK_MOUNT는 둘 다 비우거나 둘 다 채운다. 비면 SSD 단계(install --bulk-ssd, verify)를 건너뛴다.
 OPTIONAL_KEYS="TAILNET_DEVICE_NAME BULK_SSD_LABEL BULK_MOUNT"
-COMMON_KEYS="INSTALL_K3S_VERSION TIMEZONE NODE_UPSTREAM_DNS"
+COMMON_KEYS="INSTALL_K3S_VERSION SANDBOX_PROFILE_K3S SANDBOX_PROFILE_CONTAINERD TIMEZONE NODE_UPSTREAM_DNS"
 NODE_MAGICDNS=""
 # 파드 egress 규칙(install.sh --egress). 표 이름은 k3s·Tailscale의 표와 겹치지 않게 따로 둔다.
 # 표 이름과 경로는 host/egress/의 두 파일에도 글자로 있다. 바꾸면 셋을 함께 바꾼다.
@@ -40,6 +40,16 @@ EGRESS_UNIT="/etc/systemd/system/${EGRESS_UNIT_NAME}"
   # 첫 초기화의 generation 원천. 시험이 바꾼다.
   UUID_SRC=/proc/sys/kernel/random/uuid
 }
+# 샌드박스 프로필(install.sh --sandbox-profiles). 경로·소유는 tools/host-sandbox-profiles.test.sh가 root 없이 돌리려고 바꾼다.
+# seccomp는 kubelet이 <root-dir>/seccomp 아래에서 찾는다. 파드의 localhostProfile은 homelab/<파일>이다.
+# shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
+{
+  KUBELET_DIR=/var/lib/kubelet
+  SANDBOX_SECCOMP_DIR="${KUBELET_DIR}/seccomp/homelab"
+  APPARMOR_DIR=/etc/apparmor.d
+  APPARMOR_KERNEL_PROFILES=/sys/kernel/security/apparmor/profiles
+  SANDBOX_OWNER=0:0
+}
 
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
@@ -63,6 +73,17 @@ assert_host_tree_clean() {
   out="$("${git_cmd[@]}" 2>&1)" || die "host/의 git 상태를 읽지 못했다: ${out}"
   [ -z "$out" ] || die "host/에 커밋하지 않은 변경이나 무시된 파일이 있다. 커밋하거나 지운 뒤 다시 실행한다:
 ${out}"
+}
+
+# root만 읽는 것을 읽는다. root면 그대로, 아니면 sudo -n(비밀번호를 묻지 않는다). 자격이 없으면 2로 끝난다.
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif sudo -n true 2>/dev/null; then
+    sudo -n "$@"
+  else
+    return 2
+  fi
 }
 
 # MagicDNS 전체 이름은 tailnet 이름을 담는다. 출력이 작업 기록(공개 저장소)에 붙을 수 있어 가린다.
@@ -125,6 +146,71 @@ load_cluster() {
     # 루트(/)·상대 경로·..을 받지 않는다. 원장 경로가 이 아래에 붙는다.
     [[ "$BULK_MOUNT" =~ ^(/[A-Za-z0-9_-]+)+$ ]] || die "BULK_MOUNT는 /로 시작하는 절대 경로다(/ 자체, ., 공백 금지): ${BULK_MOUNT}"
   fi
+}
+
+# ---------------------------------------------------------------- 샌드박스 프로필
+
+# Git의 프로필을 "종류<TAB>원본<TAB>대상" 줄로 낸다. Git에 있는 옛 버전도 함께 깔고 확인한다(파드가 참조할 수 있다).
+# 종류마다 0건이면 성공으로 읽지 않고 멈춘다. AppArmor는 커널에 올라가는 이름이 파일 안의 선언에서 오므로 파일 이름과 맞춘다.
+sandbox_targets() {
+  local f b seccomp=0 apparmor=0
+  for f in "$HOST_DIR"/sandbox-profiles/seccomp/*; do
+    [ -e "$f" ] || continue
+    b="$(basename "$f")"
+    [[ "$b" =~ ^sandbox-[a-z0-9-]+-v[0-9]+\.json$ ]] || die "seccomp 프로필 이름 형식이 아니다(sandbox-<이름>-v<버전>.json): ${f}"
+    printf 'seccomp\t%s\t%s\n' "$f" "${SANDBOX_SECCOMP_DIR}/${b}"
+    seccomp=$((seccomp + 1))
+  done
+  for f in "$HOST_DIR"/sandbox-profiles/apparmor/*; do
+    [ -e "$f" ] || continue
+    b="$(basename "$f")"
+    [[ "$b" =~ ^homelab-sandbox-[a-z0-9-]+-v[0-9]+$ ]] || die "AppArmor 프로필 이름 형식이 아니다(homelab-sandbox-<이름>-v<버전>): ${f}"
+    grep -qE "^profile ${b} flags=" "$f" || die "${f}의 프로필 선언이 파일 이름과 다르다"
+    printf 'apparmor\t%s\t%s\n' "$f" "${APPARMOR_DIR}/${b}"
+    apparmor=$((apparmor + 1))
+  done
+  [ "$seccomp" -ge 1 ] && [ "$apparmor" -ge 1 ] \
+    || die "host/sandbox-profiles/에서 프로필을 찾지 못했다(seccomp ${seccomp}개, AppArmor ${apparmor}개)"
+}
+
+# 프로필이 기대는 호스트 조건을 본다. 문제를 한 줄씩 내고 빈 출력이 통과다.
+# apparmor.service: 부팅 때 /etc/apparmor.d를 커널에 올린다. 꺼져 있으면 재부팅 뒤 Localhost 프로필이 없어 파드가 뜨지 않는다.
+# bwrap·unpriv_bwrap: 샌드박스의 userns·mount 허용은 Ubuntu 프로필에서 온다. 커널 적재와 파일(재부팅 뒤)을 함께 본다.
+sandbox_host_problems() {
+  local en loaded p
+  en="$(systemctl is-enabled apparmor.service 2>/dev/null || true)"
+  [ "$en" = enabled ] \
+    || printf 'apparmor.service가 enabled가 아니다(%s). 재부팅하면 프로필이 커널에 올라가지 않는다\n' "${en:-없음}"
+  [ -e "${APPARMOR_DIR}/bwrap-userns-restrict" ] \
+    || printf '%s가 없다. bwrap이 /usr/bin/bwrap에서 userns를 얻지 못한다. 다시 잰다\n' "${APPARMOR_DIR}/bwrap-userns-restrict"
+  if ! loaded="$(as_root cat "$APPARMOR_KERNEL_PROFILES" 2>/dev/null)"; then
+    printf '%s를 읽지 못했다. AppArmor가 꺼져 있는지 본다\n' "$APPARMOR_KERNEL_PROFILES"
+    return 0
+  fi
+  for p in bwrap unpriv_bwrap; do
+    grep -qxF -- "${p} (enforce)" <<<"$loaded" || printf '호스트 프로필 %s가 enforce로 올라와 있지 않다. 다시 잰다\n' "$p"
+  done
+}
+
+# 깔린 프로필을 Git과 대조한다. 문제를 한 줄씩 내고 빈 출력이 통과다.
+# 소유·모드·해시, AppArmor는 enforce 적재와 disable 표시까지 본다. /var/lib/kubelet은 0750이고 커널 목록은 root만 읽어 as_root로 읽는다.
+sandbox_installed_problems() {
+  local targets kind src dest loaded="" profile git_sum live_sum
+  targets="$(sandbox_targets)"
+  stat_problem "$(as_root stat -c '%u:%g %a %F' -- "$SANDBOX_SECCOMP_DIR" 2>/dev/null)" "$SANDBOX_OWNER" 755 directory "$SANDBOX_SECCOMP_DIR"
+  loaded="$(as_root cat "$APPARMOR_KERNEL_PROFILES" 2>/dev/null)" || printf '%s를 읽지 못했다\n' "$APPARMOR_KERNEL_PROFILES"
+  while IFS=$'\t' read -r kind src dest; do
+    stat_problem "$(as_root stat -c '%u:%g %a %F' -- "$dest" 2>/dev/null)" "$SANDBOX_OWNER" 644 "regular file" "$dest"
+    git_sum="$(sha256sum -- "$src")"
+    live_sum="$(as_root sha256sum -- "$dest" 2>/dev/null)" || live_sum=""
+    [ "${live_sum%% *}" = "${git_sum%% *}" ] || printf '%s: sha256 %s (Git %s)\n' "$dest" "${live_sum%% *}" "${git_sum%% *}"
+    [ "$kind" = apparmor ] || continue
+    profile="$(basename "$dest")"
+    grep -qxF -- "${profile} (enforce)" <<<"$loaded" || printf 'AppArmor %s가 커널에 enforce로 올라와 있지 않다\n' "$profile"
+    if [ -e "${APPARMOR_DIR}/disable/${profile}" ]; then
+      printf '%s가 있어 재부팅하면 %s가 올라가지 않는다\n' "${APPARMOR_DIR}/disable/${profile}" "$profile"
+    fi
+  done <<<"$targets"
 }
 
 # ------------------------------------------------------------------ 삭제 원장 SSD

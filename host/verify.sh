@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # k3s 설치 뒤 라이브 클러스터가 Git(host/)과 같은지 본다. 읽기만 하고 sudo 없이 실행한다(C.3.2 4번).
-# 예외 둘: 커널 nft 표와 삭제 원장 파일(0750 디렉터리 안)은 root만 읽어서 sudo -n(비밀번호를 묻지 않음)으로 읽어 본다.
+# 예외 셋: 커널 nft 표, 삭제 원장 파일(0750 디렉터리 안), 샌드박스 프로필(kubelet 디렉터리, 커널 AppArmor 목록)은 root만 읽어서
+# sudo -n(비밀번호를 묻지 않음)으로 읽어 본다.
 #
 # 사용: host/verify.sh --cluster <이름> [--identity]
 #   기본        정체성, 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 k3s-config.yaml,
 #               serving cert SAN, local-retain StorageClass, 파드 egress(유닛, 규칙 파일, 대역, 커널 표),
 #               inotify 인스턴스 한도(설치된 sysctl 파일, 커널 값), 삭제 원장 SSD(마운트, fstab, 원장 디렉터리·
-#               파일 소유·모드, 표식 형식. BULK_SSD_LABEL이 빈 클러스터는 건너뜀), kubeconfig 권한.
+#               파일 소유·모드, 표식 형식. BULK_SSD_LABEL이 빈 클러스터는 건너뜀), 샌드박스 프로필(containerd 판,
+#               호스트 조건, 깔린 파일 소유·모드·해시, AppArmor enforce 적재), kubeconfig 권한.
 #   --identity  정체성만 본다. 파괴 명령(삭제, 복구, 제거) 앞에서 대상 클러스터를 확인할 때 쓴다.
 #
 # 종료 코드: 0 통과, 1 실패, 2 실패는 없지만 커널 표를 못 읽어 미검증(sudo 자격이 없다).
@@ -235,6 +237,34 @@ check_inotify() {
   fi
 }
 
+# 샌드박스 프로필(install.sh --sandbox-profiles). containerd 판은 root 없이 보고, 파일과 커널 목록은 as_root로 본다.
+# 판이 다르면 프로필의 출발점이 라이브 기본값과 어긋난 것이다. k3s를 올리고 프로필을 다시 만들지 않으면 여기서 걸린다.
+check_sandbox_profiles() {
+  local live p
+  live="$(kc get node "$NODE_NAME" -o jsonpath='{.status.nodeInfo.containerRuntimeVersion}')" || live=""
+  if [ "$live" = "containerd://${SANDBOX_PROFILE_CONTAINERD}" ]; then
+    ok "containerd ${SANDBOX_PROFILE_CONTAINERD}가 샌드박스 프로필의 판과 같다"
+  else
+    bad "containerd가 샌드박스 프로필의 판과 다르다: 라이브 ${live:-없음}, versions.env ${SANDBOX_PROFILE_CONTAINERD}. tools/sandbox-profiles/regen.sh로 다시 만들고 다시 잰다"
+  fi
+  if ! as_root true; then
+    skip "샌드박스 프로필: kubelet 디렉터리와 커널 AppArmor 목록은 root만 읽는다. sudo -v 뒤 같은 터미널에서 다시 실행한다"
+    return
+  fi
+  p="$(sandbox_host_problems)"
+  if [ -z "$p" ]; then
+    ok "샌드박스 호스트 조건: apparmor.service enabled, Ubuntu bwrap·unpriv_bwrap enforce"
+  else
+    bad "샌드박스 호스트 조건:"$'\n'"${p}"
+  fi
+  p="$(sandbox_installed_problems)"
+  if [ -z "$p" ]; then
+    ok "샌드박스 프로필이 Git과 같다(소유·모드·해시, AppArmor enforce)"
+  else
+    bad "샌드박스 프로필이 Git과 다르다. sudo host/install.sh --cluster ${CLUSTER} --sandbox-profiles:"$'\n'"${p}"
+  fi
+}
+
 # kubeconfig에는 cluster-admin 자격이 있다.
 check_kubeconfig_mode() {
   local m
@@ -289,19 +319,9 @@ main() {
   check_egress
   check_inotify
   check_bulk_ssd
+  check_sandbox_profiles
   check_kubeconfig_mode
   finish
-}
-
-# root만 읽는 것을 읽는다. root면 그대로, 아니면 sudo -n(비밀번호를 묻지 않는다). 자격이 없으면 2로 끝난다.
-as_root() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-  elif sudo -n true 2>/dev/null; then
-    sudo -n "$@"
-  else
-    return 2
-  fi
 }
 
 # 삭제 원장 SSD(install.sh --bulk-ssd). 읽기만 한다. 원장 파일 내용은 출력하지 않는다(기억 ID·시각).
@@ -372,5 +392,6 @@ finish() {
   log "verify 통과"
 }
 
-# tools/host-egress.test.sh(check_egress·finish)와 tools/host-k3s.test.sh(check_san·check_inotify)가 source한다. 그때는 main을 돌리지 않는다.
+# tools/host-egress.test.sh(check_egress·finish), tools/host-k3s.test.sh(check_san·check_inotify), tools/host-sandbox-profiles.test.sh(check_sandbox_profiles)가
+# source한다. 그때는 main을 돌리지 않는다.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
