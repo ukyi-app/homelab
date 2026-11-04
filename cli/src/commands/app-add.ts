@@ -1,4 +1,4 @@
-// homelab app add: 최초 등록 PR(설계 C.7, D 5~6번). 손 절차는 T11 #854·#855·#858·#860과 E5의 probe 손 등록.
+// homelab app add: 최초 등록 PR(설계 C.7, D 5~6번).
 // 재실행 same(AC-1, 설계 C.7 "재실행 안전"):
 // - 비밀번호는 키가 있으면 재사용한다(값은 읽지도 바꾸지도 않는다).
 // - 플래그는 더하기만 한다. 이 명령이 다루지 않는 키(migration·resources·주석)는 비교하지 않고 그대로 둔다.
@@ -16,7 +16,7 @@ const LONGEST_PREFIX = 3;
 
 type ImageFound = { image: Image } | { problem: Observation };
 
-// GitHub 조회 실패(403·429·5xx)를 "없음"으로 읽지 않는다(#884 리뷰 P2-5). 404는 allow404일 때만 null.
+// GitHub 조회 실패(403·429·5xx)를 "없음"으로 읽지 않는다. 404는 allow404일 때만 null.
 function gh(ctx: ReadCtx, path: string, what: string, allow404 = false): any {
   const r = ctx.gh.get(path);
   if (allow404 && r.status === 404) return null;
@@ -132,7 +132,7 @@ export default defineCommand({
     const flags: AddFlags = { public: input.flags.public as string | undefined, internal: input.flags.internal as string | undefined, postgres: input.flags.postgres === true, cache };
     const nameProblem = appNameProblem(app, { cache: cache === "cache", persistent: cache === "persistent" });
     if (nameProblem) throw new UsageError(nameProblem);
-    // 데이터 차트(data.persistentValkey)도 영속 Valkey 앱 이름의 valkey를 막는다. core appNameProblem은 캐시에서만 본다(#884 2라운드 P2-3).
+    // 데이터 차트(data.persistentValkey)도 영속 Valkey 앱 이름의 valkey를 막는다. core appNameProblem은 캐시에서만 본다.
     if (cache === "persistent" && app.includes("valkey")) throw new UsageError("영속 Valkey를 쓰는 앱 이름에 valkey를 넣지 않는다(데이터 차트가 렌더를 막는다)");
     if (flags.internal && (RESERVED_INTERNAL.includes(flags.internal) || flags.internal.length + LONGEST_PREFIX > 63)) throw new UsageError("--internal: 예약된 이름이거나 클러스터 접두를 붙이면 63자를 넘는다");
 
@@ -194,15 +194,15 @@ export default defineCommand({
         },
       },
     ];
-    // 영속 연결은 캐시 끄기가 병합된 뒤에도 Argo CD가 캐시 서버를 정리할 때까지 기다린다(cache add --persistent와 같은 대기,
-    // Connector 4373412609). 아니면 두 Application이 같은 <app>-valkey를 관리한다.
+    // 영속 연결은 캐시 끄기가 병합된 뒤에도 Argo CD가 캐시 서버를 정리할 때까지 기다린다(cache add --persistent와 같은 대기).
+    // 아니면 두 Application이 같은 <app>-valkey를 관리한다.
     if (cache === "persistent") steps.push(cacheGoneStep(app));
     if (flags.postgres) steps.push(passwordStep(app, "postgres"));
     if (cache !== "none") steps.push(passwordStep(app, "valkey"));
 
     const image = found && "image" in found ? found.image : null;
     // 데이터 파일은 늘 넣는다. 쓰지 않을 때도 PR 계산 때의 main에서 캐시·영속 상호 배제를 본다(시작 때 없던 파일이
-    // 그사이 영속 등록으로 생긴 경우, #890 1라운드 P2-1). 바뀌지 않은 파일은 core가 tree에서 뺀다(없는 경로 삭제를 보내지 않는다).
+    // 그사이 영속 등록으로 생긴 경우). 바뀌지 않은 파일은 core가 tree에서 뺀다(없는 경로 삭제를 보내지 않는다).
     const files = [paths.values, paths.image, paths.data];
     steps.push(
       prStep({

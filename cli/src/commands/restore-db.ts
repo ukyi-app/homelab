@@ -3,7 +3,7 @@
 //
 // 흐름·SQL·Job·임시 Cluster 매니페스트와 파괴 단계 앞의 재확인(잠금, 앱 멈춤, 4-2 입력 고정, 복원 원본, 덤프 읽기)은
 // core(w.pgRestore)가 갖는다. 이 명령은 단계 순서와 표식, 그리고 런북의 need(앞 단계 표식이 모두 있어야 다음 단계)를 맡는다.
-// 실행 기록은 앱 ns의 ConfigMap restore-pg(런북 $W를 클러스터에, REPORT-ops 2절). 이 명령이 쓰는 키는 to·srv·img·size·ok.*이고
+// 실행 기록은 앱 ns의 ConfigMap restore-pg(런북 $W를 클러스터에). 이 명령이 쓰는 키는 to·srv·img·size·ok.*이고
 // bucket·tmp·in.*·dropped는 core가 쓴다. 끝나도 기록은 남고(다시 쳐도 모두 same) --finish가 지운다.
 // 확인할 수 없으면 멈춘다. 지금 DB를 지우는 단계(db)는 앞 표식이 모두 있고 되돌림 사본이 지금도 R2에 있을 때만 시작한다.
 import { defineCommand, type LedgerMetrics, type Observation, type ReadCtx, type RestoreRecord, type Step, type WriteCtx } from "../core/command";
@@ -51,7 +51,7 @@ function dependents(step: string): string[] {
 }
 
 // inv: 이 호출이 받아들인 실행. to는 요청한 시각(--finish·--abort는 null), run은 처음 받아들인 기록의 실행 id.
-// 쓰기마다 지금 기록이 이것과 같은지 본다. 사전 검사 뒤 다른 --to의 기록이 생겨도 이어받지 않는다(#886 r2 P1-1).
+// 쓰기마다 지금 기록이 이것과 같은지 본다. 사전 검사 뒤 다른 --to의 기록이 생겨도 이어받지 않는다.
 // inv.ledgerHold: 이 호출의 재개 단계가 원장 지표를 보고 멈춘 이유. 호출마다 새로 만들어져 다시 치면 지표를 다시 본다.
 type Names = { app: string; ns: string; appsFile: string; dataFile: string; dbJob: (run: string) => string; r2Job: (run: string) => string; tmp: (run: string) => string; inv: { to: string | null; run: string | null; ledgerHold: string | null } };
 
@@ -105,7 +105,7 @@ export function normalizeTo(s: string): { t1: string; ms: number } | null {
   const [y, mo, d, h, mi, se] = m.slice(1, 7).map(Number);
   const offH = Number(m[9] ?? "0");
   const offM = Number(m[10] ?? "0");
-  // 오프셋의 시·분도 범위를 본다(+09:60은 없는 시각이다. 받으면 다른 유효한 시각으로 바뀐다, #886 r1 P2-5).
+  // 오프셋의 시·분도 범위를 본다(+09:60은 없는 시각이다. 받으면 다른 유효한 시각으로 바뀐다).
   if (m[7] !== "Z" && (offH > 14 || offM > 59)) return null;
   const off = m[7] === "Z" ? 0 : (m[8] === "-" ? -1 : 1) * (offH * 60 + offM);
   if (mo < 1 || mo > 12 || d < 1 || h > 23 || mi > 59 || se > 59 || Math.abs(off) > 14 * 60) return null;
@@ -138,7 +138,7 @@ function rolledOut(d: any): boolean {
   return Number.isInteger(want) && want >= 1 && d?.status?.updatedReplicas === want && d?.status?.readyReplicas === want && (d?.status?.observedGeneration ?? 0) >= (d?.metadata?.generation ?? 0);
 }
 
-// 삭제 원장이 있는 앱(restore.md 2.1, T20 homelab-bot). 원장 PVC 이름은 data 차트가 정한다.
+// 삭제 원장이 있는 앱(restore.md 2.1, homelab-bot). 원장 PVC 이름은 data 차트가 정한다.
 // 봇 Ready는 원장과 묶이지 않아(T20 2단계 계약) Deployment Ready만으로는 T1 뒤 지운 기억이 다시 지워졌는지 모른다.
 const LEDGER_PVC = "deletion-ledger";
 const hasLedger = (ctx: ReadCtx | WriteCtx, n: Names): boolean => ctx.k8s.get("pvc", n.ns, LEDGER_PVC) !== null;
@@ -217,7 +217,7 @@ function ensureHelper(w: WriteCtx, n: Names, run: string): void {
   }
 }
 
-// 같은 실행을 두 프로세스가 함께 진행하지 않게 하는 단계별 lease(#886 r1 P1-1). 기록 ConfigMap은 실행 id만 test하므로 같은 RUN의
+// 같은 실행을 두 프로세스가 함께 진행하지 않게 하는 단계별 lease. 기록 ConfigMap은 실행 id만 test하므로 같은 RUN의
 // 두 호출을 가르지 못한다. 앱 ns에 고정 이름 Job restore-<run>-lease를 만들어(API 서버의 이름 유일성이 원자적 잠금) 쥐고 단계를
 // 실행한 뒤 지운다. suspend: true라 파드는 생기지 않는다. 쥔 뒤 그 단계의 표식을 다시 본다: 앞 프로세스가 그사이 끝냈으면
 // 다시 하지 않는다(읽기와 lease 사이에 끝낸 경우). 프로세스가 비정상 종료하면 lease가 남아 다음 실행이 멈춘다(안전한 쪽).
@@ -332,16 +332,16 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         const bad = (detail: string, next = "--to를 고친다"): Observation => ({ state: "differs", action: "none", detail, next });
         if (!hasTrue(pg, "ContinuousArchiving")) return bad("Cluster pg의 WAL 아카이브(ContinuousArchiving)가 True가 아니다", "kubectl -n database get cluster pg");
         const first = ctx.k8s.get("objectstore", "database", "r2")?.status?.serverRecoveryWindow?.[srv]?.firstRecoverabilityPoint;
-        // 복구 범위를 확인할 수 없으면 멈춘다(경고로 넘기지 않는다, #886 r1 P1-3).
+        // 복구 범위를 확인할 수 없으면 멈춘다(경고로 넘기지 않는다).
         if (typeof first !== "string" || !Number.isFinite(Date.parse(first))) return bad(`ObjectStore r2에 ${srv}의 복구 가능 범위(firstRecoverabilityPoint)가 없다`, "kubectl -n database get objectstore r2 -o yaml");
         if (Date.parse(first) > to.ms) return bad(`복구 가능한 가장 이른 시각(${first})보다 앞이다`);
         const ends = ctx.k8s.list("backup", "database").filter((b) => b?.spec?.cluster?.name === "pg" && b?.status?.phase === "completed").map((b) => Date.parse(b?.status?.stoppedAt ?? "")).filter(Number.isFinite);
         if (!ends.some((t) => t <= to.ms)) return bad(`${to.t1} 앞에 끝난 completed base backup이 없다`);
         // WAL이 T1까지 있다는 근거: T1 뒤에 끝난 completed base backup. pg_backup_stop은 기본으로 끝 WAL이 아카이브될 때까지
         // 기다리므로(wait_for_archive) 그 백업이 끝났으면 그 시각까지의 WAL이 R2에 있다. CNPG 1.30.1 Cluster에는 마지막 아카이브
-        // 시각 필드가 없고(lastArchivedWALTime은 없다), pg_stat_archiver를 읽는 어댑터도 아직 없다(REPORT-ops 14절). 그래서
+        // 시각 필드가 없고(lastArchivedWALTime은 없다), pg_stat_archiver를 읽는 어댑터도 아직 없다. 그래서
         // 마지막 base backup 뒤의 시각은 확인할 수 없어 멈춘다. 그때는 온디맨드 base backup을 하나 만든 뒤 다시 한다.
-        // (경과 시간 기준 "지금 − 5분"은 아카이브가 밀리면 근거가 되지 않아 쓰지 않는다, #886 r1 P1-3.)
+        // (경과 시간 기준 "지금 − 5분"은 아카이브가 밀리면 근거가 되지 않아 쓰지 않는다.)
         if (!ends.some((t) => t >= to.ms)) return bad(`${to.t1} 뒤에 끝난 completed base backup이 없어 WAL이 그 시각까지 있는지 확인할 수 없다`, "온디맨드 base backup(restore.md 2절 앞의 Backup)을 만들고 completed가 된 뒤 다시 실행한다");
         return same(`${to.t1}: 앞뒤로 completed base backup, 복구 가능 범위 안`);
       },
@@ -469,7 +469,7 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
       w.k8s.restoreRecordUpdate(n.ns, RECORD, r.run, { "try.main": null });
     },
     // 본 복원(4-4)을 한 번 시작했는데 끝 표식이 없으면 DB가 일부만 복원됐을 수 있다(pg_restore는 문장마다 커밋한다). 그때는
-    // 표식이 있어도 이 단계부터 다시 한다: 빈 DB로 다시 만들고 본 복원을 처음부터(#886 r1 P2-4). 복원은 됐는데 표식만 못 쓴
+    // 표식이 있어도 이 단계부터 다시 한다: 빈 DB로 다시 만들고 본 복원을 처음부터. 복원은 됐는데 표식만 못 쓴
     // 경우도 같은 길로 간다(다시 하면 같은 결과다).
     (_ctx, r) => ok(r, "main") || r.data["try.main"] !== "1",
     ),

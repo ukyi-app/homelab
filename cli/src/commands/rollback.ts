@@ -62,7 +62,7 @@ function latestDeploy(ctx: ReadCtx, app: string, path: string): Image | null {
   return text === null ? null : parseImage(text, app);
 }
 
-// --release는 hold만 풀고 이미지는 그대로 둔다(T12-05 F4: 옛 이미지에 새 헬스 경로가 없었다). 롤백한 옛 이미지가 다음 빌드까지
+// --release는 hold만 풀고 이미지는 그대로 둔다(옛 이미지에는 새 헬스 경로가 없을 수 있다). 롤백한 옛 이미지가 다음 빌드까지
 // 남으니 그 사실과, 최신 배포가 아니면 --to <최신> 뒤 --release를 알린다. 기록을 못 읽어도 해제 자체는 막지 않는다.
 function releaseHints(ctx: ReadCtx, app: string, path: string, current: Image): { notes: string[]; next?: string } {
   const notes = [`--release는 hold만 푼다. 이미지는 지금 것(revision ${current.revision.slice(0, 7)})이 그대로 남고 다음 빌드의 배포 PR부터 바뀐다`];
@@ -111,7 +111,7 @@ export default defineCommand({
         target = { ...hit[0], hold: true };
         // 지워진 패키지 버전으로 되돌리면 파드가 이미지를 받지 못한다.
         const v = ctx.gh.get(`orgs/ukyi-app/packages/container/${app}/versions?per_page=100`);
-        // 조회 실패(403·5xx)를 "지워졌다"로 읽지 않는다(#884 리뷰 P2-5). 패키지 자체가 없으면 404다.
+        // 조회 실패(403·5xx)를 "지워졌다"로 읽지 않는다. 패키지 자체가 없으면 404다.
         if (v.status !== 200 && v.status !== 404) throw new CliError(`GHCR 패키지 버전: HTTP ${v.status}`, "gh auth status로 로그인·권한(read:packages)을 확인한 뒤 다시 실행한다");
         if (v.status === 200 && !Array.isArray(v.json)) throw new Error("GHCR 패키지 버전: 목록이 아니다");
         if (v.status === 404 || !v.json.some((x: { name?: string }) => x?.name === target!.digest)) problem = { state: "missing", action: "none", detail: `GHCR에 ${target.digest.slice(0, 19)}…가 없다(지워졌거나 최근 100개 밖)`, next: "다른 revision을 고른다" };
@@ -149,7 +149,7 @@ export default defineCommand({
           ? `homelab rollback --release가 만든 PR이다(설계 C.4.9). hold를 풀어 다음 빌드부터 정상 배포 흐름으로 돌아간다.`
           : `homelab rollback이 만든 PR이다(설계 C.4.9). image.yaml을 이전 이미지로 되돌리고 hold: true로 새 배포 PR을 멈춘다. 데이터는 바뀌지 않는다. 풀기: homelab rollback ${app} --release`,
         files: [path],
-        // --release는 PR을 계산하는 그때의 main 이미지에서 hold만 푼다(#884 리뷰 P2-2). 시작 때 읽은 이미지를 쓰면
+        // --release는 PR을 계산하는 그때의 main 이미지에서 hold만 푼다. 시작 때 읽은 이미지를 쓰면
         // 그사이 병합된 배포·롤백의 digest·revision을 되돌린다. --to는 사람이 고른 이미지라 고정한다.
         edit: (cur) => {
           if (cur[path] === null) return { [path]: null };

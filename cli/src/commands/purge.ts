@@ -5,7 +5,7 @@
 // 함정: 보호 주석(Prune=false,Delete=false)이 살아 있는 리소스에서 빠지기 전에 PR 2가 병합되면 Argo CD가 리소스를 남긴 채
 // Application만 지운다. 그래서 PR 2는 동기화를 확인한 다음 실행에서만 연다(같은 PR에 넣지 않는다, 데이터 차트 _helpers.tpl).
 // 상태 저장소 없이 이어지도록 단계마다 main 파일과 살아 있는 리소스를 읽어 어디까지 왔는지 판단한다.
-// 기억 삭제 원장(T20, data values의 volumes.deletionLedger 또는 PVC deletion-ledger)이 있는 앱은 아무것도 하지 않고 멈춘다(ledgerStep).
+// 기억 삭제 원장(data values의 volumes.deletionLedger 또는 PVC deletion-ledger)이 있는 앱은 아무것도 하지 않고 멈춘다(ledgerStep).
 import { defineCommand, type Observation, type ReadCtx, type Step, type WriteCtx } from "../core/command";
 import { APP_NAME, newRunId } from "../core/names";
 import { prStep } from "../core/pr";
@@ -16,19 +16,19 @@ const REPO = "repos/ukyi-app/homelab";
 const PURGE_CHART = "1.0.2";
 const PROTECT = "argocd.argoproj.io/sync-options";
 // R2 valkey/ 객체는 올린 뒤 14일(1,209,600초)에 지워진다(infra/cloudflare/main.tf valkey-expire-14d).
-// 여유 2일: 객체는 Job 성공 시각보다 먼저 올라가고, PR 2는 이 확인 뒤 사람이 병합한다(#883 r3 P1-1).
+// 여유 2일: 객체는 Job 성공 시각보다 먼저 올라가고, PR 2는 이 확인 뒤 사람이 병합한다.
 const VALKEY_KEEP_MS = 14 * 86_400_000;
 const VALKEY_MARGIN_MS = 2 * 86_400_000;
 // 이 기기와 클러스터의 시계 차이로 보는 범위. 이보다 미래의 성공 시각은 믿지 않는다.
 const CLOCK_SKEW_MS = 3_600_000;
 // CNPG ObjectStore r2의 retentionPolicy 14d(platform/cnpg/cluster/templates/objectstore.yaml). CR이 남아도 객체는 지워졌을 수 있다.
-// Valkey와 같은 2일 여유를 둔다(#889 r1 P1-4).
+// Valkey와 같은 2일 여유를 둔다.
 const PG_KEEP_MS = 14 * 86_400_000;
 // 앱이 쓰기를 멈춘 시각은 Git 삭제 커밋이 아니라 이 명령이 클러스터에서 앱 워크로드가 없음을 본 시각이다. Argo CD가 늦거나
-// 멈추면 커밋 뒤 몇 시간이라도 앱이 쓴다(#889 r1 P1-2). 없음을 본 직후 기록 data-purge를 만들고, 그 creationTimestamp(API
-// 서버 시계)보다 뒤에 시작한 백업만 인정한다. 백업 시각도 클러스터 시계라 이 기기와의 시계 차이가 끼지 않는다(#889 r2 P2-5).
+// 멈추면 커밋 뒤 몇 시간이라도 앱이 쓴다. 없음을 본 직후 기록 data-purge를 만들고, 그 creationTimestamp(API
+// 서버 시계)보다 뒤에 시작한 백업만 인정한다. 백업 시각도 클러스터 시계라 이 기기와의 시계 차이가 끼지 않는다.
 // 기록은 앱마다 database ns의 data-purge-<app>다. 앱 ns가 없는 PostgreSQL 전용 데이터도 같은 자리에 둔다. 앱이 없어도 사람이
-// DB에 쓸 수 있고(시나리오 10의 probe2) DB가 등록 커밋보다 늦게 생길 수 있어, 등록 시각만으로는 판단하지 않는다(#889 r3 P1-2).
+// DB에 쓸 수 있고(시나리오 10의 probe2) DB가 등록 커밋보다 늦게 생길 수 있어, 등록 시각만으로는 판단하지 않는다.
 // database ns는 CNPG가 있어 늘 있고 restore-check 기록도 그 ns에 있다.
 const REC_NS = "database";
 const recordName = (app: string) => `data-purge-${app}` as const;
@@ -66,8 +66,8 @@ function dataPod(p: any, app: string): boolean {
 function appWorkloads(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   const own = (o: any) => o?.metadata?.labels?.["homelab.ukyi.app/app"] === n.app || o?.metadata?.labels?.["app.kubernetes.io/name"] === n.app;
   const out: string[] = [];
-  // 모든 워크로드 읽기가 여기를 지난다(전용 엔진, 사전 읽기, 재조회, 쓰기 뒤 재조회, guarded 안 확인). 본 것은 잊지 않는다(#893 r2).
-  // 찾는 즉시 남긴다. 다음 종류 조회가 예외로 끝나도 앞에서 본 것이 사라지지 않게(#893 r3).
+  // 모든 워크로드 읽기가 여기를 지난다(전용 엔진, 사전 읽기, 재조회, 쓰기 뒤 재조회, guarded 안 확인). 본 것은 잊지 않는다.
+  // 찾는 즉시 남긴다. 다음 종류 조회가 예외로 끝나도 앞에서 본 것이 사라지지 않게.
   const found = (x: string) => {
     n.seen.add(x);
     out.push(x);
@@ -81,14 +81,14 @@ function appWorkloads(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   return out;
 }
 
-// 지금 보이는 워크로드, 없으면 이 실행에서 앞서 본 것. 한 번 보면 그 뒤 읽기는 사라졌어도 본 것으로 판정한다(#893 r2 A).
+// 지금 보이는 워크로드, 없으면 이 실행에서 앞서 본 것. 한 번 보면 그 뒤 읽기는 사라졌어도 본 것으로 판정한다.
 function observed(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   const left = appWorkloads(ctx, n);
   return left.length ? left : [...n.seen];
 }
 
 // 기록된 "앱 워크로드 없음" 확인 시각(기록의 creationTimestamp). 지금 기준(앱 삭제·데이터 등록)보다 앞이면 옛 실행의 것이라
-// 쓰지 않는다. 확인 뒤 워크로드가 다시 보이면 writes-stopped가 기록을 지운다(#889 r2 P1-3).
+// 쓰지 않는다. 확인 뒤 워크로드가 다시 보이면 writes-stopped가 기록을 지운다.
 function goneAt(ctx: ReadCtx | WriteCtx, n: Names, removed: number): string | null {
   const t = ctx.k8s.restoreRecord(REC_NS, recordName(n.app))?.created;
   return typeof t === "string" && Number.isFinite(Date.parse(t)) && Date.parse(t) > removed ? t : null;
@@ -142,7 +142,7 @@ function commitDates(ctx: ReadCtx, path: string, perPage: number): string[] | { 
 
 const MAX_WALK = 30;
 
-// 지금 data/<app>/values.yaml이 생긴 커밋(가장 최근의 added)의 시각. 폐기 뒤 재등록이면 그 재등록이다(#883 r2 P1-2).
+// 지금 data/<app>/values.yaml이 생긴 커밋(가장 최근의 added)의 시각. 폐기 뒤 재등록이면 그 재등록이다.
 // 새것부터 커밋마다 그 파일의 상태(added·modified·removed)를 읽는다. PR 1(purge: true)은 modified라 지나간다.
 // 생긴 커밋을 MAX_WALK 안에서 못 찾거나 모양이 다르면 정할 수 없다(멈춘다).
 function dataRegistered(ctx: ReadCtx, path: string): { date: string } | { problem: string } {
@@ -245,7 +245,7 @@ function seen(ctx: ReadCtx, n: Names, left: string[]): Observation {
   return { state: "differs", action: r ? "delete" : "none", detail: `${SEEN}(${left.join(", ")})${r ? " → 폐기 확인 기록이 무효가 된다. 지우고" : ""} 멈춘다` };
 }
 
-// T20 기억 삭제 원장(설계 C.5.5). 원장은 지운 기억이 DB 복원으로 되살아나지 않게 하는 표식이라 DB 백업(14일)과 pgdump 수동
+// 기억 삭제 원장(설계 C.5.5). 원장은 지운 기억이 DB 복원으로 되살아나지 않게 하는 표식이라 DB 백업(14일)과 pgdump 수동
 // 사본보다 오래 살아야 한다. 이 명령은 PostgreSQL·Valkey만 이해하고, PR 2가 data/<app>을 지워도 원장 PVC·PV는 보호 주석과
 // Retain으로 남는데 "모두 사라짐"으로 끝난다. 그래서 원장이 선언됐거나(main의 data values) 살아 있으면(PVC) 처음부터 멈춘다.
 // 선언을 enabled: false로 바꿔 비켜 가도 PVC는 Prune=false로 남으므로 클러스터도 본다.
@@ -270,7 +270,7 @@ function ledgerStep(n: Names): Step {
   };
 }
 
-// 클러스터에서 앱 워크로드와 기록만 본다(GitHub·Infisical·백업 조회 없음). apply 때 본 엔진보다 먼저 따로 돈다(#893 r1 P1-2).
+// 클러스터에서 앱 워크로드와 기록만 본다(GitHub·Infisical·백업 조회 없음). apply 때 본 엔진보다 먼저 따로 돈다.
 // 본 엔진의 사전 읽기는 다른 서비스 하나만 실패해도 apply 전에 돌아가 무효화가 돌지 않는다.
 function workloadStep(n: Names): Step {
   return {
@@ -289,7 +289,7 @@ function workloadStep(n: Names): Step {
 }
 
 // PR 2 전 단계(백업 확인·PR·PV)는 읽을 때마다 워크로드를 먼저 본다. 보이면 same으로 넘기지 않고 기록 삭제로 판정하고, apply에서
-// 지운 뒤 실패한다(#893 r1 P1-1). 확인만 하는 단계의 실패는 read에서 던진다. 그 단계에 apply가 생겨도 엔진이 apply 전에 막게.
+// 지운 뒤 실패한다. 확인만 하는 단계의 실패는 read에서 던진다. 그 단계에 apply가 생겨도 엔진이 apply 전에 막게.
 // 쓰는 단계는 쓰기 직전에 한 번 더 본다.
 function guarded(n: Names, step: Step): Step {
   const check = !step.apply;
@@ -342,7 +342,7 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       target: `앱 ${app}`,
       async read(ctx) {
         if (listDir(ctx, `apps/${app}`).length > 0) return { state: "differs", action: "none", detail: `apps/${app}/가 아직 있다`, next: `homelab app remove ${app}` };
-        // Application과 앱 워크로드는 writes-stopped가 본다. 여기서 막으면 쓰기 단계에 닿지 못해 옛 종료 기록을 지울 수 없다(#889 r2 P1-3).
+        // Application과 앱 워크로드는 writes-stopped가 본다. 여기서 막으면 쓰기 단계에 닿지 못해 옛 종료 기록을 지울 수 없다.
         return same("main에서 앱 삭제됨");
       },
     },
@@ -372,7 +372,7 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       async read(ctx) {
         const data = values(ctx, n.dataFile);
         if (data === null) return same(`data/${app} 없음(PR 2 뒤라 확인하지 않는다)`);
-        // 기준 시각을 못 정하면 통과시키지 않는다(#883 r1 P1-2). 앱이 있었으면 apps/<app>/values.yaml의 마지막 커밋(삭제),
+        // 기준 시각을 못 정하면 통과시키지 않는다. 앱이 있었으면 apps/<app>/values.yaml의 마지막 커밋(삭제),
         // 앱 없이 데이터만 등록했으면(시나리오 10의 probe2) data/<app>/values.yaml의 첫 커밋(등록). 첫 커밋은 PR 1이 같은
         // 파일을 고쳐도 움직이지 않는다.
         const base = baseline(ctx, app);
@@ -401,7 +401,7 @@ function steps(n: Names, dataFiles: string[]): Step[] {
           const t = lastBackupStart(ctx, n.ns, `${app}-valkey-backup`);
           if (!after(t)) lacks.push(`시작한 Valkey 백업(마지막 성공 Job 시작 ${t ?? "없음"})`);
           else {
-            // 성공 이력만으로는 객체가 R2에 남아 있다는 증거가 아니다. 백업이 멈춘 채 14일이 지나면 복구할 객체가 없다(#883 r3 P1-1).
+            // 성공 이력만으로는 객체가 R2에 남아 있다는 증거가 아니다. 백업이 멈춘 채 14일이 지나면 복구할 객체가 없다.
             const bad = staleness(t!, VALKEY_KEEP_MS);
             if (bad) return { ...wait, detail: `Valkey 마지막 성공 백업 시작(${t})이 ${bad}`, next: `kubectl -n ${n.ns} get cronjob ${app}-valkey-backup로 suspend·실패를 보고, 새 백업이 성공한 뒤 다시 실행한다` };
           }
@@ -517,7 +517,7 @@ function steps(n: Names, dataFiles: string[]): Step[] {
       target: `Infisical /apps/${app}`,
       async read(ctx) {
         // PR 2가 병합되고 리소스가 사라지기 전에는 Infisical을 부르지 않는다. 그 조회가 실패하면 사전 읽기 전체가 막혀 앞 단계의
-        // 무효화도 돌지 않는다(#893 r1 P1-2). 그때까지는 뒤 단계의 "예정"일 뿐이다.
+        // 무효화도 돌지 않는다. 그때까지는 뒤 단계의 "예정"일 뿐이다.
         if (values(ctx, n.dataFile) !== null) return afterPr("PR 2 뒤 키 삭제(앱 이름을 다시 친 뒤)");
         if (remaining(ctx, n).length) return afterPr("데이터 리소스가 사라진 뒤 키 삭제(앱 이름을 다시 친 뒤)");
         const keys = secretKeys(ctx, app);
@@ -550,7 +550,7 @@ function steps(n: Names, dataFiles: string[]): Step[] {
   ];
 }
 
-// 폐기 뒤 남는 것. 앱 ns가 없는 데이터(PostgreSQL 전용, T12-05 probe2)에는 ns를 말하지 않는다(F8). 조사는 앱 이름이 아니라
+// 폐기 뒤 남는 것. 앱 ns가 없는 데이터(PostgreSQL 전용)에는 ns를 말하지 않는다. 조사는 앱 이름이 아니라
 // "ns"에 붙여 이름의 발음과 상관없이 맞게 한다. ns를 읽지 못하면 있다고 보고 말한다(안내 문구일 뿐이고 단계 읽기가 실패를 보인다).
 function leftNote(ctx: ReadCtx, n: Names): string {
   let hasNs = true;
@@ -594,7 +594,7 @@ export default defineCommand({
       });
     };
     if (!input.apply) return main();
-    // 본 엔진이 어떻게 끝나든(성공·실패·예외·대기) 이 실행에서 워크로드를 봤으면 마지막에 기록을 지우고 실패로 끝낸다(#893 r2).
+    // 본 엔진이 어떻게 끝나든(성공·실패·예외·대기) 이 실행에서 워크로드를 봤으면 마지막에 기록을 지우고 실패로 끝낸다.
     // 엔진은 사전 읽기 실패·쓰기 뒤 재조회 실패에서 apply를 부르지 않고 돌아간다. 그 관측을 여기서 받는다.
     let result: Result | undefined;
     let thrown: unknown;

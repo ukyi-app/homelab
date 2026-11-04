@@ -4,7 +4,7 @@
 // 지금 − 10분: archive_timeout(5분)보다 넉넉히 앞이라 WAL까지 시험한다. 아카이브가 밀렸으면 Ready가 되지 않아 실패로 드러난다.
 // 실행 기록은 database ns의 ConfigMap restore-check. 중간에 멈추면 같은 명령이 그 실행을 잇고, 끝나면 기록까지 지운다
 // (시험이라 다시 치면 새 시험이다).
-// 결과는 Cluster pg의 annotation 두 키에 남긴다(T24 계약 2, 봇 브리핑이 읽는다). 통과는 정리 0개 확인 뒤·실행 기록 삭제 전에
+// 결과는 Cluster pg의 annotation 두 키에 남긴다(봇 브리핑이 읽는다). 통과는 정리 0개 확인 뒤·실행 기록 삭제 전에
 // 쓰고, 그 기록이 실패하면 완료가 아니다(실행 기록이 남아 다시 치면 정리부터 잇는다). 실패는 DB 확인 실패와 --abort만 남긴다.
 import { defineCommand, type Observation, type ReadCtx, type RestoreCheckMark, type RestoreRecord, type Step, type WriteCtx } from "../core/command";
 import { newRunId } from "../core/names";
@@ -33,7 +33,7 @@ function utc(t1: string | undefined): string {
 }
 const nowUtc = () => new Date().toISOString().replace(/\.[0-9]{3}Z$/, "Z");
 const dbCount = (r: RestoreRecord) => (r.data.dbs ?? "").split(",").filter((x) => x && x !== "-").length;
-// cluster: 시험을 시작할 때의 Cluster pg uid(실행 기록 pguid). 결과는 그 Cluster에만 귀속한다(#1035 리뷰 P2).
+// cluster: 시험을 시작할 때의 Cluster pg uid(실행 기록 pguid). 결과는 그 Cluster에만 귀속한다.
 type Attempt = { run: string; to: string | undefined; srv: string | undefined; cluster: string | undefined };
 const UID = /^[0-9a-f-]{8,64}$/;
 const attempt = (r: RestoreRecord): Attempt => ({ run: r.run, to: r.data.to, srv: r.data.srv, cluster: r.data.pguid });
@@ -84,7 +84,7 @@ function runObjects(ctx: ReadCtx | WriteCtx, run: string): string[] {
 }
 
 // created: 이 호출이 기록(과 임시 Cluster)을 새로 만들었는지. 앞 호출이 남긴 미완료 시험은 단계와 상관없이 이어받지 않는다
-// (Ready 뒤 DB 확인에서 실패한 경우도. 그사이 바뀐 Cluster를 이번 백업의 복구로 볼 수 없다, #886 r2 P1-2).
+// (Ready 뒤 DB 확인에서 실패한 경우도. 그사이 바뀐 Cluster를 이번 백업의 복구로 볼 수 없다).
 function stepsFor(inv: { created: boolean }): Step[] {
   const fresh = () => {
     if (!inv.created) throw new Error("멈춤: 앞 호출이 남긴 시험이다. 다시 쓰지 않는다: homelab db restore-check --abort 뒤 새 시험");
@@ -148,7 +148,7 @@ function stepsFor(inv: { created: boolean }): Step[] {
         const v = { t1: r.data.to, srv: r.data.srv, img: r.data.img, size: r.data.size };
         if (!T1.test(v.t1 ?? "") || !SRV.test(v.srv ?? "") || !IMG.test(v.img ?? "") || !SIZE.test(v.size ?? "")) throw new Error("실행 기록의 값 형식이 아니다");
         // 같은 실행의 임시 클러스터가 이미 있으면(앞 시도) 다시 쓰지 않는다. 그사이 사람이 다른 원본으로 다시 만들거나 바꿨을 수 있어
-        // Ready·DB 이름만으로는 이번 백업의 복구라고 볼 수 없다(restore.md 2절 2단계, #886 r1 P1-2). --abort로 정리하고 새 시험으로.
+        // Ready·DB 이름만으로는 이번 백업의 복구라고 볼 수 없다(restore.md 2절 2단계). --abort로 정리하고 새 시험으로.
         if (w.k8s.get("cluster", NS, tmpName(r.run))) throw new Error(`임시 클러스터 ${tmpName(r.run)}가 이미 있다(앞 시도). 다시 쓰지 않는다: homelab db restore-check --abort 뒤 새 시험`);
         w.pgRestore.createTmpCluster(r.run, v as { t1: string; srv: string; img: string; size: string });
         if (!w.k8s.waitCondition("cluster", NS, { name: tmpName(r.run) }, "Ready", 1800)) throw new Error("임시 클러스터가 30분 안에 Ready가 되지 않았다(복구 실패: WAL 아카이브·base backup을 본다. 버리려면 --abort)");
@@ -216,7 +216,7 @@ function failedAlready(ctx: ReadCtx | WriteCtx, run: string): boolean {
 
 // 멈춘 시험을 버린다: 이 시험의 객체를 지우고 0개를 본 뒤 실패(aborted)를 기록하고 실행 기록을 지운다
 // (앱에는 쓰지 않고 pg에는 결과 annotation만 쓰니 언제든 된다). 결과 기록이 실패하면 실행 기록을 남겨 다시 --abort로 잇는다.
-// 같은 실행의 실패가 이미 last에 있으면 덮지 않는다(missing_db·no_db 이유를 aborted로 지우지 않게, lead 결정 T24-W2 후속).
+// 같은 실행의 실패가 이미 last에 있으면 덮지 않는다(missing_db·no_db 이유를 aborted로 지우지 않게).
 const abortSteps: Step[] = [
   {
     id: "abort",

@@ -1,6 +1,6 @@
-// homelab logs: 지금 파드의 로그(kubectl logs). 설계 C.7은 과거 로그를 VictoriaLogs에서 읽는다고 했지만, CLI에서 닿을 경로가
+// homelab logs: 지금 파드의 로그(kubectl logs). 과거 로그(VictoriaLogs)는 CLI에서 닿을 경로가
 // 없다(클러스터 안 서비스이고 읽기 경로는 Grafana 데이터소스 뒤 vmauth다, C.3.7). 새 자격·port-forward를 CLI에 두지 않고
-// (T12 "새 외부 자격 없음") 과거 로그는 Grafana Explore로 안내한다(T12-02 결정, C.7에 적음).
+// 과거 로그는 Grafana Explore로 안내한다(설계 C.7).
 // 앱 로그는 그대로 보인다. 앱이 자격을 로그에 쓰지 않는 것은 앱 계약이다(설계 C.7). 제어 문자는 출력 계층이 바꾼다.
 import { defineCommand } from "../core/command";
 import { APP_NAME } from "../core/names";

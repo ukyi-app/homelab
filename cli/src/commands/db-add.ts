@@ -1,6 +1,6 @@
-// homelab db add: PostgreSQL 연결(설계 C.7, G 시나리오 2). 손 절차는 T11 #854(앱)·#855(데이터).
+// homelab db add: PostgreSQL 연결(설계 C.7, G 시나리오 2).
 // 데이터 values(역할·DB)와 앱 values(uses.postgres)를 한 PR에 넣는다. 데이터 Application이 늦으면 마이그레이션 Job이
-// 한 번 실패하고 retry로 수렴한다(T11 05:00~05:08 실측). 마이그레이션 명령은 앱 values의 몫이라 건드리지 않는다.
+// 한 번 실패하고 retry로 수렴한다(실측). 마이그레이션 명령은 앱 values의 몫이라 건드리지 않는다.
 // 명령끼리 도우미를 나눌 수 없어(정적 시험: 자기 접두만 import) app add와 같은 작은 조각을 여기 다시 둔다.
 import { defineCommand, type Observation, type ReadCtx, type Step } from "../core/command";
 import { APP_NAME, appNameProblem } from "../core/names";
@@ -38,7 +38,7 @@ export function dbValues(current: string | null, latestChart: string): string | 
 }
 
 // 앱 차트 app.env와 같은 규칙(platform/charts/app/templates/_helpers.tpl): PORT(web)·DATABASE_URL(uses.postgres)·
-// VALKEY_URL(uses.valkey)은 차트가 넣고, env 키와 secrets는 그것들과도 서로도 겹치면 렌더가 막힌다(#884 2라운드 P2-4).
+// VALKEY_URL(uses.valkey)은 차트가 넣고, env 키와 secrets는 그것들과도 서로도 겹치면 렌더가 막힌다.
 // 병합할 수 없는 PR을 만들지 않게 쓰기 전에 멈춘다. 덮거나 조용히 빼지 않는다.
 function envProblem(v: Record<string, any>): string | null {
   const names = [...(v.kind === "web" ? ["PORT"] : []), ...(v.uses?.postgres ? ["DATABASE_URL"] : []), ...(v.uses?.valkey ? ["VALKEY_URL"] : []), ...Object.keys(v.env ?? {}), ...(Array.isArray(v.secrets) ? v.secrets : [])];

@@ -1,4 +1,4 @@
-// homelab app remove: apps/<app>/ 삭제 PR(설계 C.5.5, G 시나리오 9, 손 절차 T11 #867). 앱 워크로드만 사라지고
+// homelab app remove: apps/<app>/ 삭제 PR(설계 C.5.5, G 시나리오 9). 앱 워크로드만 사라지고
 // 데이터(data/<app>, DB·역할, 영속 Valkey PVC, Infisical 키)는 다른 Application이라 남는다. 폐기는 data purge로만.
 // 모르는 파일이 있는 디렉터리는 지우지 않는다(이 명령이 만든 두 파일만 다룬다).
 // 봇이면 bot-slot target을 먼저 되돌려야 한다. 남기면 다음 콜드스타트에서 bot-slot이 끝없이 기다린다(설계 C.8).
@@ -50,7 +50,7 @@ export default defineCommand({
         title: `app remove: ${app}`,
         body: `homelab app remove가 만든 PR이다(설계 C.5.5). apps/${app}/를 지워 Application ${app}과 워크로드를 없앤다. 데이터(data/${app}, DB·영속 Valkey·Infisical 키)는 남는다. 목록: homelab data list, 폐기: homelab data purge ${app} --confirm ${app}`,
         // bot-slot은 PR 계산 때의 main에서도 본다(읽기만, 바뀌지 않아 tree에 안 들어간다). 확인 단계 뒤 그사이 target이 이 앱으로
-        // 바뀌었으면 삭제 PR을 만들지 않는다(#890 1라운드 P2-3).
+        // 바뀌었으면 삭제 PR을 만들지 않는다.
         files: [...files, BOT_SLOT],
         edit: (cur) => {
           if (botTarget(cur[BOT_SLOT]) === app) throw new Error(`그사이 main의 bot-slot target이 ${app}이 됐다. 먼저 target을 시험 값으로 되돌리고 probe: true를 켜는 PR을 병합한다(설계 C.8)`);
