@@ -30,11 +30,12 @@ worker:
   # main 빌드(app-build)가 GHCR에 올린 digest만 쓴다. 로컬 빌드 digest는 CI 빌드와 다르다.
   # 사람 PR로만 바꾼다(D2). 게시 서버는 apps/homelab-bot/image.yaml 자동 병합으로 따라가지만, 모델 자격을 든 sandbox까지
   # 자동 경로를 넓히지 않는다(설계 C.4.4·C.4.7). 작업자 요청 계약(version)을 바꾸는 봇 PR은 이 값을 바꾸는 PR과 짝으로 낸다.
-  # 지금 값: 봇 main d77944e 빌드. 리뷰 레인, #46 내장 플러그인 끔, #50 제외 파일 입력, #52(정책 위반으로 멈춘
-  # 실행의 위반 종류를 작업자 로그 run_policy_violation에 값 없이 남김)가 들어 있다. 결과 reason·요청 계약(version)·
-  # REVIEW_INSTRUCTIONS는 7a4dfe6과 같다. 빌드 증명은 GitHub API의 SLSA provenance로 대조했다(소스 d77944e, build.yaml@main → app-build v1.0.1).
+  # 지금 값: 봇 main 3520f32 빌드. 리뷰 레인, #46 내장 플러그인 끔, #50 제외 파일 입력, #52(정책 위반으로 멈춘
+  # 실행의 위반 종류를 작업자 로그 run_policy_violation에 값 없이 남김), 작업 레인 샌드박스용 bubblewrap 0.12.0·socat 1.8.0.3
+  # (#61, /usr/bin/bwrap)이 들어 있다. 이 파드는 아직 RuntimeDefault라 bwrap을 쓰지 않는다. 결과 reason·요청 계약(version)·
+  # REVIEW_INSTRUCTIONS는 7a4dfe6과 같다. 빌드 증명은 GitHub API의 SLSA provenance로 대조했다(소스 3520f32, build.yaml@main → app-build v1.0.1).
   # gh attestation verify가 sigstore 신뢰 루트 단계에서 실패해(이전 digest도 같다) 대신 썼다.
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:2e73f8c6b65ad66dbfe76072fb04d2e072348cec09d30f8e57eeaddfd18e0659
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:ba39bb5046e938c9a12dc18238b9b6dc0b4c4cc04ecf2c19bf922f818cccfc1f
   # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
   # WORKER_CONTROL_PRIVATE_KEY다. 둘이 어긋나면 작업자가 모든 실행 요청을 403으로 거부하니 회전은 두 값을 함께 바꾼다.
   # 모양이 틀리면 작업자가 기동하지 못해(종료 1) sandbox가 Degraded가 되므로 values.schema.json이 Ed25519 공개 키 모양만 받는다.
