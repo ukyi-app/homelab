@@ -1,7 +1,7 @@
 # T18 봇 CODEX_BRIDGE
 
 - 단계: P4 봇 V1
-- 상태: 진행 중 (로컬·mock 구현 병합 2026-10-29, 봇 저장소 PR #9 `1dba78e`, 시험 347. SEC-02는 부분이라 AC-B5 완료 아님. 완료는 T16b 뒤. 공개 저장소 내용으로 구독 모델을 부르는 작업의 D-14 차단 조건은 2026-11-04 해제(Claude 구독 프로필). 사용자 결정 대기 4건은 봇 저장소 `docs/ai-bot/DECISIONS.md` T18)
+- 상태: 진행 중 (로컬·mock 구현 병합 2026-10-29, 봇 저장소 PR #9 `1dba78e`, 시험 347. SEC-02는 부분이라 AC-B5 완료 아님. 완료는 T16b 뒤. 공개 저장소 내용으로 구독 모델을 부르는 작업의 D-14 차단 조건은 2026-11-04 해제(Claude 구독 프로필). 결정 4건은 2026-11-04 사용자 확정(Claude 실행기 기준, 봇 저장소 `docs/ai-bot/DECISIONS.md` "T18 결정 (Claude 실행기 기준)": R08 읽기 전용 알림, 작업 레인 자격 분리는 파드 실측 먼저(실패하면 API 키 + LLM gateway 전까지 작업 레인 닫음), 작업 레인을 열 때 파드 둘, 작업별 `CLAUDE_CONFIG_DIR`))
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T16a(착수), T16b(완료)
   - 착수: [T16a](T16a-bot-foundation-local.md) 뒤. 작업자 계약(T16a)에 Codex 어댑터를 붙이는 로컬·mock 구현을 시작한다(V1 범위 조정 안 3).
