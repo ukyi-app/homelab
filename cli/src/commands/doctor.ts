@@ -20,7 +20,7 @@ function toolStep(tool: ToolName, parse: (out: string) => string | null, expecte
       } catch {
         version = null;
       }
-      // 저장소 밖에서는 mise가 .tool-versions를 못 찾아 버전을 고르지 못할 수 있다(T12-05 운영). 그래서 저장소 안에서 다시 보라고 한다.
+      // 저장소 밖에서는 mise가 .tool-versions를 못 찾아 버전을 고르지 못할 수 있다(운영 실측). 그래서 저장소 안에서 다시 보라고 한다.
       if (!version) return bad("differs", "버전을 읽지 못함", expected ? `저장소 안에서 다시 실행한다(mise가 .tool-versions로 버전을 고른다). 그래도 안 되면 ${tool}의 버전 출력을 직접 확인한다` : `${tool}의 버전 출력을 직접 확인한다`);
       if (expected && version !== expected) return bad("differs", `${version} → 기대 ${expected}`, "mise install");
       return same(expected ? `${version} (기대와 같음)` : version);
@@ -55,7 +55,7 @@ export default defineCommand({
         async read(c) {
           const s = c.tools.infisicalLogin();
           if (s === "missing") return bad("missing", "infisical 없음", "mise install");
-          // 저장소 밖에서는 mise가 infisical 버전을 못 골라 로그인돼 있어도 실패로 보일 수 있다(T12-05 운영).
+          // 저장소 밖에서는 mise가 infisical 버전을 못 골라 로그인돼 있어도 실패로 보일 수 있다(운영 실측).
           return s === "ok" ? same("로그인 프로필 있음") : bad("missing", "로그인 안 됨", "infisical login(저장소 밖에서 실행했다면 저장소 안에서 다시 확인한다)");
         },
       },
@@ -64,7 +64,7 @@ export default defineCommand({
         target: `환경변수 ${PROJECT_ENV}`,
         async read(c) {
           const s = c.infisical.projectStatus();
-          // lead 결정(2026-10-23): 없음은 경고. Infisical을 쓰는 명령이 tty에서 한 번 묻는다.
+          // lead 결정: 없음은 경고. Infisical을 쓰는 명령이 tty에서 한 번 묻는다.
           if (s === "missing") return { ...same("없음(Infisical 쓰는 명령이 tty에서 묻는다)"), warn: `없으면 tty에서 묻는다. 묻지 않게 하려면 export ${PROJECT_ENV}=<homelab project ID>` };
           return s === "ok" ? same("있음(UUID)") : bad("differs", "UUID 형식이 아님", `${PROJECT_ENV}를 Infisical 프로젝트 설정의 ID로 고친다`);
         },

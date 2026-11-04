@@ -1,8 +1,8 @@
 // homelab status: 빌드·배포 PR·Argo CD·파드·시크릿·DB·Valkey·공개 URL의 준비 상태와 다음 행동(설계 C.7, D 9번 상자).
 // doctor처럼 확인 단계로 만든다: 준비됨은 same, 문제는 differs/missing + next. 하나라도 문제면 exit 1이고 error.next는
 // 첫 문제의 다음 행동이다. 단 원인을 아는 시크릿 문제(Infisical에 없는 키, ClusterSecretStore 준비 안 됨)가 있으면 그것이
-// 먼저다(T13 S6·S7). 진행 중(동기화·rollout 전)도 문제로 보인다(T12-02 결정, C.7에 적음).
-// 읽는 것(T12-02 결정): GitHub(앱 저장소 Actions, homelab의 deploy/<app> PR), Argo CD Application CR, 파드 imageID와
+// 먼저다(시나리오 6·7). 진행 중(동기화·rollout 전)도 문제로 보인다(설계 C.7).
+// 읽는 것(설계 C.7): GitHub(앱 저장소 Actions, homelab의 deploy/<app> PR), Argo CD Application CR, 파드 imageID와
 // main image.yaml, ExternalSecret Ready(실패한 것이 쓰는 ClusterSecretStore Ready 포함), CNPG DatabaseRole·Database status,
 // 마이그레이션 Job, Valkey Deployment·백업 CronJob, 공개 host의 /healthz. 파일은 homelab main에서 읽는다.
 import { defineCommand, type Observation, type ReadCtx, type Step } from "../core/command";
@@ -23,7 +23,7 @@ function digestOf(text: string | null): string | null {
   return text === null ? null : (/^digest: (sha256:[0-9a-f]{64})$/m.exec(text)?.[1] ?? null);
 }
 
-// GitHub 조회 실패(403·429·5xx)를 "기록 없음"·"PR 없음"으로 읽지 않는다(#884 리뷰 P2-5). 실패는 그 줄의 읽기 실패다.
+// GitHub 조회 실패(403·429·5xx)를 "기록 없음"·"PR 없음"으로 읽지 않는다. 실패는 그 줄의 읽기 실패다.
 function ghList(c: ReadCtx, path: string, what: string, field?: string): any[] {
   const r = c.gh.get(path);
   const list = field ? r.json?.[field] : r.json;
@@ -35,13 +35,13 @@ const ready = (o: any) => (o?.status?.conditions ?? []).some((c: any) => c?.type
 const wait = (app: string) => `잠시 뒤 다시: homelab status ${app}`;
 
 // 원인을 아는 시크릿 문제. 다음 행동은 첫 문제의 것이 원칙인데, 앞 줄(Argo CD)이 바로 이 원인 때문에 재시도 중이라
-// "잠시 뒤 다시"가 먼저 나왔다(T13 S6 빠진 키, S7 client secret 폐기로 Store 준비 실패). run이 이것을 첫 문제보다 먼저 안내한다.
+// "잠시 뒤 다시"가 먼저 나온다(시나리오 6 빠진 키, 시나리오 7 client secret 폐기로 Store 준비 실패). run이 이것을 첫 문제보다 먼저 안내한다.
 type Cause = { message: string; next: string };
 
 // InvalidProviderConfig는 인증 실패의 증거가 아니다. ESO v2.13.0은 provider client를 만들지 못하면 원인과 상관없이
 // (자격 Secret·CA 읽기, Infisical 접속, 로그인 거부) 이 이유와 메시지 "unable to create client"를 남기고, 실제 오류는
 // Warning 이벤트에만 쓴다(pkg/controllers/secretstore/common.go validateStore). client secret 폐기 때 이 이유였던 것은
-// T09·T10·T13 S7 실측일 뿐이라, 다음 행동은 이벤트로 원인을 가르는 것부터다. 폴더가 없을 때(bootstrap.md 2.2) 같은
+// 실측일 뿐이라, 다음 행동은 이벤트로 원인을 가르는 것부터다. 폴더가 없을 때(bootstrap.md 2.2) 같은
 // 다른 이유는 이유 이름만 보인다.
 function storeProblem(name: string, store: any): { detail: string; next: string } | null {
   if (store && ready(store)) return null;
@@ -123,8 +123,8 @@ function appSteps(ctx: ReadCtx, app: string, main: string, causes: Cause[]): Ste
     target: "파드",
     async read(c) {
       if (v.suspended === true) return ok("멈춤(suspended, 복원 중)");
-      // Job 파드와 끝난 파드(Succeeded·Failed, 예 퇴거된 옛 ReplicaSet 파드)는 지금 서비스하는 파드가 아니다(Connector 4373412611,
-      // data-list와 vmalert kubernetes 규칙과 같은 판정).
+      // Job 파드와 끝난 파드(Succeeded·Failed, 예 퇴거된 옛 ReplicaSet 파드)는 지금 서비스하는 파드가 아니다
+      // (data-list와 vmalert kubernetes 규칙과 같은 판정).
       const pods = c.k8s.list("pod", ns, `homelab.ukyi.app/app=${app}`).filter((p: any) => !p?.metadata?.ownerReferences?.some((o: any) => o?.kind === "Job") && p?.status?.phase !== "Succeeded" && p?.status?.phase !== "Failed");
       const isReady = (p: any) => (p?.status?.conditions ?? []).some((x: any) => x?.type === "Ready" && x?.status === "True");
       const readyPods = pods.filter(isReady);
@@ -142,9 +142,9 @@ function appSteps(ctx: ReadCtx, app: string, main: string, causes: Cause[]): Ste
     async read(c) {
       // DB 역할 ExternalSecret이 아직 없으면(데이터 Application 전) 빼지 않고 준비 안 됨으로 센다.
       const role = usesPg ? (c.k8s.get("externalsecret", "database", `pg-role-${app}`) ?? { metadata: { name: `pg-role-${app}`, namespace: "database" } }) : null;
-      // values가 선언한 ExternalSecret이 목록에 없으면 빈 목록을 0/0 Ready로 보지 않고 준비 안 됨으로 센다(#884 2라운드 P2-6).
+      // values가 선언한 ExternalSecret이 목록에 없으면 빈 목록을 0/0 Ready로 보지 않고 준비 안 됨으로 센다.
       // 앱 차트(externalsecret.yaml의 조건)와 데이터 차트(valkey.yaml: 영속이면 running과 무관하게 -valkey-auth·-valkey-backup-r2)
-      // 둘 다다. 데이터 Application 줄은 Argo CD의 마지막 상태라 부재를 대신 보지 못한다(#890 1라운드 P2-2).
+      // 둘 다다. 데이터 Application 줄은 Argo CD의 마지막 상태라 부재를 대신 보지 못한다.
       const want = [
         ...(Array.isArray(v.secrets) && v.secrets.length ? [`${app}-app`] : []),
         ...(v.uses?.postgres ? [`${app}-db`] : []),
@@ -169,7 +169,7 @@ function appSteps(ctx: ReadCtx, app: string, main: string, causes: Cause[]): Ste
       try {
         have = keys.length && c.infisical.folderExists(`/apps/${app}`) ? c.infisical.listKeys(`/apps/${app}`) : [];
       } catch (e) {
-        // 이미 읽어 확인한 Store 원인은 키 조회 실패(Infisical 장애, 로컬 로그인 만료)로 지우지 않는다(#950 1라운드 P2).
+        // 이미 읽어 확인한 Store 원인은 키 조회 실패(Infisical 장애, 로컬 로그인 만료)로 지우지 않는다.
         // 키는 못 읽었으니 빠졌다고 하지 않는다. Store 원인이 없으면 기존 관례대로 이 줄의 읽기 실패다.
         if (storeBad.length === 0) throw e;
         keysUnread = (e as Error).message;
@@ -242,7 +242,7 @@ function appSteps(ctx: ReadCtx, app: string, main: string, causes: Cause[]): Ste
 }
 
 // 전체 보기는 apps/와 data/를 함께 연다. 앱 없이 데이터만 남은 것(예 data/homelab-probe2)과 <app>-data 장애를
-// 놓치지 않는다(#884 리뷰 P2-4). 이름 순으로 <app>, <app>-data.
+// 놓치지 않는다. 이름 순으로 <app>, <app>-data.
 function dirs(ctx: ReadCtx, main: string, dir: "apps" | "data"): string[] {
   const r = ctx.gh.get(`repos/ukyi-app/homelab/contents/${dir}?ref=${main}`);
   if (r.status === 404) return [];

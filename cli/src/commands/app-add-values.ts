@@ -57,7 +57,7 @@ export function applyEdits(current: string | null, header: string, edits: Obj): 
 }
 
 // 앱 차트 app.env와 같은 규칙(platform/charts/app/templates/_helpers.tpl): PORT(web)·DATABASE_URL(uses.postgres)·
-// VALKEY_URL(uses.valkey)은 차트가 넣고, env 키와 secrets는 그것들과도 서로도 겹치면 렌더가 막힌다(#884 2라운드 P2-4).
+// VALKEY_URL(uses.valkey)은 차트가 넣고, env 키와 secrets는 그것들과도 서로도 겹치면 렌더가 막힌다.
 // 병합할 수 없는 PR을 만들지 않게 쓰기 전에 멈춘다. 덮거나 조용히 빼지 않는다.
 export function envProblem(v: Record<string, any>): string | null {
   const names = [...(v.kind === "web" ? ["PORT"] : []), ...(v.uses?.postgres ? ["DATABASE_URL"] : []), ...(v.uses?.valkey ? ["VALKEY_URL"] : []), ...Object.keys(v.env ?? {}), ...(Array.isArray(v.secrets) ? v.secrets : [])];
@@ -68,9 +68,9 @@ export function envProblem(v: Record<string, any>): string | null {
 export function appValues(current: string | null, flags: AddFlags, ctx: { secrets: string[]; latestChart: string }): string | null {
   const now = current === null ? {} : parseObj(current, "apps values");
   // worker는 schema가 port·public·internal을 막는다(values.schema.json allOf). 노출 플래그 하나로 web으로 바꾸지도 않는다
-  // (포트·probe를 정해야 한다, #884 2라운드 P2-5). PR 계산 때의 main에서도 본다.
+  // (포트·probe를 정해야 한다). PR 계산 때의 main에서도 본다.
   if (now.kind === "worker" && (flags.public || flags.internal)) throw new Error("worker 앱에는 --public·--internal을 붙이지 않는다(web으로 바꾸려면 values의 kind·port·probes를 사람이 고친다)");
-  // 캐시와 영속 Valkey는 이름이 같아 함께 둘 수 없다. 시작 뒤 그사이 병합된 캐시를 이 PR이 보게 한다(#884 2라운드 P2-2).
+  // 캐시와 영속 Valkey는 이름이 같아 함께 둘 수 없다. 시작 뒤 그사이 병합된 캐시를 이 PR이 보게 한다.
   if (flags.cache === "persistent" && now.cache?.enabled === true) throw new Error("그사이 main에 캐시 Valkey가 켜졌다(같은 이름이라 영속과 함께 둘 수 없다). homelab cache add <app> --persistent로 전환한다");
   const edits: Obj = {};
   if (current === null) Object.assign(edits, { chartVersion: ctx.latestChart, ...DEFAULTS });

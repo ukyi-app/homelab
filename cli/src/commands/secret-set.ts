@@ -38,7 +38,7 @@ export default defineCommand({
       async apply(w) {
         if (!w.infisical.folderExists(folder)) w.infisical.createFolder(folder);
         const value = w.readSecretInput(`${folder}/${key} 값: `);
-        // 쓰기 전에 기억한다. 서버에는 반영됐는데 응답이 시간 초과면 엔진이 다시 읽어 이 해시로 반영을 확인한다(#884 리뷰 P2-3).
+        // 쓰기 전에 기억한다. 서버에는 반영됐는데 응답이 시간 초과면 엔진이 다시 읽어 이 해시로 반영을 확인한다.
         written = value.sha256Prefix(12);
         w.infisical.setValue(folder, key, value);
       },
@@ -49,7 +49,7 @@ export default defineCommand({
     const registered = values !== null;
     const v = (values === null ? null : parseYaml(values)) as { kind?: string; uses?: { postgres?: boolean; valkey?: boolean }; env?: Record<string, string> } | null;
     // 차트가 넣는 env(PORT·DATABASE_URL·VALKEY_URL)나 values env와 같은 이름이면 app add가 secrets에 넣는 순간 렌더가
-    // 막힌다(#884 2라운드 P2-4). 쓰기 전에 멈춘다. 등록 전이면 차트가 넣을 수 있는 이름만 알린다.
+    // 막힌다. 쓰기 전에 멈춘다. 등록 전이면 차트가 넣을 수 있는 이름만 알린다.
     const taken = v ? [...(v.kind === "web" ? ["PORT"] : []), ...(v.uses?.postgres ? ["DATABASE_URL"] : []), ...(v.uses?.valkey ? ["VALKEY_URL"] : []), ...Object.keys(v.env ?? {})] : [];
     if (taken.includes(key)) {
       const blocked: Step = { id: "env-name", target: `env 이름 ${key}`, read: async () => ({ state: "differs", action: "none", detail: "차트·values env가 이미 쓰는 이름이다", next: `다른 키 이름을 쓰거나 apps/${app}/values.yaml의 env에서 ${key}를 뺀다` }) };

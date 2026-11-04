@@ -4,7 +4,7 @@
 // 순서(restore.md 1절): (0 수동 백업) → 1 서버 내림 PR → 2 복원 Job(RDB를 dump.rdb로, appendonlydir 지움) →
 // 3 복원 모드로 올림 PR(appendonly no로 RDB를 읽는다) → 4 CONFIG SET appendonly yes → 5 복원 모드 끄기 PR, rollout restart → 6 정리.
 // 함정: appendonly yes인 채 appendonlydir만 지우면 Valkey 9.1.2는 RDB를 읽지 않고 빈 데이터로 뜬다(U18). 그래서 복원 모드가 있다.
-// 멈춘 단계에서 다시 시작하려고 실행 기록을 앱 ns의 ConfigMap restore-vk에 둔다(restore.md의 $W를 클러스터에, REPORT-ops 2절).
+// 멈춘 단계에서 다시 시작하려고 실행 기록을 앱 ns의 ConfigMap restore-vk에 둔다(restore.md의 $W를 클러스터에).
 // 복원 Job 이름은 실행과 무관하게 restore-vk 하나라 API 서버의 이름 유일성이 같은 PVC의 두 번째 쓰기를 막는다(restore.md 1절 2).
 // 끝나도 기록은 남기고(재실행이 모두 same) --finish가 지운다.
 import { defineCommand, type Observation, type ReadCtx, type RestoreRecord, type Step, type WriteCtx } from "../core/command";
@@ -58,7 +58,7 @@ function restoreUsers(ctx: ReadCtx | WriteCtx, n: Names): string[] {
 
 // 이 실행의 Job·파드(지우는 중 포함). 기록을 지우기 직전에 0개여야 한다.
 // 함정: CronJob에서 만든 수동 백업 Job은 Job에만 실행 라벨이 있고 파드 템플릿에는 없다(core createJobFromCronJob, 차트의 백업
-// 템플릿에도 없다). 그래서 기록해 둔 백업 Job 이름마다 Kubernetes가 붙이는 job-name 라벨로 파드를 따로 찾는다(#883 r2 P2-3).
+// 템플릿에도 없다). 그래서 기록해 둔 백업 Job 이름마다 Kubernetes가 붙이는 job-name 라벨로 파드를 따로 찾는다.
 function runObjects(ctx: ReadCtx | WriteCtx, n: Names, r: RestoreRecord): string[] {
   const out = [...ctx.k8s.list("job", n.ns, `${LABEL}=${r.run}`).map((j) => `job/${j.metadata?.name}`), ...ctx.k8s.list("pod", n.ns, `${LABEL}=${r.run}`).map((p) => `pod/${p.metadata?.name}`)];
   for (const job of backupJobs(r)) {
@@ -77,7 +77,7 @@ function backupJobs(r: RestoreRecord): string[] {
 }
 
 // 기록이 없을 때 남은 복원 흔적. Git의 복원 설정, 복원 Job, valkey-data를 쓰는 Job 파드. 서버가 안 떠 있는 것은 흔적이 아니다
-// (AOF 손상처럼 서버 장애를 복원으로 고치려는 경우다, #883 r2 P2-4).
+// (AOF 손상처럼 서버 장애를 복원으로 고치려는 경우다).
 function traces(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   const v = values(ctx, n.dataFile)?.valkey ?? {};
   const left: string[] = [];
@@ -88,7 +88,7 @@ function traces(ctx: ReadCtx | WriteCtx, n: Names): string[] {
 }
 
 // 서버가 내려가 있지 않은 이유(빈 배열이면 내려감). main의 running: false, Deployment 없음, PVC 있음, CronJob suspend.
-// 파드 0개는 증거가 아니다. Deployment가 다시 생겼으면 곧 파드를 만든다(#883 r3 P1-2).
+// 파드 0개는 증거가 아니다. Deployment가 다시 생겼으면 곧 파드를 만든다.
 function serverUp(ctx: ReadCtx | WriteCtx, n: Names): string[] {
   const left: string[] = [];
   if (values(ctx, n.dataFile)?.valkey?.running !== false) left.push(`main ${n.dataFile}에 running: false 없음`);
@@ -140,17 +140,17 @@ function gatedPr(n: Names, id: string, pre: string | null, done: string, step: S
 }
 
 // 키 수가 같기를 요구하지 않는다. 복원 모드로 올린 뒤 사람이 PR을 병합할 때까지 앱이 돌며 키를 바꾸고 TTL 키도 만료된다.
-// 같기를 요구하면 정상 변경을 손실로 보고, touched 때문에 --abort도 안 돼 실행이 갇힌다(#883 Connector P2).
+// 같기를 요구하면 정상 변경을 손실로 보고, touched 때문에 --abort도 안 돼 실행이 갇힌다.
 // 아는 실패는 빈 데이터(U18)라, 기준들 중 하나라도 양수인데 지금 0개면 멈춘다. 기준은 저장된 값과 바로 앞에서 새로 본 값
-// 둘 다다. 저장된 0만 믿으면 그 뒤 생긴 키를 다 잃어도 통과한다(#889 r2 P1-2).
+// 둘 다다. 저장된 0만 믿으면 그 뒤 생긴 키를 다 잃어도 통과한다.
 function emptied(before: number[], after: number): boolean {
   return before.some((x) => x > 0) && after === 0;
 }
 
-// 0개를 본 실행은 기록에 suspect.empty를 남긴다. 재실행이 빈 서버의 0개를 새 기준으로 받아 성공으로 넘어가지 않게 한다
-// (#889 r1 P1-3). 앱이 정상적으로 다 지웠거나 TTL로 모두 만료됐으면(#889 r1 P2) 사람이 보고 --accept-empty로 받아들인다.
+// 0개를 본 실행은 기록에 suspect.empty를 남긴다. 재실행이 빈 서버의 0개를 새 기준으로 받아 성공으로 넘어가지 않게 한다.
+// 앱이 정상적으로 다 지웠거나 TTL로 모두 만료됐으면 사람이 보고 --accept-empty로 받아들인다.
 // 플래그는 이 표식이 있을 때만 쓰인다(미리 붙여 두어 검사를 끄지 못하게). 받아들이면 그 빈 상태가 새 기준(0)이 되고 표식은
-// 지운다. 승인은 그 관측에만 쓰인다: 뒤에 키가 생겼다가 다시 0이 되면 바로 앞에서 본 양수 때문에 다시 멈춘다(#889 r2 P1-1).
+// 지운다. 승인은 그 관측에만 쓰인다: 뒤에 키가 생겼다가 다시 0이 되면 바로 앞에서 본 양수 때문에 다시 멈춘다.
 // empty.accepted는 받아들인 횟수 기록일 뿐 검사를 끄지 않는다.
 function acceptEmpty(w: WriteCtx, n: Names, flag: boolean): boolean {
   const r = mine(w, n);
@@ -160,7 +160,7 @@ function acceptEmpty(w: WriteCtx, n: Names, flag: boolean): boolean {
 }
 
 // 앱 키 수와 이 실행의 표식 유무. 표식 키는 이 실행 것만이 아니라 homelab:restore:* 전부 뺀다. 복원 중(running: true)
-// 정기 백업이 돌면 표식이 R2 백업에 들어가고, 그 백업을 다른 실행으로 복원하면 옛 표식이 돌아온다(#891 r2 P2).
+// 정기 백업이 돌면 표식이 R2 백업에 들어가고, 그 백업을 다른 실행으로 복원하면 옛 표식이 돌아온다.
 function appKeys(w: WriteCtx, n: Names, run: string): { appendonly: string; keys: number; marker: boolean } {
   const s = valkeyServer(w, n);
   const ids = w.valkey.markers(n.ns, n.server);
@@ -290,7 +290,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
       async read(ctx) {
         const r = record(ctx, n);
         const opt = backupFirst ? "1" : "0";
-        // 실행 옵션은 기록에 고정한다. 끝난 실행에 --backup-first를 붙여 다시 치면 정리 뒤에 새 Job이 생긴다(#883 r1 P1-3).
+        // 실행 옵션은 기록에 고정한다. 끝난 실행에 --backup-first를 붙여 다시 치면 정리 뒤에 새 Job이 생긴다.
         if (r && (r.data.object !== object || (r.data["opt.backup"] ?? "") !== opt)) return { state: "differs", action: "none", detail: `다른 복원(실행 ${r.run}, 객체 ${r.data.object}, 수동 백업 ${r.data["opt.backup"] === "1" ? "함" : "안 함"})이 남아 있다`, next: `같은 옵션으로 잇거나 homelab cache restore ${app} --finish 또는 --abort` };
         const job = ctx.k8s.get("job", n.ns, JOB);
         if (job && job.metadata?.labels?.[LABEL] !== r?.run) return { state: "differs", action: "none", detail: `다른 실행의 Job ${JOB}이 있다`, next: `kubectl -n ${n.ns} get job,pod -L ${LABEL}로 보고, 끝났으면 로그를 남긴 뒤 지운다` };
@@ -361,7 +361,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
         const r = record(ctx, n);
         if (!r) return later("서버 내림 PR 병합 뒤 확인");
         // 복원 Job을 새로 만들 차례면 ok.down이 있어도 지금 다시 본다. 그만두기(--abort) PR이 병합됐거나 누가 서버를 올렸으면
-        // 옛 표식만 믿고 서버와 복원 Job이 같은 PVC를 쓰게 된다(#883 r3 P1-2). 이미 있는 Job은 기다리기만 해 새로 만들지 않는다.
+        // 옛 표식만 믿고 서버와 복원 Job이 같은 PVC를 쓰게 된다. 이미 있는 Job은 기다리기만 해 새로 만들지 않는다.
         if (has(r, "ok.down") && (has(r, "ok.job") || ctx.k8s.get("job", n.ns, JOB))) return same("내려감");
         const up = serverUp(ctx, n);
         if (has(r, "ok.down")) return up.length ? { state: "differs", action: "update", detail: `서버 내림을 기록했지만 지금은 아니다(${up.join(", ")}) → 표식을 지우고 서버 내림 PR부터 다시` } : same("내려감(다시 확인)");
@@ -385,8 +385,8 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
       async apply(w) {
         const run = mine(w, n).run;
         // touched: Job이 appendonlydir을 지운 뒤 실패하거나 로그·기록 저장이 실패해 ok.job이 없어도, 사람이 Job을 지워도 PVC는
-        // 이미 바뀌었을 수 있다. 이 표식이 있으면 --abort를 거부한다(#883 r1 P1-1). 읽기 사전 검사가 실패하면 남기지 않는다.
-        // 만들기를 요청하기 바로 전, 또는 이 실행의 Job이 이미 있음을 본 때에만 남긴다(#883 r2 P2-5).
+        // 이미 바뀌었을 수 있다. 이 표식이 있으면 --abort를 거부한다. 읽기 사전 검사가 실패하면 남기지 않는다.
+        // 만들기를 요청하기 바로 전, 또는 이 실행의 Job이 이미 있음을 본 때에만 남긴다.
         const existing = w.k8s.get("job", n.ns, JOB);
         if (existing) {
           if (existing.metadata?.labels?.[LABEL] !== run) throw new Error(`다른 실행의 Job ${JOB}이 있다`);
@@ -397,7 +397,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
           const pods = w.k8s.list("pod", n.ns).filter((p) => p?.status?.phase !== "Succeeded" && p?.status?.phase !== "Failed" && mountsData(p?.spec)).map((p) => `pod/${p.metadata?.name}`);
           const jobs = w.k8s.list("job", n.ns).filter((j) => !hasTrue(j, "Complete") && !hasTrue(j, "Failed") && mountsData(j?.spec?.template?.spec)).map((j) => `job/${j.metadata?.name}`);
           if (pods.length || jobs.length) throw new Error(`valkey-data를 쓰는 파드·Job이 남아 있다: ${[...pods, ...jobs].join(", ")}. 끝났는지 보고 지운 뒤 다시 한다`);
-          // down 단계가 방금 봤어도 touched·Job 직전에 한 번 더 본다(#883 r3 P1-2).
+          // down 단계가 방금 봤어도 touched·Job 직전에 한 번 더 본다.
           const up = serverUp(w, n);
           if (up.length) throw new Error(`서버가 내려가 있지 않다(${up.join(", ")}). 다시 실행하면 서버 내림부터 잇는다`);
           const { image, bucket } = uploadContainer(w, n);
@@ -437,7 +437,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
         const s = valkeyServer(w, n);
         // appendonly yes로 떴으면 RDB를 읽지 않고 빈 데이터다(U18). 여기서 멈춘다.
         if (s.appendonly !== "no") throw new Error(`복원 모드가 아니다(appendonly ${s.appendonly}). restoreMode가 반영됐는지 본다`);
-        // RDB를 읽은 직후 표식 키를 넣는다. 재시작 뒤 이 키가 있어야 복원한 데이터가 AOF로 이어진 것이다(#889 r2 6).
+        // RDB를 읽은 직후 표식 키를 넣는다. 재시작 뒤 이 키가 있어야 복원한 데이터가 AOF로 이어진 것이다.
         const run = mine(w, n).run;
         const keys = s.dbsize - w.valkey.markers(n.ns, n.server).length;
         w.valkey.marker(n.ns, n.server, run, "set");
@@ -494,7 +494,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
         const v = values(ctx, n.dataFile)?.valkey ?? {};
         const argo = ctx.k8s.get("application", "argocd", `${n.app}-data`);
         // ConfigMap(valkey-overrides)은 읽지 않는다. 데이터 Application의 source는 차트 태그(data-chart-v<버전>)라 revision은 main SHA가
-        // 아니다(#883 r1 P2). main values는 ApplicationSet이 spec.source.helm.valuesObject로 넣으므로, 그 값과 Argo CD가 마지막으로
+        // 아니다. main values는 ApplicationSet이 spec.source.helm.valuesObject로 넣으므로, 그 값과 Argo CD가 마지막으로
         // 비교한 값(status.sync.comparedTo)에 둘 다 running·restoreMode가 없고 Synced인지로 본다.
         const clean = (o: any) => o !== null && typeof o === "object" && o.valkey?.persistent === true && !("running" in o.valkey) && !("restoreMode" in o.valkey);
         const synced = !("running" in v) && !("restoreMode" in v) && argo?.status?.sync?.status === "Synced" && clean(argo?.spec?.source?.helm?.valuesObject) && clean(argo?.status?.sync?.comparedTo?.source?.helm?.valuesObject);
@@ -503,7 +503,7 @@ function mainSteps(n: Names, object: string, backupFirst: boolean, acceptFlag: b
       async apply(w) {
         // ok.aof는 그때의 서버 프로세스 이야기다. 복원 모드 끄기 PR을 기다리는 동안 서버가 재시작됐으면 ConfigMap이 아직
         // appendonly no라 AOF가 꺼진 채 RDB로 떠 있고, 디스크의 AOF는 그 전 것이다. 그대로 재시작하면 옛 AOF를 읽어 그사이
-        // 쓰기를 잃는다(#883 Connector P1). 재시작 직전에 지금 서버를 보고, 꺼졌으면 표식을 지워 다음 실행이 AOF부터 다시 켜게 한다.
+        // 쓰기를 잃는다. 재시작 직전에 지금 서버를 보고, 꺼졌으면 표식을 지워 다음 실행이 AOF부터 다시 켜게 한다.
         const r = mine(w, n);
         if (has(r, "suspect.marker")) throw new Error(`앞 실행이 복원 표식 키가 없음을 봤다. 손으로 확인한다(restore.md 1.1, --accept-empty로 넘길 수 없다)`);
         // 앞 실행이 0개를 봤으면 받아들이기 전에는 다시 재시작하지 않는다.
@@ -581,7 +581,7 @@ function finishSteps(n: Names): Step[] {
       },
       async apply(w) {
         const r = mine(w, n);
-        // 기록이 잠금이다. 지우기 직전에 표식이 아니라 지금 클러스터를 다시 본다(#883 r1 P1-3).
+        // 기록이 잠금이다. 지우기 직전에 표식이 아니라 지금 클러스터를 다시 본다.
         if (!has(r, "ok.cleanup")) throw new Error(`실행 ${r.run}이 끝나지 않았다`);
         const left = runObjects(w, n, r);
         if (left.length) throw new Error(`실행 ${r.run}의 객체가 남아 있다(${left.join(", ")}). 기록은 그대로다`);
@@ -601,13 +601,13 @@ function abortSteps(n: Names): Step[] {
       async read(ctx) {
         const r = record(ctx, n);
         if (!r) {
-          // 기록이 없으면 파괴 이전임을 기록으로 증명할 수 없다. 흔적이 하나라도 있으면 복원 설정을 지우는 PR을 열지 않는다(#883 r2 P1-1).
+          // 기록이 없으면 파괴 이전임을 기록으로 증명할 수 없다. 흔적이 하나라도 있으면 복원 설정을 지우는 PR을 열지 않는다.
           const left = traces(ctx, n);
           if (left.length) return { state: "differs", action: "none", detail: `실행 기록 없이 복원 흔적이 있다(${left.join(", ")})`, next: `PVC가 바뀌었는지 손으로 확인한다(restore.md 1절, kubectl -n ${n.ns} get job,pod -L ${LABEL})` };
           return same("기록 없음, 복원 흔적 없음");
         }
         const next = `homelab cache restore ${app} --apply로 끝까지 잇는다`;
-        // Job 유무가 아니라 Job을 만들기 전에 남긴 touched로 판단한다. Job은 지워질 수 있다(#883 r1 P1-1).
+        // Job 유무가 아니라 Job을 만들기 전에 남긴 touched로 판단한다. Job은 지워질 수 있다.
         if (has(r, "touched") || has(r, "ok.job")) return { state: "differs", action: "none", detail: "복원 Job을 만든 뒤라 PVC가 바뀌었을 수 있다", next };
         const users = [...(ctx.k8s.get("job", n.ns, JOB) ? [`job/${JOB}`] : []), ...restoreUsers(ctx, n)];
         if (users.length) return { state: "differs", action: "none", detail: `valkey-data를 쓰는 Job·파드가 있다(${users.join(", ")})`, next };

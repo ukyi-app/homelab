@@ -69,7 +69,7 @@ export default defineCommand({
       const st = a.status ?? {};
       const conditions: any[] = Array.isArray(st.conditions) ? st.conditions : [];
       // InvalidSpecError·UnknownError는 조정마다 비교 전에 다시 쓴다(v3.5.5 refreshAppConditions: 프로젝트·저장소·대상 권한
-      // 검증). 이 오류면 컨트롤러가 CompareAppState 전에 끝나 comparedTo가 바뀌지 않으므로 아래 비교보다 먼저 본다(#925 r1 P2-1).
+      // 검증). 이 오류면 컨트롤러가 CompareAppState 전에 끝나 comparedTo가 바뀌지 않으므로 아래 비교보다 먼저 본다.
       const spec = conditions.find((x) => x?.type === "InvalidSpecError" || x?.type === "UnknownError");
       if (spec) {
         return {
@@ -89,10 +89,10 @@ export default defineCommand({
       const op = st.operationState;
       if (op?.phase === "Running") return same(`동기화 진행 중(재시도 ${op.retryCount ?? 0}회)`, { hold: "Argo CD 동기화가 끝나기를 기다림" });
       // 자동 동기화는 마지막 동기화가 지금 revision·source(전체)로 한 것이면 다시 하지 않는다(v3.5.5 alreadyAttemptedSync).
-      // 차트 버전이나 다른 값만 바뀌어도 새 시도다. secrets 키가 같다는 것으로는 가를 수 없다(#913 r2 P2-1).
+      // 차트 버전이나 다른 값만 바뀌어도 새 시도다. secrets 키가 같다는 것으로는 가를 수 없다.
       // 결과가 없는 끝난 동기화도 시도한 것으로 본다(같은 함수). Argo CD는 revision 비교 여부를 내부 값(newRevisionHasChanges)으로
       // 정하는데 CLI는 그 값을 볼 수 없어, sync.revision이 있을 때만 revision을 비교한다(같은 알고리즘은 아니다). 모르는 값을
-      // "다름"으로 읽으면 재시도 소진(r1 P2-1)이 대기로 되돌아간다.
+      // "다름"으로 읽으면 재시도 소진이 대기로 되돌아간다.
       const sameRev = (r: unknown) => typeof st.sync?.revision !== "string" || r === st.sync.revision;
       const attempted = op ? (op.syncResult ? sameRev(op.syncResult.revision) && sameJson(a.spec?.source, op.syncResult.source) : ["Succeeded", "Failed", "Error"].includes(op.phase)) : false;
       if (attempted && (op.phase === "Failed" || op.phase === "Error")) return stuck(`${what} 없음, 동기화 ${op.phase}(재시도 ${op.retryCount ?? 0}회 뒤 멈춤)`);
@@ -126,18 +126,18 @@ export default defineCommand({
       },
       {
         // ExternalSecret(wave 0)이나 Deployment(wave 2)가 없을 때 Argo CD가 아직 반영 중이면 대기(3), 끝났는데 멈췄으면
-        // 실패(T12-05 F3, #913 r1 P2-1·r2). 첫 배포는 그 사이(ExternalSecret만 있음)를 지난다. values는 ApplicationSet이 main을
+        // 실패. 첫 배포는 그 사이(ExternalSecret만 있음)를 지난다. values는 ApplicationSet이 main을
         // 60초마다 읽어 Application의 helm.valuesObject로 넣는다(applicationset.yaml). 재시도(limit 10)가 도는 동안
         // operationState.phase는 Running이고, 소진되거나 재시도 없이 끝나면 Failed·Error로 남아 다시 하지 않는다(명시 sync가
         // 필요, _helpers.tpl homelab.retry). 쓰기가 없는 확인 단계에 두어 hold는 실행 전 읽기에서만 난다. 아래 sync의 실행 뒤
-        // 재조회는 hold로 넘어가지 않는다(r1 P2-2).
+        // 재조회는 hold로 넘어가지 않는다.
         id: "argo",
         target: `Argo CD ${app}`,
         async read(c) {
           const first = observe(c);
           if (first.missing === null || first.o.state === "same") return first.o;
           // 실패 판정은 "없음"을 본 뒤에 읽은 Argo CD 상태에 기댄다. 조회는 원자적이지 않아 그사이 생겼을 수 있다(첫 배포의
-          // wave가 진행되면 없음 → Synced로 읽힌다, #925 r1 P2-2). 실패로 끝내기 전에 그 객체를 다시 보고, 생겼으면 한 번 더 본다.
+          // wave가 진행되면 없음 → Synced로 읽힌다). 실패로 끝내기 전에 그 객체를 다시 보고, 생겼으면 한 번 더 본다.
           return c.k8s.get(first.missing.kind, ns, first.missing.name) === null ? first.o : observe(c).o;
         },
       },
@@ -166,7 +166,7 @@ export default defineCommand({
           try {
             p = c.k8s.podSecretsCurrent(ns, app);
           } catch {
-            // Deployment가 없어서 난 실패만 바꾼다. 다시 보니 있으면(두 조회 사이에 생김, #925 r1 P2-2) 한 번 더 읽고, 그때의
+            // Deployment가 없어서 난 실패만 바꾼다. 다시 보니 있으면(두 조회 사이에 생김) 한 번 더 읽고, 그때의
             // 실패(시간 초과 등)는 그대로 올린다.
             if (c.k8s.get("deployment", ns, app) === null) return { state: "differs", action: "update", detail: "Deployment가 생긴 뒤 확인" };
             p = c.k8s.podSecretsCurrent(ns, app);

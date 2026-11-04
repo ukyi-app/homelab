@@ -1,4 +1,4 @@
-// homelab cache add: Valkey 연결(설계 C.7·C.5.6, G 시나리오 3·4). 손 절차는 T11 #858(캐시), #859·#860(캐시 → 영속).
+// homelab cache add: Valkey 연결(설계 C.7·C.5.6, G 시나리오 3·4).
 // 캐시(앱 차트)와 영속(데이터 차트) Valkey는 이름이 같다(<앱>-valkey Service·Deployment, <앱>-valkey-auth).
 // 그래서 한 revision에 둘을 두지 못하고, 캐시를 쓰던 앱의 --persistent는 PR 둘이다: A 캐시 끄기 → 병합·동기화 →
 // 같은 명령 재실행 → B 영속 켜기. 어느 단계인지는 main의 앱 values(cache 키)로 고른다. 두 PR은 같은 브랜치를 차례로 쓴다.
@@ -18,7 +18,7 @@ const CACHE_MIN_CHART = "1.1.0";
 const cmp = (a: string, b: string) => a.split(".").map(Number).reduce((d, n, i) => d || n - Number(b.split(".")[i]), 0);
 
 // 앱 차트 app.env와 같은 규칙(platform/charts/app/templates/_helpers.tpl): PORT(web)·DATABASE_URL(uses.postgres)·
-// VALKEY_URL(uses.valkey)은 차트가 넣고, env 키와 secrets는 그것들과도 서로도 겹치면 렌더가 막힌다(#884 2라운드 P2-4).
+// VALKEY_URL(uses.valkey)은 차트가 넣고, env 키와 secrets는 그것들과도 서로도 겹치면 렌더가 막힌다.
 // 병합할 수 없는 PR을 만들지 않게 쓰기 전에 멈춘다. 덮거나 조용히 빼지 않는다.
 function envProblem(v: Record<string, any>): string | null {
   const names = [...(v.kind === "web" ? ["PORT"] : []), ...(v.uses?.postgres ? ["DATABASE_URL"] : []), ...(v.uses?.valkey ? ["VALKEY_URL"] : []), ...Object.keys(v.env ?? {}), ...(Array.isArray(v.secrets) ? v.secrets : [])];
@@ -53,7 +53,7 @@ function checked(text: string | null): string | null {
 }
 
 // 계획·실행 표의 PR 줄. cacheOn이 바꾸는 키를 모두 적는다. cache.enabled만 적으면 VALKEY_URL을 켜는 uses.valkey
-// 변경이 표에서 안 보였다(T13 S3 #932).
+// 변경이 표에서 안 보인다.
 export function cacheOnSummary(before: string | null, after: string | null): string {
   const b = obj(before);
   const a = obj(after);
@@ -72,11 +72,10 @@ export function cacheOn(current: string, latestApp: string): string | null {
   return checked(edit(current, "", { chartVersion: chart, uses: { ...(now.uses ?? {}), valkey: true }, cache: { ...(now.cache ?? {}), enabled: true } }));
 }
 
-// 꺼진 캐시(cache: { enabled: false })는 캐시가 아니다. 키 존재로 보면 이미 영속인 앱의 연결(uses.valkey)을 지운다
-// (#884 2라운드 P2-1, Connector 4373412607).
+// 꺼진 캐시(cache: { enabled: false })는 캐시가 아니다. 키 존재로 보면 이미 영속인 앱의 연결(uses.valkey)을 지운다.
 export const cacheEnabled = (text: string | null) => obj(text).cache?.enabled === true;
 
-// 단계 A(T11 #859): 캐시 서버와 VALKEY_URL을 함께 끈다. uses가 비면 키째 지운다.
+// 단계 A: 캐시 서버와 VALKEY_URL을 함께 끈다. uses가 비면 키째 지운다.
 // PR 계산 때 main에서 캐시가 이미 꺼졌으면 그대로 둔다(그사이 누가 껐다. 재실행이 단계 B를 고른다).
 export function cacheOff(current: string): string | null {
   if (!cacheEnabled(current)) return current;
@@ -86,13 +85,13 @@ export function cacheOff(current: string): string | null {
   return edit(current, "", { cache: undefined, uses: Object.keys(uses).length ? uses : undefined });
 }
 
-// 단계 B(T11 #860).
+// 단계 B.
 export function persistentData(current: string | null, latestData: string): string | null {
   const now = obj(current);
   return edit(current, HEADER, { ...(current === null ? { chartVersion: latestData } : {}), valkey: { ...(now.valkey ?? {}), persistent: true } });
 }
 
-// 단계 B. PR 계산 때 main에 그사이 캐시가 켜졌으면 멈춘다(시작 때의 단계 선택이 낡았다, #884 2라운드 P2-2).
+// 단계 B. PR 계산 때 main에 그사이 캐시가 켜졌으면 멈춘다(시작 때의 단계 선택이 낡았다).
 export function usesValkey(current: string): string | null {
   if (cacheEnabled(current)) throw new Error("그사이 main에 캐시 Valkey가 켜졌다. 같은 명령을 다시 실행해 단계를 다시 고른다");
   const now = obj(current);
@@ -126,7 +125,7 @@ function passwordStep(app: string): Step {
 // 단계 B 앞의 대기: 앱 Application이 아직 캐시 서버 리소스를 갖고 있으면 영속을 켜지 않는다.
 // 캐시 렌더(app 차트 1.1.0): <앱>-valkey(Deployment·Service), -valkey-auth, -valkey-config, -valkey-init-scripts,
 // -valkey-url. 이 가운데 -valkey-url(연결 ExternalSecret)은 uses.valkey가 있으면 영속에서도 앱 Application 몫이라 기다릴
-// 대상이 아니다(#884 리뷰 P2-1: 넣으면 다 된 재실행이 영원히 대기). 영속 서버는 데이터 Application(<앱>-data) 몫이다.
+// 대상이 아니다(넣으면 다 된 재실행이 영원히 대기). 영속 서버는 데이터 Application(<앱>-data) 몫이다.
 export function cacheGoneStep(app: string): Step {
   return {
     id: "cache-gone",
@@ -151,7 +150,7 @@ export default defineCommand({
     const persistent = input.flags.persistent === true;
     const problem = appNameProblem(app, persistent ? { persistent: true } : { cache: true });
     if (problem) throw new UsageError(problem);
-    // 데이터 차트도 영속 Valkey 앱 이름의 valkey를 막는다. core appNameProblem은 캐시에서만 본다(#884 2라운드 P2-3).
+    // 데이터 차트도 영속 Valkey 앱 이름의 valkey를 막는다. core appNameProblem은 캐시에서만 본다.
     if (persistent && app.includes("valkey")) throw new UsageError("영속 Valkey를 쓰는 앱 이름에 valkey를 넣지 않는다(데이터 차트가 렌더를 막는다)");
     const appPath = `apps/${app}/values.yaml`;
     const dataPath = `data/${app}/values.yaml`;
@@ -180,7 +179,7 @@ export default defineCommand({
           title: `cache add: ${app}`,
           body: `homelab cache add가 만든 PR이다(설계 C.5.6). ${app} ns에 캐시 Valkey(PVC 없음, allkeys-lru)와 VALKEY_URL을 켠다.`,
           // 데이터 파일을 늘 함께 읽어(내용 그대로) PR 계산 때 영속 Valkey가 그사이 켜졌는지 본다. 시작 때 없던 파일도
-          // 본다(#890 1라운드 P2-1). 바뀌지 않은 파일은 core가 tree에서 뺀다.
+          // 본다. 바뀌지 않은 파일은 core가 tree에서 뺀다.
           files: [appPath, dataPath],
           edit: (cur) => {
             if (obj(cur[dataPath]).valkey?.persistent === true) throw new Error("그사이 main에 영속 Valkey가 켜졌다(캐시와 함께 둘 수 없다)");
