@@ -1,4 +1,4 @@
-// ApplicationSet apps·data의 templatePatch를 실제로 실행해 본다(T23 할 일 1, 복구 스위치·복구 멈춤 주입).
+// ApplicationSet apps·data의 templatePatch를 실제로 실행해 본다(복구 스위치·복구 멈춤 주입).
 // render.ts 5.·6.은 생성될 Application의 values를 직접 만들어(appValues, dataValues) 공유 차트를 렌더하고, APPSET_RENDERERS는
 // templatePatch에 주입 줄이 들어 있는지만 본다. 그 줄을 {{- if false }}로 감싸 실행되지 않게 해도 둘 다 통과한다.
 // 그래서 렌더된 ApplicationSet의 templatePatch를 견본 입력으로 실행하고 다음을 본다.

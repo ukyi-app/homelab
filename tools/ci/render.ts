@@ -475,7 +475,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     for (const a of r.suspendedApps.filter((a) => !appDirs.has(a))) fail(vf, `cluster.restore.suspendedApps의 ${a}: apps/${a}/values.yaml이 없다`);
     for (const a of Object.keys(r.valkey).filter((a) => !dataDirs.has(a))) fail(vf, `cluster.restore.valkey의 ${a}: data/${a}/values.yaml이 없다`);
   }
-  // 봇 자리의 Kubernetes API egress 주소(T16b D8). 노드 IP는 host/clusters/<클러스터>.env와 root 값 두 곳에 있어
+  // 봇 자리의 Kubernetes API egress 주소(설계 C.8). 노드 IP는 host/clusters/<클러스터>.env와 root 값 두 곳에 있어
   // 한쪽만 바꾸면 봇의 API 연결이 조용히 끊긴다. 단일 노드라 [NODE_IP/32]와 같아야 한다. 다중 노드가 되면 이 대조를 바꾼다.
   for (const vf of clusterFiles) {
     const cluster = vf.replace(/^platform\/root\/values-/, "").replace(/\.yaml$/, "");
@@ -486,7 +486,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     else if (JSON.stringify(got) !== JSON.stringify([`${nodeIp}/32`])) {
       fail(vf, `cluster.kubernetesApi.endpointCIDRs는 [${nodeIp}/32](${env}의 NODE_IP)이다. 지금 ${JSON.stringify(got)}`);
     }
-    // T20 원장 PV의 nodeAffinity 노드. 노드 이름이 다르면 PV에 묶인 봇 파드가 어느 노드에도 뜨지 못한다. 값이 없으면(VM) PV가 없다.
+    // 원장 PV의 nodeAffinity 노드. 노드 이름이 다르면 PV에 묶인 봇 파드가 어느 노드에도 뜨지 못한다. 값이 없으면(VM) PV가 없다.
     const ledgerNode = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) as any)?.cluster?.deletionLedger?.nodeName;
     if (ledgerNode !== undefined) {
       const nodeName = existsSync(join(ROOT, env)) ? readFileSync(join(ROOT, env), "utf8").match(/^NODE_NAME=["']?([a-z0-9-]+)["']?\s*$/m)?.[1] : undefined;

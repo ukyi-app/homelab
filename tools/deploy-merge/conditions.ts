@@ -149,7 +149,7 @@ export function evaluate(f: Facts): Verdict {
   }
   for (const t of ["non_fast_forward", "deletion"]) if (!rules.some((r) => r.type === t)) fail(9, `앱 main에 ${t} 규칙이 없다`);
   // 승인 요건만으로는 owner PR을 막지 못한다. 작성자가 유일한 code owner면 쓰기 권한 App(Codex Connector, Renovate)의 승인
-  // 하나로 요건이 차고 그 App이 병합할 수 있었다(U08 (나), 2026-10-21 homelab #822). 실제 장치는 update(Restrict updates)다.
+  // 하나로 요건이 차고 그 App이 병합할 수 있다(U08 (나)). 실제 장치는 update(Restrict updates)다.
   const update = rules.find((r) => r.type === "update");
   if (!update) fail(9, "앱 main에 update(Restrict updates) 규칙이 없다");
   else if (update.parameters?.update_allows_fetch_and_merge === true) fail(9, "앱 main의 update 규칙이 fetch and merge를 허용한다");

@@ -130,7 +130,7 @@ printf 'HTTP/2.0 200 OK\r\nGitHub-Authentication-Token-Expiration: 2026-12-01 00
 printf 'HTTP/2.0 200 OK\r\nX-Github-Request-Id: x\r\n\r\n{}\n' >"$t/h-pat-noexp"
 echo '{"resource_changes":[]}' >"$t/p-none"
 echo '{"resource_changes":[{"address":"github_repository_ruleset.app_main[\"files\"]","change":{"actions":["delete"]}}]}' >"$t/p-delete"
-# app new 판정용(T12): 생성 하나, no-op 하나, import(no-op + importing) 하나, 미뤄진 guard 읽기 하나. after에 값 표식을 둔다.
+# app new 판정용: 생성 하나, no-op 하나, import(no-op + importing) 하나, 미뤄진 guard 읽기 하나. after에 값 표식을 둔다.
 cat >"$t/p-app" <<'EOF2'
 {"resource_changes":[
  {"address":"github_repository_ruleset.app_main[\"smoke\"]","mode":"managed","change":{"actions":["create"],"after":{"name":"VALUEMARK"}}},
@@ -202,7 +202,7 @@ expect "호출 셸에 AWS 키가 있어도 Infisical 값을 씀" 0 AWS_ACCESS_KE
 expect "delete plan은 --allow-destroy 없이 멈춤" nonzero STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan
 expect "delete plan은 --allow-destroy로 통과" 2 STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-delete" -- plan --allow-destroy
 
-# --plan-json(T12 app new): 주소·동작만 남기고 종료 코드는 그대로다.
+# --plan-json(app new): 주소·동작만 남기고 종료 코드는 그대로다.
 expect "plan --plan-json은 exit 2를 그대로" 2 STUB_PLAN_EXIT=2 STUB_PLAN_JSON="$t/p-app" -- plan --plan-json "$t/out/a.json"
 if [[ -f $t/out/a.json ]]; then
   got=$(jq -c '[.schema, (.sha | test("^[0-9a-f]{40}$")), [.changes[] | [.address, .mode, (.actions | join(",")), .importing, .moved]]]' "$t/out/a.json")

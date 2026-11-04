@@ -67,7 +67,7 @@ export function gitFiles(...pathspecs: string[]): string[] {
 
 // 이 실행이 만든 임시 폴더. 끝날 때 모두 지운다(정상, 실패 exit, 잡히지 않은 예외, SIGINT·SIGTERM·SIGHUP).
 // 함정: terraform 사본은 provider까지 들어 개당 수백 MB다. 남기면 tmpfs 사용자 할당량을 넘겨 다음 terraform init이
-// "disk quota exceeded"로 실패한다(2026-10-21 로컬 실측: 387개, 24GB). 시험: ci 단계 "temp cleanup".
+// "disk quota exceeded"로 실패한다(로컬 실측: 387개, 24GB). 시험: ci 단계 "temp cleanup".
 const temps = new Set<string>();
 let cleanupInstalled = false;
 

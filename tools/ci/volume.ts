@@ -1,4 +1,4 @@
-// 앱 볼륨 검사(T20 봇 기억 삭제 원장, 설계 C.5.5·C.8). 원장 계약 v1의 StorageClass·PV·PVC가 서로 맞는지, 원장을 게시 서버
+// 앱 볼륨 검사(봇 기억 삭제 원장, 설계 C.5.5·C.8). 원장 계약 v1의 StorageClass·PV·PVC가 서로 맞는지, 원장을 게시 서버
 // Deployment 하나만 붙이는지, 공유 차트 앱이 PVC를 붙이면 Recreate인지(단일 작성자), 앱 ns에 직접 hostPath가 없는지 본다.
 // 렌더 맥락(클러스터)마다 따로 잇는다. 운영과 VM은 같은 이름의 리소스를 따로 갖는다(policy.ts context).
 import { type Doc, type Violation } from "./lib";

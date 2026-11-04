@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# platform/go 리다이렉트 규칙 시험(T08c, 설계 C.3.5 "짧은 주소"). 차트를 운영·VM 값으로 렌더해 그 ConfigMap·init 스크립트·
+# platform/go 리다이렉트 규칙 시험(설계 C.3.5 "짧은 주소"). 차트를 운영·VM 값으로 렌더해 그 ConfigMap·init 스크립트·
 # 이미지·명령을 그대로 컨테이너로 띄우고 curl로 본다. 규칙을 따로 흉내 내지 않으므로 렌더한 설정 자체를 시험한다.
 #
 # bun run ci에 넣지 않는다. 이미지를 Docker Hub에서 받아야 하는데 외부 레지스트리 조회는 필수 검사 밖이다(설계 C.4.6, P27).
@@ -160,7 +160,7 @@ for cluster in prod vm; do
   expect "/argocd@evil.com" 404 -
   expect "/argocd:443" 404 -
   expect '/argocd\@evil.com' 404 -
-  # 판정은 원문($request_uri)이다. 디코딩·정규화한 경로로 판정하면 아래가 사용법 200을 받는다(T08c 추가 리뷰).
+  # 판정은 원문($request_uri)이다. 디코딩·정규화한 경로로 판정하면 아래가 사용법 200을 받는다.
   expect "/argocd%2F..%2F" 404 -
   expect "/evil.com/.." 404 -
   expect "//" 404 -

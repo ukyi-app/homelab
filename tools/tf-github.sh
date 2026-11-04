@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # infra/github(GitHub 보호 설정) 래퍼(설계 C.3.9, E5). owner 로컬에서만 실행한다. CI는 plan·apply하지 않는다.
-# T12부터 homelab github plan·apply·verify가 같은 규칙으로 감싼다.
+# homelab github plan·apply·verify가 같은 규칙으로 감싼다.
 #
 #   tools/tf-github.sh verify                 plan -lock=false. exit 0 같음, 2 차이, 1 guard 실패·오류
 #   tools/tf-github.sh plan [--allow-destroy] [--plan-json <절대 경로>]  plan -lock=false, delete가 있으면 --allow-destroy 없이는 멈춤
@@ -32,7 +32,7 @@ shift
 # 사본으로 다시 실행할 때 그대로 넘기려고 원래 인자를 남긴다(아래 파싱이 shift로 비운다).
 args=("$@")
 allow_destroy=false
-# --plan-json: plan만. 변경 목록(주소·동작, 값 없음)을 파일로 남긴다. homelab app new가 "app_main 생성만"을 판정한다(T12).
+# --plan-json: plan만. 변경 목록(주소·동작, 값 없음)을 파일로 남긴다. homelab app new가 "app_main 생성만"을 판정한다.
 plan_json=""
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -107,7 +107,7 @@ if [[ -n $plan_json ]]; then
 fi
 
 # 2. 토큰 종류와 범위. 머리글은 응답 전체를 변수로 받은 뒤 본다. grep -q로 파이프를 끊으면 pipefail 아래 SIGPIPE로
-#    범위가 있는데도 놓친다(2026-10-18 실측: 15회 중 1회).
+#    범위가 있는데도 놓친다(실측: 15회 중 1회).
 if [[ -z ${GITHUB_TOKEN:-} ]]; then
   GITHUB_TOKEN=$(gh auth token) || die "GITHUB_TOKEN이 없고 gh auth token도 실패했다"
 fi
@@ -218,7 +218,7 @@ deletes() {
 }
 
 # 변경 목록만 낸다. before·after·configuration·variables는 빼서 provider가 state에 넣는 값을 파일로 남기지 않는다.
-# plain no-op은 빼되 state를 바꾸는 no-op은 남긴다: import(importing)와 주소 이동(moved, previous_address. #882 리뷰).
+# plain no-op은 빼되 state를 바꾸는 no-op은 남긴다: import(importing)와 주소 이동(moved, previous_address).
 # 이동은 동작과 따로 moved로 남긴다. 미뤄진 data read와 이동이 한 항목에 겹치면 동작만으로는 보통 읽기와 같아 보인다.
 # 미뤄진 guard 읽기는 mode data, actions ["read"]로 남는다. root output 변경도 apply가 state에 쓰는 변경이라
 # 주소 output.<이름>으로 남긴다(소비자 파서의 mode가 managed·data 둘뿐이라 managed로 둔다).

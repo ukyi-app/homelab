@@ -226,7 +226,7 @@ const steps: Step[] = [
         const ok = lines.length === want.length && want.every((re) => lines.filter((l) => re.test(l)).length === 1);
         if (!ok) out.push({ rule: "image-yaml", where: f, message: `repository: ghcr.io/ukyi-app/${app}, digest: sha256:<64자>, revision: <40자>, hold: true|false 네 줄만 둔다` });
       }
-      // override 파일은 일반 .tf 위에 병합돼 리소스를 덮고, tfvars에는 자격이 들어가기 쉽다(설계 C.3.9, 옛 R41).
+      // override 파일은 일반 .tf 위에 병합돼 리소스를 덮고, tfvars에는 자격이 들어가기 쉽다(설계 C.3.9).
       for (const f of gitFiles()) {
         const b = basename(f);
         if (/override\.tf/.test(b) || /\.tfvars/.test(b)) out.push({ rule: "terraform-files", where: f, message: "*override.tf*·*.tfvars* 파일을 커밋하지 않는다" });
@@ -274,7 +274,7 @@ const steps: Step[] = [
   },
   {
     name: "cli typecheck",
-    // strict TypeScript(사용자 결정 2026-10-23, T12-01b). bun test는 타입을 보지 않아 타입 계약(불투명 Secret의 메서드 없음,
+    // strict TypeScript(사용자 결정, 설계 C.4.6). bun test는 타입을 보지 않아 타입 계약(불투명 Secret의 메서드 없음,
     // 읽기 문맥에 쓰기 함수 없음)은 이 단계만 지킨다. 외부 패키지는 typescript·@types/bun 둘이고 bun.lock의 무결성 해시로만 받는다.
     // --frozen-lockfile: package.json과 lockfile이 어긋나면 실패하고 새로 해석하지 않는다.
     // --ignore-scripts: 패키지 설치 스크립트를 돌리지 않는다(공급망). TS 7은 플랫폼 바이너리를 optional 의존으로 받아 스크립트가 필요 없다.
@@ -320,7 +320,7 @@ const steps: Step[] = [
   },
   {
     name: "host bulk ssd",
-    // install.sh --bulk-ssd(T20 삭제 원장 SSD)의 fstab 멱등·충돌 멈춤, 장치·마운트 대조 실패 때 원장 디렉터리 0,
+    // install.sh --bulk-ssd(삭제 원장 SSD)의 fstab 멱등·충돌 멈춤, 장치·마운트 대조 실패 때 원장 디렉터리 0,
     // 원장 첫 초기화와 기존 원장 보존·누락 시 멈춤, VM 빈 값 건너뜀, verify.sh 판정을 가짜 명령과 임시 경로로 본다.
     run: () => tool("host-bulk", ["bash", "tools/host-bulk.test.sh"]),
   },
@@ -415,7 +415,7 @@ const steps: Step[] = [
   },
   {
     name: "external secrets switch",
-    // 복구 스위치 cluster.restore.externalSecrets(T23, 설계 C.6.4). 끄면 Store·ExternalSecret 0개, 켬과의 차이는 시크릿뿐,
+    // 복구 스위치 cluster.restore.externalSecrets(설계 C.6.4). 끄면 Store·ExternalSecret 0개, 켬과의 차이는 시크릿뿐,
     // 스위치가 없으면 렌더가 그대로인지(tools/ci/switch.ts). 위 단계의 렌더 캐시를 함께 쓴다.
     run: checkExternalSecretsSwitch,
   },
@@ -548,7 +548,7 @@ const steps: Step[] = [
       if (roots.length === 0) out.push({ rule: "terraform", where: "infra", message: "Terraform root가 0개다(L40)" });
       const work = tempDir("terraform");
       // 자격이 들어가는 환경 변수는 넘기지 않는다. provider 캐시만 공유한다.
-      // 캐시를 정하지 않으면 사용자 캐시 폴더를 쓴다. 없으면 root마다, 실행마다 provider를 새로 받아 사본에 풀었다.
+      // 캐시를 정하지 않으면 사용자 캐시 폴더를 쓴다. 없으면 root마다, 실행마다 provider를 새로 받아 사본에 푼다.
       // 캐시의 provider는 .terraform.lock.hcl 해시와 맞을 때만 쓰인다(lockfile=readonly). 동시 실행 두 개가 같은
       // provider를 처음 받는 순간만 겹칠 수 있다(Terraform 문서: 캐시는 동시 쓰기에 안전하지 않다).
       const pluginCache = process.env.TF_PLUGIN_CACHE_DIR || join(process.env.XDG_CACHE_HOME || join(process.env.HOME ?? tmpdir(), ".cache"), "homelab-ci", "terraform-plugins");
@@ -579,9 +579,9 @@ const steps: Step[] = [
           if (r.code !== 0) out.push({ rule: "terraform-test", where: root, message: `terraform test exit ${r.code}` });
         }
         // app new의 목록 PR 모양(app-repos.json에 이름 하나만 더하고 시험은 그대로)으로 한 번 더 돈다. 시험이 목록 이름을
-        // 손으로 적어 두면 그 PR의 필수 ci가 guard 8에서 깨진다(T13 #923). 고치는 것은 임시 사본뿐이다.
+        // 손으로 적어 두면 그 PR의 필수 ci가 guard 8에서 깨진다. 고치는 것은 임시 사본뿐이다.
         // 더할 이름은 목록에 없는 것으로 고른다. 이미 있는 이름을 또 넣으면 mock 응답에는 둘, toset인 기대 집합에는 하나라
-        // 정상 목록이 guard 8에 걸린다(#924 리뷰).
+        // 정상 목록이 guard 8에 걸린다.
         if (root === "infra/github") {
           const list = join(dst, "app-repos.json");
           const names: string[] = JSON.parse(readFileSync(list, "utf8"));

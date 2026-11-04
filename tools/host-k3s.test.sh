@@ -316,7 +316,7 @@ expect_run "처음 설치: 설치 스크립트가 k3s를 띄워도 백업·DNS �
   'log:installer force=false' 'log:installer restart' '!log:tcp ' '!log:san read' '!log:rc=' backup:0 config=render \
   'log:podcidr read 1' 'out:노드 podCIDR 10.42.0.0/24'
 
-# 처음 설치 직후 노드 podCIDR 배정 전에 끝나 verify가 FAIL했다(2026-10-28 VM). 배정될 때까지 기다린다.
+# 처음 설치 직후 노드 podCIDR 배정 전에 끝나면 verify가 FAIL한다(VM 실측). 배정될 때까지 기다린다.
 T_PODCIDR_LATE=2 k3s_run cidrwait none
 expect_run "처음 설치: 노드 등록 전(NotFound)·배정 전(빈 값)을 지나 세 번째에 podCIDR를 보고 끝난다" cidrwait \
   'log:podcidr read 3' '!log:podcidr read 4' '!log:rc=' 'out:노드 podCIDR 10.42.0.0/24' 'out:kubeconfig:'
@@ -329,7 +329,7 @@ expect_run "재시작 뒤 DNS 답이 틀리면 NET_CHECK_MAX(1초) 뒤 멈추고
   'log:rc=1' 'log:systemctl restart k3s.service' 'out:1초 안에 돌아오지 않았다' 'out:되돌리기: sudo install -m 0600' \
   backup:1 maxms:3000
 
-# config 값은 같고 k3s가 다시 뜬 경우(codex 926-r1). 옛 판은 restart=false라 확인을 건너뛰었다.
+# config 값은 같고 k3s가 다시 뜬 경우. restart=false만 보면 확인을 건너뛴다.
 k3s_run veronly same v1.0.0+k3s1
 expect_run "버전만 다름: 설치 스크립트가 강제 없이 바이너리를 바꿔 재시작, DNS·Service 확인, 백업 없음" veronly \
   'log:installer force=false' 'log:installer restart' 'log:tcp 10.43.0.1 443' '!log:rc=' '!log:san read' backup:0 \
@@ -345,7 +345,7 @@ T_NOBIN=1 k3s_run nobin other
 expect_run "config만 있고 바이너리 없음(첫 설치가 중간에 실패): 처음 설치처럼 확인 없음" nobin \
   'log:installer force=true' 'log:installer restart' '!log:tcp ' '!log:rc=' backup:1 config=render
 
-# tls-san을 더한 재시작 직후 옛 인증서가 잠시 나간다(2026-10-27 운영 verify FAIL). 새 SAN이 나올 때까지 기다린다.
+# tls-san을 더한 재시작 직후 옛 인증서가 잠시 나가 verify가 FAIL한다(운영 실측). 새 SAN이 나올 때까지 기다린다.
 T_SAN_STALE=2 k3s_run sanwait sanadd
 expect_run "tls-san 더함: 옛 인증서가 두 번 나와도 세 번째에 새 SAN을 보고 끝난다" sanwait \
   'log:systemctl restart k3s.service' 'log:tcp 10.43.0.1 443' 'log:san read 3' '!log:san read 4' '!log:rc=' \
@@ -355,7 +355,7 @@ expect_run "새 SAN이 SAN_WAIT_MAX(1초) 안에 안 나오면 멈추고 로그�
   'log:rc=1' 'out:1초 안에 모두 나오지 않았다(없는 SAN: t-node)' 'out:journalctl -u k3s -g k3s-serving' \
   'out:되돌리기: sudo install -m 0600' backup:1 maxms:3500
 
-# 빈 값·따옴표가 다른 기존 config(#921 리뷰). 옛 판은 이 줄을 버리거나 따옴표를 벗겨 같다고 보고 재시작하지 않았다.
+# 빈 값·따옴표가 다른 기존 config. 이 줄을 버리거나 따옴표를 벗기면 같다고 보고 재시작하지 않는다.
 k3s_run empty empty
 expect_run "기존에 빈 값(cluster-domain: \"\") 키가 있음: 값이 바뀐 것, 설치 스크립트 강제 재시작" empty \
   'log:installer force=true' '!log:systemctl restart' 'log:tcp 10.43.0.1 443' '!log:rc=' backup:1 config=render
@@ -370,7 +370,7 @@ k3s_run quote quote
 expect_run "write-kubeconfig-mode 따옴표만 다름(0600은 8진수 정수): 설치 스크립트 강제 재시작" quote \
   'log:installer force=true' '!log:rc=' backup:1 config=render
 
-# NET_CHECK_MAX가 전체 상한이다(#921 리뷰). 옛 판은 Service 조회가 멈추면 끝나지 않았고, 느린 dig 시간을 세지 않았다.
+# NET_CHECK_MAX가 전체 상한이다. Service 조회가 멈춰도 끝나야 하고, 느린 dig 시간도 센다.
 T_NET_MAX=1 T_HANG=1 k3s_run hang san
 expect_run "재시작 뒤 Service 조회가 멈춤: 1초 상한에서 멈추고 되돌리기를 알린다" hang \
   'log:rc=1' 'out:kube-dns Service를 1초 안에 읽지 못했다' 'out:되돌리기: sudo install -m 0600' '!log:tcp ' maxms:3000
@@ -397,7 +397,7 @@ vsan "SAN을 3개 미만 읽음: 형식 문제로 가른다" 'DNS:t-node, IP Add
 
 # ------------------------------------------------------------------ verify.sh의 kubectl(k3s 멀티콜) 경고
 # 노드의 kubectl은 k3s 심링크다. 멀티콜은 kubectl로 넘기기 전에 config 파일을 세 번 찾고, 비root는 0600 config를 못 읽어
-# 호출마다 WARN을 낸다(2026-10-28 VM verify). 가짜 kubectl이 그 동작을 흉내 낸다: K3S_CONFIG_FILE이 없으면 기본
+# 호출마다 WARN을 낸다(VM verify 실측). 가짜 kubectl이 그 동작을 흉내 낸다: K3S_CONFIG_FILE이 없으면 기본
 # 경로(노드에서는 root 0600)를 읽다 WARN, 읽을 수 있는 파일을 가리키면 조용하다.
 VK="$TMP/vk"
 mkdir -p "$VK/bin"
@@ -428,7 +428,7 @@ else
 fi
 
 # ------------------------------------------------------------------ --host-config sysctl(inotify 한도)
-# 2026-10-27 운영 NUC에서 기본 128 때문에 libvirt dnsmasq가 inotify를 못 만들었다. 값은 사용자 결정이다.
+# 기본 128이면 운영 NUC에서 libvirt dnsmasq가 inotify를 못 만든다(실측). 값은 사용자 결정이다.
 INO="$TMP/host/etc/sysctl.d/60-inotify.conf"
 got="$(grep -vE '^[[:space:]]*(#|$)' "$INO" || true)"
 if [ "$got" = "fs.inotify.max_user_instances = 8192" ]; then
