@@ -1,5 +1,5 @@
-// data purge: 한 실행에서 본 워크로드를 잊지 않는지(#893 r2 재현 A·B·C)와 두 probe의 정상 폐기.
-// 엔진에 넘기는 단계의 read를 가로채 그 읽기 때만 파드를 넣고 뺀다(codex 재현과 같은 방식).
+// data purge: 한 실행에서 본 워크로드를 잊지 않는지(재현 A·B·C)와 두 probe의 정상 폐기.
+// 엔진에 넘기는 단계의 read를 가로채 그 읽기 때만 파드를 넣고 뺀다.
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import type { Observation, ReadCtx, Step } from "../../src/core/command";
 import cmd from "../../src/commands/purge";
@@ -9,7 +9,7 @@ const APP = "homelab-probe";
 const NS = `app-${APP}`;
 const DATA = `data/${APP}/values.yaml`;
 const REC = `database/data-purge-${APP}`;
-// 두 probe의 values 사본(main afc20c0, PR 1 전). 저장소 파일을 읽으면 purge PR 1·2가 그 파일을 바꾸고 지울 때 ci가 깨진다(#906).
+// 두 probe의 values 사본(main afc20c0, PR 1 전). 저장소 파일을 읽으면 purge PR 1·2가 그 파일을 바꾸고 지울 때 ci가 깨진다.
 const PROBE_VALUES: Record<string, string> = {
   "homelab-probe": [
     "# T11 시나리오 2. 공유 Cluster pg에 역할·DB homelab-probe(비밀번호 원본 /apps/homelab-probe/postgres/PASSWORD).",

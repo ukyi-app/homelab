@@ -1,4 +1,4 @@
-// 시작할 때 잡아 둔 내장 함수(core/intrinsics.ts, T12-01b). 모듈을 불러온 뒤 전역을 덮어도 core의 시크릿 판정·출력·해석이 그대로인지 본다.
+// 시작할 때 잡아 둔 내장 함수(core/intrinsics.ts). 모듈을 불러온 뒤 전역을 덮어도 core의 시크릿 판정·출력·해석이 그대로인지 본다.
 // 시험이 끝나면 전역을 되돌린다(다른 시험에 새지 않게).
 import { afterEach, describe, expect, test } from "bun:test";
 import { findSecretPath } from "../../src/core/guard";

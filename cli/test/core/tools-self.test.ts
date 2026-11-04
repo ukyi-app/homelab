@@ -1,4 +1,4 @@
-// doctor의 PATH homelab 확인(T12-05 운영: 옛 bun link ~/.bun/bin/homelab이 새 CLI를 가렸다). 링크를 따라간 실제 파일로 비교한다.
+// doctor의 PATH homelab 확인. 옛 bun link ~/.bun/bin/homelab이 새 CLI를 가릴 수 있어 링크를 따라간 실제 파일로 비교한다.
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

@@ -38,7 +38,7 @@ const pvr = (resps: boolean[]) => ghGet(`${A}/private-vulnerability-reporting`, 
 const fork = (resps: string[]) => ghGet(`${A}/actions/permissions/fork-pr-contributor-approval`, resps.map((approval_policy) => ghResponse(200, { approval_policy })));
 const appRulesets = (resps: unknown[][]) => ghGet(`${A}/rulesets?includes_parents=false&per_page=100`, resps.map((j) => ghResponse(200, j)));
 const ACTIVE = [{ id: 21, name: "app-main", enforcement: "active" }];
-// 앱 main에 실제로 걸린 규칙(#882 리뷰 1). 21이 있어야 완료다.
+// 앱 main에 실제로 걸린 규칙. 21이 있어야 완료다.
 const appRules = (resps: unknown[][]) => ghGet(`${A}/rules/branches/main`, resps.map((j) => ghResponse(200, j)));
 const APPLIED = [{ type: "deletion", ruleset_id: 21 }];
 
@@ -375,7 +375,7 @@ describe("app new: 판정과 목록 편집(순수 함수)", () => {
       [2, [{ address: 'data.github_rest_api.x["smoke"]', mode: "data", actions: ["create"], importing: false, moved: false }], "생성 말고 변경"],
       [2, [c(WANT, ["create"]), c("github_repository_environment.automerge", ["update"])], "automerge(update)"],
       [2, [c(WANT, ["create"]), c("github_repository_ruleset.renamed", ["no-op"], { moved: true })], "renamed(주소 이동)"],
-      // 미뤄진 data read와 이동이 겹친 항목. data read 예외보다 이동을 먼저 센다(#882 리뷰 2라운드).
+      // 미뤄진 data read와 이동이 겹친 항목. data read 예외보다 이동을 먼저 센다.
       [2, [c(WANT, ["create"]), c("data.terraform_remote_state.renamed", ["read"], { mode: "data", moved: true })], "renamed(주소 이동, read)"],
       [2, [c(WANT, ["create"], { moved: true })], "생성 말고 변경"],
       [2, [c(WANT, ["create"]), c("output.o", ["update"])], "output.o(update)"],

@@ -1,4 +1,4 @@
-// Infisical 로컬 백업 막기(#873 Connector P1). 스텁이 CLI 0.44.2처럼 $HOME/.infisical/secrets-backup/에 파일을 쓰려 한다.
+// Infisical 로컬 백업 막기. 스텁이 CLI 0.44.2처럼 $HOME/.infisical/secrets-backup/에 파일을 쓰려 한다.
 // 잠긴 폴더면 쓰기가 실패하고(CLI는 그 오류를 무시한다) 조회는 그대로 된다. 권한이 듣지 않아 파일이 생기면 명령이 실패한다.
 import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";

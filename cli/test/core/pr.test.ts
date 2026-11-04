@@ -1,4 +1,4 @@
-// PR 작성기(D3) 시험. 02~04가 prStep을 쓰는 명령의 시험을 이 규칙 모양으로 만든다.
+// PR 작성기(D3) 시험. prStep을 쓰는 명령의 시험은 이 규칙 모양으로 만든다.
 import { describe, expect, test } from "bun:test";
 import { HOMELAB_REPO } from "../../src/core/github";
 import { branchName, prStep } from "../../src/core/pr";

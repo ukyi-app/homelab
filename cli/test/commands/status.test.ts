@@ -19,10 +19,10 @@ const ALL_ES = [`${APP}-app`, `${APP}-db`, `${APP}-valkey-url`, `${APP}-valkey-a
 // 차트가 만드는 ExternalSecret은 모두 store infisical-apps를 쓴다(app·app-data 차트 _helpers.tpl).
 const STORE_REF = { secretStoreRef: { kind: "ClusterSecretStore", name: "infisical-apps" } };
 const STORES = ["get", "clustersecretstores.external-secrets.io", "-A", "-o", "json"];
-// Argo CD가 ExternalSecret 실패로 sync를 재시도하는 중(T13 S6·S7 실측 모양).
+// Argo CD가 ExternalSecret 실패로 sync를 재시도하는 중(실측 모양).
 const RETRYING = { status: { sync: { status: "OutOfSync", revision: MAIN }, health: { status: "Degraded" }, operationState: { phase: "Running", message: "one or more synchronization tasks completed unsuccessfully. Retrying attempt #2 at 4:36AM." } } };
 const storeDown = (reason: string) => ({ conditions: [{ type: "Ready", status: "False", reason, message: "unable to create client" }] });
-// InvalidProviderConfig는 client 생성 실패 전반이라(ESO v2.13.0) 인증 실패로 단정하지 않고 이벤트로 가르게 한다(#950 1라운드 P2).
+// InvalidProviderConfig는 client 생성 실패 전반이라(ESO v2.13.0) 인증 실패로 단정하지 않고 이벤트로 가르게 한다.
 const STORE_DETAIL = "Infisical Store 준비 실패: ClusterSecretStore infisical-apps Ready=False InvalidProviderConfig: unable to create client";
 const STORE_NEXT = "kubectl describe clustersecretstore infisical-apps의 Events로 원인을 가른다. 인증 거부면 docs/runbooks-public/rotate.md 1절, 접속 오류(DNS·TLS·시간 초과)면 NUC에서 Infisical로 가는 네트워크, 자격 Secret을 못 읽으면 docs/runbooks-public/bootstrap.md 2.2";
 type Opts = { esList?: string[]; pods?: unknown[]; esReady?: boolean; infisicalKeys?: Record<string, string>; migrate?: "ok" | "failed"; http?: number; argo?: unknown; store?: unknown; storesRead?: Rule; infisical?: Rule[] };
@@ -70,7 +70,7 @@ describe("status <app>", () => {
     expect(r.json.error.next).toBe(`homelab secret set ${APP} API_TOKEN`);
   });
 
-  // T13 S6: 앞 줄(Argo CD)이 이 실패로 재시도 중이라 다음이 "잠시 뒤 다시"였다. 원인을 아는 줄이 먼저다.
+  // 앞 줄(Argo CD)이 이 실패로 재시도 중이어도 다음은 "잠시 뒤 다시"가 아니다. 원인을 아는 줄이 먼저다.
   test("시나리오 6: Argo CD 재시도 중이어도 다음은 secret set(T13 S6)", async () => {
     const rules = world({ esReady: false, infisicalKeys: {}, argo: RETRYING });
     const r = await runCli(["status", APP, "--json"], rules);
@@ -84,7 +84,7 @@ describe("status <app>", () => {
     expect(h.stdout).not.toContain("잠시 뒤 다시");
   });
 
-  // T13 S7: ExternalSecret 실패만 보이고 원인(Store 준비 실패)을 말하지 않았다.
+  // ExternalSecret 실패만 보이면 원인(Store 준비 실패)을 알 수 없다.
   test("시나리오 7: Store Ready=False면 원인 줄과 원인을 가르는 안내(T13 S7)", async () => {
     const r = await runCli(["status", APP, "--json"], world({ esReady: false, store: storeDown("InvalidProviderConfig"), argo: RETRYING }));
     expect(r.code).toBe(1);
@@ -105,8 +105,8 @@ describe("status <app>", () => {
     expect(other.json.next).toContain("docs/runbooks-public/bootstrap.md 2.2");
   });
 
-  // #950 1라운드 P2: Store를 읽어 Ready=False를 확인했으면 뒤의 Infisical 조회가 실패해도 그 원인과 다음 행동이 남는다.
-  // 전에는 이 줄이 "읽지 못함"이 되고 Argo CD 재시도의 "잠시 뒤 다시"가 다시 다음이 됐다.
+  // Store를 읽어 Ready=False를 확인했으면 뒤의 Infisical 조회가 실패해도 그 원인과 다음 행동이 남는다.
+  // 이 원인을 버리면 이 줄이 "읽지 못함"이 되고 Argo CD 재시도의 "잠시 뒤 다시"가 다시 다음이 된다.
   test("Store Ready=False 확인 뒤 Infisical 조회가 실패해도 다음은 Store 안내, 빠진 키는 단정하지 않는다", async () => {
     const down = "error: dial tcp: connect: connection refused";
     const cases: [string, Rule[], string][] = [
@@ -271,7 +271,7 @@ describe("status(전체·--platform)", () => {
     expect(plat.json.steps.map((s: any) => s.detail)).toEqual(["1개 Synced·Healthy", "1개 Ready", "Cluster in healthy state", "1개 Ready"]);
   });
 
-  // T13 S7: Store가 Degraded면 플랫폼 Application 줄이 먼저 실패한다. 다음은 원인(Store)의 것이다.
+  // Store가 Degraded면 플랫폼 Application 줄이 먼저 실패한다. 다음은 원인(Store)의 것이다.
   test("--platform: Store Ready=False면 원인 줄과 원인을 가르는 안내", async () => {
     const down = storeDown("InvalidProviderConfig");
     const rules = [

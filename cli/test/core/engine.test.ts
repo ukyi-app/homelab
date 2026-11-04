@@ -1,4 +1,4 @@
-// 단계 엔진 시험. 02~04의 재실행·실패 주입 시험은 같은 모양(상태를 가진 가짜 단계 또는 스텁 responses)으로 쓴다.
+// 단계 엔진 시험. 명령의 재실행·실패 주입 시험은 같은 모양(상태를 가진 가짜 단계 또는 스텁 responses)으로 쓴다.
 import { describe, expect, test } from "bun:test";
 import type { ReadCtx, Observation, Step, WriteCtx } from "../../src/core/command";
 import { ExecTimeout, PLAN_WRITE_BLOCKED } from "../../src/core/exec";

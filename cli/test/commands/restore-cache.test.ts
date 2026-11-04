@@ -49,7 +49,7 @@ describe("cache restore: plan(PATH 스텁)", () => {
 function restoreWorld(): World {
   const w = valkeyWorld(APP, "persistent");
   w.obj("deployment", NS, `${APP}-valkey`)!.status = { updatedReplicas: 1, readyReplicas: 1 };
-  // 데이터 Application의 source는 차트 태그라 revision은 main SHA가 아니다(#883 r1 P2). values는 valuesObject로 들어간다.
+  // 데이터 Application의 source는 차트 태그라 revision은 main SHA가 아니다. values는 valuesObject로 들어간다.
   const mode = { chartVersion: "1.0.1", valkey: { persistent: true, running: true, restoreMode: true } };
   w.put("application", "argocd", `${APP}-data`, { spec: { source: { targetRevision: "data-chart-v1.0.1", helm: { valuesObject: mode } } }, status: { sync: { status: "Synced", revision: "c".repeat(40), comparedTo: { source: { helm: { valuesObject: mode } } } } } });
   w.jobLogs.set("restore-vk", `받음: ${GOT}\n-rw-r--r-- dump.rdb\n`);
@@ -572,7 +572,7 @@ describe("cache restore: 흐름(가짜 세계)", () => {
   });
 
   test("r1 P2-5: 키가 정상적으로 0개가 됐으면 사람이 --accept-empty로 받아들여 끝낸다(표식 없이는 쓰이지 않는다)", async () => {
-    // 복원 모드 PR 대기 중 앱이 키를 모두 지웠고, 서버가 재시작돼 AOF를 다시 켜야 하는 경로(리뷰 재현)
+    // 복원 모드 PR 대기 중 앱이 키를 모두 지웠고, 서버가 재시작돼 AOF를 다시 켜야 하는 경로
     const { w, vk } = await toNormalPr();
     vk.keys = 0;
     vk.appendonly = false;
@@ -623,7 +623,7 @@ describe("cache restore: 흐름(가짜 세계)", () => {
     for (const marker of [false, true]) {
       // 복원 직후 5개 → AOF를 켜는 사이 0개(정상 만료라 사람이 승인)
       const { w, vk } = await toNormalPr();
-      // 서버가 복원 모드로 재시작돼 AOF부터 다시 켜야 하는 상태(앞 시험의 P1 경로와 같다)
+      // 서버가 복원 모드로 재시작돼 AOF부터 다시 켜야 하는 상태(앞 시험의 경로와 같다)
       delete rec(w)["ok.aof"];
       vk.keys = 0;
       vk.appendonly = false;

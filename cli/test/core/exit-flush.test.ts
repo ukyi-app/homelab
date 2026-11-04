@@ -1,4 +1,4 @@
-// 큰 출력이 끝까지 가는지(Connector 4360396737). 진입점이 process.exit()로 끝나면 파이프 버퍼(64KB)를 넘는 출력이 잘린다.
+// 큰 출력이 끝까지 가는지. 진입점이 process.exit()로 끝나면 파이프 버퍼(64KB)를 넘는 출력이 잘린다.
 // 소비자가 늦게 읽기 시작해도 전체가 와야 한다. doctor의 gh 버전 칸에 큰 값을 넣어 출력을 키운다.
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";

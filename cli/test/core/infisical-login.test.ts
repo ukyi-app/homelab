@@ -1,4 +1,4 @@
-// T12-05 F9: Infisical 세션 만료·인증 거부를 정해진 낱말로만 분류해 next를 infisical login으로 둔다.
+// Infisical 세션 만료·인증 거부를 정해진 낱말로만 분류해 next를 infisical login으로 둔다.
 // 값이 실릴 수 있는 호출의 오류 원문은 그대로 버린다(메시지·출력에 원문이 없다).
 import { describe, expect, test } from "bun:test";
 import type { WriteCtx } from "../../src/core/command";

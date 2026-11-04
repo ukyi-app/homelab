@@ -260,7 +260,7 @@ describe("app add", () => {
     expect((await runCli(["app", "add", "my-valkey", "--cache"], [])).code).toBe(64);
     expect((await runCli(["app", "add", APP, "--internal", "go"], [])).code).toBe(64);
     expect((await runCli(["app", "add", APP, "--cache", "--cache"], [])).code).toBe(64);
-    // 영속에서도 이름의 valkey 금지(데이터 차트 data.persistentValkey, #884 2라운드 P2-3).
+    // 영속에서도 이름의 valkey 금지(데이터 차트 data.persistentValkey).
     const r = await runCli(["app", "add", "my-valkey", "--cache=persistent", "--apply"], []);
     expect(r.code).toBe(64);
     expect(r.calls).toEqual([]);

@@ -1,4 +1,4 @@
-// curl 판정 독립 시험(#873 1라운드 P1). 판정(classify)을 믿지 않고 실제 curl과 127.0.0.1 서버로 보낸 메서드를 관측한다.
+// curl 판정 독립 시험. 판정(classify)을 믿지 않고 실제 curl과 127.0.0.1 서버로 보낸 메서드를 관측한다.
 // HOME에 request = POST를 넣은 .curlrc를 두고, 판정이 읽기라고 한 꼴은 서버가 GET·HEAD만 받고 파일을 남기지 않아야 한다.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";

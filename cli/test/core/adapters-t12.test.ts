@@ -1,4 +1,4 @@
-// 02·03·04가 요청한 core 어댑터 시험(~/t12/REPORT-adapters.md). argv 모양 고정, 읽기 문맥에 쓰기 없음, 시크릿은 불투명 핸들,
+// core 어댑터 시험. argv 모양 고정, 읽기 문맥에 쓰기 없음, 시크릿은 불투명 핸들,
 // 실패 주입. 스텁 규칙은 어댑터와 같은 argv 함수(kubectlRule 등)로 만든다.
 import { describe, expect, test } from "bun:test";
 import type { Observation, Step } from "../../src/core/command";
@@ -488,7 +488,7 @@ describe("파드 안 작업", () => {
 
 describe("Infisical 폴더·web·확인", () => {
   test("folderExists(읽기)·createFolder(없는 조각만 바깥부터)", async () => {
-    // 0.44.2 실제 출력(#880 리뷰 실측, packages/cmd/folder.go): 항목 {folderId, folderName, folderPath}, 빈 목록은 null.
+    // 0.44.2 실제 출력(실측, packages/cmd/folder.go): 항목 {folderId, folderName, folderPath}, 빈 목록은 null.
     const list = (parent: string, names: string[]) => rule(infArgv.folders(FAKE_PROJECT, parent), { stdout: names.length ? JSON.stringify(names.map((folderName, i) => ({ folderId: `f-${i}`, folderName, folderPath: parent }))) : "null" });
     const r = testCtx("plan", [list("/apps", ["other"])]);
     expect(r.ctx.infisical.folderExists("/apps/smoke")).toBe(false);
@@ -499,7 +499,7 @@ describe("Infisical 폴더·web·확인", () => {
     expect(calls().unmatched).toEqual([]);
     const exists = testCtx("plan", [list("/apps", ["smoke"])]);
     expect(exists.ctx.infisical.folderExists("/apps/smoke")).toBe(true);
-    // 모양이 다르면(옛 가정 {name}) 던진다.
+    // 모양이 다르면(예: {name}) 던진다.
     const odd = testCtx("plan", [rule(infArgv.folders(FAKE_PROJECT, "/apps"), { stdout: JSON.stringify([{ name: "smoke" }]) })]);
     expect(() => odd.ctx.infisical.folderExists("/apps/smoke")).toThrow("모양이 다르다");
   });
@@ -576,7 +576,7 @@ describe("github 래퍼 plan JSON·app new 쓰기", () => {
 
   test("plan JSON 형식이 다르면 던진다(값 키는 받지 않고 주소·동작만)", () => {
     expect(() => parsePlanJson("{}")).toThrow("tf-github-plan/v1");
-    // moved가 없으면(옛 래퍼·다른 형식) 이동을 놓칠 수 있어 받지 않는다(#882 리뷰).
+    // moved가 없으면(옛 래퍼·다른 형식) 이동을 놓칠 수 있어 받지 않는다.
     expect(() => parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a", mode: "data", actions: ["read"], importing: false }] }))).toThrow("moved 형식");
     expect(() => parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a; rm", mode: "managed", actions: ["create"], importing: false, moved: false }] }))).toThrow("주소");
     expect(() => parsePlanJson(JSON.stringify({ schema: "tf-github-plan/v1", sha: "b".repeat(40), changes: [{ address: "a", mode: "managed", actions: ["destroy-everything"], importing: false, moved: false }] }))).toThrow("동작");

@@ -1,4 +1,4 @@
-// restore-check 결과 기록 어댑터(T24 계약 2). argv는 Cluster database/pg의 annotate 하나, 키는 두 개뿐,
+// restore-check 결과 기록 어댑터(restore.md 2.2). argv는 Cluster database/pg의 annotate 하나, 키는 두 개뿐,
 // fail은 pass 키를 건드리지 않는다. 값 스키마 밖이면 쓰기 0건, 되읽기가 다르면 실패.
 import { describe, expect, test } from "bun:test";
 import type { RestoreCheckMark } from "../../src/core/command";

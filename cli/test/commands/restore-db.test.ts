@@ -39,7 +39,7 @@ describe("db restore: 입력", () => {
     expect(normalizeTo("2026-02-30T01:00:00Z")).toBeNull();
     expect(normalizeTo("2026-11-02T10:00:00")).toBeNull();
     expect(normalizeTo("2026-11-02T25:00:00Z")).toBeNull();
-    // r1 P2-5: 오프셋 분은 00~59, 시는 14까지
+    // 오프셋 분은 00~59, 시는 14까지
     expect(normalizeTo("2026-10-20T10:00:00+09:60")).toBeNull();
     expect(normalizeTo("2026-10-20T10:00:00+09:99")).toBeNull();
     expect(normalizeTo("2026-10-20T10:00:00+15:00")).toBeNull();
@@ -316,7 +316,7 @@ describe("db restore: 흐름(가짜 세계)", () => {
       expect(r.status).toBe("failed");
       expect(w.writes).toEqual([]);
     }
-    // r1 P1-3: 복구 가능 범위를 확인할 수 없으면(필드 없음) 경고가 아니라 멈춘다
+    // 복구 가능 범위를 확인할 수 없으면(필드 없음) 경고가 아니라 멈춘다
     const nb = dbWorld(APP);
     nb.objects.delete("objectstore/database/r2");
     const rb = await runIn(nb, cmd, "apply", { app: APP }, { to: T1_INPUT });
@@ -441,7 +441,7 @@ describe("db restore: 흐름(가짜 세계)", () => {
   });
 });
 
-// 삭제 원장이 있는 앱(restore.md 2.1, T20 homelab-bot). 원장 PVC가 있으면 재개 단계가 Deployment Ready에 더해
+// 삭제 원장이 있는 앱(restore.md 2.1, homelab-bot). 원장 PVC가 있으면 재개 단계가 Deployment Ready에 더해
 // 원장 ready·삭제 대기 0을 본다. 아니면 기록하지 않고 hold로 멈춘다(정리·--finish로 가지 않는다).
 describe("db restore: 삭제 원장 재개 확인", () => {
   // 재개 PR까지 병합되고 앱이 다시 뜬 세계(재개 단계 바로 앞). ledger면 앱 ns에 원장 PVC(복원 라벨 없음)가 있다.
