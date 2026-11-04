@@ -2,8 +2,8 @@
 # VM에는 root-vm.yaml을 apply한다. 두 파일은 이름과 helm.valueFiles만 다르다.
 #
 # root 자신은 templates/ 밖이라 Git에서 다시 맞춰지지 않는다. 이 파일을 고치면 다시 apply한다.
-# 그 대신 argocd Application은 root가 소유한다(templates/argocd.yaml). 옛 구성은 자기 관리 App과 root를
-# 부트스트랩에서 따로 만들어, 하나만 다시 apply하면 핀 이동이 한쪽만 됐다(옛 scripts/bootstrap.sh:33-44, L21).
+# 그 대신 argocd Application은 root가 소유한다(templates/argocd.yaml). 자기 관리 App과 root를
+# 부트스트랩에서 따로 만들면, 하나만 다시 apply할 때 핀 이동이 한쪽만 된다(L21).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

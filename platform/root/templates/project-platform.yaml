@@ -1,4 +1,4 @@
-# AppProject platform(설계 C.3.3 AppProject 표). root가 렌더하는 플랫폼 구성 요소 Application이 쓴다. T07.
+# AppProject platform(설계 C.3.3 AppProject 표). root가 렌더하는 플랫폼 구성 요소 Application이 쓴다.
 # root 자신은 default 프로젝트다(root-prod.yaml 주석).
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -11,11 +11,11 @@ metadata:
     argocd.argoproj.io/sync-wave: "-11"
 spec:
   description: Platform components rendered by root
-  # 플랫폼 구성 요소는 외부 Helm 저장소도 쓴다. 저장소를 하나씩 적으면 뒤 티켓마다 이 파일을 고쳐야 해서 전부 연다.
+  # 플랫폼 구성 요소는 외부 Helm 저장소도 쓴다. 저장소를 하나씩 적으면 구성 요소를 더할 때마다 이 파일을 고쳐야 해서 전부 연다.
   sourceRepos:
     - "*"
   # 대상 ns 전부. "*"는 destination.namespace가 빈 Application(namespaces, 봇 자리처럼 여러 ns나
-  # cluster-scoped만 담는 것)도 허용한다(옛 projects.yaml:51-54).
+  # cluster-scoped만 담는 것)도 허용한다.
   destinations:
     - server: https://kubernetes.default.svc
       namespace: "*"

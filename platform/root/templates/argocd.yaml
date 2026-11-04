@@ -1,4 +1,4 @@
-# argocd: Argo CD 자기 관리(설계 C.3.3). T07. wave -10. 항상 켜져 있다(자리 스위치 없음).
+# argocd: Argo CD 자기 관리(설계 C.3.3). wave -10. 항상 켜져 있다(자리 스위치 없음).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

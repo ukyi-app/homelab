@@ -1,7 +1,7 @@
 {{/*
 자식 Application 공통 규칙(설계 C.3.3 "root 아래 wave와 규칙").
 
-자식 Application을 더하는 방법: templates/<이름>.yaml 하나에 Application 하나(또는 같은 티켓의 몇 개)를 둔다.
+자식 Application을 더하는 방법: templates/<이름>.yaml 하나에 Application 하나(또는 함께 움직이는 몇 개)를 둔다.
 - metadata.namespace는 argocd, sync-wave는 설계 C.3.1 표의 "순서" 열.
 - 자기 저장소 source는 repoURL에 homelab.repoURL을 쓰고 targetRevision은 main을 직접 적는다.
 - 외부 Helm 차트는 chart와 고정 semver를 쓴다. chart를 쓰면 repoURL은 Helm 저장소, targetRevision은 semver다(설계 B.8 E2).
@@ -13,7 +13,7 @@
 - root → 자식 Application → 리소스로 selfHeal이 사슬로 걸린다. 그래서 Application 하나를 잠시 끄는 것은 Git 변경
   밖에서는 안 되고, kubectl로 라이브를 바꾸는 장애 주입은 약 5초 만에 되돌려져 거짓 PASS를 낸다(설계 B.8 E2).
   장애 주입 시험은 Git PR로 하거나 Argo CD 밖 자원(외부 계정·네트워크)에서 한다.
-- 클러스터 값(values-prod.yaml·values-vm.yaml)은 Helm 차트인 구성 요소에만 넘긴다(사용자 결정 2026-10-19, T07,
+- 클러스터 값(values-prod.yaml·values-vm.yaml)은 Helm 차트인 구성 요소에만 넘긴다(사용자 결정,
   설계 E8 VM 격리 1번 A안). 넘기는 길은 spec.source.helm.valuesObject 하나다. 클러스터 값이 필요한 평문
   매니페스트는 platform/<이름>/에 Chart.yaml을 둔 작은 로컬 차트로 감싼다. Kustomize·평문 디렉터리는 클러스터
   값을 받지 않는다. 그 차트 안 ExternalSecret target.template의 이중 중괄호는 Helm이 렌더하지 않게 이스케이프한다.
@@ -29,7 +29,7 @@ https://github.com/ukyi-app/homelab
 
 {{/*
 복구 스위치 cluster.restore.externalSecrets(설계 C.6.4 "클러스터 유실 + Infisical 장애"). false일 때만 "off"를 낸다.
-없거나 true면 빈 문자열이라 템플릿이 아무것도 넘기지 않고, 운영 Application spec이 이 스위치가 생기기 전과 같다.
+없거나 true면 빈 문자열이라 템플릿이 아무것도 넘기지 않아, 운영 Application spec에 이 스위치가 나타나지 않는다.
 끌 때 받는 쪽: 구성 요소 차트와 ApplicationSet 차트에 externalSecrets.enabled: false, Store Application은
 렌더하지 않는다. ESO operator는 남긴다. 새 ExternalSecret을 더하면 이 값으로 함께 꺼지게 한다(ci 단계 external secrets switch).
 bool이 아닌 값(문자열 "false" 등)은 여기서 켬으로 읽히므로 cluster-check.yaml이 렌더를 막는다.
