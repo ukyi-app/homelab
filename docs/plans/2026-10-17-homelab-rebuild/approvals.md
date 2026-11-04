@@ -826,4 +826,3 @@
 | 2026-11-04 23:4x~23:53 | 사용자 승인("승인, R2 한 번 더") | 클러스터 `sandbox` ns 임시 파드 `t18-stage2`(Git 밖) | 2단계 R2 재시험 1회(`sandbox.network.allowAllUnixSockets: true`). env·`/proc` 토큰 0건, 자격 파일 가려짐, 중첩 userns 거부, 직접 네트워크 막힘. 로그에 토큰 없음 확인. 파드·ConfigMap 삭제 확인 | `kubectl apply`·`delete` | T18 |
 | 2026-11-04 23:5x | 사용자 결정 | T18 작업 레인 조합의 대가 | 유닉스 소켓 차단 없음(`allowAllUnixSockets`), Ubuntu `bwrap` 프로필 의존, 호스트 전용 프로필 유지 부담을 받아들임. 다음은 기록 PR | 대화 기록 | T18, 봇 DECISIONS "(2) 파드 실측 결과와 대가 수용" |
 | 2026-11-04 23:5x | 사용자 승인("응 PR 올려줘") | Tailscale 정책 파일(`infra/tailscale`) | 운영자 → `tag:nuc` UDP 60000-61000 규칙 추가 결정. `tag:nuc` 전환 뒤 Moshi 앱의 Mosh UDP가 tailscaled에서 `no rules matched`로 버려져 연결이 타임아웃난다(SSH 22는 정상). apply 실행 대기. 실행 줄은 apply 뒤에 더한다 | 대화 기록 | D-11, T08a |
-||||||| parent of 62aad0c (docs(t18): 작업 레인 격리 파드 실측 승인 기록과 T18 상태)
