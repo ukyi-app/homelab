@@ -1,4 +1,4 @@
-# Argo CD 로컬 계정 owner의 비밀번호(사용자 결정 2026-10-19, T07 → T09). argocd-cm의 accounts.owner(login)와 짝이다.
+# Argo CD 로컬 계정 owner의 비밀번호(사용자 결정). argocd-cm의 accounts.owner(login)와 짝이다.
 # Infisical homelab/prod(VM은 homelab-dev/dev)의 /platform/argocd에 사람이 bcrypt 해시와 시각을 넣는다. 원문은 넣지 않는다.
 #
 # 이 Application(external-secrets-stores, wave -7)에 두는 이유: argocd Application(wave -10)에 두면 ESO CRD(wave -8)보다
@@ -26,8 +26,8 @@ spec:
     creationPolicy: Merge
     deletionPolicy: Retain
     # 함정: template이 없으면 ESO가 이 ExternalSecret의 라벨·주석(Argo CD tracking-id 포함)을 대상 Secret에 복사한다
-    # (v2.13.0 setMetadata). argocd-secret의 tracking-id가 이 Application 것으로 바뀌자 argocd Application이 되돌렸고,
-    # 두 컨트롤러가 몇 초마다 그 Secret을 번갈아 덮어썼다(2026-10-20 실측). template을 두면 template의 metadata만
+    # (v2.13.0 setMetadata). argocd-secret의 tracking-id가 이 Application 것으로 바뀌면 argocd Application이 되돌려,
+    # 두 컨트롤러가 몇 초마다 그 Secret을 번갈아 덮어쓴다(실측). template을 두면 template의 metadata만
     # 쓴다. creationPolicy Merge라 서버가 넣은 키도 남는다.
     # mergePolicy Merge: 아래 data[] 값을 Secret에 넣는다. v2.13.0은 data template이 없으면 Replace여도 넣지만
     # (ApplyTemplate의 noTemplate), 문서는 Replace를 "조회 결과를 쓰지 않음"으로 설명해 명시한다.

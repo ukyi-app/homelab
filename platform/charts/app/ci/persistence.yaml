@@ -1,4 +1,4 @@
-# 시험 values: 기존 PVC를 붙이고 Recreate로 도는 web 앱(T20 봇 삭제 원장 모양). 마이그레이션 Job에는 볼륨이 없어야 한다.
+# 시험 values: 기존 PVC를 붙이고 Recreate로 도는 web 앱(봇 삭제 원장 모양). 마이그레이션 Job에는 볼륨이 없어야 한다.
 chartVersion: 1.3.0
 kind: web
 port: 8080

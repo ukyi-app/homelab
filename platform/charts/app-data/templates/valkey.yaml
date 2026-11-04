@@ -17,7 +17,7 @@ metadata:
     # 서버와 같은 wave: WaitForFirstConsumer라 앞 wave면 Pending을 기다리며 멈춘다(platform/sandbox 실측).
     # PostgreSQL 쪽 뒤: running: false로 새 PVC를 만들면(빈 클러스터 복구) 쓰는 파드가 없어 Pending이고, Argo CD v3.5.5는
     # Pending PVC를 Progressing으로 보며(gitops-engine health_pvc.go) 앞 wave가 Healthy가 되기 전에는 뒤 wave를 적용하지
-    # 않는다(sync_context.go:576-577). wave 1에 있을 때 Database CR이 복원 Job이 PVC를 묶을 때까지 멈췄다(T13 S13).
+    # 않는다(sync_context.go:576-577). wave 1에 두면 Database CR이 복원 Job이 PVC를 묶을 때까지 멈춘다(S13 실측).
     # 마지막 wave에 hook이 없으면 Argo CD는 적용만 하고 sync를 끝낸다(sync_context.go:704-712). 그래서 Pending PVC를 기다리지
     # 않는다. 함정: 이 wave나 뒤에 hook(PostSync 포함)을 두면 다시 PVC가 묶일 때까지 sync가 Running이다.
     argocd.argoproj.io/sync-wave: "4"
@@ -174,7 +174,7 @@ spec:
                 - name: work
                   mountPath: /work
           containers:
-            # 업로드 뒤 되읽어 sha256을 대조한다. 크기만 보면 전송 중 잘림을 못 잡는다(옛 cache-backup).
+            # 업로드 뒤 되읽어 sha256을 대조한다. 크기만 보면 전송 중 잘림을 못 잡는다.
             - name: upload
               image: docker.io/rclone/rclone:1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5
               command: ["/bin/sh", "-c"]
@@ -201,7 +201,7 @@ spec:
                 - name: RCLONE_CONFIG_R2_REGION
                   value: auto
                 # 버킷 전용 Object Read & Write 토큰은 버킷 조회·생성을 거부한다. 확인을 끄지 않으면 rclone이
-                # "버킷 없음"으로 보고 CreateBucket(403)을 시도한다(옛 cache-backup 실측).
+                # "버킷 없음"으로 보고 CreateBucket(403)을 시도한다(실측).
                 - name: RCLONE_CONFIG_R2_NO_CHECK_BUCKET
                   value: "true"
                 {{- range list "ACCESS_KEY_ID" "SECRET_ACCESS_KEY" "ENDPOINT" }}

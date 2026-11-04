@@ -1,4 +1,4 @@
-# 시험 values: DB와 삭제 원장 볼륨(T20 봇 모양).
+# 시험 values: DB와 삭제 원장 볼륨(봇 모양).
 chartVersion: 1.2.0
 postgres:
   enabled: true

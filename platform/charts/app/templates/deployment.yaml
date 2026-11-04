@@ -25,7 +25,7 @@ spec:
       {{- include "app.selector" . | nindent 6 }}
   strategy:
     {{- if eq (.Values.strategy | default "RollingUpdate") "Recreate" }}
-    # 옛 파드가 끝난 뒤 새 파드를 띄운다(단일 작성자, T20). 배포마다 잠깐 끊긴다.
+    # 옛 파드가 끝난 뒤 새 파드를 띄운다(단일 작성자). 배포마다 잠깐 끊긴다.
     type: Recreate
     {{- else }}
     type: RollingUpdate
