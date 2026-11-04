@@ -24,7 +24,7 @@
 8. PR이 Draft가 아니고 `hold` 라벨이 없다.
 9. 앱 저장소 `ukyi-app/<앱>`이 public이고, 그 main에 `app-main` 규칙(PR 필수, 승인 1 이상, code owner 리뷰, 새 push 때 승인 무효화, force push·삭제 금지, main 갱신은 bypass 신원만(Restrict updates, fetch and merge 예외 없음))이 active로 보이며, main에 유효한 `CODEOWNERS`가 있다(`codeowners/errors`가 빈 배열이고 규칙이 `* @<owner 계정>` 한 줄). 규칙은 GitHub이 적용하는 파일(`.github/`, 루트, `docs/` 순서의 첫 파일)에서 읽고, 앞 후보가 404일 때만 다음 후보로 넘어간다. 앞 후보 조회가 그 밖의 오류면 이 조건은 거짓이다.
 
-병합은 검사한 head SHA를 고정해 `PUT /repos/ukyi-app/homelab/pulls/{n}/merge`(squash)로 한다. 검사와 병합 사이에 새 커밋이 들어오면 GitHub이 거부한다. GitHub auto-merge(`allow_auto_merge`)는 꺼져 있다.
+병합은 검사한 head SHA를 고정해 `PUT /repos/ukyi-app/homelab/pulls/{n}/merge`(squash)로 한다. 검사와 병합 사이에 새 커밋이 들어오면 GitHub이 거부한다. GitHub auto-merge(`allow_auto_merge`)는 꺼져 있다. 병합 API의 5xx는 "병합 안 됨"을 뜻하지 않으므로, merge job은 PUT 전마다 PR의 실제 상태를 읽고 위 조건을 다시 판정한다. 이미 그 SHA로 병합됐으면 성공이다. 5xx·네트워크 오류만 횟수와 대기를 정해 다시 시도하고, 4xx·head 변경·조건 불일치는 다시 시도하지 않고 사유를 남긴다(`tools/deploy-merge/merge.ts`).
 
 그 밖의 PR(사람, Renovate, 봇 변경 PR, Codex Connector가 만든 변경)은 모두 code owner가 검토한 뒤 사람이 병합한다. owner가 만든 PR은 검토한 SHA를 고정해 관리자 bypass로 병합한다: `gh pr merge <n> --squash --admin --match-head-commit <검토한 SHA>`.
 
@@ -39,4 +39,4 @@
 - 앱 저장소와 `homelab-app-template`의 `app-main`.
 - 병합 키 `HOMELAB_MERGE_KEY`는 environment `automerge`(배포 브랜치 main)의 secret이고 `deploy-merge`의 merge job만 쓴다. 배포 키는 Infisical OIDC identity가 앱 main push의 태그 고정 `app-build`에만 준다.
 
-ci의 workflow-guard(`tools/ci/workflow-guard.ts`)는 실수를 잡는다: `automerge` environment와 병합 키는 `deploy-merge.yaml`의 merge job만, `deploy-merge` 트리거는 `workflow_run`만, environment를 선언한 워크플로는 `workflow_run`만, `secrets: inherit`·다른 저장소 reusable 호출·동적 secrets 참조·`pull_request_target`·self-hosted runner 금지, `uses`는 40자 SHA와 버전 주석. 이 검사 자체를 고치는 PR은 고친 코드로 돌므로, 악의적인 변경은 사람 검토(ruleset B)가 막는다.
+ci의 workflow-guard(`tools/ci/workflow-guard.ts`)는 실수를 잡는다: `automerge` environment와 병합 키는 `deploy-merge.yaml`의 merge job만, `deploy-merge` 트리거는 `workflow_run`만, environment를 선언한 워크플로는 `workflow_run`만, `secrets: inherit`·다른 저장소 reusable 호출·동적 secrets 참조·`pull_request_target`·self-hosted runner 금지, `uses`는 40자 SHA와 버전 주석, `deploy-merge.yaml`의 checkout은 `ref: ${{ github.sha }}`·`persist-credentials: false`만(merge job이 병합 키 옆에서 main 코드를 돌린다). 이 검사 자체를 고치는 PR은 고친 코드로 돌므로, 악의적인 변경은 사람 검토(ruleset B)가 막는다.
