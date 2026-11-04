@@ -1,5 +1,5 @@
 locals {
-  # adopt(현재 값 import, 2026-10-20 무변경 확인)를 거쳐 target으로 바꿨다. 환경변수로 건너뛰지 않는다.
+  # adopt(현재 값 import, 무변경 확인) 다음 단계가 target이다. 환경변수로 건너뛰지 않는다.
   # target도 split DNS·검색 도메인은 첫 사본에서 읽으므로 TF_VAR_dns_adoption_snapshot은 계속 필요하다.
   dns_phase = "target"
 }

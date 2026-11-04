@@ -216,7 +216,7 @@ data "github_rest_api" "codeowners_content" {
   }
 }
 
-# 6. 옛 브랜치 보호가 없다(E1에서 지움). ruleset과 둘이 겹치면 어느 쪽이 막는지 흐려진다.
+# 6. 브랜치 보호가 없다. ruleset과 둘이 겹치면 어느 쪽이 막는지 흐려진다.
 data "github_rest_api" "branch_protection" {
   for_each = local.public_repos
   endpoint = "repos/ukyi-app/${each.key}/branches/main/protection"

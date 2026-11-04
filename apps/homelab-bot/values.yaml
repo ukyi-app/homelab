@@ -4,7 +4,7 @@ kind: web
 port: 8080
 # 실측 전 값이다(Node 24 게시 서버, pg Pool·Gateway WebSocket). memory는 limit도 같다. 첫 배포 뒤 사용량을 보고 줄인다.
 resources: { cpu: "100m", memory: "256Mi" }
-# GITHUB_REVIEW_APP_ID·_PRIVATE_KEY: 리뷰 App ukyi-review(T17). 둘 다 있어야 하고 하나만 있으면 봇이 기동하지 않는다.
+# GITHUB_REVIEW_APP_ID·_PRIVATE_KEY: 리뷰 App ukyi-review. 둘 다 있어야 하고 하나만 있으면 봇이 기동하지 않는다.
 # 넣기만 해서는 리뷰가 열리지 않는다. env REVIEW_ENABLED가 true여야 하고(기본 꺼짐) 정책·작업자 조건도 맞아야 한다.
 secrets: [DISCORD_BOT_TOKEN, GITHUB_REVIEW_APP_ID, GITHUB_REVIEW_APP_PRIVATE_KEY, GITHUB_REVIEW_WEBHOOK_SECRET, GRAFANA_READER_TOKEN, HEALTHCHECKS_PING_URL, RUNTIME_POLICIES, WORKER_CONTROL_PRIVATE_KEY]
 uses: { postgres: true }
@@ -12,19 +12,19 @@ uses: { postgres: true }
 # / Prefix다. 밖에서는 Cloudflare WAF 규칙 1(infra/cloudflare/main.tf)이 /github POST 밖을 먼저 막고, 봇도 8080의 그 밖
 # 경로는 404로 답한다. 함정: WAF를 거치지 않는 클러스터 안 요청(Traefik web에 닿는 cloudflared 파드 등)이
 # Host: hooks.ukyi.app을 붙이면 /readyz·/metrics까지 닿는다. 이 host를 다른 Ingress가 함께 쓰면 Traefik은 규칙 길이가
-# 같을 때 어느 쪽으로 보낼지 정하지 않는다(edge-probe를 같은 PR에서 지운 이유).
+# 같을 때 어느 쪽으로 보낼지 정하지 않으므로 함께 쓰지 않는다.
 public: { host: hooks.ukyi.app }
 # 봇은 /healthz가 없다. /readyz는 DB·루프 상태를 본다. Gateway가 끊겨도 Ready를 유지해야 webhook·경보 수신이
 # 계속된다(봇 ARCHITECTURE §8). 그래서 liveness는 두지 않는다(Gateway 단절은 지표 경보로 알린다).
 probes: { readiness: { path: /readyz } }
-# 적용된 버전은 건너뛰고 advisory lock으로 동시 실행을 막는다(봇 #12). Sync hook Job이라 매 sync마다 돈다.
+# 적용된 버전은 건너뛰고 advisory lock으로 동시 실행을 막는다. Sync hook Job이라 매 sync마다 돈다.
 migration: { command: ["node", "dist/src/migrate-main.js"] }
-# T20 기억 삭제 원장(D-12 후속, 원장 계약 v1). PVC는 data/homelab-bot이, PV는 platform/bot-slot이 운영 SSD 경로로 만든다.
+# 기억 삭제 원장(D-12 후속, 원장 계약 v1). PVC는 data/homelab-bot이, PV는 platform/bot-slot이 운영 SSD 경로로 만든다.
 # 게시 서버 컨테이너에만 붙고 마이그레이션 Job·작업자(sandbox)에는 없다.
 # - 차트는 persistence가 있으면 파드에 fsGroup을 두지 않는다. kubelet이 local 볼륨을 붙일 때 fsGroup으로 파일 0660·
 #   디렉터리 2770을 OR해 계약 0600·0750이 깨지고 봇·host/verify.sh가 원장을 거부한다. 원장은 호스트에서 이미 65532 소유다.
 # - 호스트 디렉터리가 없으면(SSD 미마운트, sudo host/install.sh --cluster prod --bulk-ssd 전) 파드는 ContainerCreating에서
-#   멈춘다. 의도된 fail-closed다. 이 PR은 그 설치와 host/verify.sh 통과 뒤에 병합한다(restore.md 4절).
+#   멈춘다. 의도된 fail-closed다. 그 설치와 host/verify.sh 통과가 먼저다(restore.md 4절).
 persistence: { existingClaim: deletion-ledger, mountPath: /var/lib/homelab-bot/ledger }
 # 원장 작성자를 하나로 둔다. RollingUpdate면 새 파드가 옛 파드와 함께 떠 같은 원장을 연다(봇 advisory lock이 둘째를 막지만
 # 그동안 기억 기능이 닫힌다). 함정: 배포마다 옛 파드가 먼저 내려가 수십 초 webhook·경보 수신과 Gateway가 끊긴다(사용자 수용).
@@ -35,7 +35,7 @@ serviceAccountName: bot-reader
 # 봇 파드 → 이 셋은 bot-slot NetworkPolicy가 연다(작업자 8080, Grafana 3000, API Endpoint 6443).
 env:
   # 이 클러스터의 파드 egress는 IPv4만이다(공유 차트 정책). Node 기본 happy eyeballs는 주소마다 250ms만 기다려
-  # 먼 IPv4(hc-ping.com 독일, 왕복 약 300ms)를 모두 끊고 ETIMEDOUT을 낸다(2026-10-30 첫 배포 하트비트 실패 실측).
+  # 먼 IPv4(hc-ping.com 독일, 왕복 약 300ms)를 모두 끊고 ETIMEDOUT을 낸다(첫 배포 하트비트 실패 실측).
   # IPv4를 먼저 고르고 시도당 2초를 준다. 클러스터 안 주소와 Discord(Cloudflare)는 영향 없다.
   NODE_OPTIONS: "--dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000"
   WORKER_URL: "http://worker.sandbox:8080/"
@@ -44,12 +44,12 @@ env:
   # 위 persistence.mountPath와 같아야 한다. 봇은 /var/lib/homelab-bot/ 밖이면 기동하지 않고, 이 env가 없으면 기억·원장을 끈다.
   # 원장이 열리지 않아도 Ready는 그대로다(경보·webhook 수신 유지). 기억 경로만 닫고 지표로 알린다(vmalert bot.yaml).
   MEMORY_LEDGER_DIR: "/var/lib/homelab-bot/ledger"
-  # 일일 브리핑(D-17: 매일 08:50 Asia/Seoul, 알림·리뷰·브리핑 채널 = 정책 notificationChannel). 사용자 승인 2026-11-02.
+  # 일일 브리핑(D-17: 매일 08:50 Asia/Seoul, 알림·리뷰·브리핑 채널 = 정책 notificationChannel). 사용자 승인.
   # 둘 다 있거나 둘 다 없어야 한다(하나만이면 봇이 기동하지 않는다). 지우면 다음 기동 때 예약을 끄고 남은 미발송 사본을 막는다.
   # 원장 env가 없으면 브리핑도 켤 수 없다(기억 칸이 원장에 기댄다).
   BRIEFING_TIME: "08:50"
   BRIEFING_TIMEZONE: "Asia/Seoul"
-  # T17 PR 자동 리뷰 스위치(사용자 승인 2026-11-04). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
+  # PR 자동 리뷰 스위치(사용자 승인). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
   # 켜도 Infisical RUNTIME_POLICIES의 review 절(시험 저장소 homelab-smoke 하나)과 작업자 리뷰 레인이 있어야 열린다.
   # 끄려면 이 줄을 지운다. 대기 작업과 미게시 결과는 지우지 않고 다시 켜질 때까지 기다린다.
   REVIEW_ENABLED: "true"

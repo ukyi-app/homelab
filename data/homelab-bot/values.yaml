@@ -1,7 +1,7 @@
 # homelab CLI가 만들었다(설계 C.5). 이 앱 데이터는 앱을 지워도 남는다(data purge로만 지운다).
 chartVersion: 1.2.0
 postgres: { enabled: true }
-# T20 기억 삭제 원장 PVC deletion-ledger. 운영 bot-slot이 만든 PV(SSD /mnt/bulk 아래, Retain)에 미리 묶인다.
+# 기억 삭제 원장 PVC deletion-ledger. 운영 bot-slot이 만든 PV(SSD /mnt/bulk 아래, Retain)에 미리 묶인다.
 # 원장은 DB 백업보다 오래 살아야 해 purge와 함께 쓰지 못하고, data purge도 이 앱에서는 멈춘다(설계 C.5.5).
 # 함정: VM에는 PV가 없어(values-vm.yaml deletionLedger: {}) 이 PVC와 봇 파드가 Pending이다. 의도된 상태다(restore.md 4절).
 volumes: { deletionLedger: { enabled: true } }
