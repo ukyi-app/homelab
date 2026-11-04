@@ -1,8 +1,8 @@
 # homelab ruleset 여섯(설계 C.4.7 서버 쪽 장치). 지우지 않고 enforcement를 disabled로만 끈다. 정답은 이 HCL이다.
 # 콘솔·gh api로 바꾸면 다음 verify가 차이(exit 2)나 guard 오류(exit 1)로 보인다.
 
-# 임시 ruleset(E1, gh api로 만듦). E5 1단계에서 active 그대로 import했고(2026-10-21), ruleset B가 main에 걸린 것을 확인한 뒤
-# 2단계에서 disabled로 바꿨다. 한 apply로 하면 병렬 적용이나 부분 실패(#3519) 때 main에 필수 검사만 남는다.
+# 임시 ruleset(E1, gh api로 만듦). E5 1단계에서 active 그대로 import하고, ruleset B가 main에 걸린 것을 확인한 뒤
+# 2단계에서 disabled로 바꾼다. 한 apply로 하면 병렬 적용이나 부분 실패(#3519) 때 main에 필수 검사만 남는다.
 # 다른 ruleset을 끄거나 고칠 때 먼저 active로 바꿔 main이 열리지 않게 하는 데 쓴다(런북 github.md).
 # 2단계 뒤에도 선언해 둔다. 빼면 guard 3(이름 집합)이 늘 실패하고, 이름으로 예외를 두면 몰래 바꾼 ruleset을 놓친다.
 resource "github_repository_ruleset" "main_interim" {
@@ -42,7 +42,7 @@ resource "github_repository_ruleset" "main_interim" {
   }
 }
 
-# A. 필수 검사 ci. bypass 없음. E2의 ruleset ci를 제자리에서 이름만 바꾼다(provider에서 name은 ForceNew가 아니다).
+# A. 필수 검사 ci. bypass 없음. provider에서 name은 ForceNew가 아니라 이름을 바꿔도 제자리에서 갱신된다.
 # 검사 이름은 ci.yaml의 job id ci다. job id를 바꾸면 모든 PR이 오지 않는 검사를 기다린다(설계 B.8 E5).
 # strict(최신 main 요구)를 끈다. 배포 PR이 서로 다른 파일만 바꿔 BEHIND 정지와 스위퍼가 필요 없다(R17).
 resource "github_repository_ruleset" "main_checks" {
@@ -77,8 +77,8 @@ resource "github_repository_ruleset" "main_checks" {
 # B. 사람 검토. owner가 만든 PR은 자기 승인이 안 돼 관리자 bypass(pull_request 모드)로 병합한다.
 # 그 bypass는 B에만 있어 A의 ci는 그대로 적용된다(U08). ukyi-merge App은 자동 병합 조건을 통과한 PR만 병합한다.
 # update(Restrict updates): main 갱신(PR 병합 포함)을 bypass 신원만 하게 한다. 승인 요건만으로는 막지 못한다.
-# owner가 연 PR(Codex PR도 작성자가 owner)은 작성자가 유일한 code owner라 쓰기 권한 App의 승인 하나로 리뷰 요건이 찼고,
-# bypass 없는 배포 App이 승인·병합해 main에 들어갔다(2026-10-21 #822, U08 (나)). pull_requests·contents write를 함께 가진
+# owner가 연 PR(Codex PR도 작성자가 owner)은 작성자가 유일한 code owner라 쓰기 권한 App의 승인 하나로 리뷰 요건이 차고,
+# bypass 없는 배포 App이 승인·병합해 main에 들어갈 수 있다(U08 (나)). pull_requests·contents write를 함께 가진
 # 신원(배포 App, Codex Connector, Renovate)이 모두 같은 길을 쓸 수 있다. 그래서 사람 병합도 늘 관리자 bypass다.
 # update_allows_fetch_and_merge는 두지 않는다(fork 동기화 예외가 필요 없다).
 resource "github_repository_ruleset" "main_review" {
@@ -212,7 +212,7 @@ resource "github_repository_ruleset" "release_tags_create" {
 }
 
 # 앱 저장소와 템플릿의 main(설계 C.4.7 app-main). App bypass 없음. 자동 배포는 앱 main을 믿으므로 앱 main을 바꿀 수
-# 있는 신원이 곧 배포 주체다. 결정 5 하드닝이 같은 모양으로 먼저 건 것을 E5 1단계에서 import했다.
+# 있는 신원이 곧 배포 주체다. 결정 5 하드닝이 건 것과 같은 모양이고 E5 1단계에서 import한다.
 # Free에서는 public 저장소에만 걸린다. private이 되면 자동 병합 조건 9가 멈춘다.
 # prevent_destroy를 두지 않는다. app-repos.json에서 빼는 앱 삭제는 delete plan이라 래퍼가 --allow-destroy 없이 멈춘다.
 # update(Restrict updates)는 main-review와 같은 이유다. 앱 저장소에도 Codex Connector·Renovate가 쓰기 권한으로 있고,

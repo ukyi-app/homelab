@@ -24,7 +24,7 @@
     { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s-go:80"] }
   ],
   "grants": [
-    // 공유기 관리 화면. 사용자가 2026-10-20 콘솔에 넣은 것을 옮겼다. 콘솔에서 직접 고치면 다음 apply가 지운다.
+    // 공유기 관리 화면(사용자 설정). 콘솔에서 직접 고치면 다음 apply가 지운다.
     { "src": ["autogroup:member"], "dst": ["192.168.117.1/32"], "ip": ["tcp:80", "tcp:443"] }
   ],
   "ssh": [

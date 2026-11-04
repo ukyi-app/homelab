@@ -2,7 +2,7 @@
 #
 # 모든 guard 인스턴스에 정상 JSON을 파일 단위 override_data로 넣고, run마다 하나만 망가뜨린다.
 #
-# command는 guard 종류로 고른다(설계 C.3.9는 apply로 적었지만 Terraform 1.16 test에서 실측해 나눴다).
+# command는 guard 종류로 고른다(Terraform 1.16 test 실측. 설계 C.3.9의 apply 하나로는 안 된다).
 # - 의존이 있어 미뤄지는 guard 3·4·9의 관리 자원 쪽은 apply다. plan이면 평가되지 않아 expect_failures가 성립하지 않는다.
 #   run마다 state_key를 달리해 빈 state에서 자원을 만들게 한다. 앞 run이 만든 state를 이어 쓰면 변경이 없어 guard가
 #   plan 때 평가되고, apply run의 plan 단계 기대 실패를 Terraform test는 "Expected failure while planning"으로 실패 처리한다.
@@ -12,7 +12,7 @@
 # 덮어쓰지 않은 계산 문자열은 mock이 임의 8자를 넣어 나머지 guard까지 실패한다.
 #
 # guard 8의 org public 저장소 응답은 app-repos.json에서 만든다. app new의 목록 PR은 app-repos.json만 고치므로,
-# 이름을 손으로 적어 두면 그 PR의 ci가 여기서 깨진다(T13 #923). ci는 mock이라 실제 org를 읽지 않는다.
+# 이름을 손으로 적어 두면 그 PR의 ci가 여기서 깨진다. ci는 mock이라 실제 org를 읽지 않는다.
 # file() 경로는 terraform test를 도는 root(infra/github) 기준이다. 시험 파일의 variables는 override_data에서 못 쓴다.
 
 variables {
@@ -560,7 +560,7 @@ run "g5_codeowners_override" {
 }
 
 run "main_update_restricted" {
-  # main 갱신은 bypass 신원만(Restrict updates, U08 (나)). 승인 요건만으로는 owner PR의 App 승인 병합을 막지 못했다.
+  # main 갱신은 bypass 신원만(Restrict updates, U08 (나)). 승인 요건만으로는 owner PR의 App 승인 병합을 막지 못한다.
   command = plan
   assert {
     condition     = github_repository_ruleset.main_review.rules[0].update == true

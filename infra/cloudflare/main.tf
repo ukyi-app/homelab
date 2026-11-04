@@ -74,7 +74,7 @@ resource "cloudflare_r2_bucket_lifecycle" "backups" {
   rules = [{
     id      = "valkey-expire-14d"
     enabled = true
-    # 빈 prefix는 PostgreSQL 백업도 지운다. pg/ 보존은 T11의 CNPG가 관리한다.
+    # 빈 prefix는 PostgreSQL 백업도 지운다. pg/ 보존은 CNPG가 관리한다.
     conditions = { prefix = "valkey/" }
     delete_objects_transition = {
       condition = { type = "Age", max_age = 1209600 }
