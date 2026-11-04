@@ -23,6 +23,12 @@
 4. `shell_environment_policy`를 `inherit = "none"` 또는 명시 `include`로 고정한다. 기본값은 `KEY`·`SECRET`·`TOKEN` 이름의 변수를 모델이 띄우는 명령에 넘긴다 [확인: https://learn.chatgpt.com/docs/config-file/config-advanced , 2026-10-18].
 5. 봇 저장소 `ARCHITECTURE.md` §5.1의 열린 항목 둘을 판단한다. (1) 인증 파일(`auth.json`)을 작업 레인의 비신뢰 코드 실행(패키지 설치·시험, 모델이 띄우는 셸)에서 떼는 방법. (2) 대화 레인과 작업 레인의 분리. 판단과 근거는 `DECISIONS.md`에 적는다. 설계 C.8(작업자 상주 파드 하나, 동시성 1, 작업자 자격 하나)을 바꿔야 하면 사용자가 정한다. T19는 비신뢰 코드를 가장 많이 돌리므로 이 판단을 따른다(T19 제약). (1)은 봇 저장소 PR #9(2026-10-29)의 Codex 보안 P2 "작업 셸과 Codex `auth.json` 분리(별도 UID·컨테이너나 credential broker)"와 같은 범위다. 그 P2는 T16b 할 일 7에서 옮겼다(lead 결정 2026-11-02. 작업 레인이 T16b에서 꺼져 있었다). 실제 `TaskLane` 연결 전 필수이고 T18 사용자 결정 (2) 인증 파일 분리와 같다.
 6. 실제 `TaskLane`을 연결하기 전에 같은 PR #9의 보안 P2를 고친다(`src/codex-process.ts`): 작업별 cgroup이 빌 때까지 완료·취소·해제하지 않는다. T18 사용자 결정 (4) 작업별 세션 공간과 같은 범위이고, T16b 할 일 7에서 옮겼다(위와 같은 결정). 같은 멈춤 규칙(1라운드 수정 → 재리뷰 → P1 없으면 병합)을 따른다.
+7. 작업 레인 격리를 운영에 반영한다(파드 실측 통과·대가 수용 2026-11-04, 봇 저장소 `DECISIONS.md` "(2) 파드 실측 결과와 대가 수용"). 노드에 없는 Localhost 프로필을 main이 참조하면 파드가 뜨지 않으므로 호스트가 먼저다.
+   1. `host/`: 전용 seccomp JSON·AppArmor 프로필과 그 생성 절차(containerd 버전 고정)를 둔다. `install.sh`가 kubelet seccomp 디렉터리와 `/etc/apparmor.d`에 설치·적재하고 재부팅 뒤에도 남게 한다. 사람이 `sudo host/install.sh`로 적용한다. 프로필 이름에 버전을 붙여 옛 버전과 함께 둘 수 있게 한다.
+   2. 봇 이미지: bubblewrap(`/usr/bin/bwrap`)·socat을 Debian 패키지로 넣고 버전을 고정한다. 작업자에는 `platform/sandbox` digest 사람 PR로 반영한다.
+   3. 봇 작업 레인 실행 설정: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, `--settings` 샌드박스(`failIfUnavailable`, `allowUnsandboxedCommands: false`, `network.allowAllUnixSockets: true`, 자격 디렉터리·다른 작업 세션 `denyRead`), `Read(...)` deny, `--allowedTools`. `TaskLane` 연결과 함께 한다.
+   4. `platform/sandbox`: 작업 레인 파드(결정 (3) 파드 둘)에 `hostUsers: false`, worker 컨테이너만 `procMount: Unmasked`와 Localhost 두 프로필. init 방화벽은 RuntimeDefault다. 설계 C.8을 같은 변경에서 고친다.
+   5. 운영 작업 레인에서 같은 조합으로 SEC-02 작업 레인 사례를 다시 확인한다. 2026-11-04 시험에서 호스트에 남긴 자원(커널에 적재한 AppArmor `homelab-worker-bwrap-v4`, kubelet seccomp 디렉터리의 v4 JSON, containerd 시험 이미지)은 정식 프로필로 바꾼 뒤 정리한다.
 
 ## 실행 경로 (T15 조사)
 
