@@ -28,7 +28,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: vmauth
-          # v1.154.1, Docker Hub 멀티 아키텍처 index 확인: 2026-10-23. vmsingle과 같은 버전으로 올린다.
+          # v1.154.1, Docker Hub 멀티 아키텍처 index. vmsingle과 같은 버전으로 올린다.
           image: victoriametrics/vmauth:v1.154.1@sha256:d8c65a73b8a30a0777417d43a13fbfaea1da1aa4ec4cd68905baf996072376bf
           args:
             - -auth.config=/etc/vmauth/auth.yaml

@@ -56,7 +56,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kube-state-metrics
-          # v2.20.0, registry.k8s.io 멀티 아키텍처 index 확인: 2026-10-22.
+          # v2.20.0, registry.k8s.io 멀티 아키텍처 index.
           image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0@sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b
           # 위 ClusterRole과 같은 목록이다. 하나를 더하면 둘 다 고친다(권한이 없으면 그 자원 지표가 조용히 빈다).
           args:

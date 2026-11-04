@@ -31,7 +31,7 @@ spec:
         - operator: Exists
       containers:
         - name: node-exporter
-          # v1.12.1, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
+          # v1.12.1, Docker Hub 멀티 아키텍처 index.
           image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
           args:
             - --path.rootfs=/host/root
@@ -40,7 +40,7 @@ spec:
             - --path.udev.data=/host/root/run/udev/data
             - --web.listen-address=:9100
             - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/kubelet/.+|var/lib/rancher/k3s/agent/containerd/.+)($|/)
-            # 호스트 유닛 실패(NodeSystemdUnitFailed). 옛 주기 스윕 유닛을 대신한다.
+            # 호스트 유닛 실패(NodeSystemdUnitFailed).
             - --collector.systemd
             - --collector.systemd.unit-exclude=.+\.(automount|device|mount|scope|slice)
           env:
