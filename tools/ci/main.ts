@@ -325,6 +325,12 @@ const steps: Step[] = [
     run: () => tool("host-bulk", ["bash", "tools/host-bulk.test.sh"]),
   },
   {
+    name: "host sandbox profiles",
+    // 커밋한 프로필 = base/ + generate.ts 변경, 이름·peer 규칙, k3s·containerd·go.mod 짝, install.sh --sandbox-profiles와 verify.sh 판정.
+    // containerd에서 base/를 다시 뽑는 대조와 apparmor_parser 문법은 Go·apparmor_parser가 없어 ci 밖이다(tools/sandbox-profiles/regen.sh --check).
+    run: () => tool("host-sandbox-profiles", ["bash", "tools/host-sandbox-profiles.test.sh"]),
+  },
+  {
     name: "workflows",
     run: () => {
       const files = gitFiles(".github/workflows/*.yaml", ".github/workflows/*.yml").map((path) => ({ path, text: readText(path) }));

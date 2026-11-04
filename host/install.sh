@@ -7,9 +7,13 @@
 #   sudo host/install.sh --cluster <이름> --k3s
 #   sudo host/install.sh --cluster <이름> --egress-off   (되돌리기: 파드 egress 규칙을 끄고 지운다)
 #   sudo host/install.sh --cluster <이름> --bulk-ssd     (삭제 원장 SSD 마운트와 원장 첫 초기화. 값이 빈 클러스터는 건너뜀)
+#   sudo host/install.sh --cluster <이름> --sandbox-profiles   (봇 작업 레인 worker의 Localhost seccomp·AppArmor 프로필)
 #
 # 순서가 계약이다: preflight --before -> install --host-config -> preflight --after
-#   -> install --egress -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
+#   -> install --egress -> install --sandbox-profiles -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
+#   --sandbox-profiles를 --k3s보다 먼저 두는 까닭: 이 프로필을 참조하는 파드는 프로필이 없으면 뜨지 않고, k3s가 서면 곧 Argo CD가
+#   main을 적용한다. 이미 도는 클러스터에는 따로 실행해도 된다(k3s를 다시 시작하지 않는다). k3s-uninstall.sh가 /var/lib/kubelet을
+#   지우므로 k3s를 다시 깔기 전에 이 단계도 다시 돈다. --host-config에 넣지 않은 까닭: 그 단계는 링크를 재구성한다.
 #   sudo는 비밀번호를 묻는 대화형 단계이고, 사람이 단계마다 결과를 보고 넘어간다.
 #   --egress를 --k3s보다 먼저 두는 까닭: 첫 파드부터 규칙 아래서 뜬다. 이미 도는 클러스터에는 --egress만
 #   따로 실행해도 된다(k3s를 다시 시작하지 않는다). --host-config에 넣지 않은 까닭: 그 단계는 networkd를
@@ -49,7 +53,7 @@ TARGETS=""
 NET_DROPINS=""
 KUBECONFIG_OUT=""
 
-usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--egress|--k3s|--egress-off|--bulk-ssd"; }
+usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--egress|--k3s|--egress-off|--bulk-ssd|--sandbox-profiles"; }
 cleanup() { [ -z "$TMPD" ] || rm -rf "$TMPD"; }
 trap cleanup EXIT
 
@@ -856,6 +860,83 @@ bulk_ssd() {
   echo "    다음: host/verify.sh --cluster ${CLUSTER} (sudo 없이. 원장 파일은 sudo -n으로 읽는다)"
 }
 
+# -------------------------------------------------------------------- --sandbox-profiles
+# 봇 작업 레인 worker의 Localhost seccomp·AppArmor 프로필. 만드는 법은 tools/sandbox-profiles/regen.sh다.
+# Git에 있는 모든 버전을 깐다. 깔린 옛 버전은 지우지 않는다. 그 이름을 참조하는 파드가 있을 수 있다.
+
+# 깔린 파일이 Git과 다르면 덮지 않고 멈춘다. 내용을 바꿀 때는 이름의 버전을 올리는 것이 규칙이고, 같은 이름을 덮으면
+# apparmor_parser -r이 도는 파드의 규칙을 그 자리에서 바꾼다.
+sandbox_check_targets() {
+  local kind src dest profile
+  while IFS=$'\t' read -r kind src dest; do
+    case "$kind" in
+      seccomp) jq -e . "$src" >/dev/null || die "${src}가 JSON이 아니다. 아무것도 바꾸지 않았다" ;;
+      apparmor)
+        # 문법만 본다(-Q 커널에 올리지 않음, -K -T 캐시 안 씀). 여기서 걸리면 아무것도 깔지 않는다.
+        apparmor_parser -Q -K -T "$src" || die "apparmor_parser가 ${src}를 거부했다. 아무것도 바꾸지 않았다"
+        profile="$(basename "$dest")"
+        if [ -e "${APPARMOR_DIR}/disable/${profile}" ]; then
+          die "${APPARMOR_DIR}/disable/${profile}가 있다. 재부팅하면 이 프로필이 올라가지 않는다. 왜 있는지 사람이 본다"
+        fi
+        ;;
+    esac
+    if { [ -e "$dest" ] || [ -L "$dest" ]; } && ! cmp -s "$src" "$dest"; then
+      die "${dest}가 Git과 다르다. 덮지 않고 멈춘다. 내용을 바꿀 때는 tools/sandbox-profiles/generate.ts의 VERSION을 올린다. 파일을 왜 고쳤는지 사람이 본다"
+    fi
+  done <<<"$1"
+}
+
+# 같은 내용이면 파일을 다시 쓰지 않는다. 시각을 그대로 둬 다시 실행해도 아무것도 바뀌지 않게 한다.
+sandbox_copy() {
+  local src="$1" dest="$2"
+  if cmp -s "$src" "$dest"; then
+    echo "    그대로 ${dest}"
+  else
+    install -m 0644 -o "${SANDBOX_OWNER%:*}" -g "${SANDBOX_OWNER#*:}" "$src" "$dest"
+    echo "    ${dest}"
+  fi
+}
+
+sandbox_profiles() {
+  local targets kind src dest problems
+
+  log "확인"
+  require_cmds apparmor_parser install sha256sum stat systemctl
+  targets="$(sandbox_targets)"
+  problems="$(sandbox_host_problems)"
+  [ -z "$problems" ] || die "호스트 조건이 맞지 않는다. 아무것도 바꾸지 않았다:"$'\n'"${problems}"
+  sandbox_check_targets "$targets"
+
+  log "[1/3] seccomp JSON(${SANDBOX_SECCOMP_DIR})"
+  # k3s보다 먼저 돌 수 있어 kubelet 디렉터리가 없을 수 있다. 파드 볼륨이 들어가는 곳이라 넓히지 않고 라이브와 같은 0750으로 만든다.
+  if [ ! -e "$KUBELET_DIR" ]; then
+    install -d -m 0750 -o "${SANDBOX_OWNER%:*}" -g "${SANDBOX_OWNER#*:}" "$KUBELET_DIR"
+  fi
+  install -d -m 0755 -o "${SANDBOX_OWNER%:*}" -g "${SANDBOX_OWNER#*:}" "${SANDBOX_SECCOMP_DIR%/*}" "$SANDBOX_SECCOMP_DIR"
+  while IFS=$'\t' read -r kind src dest; do
+    [ "$kind" != seccomp ] || sandbox_copy "$src" "$dest"
+  done <<<"$targets"
+
+  log "[2/3] AppArmor(${APPARMOR_DIR}, 부팅 때 apparmor.service가 다시 올린다)"
+  while IFS=$'\t' read -r kind src dest; do
+    [ "$kind" = apparmor ] || continue
+    sandbox_copy "$src" "$dest"
+    # 깔린 파일을 올린다. 재부팅 뒤 커널에 올라갈 것과 지금 올라간 것이 같은 파일에서 온다.
+    apparmor_parser -r "$dest" || die "apparmor_parser -r ${dest}가 실패했다. journalctl -k -g apparmor를 본다"
+    echo "    적재 $(basename "$dest")"
+  done <<<"$targets"
+
+  log "[3/3] 확인(소유·모드·해시, enforce 적재)"
+  problems="$(sandbox_installed_problems)"
+  [ -z "$problems" ] || die "깔린 프로필이 Git과 다르다:"$'\n'"${problems}"
+
+  log "샌드박스 프로필 설치 완료"
+  while IFS=$'\t' read -r kind src dest; do
+    echo "    ${kind} $(sha256sum -- "$dest" | cut -d ' ' -f 1) ${dest}"
+  done <<<"$targets"
+  echo "    다음: host/verify.sh --cluster ${CLUSTER} (sudo -v 뒤 같은 터미널에서. 깔린 파일과 커널 목록은 root만 읽는다)"
+}
+
 # ------------------------------------------------------------------------------ main
 
 main() {
@@ -863,7 +944,7 @@ main() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --cluster) [ "$#" -ge 2 ] || usage; cluster="$2"; shift 2 ;;
-      --host-config | --egress | --egress-off | --k3s | --bulk-ssd) [ -z "$mode" ] || usage; mode="$1"; shift ;;
+      --host-config | --egress | --egress-off | --k3s | --bulk-ssd | --sandbox-profiles) [ -z "$mode" ] || usage; mode="$1"; shift ;;
       *) usage ;;
     esac
   done
@@ -882,8 +963,9 @@ main() {
     --egress-off) egress_off ;;
     --k3s) k3s_install ;;
     --bulk-ssd) bulk_ssd ;;
+    --sandbox-profiles) sandbox_profiles ;;
   esac
 }
 
-# tools/host-k3s.test.sh가 check_install_time_keys·k3s_install·apply_services를 쓰려고 source한다. 그때는 main을 돌리지 않는다.
+# tools/host-*.test.sh가 check_install_time_keys·k3s_install·apply_services·bulk_ssd·sandbox_profiles를 쓰려고 source한다. 그때는 main을 돌리지 않는다.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
