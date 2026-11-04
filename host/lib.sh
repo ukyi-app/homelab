@@ -25,7 +25,7 @@ EGRESS_RULES=/etc/homelab/egress.nft
 EGRESS_UNIT_NAME=homelab-egress.service
 # shellcheck disable=SC2034
 EGRESS_UNIT="/etc/systemd/system/${EGRESS_UNIT_NAME}"
-# T20 삭제 원장(원장 계약 v1). 경로·소유·파일 이름은 봇(B2)과 PV(platform)가 같은 값을 쓴다. 한쪽만 바꾸지 않는다.
+# 삭제 원장(원장 계약 v1). 경로·소유·파일 이름은 봇(B2)과 PV(platform)가 같은 값을 쓴다. 한쪽만 바꾸지 않는다.
 # 봇은 파일을 만들지 않는다. 첫 초기화는 install.sh --bulk-ssd만 한다.
 # 소유는 tools/host-bulk.test.sh가 root 없이 돌리려고 바꾼다.
 # shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
@@ -127,7 +127,7 @@ load_cluster() {
   fi
 }
 
-# ------------------------------------------------------------------ T20 삭제 원장 SSD
+# ------------------------------------------------------------------ 삭제 원장 SSD
 
 # 관리하는 fstab 줄. nofail이라 SSD가 없어도 부팅은 계속된다. 대신 마운트 안 된 /mnt/bulk는 루트 디스크의 빈
 # 디렉터리라, 그 아래에 원장을 만들면 봇이 빈 원장을 정상으로 읽는다. 그래서 원장 디렉터리는 마운트 대조 뒤에만
@@ -144,7 +144,7 @@ fstab_bulk_lines() {
 }
 
 # 지금 BULK_MOUNT에 걸린 마운트를 "원본 형식 옵션 라벨" 줄로 낸다. --mountpoint만 쓴다. findmnt -T는 마운트가 없으면
-# 상위 루트 파일시스템을 답해 "마운트됨"으로 읽힌다(설계 B.4 H8, 옛 TD:1166). 여러 줄이면 겹쳐 마운트된 것이다.
+# 상위 루트 파일시스템을 답해 "마운트됨"으로 읽힌다(설계 B.4 H8). 여러 줄이면 겹쳐 마운트된 것이다.
 # 마운트가 없으면 findmnt가 1로 끝난다. 그 경우는 빈 출력으로 낸다.
 bulk_mount_lines() {
   findmnt -n -r -o SOURCE,FSTYPE,OPTIONS,LABEL --mountpoint "$BULK_MOUNT" 2>/dev/null || true
@@ -272,7 +272,7 @@ render_k3s_config() {
 # yq를 쓰지 않는다. NUC의 yq는 개인 mise 설치라 root PATH와 새 호스트에 있다고 볼 수 없다.
 #
 # 값이 빈 키(key: "" 또는 항목 없는 key:)도 "--키<TAB>"로 낸다. k3s는 빈 값도 --키=로 넘겨 키가 없을 때의
-# 기본값과 다르다(cluster-domain: ""는 cluster.local이 아니다). 옛 판은 이 줄을 버려 재시작 판단이 틀렸다.
+# 기본값과 다르다(cluster-domain: ""는 cluster.local이 아니다). 이 줄을 버리면 재시작 판단이 틀린다.
 #
 # config_pairs exact: install.sh가 재시작할지 고를 때 쓴다. 따옴표를 벗기지 않고 파일 순서를 지킨다.
 # "0600"과 0600은 YAML에서 문자열과 8진수 정수라 k3s에 다른 값이 가고, 목록은 뒤 항목이 앞 항목을 덮을 수 있다.
@@ -362,7 +362,7 @@ serving_sans() {
 }
 
 # missing_sans <tls_sans 출력> <serving_sans 출력>: 인증서에 없는 tls-san을 한 줄에 하나씩 낸다.
-# 줄 전체로 비교한다. 부분 일치는 짧은 이름이 빠져도 FQDN 항목에 걸려 통과하던 옛 자리다.
+# 줄 전체로 비교한다. 부분 일치는 짧은 이름이 빠져도 FQDN 항목에 걸려 통과한다.
 missing_sans() {
   local s
   while IFS= read -r s; do
@@ -370,8 +370,8 @@ missing_sans() {
   done <<<"$1"
 }
 
-# host/etc/의 모든 파일을 "원본<TAB>대상" 줄로 낸다. 확장자로 거르지 않는다. 옛 화이트리스트는
-# 목록 밖 확장자를 조용히 빠뜨렸다. 0건이면 성공으로 읽지 않고 멈춘다.
+# host/etc/의 모든 파일을 "원본<TAB>대상" 줄로 낸다. 확장자로 거르지 않는다. 화이트리스트는
+# 목록 밖 확장자를 조용히 빠뜨린다. 0건이면 성공으로 읽지 않고 멈춘다.
 etc_targets() {
   local src rel dest n=0
   while IFS= read -r -d '' src; do
@@ -502,7 +502,7 @@ egress_kernel_json() {
 # 표 comment의 해시가 렌더 해시와 같아야 한다(파일만 바꾸고 reload를 빠뜨리면 여기서 걸린다). 해시는 올린 뒤
 # 규칙을 바꿔도 따라 바뀌지 않는다. 그래서 체인마다 규칙을 자리별로 렌더의 규칙과 정확히 대조한다. 허용 verdict나
 # 대역 포함만 보면 끝 drop이 남은 채 그 앞 로그 규칙을 counter accept로 바꾼 것, 클러스터 대역을 10.0.0.0/8로
-# 넓힌 것이 통과했다(#919 리뷰). 주소는 구간으로 바꿔 비교한다. nft는 인접 CIDR을 합쳐 올리므로
+# 넓힌 것이 통과한다. 주소는 구간으로 바꿔 비교한다. nft는 인접 CIDR을 합쳐 올리므로
 # (10.42.0.0/16 + 10.43.0.0/16 -> 10.42.0.0/15) 합친 것은 같게, 넓힌 것은 다르게 읽는다.
 # 표 flags도 본다. dormant는 규칙을 그대로 둔 채 base chain을 떼어 표 전체를 끈다.
 # 아래 want는 host/egress/egress.nft의 규칙 줄과 하나씩 짝이다. 규칙을 바꾸면 둘을 함께 고친다. 줄 수가
