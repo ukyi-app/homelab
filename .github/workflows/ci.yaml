@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # 정렬·문자 분류를 러너 로케일에 맡기지 않는다. 옛 저장소에서 en_US sort -u가 -1과 1을 같게 봤다(설계 B.8).
+  # 정렬·문자 분류를 러너 로케일에 맡기지 않는다. en_US sort -u는 -1과 1을 같게 본다(설계 B.8).
   LC_ALL: C
 
 defaults:
@@ -40,7 +40,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned tools
-        # 버전은 .tool-versions에서 읽고, 받은 파일은 아래 sha256과 대조한다. TLS만 믿지 않는다(옛 R29).
+        # 버전은 .tool-versions에서 읽고, 받은 파일은 아래 sha256과 대조한다. TLS만 믿지 않는다.
         # .tool-versions에서 버전을 바꾸면 아래 sha256도 같은 커밋에서 바꾼다. 안 바꾸면 여기서 실패한다.
         # GITHUB_PATH는 PATH 앞에 붙으므로 러너 이미지에 깔린 같은 이름의 도구보다 이것이 먼저 잡힌다.
         env:

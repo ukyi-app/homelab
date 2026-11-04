@@ -61,9 +61,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           # ukyi-deploy[bot]의 숫자 사용자 ID(조건 1).
-          # 함정: 옛 이름 homelab-deploy[bot]은 남의 App이다. 그 ID를 넣으면 조건 1이 남의 PR을 통과시킨다.
+          # 함정: 이름 homelab-deploy[bot]은 남의 App이다. 그 ID를 넣으면 조건 1이 남의 PR을 통과시킨다.
           # 반드시 /users/ukyi-deploy%5Bbot%5D로 읽고 App ID 5404211의 봇인지 대조한다(설계 B.8 E5).
-          # 2026-11-04 이전 이름 ukyi-homelab-deploy는 이제 비어 있어 남이 가질 수 있다. 그 이름으로 다시 읽지 않는다.
+          # 이름 ukyi-homelab-deploy는 비어 있어 남이 가질 수 있다. 그 이름으로 읽지 않는다.
           # 이름이 바뀌어도 숫자 ID는 그대로라, 여기서는 이름이 아니라 이 숫자만 믿는다.
           # 0이면 어떤 PR도 조건 1을 통과하지 못한다(fail-safe).
           HOMELAB_DEPLOY_BOT_ID: "345583640"
@@ -84,8 +84,8 @@ jobs:
     permissions: {}
     env:
       # App ukyi-merge(App ID 5404220)의 client ID. gh api /apps/ukyi-merge로 읽는다(owner ukyi-app).
-      # 옛 이름 homelab-merge는 남의 App이다. 그 App의 값이 아니라 ukyi-merge 설정 화면의 값을 넣는다(설계 B.8 E5).
-      # 2026-11-04 이전 이름 ukyi-homelab-merge도 이제 비어 있다. /apps/<이름>으로 읽을 때 ID 5404220인지 대조한다.
+      # 이름 homelab-merge는 남의 App이다. 그 App의 값이 아니라 ukyi-merge 설정 화면의 값을 넣는다(설계 B.8 E5).
+      # 이름 ukyi-homelab-merge도 비어 있다. /apps/<이름>으로 읽을 때 ID 5404220인지 대조한다.
       MERGE_APP_CLIENT_ID: Iv23liXKmf5ni2fGsiQN
     steps:
       - name: 병합 App 토큰

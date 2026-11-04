@@ -1,6 +1,6 @@
-# 공개 저장소다. 자격이 담길 수 있는 파일은 이름을 바꾼 사본까지 무시한다(옛 R41).
-# 옛 사고 둘: terraform.tfvars.pre-cutover.bak이 *.tfvars에 안 걸려 커밋될 뻔했고,
-# 이름만 바꾼 backend.hcl 사본(R2 state 키 평문)을 git add -A가 스테이징했다.
+# 공개 저장소다. 자격이 담길 수 있는 파일은 이름을 바꾼 사본까지 무시한다.
+# 패턴이 좁으면 terraform.tfvars.pre-cutover.bak이 *.tfvars에 안 걸려 커밋되고,
+# 이름만 바꾼 backend.hcl 사본(R2 state 키 평문)을 git add -A가 스테이징한다.
 # 자격은 파일로 두지 않고 infisical run으로만 넣는다(설계 C.2). 이 목록은 그 규칙을 어겼을 때의 그물이다.
 
 # 환경변수 파일. host/versions.env·host/clusters/*.env는 공개 값이라 추적한다. 그래서 *.env는 쓰지 않는다.
