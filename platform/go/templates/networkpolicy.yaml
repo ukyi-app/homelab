@@ -1,6 +1,6 @@
 # 들어오는 것은 이 Service의 operator 프록시 파드에서 8080뿐이고, 밖으로는 나가지 않는다(DNS도 쓰지 않는다).
 #
-# 출처 근거(v1.104.1 소스, 실측은 T08c 수용 시험): 프록시는 tailnet 주소 → ClusterIP DNAT만 걸고 SNAT을 직접 걸지 않는다
+# 출처 근거(v1.104.1 소스, 실측은 수용 시험): 프록시는 tailnet 주소 → ClusterIP DNAT만 걸고 SNAT을 직접 걸지 않는다
 # (cmd/containerboot/forwarding.go installIngressForwardingRule). 대신 프록시 안 tailscaled가 기본값(--snat-subnet-routes)대로
 # tailscale0에서 들어와 나가는 패킷에 표시를 달아 MASQUERADE한다(util/linuxfw ts-forward·AddSNATRule). 그래서 이 파드가 보는
 # 출처는 원래 tailnet 주소가 아니라 tailscale ns의 그 프록시 파드 IP다. 출처가 프록시 파드 밖으로 관찰되면

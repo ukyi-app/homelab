@@ -25,7 +25,7 @@ infisical:
     expandSecretReferences: false
 {{- end }}
 
-{{/* 작업자 파드 라벨. bot-slot(PR 3)의 sandbox ingress 정책이 이 라벨로 작업자를 고른다. */}}
+{{/* 작업자 파드 라벨. bot-slot의 sandbox ingress 정책이 이 라벨로 작업자를 고른다. */}}
 {{- define "sandbox.workerLabels" -}}
 app: worker
 {{- end }}

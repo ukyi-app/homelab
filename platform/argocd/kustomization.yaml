@@ -16,13 +16,13 @@
 # - argocd-cm.yaml의 resource.exclusions를 새 install.yaml의 기본 목록과 대조한다. 그 키는 통째로 덮어쓴다.
 #
 # argocd-secret은 여기서 patch하지 않는다. data를 여기 적으면 Argo CD가 그 Secret의 data 소유권을 가져,
-# 서버나 다른 컨트롤러가 넣은 키(owner 비밀번호 등)를 sync 때 지울 수 있다(옛 bootstrap-values.yaml의 경고).
+# 서버나 다른 컨트롤러가 넣은 키(owner 비밀번호 등)를 sync 때 지울 수 있다.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: argocd
 resources:
-  # 공식 매니페스트의 NetworkPolicy 7개(구성 요소별 ingress 제한)를 그대로 둔다. 옛 구성에서는 repo-server에
-  # 정책이 없어 다른 ns의 파드가 렌더를 요청할 수 있었다(설계 B.8 E2). 라이브 적용 확인은 T07에서 한다.
+  # 공식 매니페스트의 NetworkPolicy 7개(구성 요소별 ingress 제한)를 그대로 둔다. repo-server에
+  # 정책이 없으면 다른 ns의 파드가 렌더를 요청할 수 있다(설계 B.8 E2).
   - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.5/manifests/install.yaml
 patches:
   - path: argocd-cm.yaml

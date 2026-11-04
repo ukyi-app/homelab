@@ -1,5 +1,5 @@
 {{- /*
-(4) 봇 기억 삭제 원장 볼륨(T20, 설계 C.5.5·C.8). 정적 local PV와 그 StorageClass를 둔다. PVC는 데이터 차트(data/<봇>의
+(4) 봇 기억 삭제 원장 볼륨(설계 C.5.5·C.8). 정적 local PV와 그 StorageClass를 둔다. PVC는 데이터 차트(data/<봇>의
 volumes.deletionLedger)가, 마운트는 공유 차트 persistence가 맡는다. PV·SC는 cluster-scoped라 data·apps 프로젝트는 못 만들고
 platform 프로젝트인 이 Application이 맡는다(AppProject 권한을 넓히지 않는다).
 값은 root가 cluster.deletionLedger로 넘긴다(platform/root/templates/bot-slot.yaml). VM은 운영 SSD가 없어 값을 비우고, 그러면
