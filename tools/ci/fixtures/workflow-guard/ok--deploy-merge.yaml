@@ -12,6 +12,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
   merge:
     needs: check
     runs-on: ubuntu-24.04
@@ -19,6 +22,10 @@ jobs:
       name: automerge
       deployment: false
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/create-github-app-token@3d3c42e5aac5ba805825da76410c181273ba90b1 # v3.3.0
         with:
           private-key: ${{ secrets.HOMELAB_MERGE_KEY }}

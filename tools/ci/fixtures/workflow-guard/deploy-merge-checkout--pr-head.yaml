@@ -1,0 +1,19 @@
+# path: .github/workflows/deploy-merge.yaml
+# expect: deploy-merge-checkout
+# PR head를 체크아웃하면 PR이 고친 코드가 병합 키 옆에서 돈다.
+name: deploy-merge
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    environment:
+      name: automerge
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
