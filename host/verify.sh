@@ -5,7 +5,7 @@
 # 사용: host/verify.sh --cluster <이름> [--identity]
 #   기본        정체성, 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 k3s-config.yaml,
 #               serving cert SAN, local-retain StorageClass, 파드 egress(유닛, 규칙 파일, 대역, 커널 표),
-#               inotify 인스턴스 한도(설치된 sysctl 파일, 커널 값), T20 삭제 원장 SSD(마운트, fstab, 원장 디렉터리·
+#               inotify 인스턴스 한도(설치된 sysctl 파일, 커널 값), 삭제 원장 SSD(마운트, fstab, 원장 디렉터리·
 #               파일 소유·모드, 표식 형식. BULK_SSD_LABEL이 빈 클러스터는 건너뜀), kubeconfig 권한.
 #   --identity  정체성만 본다. 파괴 명령(삭제, 복구, 제거) 앞에서 대상 클러스터를 확인할 때 쓴다.
 #
@@ -14,7 +14,7 @@
 #
 # kubeconfig는 KUBECONFIG가 있으면 그것, 없으면 ~/.kube/<KUBE_CONTEXT>.yaml(install.sh가 씀)이다.
 # 모든 kubectl 호출에 --context <KUBE_CONTEXT>를 붙인다. 다른 클러스터의 파일을 가리키면 그 context가
-# 없어 실패하고, 이름만 같은 다른 클러스터면 노드 이름에서 멈춘다(옛 assert-cluster-identity.sh를 줄임).
+# 없어 실패하고, 이름만 같은 다른 클러스터면 노드 이름에서 멈춘다.
 #
 # 플래그 문자열이나 Git만 보면 "그렇게 설치할 것이다"만 증명된다. 여기서는 라이브 노드 객체,
 # 어노테이션, 실제로 내주는 인증서를 본다. node-name, node-ip는 설치 때만 정해지고, tls-san은 config를
@@ -81,7 +81,7 @@ check_version() {
 }
 
 # k3s는 config.yaml의 키마다 --키=값 플래그를 만들고(목록은 항목마다 하나) 그 목록을
-# k3s.io/node-args 어노테이션에 남긴다(옛 verify-cluster.sh:44-61 방식). 같은 모양으로 바꿔 통째로 비교한다.
+# k3s.io/node-args 어노테이션에 남긴다. 같은 모양으로 바꿔 통째로 비교한다.
 # config.yaml.d drop-in이나 모르는 키(k3s가 경고만 하고 버림)도 여기서 차이로 드러난다.
 check_node_args() {
   local ann live want d
@@ -304,7 +304,7 @@ as_root() {
   fi
 }
 
-# T20 삭제 원장 SSD(install.sh --bulk-ssd). 읽기만 한다. 원장 파일 내용은 출력하지 않는다(기억 ID·시각).
+# 삭제 원장 SSD(install.sh --bulk-ssd). 읽기만 한다. 원장 파일 내용은 출력하지 않는다(기억 ID·시각).
 # 마운트가 없으면 원장을 더 보지 않고, 대신 루트 디스크 쪽에 원장 경로가 생겼는지 본다. 그것이 있으면
 # SSD 없이 PV가 붙어 봇이 빈 원장을 볼 수 있다.
 check_bulk_ssd() {

@@ -8,7 +8,6 @@
 #   --after   install.sh --host-config 뒤. 스왑 없음, 타임존, systemd-resolved 스텁 꺼짐,
 #             /etc/resolv.conf가 loopback·tailnet·자기 주소가 아님, 링크가 DHCP DNS를 거부.
 # 항목을 모두 돌고 실패를 모두 출력한 뒤 하나라도 실패면 exit 1이다. 그러면 다음 단계로 가지 않는다.
-# 옛 host-preflight.sh:42-216의 6항목을 두 시점으로 나눴다.
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"

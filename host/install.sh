@@ -6,11 +6,11 @@
 #   sudo host/install.sh --cluster <이름> --egress
 #   sudo host/install.sh --cluster <이름> --k3s
 #   sudo host/install.sh --cluster <이름> --egress-off   (되돌리기: 파드 egress 규칙을 끄고 지운다)
-#   sudo host/install.sh --cluster <이름> --bulk-ssd     (T20 삭제 원장 SSD 마운트와 원장 첫 초기화. 값이 빈 클러스터는 건너뜀)
+#   sudo host/install.sh --cluster <이름> --bulk-ssd     (삭제 원장 SSD 마운트와 원장 첫 초기화. 값이 빈 클러스터는 건너뜀)
 #
 # 순서가 계약이다: preflight --before -> install --host-config -> preflight --after
 #   -> install --egress -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
-#   sudo는 비밀번호를 묻는 대화형 단계이고, 사람이 단계마다 결과를 보고 넘어간다(옛 host-up.sh:5-14).
+#   sudo는 비밀번호를 묻는 대화형 단계이고, 사람이 단계마다 결과를 보고 넘어간다.
 #   --egress를 --k3s보다 먼저 두는 까닭: 첫 파드부터 규칙 아래서 뜬다. 이미 도는 클러스터에는 --egress만
 #   따로 실행해도 된다(k3s를 다시 시작하지 않는다). --host-config에 넣지 않은 까닭: 그 단계는 networkd를
 #   재구성해 링크가 끊길 수 있고 끄는 짝이 없다. egress는 켜고 끄는 한 쌍이 되돌리기 한 명령이어야 한다.
@@ -19,7 +19,7 @@
 #   --host-config에 넣지 않은 까닭: 그 단계는 resolved·journald를 재시작하고 링크를 재구성한다. 마운트만
 #   다시 볼 때 그것까지 치르지 않는다.
 # 각 모드는 확인을 모두 먼저 하고, 하나라도 실패하면 아무것도 바꾸지 않고 멈춘다.
-# 실패를 파이프나 || true로 삼키지 않는다. 옛 bootstrap.sh는 helm 실패를 삼키고 성공을 찍었다(L21).
+# 실패를 파이프나 || true로 삼키지 않는다. 삼키면 실패한 helm도 성공으로 찍힌다(L21).
 #
 # 다시 실행해도 된다. --host-config는 같은 파일을 다시 쓰고, --k3s는 같은 config로 다시 설치한다.
 # k3s 업그레이드는 host/versions.env의 INSTALL_K3S_VERSION을 올린 뒤 --k3s를 다시 실행한다[S51].
@@ -56,7 +56,7 @@ trap cleanup EXIT
 # ------------------------------------------------------------------------ --host-config
 
 # resolved drop-in의 DNS= 줄은 정확히 하나이고 NODE_UPSTREAM_DNS와 같아야 한다. 같은 키를 두 번
-# 적으면 덮어쓰지 않고 이어 붙어 앞줄이 1순위가 된다(옛 공유기 교착과 같은 종류).
+# 적으면 덮어쓰지 않고 이어 붙어 앞줄이 1순위가 된다(노드 → 공유기 → AdGuard 교착과 같은 종류).
 check_dns_dropin() {
   local f="$HOST_DIR/etc/systemd/resolved.conf.d/10-k3s-node.conf" lines
   [ -f "$f" ] || die "resolved drop-in이 없다: ${f}"
@@ -486,7 +486,7 @@ left_s() {
 # kubernetes Service IP와 같고, 그 IP의 443이 열린다(Service DNAT -> 노드 6443). 규칙이 다시 맞춰지는 동안
 # 잠깐 실패할 수 있어 NET_CHECK_MAX초까지 다시 본다. 공개 URL·파드의 새 외부 연결은 런북에서 사람이 본다.
 # NET_CHECK_MAX는 Service 조회부터 마지막 재시도까지 전체 기한이다. 호출마다 남은 시간만큼 timeout을 건다.
-# 옛 판은 sleep만 세어, /readyz 뒤 API가 멈추면 kubectl get svc가 끝없이 기다려 되돌리기 안내까지 가지 못했다.
+# sleep만 세면 /readyz 뒤 API가 멈출 때 kubectl get svc가 끝없이 기다려 되돌리기 안내까지 가지 못한다.
 check_cluster_net() {
   local dns api got="" start end left
   start="$(now_ms)"
@@ -517,7 +517,7 @@ k3s_started_at() { systemctl show -P InactiveExitTimestampMonotonic k3s.service;
 # dynamiclistener는 시작할 때 SAN을 더한 새 인증서를 만들지만 저장은 비동기 큐를 거친다. k3s Secret 컨트롤러가
 # 뜨기 전에는 새 인증서가 옛 ResourceVersion을 단 채 캐시에 들어가, 먼저 읽힌 옛 인증서가 계속 나간다. Secret을
 # 갱신해 버전이 바뀐 뒤의 새 연결부터 새 인증서를 받는다(dynamiclistener e4a1908ede0d listener.go:398-493,
-# storage/kubernetes/controller.go:49-85·244-253). /readyz는 그 전에 통과할 수 있다. 2026-10-27 운영 적용에서
+# storage/kubernetes/controller.go:49-85·244-253). /readyz는 그 전에 통과할 수 있다. 운영 적용에서
 # install 직후 verify의 SAN 검사가 FAIL, 다시 돌린 verify는 ok였다.
 # SAN_WAIT_MAX: /readyz 뒤 남은 일은 Secret 컨트롤러 초기화(1초 간격으로 기다림)와 Secret 갱신 API 호출 몇 번이라
 # 몇 초다(소스로 셈, 실측 없음). 60초는 NET_CHECK_MAX와 같은 여유이고, 넘으면 갱신이 막힌 것(k3s 로그
@@ -540,7 +540,7 @@ wait_serving_sans() {
 # 노드에 podCIDR가 배정될 때까지 기다린다. 처음 설치에서 /readyz는 kubelet의 노드 등록과 kube-controller-manager
 # node-ipam의 배정(k3s가 allocate-node-cidrs=true로 띄운다, k3s v1.36.5+k3s1 pkg/daemons/control/server.go:116)보다
 # 먼저 통과한다. 배정 전에는 k3s의 flannel이 시작하지 않아(pkg/agent/flannel/setup.go:109 waitForPodCIDR) 파드
-# 네트워크가 없다. 2026-10-28 VM 첫 설치에서 install 직후 verify가 "노드 podCIDR 없음"으로 FAIL, 다시 돌린 verify는
+# 네트워크가 없다. VM 첫 설치에서 install 직후 verify가 "노드 podCIDR 없음"으로 FAIL, 다시 돌린 verify는
 # 통과했다. SAN 대기(wait_serving_sans)와 같은 기준이다: 설치가 막 띄운 k3s의 일시 상태는 install이 끝나기 전에
 # 기다리고, verify는 한 번만 본다(다시 보면 진짜 누락의 FAIL만 늦어진다). 배정은 노드 spec에 남아 재실행·재시작에서는
 # 첫 조회로 끝난다. 값이 POD_CIDR 안인지는 verify check_egress가 본다.
@@ -706,7 +706,7 @@ k3s_install() {
 }
 
 # ---------------------------------------------------------------------------- --bulk-ssd
-# T20 삭제 원장 SSD(D-12 후속, 사용자 2026-11-02). 원장 계약 v1: LABEL로 마운트하고, 마운트를 대조한 뒤에만
+# 삭제 원장 SSD(D-12 후속, 사용자 결정). 원장 계약 v1: LABEL로 마운트하고, 마운트를 대조한 뒤에만
 # 원장 디렉터리를 만들며, 첫 초기화(빈 원장 + 표식)는 이 단계만 한다. 이 단계는 포맷·mkfs·라벨 변경을 하지 않는다.
 # 장치 번호(/dev/nvme1n1p1)는 부팅마다 바뀔 수 있어 설정에 쓰지 않는다. UUID·시리얼은 화면에만 내고 파일에 적지 않는다.
 
