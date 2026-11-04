@@ -2,7 +2,7 @@
 // argv는 여기서만 만든다. 리소스는 KINDS 표의 이름뿐이라 범용 조회로 Secret을 읽을 수 없고(#873 2라운드 P1),
 // --raw·config view 같은 원문 출력 옵션은 쓰지 않는다. 모든 호출에 --request-timeout(서버가 멈추면 기본으로 오래 기다린다).
 import { entries, isArray, jsonParse, jsonStringify, strIncludes } from "./intrinsics";
-import type { KubeKind, KubeRead, KubeWrite, LogTarget, RestoreCheckMark, RestoreRecord, RestoreRecordName } from "./command";
+import type { KubeKind, KubeRead, KubeWrite, LedgerMetrics, LogTarget, RestoreCheckMark, RestoreRecord, RestoreRecordName } from "./command";
 import { ExecTimeout, must, why, type Exec, type ExecOpts } from "./exec";
 import { findSecretPath } from "./guard";
 import { APP_NAME, fullMatch, hasControl } from "./names";
@@ -400,6 +400,24 @@ export function restoreCheckValue(m: RestoreCheckMark): string {
   return jsonStringify(v);
 }
 
+// 봇 삭제 원장 지표(restore.md 2.1 재개 확인, 봇 T20 2단계 계약). 포트·경로·지표 이름은 봇 계약이라 여기 고정한다.
+// 스크립트는 런북 블록과 같은 글자다(둘 중 하나만 고치면 CLI와 손 확인이 다른 것을 본다).
+export const LEDGER_FETCH = 'fetch("http://127.0.0.1:8080/metrics").then(async r => { if (!r.ok) process.exit(1); process.stdout.write(await r.text()) }, () => process.exit(1))';
+const LEDGER_STATE = /^homelab_bot_deletion_ledger_state\{state="([a-z_]{1,32})"\} 1$/;
+const LEDGER_PENDING = /^homelab_bot_memory_deletions_pending (\S+)$/;
+
+// 지표 본문에서 원장 상태(one-hot에서 값이 1인 줄)와 삭제 대기 수만 꺼낸다. 런북처럼 값은 정확히 "1"·정수만 받는다.
+// 오류 문구에는 개수만 넣는다(본문은 출력·기록에 옮기지 않는다, restore.md 2.1).
+export function parseLedgerMetrics(text: string): LedgerMetrics {
+  const lines = text.split("\n");
+  const states = lines.flatMap((l) => LEDGER_STATE.exec(l)?.[1] ?? []);
+  const pendings = lines.flatMap((l) => LEDGER_PENDING.exec(l)?.[1] ?? []);
+  if (states.length !== 1) throw new Error(`원장 상태 줄(값 1)이 ${states.length}개다`);
+  if (pendings.length !== 1) throw new Error(`삭제 대기 줄이 ${pendings.length}개다`);
+  if (!/^[0-9]{1,9}$/.test(pendings[0])) throw new Error("삭제 대기 값이 정수가 아니다");
+  return { state: states[0], pending: Number(pendings[0]) };
+}
+
 export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
   const pollMs = opts.pollMs ?? POLL_MS;
   const r = kubeRead(exec, opts);
@@ -581,6 +599,16 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       const back = r.get("cluster", "database", "pg");
       if (back?.metadata?.uid !== uid) throw new Error("restore-check 결과를 쓴 뒤 Cluster pg가 다른 객체로 바뀌었다");
       for (const k of keys) if (back?.metadata?.annotations?.[k] !== value) throw new Error(`restore-check 결과를 되읽었더니 ${k}가 쓴 값과 다르다`);
+    },
+    ledgerMetrics(ns, deployment) {
+      checkName("namespace", ns);
+      checkName("Deployment", deployment);
+      // --request-timeout은 -- 앞에 둔다(뒤에 두면 node의 인자가 된다). 컨테이너 app은 공유 차트의 앱 컨테이너 이름이다.
+      // 앱이 답하지 않으면 fetch가 끝나지 않으므로 exec 시간을 짧게 둔다.
+      const x = exec(["kubectl", "-n", ns, "exec", `deploy/${deployment}`, "-c", "app", REQUEST_TIMEOUT, "--", "node", "-e", LEDGER_FETCH], { timeoutMs: 60_000 });
+      if (x.errKind === "timeout") throw new ExecTimeout("원장 지표: 시간 초과");
+      if (x.code !== 0) throw new Error(`원장 지표: ${why(x)}`);
+      return parseLedgerMetrics(x.stdout);
     },
   };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { expectPlanReadOnly, ghGet, kubectlRule, runCli, type Rule } from "../harness";
 import cmd, { normalizeTo } from "../../src/commands/restore-db";
+import { ExecTimeout } from "../../src/core/exec";
 import { T1_INPUT, T1_NORMAL, World, dbWorld, runIn } from "../fixtures/restore-db-world/world";
 
 const APP = "probe";
@@ -437,5 +438,115 @@ describe("db restore: 흐름(가짜 세계)", () => {
     const again = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
     expect(again.status).toBe("waiting");
     expect(w.openPrs()).toHaveLength(1);
+  });
+});
+
+// 삭제 원장이 있는 앱(restore.md 2.1, T20 homelab-bot). 원장 PVC가 있으면 재개 단계가 Deployment Ready에 더해
+// 원장 ready·삭제 대기 0을 본다. 아니면 기록하지 않고 hold로 멈춘다(정리·--finish로 가지 않는다).
+describe("db restore: 삭제 원장 재개 확인", () => {
+  // 재개 PR까지 병합되고 앱이 다시 뜬 세계(재개 단계 바로 앞). ledger면 앱 ns에 원장 PVC(복원 라벨 없음)가 있다.
+  async function resumedWorld(ledger: boolean): Promise<World> {
+    const w = dbWorld(APP);
+    if (ledger) w.put("pvc", NS, "deletion-ledger", { metadata: {} });
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    suspendApplied(w);
+    expect((await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT })).status).toBe("waiting");
+    w.merge(w.openPrs()[0].number);
+    w.obj("deployment", NS, APP)!.spec.replicas = 1;
+    w.obj("deployment", NS, APP)!.status = { observedGeneration: 3, replicas: 1, updatedReplicas: 1, readyReplicas: 1 };
+    w.writes = [];
+    return w;
+  }
+  const rec = (w: World) => w.records.get(`${NS}/restore-pg`)!;
+  const ledgerReads = (w: World) => w.writes.filter((x) => x.startsWith("ledgerMetrics"));
+  // 정리 쓰기(lease Job 지우기는 단계마다 있어 뺀다)
+  const cleanupWrites = (w: World) => w.writes.filter((x) => x.startsWith("delete") && !x.endsWith("-lease"));
+
+  test("원장 PVC가 없는 앱은 Deployment Ready만 보고 예전처럼 기록한다(지표를 읽지 않는다)", async () => {
+    const w = await resumedWorld(false);
+    w.ledger = new Error("불리면 안 된다");
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("done");
+    expect(ledgerReads(w)).toEqual([]);
+    expect(rec(w).data["ok.resumed"]).toBe("1");
+    expect(rec(w).data["ok.cleanup"]).toBe("1");
+  });
+
+  test("원장 ready·삭제 대기 0이면 기록하고 정리까지 간다. 원장 PVC는 정리 대상이 아니다", async () => {
+    const w = await resumedWorld(true);
+    const run = rec(w).run;
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("done");
+    expect(ledgerReads(w)).toEqual([`ledgerMetrics ${NS}/${APP}`]);
+    expect(rec(w).data["ok.resumed"]).toBe("1");
+    expect(rec(w).data["ok.cleanup"]).toBe("1");
+    expect(w.runObjects(run)).toEqual([]);
+    expect(w.obj("pvc", NS, "deletion-ledger")).toBeDefined();
+    expect((await runIn(w, cmd, "apply", { app: APP }, { finish: true })).status).toBe("done");
+    expect(w.records.size).toBe(0);
+  });
+
+  test("삭제 대기가 남으면 hold로 두고 재개를 기록하지 않는다. 다시 치면 지표를 다시 보고 잇는다", async () => {
+    const w = await resumedWorld(true);
+    w.ledger = { state: "ready", pending: 3 };
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("waiting");
+    expect(r.next).toContain("원장 재적용 대기(원장 ready, 삭제 대기 3)");
+    expect(r.next).toContain("끝나면 다시");
+    expect(r.steps.find((s) => s.id === "running")!.result).toBe("waiting");
+    expect(rec(w).data["ok.resumed"]).toBeUndefined();
+
+    w.ledger = { state: "ready", pending: 0 };
+    const again = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(again.status).toBe("done");
+    expect(ledgerReads(w)).toHaveLength(2);
+    expect(rec(w).data["ok.resumed"]).toBe("1");
+    expect(rec(w).data["ok.cleanup"]).toBe("1");
+  });
+
+  test("failed·disabled·읽기 실패(exec 실패·시간 초과·꼴 다름)도 hold로 두고 재개를 기록하지 않는다", async () => {
+    const cases: [World["ledger"], string][] = [
+      [{ state: "failed", pending: 0 }, "원장 재적용 대기(원장 failed, 삭제 대기 0)"],
+      [{ state: "disabled", pending: 0 }, `원장 PVC deletion-ledger가 있는데 ${APPS} env에 MEMORY_LEDGER_DIR이 없다`],
+      [new Error("원장 지표: exit 1"), "원장 지표를 읽지 못했다(원장 지표: exit 1)"],
+      [new ExecTimeout("원장 지표: 시간 초과"), "원장 지표를 읽지 못했다(원장 지표: 시간 초과)"],
+      [new Error("원장 상태 줄(값 1)이 0개다"), "원장 지표를 읽지 못했다(원장 상태 줄(값 1)이 0개다)"],
+    ];
+    for (const [ledger, msg] of cases) {
+      const w = await resumedWorld(true);
+      w.ledger = ledger;
+      const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+      expect([r.status, r.next?.includes(msg)]).toEqual(["waiting", true]);
+      expect(r.steps.find((s) => s.id === "running")!.result).toBe("waiting");
+      expect(rec(w).data["ok.resumed"]).toBeUndefined();
+    }
+  });
+
+  test("원장 확인이 hold인 동안 정리(cleanup)와 --finish는 진행되지 않고, plan은 파드에 들어가지 않는다", async () => {
+    const w = await resumedWorld(true);
+    w.ledger = { state: "failed", pending: 2 };
+    const run = rec(w).run;
+    const objs = w.runObjects(run);
+    expect(objs.length).toBeGreaterThan(0);
+    for (let i = 0; i < 2; i++) {
+      const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+      expect(r.status).toBe("waiting");
+      expect(r.steps.find((s) => s.id === "cleanup")!.result).toBe("not-run");
+    }
+    expect(cleanupWrites(w)).toEqual([]);
+    expect(w.runObjects(run)).toEqual(objs);
+    expect(rec(w).data["ok.cleanup"]).toBeUndefined();
+
+    // 지표는 kubectl exec라 apply에서만 읽는다. plan은 할 일로 보이기만 하고 아무것도 부르지 않는다.
+    w.writes = [];
+    const p = await runIn(w, cmd, "plan", { app: APP }, { to: T1_INPUT });
+    expect(p.status).toBe("pending");
+    expect(p.steps.find((s) => s.id === "running")!.detail).toContain("원장 ready·삭제 대기 0 확인 뒤 기록");
+    expect(w.writes).toEqual([]);
+
+    const fin = await runIn(w, cmd, "apply", { app: APP }, { finish: true });
+    expect(fin.status).toBe("failed");
+    expect(w.records.size).toBe(1);
+    expect(w.runObjects(run)).toEqual(objs);
   });
 });

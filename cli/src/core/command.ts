@@ -52,6 +52,9 @@ export type RestoreRecord = { run: string; data: Record<string, string>; resourc
 // cluster: 시험을 시작할 때 읽은 Cluster pg의 uid(실행 기록 pguid). 결과는 그 Cluster에만 귀속한다(#1035 리뷰 P2).
 export type RestoreCheckMark = { run: string; result: "pass" | "fail"; at: string; target: string; server: string; dbs: number; cluster: string; reason?: "missing_db" | "no_db" | "aborted" };
 
+// 봇 삭제 원장 지표에서 꺼낸 두 값(restore.md 2.1). 지표 본문은 core 밖으로 나오지 않는다.
+export type LedgerMetrics = { state: string; pending: number };
+
 // 파드 템플릿이 참조하는 Secret들의 resourceVersion이 템플릿 주석과 같은지(값은 읽지 않는다).
 export type PodSecrets = { current: boolean; rolledOut: boolean; secrets: string[] };
 
@@ -100,6 +103,9 @@ export type KubeWrite = {
   deleteRestoreObjects(ns: string, runId: string): void;
   // restore-check 결과를 Cluster database/pg의 전용 annotation 두 키에만 쓰고 되읽어 확인한다(범용 patch가 아니다).
   restoreCheckMark(m: RestoreCheckMark): void;
+  // 봇 삭제 원장 상태와 삭제 대기 수(restore.md 2.1 재개 확인과 같은 exec). 바꾸는 것은 없지만 kubectl exec라
+  // 쓰기 문맥에만 둔다(plan은 파드에 들어가지 않는다, AC-P13). 읽지 못했거나 지표 꼴이 다르면 던진다.
+  ledgerMetrics(ns: string, deployment: string): LedgerMetrics;
 };
 
 export type InfisicalRead = {

@@ -31,6 +31,8 @@ export class World {
   aclSame = true;
   flags = "f|f|f|f|f";
   tmpDbs = new Set<string>();
+  // 봇 삭제 원장 지표(w.k8s.ledgerMetrics). Error면 읽기 실패(exec 실패·꼴 다름)로 던진다.
+  ledger: { state: string; pending: number } | Error = { state: "ready", pending: 0 };
   commits = new Map<string, { files: Map<string, string>; message: string }>();
   trees = new Map<string, Map<string, string>>();
   refs = new Map<string, string>();
@@ -219,6 +221,12 @@ export class World {
       },
       rolloutRestart(ns: string, d: string) {
         w.write(`rolloutRestart ${ns}/${d}`);
+      },
+      // 실제처럼 쓰기 문맥에만 있다(kubectl exec). 읽기 문맥 k8s에는 없어 read()에서 부르면 시험이 깨진다.
+      ledgerMetrics(ns: string, d: string) {
+        w.write(`ledgerMetrics ${ns}/${d}`);
+        if (w.ledger instanceof Error) throw w.ledger;
+        return { ...w.ledger };
       },
       // 값 검사·직렬화는 실제 core 함수다. 쓰기 실패 주입은 fail.set("restoreCheckMark <result>"). 쓰는 것은 그 annotation 키뿐이다.
       restoreCheckMark(m: RestoreCheckMark) {
