@@ -6,7 +6,7 @@
 {{- if .Values.purge }}
 {{- fail "volumes.deletionLedger는 purge: true와 함께 쓰지 않는다. 원장은 일반 폐기 대상이 아니다(설계 C.5.5 원장 폐기)" }}
 {{- end }}
-# 봇 기억 삭제 원장(T20, 설계 C.5.5·C.8). 게시 서버만 공유 차트 persistence로 이 PVC를 붙인다.
+# 봇 기억 삭제 원장(설계 C.5.5·C.8). 게시 서버만 공유 차트 persistence로 이 PVC를 붙인다.
 # volumeName으로 bot-slot의 정적 PV에 미리 묶는다(PV의 claimRef도 이 PVC를 가리킨다). 다른 PV·동적 생성에 묶이지 않는다.
 # 보호 주석은 purge 값과 상관없이 늘 붙인다(data.protect를 쓰지 않는다).
 apiVersion: v1

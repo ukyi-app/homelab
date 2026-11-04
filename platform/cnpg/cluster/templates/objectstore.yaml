@@ -19,7 +19,7 @@ spec:
     env:
       {{- include "cnpg.sidecarEnv" (dict "secret" $secret) | nindent 6 }}
     # sidecar는 Cluster가 주입하는 네이티브 사이드카라 Cluster에 resources 자리가 없다. 여기가 유일한 자리다.
-    # 옛 실측 peak 152.5Mi(매일 base backup 때, PGDATA 49MB)의 약 2배. DB가 커지면 다시 잰다.
+    # 실측 peak 152.5Mi(매일 base backup 때, PGDATA 49MB)의 약 2배. DB가 커지면 다시 잰다.
     resources:
       requests:
         cpu: 10m

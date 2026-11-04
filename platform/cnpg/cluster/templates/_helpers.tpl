@@ -3,7 +3,7 @@
 -2 ExternalSecret·NetworkPolicy → -1 ObjectStore → 0 Cluster → 1 ScheduledBackup.
 자격 Secret이 CR보다 늦으면 barman이 자격을 못 읽고, ObjectStore가 Cluster보다 늦으면 plugin이
 "barman object configuration not found"로 무한 requeue해 Cluster가 Healthy가 되지 않는다. 그러면 Argo CD가
-Cluster wave에서 기다려 ObjectStore를 영영 적용하지 않는다(옛 첫 bootstrap 교착 두 건, 설계 B.8 E6).
+Cluster wave에서 기다려 ObjectStore를 영영 적용하지 않는다(첫 bootstrap 교착 두 건 실측, 설계 B.8 E6).
 PVC는 operator가 만들므로 WaitForFirstConsumer PVC가 wave를 막는 함정(sandbox worker-pvc.yaml)은 없다.
 */}}
 
