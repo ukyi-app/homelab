@@ -1,4 +1,4 @@
-// #873 남은 리뷰 지적의 회귀 시험(T12-01b). 지적마다 고치기 전 동작이면 실패하는 꼴로 쓴다.
+// 입력·출력 경계와 어댑터의 회귀 시험. 시험마다 그 결함이 있으면 실패하는 꼴로 쓴다.
 import { describe, expect, test } from "bun:test";
 import { applyLine } from "../../src/core/engine";
 import { readHiddenLine } from "../../src/core/input";

@@ -31,7 +31,7 @@ describe("app remove", () => {
     const r = await runCli(["app", "remove", APP, "--apply", "--json"], world({ pr: prCreate(BRANCH, "app remove", gone, { readOnly: ro }) }));
     expect(r.code).toBe(3);
     const tree = r.calls.find((c) => c.argv.includes(`${R}/git/trees`))!;
-    // bot-slot은 읽기만 해서 tree에 없다(#890 1라운드 P2-4).
+    // bot-slot은 읽기만 해서 tree에 없다.
     expect(JSON.parse(tree.stdin!).tree.map((t: any) => [t.path, t.sha])).toEqual([[I, null], [V, null]]);
     const failed = await runCli(["app", "remove", APP, "--apply", "--json"], world({ pr: prCreate(BRANCH, "app remove", gone, { treeCode: 500, readOnly: ro }) }));
     expect(failed.code).toBe(1);

@@ -111,7 +111,7 @@ function goneRecord(w: World, at: string) {
 function purgeWorld(): World {
   const w = new World({ [DATA]: "chartVersion: 1.0.1\n# 사람이 쓴 주석\npostgres: { enabled: true }\nvalkey: { persistent: true }\n" });
   const protect = { "argocd.argoproj.io/sync-options": "Prune=false,Delete=false" };
-  // 실제 API처럼 없는 ns에는 기록을 만들지 못하게 한다(#889 r2 P2-4)
+  // 실제 API처럼 없는 ns에는 기록을 만들지 못하게 한다
   w.strictNamespaces = true;
   w.put("namespace", null, NS, { metadata: { name: NS } });
   w.put("namespace", null, "database", { metadata: { name: "database" } });
@@ -405,7 +405,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
   });
 
   test("r1 P1-2: 삭제 커밋 뒤에도 앱이 쓰던 동안의 백업은 인정하지 않는다(쓰기 종료는 워크로드가 사라진 것을 본 시각)", async () => {
-    // 리뷰 재현: 삭제 커밋 10/20 00:00, Argo CD가 늦어 앱이 03:00까지 썼고 02:00 백업이 성공했다. 기록은 아직 없다
+    // 삭제 커밋 10/20 00:00, Argo CD가 늦어 앱이 03:00까지 썼고 02:00 백업이 성공했다. 기록은 아직 없다
     setSystemTime(new Date("2026-10-20T03:30:00Z"));
     try {
       const w = purgeWorld();
@@ -476,7 +476,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
   });
 
   test("r2 P1-3: 종료 기록 뒤 앱 파드가 다시 보이면 기록을 지우고, 사라진 뒤 새로 잰 시각 뒤의 백업만 인정한다", async () => {
-    // 리뷰 재현: 기록 10/25 12:00, 백업 시작 10/25 18:30, 10/26 12:00에 앱 라벨의 실행 중 파드
+    // 기록 10/25 12:00, 백업 시작 10/25 18:30, 10/26 12:00에 앱 라벨의 실행 중 파드
     setSystemTime(new Date("2026-10-26T12:00:00Z"));
     try {
       const w = purgeWorld();
@@ -521,7 +521,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
     for (const [what, extra] of cases) {
       setSystemTime(new Date("2026-10-26T12:00:00Z"));
       try {
-        // 리뷰 재현: 기록 10/25 12:00, 그 뒤 성공 백업 없음(10/21 것뿐), 실행 중 앱 파드
+        // 기록 10/25 12:00, 그 뒤 성공 백업 없음(10/21 것뿐), 실행 중 앱 파드
         const w = purgeWorld();
         goneRecord(w, "2026-10-25T12:00:00Z");
         extra(w);
@@ -562,7 +562,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
   }
 
   test("r1 P1-1(#893): writes-stopped가 기록하는 사이·그 뒤 backup 재조회 때 앱 파드가 나타나면 기록을 지우고 멈춘다(PV·PR 2 없음)", async () => {
-    // 리뷰 재현: PR 1 반영 뒤, 기록 없음(앞 무효화 뒤), 성공 백업 없음
+    // PR 1 반영 뒤, 기록 없음(앞 무효화 뒤), 성공 백업 없음
     for (const when of ["기록하는 사이", "backup 재조회"] as const) {
       const w = await prepared();
       w.records.delete(`database/data-purge-${APP}`);
@@ -656,7 +656,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
   test("r1 P1-2(#893): Infisical·GitHub 조회가 실패해도 apply는 먼저 워크로드를 보고 기록을 지운다(plan은 쓰기 0)", async () => {
     setSystemTime(new Date("2026-10-26T12:00:00Z"));
     try {
-      // 리뷰 재현: 기록 10/25 12:00, 백업 없음, 앱 파드, Infisical 폴더 조회 오류(+ GitHub 이력 오류)
+      // 기록 10/25 12:00, 백업 없음, 앱 파드, Infisical 폴더 조회 오류(+ GitHub 이력 오류)
       const w = purgeWorld();
       goneRecord(w, "2026-10-25T12:00:00Z");
       w.put("pod", NS, "writer", { metadata: { name: "writer", labels: { "homelab.ukyi.app/app": APP } }, status: { phase: "Running" } });
@@ -701,7 +701,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
   });
 
   test("r2 P2-5: 종료 시각은 기록의 생성 시각(클러스터 시계)이라 이 기기 시계가 늦어도 그 전 백업을 인정하지 않는다", async () => {
-    // 리뷰 재현: 이 기기 12:00, 클러스터는 20분 앞(12:20). 백업 시작 12:10(클러스터 시계)은 확인보다 앞이다
+    // 이 기기 12:00, 클러스터는 20분 앞(12:20). 백업 시작 12:10(클러스터 시계)은 확인보다 앞이다
     setSystemTime(new Date("2026-10-26T12:00:00Z"));
     try {
       const w = purgeWorld();
@@ -719,7 +719,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
   });
 
   function pgOnlyWorld(): World {
-    // 앱 없이 PostgreSQL만 등록한 데이터(T12-05의 homelab-probe2). 앱 ns가 없다
+    // 앱 없이 PostgreSQL만 등록한 데이터(homelab-probe2). 앱 ns가 없다
     const w = new World({ [DATA]: "chartVersion: 1.0.1\npostgres: { enabled: true }\n" });
     w.strictNamespaces = true;
     w.put("namespace", null, "database", { metadata: { name: "database" } });
@@ -734,11 +734,11 @@ describe("data purge: 흐름(가짜 세계)", () => {
   }
 
   test("r3 P1-2: 앱 ns가 없는 PostgreSQL 전용도 폐기 확인 시각을 database ns에 기록하고, 그 뒤 완료한 Backup만 인정한다", async () => {
-    // 리뷰 재현: 등록 10/20, completed Backup 10/21 18:00, DB 생성 10/22 03:00(백업에 DB가 없다)
+    // 등록 10/20, completed Backup 10/21 18:00, DB 생성 10/22 03:00(백업에 DB가 없다)
     const w = pgOnlyWorld();
     const r = await runIn(w, cmd, "apply", { app: APP }, { confirm: APP });
     expect(r.status).toBe("failed");
-    // T12-05 F8: 앱 ns가 없으니 남는 것은 Infisical 폴더뿐이다
+    // 앱 ns가 없으니 남는 것은 Infisical 폴더뿐이다
     expect(r.notes).toContain("Infisical 폴더는 남는다(키만 지운다).");
     expect(r.notes.join(" ")).not.toContain("앱 ns");
     expect(w.records.get(`database/data-purge-${APP}`)!.created).toBe("2026-10-26T00:00:00Z");
@@ -748,7 +748,7 @@ describe("data purge: 흐름(가짜 세계)", () => {
     w.writes = [];
     expect((await runIn(w, cmd, "apply", { app: APP }, { confirm: APP })).status).toBe("failed");
     expect(w.writes).toEqual([]);
-    // T12-05: 기록 뒤 온디맨드 Backup CR 하나가 끝나면 PR 1을 연다
+    // 기록 뒤 온디맨드 Backup CR 하나가 끝나면 PR 1을 연다
     setSystemTime(new Date("2026-10-26T01:00:00Z"));
     try {
       w.put("backup", "database", "ondemand", { spec: { cluster: { name: "pg" } }, status: { phase: "completed", stoppedAt: "2026-10-26T00:10:00Z" } });

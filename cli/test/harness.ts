@@ -61,7 +61,7 @@ export function ghSend(method: string, path: string, status: number | Resp[], js
   return rule(ghArgv.send(method, path), Array.isArray(status) ? status : ghResponse(status, json), { captureStdin: true });
 }
 export function infisicalList(path: string, entries: Record<string, string> | Resp[]): Rule {
-  // 빈 목록은 0.44.2 실제 출력처럼 null이다(#880 2라운드).
+  // 빈 목록은 0.44.2 실제 출력처럼 null이다.
   const list = Array.isArray(entries) ? [] : Object.entries(entries).map(([secretKey, secretValue]) => ({ secretKey, secretValue }));
   const resp = Array.isArray(entries) ? entries : { stdout: list.length ? JSON.stringify(list) : "null" };
   return rule(infisicalArgv.list(FAKE_PROJECT, path), resp);
@@ -78,8 +78,8 @@ function shq(v: string): string {
 }
 
 // 스텁 폴더는 실행마다 mkdtemp로 만든 뿌리(homelab-cli-test-run-*) 아래에 두고, 이 실행이 만든 뿌리만 지운다.
-// 함정: 예전에는 PID 이름의 뿌리를 두고 죽은 PID의 것을 지웠는데, /tmp를 나눠 쓰는 다른 PID 네임스페이스의
-// 살아 있는 실행도 kill(pid, 0)이 ESRCH라 남의 스텁·원장·HOME을 지웠다(#880 3라운드, 간헐 실패).
+// 함정: PID 이름의 뿌리를 두고 죽은 PID의 것을 지우면, /tmp를 나눠 쓰는 다른 PID 네임스페이스의
+// 살아 있는 실행도 kill(pid, 0)이 ESRCH라 남의 스텁·원장·HOME을 지운다(간헐 실패).
 // 함정(bun 1.4.3 실측): bun test에서는 process.on("exit")·beforeExit가 돌지 않는다. 그래서 runCli는 끝나자마자
 // 자기 폴더를 지우고, 뿌리는 preload(setup.ts)의 afterAll이 지운다. --bail 실패 종료·신호에서는 afterAll도 돌지 않으므로
 // 그 경우는 실행 감싸개(cli/test/run.ts)가 전용 TMPDIR째 회수한다. 남의 것은 어느 쪽도 건드리지 않는다.

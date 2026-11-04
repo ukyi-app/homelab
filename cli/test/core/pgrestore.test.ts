@@ -1,5 +1,5 @@
-// DB 복원 흐름(core/pgrestore.ts, 03 2부). 순수 판정은 restore.md 2절의 awk·grep과 같은지, 흐름은 파괴 단계 앞의 확인이
-// 하나라도 어긋나면 DROP·복원 호출이 0건인지 본다. 파드 안 명령은 PATH 스텁이다(실제 동작은 T12-05·2a 로컬 시험).
+// DB 복원 흐름(core/pgrestore.ts). 순수 판정은 restore.md 2절의 awk·grep과 같은지, 흐름은 파괴 단계 앞의 확인이
+// 하나라도 어긋나면 DROP·복원 호출이 0건인지 본다. 파드 안 명령은 PATH 스텁이다(실제 동작은 운영 통합 검증·restore.md 2a 로컬 시험).
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -243,7 +243,7 @@ describe("#885 리뷰 1라운드", () => {
     };
     expect(run(PG_RESTORE_DRAINED)).toEqual(["list", "0 0"]);
     expect(run(PG_RESTORE_DRAINED, "1")).toEqual(["list", "0 3"]);
-    // 대조군: 소진하지 않으면 생산자가 141(SIGPIPE)이다(#885 리뷰 실측과 같은 꼴).
+    // 대조군: 소진하지 않으면 생산자가 141(SIGPIPE)이다(실측과 같은 꼴).
     expect(run('pg_restore "$@"')).toEqual(["list", "141 0"]);
   });
 });

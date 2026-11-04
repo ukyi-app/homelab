@@ -26,7 +26,7 @@ describe("cache add(캐시)", () => {
     expect(CACHED).toContain("uses: { postgres: true, valkey: true }");
   });
 
-  // T13 S3 #932: 표에 cache.enabled만 보이고 uses.valkey 변경이 빠졌다. 바뀌는 키만, 빠짐없이.
+  // 표에 cache.enabled만 보이고 uses.valkey 변경이 빠지면 안 된다. 바뀌는 키만, 빠짐없이.
   test("PR 줄 요약: 바뀌는 키를 모두, 그대로인 키는 빼고", () => {
     expect(cacheOnSummary(BASE, CACHED)).toBe("cache.enabled false → true, uses.valkey false → true, chart 1.1.0");
     const valkeyOnly = "chartVersion: 1.1.0\nkind: web\nuses: { valkey: true }\n";

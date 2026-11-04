@@ -88,7 +88,7 @@ describe("secret sync", () => {
     expect(again.writes.map((c) => c.argv[3])).toEqual(["patch"]);
   });
 
-  // T12-05 F3: app add PR(secrets 추가) 병합 직후 Argo CD가 아직 반영하지 않으면 ExternalSecret이 없다. 반영이 진행 중인
+  // app add PR(secrets 추가) 병합 직후 Argo CD가 아직 반영하지 않으면 ExternalSecret이 없다. 반영이 진행 중인
   // 모양은 실패가 아니라 대기다. ApplicationSet은 values를 helm.valuesObject로 넣는다(argo 확인 단계 주석).
   const withSecrets = { helm: { valuesObject: { kind: "web", secrets: ["API_TOKEN"] } } };
   const noSecrets = { helm: { valuesObject: { kind: "web" } } };
@@ -127,7 +127,7 @@ describe("secret sync", () => {
     });
   }
 
-  // #913 r1 P2-1: Argo CD가 끝났는데 ExternalSecret을 만들지 못했으면 기다려도 오지 않는다. 실패와 원인 확인 행동.
+  // Argo CD가 끝났는데 ExternalSecret을 만들지 못했으면 기다려도 오지 않는다. 실패와 원인 확인 행동.
   const stuckShapes: [string, Resp, string][] = [
     ["재시도 소진(Failed, 10회, 같은 source)", application({ sync: "OutOfSync", op: { phase: "Failed", retryCount: 10, syncResult: { source: withSecrets, revision: REV } } }), "ExternalSecret 없음, 동기화 Failed(재시도 10회 뒤 멈춤)"],
     ["동기화 오류(Error)", application({ sync: "OutOfSync", op: { phase: "Error", retryCount: 0, syncResult: { source: withSecrets, revision: REV } } }), "ExternalSecret 없음, 동기화 Error(재시도 0회 뒤 멈춤)"],
@@ -175,8 +175,8 @@ describe("secret sync", () => {
     }
   }
 
-  // #913 r2 P2-1: 실패한 과거 동기화가 지금 시도를 막는지는 Argo CD v3.5.5 alreadyAttemptedSync처럼 revision과 source 전체로
-  // 가른다. secrets 키가 같아도 차트 버전만 바뀌었으면 새 시도다(회복 경로). 키 비교로 되돌리면 이 시험이 실패한다.
+  // 실패한 과거 동기화가 지금 시도를 막는지는 Argo CD v3.5.5 alreadyAttemptedSync처럼 revision과 source 전체로
+  // 가른다. secrets 키가 같아도 차트 버전만 바뀌었으면 새 시도다(회복 경로). 키 비교로 가르면 이 시험이 실패한다.
   describe("#913 r2 P2-1: 차트 버전만 바꾼 회복 경로", () => {
     const v110 = { repoURL: "https://github.com/ukyi-app/homelab", path: "platform/charts/app", targetRevision: "app-chart-v1.1.0", helm: { valuesObject: { kind: "web", secrets: ["API_TOKEN"] } } };
     const v100 = { ...v110, targetRevision: "app-chart-v1.0.0" };
@@ -213,8 +213,8 @@ describe("secret sync", () => {
     });
   });
 
-  // #913 r2 P2-2: 자식 Application이 없거나 values 전달 전이면 부모 ApplicationSet apps의 생성 오류를 본다.
-  // 오류를 안 보면(되돌리면) 몇 번을 다시 쳐도 대기(3)로 끝난다.
+  // 자식 Application이 없거나 values 전달 전이면 부모 ApplicationSet apps의 생성 오류를 본다.
+  // 오류를 안 보면 몇 번을 다시 쳐도 대기(3)로 끝난다.
   describe("#913 r2 P2-2: ApplicationSet 생성 오류", () => {
     const appsetError = (status: string): Resp => ({ stdout: JSON.stringify({ status: { conditions: [{ type: "ErrorOccurred", status, reason: "ApplicationGenerationFromParamsError", message: "x" }, { type: "ParametersGenerated", status: status === "True" ? "False" : "True" }] } }) });
     const noApp = [notFound(`applications.argoproj.io "${APP}"`)];
@@ -236,10 +236,10 @@ describe("secret sync", () => {
     });
   });
 
-  // #913 r2 기존: 첫 배포는 ExternalSecret(wave 0)이 먼저 생기고 Deployment(wave 2)는 마이그레이션 Job(wave 1) 뒤다.
-  // 그 사이는 반영 중이라 대기다. Deployment 부재로 전체 읽기가 실패하던(failed/1) 것을 되돌리면 이 시험이 실패한다.
-  // #925 r1 P2-1: InvalidSpecError·UnknownError는 비교 전 검증(refreshAppConditions)에서 나와 comparedTo를 바꾸지 않는다.
-  // comparedTo 불일치를 먼저 보면(되돌리면) 이 오류가 있어도 "새 source를 비교하기를 기다림"만 반복한다.
+  // 첫 배포는 ExternalSecret(wave 0)이 먼저 생기고 Deployment(wave 2)는 마이그레이션 Job(wave 1) 뒤다.
+  // 그 사이는 반영 중이라 대기다. Deployment 부재를 전체 읽기 실패(failed/1)로 보면 이 시험이 실패한다.
+  // InvalidSpecError·UnknownError는 비교 전 검증(refreshAppConditions)에서 나와 comparedTo를 바꾸지 않는다.
+  // comparedTo 불일치를 먼저 보면 이 오류가 있어도 "새 source를 비교하기를 기다림"만 반복한다.
   describe("#925 r1 P2-1: 비교 전 설정 검증 오류", () => {
     const shapes: [string, object | undefined][] = [["comparedTo 없음(첫 Application)", undefined], ["comparedTo가 옛 source", noSecrets]];
     for (const type of ["InvalidSpecError", "UnknownError"]) {
@@ -252,8 +252,8 @@ describe("secret sync", () => {
     }
   });
 
-  // #925 r1 P2-2: 첫 배포에서 Deployment가 두 조회 사이에 생긴다(NotFound → NotFound → 있음). 없음을 확정하기 전에 다시 보지 않으면
-  // (되돌리면) 정상 첫 배포가 실패(1)로 끝난다. 응답은 Deployment 조회 순서대로다(UNTIL_DONE 주석).
+  // 첫 배포에서 Deployment가 두 조회 사이에 생긴다(NotFound → NotFound → 있음). 없음을 확정하기 전에 다시 보지 않으면
+  // 정상 첫 배포가 실패(1)로 끝난다. 응답은 Deployment 조회 순서대로다(UNTIL_DONE 주석).
   describe("#925 r1 P2-2: Deployment가 조회 사이에 생김", () => {
     const GONE = notFound(`deployments.apps "${APP}"`);
     const rules = (app: Resp, deployResp: Resp[]) => world({ app: [app], secret: [secret(FAKE_SECRETS[0])], deploy: deployResp });
@@ -331,7 +331,7 @@ describe("secret sync", () => {
   });
 });
 
-// #913 r1 P2-2: 실행 뒤 재조회는 대기로 넘어가지 않는다. 상태가 있는 가짜 세계에 실제 명령·엔진을 돌리고 forceSync만 바꿔 끼운다.
+// 실행 뒤 재조회는 대기로 넘어가지 않는다. 상태가 있는 가짜 세계에 실제 명령·엔진을 돌리고 forceSync만 바꿔 끼운다.
 describe("secret sync: 실행 뒤 재조회(가짜 세계)", () => {
   const ES_ID = `${NS}/${APP}-app`;
   function syncWorld(onForceSync: (w: World) => void): World {

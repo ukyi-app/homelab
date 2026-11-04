@@ -53,7 +53,7 @@ describe("rollback", () => {
     expect(open.writes).toEqual([]);
   });
 
-  // T12-05 F4: 기록 = [롤백 커밋(C0), 배포 App 커밋(C1, NOW = APP_HEAD), 그 전 배포(C2)]. 최신 배포는 C1의 이미지다.
+  // 기록 =[롤백 커밋(C0), 배포 App 커밋(C1, NOW = APP_HEAD), 그 전 배포(C2)]. 최신 배포는 C1의 이미지다.
   function releaseWorld(current: string, commits: Rule): Rule[] {
     return world(current, [noPr(BRANCH)]).map((x) => (String(x.argv.at(-1)).includes("/commits?path=") ? commits : x));
   }
@@ -109,7 +109,7 @@ describe("rollback", () => {
     expect(r.json.steps.find((s: any) => s.id === "pr").detail).toContain(`${APP_HEAD.slice(0, 7)} hold true → ${APP_HEAD.slice(0, 7)} hold false`);
   });
 
-  // #892 1라운드 P2: 전체 읽기·직전 읽기 뒤 apply의 main 스냅샷이 이미 원하는 내용(hold false)이 된 경합.
+  // 전체 읽기·직전 읽기 뒤 apply의 main 스냅샷이 이미 원하는 내용(hold false)이 된 경합.
   // main 조회 순서: 명령 시작, 전체 읽기, 직전 읽기(MAIN) → apply, 재조회(MAIN2).
   function raceWorld(openPrAtStart: boolean): Rule[] {
     const MAIN2 = "6".repeat(40);

@@ -1,4 +1,4 @@
-// kubectl 하위 명령 앞에는 전역 플래그만(T12-05 운영: `kubectl -A get pv`가 "flags cannot be placed before plugin name: -A"로 실패).
+// kubectl 하위 명령 앞에는 전역 플래그만(`kubectl -A get pv`는 "flags cannot be placed before plugin name: -A"로 실패한다).
 // 스텁이 실제 kubectl처럼 거부하므로 모든 시험의 kubectl 호출이 이 규칙을 지킨다. 여기서는 판정과 스텁 거부, list의 순서를 본다.
 import { describe, expect, test } from "bun:test";
 import { KINDS } from "../../src/core/kubectl";

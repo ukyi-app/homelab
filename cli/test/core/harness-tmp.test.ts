@@ -1,4 +1,4 @@
-// 시험 장치의 임시 뿌리 정리(#880 3라운드 P2, #887 리뷰 P2 둘). 하위 bun test를 전용 TMPDIR로 돌려, 다른 실행의 폴더는
+// 시험 장치의 임시 뿌리 정리. 하위 bun test를 전용 TMPDIR로 돌려, 다른 실행의 폴더는
 // 그대로 두고 자기 것(장치 뿌리, core tempDir 폴더, 감싸개의 TMPDIR)만 지우는지 본다. 다른 PID 네임스페이스의 살아 있는
 // 실행은 이쪽에서 죽은 PID로 보이므로, 이미 끝난 프로세스의 PID 이름으로 폴더를 심어 그 경우를 흉내 낸다.
 import { afterAll, describe, expect, test } from "bun:test";
@@ -55,7 +55,7 @@ async function childRun(name: string, o: Opts) {
   const kase = join(base, "case");
   mkdirSync(tmp, { recursive: true });
   mkdirSync(kase);
-  // 다른 실행의 폴더 셋: 예전 PID 이름(죽은 PID로 보임), 지금 장치 뿌리 이름, 감싸개 TMPDIR 이름(모두 살아 있는 다른 실행).
+  // 다른 실행의 폴더 셋: PID 이름(죽은 PID로 보임), 장치 뿌리 이름, 감싸개 TMPDIR 이름(모두 살아 있는 다른 실행).
   const others = [`homelab-cli-test-${await deadPid()}`, "homelab-cli-test-run-other", "homelab-cli-test-tmp-other"];
   for (const x of others) {
     mkdirSync(join(tmp, x, "s-x", "home"), { recursive: true });

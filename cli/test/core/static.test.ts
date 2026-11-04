@@ -1,7 +1,7 @@
-// 소스 규칙 정적 검사(cli/README.md "명령 더하기"). 3라운드 구조(사용자 결정 2026-10-23)의 근거는 두 가지다:
+// 소스 규칙 정적 검사(cli/README.md "명령 더하기"). 이 구조(사용자 결정)의 근거는 두 가지다:
 // 명령은 core의 타입 있는 어댑터만 부르고(import 허용 목록 + 전역 금지), core 안에서도 exec·문맥 조립·쓰기 문맥 내부·
-// 시크릿 원문 해석은 정해진 파일만 쓴다. import는 문법 단위로 읽는다(Bun.Transpiler.scanImports, #873 3라운드 P2:
-// 공백 없는 import와 .js 도우미가 정규식 검사를 빠져나갔다).
+// 시크릿 원문 해석은 정해진 파일만 쓴다. import는 문법 단위로 읽는다(Bun.Transpiler.scanImports:
+// 공백 없는 import와 .js 도우미는 정규식 검사를 빠져나간다).
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -41,7 +41,7 @@ function offenders(re: RegExp, allowed: string[]): string[] {
 const transpiler = new Bun.Transpiler({ loader: "ts" });
 
 // 주석을 지우고 타입을 벗긴 코드. import /* 주석 */ (변수) 같은 꼴은 scanImports가 경로를 내지 않고 키워드 정규식도
-// 주석 때문에 놓친다(codex 확인 라운드 P2). 변환 결과에는 주석이 없어 `import(`로 드러난다.
+// 주석 때문에 놓친다. 변환 결과에는 주석이 없어 `import(`로 드러난다.
 export function stripped(text: string): string {
   return transpiler.transformSync(text);
 }
@@ -57,7 +57,7 @@ export function importsOf(text: string): string[] {
 }
 
 // node:fs를 import해도 되는 파일과 그 이름. 파일을 바꾸는 곳은 둘뿐이다: temp.ts(임시 폴더)와
-// infisical-backup.ts(Infisical 로컬 백업 폴더 잠금·비우기, #873 P1). 나머지는 읽기만.
+// infisical-backup.ts(Infisical 로컬 백업 폴더 잠금·비우기). 나머지는 읽기만.
 const FS_WRITERS = new Set(["core/temp.ts", "core/infisical-backup.ts"]);
 const FS_IMPORTERS: Record<string, Set<string> | "any"> = {
   "core/temp.ts": "any",
@@ -99,7 +99,7 @@ const COMMAND_IMPORTS = new Set(["../core/command", "../core/names", "../core/re
 // 명령 파일에서 쓰면 안 되는 전역(외부 명령·네트워크·파일·환경변수·출력의 우회로).
 const COMMAND_GLOBALS = /\b(Bun|process|fetch|require|globalThis|eval|Deno|XMLHttpRequest|WebSocket|navigator|console|Function)\b|\bimport\s*\(/;
 // 내장 전역을 바꾸는 꼴: 재할당·복합 대입·delete, 프로토타입 접근, defineProperty류, Object.assign(내장, …), global·self 경유.
-// 실수로 core의 판정을 바꾸지 않게 하는 장치다. 일부러 우회하는 코드까지 막지는 않는다(설계 C.7 위협 모델, T12-01b).
+// 실수로 core의 판정을 바꾸지 않게 하는 장치다. 일부러 우회하는 코드까지 막지는 않는다(설계 C.7 위협 모델).
 // core는 시작할 때 잡아 둔 함수(core/intrinsics.ts)를 쓴다.
 const BUILTINS = "JSON|Object|Array|String|Number|Boolean|Symbol|BigInt|Math|Date|RegExp|Promise|Reflect|Proxy|Map|Set|WeakMap|WeakSet|Error|TypeError|TextEncoder|TextDecoder|Buffer|crypto|Intl|URL|Atomics|structuredClone|setTimeout|setInterval|queueMicrotask";
 const GLOBAL_WRITE = new RegExp(
@@ -315,7 +315,7 @@ describe("명령 파일", () => {
     expect(missingPlanTests(await commandFiles(), join(TEST, "commands"))).toEqual([]);
   });
 
-  // 시험 폴더는 fixture로 따로 만든다. 함정: 실제 commands 폴더로 보면 db-add 시험이 생기는 순간(#884) 이 자기 확인이 깨진다.
+  // 시험 폴더는 fixture로 따로 만든다. 함정: 실제 commands 폴더로 보면 db-add 시험이 이미 있어 이 자기 확인이 깨진다.
   test("검사가 두 단어 명령의 구현을 놓치지 않는다(자리표시를 지운 db-add로 확인)", async () => {
     const entries = await commandFiles();
     const dbAdd = entries.find((e) => e.cmd.path.join(" ") === "db add");

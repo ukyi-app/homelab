@@ -61,7 +61,7 @@ describe("모든 명령: 사용법 오류는 외부 호출 없이 64", () => {
       const h = await runCli([...base, "--help"], []);
       expect(h.code).toBe(0);
       expect(h.stdout).toStartWith(`homelab ${c.path.join(" ")}`);
-      // 필수 인자를 몰라도 도움말은 0(Connector 2라운드).
+      // 필수 인자를 몰라도 도움말은 0.
       expect((await runCli([...c.path, "--help"], [])).code).toBe(0);
     });
   }
