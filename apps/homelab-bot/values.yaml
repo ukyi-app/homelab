@@ -49,3 +49,7 @@ env:
   # 원장 env가 없으면 브리핑도 켤 수 없다(기억 칸이 원장에 기댄다).
   BRIEFING_TIME: "08:50"
   BRIEFING_TIMEZONE: "Asia/Seoul"
+  # T17 PR 자동 리뷰 스위치(사용자 승인 2026-11-04). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
+  # 켜도 Infisical RUNTIME_POLICIES의 review 절(시험 저장소 homelab-smoke 하나)과 작업자 리뷰 레인이 있어야 열린다.
+  # 끄려면 이 줄을 지운다. 대기 작업과 미게시 결과는 지우지 않고 다시 켜질 때까지 기다린다.
+  REVIEW_ENABLED: "true"
