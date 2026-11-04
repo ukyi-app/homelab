@@ -1,6 +1,6 @@
 # Grafana. 대시보드는 Git provisioning이고 UI 저장은 남지 않는다. 플러그인은 VictoriaLogs 데이터소스 하나만
 # init 컨테이너가 버전 고정으로 넣는다(설계 C.3.7). Grafana 자체 내려받기(preinstall)는 끈 채로 둔다.
-# 사람은 tailnet Ingress(../ingress)로 들어온다. 관리자 자격 ExternalSecret grafana-admin도 ../ingress 차트에 있다(T23).
+# 사람은 tailnet Ingress(../ingress)로 들어온다. 관리자 자격 ExternalSecret grafana-admin도 ../ingress 차트에 있다.
 #
 # 사용자·서비스 계정(봇 Viewer SA, 설계 C.8)이 sqlite DB에 남는다. 대시보드는 Git이 원본이다.
 # 플러그인도 여기 둔다. 풀린 크기 214MB(v0.33.1, 모든 OS용 백엔드 포함, 서명이 파일 전부를 덮어 지울 수 없다).
@@ -86,7 +86,7 @@ spec:
           env:
             - name: PLUGIN_ID
               value: victoriametrics-logs-datasource
-            # v0.33.1(2026-10-16, 최신 안정판). sha256은 GitHub 릴리스 asset digest이고 받은 파일로 다시 확인했다(2026-10-23).
+            # v0.33.1. sha256은 GitHub 릴리스 asset digest이고 받은 파일로 다시 확인했다.
             # 릴리스의 checksums 파일은 sha1이라 쓰지 않는다. 버전과 sha256은 함께 바꾼다.
             - name: PLUGIN_VERSION
               value: "0.33.1"
@@ -108,7 +108,7 @@ spec:
               mountPath: /var/lib/grafana
       containers:
         - name: grafana
-          # 13.2.4, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
+          # 13.2.4, Docker Hub 멀티 아키텍처 index.
           image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
           env:
             # 관리자 자격은 DB를 처음 만들 때만 적용된다. 그 뒤 Infisical 값을 바꿔도 비밀번호는 그대로다.
@@ -121,7 +121,7 @@ spec:
               value: "false"
             - name: GF_AUTH_ANONYMOUS_ENABLED
               value: "false"
-            # 12부터 기본 플러그인을 시작 때 내려받는다. 다운로드가 디스크를 채우던 부팅·축출 루프(설계 B.8 E4)를
+            # 12부터 기본 플러그인을 시작 때 내려받는다. 다운로드가 디스크를 채우는 부팅·축출 루프(설계 B.8 E4)를
             # 막는다. 필요한 플러그인은 위 init이 버전 고정으로 넣는다.
             - name: GF_PLUGINS_PREINSTALL_DISABLED
               value: "true"
@@ -149,7 +149,7 @@ spec:
               cpu: 50m
               memory: 128Mi
             # 클러스터 3일 최대 263Mi(플러그인 전). 로그 플러그인 백엔드 프로세스가 약 30Mi를 더하고, 상한 근처 로그 질의는
-            # 2개 동시 406Mi·4개 동시 490Mi(로컬 실측)라 384Mi에서 올린다. 그 이상 동시 질의는 OOM 재시작이 남는 위험이다.
+            # 2개 동시 406Mi·4개 동시 490Mi(로컬 실측)라 384Mi로는 모자란다. 그 이상 동시 질의는 OOM 재시작이 남는 위험이다.
             limits:
               memory: 512Mi
           readinessProbe:

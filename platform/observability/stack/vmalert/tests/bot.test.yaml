@@ -74,7 +74,7 @@ tests:
         alertname: HomelabBotOutboxUnknown
         exp_alerts: []
 
-  # T20 삭제 원장(rules/bot.yaml deletion-ledger 그룹). 라벨은 kube-state-metrics(honor_labels)·node-exporter(instance = 노드 이름)·
+  # 삭제 원장(rules/bot.yaml deletion-ledger 그룹). 라벨은 kube-state-metrics(honor_labels)·node-exporter(instance = 노드 이름)·
   # bot-slot job이 붙이는 모양이다. 원장 PV는 운영에만 있다(VM은 values-vm.yaml deletionLedger: {}).
   - name: HomelabBotLedgerDiskNotMounted는 원장 PV가 있는데 /mnt/bulk가 없으면 5분 뒤 발화한다
     interval: 1m

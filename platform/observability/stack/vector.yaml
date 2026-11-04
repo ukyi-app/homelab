@@ -54,9 +54,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: vector
-          # 0.60.0, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22. kubernetes_logs의 glibc 의존이 없는 libc판.
+          # 0.60.0, Docker Hub 멀티 아키텍처 index. kubernetes_logs의 glibc 의존이 없는 libc판.
           image: timberio/vector:0.60.0-distroless-libc@sha256:a9ed9a4710bdc2efa66e94c1e8edc7b439709e6e50079f1e1b2b1bf479d387da
-          # tokio 워커는 기본으로 코어 수만큼 뜬다. 위생상 묶는다(옛 OOM의 원인은 아니었다).
+          # tokio 워커는 기본으로 코어 수만큼 뜬다. 위생상 묶는다(OOM의 원인은 아니다).
           args: ["--config", "/etc/vector/vector.yaml", "--threads", "4"]
           env:
             - name: VECTOR_SELF_NODE_NAME
@@ -70,7 +70,7 @@ spec:
             requests:
               cpu: 50m
               memory: 160Mi
-            # 옛 실측: 320Mi에서 2시간에 22회 OOMKilled, 512Mi로 백로그 버스트를 견딘 peak 418Mi.
+            # 실측: 320Mi에서 2시간에 22회 OOMKilled, 512Mi로 백로그 버스트를 견딘 peak 418Mi.
             # VictoriaLogs가 멈췄다 돌아오면 쌓인 로그를 한꺼번에 보낸다. limit을 깎기 전에 버스트를 줄인다.
             limits:
               memory: 512Mi
@@ -94,7 +94,7 @@ spec:
           configMap:
             name: vector-config
         # 읽기 위치(checkpoint)를 파드 재생성에도 남긴다. emptyDir이면 재생성마다 /var/log를 처음부터 다시 읽어
-        # 백로그 버스트로 OOM이 났다(옛 근본 원인 2026-06-23).
+        # 백로그 버스트로 OOM이 난다(실측).
         - name: data
           hostPath:
             path: /var/lib/vector

@@ -1,7 +1,7 @@
 # Alertmanager. 설정 본문은 alertmanager/alertmanager.yml이고 configMapGenerator가 해시 이름으로 굽는다.
 # 설정을 고치면 볼륨이 가리키는 ConfigMap 이름이 바뀌어 sync만으로 롤아웃된다.
 #
-# 자격(receiver별 ExternalSecret)은 같은 Application의 ../ingress 차트에 있다(복구 스위치를 Helm 값으로 받으려고, T23).
+# 자격(receiver별 ExternalSecret)은 같은 Application의 ../ingress 차트에 있다(복구 스위치를 Helm 값으로 받으려고).
 # 볼륨이 optional이라 Secret이 없어도 파드는 뜨고 그 receiver만 실패한다.
 apiVersion: apps/v1
 kind: Deployment
@@ -33,7 +33,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: alertmanager
-          # v0.34.1(티켓 고정), Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
+          # v0.34.1, Docker Hub 멀티 아키텍처 index.
           image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
           args:
             - --config.file=/etc/alertmanager/config/alertmanager.yml

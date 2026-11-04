@@ -86,7 +86,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: vmsingle
-          # v1.154.1, Docker Hub 멀티 아키텍처 index 확인: 2026-10-22.
+          # v1.154.1, Docker Hub 멀티 아키텍처 index.
           image: victoriametrics/victoria-metrics:v1.154.1@sha256:c7884f32920dd45a9d86542a717227e63af03e060e53bbf8031e6e6fd0e1e05d
           args:
             - -storageDataPath=/storage
@@ -112,7 +112,7 @@ spec:
             requests:
               cpu: 100m
               memory: 512Mi
-            # 옛 실측 RSS peak 694.9Mi(수집 대상이 지금보다 많았다)의 약 1.5배.
+            # 수집 대상이 더 많은 구성에서 잰 RSS peak 694.9Mi의 약 1.5배.
             limits:
               memory: 1Gi
           readinessProbe:
