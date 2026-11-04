@@ -262,7 +262,7 @@ STUB
   chmod +x "$TMP"/stub/* "$TMP/vh.sh"
 }
 
-# 커널 표를 읽지 못하거나 표가 없으면 verify가 0으로 끝나면 안 된다(#919 리뷰 P2).
+# 커널 표를 읽지 못하거나 표가 없으면 verify가 0으로 끝나면 안 된다.
 # 실제 커널 표에 대한 양성·음성은 --netns가 본다.
 verify_tests() {
   local out rc c want_rc want_text desc
@@ -601,7 +601,7 @@ nft delete rule inet homelab_egress pod_to_node handle "$(handle pod_to_node " d
 vexpect 1 "pod_to_node의 drop을 지움" /host "pod_to_node: 규칙 수 3, 렌더 4"; nft -f "$R"
 nft insert rule inet homelab_egress pod_to_node tcp dport 22 accept
 vexpect 1 "pod_to_node 앞에 22 허용을 끼움" /host "pod_to_node: 규칙 수 5"; nft -f "$R"
-# 규칙 수·끝 drop·해시가 그대로인 변경(#919 리뷰). 먼저 실제로 열리는지 보여 판정이 잡아야 하는 상태임을 확인한다.
+# 규칙 수·끝 drop·해시가 그대로인 변경. 먼저 실제로 열리는지 보여 판정이 잡아야 하는 상태임을 확인한다.
 nft add table inet homelab_egress "{ flags dormant; }"
 expect pass "dormant: 표가 꺼져 공개 22가 열림" pod tcp 203.0.113.10 22
 vexpect 1 "표를 dormant로 끔(규칙은 그대로)" /host "표 flags가 [\"dormant\"]다"

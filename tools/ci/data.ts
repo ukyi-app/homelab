@@ -1,4 +1,4 @@
-// 데이터 서비스(T11) 검사. 렌더 결과의 ExternalSecret 경로와, 공유 차트에 묶은 외부 차트(tgz)의 고정값을 본다.
+// 데이터 서비스 검사. 렌더 결과의 ExternalSecret 경로와, 공유 차트에 묶은 외부 차트(tgz)의 고정값을 본다.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -91,7 +91,7 @@ export function checkValkeyWiring(): Violation[] {
 }
 
 // PUBLIC CONNECT hook(pg-acl, 데이터 차트 templates/postgres.yaml)의 순서(설계 C.5.3). Database가 적용된 뒤 이 hook보다 먼저
-// Healthy를 기다리는 리소스가 있으면, 그것이 늦는 동안(Pending PVC 등) 새 DB가 PUBLIC CONNECT를 가진 채 남는다(PR #968 리뷰).
+// Healthy를 기다리는 리소스가 있으면, 그것이 늦는 동안(Pending PVC 등) 새 DB가 PUBLIC CONNECT를 가진 채 남는다.
 // 그래서 hook은 Sync 단계이고(PostSync는 모든 Sync 리소스가 Healthy여야 돈다) Database 뒤 wave이며, Database wave 이상
 // hook wave 미만에는 Database 말고 Sync 단계 리소스가 없어야 한다. wave 해석은 Argo CD와 같다(정수가 아니면 0).
 // data:<앱> 렌더는 chartVersion 태그(바꿀 수 없다, 1.0.3 이하는 PostSync)라 보지 않는다. 차트는 시험 values 렌더로 본다.

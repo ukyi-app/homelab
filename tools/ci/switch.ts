@@ -1,10 +1,10 @@
-// 복구 스위치 cluster.restore.externalSecrets 검사(T23, 설계 C.6.4 "클러스터 유실 + Infisical 장애").
+// 복구 스위치 cluster.restore.externalSecrets 검사(설계 C.6.4 "클러스터 유실 + Infisical 장애").
 // 같은 저장소를 스위치를 켠 값과 끈 값으로 한 번씩 더 렌더해(render.ts RenderOptions) 다음을 본다.
 // 1. 끄면 ExternalSecret·ClusterSecretStore가 0개(root 아래 전부, 등록 앱·데이터, 로컬 차트 시험 values).
 // 2. 켬과 끔의 차이는 그 둘과 허용한 Application 하나(Store), 스위치 값 자리뿐이다. Deployment 같은 것이 함께
 //    빠지면 복구 때 그 구성 요소가 뜨지 않는다.
 // 3. 값 파일에 스위치가 없는 클러스터는 기본 렌더가 켠 렌더와 같고, 어느 Application에도 스위치 값이 들어가지 않는다.
-//    운영 Application spec이 스위치 전과 같다는 장치를 지킨다.
+//    운영 Application spec이 스위치로 달라지지 않는다는 장치를 지킨다.
 // 4. 끈 렌더도 정책을 통과한다(복구 PR이 가장 급할 때 막히지 않게). kubeconform은 리소스를 빼기만 하므로 생략한다.
 // 5. ApplicationSet apps·data의 templatePatch를 실제로 실행해 위 렌더의 재현과 같은지, 끄면 공유 차트 ES가 0인지 본다
 //    (tools/ci/appset-patch.ts). 위 1.~3.의 등록 앱·데이터 렌더는 render.ts의 재현이라 그 단계를 대신 보지 못한다.
@@ -25,7 +25,7 @@ const ES_PATCH = "externalSecrets";
 
 const isSecret = (d: Doc) => SECRET_KINDS.has(d.obj?.kind) && String(d.obj?.apiVersion ?? "").startsWith("external-secrets.io/");
 
-// root 아래 렌더의 출처는 "<Application>[<클러스터>]:<path>"다. source가 바뀌어도(관측 ES를 Helm source로 옮김) 같은
+// root 아래 렌더의 출처는 "<Application>[<클러스터>]:<path>"다. source가 달라도(관측 Application은 source가 둘이다) 같은
 // Application이면 같은 묶음으로 본다. 그 밖(root 파일, chart:, app:, data:)은 출처 그대로다.
 function group(origin: string): { key: string; app?: string; cluster?: string } {
   const m = /^([^:[]+)\[([a-z0-9-]+)\]:/.exec(origin);

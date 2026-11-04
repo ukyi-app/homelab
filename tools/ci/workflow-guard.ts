@@ -40,7 +40,7 @@ const ALLOWED_OWNERS = new Set(["actions", "github", "docker"]);
 const ALLOWED_ACTIONS = new Set(["Infisical/secrets-action"]);
 // runs-on: 아래 호스트 runner 레이블 리터럴 하나만. group·표현식·배열은 self-hosted로 라우팅될 수 있어 받지 않는다.
 // GitHub 문서의 표준 호스트 runner 레이블(github/docs data/reusables/actions/supported-github-runners.md,
-// 2026-10-16 커밋 eb5a6158a3fb). 오타·사설 레이블은 대기하거나 같은 레이블의 self-hosted runner로 갈 수 있다.
+// 커밋 eb5a6158a3fb). 오타·사설 레이블은 대기하거나 같은 레이블의 self-hosted runner로 갈 수 있다.
 // 새 이미지가 나오면 이 목록에 더한다.
 const HOSTED_RUNNERS = new Set([
   "ubuntu-latest", "ubuntu-26.04", "ubuntu-24.04", "ubuntu-22.04",

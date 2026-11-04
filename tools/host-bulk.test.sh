@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# host/install.sh --bulk-ssd와 verify.sh check_bulk_ssd의 시험(T20 삭제 원장 SSD). ci가 부른다.
+# host/install.sh --bulk-ssd와 verify.sh check_bulk_ssd의 시험(삭제 원장 SSD). ci가 부른다.
 # root·실제 디스크·마운트 없이 돈다. 가짜 blkid·findmnt·mount·lsblk·systemctl·install·sudo와 임시 디렉터리
 # (가짜 fstab, 가짜 마운트 지점)를 쓴다. "마운트됨"은 가짜 findmnt가 상태 파일을 보고 답하는 것이다.
 # 실제 장치·fstab·systemd 마운트는 사람이 병합 뒤 sudo host/install.sh --cluster prod --bulk-ssd로 본다.

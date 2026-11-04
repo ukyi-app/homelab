@@ -129,7 +129,7 @@ run_case() {
   fi
 }
 
-# 1. 앱의 첫 배포 PR: 브랜치가 없다(404). lease는 빈 값("없어야 한다")이고 PR을 만든다. app-build-v1.0.0은 여기서 404 JSON을 lease로 썼다.
+# 1. 앱의 첫 배포 PR: 브랜치가 없다(404). lease는 빈 값("없어야 한다")이고 PR을 만든다. 404 JSON을 lease로 쓰면 git 파싱 오류로 끝난다.
 run_case "브랜치 없음(404) → 빈 lease로 push, PR 생성" 404 ok "" 0 "" create
 # 2. 열린 배포 PR이 있다(200). 그 SHA가 lease고, 새 PR 대신 열린 PR의 제목·본문을 고친다.
 run_case "브랜치·열린 PR 있음(200) → 그 SHA로 push, PR 갱신" 200 ok 9 0 "$branch_sha" patch
