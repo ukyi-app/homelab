@@ -30,11 +30,11 @@ worker:
   # main 빌드(app-build)가 GHCR에 올린 digest만 쓴다. 로컬 빌드 digest는 CI 빌드와 다르다.
   # 사람 PR로만 바꾼다(D2). 게시 서버는 apps/homelab-bot/image.yaml 자동 병합으로 따라가지만, 모델 자격을 든 sandbox까지
   # 자동 경로를 넓히지 않는다(설계 C.4.4·C.4.7). 작업자 요청 계약(version)을 바꾸는 봇 PR은 이 값을 바꾸는 PR과 짝으로 낸다.
-  # 지금 값: 봇 main 10f5da4 빌드. bd0bc8f(T17 리뷰 레인·작업자 서버 통합·다운로더)에 #46(리뷰 레인에서 CLI 내장 플러그인
-  # 두 개를 끄는 --settings)만 더했다. src 변경은 executor-claude.ts 하나라 요청 계약(version)은 097c93e와 같다.
-  # 빌드 증명은 GitHub API의 SLSA provenance로 대조했다(소스 10f5da4, build.yaml@main → app-build v1.0.1).
+  # 지금 값: 봇 main 7a4dfe6 빌드. 10f5da4(T17 리뷰 레인, #46 내장 플러그인 끔)에 #50(리뷰 모델 입력에 제외 파일·잘린 한도를
+  # 비신뢰 자료로 넘김)을 더했다. src 변경은 review-input.ts·review-lane.ts뿐이고 요청 계약(version)은 097c93e와,
+  # REVIEW_INSTRUCTIONS는 10f5da4와 같다. 빌드 증명은 GitHub API의 SLSA provenance로 대조했다(소스 7a4dfe6, build.yaml@main → app-build v1.0.1).
   # gh attestation verify는 2026-11-04 sigstore 신뢰 루트 단계에서 실패해(옛 digest도 같음) 대신 썼다.
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:b6a9fbd1df7738d45e76d7cc4ceb10f2eb67e50f1733e61c55ed9152321096d8
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:3e2d597e40553e62158f3866920b54378d73b12fb3a606651d101fd6473a8bf8
   # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
   # WORKER_CONTROL_PRIVATE_KEY다. 둘이 어긋나면 작업자가 모든 실행 요청을 403으로 거부하니 회전은 두 값을 함께 바꾼다.
   # 모양이 틀리면 작업자가 기동하지 못해(종료 1) sandbox가 Degraded가 되므로 values.schema.json이 Ed25519 공개 키 모양만 받는다.
