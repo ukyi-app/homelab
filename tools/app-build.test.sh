@@ -53,7 +53,7 @@ case $path in
     if [[ $(cat "$t/branch") == 200b ]]; then image "$newer_rev"; else image "$old_rev"; fi ;;
   "repos/ukyi-app/probe/compare/${newer_rev}..."*) echo behind ;;
   repos/ukyi-app/probe/compare/*) echo ahead ;;
-  "/users/ukyi-homelab-deploy%5Bbot%5D") echo 345583640 ;;
+  "/users/ukyi-deploy%5Bbot%5D") echo 345583640 ;;
   repos/ukyi-app/homelab/git/ref/heads/deploy/probe)
     r=$(pick ref "$STUB_REF")
     echo "$r" >"$t/branch"
@@ -111,7 +111,7 @@ run_case() {
   local rc=0
   env -i PATH="$t/bin:$PATH" HOME="$t" STUB_REF="$ref" STUB_PUSH="$push" STUB_OPEN_PR="$open" \
     APP=probe DIGEST="$digest" HOMELAB_TOKEN=stub-homelab APP_REPO_TOKEN=stub-app NEW_REV="$new_rev" \
-    APP_SLUG=ukyi-homelab-deploy GITHUB_STEP_SUMMARY="$t/summary" GITHUB_REPOSITORY=ukyi-app/probe \
+    APP_SLUG=ukyi-deploy GITHUB_STEP_SUMMARY="$t/summary" GITHUB_REPOSITORY=ukyi-app/probe \
     GITHUB_SERVER_URL=https://github.com GITHUB_RUN_ID=1 \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
     bash -e "$t/step.sh" >"$t/out" 2>&1 || rc=$?

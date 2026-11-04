@@ -124,7 +124,7 @@ jobs:
       # identity gha-homelab-deploy는 claim으로 이 파일의 태그 ref·main push·ukyi-app에 묶여 있다(approvals 2026-10-19).
       INFISICAL_IDENTITY_ID: 44ba77ec-d301-4226-8a9d-3e1321579416
       INFISICAL_PROJECT_SLUG: ukyi-homelab-ci-deploy
-      # App ukyi-homelab-deploy(App ID 5404211)의 client ID. gh api /apps/ukyi-homelab-deploy로 읽는다(owner ukyi-app).
+      # App ukyi-deploy(App ID 5404211)의 client ID. gh api /apps/ukyi-deploy로 읽는다(owner ukyi-app).
       # REPLACE_로 되돌리면 아래 확인에서 멈춘다.
       DEPLOY_APP_CLIENT_ID: Iv23lixKS54BYjxLjsSj
     steps:
@@ -144,7 +144,7 @@ jobs:
           [[ $GITHUB_REPOSITORY_OWNER == ukyi-app ]] || { echo "::error::ukyi-app 저장소만"; exit 1; }
           [[ $APP =~ ^[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$ ]] || { echo "::error::앱 이름(저장소 이름)이 DNS 라벨 53자 이하가 아니다(Helm 릴리스 이름 상한): $APP"; exit 1; }
           [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::push job의 digest가 없다"; exit 1; }
-          [[ $DEPLOY_APP_CLIENT_ID != REPLACE_* ]] || { echo "::error::app-build.yaml의 DEPLOY_APP_CLIENT_ID가 아직 비어 있다(App ukyi-homelab-deploy 생성 뒤 채운다)"; exit 1; }
+          [[ $DEPLOY_APP_CLIENT_ID != REPLACE_* ]] || { echo "::error::app-build.yaml의 DEPLOY_APP_CLIENT_ID가 아직 비어 있다(App ukyi-deploy 생성 뒤 채운다)"; exit 1; }
 
       - name: 배포 App 키(Infisical OIDC)
         uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18

@@ -69,4 +69,4 @@
 - **`aiops-autodeploy-canary`(할 일 6):** 보관 대신 삭제(D-29가 허용, 사용자 결정). GHCR 패키지(private, 버전 12개)도 지웠다. 둘 다 404.
 - **`mac-uptime-guard`(할 일 7):** 장치(옛 맥 미니)가 이미 없어 7.1은 해당 없음. 사람이 BotFather에서 옛 Telegram 알림 봇을 지웠고(토큰 폐기), 저장소를 삭제했다(404). 토큰 사본이 있던 NUC의 옛 작업 사본도 지웠다. 이것으로 T06 자격 폐기 표의 `보류(D-10, T22)` 줄과 `보류(D-13, T22)` 줄을 닫았다.
 - **삭제 방법:** 사람이 탭에서 스크립트를 실행하고 단계마다 Enter를 눌렀다. gh 토큰에 `delete_repo`·`delete:packages`를 잠시 더했다가 끝에 뺐다.
-- **검증:** `gh api repos/ukyi-app/{aiops,aiops-autodeploy-canary,mac-uptime-guard}` → 404, 패키지 → not found. org 저장소는 `files`·`homelab`·`homelab-app-template`·`homelab-bot`·`homelab-probe`·`homelab-smoke`(public), `homelab-bot-ops`(private). App 설치는 `chatgpt-codex-connector`·`ukyi-homelab-deploy`·`ukyi-homelab-merge`·`renovate`(모두 선택 저장소)로 approvals와 맞다.
+- **검증:** `gh api repos/ukyi-app/{aiops,aiops-autodeploy-canary,mac-uptime-guard}` → 404, 패키지 → not found. org 저장소는 `files`·`homelab`·`homelab-app-template`·`homelab-bot`·`homelab-probe`·`homelab-smoke`(public), `homelab-bot-ops`(private). App 설치는 `chatgpt-codex-connector`·`ukyi-deploy`·`ukyi-merge`·`renovate`(모두 선택 저장소)로 approvals와 맞다.
