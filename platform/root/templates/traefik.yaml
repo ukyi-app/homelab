@@ -83,7 +83,7 @@ spec:
         accessLog:
           enabled: true
           format: json
-        # 공개 web(8000)에는 cloudflared만 들어온다. 지표(9100)·ping(8080)은 열지 않는다(수집은 T08b가 연다).
+        # 공개 web(8000)에는 cloudflared만 들어온다. 지표(9100)·ping(8080)은 열지 않는다. 지표는 수집하지 않는다(vmsingle/scrape.yaml에 job이 없다).
         # kubelet 프로브는 노드에서 오므로 이 정책과 상관없다.
         extraObjects:
           - apiVersion: networking.k8s.io/v1

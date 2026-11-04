@@ -351,7 +351,7 @@ export type CommandSpec = {
   wrapper?: "plan-json";
   args: ArgSpec[];
   flags: FlagSpec[];
-  // 자리표시(아직 구현 전) 명령이면 담당 티켓. 구현하면 지운다.
+  // 자리표시 명령(구현 전)의 담당 티켓. placeholder()가 채운다.
   placeholder?: string;
   run(ctx: ReadCtx, input: Input): Promise<Result>;
 };
@@ -360,7 +360,7 @@ export function defineCommand(spec: CommandSpec): CommandSpec {
   return spec;
 }
 
-// 자리표시. 담당 티켓이 이 파일을 통째로 바꾼다.
+// 구현 전 명령을 등록표에 올리는 자리표시. 실행하면 담당 티켓을 알리고 실패한다. 지금 쓰는 명령은 없다.
 export function placeholder(spec: Omit<CommandSpec, "run" | "placeholder">, ticket: string): CommandSpec {
   return {
     ...spec,
