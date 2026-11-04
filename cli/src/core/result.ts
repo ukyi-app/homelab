@@ -1,4 +1,4 @@
-// 명령 결과와 종료 코드(PLAN D2, lead 결정 2026-10-23).
+// 명령 결과와 종료 코드(lead 결정).
 // plan에 차이가 있어도 0이다(plan 자체는 성공). 3은 apply 뒤 바깥 대기(PR 병합·동기화)에만 쓴다.
 
 export type State = "missing" | "differs" | "same";

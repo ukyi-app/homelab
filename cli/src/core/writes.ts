@@ -1,5 +1,5 @@
 // 외부 명령 argv가 바깥 상태를 바꾸는지 판정한다. 안전의 근거는 core 어댑터의 고정 argv이고(명령은 argv를 만들 수 없다),
-// 이 판정은 read exec의 마지막 방어선과 시험의 PATH 원장 집계에 쓴다(사용자 결정 2026-10-23).
+// 이 판정은 read exec의 마지막 방어선과 시험의 PATH 원장 집계에 쓴다(사용자 결정).
 // 설계 C.7 "plan은 읽기 전용이다"(비밀번호 생성, Infisical 쓰기, 브랜치 push, PR 생성, kubectl 변경 없음), L50, AC-P13.
 // 읽기 허용 목록 방식이다. 목록에 없으면 쓰기로 본다(모르는 도구·하위 명령 포함). 목록을 넓히면 이 판정과
 // cli/test/core/writes.test.ts의 표를 함께 고친다. exec가 plan·read 모드에서 쓰기를 막고, 시험이 스텁 원장을 이 판정으로 센다.
@@ -72,14 +72,14 @@ function gh(args: string[]): Verdict {
 
 function git(args: string[]): Verdict {
   // 명령은 git을 부를 수 없다. core의 github 위임이 임시 폴더로 fresh clone만 한다(exec가 목적지를 확인).
-  // 읽기 하위 명령도 --output 같은 파일 쓰기 옵션이 있어(#873 2라운드 P2) 버전 확인 말고는 모두 쓰기로 본다.
+  // 읽기 하위 명령도 --output 같은 파일 쓰기 옵션이 있어 버전 확인 말고는 모두 쓰기로 본다.
   if (args.length === 1 && args[0] === "--version") return read("git --version");
   const [sub] = positionals("git", args);
   return write(`git ${sub ?? ""}`.trim());
 }
 
 // kubectl 리소스 인자가 Secret 종류를 가리키는지. 종류 자리만 본다: 첫 인자(secret, Secret, secrets.v1, pods,secrets)와
-// kind/name 꼴의 kind. 이름 자리(앱 이름이 secret인 deploy/secret, get deploy secret)는 Secret이 아니다(Connector 4360396711).
+// kind/name 꼴의 kind. 이름 자리(앱 이름이 secret인 deploy/secret, get deploy secret)는 Secret이 아니다.
 // kindFirst=false(logs)면 첫 인자도 이름(파드)이라 kind/name 꼴만 본다.
 export function targetsSecret(resources: string[], kindFirst = true): boolean {
   const secretKind = (k: string) => k.toLowerCase().split(",").some((piece) => /^secrets?$/.test(piece.split(".")[0]));
@@ -88,7 +88,7 @@ export function targetsSecret(resources: string[], kindFirst = true): boolean {
 
 function kubectl(args: string[]): Verdict {
   // --raw는 임의 API 경로(Secret 포함)를 읽고, config view --raw는 토큰·개인키를 낸다. 어댑터가 쓰지 않으므로
-  // 등호형(--raw=)까지 모두 거부한다(#873 2라운드 P1).
+  // 등호형(--raw=)까지 모두 거부한다.
   if (args.some((a) => a === "--raw" || a.startsWith("--raw=") || a === "--flatten")) return write("kubectl --raw·--flatten은 쓰지 않는다", true);
   const pos = positionals("kubectl", args);
   const [verb, sub] = pos;
@@ -117,7 +117,7 @@ function infisical(args: string[]): Verdict {
   return write(`infisical ${[a, b, c].filter(Boolean).join(" ")}`, a === "export" || a === "run");
 }
 
-// curl은 읽기 꼴 하나만 허용한다(#873 1라운드 P1). 함정: curl은 ~/.curlrc와 -K/--config 파일에서 request·data를
+// curl은 읽기 꼴 하나만 허용한다. 함정: curl은 ~/.curlrc와 -K/--config 파일에서 request·data를
 // 읽어 argv에 없는 POST를 보낸다(실제 curl과 127.0.0.1 서버로 재현). 그래서 첫 인자가 -q(.curlrc 끔)여야 하고,
 // 나머지는 아래 옵션과 URL 하나뿐이어야 한다. 그 밖의 옵션은 해석하지 않고 쓰기로 본다.
 // -w는 %{http_code}만: curl 8.3+의 %output{파일}은 파일에 쓴다. -o는 /dev/null·-만.

@@ -1,11 +1,11 @@
 // 외부 명령 seam. cli/src에서 프로세스를 띄우는 곳은 여기 하나다. 명령(commands/)은 이 모듈을 볼 수 없고
 // core 어댑터(runtime.ts가 문맥으로 준다)만 부른다. 어댑터마다 argv 모양이 고정이라 안전의 근거는 어댑터 모양이고,
-// 아래 판정(writes.ts)은 원장 집계와 마지막 방어선이다(사용자 결정 2026-10-23, #873 3라운드).
+// 아래 판정(writes.ts)은 원장 집계와 마지막 방어선이다(사용자 결정).
 // seam은 재시도하지 않는다. 변이 호출의 타임아웃은 "결과 미상"이고 재시도는 두 번 실행이다(B.8 E7).
 //
 // - read exec: 쓰기로 판정된 argv를 실행하지 않는다. 예외는 core가 만든 임시 폴더로의 git clone 하나.
 // - write exec: 엔진이 Step.apply() 한 번마다 새로 만들고 끝나면 폐기한다(live). 폐기한 exec를 붙잡아 두었다가 써도 막힌다.
-//   전역 쓰기 창이 없으므로 다른 엔진·병렬 흐름의 read가 쓰기를 빌려 쓸 수 없다(#873 2라운드 P2).
+//   전역 쓰기 창이 없으므로 다른 엔진·병렬 흐름의 read가 쓰기를 빌려 쓸 수 없다.
 // - 직접 stdio(inherit, stdout-to-stderr)는 github 위임만. 위임 stdout-to-stderr는 부모 stdin을 넘긴다.
 // - 값을 내는 호출은 secretStdout으로만, 민감 호출의 stderr 원문은 돌려주지 않는다.
 import { basename } from "node:path";
@@ -42,7 +42,7 @@ export type ExecResult = {
   errKind?: "not-found" | "timeout" | "spawn";
   // opts.signals 중 stdout·stderr에 맞은 이름.
   signals?: string[];
-  // 자식이 신호로 끝났으면 그 이름(SIGTERM 등). 그때 code는 null이다(#882 리뷰: 위임 종료 코드 보존).
+  // 자식이 신호로 끝났으면 그 이름(SIGTERM 등). 그때 code는 null이다(위임 종료 코드 보존).
   signal?: string;
 };
 
@@ -63,9 +63,9 @@ function timeoutFor(write: boolean, env: Record<string, string | undefined>, ask
   return Number.isFinite(cap) && cap > 0 ? Math.min(base, cap) : base;
 }
 
-// 함정(옛 tools/lib/exec.ts 실측): git hook 안에서 CLI를 띄우면 GIT_DIR·GIT_WORK_TREE·GIT_INDEX_FILE이 상속돼
+// 함정(실측): git hook 안에서 CLI를 띄우면 GIT_DIR·GIT_WORK_TREE·GIT_INDEX_FILE이 상속돼
 // git -C <다른 곳>이 hook의 저장소를 본다. 자격이 없으면 프롬프트에서 멈추므로 GIT_TERMINAL_PROMPT=0. 판정은 basename.
-// git을 부르는 래퍼(tf-github.sh)도 같다(Connector 4360754437). GIT_CONFIG_COUNT·KEY·VALUE는 설정(core.fsmonitor 등)을
+// git을 부르는 래퍼(tf-github.sh)도 같다. GIT_CONFIG_COUNT·KEY·VALUE는 설정(core.fsmonitor 등)을
 // 끼워 넣으므로 저장소 변수만이 아니라 GIT_* 전부를 지운다.
 function childEnv(argv0: string, base: Record<string, string | undefined>, opts: ExecOpts): Record<string, string> {
   const env: Record<string, string | undefined> = opts.cleanEnv ? { ...opts.cleanEnv } : { ...base, ...opts.env };
@@ -173,9 +173,9 @@ export function must(r: ExecResult, what: string): ExecResult {
   return r;
 }
 
-// port-forward 하나를 백그라운드로 띄워 로컬 포트를 읽고, 그 포트로 curl 하나를 한 뒤 끝낸다(03 D7 헬스 확인).
+// port-forward 하나를 백그라운드로 띄워 로컬 포트를 읽고, 그 포트로 curl 하나를 한 뒤 끝낸다(헬스 확인).
 // 비동기 프로세스라 makeExec 밖의 이 모양 전용 함수로 둔다. argv는 core가 만들고(kubectl.ts), 쓰기 문맥이 살아 있을 때만 돈다.
-// port-forward는 NetworkPolicy를 거치지 않는다(T11 손 절차와 같음).
+// port-forward는 NetworkPolicy를 거치지 않는다.
 export type Forward = (forwardArgs: string[], path: string, timeoutMs?: number) => Promise<number>;
 
 const FORWARDING = /Forwarding from 127\.0\.0\.1:([0-9]{1,5}) ->/;
@@ -214,7 +214,7 @@ export function makeForward(exec: Exec, m: { env: Record<string, string | undefi
   };
 }
 
-// kubectl 둘을 잇는 파이프(03 2부: pg_dump | rclone rcat, rclone cat | pg_restore, 임시 클러스터 pg_dump | 복원 Job pg_restore).
+// kubectl 둘을 잇는 파이프(pg_dump | rclone rcat, rclone cat | pg_restore, 임시 클러스터 pg_dump | 복원 Job pg_restore).
 // 데이터는 CLI 메모리를 흐름으로만 지나고 디스크에 남지 않는다(restore.md 1단계: 사람 기기에 데이터가 남지 않게).
 // 판정은 두 종료 코드를 함께 본다(한쪽만 0이면 실패다: 앞이 죽으면 뒤는 잘린 입력으로 성공할 수 있다).
 // stderr 원문은 돌려주지 않는다(pg_restore 오류에 행 데이터가 섞일 수 있다). 소비자 stdout만 상한까지 모은다.

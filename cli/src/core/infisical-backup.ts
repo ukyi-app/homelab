@@ -1,11 +1,11 @@
-// Infisical CLI 로컬 백업 막기(#873 Connector P1, 사용자 결정 2026-10-23). tools/tf-github.sh·infra/README.md 2절과 같은 목적이다.
+// Infisical CLI 로컬 백업 막기(사용자 결정). tools/tf-github.sh·infra/README.md 2절과 같은 목적이다.
 // 함정: 로그인 사용자의 CLI 0.44.2가 조회한 값을 $HOME/.infisical/secrets-backup/에 파일로 남긴다(packages/util/secrets.go
 // WriteBackupSecrets, 폴더는 os.UserHomeDir() 기준이라 자식의 HOME). 호출부가 그 쓰기 오류를 무시하므로 폴더를 쓰기 불가로
 // 두어 파일을 못 만들게 하고, 실제로 쓰기 불가인지 확인하고, 호출마다 파일이 0개인지 본다. 하나라도 어긋나면 실패한다.
 // plan에서도 돈다. 바꾸는 것은 이 로컬 폴더의 권한과 남은 백업 파일뿐이다(Git·Infisical·클러스터는 그대로).
 // exec.ts가 infisical 호출마다 부른다(호출하는 어댑터가 무엇이든 빠지지 않게).
 //
-// 백업 경로는 한 번도 다시 열지 않는다(#876 리뷰 P2 둘). 래퍼처럼 0700으로 열고 비운 뒤 잠그면, 같은 HOME의 다른 실행이 그 틈에
+// 백업 경로는 한 번도 다시 열지 않는다. 래퍼처럼 0700으로 열고 비운 뒤 잠그면, 같은 HOME의 다른 실행이 그 틈에
 // 백업을 쓰고 이쪽 정리가 흔적을 지워 둘 다 성공하거나, 삭제가 실패하면 열린 채 남는다. 그래서 비울 때는 폴더째 옆 이름으로
 // 옮기고(부모 쓰기 권한만 필요) 처음부터 0500인 새 폴더를 만든 뒤, 옮긴 폴더를 지운다. 지우기에 실패해도 백업 경로는 잠겨 있다.
 import { chmodSync, lstatSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -14,7 +14,7 @@ import { CliError } from "./result";
 
 const NEXT = "~/.infisical/secrets-backup*을 지우고(또는 권한을 지원하는 파일시스템의 HOME에서) 같은 명령을 다시 실행한다";
 const STALE = "secrets-backup.stale-";
-// 바꿔 넣을 0500 새 폴더. 기존 경로를 옮기기 전에 만든다(#877 리뷰 P2: 옮긴 뒤 만들기가 실패하면 보호가 사라졌다).
+// 바꿔 넣을 0500 새 폴더. 기존 경로를 옮기기 전에 만든다(옮긴 뒤 만들기가 실패하면 보호가 사라진다).
 const FRESH = "secrets-backup.new-";
 
 // 시험 전용 seam: 권한이 듣지 않는 파일시스템을 흉내 낸다. 실제 실행은 기본값만 쓴다.
@@ -39,7 +39,7 @@ function entries(dir: string): string[] {
   return readdirSync(dir);
 }
 
-// HOME을 실제 경로로 푼다. 자식에게도 이 값을 HOME으로 준다(exec.ts). 함정(#876 리뷰 P2): path.join은 링크를 보기 전에
+// HOME을 실제 경로로 푼다. 자식에게도 이 값을 HOME으로 준다(exec.ts). 함정: path.join은 링크를 보기 전에
 // `link/..`를 지워 다른 폴더를 가리키지만, Infisical은 HOME 문자열에 이어 붙여 OS가 링크를 따라간 뒤 ..를 푼다.
 // Bun의 realpathSync(.native 포함)도 ..를 먼저 문자열로 지운다(1.4.3 실측). 그래서 .·.. 성분이 있는 HOME은 거부하고,
 // 남은 링크만 realpath로 푼다(..가 없으면 문자열 해석과 OS 해석이 같다).
@@ -54,7 +54,7 @@ export function realHome(home: string | undefined): string {
 }
 
 // 옮겨 둔 폴더·남은 새 폴더 지우기. 이 함수는 보호 경로가 잠긴 것을 확인한 뒤에만 부른다.
-// 최상위가 심볼릭 링크면 링크만 지운다(#877 리뷰 P2: 따라가면 HOME 밖 폴더의 권한을 바꿨다). 안쪽 링크는 readdir 형식이
+// 최상위가 심볼릭 링크면 링크만 지운다(따라가면 HOME 밖 폴더의 권한을 바꾼다). 안쪽 링크는 readdir 형식이
 // 폴더가 아니라 따라가지 않는다.
 function removeStale(path: string, ops: BackupOps): void {
   try {
@@ -106,7 +106,7 @@ function prepare(home: string, ops: BackupOps): void {
   }
   // 심볼릭 링크면 chmod가 링크 너머를 바꾸고 백업은 다른 곳에 쌓인다. lstat이라 링크는 폴더가 아니다(따라가지 않고 멈춘다).
   if (st && !st.isDirectory()) throw new CliError("Infisical 백업 경로가 폴더가 아니다(심볼릭 링크 포함)", NEXT);
-  // 보호 경로를 먼저 세운다. 남은 옮긴 폴더 정리는 그다음이다(#877 리뷰 P2: 이전 실행이 옮긴 직후 끊겼으면 경로가 없다).
+  // 보호 경로를 먼저 세운다. 남은 옮긴 폴더 정리는 그다음이다(이전 실행이 옮긴 직후 끊겼으면 경로가 없다).
   if (!st) {
     try {
       ops.mkdirLocked(dir);

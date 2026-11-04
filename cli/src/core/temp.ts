@@ -1,5 +1,5 @@
 // 이 실행이 만든 임시 폴더. 끝날 때 모두 지운다(정상, 실패 exit, 잡히지 않은 예외, SIGINT·SIGTERM·SIGHUP).
-// tools/ci/lib.ts의 tempDir과 같은 방식이다. 함정: terraform 사본은 개당 수백 MB라 남기면 tmpfs 할당량을 넘긴다(2026-10-21 실측).
+// tools/ci/lib.ts의 tempDir과 같은 방식이다. 함정: terraform 사본은 개당 수백 MB라 남기면 tmpfs 할당량을 넘긴다(실측).
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

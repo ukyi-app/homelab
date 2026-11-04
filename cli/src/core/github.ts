@@ -82,7 +82,7 @@ export function ghRead(exec: Exec): GhRead {
   };
 }
 
-// curl 어댑터는 이것 하나다(사용자 결정 2026-10-23): 정해진 URL 꼴, -q로 .curlrc를 끄고 설정 옵션은 없다.
+// curl 어댑터는 이것 하나다(사용자 결정): 정해진 URL 꼴, -q로 .curlrc를 끄고 설정 옵션은 없다.
 export function ghcrRead(exec: Exec): GhcrRead {
   return {
     anonymousPullStatus(app) {
@@ -108,7 +108,7 @@ export function cloneArgv(work: string): string[] {
 
 // CLI를 실행한 폴더가 든 checkout의 루트(.git이 폴더든 파일이든). 없으면 null. git을 부르지 않고 경로만 거슬러 본다
 // (읽기 문맥은 git 하위 명령을 쓰기로 막는다). 래퍼에 TF_GITHUB_ORIGIN_ROOT로 넘겨 state 백업이 그 안에 생기지 않게 한다
-// (Connector 4360754428, codex 확인 라운드 P2: 래퍼를 clone 안에서 돌리면 래퍼의 repo_root·origin_root가 둘 다 clone이 된다).
+// (래퍼를 clone 안에서 돌리면 래퍼의 repo_root·origin_root가 둘 다 clone이 된다).
 export function originRoot(cwd: string): string | null {
   let dir: string;
   try {
@@ -136,7 +136,7 @@ function runWrapper(readExec: Exec, exec: Exec, d: DelegateEnv, args: string[], 
   const r = exec([join(work, "tree", "tools", "tf-github.sh"), ...args], {
     stdio,
     // 래퍼는 TF_GITHUB_CLONE을 보기 전에 git rev-parse --show-toplevel을 set -e로 실행한다. cwd를 clone으로 두지 않으면
-    // 저장소 밖(예: 홈)에서 실행한 CLI가 exit 128로 끝난다(#873 3라운드).
+    // 저장소 밖(예: 홈)에서 실행한 CLI가 exit 128로 끝난다.
     cwd: join(work, "tree"),
     // 상속된 TF_GITHUB_ORIGIN_ROOT는 쓰지 않는다(이 실행의 cwd로만 정한다). GIT_* 제거는 exec가 한다.
     env: { TF_GITHUB_CLONE: work, TF_GITHUB_ORIGIN_ROOT: originRoot(d.cwd) ?? undefined },
@@ -144,7 +144,7 @@ function runWrapper(readExec: Exec, exec: Exec, d: DelegateEnv, args: string[], 
   });
   if (r.errKind === "not-found") throw new Error("clone한 main에 tools/tf-github.sh가 없다");
   if (r.code !== null) return r.code;
-  // 래퍼가 신호로 끝나면 셸이 보이는 $?와 같은 128+번호를 돌려준다(AC-5: 직접 실행과 CLI의 종료 코드가 같다, #882 리뷰).
+  // 래퍼가 신호로 끝나면 셸이 보이는 $?와 같은 128+번호를 돌려준다(AC-5: 직접 실행과 CLI의 종료 코드가 같다).
   // CLI가 시간 초과로 죽인 것은 래퍼의 결과가 아니라 1로 둔다.
   const n = r.signal && r.errKind !== "timeout" ? (osConstants.signals as Record<string, number>)[r.signal] : undefined;
   return n ? 128 + n : 1;
@@ -153,7 +153,7 @@ function runWrapper(readExec: Exec, exec: Exec, d: DelegateEnv, args: string[], 
 const PLAN_ADDRESS = /^[A-Za-z0-9_.\[\]"-]+$/;
 const PLAN_ACTIONS = new Set(["no-op", "create", "read", "update", "delete"]);
 
-// 래퍼 plan JSON(tf-github-plan/v1, 04 3절) 해석. 값(before·after)은 래퍼가 내지 않고, 여기서도 주소와 동작만 받는다.
+// 래퍼 plan JSON(tf-github-plan/v1) 해석. 값(before·after)은 래퍼가 내지 않고, 여기서도 주소와 동작만 받는다.
 export function parsePlanJson(text: string): Pick<PlanChanges, "sha" | "changes"> {
   let doc: any;
   try {
@@ -168,14 +168,14 @@ export function parsePlanJson(text: string): Pick<PlanChanges, "sha" | "changes"
     if (c.mode !== "managed" && c.mode !== "data") throw new Error("래퍼 plan JSON의 mode 형식이 아니다");
     if (!Array.isArray(c.actions) || c.actions.length === 0 || !c.actions.every((a: unknown) => typeof a === "string" && PLAN_ACTIONS.has(a))) throw new Error("래퍼 plan JSON의 동작 형식이 아니다");
     if (typeof c.importing !== "boolean") throw new Error("래퍼 plan JSON의 importing 형식이 아니다");
-    // 주소 이동(previous_address)은 동작 목록과 따로다. data read와 겹치면 동작만으로 구별할 수 없다(#882 리뷰).
+    // 주소 이동(previous_address)은 동작 목록과 따로다. data read와 겹치면 동작만으로 구별할 수 없다.
     if (typeof c.moved !== "boolean") throw new Error("래퍼 plan JSON의 moved 형식이 아니다");
     return { address: c.address, mode: c.mode, actions: [...c.actions], importing: c.importing, moved: c.moved };
   });
   return { sha: doc.sha, changes };
 }
 
-// app new(04): 래퍼 plan JSON. 파일은 clone과 다른 임시 폴더에 둔다(함정: 래퍼가 TF_GITHUB_CLONE 폴더를 EXIT trap으로 지운다).
+// app new: 래퍼 plan JSON. 파일은 clone과 다른 임시 폴더에 둔다(함정: 래퍼가 TF_GITHUB_CLONE 폴더를 EXIT trap으로 지운다).
 // stdout은 늘 stderr로 돌린다(CLI stdout은 결과 하나). stdin은 상속해 래퍼가 묻는 값을 사람이 답한다.
 function planChangesOf(readExec: Exec, d: DelegateEnv): PlanChanges {
   const out = join(tempDir("plan"), "plan.json");
@@ -202,7 +202,7 @@ export function githubDelegate(readExec: Exec, writeOnce: () => Exec | null, env
   };
 }
 
-// 공개 host의 응답 코드(02 R9). host는 <이름>.ukyi.app 전체 일치, 경로는 소문자·숫자·/_-만.
+// 공개 host의 응답 코드. host는 <이름>.ukyi.app 전체 일치, 경로는 소문자·숫자·/_-만.
 export function webRead(exec: Exec): WebRead {
   return {
     publicStatus(host, path) {
@@ -218,7 +218,7 @@ export function webRead(exec: Exec): WebRead {
   };
 }
 
-// app new(04 W2)의 앱 저장소 생성·보안 설정. 메서드·경로·본문은 고정이고 앱 이름만 바뀐다(설계 C.7 app new, guard 2·7).
+// app new의 앱 저장소 생성·보안 설정. 메서드·경로·본문은 고정이고 앱 이름만 바뀐다(설계 C.7 app new, guard 2·7).
 export const APP_REPO_CALLS = {
   createFromTemplate: (app: string) => ["POST", `repos/${OWNER}/homelab-app-template/generate`, { owner: OWNER, name: app, private: false, include_all_branches: false }] as const,
   setRepoSettings: (app: string) => ["PATCH", `repos/${OWNER}/${app}`, { security_and_analysis: { secret_scanning: { status: "enabled" }, secret_scanning_push_protection: { status: "enabled" } }, pull_request_creation_policy: "collaborators_only" }] as const,

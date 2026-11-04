@@ -1,5 +1,5 @@
 // kubectl 어댑터. 사람의 kubeconfig와 현재 context를 그대로 쓴다(자격을 저장하지 않는다).
-// argv는 여기서만 만든다. 리소스는 KINDS 표의 이름뿐이라 범용 조회로 Secret을 읽을 수 없고(#873 2라운드 P1),
+// argv는 여기서만 만든다. 리소스는 KINDS 표의 이름뿐이라 범용 조회로 Secret을 읽을 수 없고,
 // --raw·config view 같은 원문 출력 옵션은 쓰지 않는다. 모든 호출에 --request-timeout(서버가 멈추면 기본으로 오래 기다린다).
 import { entries, isArray, jsonParse, jsonStringify, strIncludes } from "./intrinsics";
 import type { KubeKind, KubeRead, KubeWrite, LedgerMetrics, LogTarget, RestoreCheckMark, RestoreRecord, RestoreRecordName } from "./command";
@@ -123,7 +123,7 @@ function run(exec: Exec, args: string[], opts: ExecOpts = {}) {
 
 const nsArgs = (ns: string | null) => (ns ? ["-n", ns] : []);
 
-// 어디든 kind: Secret(List 포함)이 있으면 true. 중첩 항목까지 본다(#873 2라운드 P1: List 안의 Secret).
+// 어디든 kind: Secret(List 포함)이 있으면 true. 중첩 항목까지 본다(List 안의 Secret).
 export function containsSecretManifest(x: unknown): boolean {
   if (Array.isArray(x)) return x.some(containsSecretManifest);
   if (x && typeof x === "object") {
@@ -134,7 +134,7 @@ export function containsSecretManifest(x: unknown): boolean {
   return false;
 }
 
-// 복원 기록 ConfigMap 해석. 라벨과 data.run이 같아야 하고, 키·값 형식을 본다(값은 시크릿이 아니다, 03 2절).
+// 복원 기록 ConfigMap 해석. 라벨과 data.run이 같아야 하고, 키·값 형식을 본다(값은 시크릿이 아니다).
 export function parseRecord(doc: any, name: string): RestoreRecord {
   const data: Record<string, string> = doc?.data ?? {};
   const run = data.run;
@@ -217,7 +217,7 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
       if (ns) checkName("namespace", ns);
       if (selector !== undefined && !SELECTOR.test(selector)) throw new Error("kubectl label selector 형식이 아니다");
       // -A는 get의 플래그라 하위 명령 뒤에 둔다. 앞에 두면 kubectl 1.36.5가 플러그인 이름 자리로 보고 거부한다
-      // ("flags cannot be placed before plugin name: -A", T12-05 운영 실측). -n은 전역 플래그라 앞에 있어도 된다.
+      // ("flags cannot be placed before plugin name: -A", 운영 실측). -n은 전역 플래그라 앞에 있어도 된다.
       const r = run(exec, [...nsArgs(ns), "get", resource(kind), ...(ns ? [] : ["-A"]), ...(selector ? ["-l", selector] : []), "-o", "json"]);
       must(r, `kubectl get ${kind}`);
       return jsonParse(r.stdout).items ?? [];
@@ -230,7 +230,7 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
       if (r.errKind === "timeout") throw new ExecTimeout(`kubectl get secret ${name}: 시간 초과`);
       if (r.code !== 0 && r.notFound) return null;
       if (r.code !== 0 || !r.stdoutSecret) throw new Error(`kubectl get secret ${name}: ${why(r)}`);
-      // 요청한 키 하나만 Secret으로 만든다. 같은 Secret의 username(앱 이름 같은 공개 값)은 추적하지 않는다(#873 2라운드 P1).
+      // 요청한 키 하나만 Secret으로 만든다. 같은 Secret의 username(앱 이름 같은 공개 값)은 추적하지 않는다.
       const encoded = jsonParse(revealSecret(r.stdoutSecret)).data?.[key];
       if (typeof encoded !== "string") return null;
       return new Secret(Buffer.from(encoded, "base64").toString("utf8")).sha256Prefix(12);
@@ -282,7 +282,7 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
         what = [`${resource(kind)}/${target.name}`];
       }
       // 함정(kubectl 1.36.5 pkg/cmd/wait): 셀렉터에 맞는 객체가 아직 없으면 기다리지 않고 "no matching resources found"로 끝난다.
-      // Job을 만든 직후의 파드가 그렇다. 시간 안에서 다시 본다(#880 후속, 실제 출력 대조).
+      // Job을 만든 직후의 파드가 그렇다. 시간 안에서 다시 본다(실제 출력 대조).
       const deadline = Date.now() + timeoutSec * 1000;
       for (;;) {
         const left = Math.max(1, Math.ceil((deadline - Date.now()) / 1000));
@@ -307,14 +307,14 @@ export function kubeRead(exec: Exec, opts: KubeOpts = {}): KubeRead {
       must(r, `복원 기록 ${name}`);
       return parseRecord(jsonParse(r.stdout), name);
     },
-    // 앱 로그를 그대로 돌려준다. 앱이 자격을 로그에 쓰지 않는 것은 앱 계약이다(설계 C.7, Connector 3라운드 판단).
+    // 앱 로그를 그대로 돌려준다. 앱이 자격을 로그에 쓰지 않는 것은 앱 계약이다(설계 C.7).
     // CLI는 로그 속 임의 값이 시크릿인지 알 수 없고(추측 마스킹은 놓친 값을 가린 것처럼 보이게 한다), 같은 사람은
     // kubeconfig로 kubectl logs를 직접 볼 수 있다. 이 실행이 다룬 시크릿(16자 이상)이 섞이면 출력 계층이 결과 전체를 막는다.
     logs(ns, target: LogTarget, opts = {}) {
       checkName("namespace", ns);
       const ref = "job" in target ? (checkName("Job", target.job), `job/${target.job}`) : (checkName("Deployment", target.deployment), `deploy/${target.deployment}`);
       if (opts.container !== undefined) checkName("컨테이너", opts.container);
-      // 명령은 일 단위(7d)도 받는다. kubectl은 Go duration이라 d가 없어 시간으로 바꾼다(Connector 4360754457).
+      // 명령은 일 단위(7d)도 받는다. kubectl은 Go duration이라 d가 없어 시간으로 바꾼다.
       const m = opts.since === undefined ? null : /^([1-9][0-9]{0,5})([smhd])$/.exec(opts.since);
       if (opts.since !== undefined && !m) throw new Error("--since 형식이 아니다");
       const since = m ? (m[2] === "d" ? `${Number(m[1]) * 24}h` : opts.since) : undefined;
@@ -377,7 +377,7 @@ export function updateRecord(exec: Exec, r: KubeRead, ns: string, name: RestoreR
   must(x, `복원 기록 ${name} 고치기`);
 }
 
-// restore-check 결과 기록(T24 계약 2). 봇이 Cluster pg GET 응답에서 읽는다(봇 권한은 그대로). 대상과 키는 여기 고정이고
+// restore-check 결과 기록. 봇이 Cluster pg GET 응답에서 읽는다(봇 권한은 그대로). 대상과 키는 여기 고정이고
 // 명령은 값만 넘긴다. Argo CD는 이 두 키를 ignoreDifferences로 뺐다(platform/root/templates/cnpg-cluster.yaml).
 export const RESTORE_CHECK_LAST = "homelab.ukyi.app/restore-check-last";
 export const RESTORE_CHECK_PASS = "homelab.ukyi.app/restore-check-pass";
@@ -442,7 +442,7 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       if (o.waitSec !== undefined) checkTimeout(o.waitSec, 120);
       // 이번 요청의 동기화를 가르는 표지: ESO는 동기화를 마치면 status.syncedResourceVersion에 그때의 메타데이터 버전
       // (generation + annotation·label 해시, esSyncVersion)을 쓴다. 이번 annotation이 든 지금 메타데이터의 버전과 같아져야 끝이다.
-      // "이전 값과 다름"만 보면 앞선 요청의 완료를 이번 것으로 인정한다(#880 2라운드). refreshTime은 초 단위라 쓰지 않는다.
+      // "이전 값과 다름"만 보면 앞선 요청의 완료를 이번 것으로 인정한다. refreshTime은 초 단위라 쓰지 않는다.
       // 값은 ms+난수라 늘 바뀐다(같으면 해시가 안 바뀌어 ESO가 동기화하지 않는다).
       const stamp = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(2))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
       must(run(exec, ["-n", ns, "annotate", KINDS.externalsecret, externalSecret, `force-sync=${stamp}`, "--overwrite"]), `force-sync ${externalSecret}`);
@@ -492,8 +492,8 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       checkName("namespace", ns);
       checkRecord(ns, name);
       checkRun(runId);
-      // 이 실행의 기록인지 본 그 객체(uid)만 지운다(#880 2라운드 P2). 라벨 셀렉터 삭제는 kubectl이 목록을 본 뒤 이름으로 지워,
-      // 그사이 같은 이름으로 생긴 다른 실행의 잠금을 지운다. 남의 기록이거나 없으면 아무것도 하지 않는다(전과 같음).
+      // 이 실행의 기록인지 본 그 객체(uid)만 지운다. 라벨 셀렉터 삭제는 kubectl이 목록을 본 뒤 이름으로 지워,
+      // 그사이 같은 이름으로 생긴 다른 실행의 잠금을 지운다. 남의 기록이거나 없으면 아무것도 하지 않는다.
       const cur = r.restoreRecord(ns, name);
       if (!cur || cur.run !== runId) return;
       const uid = cur.uid;
@@ -514,7 +514,7 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       if (cur.metadata?.labels?.[RESTORE_LABEL] !== runId) throw new Error(`${kind} ${name}은 이 실행(${runId})의 복원 객체가 아니다`);
       const uid = cur.metadata?.uid;
       if (typeof uid !== "string" || !/^[0-9a-f-]{8,64}$/.test(uid)) throw new Error(`${kind} ${name}의 uid를 읽지 못했다`);
-      // 확인한 그 객체만 지운다(#880 리뷰 P2): 이름만으로 지우면 확인과 삭제 사이 같은 이름의 다른 실행 객체가 생겼을 때 그것을 지운다.
+      // 확인한 그 객체만 지운다: 이름만으로 지우면 확인과 삭제 사이 같은 이름의 다른 실행 객체가 생겼을 때 그것을 지운다.
       // kubectl delete는 precondition을 넣지 않아 DeleteOptions를 --raw 본문으로 보낸다(kubectl 1.36.5 실측: -f - 본문을 그대로 보낸다).
       const body = jsonStringify({ kind: "DeleteOptions", apiVersion: "v1", propagationPolicy: "Foreground", preconditions: { uid } });
       const x = run(exec, ["delete", "--raw", `${RAW_PATH[kind]}/namespaces/${ns}/${kind === "job" ? "jobs" : "clusters"}/${name}`, "-f", "-"], { input: body, secretStdout: true, signals: { conflict: /Precondition failed|\(Conflict\)/ } });
@@ -578,7 +578,7 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
     deleteRestoreObjects(ns, runId) {
       checkName("namespace", ns);
       if (!/^[a-z0-9]{1,22}$/.test(runId)) throw new Error("복원 실행 id 형식이 아니다");
-      // 실제로 사라질 때까지 기다린다(Connector 4360754447). 기다리지 않으면 finalizer가 있는 PVC·CNPG Cluster가 terminating으로
+      // 실제로 사라질 때까지 기다린다. 기다리지 않으면 finalizer가 있는 PVC·CNPG Cluster가 terminating으로
       // 남아 엔진의 실행 뒤 재조회가 성공한 삭제를 실패로 본다. [미검증] --request-timeout(20s)이 긴 대기의 watch를 끊어도
       // kubectl이 다시 watch해 이어 가는지는 T12-05 운영 실행에서 본다.
       must(run(exec, ["-n", ns, "delete", RESTORE_RESOURCES, "-l", `${RESTORE_LABEL}=${runId}`, "--ignore-not-found", "--wait=true", "--timeout=300s"], { timeoutMs: 330_000 }), "복원 객체 지우기");
@@ -587,7 +587,7 @@ export function kubeWrite(exec: Exec, opts: KubeOpts = {}): KubeWrite {
       const pg = r.get("cluster", "database", "pg");
       if (!pg) throw new Error("Cluster database/pg가 없다. restore-check 결과를 남기지 못했다");
       const value = restoreCheckValue(m);
-      // 시험을 시작한 Cluster에만 귀속한다. 그사이 pg가 다시 만들어졌으면 새 Cluster는 시험한 적이 없으니 쓰지 않는다(#1035 리뷰 P2).
+      // 시험을 시작한 Cluster에만 귀속한다. 그사이 pg가 다시 만들어졌으면 새 Cluster는 시험한 적이 없으니 쓰지 않는다.
       const uid = pg.metadata?.uid;
       if (uid !== m.cluster) throw new Error(`Cluster pg가 시험 시작 때(uid ${m.cluster})와 다른 객체다(uid ${uid}). 이 시험의 결과를 남기지 않는다`);
       const keys = m.result === "pass" ? [RESTORE_CHECK_LAST, RESTORE_CHECK_PASS] : [RESTORE_CHECK_LAST];

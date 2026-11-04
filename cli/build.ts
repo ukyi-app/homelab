@@ -4,7 +4,7 @@
 //   bun cli/build.ts --install             ~/.local/bin/homelab, 이전 파일은 homelab.prev
 //   bun cli/build.ts --install --allow-dirty
 // 함정(B.8 E7): bun link는 절대 경로 고정이라 worktree를 지우면 전역 명령이 끊긴다. 그래서 실행 파일을 복사한다.
-// 함정(2026-10-23 실측, bun 1.4.3): --compile 실행 파일은 기본으로 실행한 폴더의 .env·bunfig.toml을 읽는다.
+// 함정(bun 1.4.3 실측): --compile 실행 파일은 기본으로 실행한 폴더의 .env·bunfig.toml을 읽는다.
 // 아무 폴더에서 돌린 homelab에 남의 환경변수가 섞이므로 둘 다 끈다.
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";

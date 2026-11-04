@@ -2,7 +2,7 @@
 // 문자열로 바뀌는 모든 길(toString, 템플릿 문자열, JSON.stringify, console의 inspect)은 값 대신 [secret]을 낸다.
 // 명령은 이 모듈을 import할 수 없다(정적 시험). Secret은 core 어댑터가 만들고 명령은 불투명하게 넘기기만 한다.
 //
-// 원문 추적(출력·argv의 마지막 방어선)은 16자 이상만 한다. 사용자 결정(2026-10-23, #873 3라운드): 짧은 값을 추적하면
+// 원문 추적(출력·argv의 마지막 방어선)은 16자 이상만 한다. 사용자 결정: 짧은 값을 추적하면
 // 고정 옵션(--expand=false)·JSON 키("mode")와 겹쳐 정상 출력이 깨지고, 경계 조건으로 줄이면 붙은 원문이 샌다.
 // 대신 시크릿 입력은 16자 이상만 받고(MIN_SECRET), 기존의 짧은 값은 Secret 객체로만 들고 출력에 오지 않는 구조로 막는다.
 import { freeze, jsonStringify, strIncludes } from "./intrinsics";
@@ -11,8 +11,8 @@ export const MIN_SECRET = 16;
 
 const tracked = new Set<string>();
 
-// 원문을 꺼내는 길은 아래 revealSecret 하나다. 클래스에는 원문을 돌려주는 메서드가 없다(#873 3라운드 P1: 공개 reveal()을
-// 명령이 불러 16자 미만 기존 값이 추적 없이 출력·PR 파일로 샜다). 원문은 JS private 필드라 객체 밖에서 읽을 수 없고,
+// 원문을 꺼내는 길은 아래 revealSecret 하나다. 클래스에는 원문을 돌려주는 메서드가 없다(공개 reveal()을
+// 명령이 부르면 16자 미만 기존 값이 추적 없이 출력·PR 파일로 샌다). 원문은 JS private 필드라 객체 밖에서 읽을 수 없고,
 // revealSecret은 이 모듈에만 있어 명령은 import할 수 없다(정적 시험). 해시·같음 비교만 공개한다.
 let rawOf: (s: Secret) => string;
 
@@ -67,9 +67,9 @@ export function isSecret(x: unknown): x is Secret {
   return x instanceof Secret;
 }
 
-// 시험 전용: 시험마다 추적 목록을 비운다(cli/test/setup.ts의 beforeEach). 함정(#873 CI 실패, 2026-10-23): 추적 목록은
+// 시험 전용: 시험마다 추적 목록을 비운다(cli/test/setup.ts의 beforeEach). 함정: 추적 목록은
 // 프로세스 전역이라 bun test가 파일을 한 프로세스에서 돌리면 앞 시험의 가짜 시크릿("a" 16자)이 뒤 시험의 가짜 SHA("a" 40자)를
-// 시크릿으로 오인하게 했다. 실행 순서에 따라서만 드러났다. 명령은 이 모듈을 import할 수 없다(정적 시험).
+// 시크릿으로 오인하게 한다. 실행 순서에 따라서만 드러난다. 명령은 이 모듈을 import할 수 없다(정적 시험).
 export function resetTrackedForTests(): void {
   tracked.clear();
 }

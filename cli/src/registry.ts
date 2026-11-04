@@ -1,4 +1,4 @@
-// 명령 등록 표. C.7의 모든 명령을 01이 미리 적었다. 02~04는 이 파일을 고치지 않고 자기 명령 파일만 바꾼다.
+// 명령 등록 표. C.7의 모든 명령을 적는다.
 // 정적 import만 쓴다(bun build --compile 실행 파일은 실행 때 파일을 찾지 못한다).
 import type { CommandSpec } from "./core/command";
 import doctor from "./commands/doctor";
