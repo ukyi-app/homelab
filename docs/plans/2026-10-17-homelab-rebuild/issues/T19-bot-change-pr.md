@@ -14,7 +14,7 @@
 
 ## 할 일
 
-1. 사용자가 D-24의 남은 하위 항목을 정한다: App 이름, 설치 저장소, 토큰 분리, ruleset E 여부, 허용 파일 경로(설정 키 `github.change_writer_allow_paths`). 추천과 근거는 봇 저장소 `DECISIONS.md` D-24에 있다. 허용 파일 경로는 `DECISIONS.md` D-24와 `V1_PLAN.md` §5 T19 행이 이 티켓으로 넘겼고 추천은 아직 없다.
+1. D-24의 남은 하위 항목은 사용자가 정했다(확정(사용자 2026-11-05)): App 이름 `ukyi-writer`, 토큰 두 종류, 설치 저장소마다 ruleset E(`refs/heads/bot/**/*` 생성·갱신·삭제), `homelab-smoke` 먼저 설치(`homelab`은 별도 승인), 저장소별 좁은 허용 파일 경로. 근거·함정은 봇 저장소 `DECISIONS.md` D-24 "T19 세부 결정". 허용 경로는 GitHub이 강제하지 못해(Free + public이라 push ruleset 없음) 게시 서버가 첫 blob 업로드 전에 검사한다.
 2. 시작 전에 D-24 신원이 생성돼 허용 저장소에 설치돼 있는지 확인한다. 생성·설치와 키의 Infisical `/apps/homelab-bot/` 등록은 사람이 하고 [../approvals.md](../approvals.md)에 기록한다 (AC-X2).
 3. 이 App의 봇 사용자 숫자 ID를 허용 봇 작성자 목록에 넣는다(D-16, T17 할 일 1). 실제 ID는 Infisical runtime policy(키 이름 예: `review.allowed_bot_author_ids`)에만 둔다. 사람이 등록한다.
 4. 플랫폼이 이 신원의 PR을 자동 병합하지 않는지 확인한다(AC-P8). 확인하지 못하면 봇 PR을 만들지 않고 `blocked`로 둔다.
