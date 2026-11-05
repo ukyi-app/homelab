@@ -65,6 +65,96 @@ tests:
               summary: ExternalSecret observability/alertmanager-healthchecks가 10분 넘게 Ready가 아니다
               description: Infisical 키 이름·경로와 ESO 인증을 본다. 이미 만든 Secret은 마지막 값으로 남아 있다.
 
+  - name: CloudflaredTunnelDown은 연결이 하나라도 있으면 발화하지 않는다
+    interval: 1m
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared", instance="cloudflared"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 20m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts: []
+
+  - name: CloudflaredTunnelDown은 연결이 0이 되고 5분 뒤 발화한다
+    interval: 1m
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared", instance="cloudflared"}'
+        values: "4x5 0x20"
+    alert_rule_test:
+      - eval_time: 9m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts: []
+      - eval_time: 11m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: cloudflared의 Cloudflare 에지 연결이 5분 넘게 없거나 지표가 없다. 공개 경로가 끊겼을 수 있다
+              description: kubectl -n cloudflared get pods, kubectl -n cloudflared logs deploy/cloudflared. 터널 토큰과 7844 나가는 길을 본다.
+
+  - name: CloudflaredTunnelDown은 파드가 사라져 지표가 없어져도 발화한다
+    interval: 1m
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared", instance="cloudflared"}'
+        values: "4x5 _x20"
+    alert_rule_test:
+      - eval_time: 9m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts: []
+      - eval_time: 11m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: cloudflared의 Cloudflare 에지 연결이 5분 넘게 없거나 지표가 없다. 공개 경로가 끊겼을 수 있다
+              description: kubectl -n cloudflared get pods, kubectl -n cloudflared logs deploy/cloudflared. 터널 토큰과 7844 나가는 길을 본다.
+
+  - name: CloudflaredTunnelDown은 재시작을 되풀이해 0과 빈 구간이 번갈아도 for가 끊기지 않는다
+    interval: 1m
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared", instance="cloudflared"}'
+        values: "4x5 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3"
+    alert_rule_test:
+      - eval_time: 9m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts: []
+      - eval_time: 11m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: cloudflared의 Cloudflare 에지 연결이 5분 넘게 없거나 지표가 없다. 공개 경로가 끊겼을 수 있다
+              description: kubectl -n cloudflared get pods, kubectl -n cloudflared logs deploy/cloudflared. 터널 토큰과 7844 나가는 길을 본다.
+
+  - name: CloudflaredTunnelDown은 짧은 재연결과 수집 실패에 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared", instance="cloudflared"}'
+        values: "4x5 0x2 4x5 _ 4x5 _ 4x5"
+    alert_rule_test:
+      - eval_time: 8m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts: []
+      - eval_time: 11m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts: []
+      - eval_time: 20m
+        groupname: platform
+        alertname: CloudflaredTunnelDown
+        exp_alerts: []
+
   - name: 데이터 지표가 아직 없으면 아무것도 발화하지 않는다
     interval: 1m
     input_series:

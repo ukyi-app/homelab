@@ -29,6 +29,22 @@ groups:
           summary: "ExternalSecret {{ $labels.namespace }}/{{ $labels.name }}가 10분 넘게 Ready가 아니다"
           description: "Infisical 키 이름·경로와 ESO 인증을 본다. 이미 만든 Secret은 마지막 값으로 남아 있다."
 
+      # 커넥터가 Cloudflare 에지에 맺은 연결 수. 정상이면 4이고 0이면 공개 요청이 NUC까지 오지 못한다.
+      # 커넥터가 재시작을 되풀이하면 값이 0인 구간과 시계열이 없는 구간이 번갈아 온다. 둘 다 참으로 두고, max로 라벨을
+      # 없애 두 쪽의 라벨을 맞춘다. 라벨이 갈리면 경보가 둘로 나뉘어 구간이 바뀔 때마다 for를 처음부터 다시 센다.
+      # [2m]: 수집(30초 주기)이 한두 번 빠져도 창 안에 정상 값이 남아 참이 되지 않는다.
+      # 커넥터와 에지 사이만 본다. Traefik 쪽은 TargetDown·TargetMissing(job traefik)이 본다.
+      - alert: CloudflaredTunnelDown
+        expr: |
+          max(max_over_time(cloudflared_tunnel_ha_connections[2m])) < 1
+          or absent_over_time(cloudflared_tunnel_ha_connections[2m])
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "cloudflared의 Cloudflare 에지 연결이 5분 넘게 없거나 지표가 없다. 공개 경로가 끊겼을 수 있다"
+          description: "kubectl -n cloudflared get pods, kubectl -n cloudflared logs deploy/cloudflared. 터널 토큰과 7844 나가는 길을 본다."
+
   # 아래 룰은 지표가 없으면 시계열이 없어 발화하지 않는다. CNPG 수집 대상이 사라지면 core.yaml TargetMissing이 본다.
   # Valkey 백업 지표는 영속 Valkey 앱이 없어 운영 수집으로 확인하지 못했다([미검증]).
   - name: data
