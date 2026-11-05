@@ -351,31 +351,9 @@ export type CommandSpec = {
   wrapper?: "plan-json";
   args: ArgSpec[];
   flags: FlagSpec[];
-  // 자리표시 명령(구현 전)의 담당 티켓. placeholder()가 채운다.
-  placeholder?: string;
   run(ctx: ReadCtx, input: Input): Promise<Result>;
 };
 
 export function defineCommand(spec: CommandSpec): CommandSpec {
   return spec;
-}
-
-// 구현 전 명령을 등록표에 올리는 자리표시. 실행하면 담당 티켓을 알리고 실패한다. 지금 쓰는 명령은 없다.
-export function placeholder(spec: Omit<CommandSpec, "run" | "placeholder">, ticket: string): CommandSpec {
-  return {
-    ...spec,
-    placeholder: ticket,
-    async run(ctx) {
-      const command = spec.path.join(" ");
-      return {
-        command,
-        mode: ctx.mode,
-        status: "failed",
-        steps: [],
-        notes: [],
-        next: null,
-        error: { message: `homelab ${command}은 아직 구현 전이다(${ticket})`, next: "homelab doctor" },
-      };
-    },
-  };
 }

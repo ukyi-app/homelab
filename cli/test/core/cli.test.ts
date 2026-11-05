@@ -66,14 +66,3 @@ describe("모든 명령: 사용법 오류는 외부 호출 없이 64", () => {
     });
   }
 });
-
-describe("자리표시 명령은 외부 호출 없이 exit 1", () => {
-  for (const c of REGISTRY.filter((x) => x.placeholder)) {
-    test(`homelab ${c.path.join(" ")} (${c.placeholder})`, async () => {
-      const r = await runCli([...argsOf(c), "--json"], []);
-      expect(r.code).toBe(1);
-      expect(r.json.error.message).toContain("아직 구현 전");
-      expect(r.calls).toEqual([]);
-    });
-  }
-});

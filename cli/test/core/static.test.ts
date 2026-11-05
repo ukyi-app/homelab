@@ -286,10 +286,9 @@ async function commandFiles(): Promise<{ file: string; cmd: CommandSpec }[]> {
   return out;
 }
 
-// 구현된 명령인데 시험 파일이 없거나 expectPlanReadOnly를 부르지 않는 파일 이름들.
-export function missingPlanTests(entries: { file: string; cmd: Pick<CommandSpec, "placeholder"> }[], testDir: string): string[] {
+// 시험 파일이 없거나 expectPlanReadOnly를 부르지 않는 명령 파일 이름들.
+export function missingPlanTests(entries: { file: string }[], testDir: string): string[] {
   return entries
-    .filter((e) => !e.cmd.placeholder)
     .filter((e) => {
       const t = join(testDir, `${e.file}.test.ts`);
       return !existsSync(t) || !readFileSync(t, "utf8").includes("expectPlanReadOnly(");
@@ -311,18 +310,17 @@ describe("명령 파일", () => {
     }
   });
 
-  test("구현된 명령마다 시험 파일이 있고 expectPlanReadOnly를 부른다(AC-2)", async () => {
+  test("명령마다 시험 파일이 있고 expectPlanReadOnly를 부른다(AC-2)", async () => {
     expect(missingPlanTests(await commandFiles(), join(TEST, "commands"))).toEqual([]);
   });
 
   // 시험 폴더는 fixture로 따로 만든다. 함정: 실제 commands 폴더로 보면 db-add 시험이 이미 있어 이 자기 확인이 깨진다.
-  test("검사가 두 단어 명령의 구현을 놓치지 않는다(자리표시를 지운 db-add로 확인)", async () => {
+  test("검사가 두 단어 명령을 놓치지 않는다(db-add로 확인)", async () => {
     const entries = await commandFiles();
     const dbAdd = entries.find((e) => e.cmd.path.join(" ") === "db add");
     expect(dbAdd).toBeDefined();
-    const one = [{ file: dbAdd!.file, cmd: { ...dbAdd!.cmd, placeholder: undefined } }];
+    const one = [{ file: dbAdd!.file }];
     const dir = mkdtempSync(join(testRoot(), "static-"));
-    expect(missingPlanTests([{ file: dbAdd!.file, cmd: { placeholder: "T12-02" } }], dir)).toEqual([]);
     expect(missingPlanTests(one, dir)).toEqual(["db-add"]);
     writeFileSync(join(dir, "db-add.test.ts"), "test(\"plan\", () => {});\n");
     expect(missingPlanTests(one, dir)).toEqual(["db-add"]);
