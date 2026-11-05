@@ -1,0 +1,63 @@
+
+#
+# 생성물이다. 손으로 고치지 않는다: tools/sandbox-profiles/generate.ts(containerd 기본값 + 변경).
+# 내용을 바꾸려면 이름의 버전을 올린다. 같은 이름에 apparmor_parser -r을 하면 도는 파드의 규칙이 그 자리에서 바뀐다.
+#
+# containerd 기본 프로필의 복사본이라 upstream 수정이 저절로 들어오지 않는다. 출발점은 host/versions.env의
+# SANDBOX_PROFILE_CONTAINERD 판이다. k3s·containerd를 올리면 다시 생성한다.
+#
+# 기본 프로필에는 dbus 규칙이 없어 시스템 버스가 Hello부터 거부한다. 그러면 node-exporter의 systemd 수집기가 실패하고
+# node_systemd_unit_state가 사라져 NodeSystemdUnitFailed가 울리지 못한다. 기본값에 더하는 것은 아래 dbus 규칙뿐이다.
+#
+abi <abi/3.0>,
+
+#include <tunables/global>
+
+profile homelab-sandbox-node-exporter-v1 flags=(attach_disconnected,mediate_deleted) {
+
+  #include <abstractions/base>
+
+  network,
+  capability,
+  file,
+  umount,
+  # Host (privileged) processes may send signals to container processes.
+  signal (receive) peer=unconfined,
+  # runc may send signals to container processes.
+  signal (receive) peer=runc,
+  # crun may send signals to container processes.
+  signal (receive) peer=crun,
+  # Manager may send signals to container processes.
+  signal (receive) peer=unconfined
+,
+  # Container processes may send signals amongst themselves.
+  signal (send,receive) peer=homelab-sandbox-node-exporter-v1,
+
+  deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
+  # deny write to files not in /proc/<number>/** or /proc/sys/**
+  deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,  # deny /proc/sys except /proc/sys/k* (effectively /proc/sys/kernel)
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,  # deny everything except shm* in /proc/sys/kernel/
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+
+  deny mount,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  # allow processes within the container to trace each other,
+  # provided all other LSM and yama setting allow it.
+  ptrace (trace,tracedby,read,readby) peer=homelab-sandbox-node-exporter-v1,
+
+  # 시스템 버스 접속, 유닛 목록, Manager·유닛 속성 읽기.
+  dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=Hello peer=(name=org.freedesktop.DBus),
+  dbus send bus=system path=/org/freedesktop/systemd1 interface=org.freedesktop.systemd1.Manager member=ListUnits peer=(name=org.freedesktop.systemd1),
+  dbus send bus=system path=/org/freedesktop/systemd1{,/unit/*} interface=org.freedesktop.DBus.Properties member=Get peer=(name=org.freedesktop.systemd1),
+}

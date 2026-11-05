@@ -14,8 +14,29 @@
   },
   "type": "object",
   "additionalProperties": false,
-  "required": ["infisical", "proxy", "worker"],
+  "required": ["infisical", "proxy", "worker", "task"],
+  "if": {
+    "properties": { "task": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] } },
+    "required": ["task"]
+  },
+  "then": {
+    "properties": {
+      "worker": { "properties": { "profile": { "properties": { "id": { "const": "claude-subscription" } } } } },
+      "task": { "properties": { "nodeName": { "minLength": 1 } } }
+    }
+  },
   "properties": {
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "image", "remoteCredentialKey", "nodeName"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "type": "string", "pattern": "^ghcr\\.io/ukyi-app/homelab-bot@sha256:[0-9a-f]{64}$" },
+        "remoteCredentialKey": { "const": "CLAUDE_CODE_OAUTH_TOKEN_TASK" },
+        "nodeName": { "type": "string", "pattern": "^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$" }
+      }
+    },
     "worker": {
       "type": "object",
       "additionalProperties": false,

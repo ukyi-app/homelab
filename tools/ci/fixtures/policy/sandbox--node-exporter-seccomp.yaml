@@ -1,0 +1,19 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: Localhost 프로필은
+# node-exporter 예외는 AppArmor 하나다. seccomp까지 Localhost로 바꾸면 막는다.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: node-exporter, namespace: observability}
+spec:
+  selector: {matchLabels: {app: node-exporter}}
+  template:
+    metadata: {labels: {app: node-exporter}}
+    spec:
+      containers:
+        - name: node-exporter
+          image: x
+          securityContext:
+            seccompProfile: {type: Localhost, localhostProfile: homelab/sandbox-worker-v1.json}
+            appArmorProfile: {type: Localhost, localhostProfile: homelab-sandbox-node-exporter-v1}

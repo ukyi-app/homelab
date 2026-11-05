@@ -1,0 +1,53 @@
+{{- if .Values.task.enabled }}
+# 작업 레인 저장 공간(설계 C.8). 작업별 home·config·workspace와 nonce·receipt(.homelab-worker/)를 둔다. codex-home과 나눈다.
+# 2GiB 고정 크기 파일 위 ext4다(host/install.sh --task-state-volume). local-retain을 쓰지 않는다. 그 PV는 루트 디스크라 비신뢰 코드가
+# 노드 디스크를 채울 수 있다. 경로·크기는 host/lib.sh TASK_STATE_*와 같아야 하고 tools/ci/policy.ts가 대조한다.
+# 함정: local PV는 크기를 강제하지 않는다. 상한은 그 파일시스템에서 온다. 그래서 마운트 지점이 아니라 그 안의 data를 가리킨다.
+# 마운트가 빠지면 경로가 없어 파드가 뜨지 않고, 루트 디스크로 새지 않는다.
+# 함정: 다 차면 nonce 기록이 실패한다. 재시작 때 그 상태면 작업자가 뜨지 못한다. 그때는 호스트에서 data 안 작업 공간을 사람이 지운다.
+# 노드에 이 볼륨이 없으면 PVC는 묶여도 파드가 뜨지 않아 root가 sandbox wave(-2)에서 멈춘다. 켜기 전에 install을 돌린다(values.yaml task).
+# claimRef는 이름·ns만 적는다. uid를 적으면 재구축 때 새 PVC에 묶이지 않는다. 백업하지 않는다. 끝난 작업은 지운다. 이미지는 PV가 지워져도 노드에 남는다.
+# wave: PV를 먼저 둔다. PVC가 volumeName으로 바로 묶여 소비자를 기다리지 않는다.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: worker-task-state
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  capacity:
+    storage: 2Gi
+  volumeMode: Filesystem
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  # 빈 값: 동적 생성 없이 이 PV에만 묶인다.
+  storageClassName: ""
+  claimRef:
+    namespace: sandbox
+    name: worker-task-state
+  local:
+    path: /var/lib/taskstate/mnt/data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - {{ .Values.task.nodeName }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: worker-task-state
+  namespace: sandbox
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ""
+  volumeName: worker-task-state
+  resources:
+    requests:
+      storage: 2Gi
+{{- end }}

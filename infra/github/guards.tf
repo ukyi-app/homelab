@@ -117,15 +117,24 @@ data "github_rest_api" "rulesets_homelab" {
   }
 }
 
+locals {
+  app_ruleset_names = {
+    for r in local.app_main_repos : r => sort(concat(["app-main"], contains(local.writer_repos, r) ? ["bot-branches"] : []))
+  }
+}
+
 data "github_rest_api" "rulesets_app" {
-  for_each   = local.app_main_repos
-  endpoint   = "repos/ukyi-app/${each.key}/rulesets?includes_parents=false&per_page=100"
-  depends_on = [github_repository_ruleset.app_main]
+  for_each = local.app_main_repos
+  endpoint = "repos/ukyi-app/${each.key}/rulesets?includes_parents=false&per_page=100"
+  depends_on = [
+    github_repository_ruleset.app_main,
+    github_repository_ruleset.bot_branches,
+  ]
 
   lifecycle {
     postcondition {
-      condition     = try(jsonencode([for r in jsondecode(self.body) : r.name]) == jsonencode(["app-main"]), false)
-      error_message = "guard 3: 앱 저장소·템플릿의 ruleset이 app-main 하나가 아니다."
+      condition     = try(jsonencode(sort([for r in jsondecode(self.body) : r.name])) == jsonencode(local.app_ruleset_names[each.key]), false)
+      error_message = "guard 3: 앱 저장소·템플릿의 ruleset 이름 집합이 선언과 다르다(app-main 하나, writer_repos 저장소는 bot-branches까지 둘)."
     }
   }
 }
@@ -170,6 +179,22 @@ data "github_rest_api" "bypass_app" {
         false
       )
       error_message = "guard 4: app-main의 bypass가 저장소 관리자(pull_request)만이 아니다. App bypass는 두지 않는다(D-26 조건 (1))."
+    }
+  }
+}
+
+# 목록과 정확히 같아야 하므로 exempt도, 관리자 bypass도 여기서 걸린다.
+data "github_rest_api" "bypass_bot_branches" {
+  for_each = local.writer_repos
+  endpoint = "repos/ukyi-app/${each.key}/rulesets/${github_repository_ruleset.bot_branches[each.key].ruleset_id}"
+
+  lifecycle {
+    postcondition {
+      condition = try(
+        jsonencode(sort([for a in jsondecode(self.body).bypass_actors : "${a.actor_type}:${a.actor_id == null ? "null" : a.actor_id}:${a.bypass_mode}"])) == jsonencode(sort(local.bot_branches_bypass)),
+        false
+      )
+      error_message = "guard 4: bot-branches의 bypass가 ukyi-writer App(always) 하나가 아니거나 exempt가 있다(또는 bypass_actors가 응답에 없다)."
     }
   }
 }

@@ -1528,9 +1528,11 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
 
 **함정: 살아 있는 클러스터에서 끄지 않는다.** Store와 `argocd-owner`는 추적 없이 남는다. 설계한 쓰임은 빈 클러스터 복구다. 시험을 다시 할 때도 살아 있는 VM 클러스터에 끄는 PR을 다시 넣지 않고 VM을 새로 만든다.
 
-**손으로 만들 것은 10개다.** `bun run ci --only external`이 출력하는 "끌 때 빠지는 것" 줄은 앱 0개일 때 13개(Store 3 + ExternalSecret 대상 10)다. 봇 등록(#995) 뒤로는 앱 몫 3개(`app-homelab-bot/homelab-bot-app`·`homelab-bot-db`, `database/pg-role-homelab-bot`)가 더해져 16개이고, 이 셋은 아래 "한계"대로 이 절이 아직 다루지 못한다. Store 셋은 Secret이 아니라 만들 것이 없다. 남는 10개는 Owner 9개와, 새 Secret이 아니라 Argo CD 설치가 만든 `argocd/argocd-secret`에 owner 자격 두 키를 합치는 Merge 1개다. 키는 17개로, 플랫폼 ExternalSecret 키 수와 같다(등록 앱 키는 따로다). 모든 ExternalSecret의 `target.template`은 `engineVersion: v2`, `mergePolicy: Merge`뿐이라(ES 라벨·Argo CD 추적 주석이 Secret에 복사되지 않게 하는 용도, 설계 B.8 E3), 손 Secret을 키 그대로, type Opaque, 라벨·주석·`ownerReferences`·`immutable` 없이 만들면 ESO 결과와 같다.
+**손으로 만들 것은 11개다.** `bun run ci --only external`이 출력하는 "끌 때 빠지는 것" 줄은 앱 0개일 때 14개(Store 3 + ExternalSecret 대상 11)다. 봇 등록(#995) 뒤로는 앱 몫 3개(`app-homelab-bot/homelab-bot-app`·`homelab-bot-db`, `database/pg-role-homelab-bot`)가 더해져 17개이고, 이 셋은 아래 "한계"대로 이 절이 아직 다루지 못한다. Store 셋은 Secret이 아니라 만들 것이 없다. 남는 11개는 Owner 10개와, 새 Secret이 아니라 Argo CD 설치가 만든 `argocd/argocd-secret`에 owner 자격 두 키를 합치는 Merge 1개다. 키는 18개로, 플랫폼 ExternalSecret 키 수와 같다(등록 앱 키는 따로다). 모든 ExternalSecret의 `target.template`은 `engineVersion: v2`, `mergePolicy: Merge`뿐이라(ES 라벨·Argo CD 추적 주석이 Secret에 복사되지 않게 하는 용도, 설계 B.8 E3), 손 Secret을 키 그대로, type Opaque, 라벨·주석·`ownerReferences`·`immutable` 없이 만들면 ESO 결과와 같다.
 
-**한계: 앱 0개에서만 실행했다.** 공유 차트·ApplicationSet 생성 Application 경로는 라이브로 보지 않았다(ci가 templatePatch를 sprig v3.3.0으로 실행해 끄면 ExternalSecret이 0개인지만 본다). 등록 앱이 생기면 그 앱의 Secret도 손으로 만들어야 한다. 그런데 앱 차트의 `<앱>-db`·`<앱>-valkey-url`과 데이터 차트의 `pg-role-<앱>`은 template에 `data`·`type`·`metadata`가 있어 1)의 지도가 "손으로 같은 결과를 만들 수 없는 모양"에서 멈추고, 개수 검사(10개)도 멈춘다. 그때는 이 절을 앱 경로까지 넓힌 뒤 쓴다.
+**작업 레인이 켜져 있다.** 이 절의 숫자는 `platform/sandbox/values.yaml`의 `task.enabled: true` 기준이다. 지도의 sandbox 항목은 `sandbox/worker-credential-claude-subscription`과 `sandbox/worker-task-credential-claude-subscription`(Secret 키 `CLAUDE_CODE_OAUTH_TOKEN` ← `/apps/homelab-bot/worker/CLAUDE_CODE_OAUTH_TOKEN_TASK`) 둘이고, 그래서 손 Secret 11개(Owner 10개 + Merge 1개), 키 18개다. canary는 sandbox 항목 전부에 들어가므로 VM 시험의 "ESO가 바꾼 항목"도 둘이다. 끄는 PR은 이 절의 개수, 1)·4)·6) 블록의 개수, canary 검사를 같은 PR에서 되돌린다. PVC `worker-task-state`는 백업하지 않는다. 디스크를 잃으면 진행 중 작업의 세션이 없으므로 봇이 명시 실패로 두고 사람이 retry한다. 새 노드에서는 root apply 전에 `sudo host/install.sh --cluster <이름> --task-state-volume`으로 빈 볼륨을 만든다(bootstrap.md 1절). 이미지가 남은 노드에서는 다시 포맷하지 않고 그대로 쓴다. UUID 기록(`/var/lib/taskstate/volume.uuid`)만 잃었으면 설치기가 멈춘다. 그 이미지를 버릴지 사람이 정한다.
+
+**한계: 앱 0개에서만 실행했다.** 공유 차트·ApplicationSet 생성 Application 경로는 라이브로 보지 않았다(ci가 templatePatch를 sprig v3.3.0으로 실행해 끄면 ExternalSecret이 0개인지만 본다). 등록 앱이 생기면 그 앱의 Secret도 손으로 만들어야 한다. 그런데 앱 차트의 `<앱>-db`·`<앱>-valkey-url`과 데이터 차트의 `pg-role-<앱>`은 template에 `data`·`type`·`metadata`가 있어 1)의 지도가 "손으로 같은 결과를 만들 수 없는 모양"에서 멈추고, 개수 검사(11개)도 멈춘다. 그때는 이 절을 앱 경로까지 넓힌 뒤 쓴다.
 
 **블록 공통.**
 
@@ -1575,7 +1577,7 @@ for (const d of docs.filter((d) => d.obj.kind === "ExternalSecret")) {
     keys: s.data.map((x) => ({ secretKey: x.secretKey, path: x.remoteRef.key.startsWith("/") ? x.remoteRef.key : `${base}/${x.remoteRef.key}` })) });
 }
 out.sort((a, b) => `${a.ns}/${a.target}`.localeCompare(`${b.ns}/${b.target}`));
-if (out.length !== 10) throw new Error(`손 Secret ${out.length}개(앱 0개일 때 10개. 등록 앱이 생겼으면 restore.md 3.1을 고친다)`);
+if (out.length !== 11) throw new Error(`손 Secret ${out.length}개(앱 0개일 때 11개. 등록 앱이 생겼으면 restore.md 3.1을 고친다)`);
 console.log(JSON.stringify(out, null, 2));
 TS
 )" >"$map.part"
@@ -1584,7 +1586,7 @@ echo "지도: 손 Secret $(jq length "$map")개, 키 $(jq '[.[].keys[]] | length
 EOF
 ```
 
-출력은 "지도: 손 Secret 10개, 키 17개"다. 2026-10-29 시험은 같은 스크립트를 저장소 밖에 두고 돌렸고(이 블록은 경로와 `CLUSTER`만 바꿨다), 운영 클러스터의 ExternalSecret(읽기만)에서 같은 모양을 만들어 정렬·대조해 같았다. 2026-10-30 이 블록의 `vm`·`prod` 로컬 렌더 결과도 그때 지도와 같았다.
+출력은 "지도: 손 Secret 11개, 키 18개"다. 2026-10-29 시험은 같은 스크립트를 저장소 밖에 두고 돌렸고(이 블록은 경로와 `CLUSTER`만 바꿨다), 운영 클러스터의 ExternalSecret(읽기만)에서 같은 모양을 만들어 정렬·대조해 같았다. 2026-10-30 이 블록의 `vm`·`prod` 로컬 렌더 결과도 그때 지도와 같았다. 둘 다 작업 레인 항목이 없던 때라 10개, 키 17개였다.
 
 **2) 암호화 내보내기.** 장애 전에 있어야 한다(복구 자산 "Infisical 암호화 내보내기", [recovery-assets.md](recovery-assets.md)). 형식은 `{project, env, at, secrets: {"<Infisical 경로>": "<값>"}}` JSON을 age 암호문구로 암호화한 파일 하나다. 아래 블록이 지도의 키만 담아 `$U40_DIR/<프로젝트>-export.age`로 만든다. 4)의 손 Secret 블록은 지도의 경로만 읽으므로 같은 형식에 키가 더 있는 내보내기도 그대로 쓴다. 실제 장애에서는 복구 자산의 최신 사본을 `$U40_DIR/homelab-export.age`로 둔다.
 
@@ -1631,7 +1633,7 @@ echo "내보내기 만듦: 키 $(wc -l <<<"$want")개(이름만 대조)"
 EOF
 ```
 
-출력은 "내보내기 만듦: 키 17개(이름만 대조)"다. 지도의 키 수라 플랫폼 ExternalSecret 키 수(17개)와 같다. 2026-10-29 시험 때는 운영 키가 그때 있던 edge-probe `GITHUB_WEBHOOK_SECRET`까지 18개였다. 멈춤: "missing"(지도 경로가 Infisical에 없음), 백업 파일 생김, 키 이름 불일치. 출력은 개수뿐이다.
+출력은 "내보내기 만듦: 키 18개(이름만 대조)"다. 지도의 키 수라 플랫폼 ExternalSecret 키 수(18개)와 같다. 2026-10-29 시험 때는 작업 레인 키가 없어 내보내기가 17개였고, 운영 키는 그때 있던 edge-probe `GITHUB_WEBHOOK_SECRET`까지 18개였다. 멈춤: "missing"(지도 경로가 Infisical에 없음), 백업 파일 생김, 키 이름 불일치. 출력은 개수뿐이다.
 
 **3) Argo CD와 ESO 부트스트랩 Secret.** 3절 3단계 순서(host → k3s → Argo CD → ESO 부트스트랩 Secret)대로 하고 root apply 앞에서 멈춘다. 장애 중이라 Store는 아직 없지만 부트스트랩 Secret은 켜는 PR 때 필요하니 지금 넣는다(값은 복구 자산에서 오고 Infisical이 없어도 된다).
 
@@ -1640,9 +1642,9 @@ EOF
 
 **4) 손 Secret(root apply 전).** `argocd-secret`이 있어야 두 키를 합칠 수 있어 Argo CD 설치 뒤, 첫 소비자보다 먼저 있어야 해서 root apply 전이다. 대상 ns는 이 블록이 먼저 만든다. root의 namespaces(wave -9)가 나중에 PSA 라벨을 붙여 넘겨받는다(3절 3단계의 `database`와 같은 방식). root apply 뒤에 넣으면 첫 소비자(wave -5: cloudflared·tailscale·adguard)가 `CreateContainerConfigError`·볼륨 대기에 들고, Deployment는 `progressDeadlineSeconds`(이 저장소는 모두 기본 600초) 뒤 Degraded가 된다. 그때 root가 sync를 실패로 끝내고 재시도하는지는 확인하지 않았다. 먼저 넣으면 이 경합이 없다.
 
-- VM 시험: **canary.** sandbox 작업자 자격 Secret(지도에서 ns `sandbox` 항목 하나, 지금 `worker-credential-claude-subscription`)의 `CLAUDE_CODE_OAUTH_TOKEN` 값만 비밀이 아닌 고정 문자열 `u40-canary-not-a-real-token`으로 바꿔 넣는다(`vm`에서만). 켠 뒤 그 해시가 내보내기 값으로 바뀌면 ESO가 data를 실제로 썼다는 직접 증거다. 나머지 9개는 값이 같아 ESO가 아무것도 쓰지 않아도 해시가 같다.
+- VM 시험: **canary.** sandbox 작업자 자격 Secret 둘(지도에서 ns `sandbox` 항목, 지금 `worker-credential-claude-subscription`과 `worker-task-credential-claude-subscription`)의 `CLAUDE_CODE_OAUTH_TOKEN` 값만 비밀이 아닌 고정 문자열 `u40-canary-not-a-real-token`으로 바꿔 넣는다(`vm`에서만). 켠 뒤 그 해시가 내보내기 값으로 바뀌면 ESO가 data를 실제로 썼다는 직접 증거다. 나머지 9개는 값이 같아 ESO가 아무것도 쓰지 않아도 해시가 같다.
   - **canary는 작업자가 받는 토큰 모양이어야 한다.** 앞뒤 공백을 뺀 인쇄 가능한 ASCII 한 줄, 공백 없이 16~8192자다. 모양이 틀리면 VM 작업자가 `credential_invalid`로 종료 1 → CrashLoop → Degraded가 되어 root가 wave -2에서 멈추고 5)가 실패한다.
-  - 키를 더하지 않고 있는 키의 값만 바꾼다. 스냅숏 해시는 지도 키만 보지만 `keys=map`은 Secret의 키 집합 전체를 본다. 여분 키가 있으면 `hand`·`before`가 `keys!=map`이고, 넘겨받을 때 ESO가 여분 키를 지우는지는 라이브로 보지 않았다 [미확인](6)의 소스 근거는 data를 통째로 바꿔 쓴다고 읽는다). 블록은 지도의 sandbox 항목 키가 `CLAUDE_CODE_OAUTH_TOKEN` 하나가 아니면 쓰기 전에 멈춘다. 실행기 프로필을 바꾸면 canary 값과 이 검사도 그 자격의 모양·키로 함께 바꾼다.
+  - 키를 더하지 않고 있는 키의 값만 바꾼다. 스냅숏 해시는 지도 키만 보지만 `keys=map`은 Secret의 키 집합 전체를 본다. 여분 키가 있으면 `hand`·`before`가 `keys!=map`이고, 넘겨받을 때 ESO가 여분 키를 지우는지는 라이브로 보지 않았다 [미확인](6)의 소스 근거는 data를 통째로 바꿔 쓴다고 읽는다). 블록은 지도의 sandbox 항목이 둘이 아니거나 항목마다 키가 `CLAUDE_CODE_OAUTH_TOKEN` 하나가 아니면 쓰기 전에 멈춘다. 실행기 프로필을 바꾸면 canary 값과 이 검사도 그 자격의 모양·키로 함께 바꾼다.
   - 켠 뒤 ESO가 값을 내보내기 값으로 바꾸면 작업자는 파드 재시작 없이 다음 실행부터 새 값을 읽는다(실행마다 파일을 다시 읽는다). 6)의 "재시작 수 바뀐 것 0" 판정과 맞는다.
 - 실제 복구(`prod`): sandbox 파드는 내보내기의 토큰 모양만 보고 Ready가 된다(모델 호출 없음). 장기 토큰이라 Codex 시드처럼 갱신으로 낡지는 않지만, 내보내기 뒤 철회·재발급했거나 만료(발급 뒤 1년)됐으면 첫 대화가 `auth_expired`다. 그때는 새 토큰을 발급해 Infisical에 넣고, 장애가 끝나 ESO가 넘겨받으면 반영된다. 이 경우 6) 판정에서 이 항목은 `hash!=expected`로 나온다(내보내기와 Infisical 값이 달라서다. 넘겨받기 실패가 아니다).
 - VM 시험: Alertmanager 수신자 Secret 둘(`alertmanager-healthchecks`, `alertmanager-telegram`)은 optional 볼륨이고 Alertmanager가 보낼 때 파일을 읽어, 값이 틀려도 파드는 뜨고 그 전송만 실패한다. **알림 판정을 안 하면 `homelab-dev`의 그 키에 가짜 값(`.invalid` 주소 등)을 넣는 것으로 충분하다**(2026-10-29 시험은 시험 체크·봇을 만들지 않았다).
@@ -1656,10 +1658,10 @@ host/verify.sh --cluster "$CLUSTER" --identity   # 다른 클러스터에서 돌
 map="$U40_DIR/map.json"; exp="$U40_DIR/$project-export.age"
 # canary는 작업자가 받는 토큰 모양(인쇄 가능한 ASCII 한 줄, 공백 없이 16자 이상)이어야 한다. 틀리면 VM 작업자가 credential_invalid로 멈춘다
 if [ "$CLUSTER" = vm ]; then canary=u40-canary-not-a-real-token; else canary=; fi
-[ "$(jq length "$map")" -eq 10 ] || { echo "지도가 10개가 아니다"; exit 1; }
-# canary는 sandbox 항목(작업자 자격 Secret 하나)의 있는 키 값만 바꾼다. 키를 더하면 스냅숏이 keys!=map이 된다
-[ -z "$canary" ] || [ "$(jq -c '[.[] | select(.ns == "sandbox") | .keys[].secretKey]' "$map")" = '["CLAUDE_CODE_OAUTH_TOKEN"]' ] \
-  || { echo "지도의 sandbox 항목 키가 CLAUDE_CODE_OAUTH_TOKEN 하나가 아니다(canary 자리, 프로필이 바뀌었으면 canary도 바꾼다)"; exit 1; }
+[ "$(jq length "$map")" -eq 11 ] || { echo "지도가 11개가 아니다"; exit 1; }
+# canary는 sandbox 항목(작업자 자격 Secret 둘)의 있는 키 값만 바꾼다. 키를 더하면 스냅숏이 keys!=map이 된다
+[ -z "$canary" ] || [ "$(jq -c '[.[] | select(.ns == "sandbox") | .keys[].secretKey]' "$map")" = '["CLAUDE_CODE_OAUTH_TOKEN","CLAUDE_CODE_OAUTH_TOKEN"]' ] \
+  || { echo "지도의 sandbox 항목이 CLAUDE_CODE_OAUTH_TOKEN 키 하나씩 둘이 아니다(canary 자리, 프로필이 바뀌었으면 canary도 바꾼다)"; exit 1; }
 [ "$(jq -c '[.[] | select(.creationPolicy == "Merge") | .ns + "/" + .target]' "$map")" = '["argocd/argocd-secret"]' ] \
   || { echo "Merge 대상이 argocd/argocd-secret 하나가 아니다"; exit 1; }
 # Owner 대상이 이미 있으면 멈춘다. 다시 돌릴 때 ESO가 넘겨받은 Secret을 덮지 않게
@@ -1685,7 +1687,7 @@ age -d "$exp" \
             then .stringData.CLAUDE_CODE_OAUTH_TOKEN = $canary else . end]}' 2>/dev/null \
   | kubectl apply --server-side --field-manager=u40-hand -f - 2>/dev/null \
   || { echo "손 Secret 만들기 실패(오류 문구는 값을 담을 수 있어 버렸다)" >&2; exit 1; }
-echo "손 Secret: Owner 9개 만듦${canary:+(sandbox 작업자 자격은 canary)}, argocd-secret에 두 키 합침"
+echo "손 Secret: Owner 10개 만듦${canary:+(sandbox 작업자 자격 둘은 canary)}, argocd-secret에 두 키 합침"
 EOF
 ```
 
@@ -1718,7 +1720,7 @@ cat "$out"   # UID·해시는 실행 기록에만 둔다
 EOF
 ```
 
-`hand` 통과: 10줄 모두 소유자 `none`, 라벨·주석 `-`·`-`, Owner 9개 `keys=map`. `argocd-secret`은 서버 키가 더 있어 `keys!=map`이 정상이다. 그다음 root를 apply한다(bootstrap.md 2.3, vm은 2.2 vm 4단계). 셸의 자격 변수는 `unset`한다.
+`hand` 통과: 11줄 모두 소유자 `none`, 라벨·주석 `-`·`-`, Owner 10개 `keys=map`. `argocd-secret`은 서버 키가 더 있어 `keys!=map`이 정상이다. 그다음 root를 apply한다(bootstrap.md 2.3, vm은 2.2 vm 4단계). 셸의 자격 변수는 `unset`한다.
 
 **5) 끈 상태 확인(root가 손 Secret만으로 끝까지 가는지).** 읽기만 한다.
 
@@ -1750,7 +1752,7 @@ EOF
 
 **6) 장애가 끝나면 켜는 PR, 넘겨받기 확인.**
 
-1. 스냅숏 `PHASE=before`를 돌리고, 아래 블록으로 내보내기의 기대 해시와 쓰는 파드의 재시작 수를 남긴다(암호문구 한 번). 기대 해시는 스냅숏과 같은 꼴(키 정렬, 값 base64, `jq -c` 한 줄 + 개행)로 계산하고, 값은 셸 변수와 파이프에만 있다. 통과: before와 대조해 다른 것 없음(VM 시험은 canary인 sandbox 작업자 자격 Secret 하나만 다름). 다른 것이 있으면 내보내기와 손 Secret이 다른 것이니 켜기 전에 원인을 본다. 2026-10-29: 10개 중 canary만 다름, 손 Secret ns 파드 27개 재시작 합 0.
+1. 스냅숏 `PHASE=before`를 돌리고, 아래 블록으로 내보내기의 기대 해시와 쓰는 파드의 재시작 수를 남긴다(암호문구 한 번). 기대 해시는 스냅숏과 같은 꼴(키 정렬, 값 base64, `jq -c` 한 줄 + 개행)로 계산하고, 값은 셸 변수와 파이프에만 있다. 통과: before와 대조해 다른 것 없음(VM 시험은 canary인 sandbox 작업자 자격 Secret 둘만 다름). 다른 것이 있으면 내보내기와 손 Secret이 다른 것이니 켜기 전에 원인을 본다. 2026-10-29(작업 레인 항목 전): 10개 중 canary 하나만 다름, 손 Secret ns 파드 27개 재시작 합 0.
 
    ```bash
    CLUSTER=vm bash -euo pipefail <<'EOF'
@@ -1764,14 +1766,14 @@ EOF
    age -d "$exp" | jq -r --slurpfile m "$map" '.secrets as $s | $m[0][] | . as $e
      | "\($e.ns)/\($e.target)\t" + ([$e.keys[] | {key: .secretKey, value: ($s[.path] | @base64)}] | sort_by(.key) | from_entries | tojson)' 2>/dev/null \
      | while IFS=$'\t' read -r id json; do printf '%s\t%s\n' "$id" "$(printf '%s\n' "$json" | sha256sum | cut -c1-12)"; done >"$D/expected.tsv"
-   [ "$(wc -l <"$D/expected.tsv")" -eq 10 ] || { echo "기대 해시가 10줄이 아니다"; exit 1; }
+   [ "$(wc -l <"$D/expected.tsv")" -eq 11 ] || { echo "기대 해시가 11줄이 아니다"; exit 1; }
    # 쓰는 파드(손 Secret이 있는 ns 전체)의 이름·UID·재시작 합계. UID가 있어야 같은 이름으로 다시 만들어진
    # StatefulSet 파드(pg-1, vmsingle-0 등)를 잡는다. 새 파드는 restartCount가 0부터라 재시작 수로는 안 보인다
    kubectl get pods -A -o json | jq -r --argjson ns "$(jq -c '[.[].ns] | unique' "$map")" \
      '.items[] | select(.metadata.namespace | IN($ns[])) | "\(.metadata.namespace)/\(.metadata.name)\t\(.metadata.uid)\t\([.status.containerStatuses[]?.restartCount] | add // 0)"' \
      | LC_ALL=C sort >"$D/restarts-before.tsv"
    echo "파드 기록: $(wc -l <"$D/restarts-before.tsv")개, 재시작 합 $(awk -F'\t' '{s+=$3} END{print s+0}' "$D/restarts-before.tsv")"
-   # before 해시와 기대 해시 대조. VM 시험은 canary(sandbox ns의 작업자 자격 Secret)만 달라야 한다
+   # before 해시와 기대 해시 대조. VM 시험은 canary(sandbox ns의 작업자 자격 Secret 둘)만 달라야 한다
    join -t $'\t' <(cut -f1,3 "$D/snap-before.tsv" | LC_ALL=C sort) <(LC_ALL=C sort "$D/expected.tsv") \
      | awk -F'\t' '{ s = ($2 == $3) ? "같음" : "다름"; print $1, s; if ($2 != $3) d = d " " $1; n++ } END { print "대조 " n "개, 다름:" (d ? d : " 없음") }'
    EOF
@@ -1780,7 +1782,7 @@ EOF
 2. VM 시험: 켜는 PR 전에 Infisical 차단을 푼다(아래 "VM 시험: Infisical 차단"의 해제 → 확인 파드 `MODE=open`). 열림이 확인되지 않으면 켜는 PR을 열지 않는다.
 3. 켜는 PR: 값 파일에서 `externalSecrets: false` 한 줄만 지운다(diff 한 줄). 손 Secret은 지우지 않는다. VM 시험: #989.
 4. Store: 동기화 뒤 `kubectl get clustersecretstore`가 셋 다 READY True. Store Ready는 Universal Auth 로그인과 폴더 목록 읽기가 성공해야 나오므로 Infisical에 다시 닿는다는 최종 증거다. False면 Infisical 폴더·부트스트랩 Secret(VM은 차단 해제)을 본다. 넘겨받기 실패가 아니다.
-5. 스냅숏 `PHASE=after`를 돌린 뒤 아래 판정 블록을 돌린다. 마지막 줄이 "넘겨받기 10/10 통과, 실패 0"이고 파드가 다시 만들어진 것(같은 이름, UID 바뀜) 0, 재시작 수가 바뀐 것 0, 사라진 것 0이면 넘겨받은 것이다. 블록은 둘 중 하나라도 어긋나거나 파드 목록을 읽지 못하면 0이 아닌 코드로 끝난다.
+5. 스냅숏 `PHASE=after`를 돌린 뒤 아래 판정 블록을 돌린다. 마지막 줄이 "넘겨받기 11/11 통과, 실패 0"이고 파드가 다시 만들어진 것(같은 이름, UID 바뀜) 0, 재시작 수가 바뀐 것 0, 사라진 것 0이면 넘겨받은 것이다. 블록은 둘 중 하나라도 어긋나거나 파드 목록을 읽지 못하면 0이 아닌 코드로 끝난다.
 
    ```bash
    CLUSTER=vm bash -uo pipefail <<'EOF'
@@ -1833,15 +1835,15 @@ EOF
    gone=$(LC_ALL=C comm -23 <(cut -f1 "$D/restarts-before.tsv") <(cut -f1 "$D/restarts-after.tsv") | wc -l)
    new=$(LC_ALL=C comm -13 <(cut -f1 "$D/restarts-before.tsv") <(cut -f1 "$D/restarts-after.tsv") | tr '\n' ' ')
    echo "파드: 다시 만들어진 것(같은 이름, UID 바뀜) $repl, 재시작 수 바뀐 것 $chg, 사라진 것 $gone, 새로 생긴 것: ${new:-없음}"
-   echo "넘겨받기 ${pass}/10 통과, 실패 $fail"
+   echo "넘겨받기 ${pass}/11 통과, 실패 $fail"
    # Secret 판정과 파드 영향이 둘 다 통과해야 0으로 끝난다
-   [ "$pass" -eq 10 ] && [ "$fail" -eq 0 ] && [ "$repl" -eq 0 ] && [ "$chg" -eq 0 ] && [ "$gone" -eq 0 ]
+   [ "$pass" -eq 11 ] && [ "$fail" -eq 0 ] && [ "$repl" -eq 0 ] && [ "$chg" -eq 0 ] && [ "$gone" -eq 0 ]
    EOF
    ```
 
    판정이 보는 것:
 
-   | 항목 | Owner 9개 | `argocd-secret`(Merge) |
+   | 항목 | Owner 10개 | `argocd-secret`(Merge) |
    |---|---|---|
    | UID | before = after(다시 만들지 않음) | 같음 |
    | 소유자 | none → `ExternalSecret/<지도의 es>`, `created-by` 라벨 | none 그대로 |

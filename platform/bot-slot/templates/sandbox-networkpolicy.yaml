@@ -1,7 +1,9 @@
 {{- /*
-(2) 작업자로 오는 작업 전달(설계 C.8 담는 것 (2)). platform/sandbox의 기본 거부에 더하는 유일한 ingress 허용이다.
+(2) 작업자로 오는 작업 전달(설계 C.8 담는 것 (2)). platform/sandbox의 기본 거부에 더하는 ingress 허용은 이 파일의 둘뿐이다.
 ns와 라벨을 함께 본다. 같은 봇 ns의 다른 파드(마이그레이션 Job 등)나 다른 ns의 같은 라벨은 닿지 않는다.
 작업자의 응답은 작업자 init 방화벽의 ESTABLISHED 허용으로 나간다.
+작업 레인 정책은 platform/sandbox task.enabled와 상관없이 늘 낸다. 이 차트는 그 값을 받지 않고, 파드가 없으면 고르는 대상이 0이다.
+정책을 합치지 않는다. 파드 selector를 넓히면 두 작업자에게 한 규칙이 걸려 한쪽만 줄일 수 없다.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -14,6 +16,30 @@ spec:
   podSelector:
     matchLabels:
       {{- include "botSlot.workerSelector" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.target.namespace }}
+          podSelector:
+            {{- include "botSlot.targetPodSelector" . | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.target.workerPort }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bot-slot-worker-task-ingress
+  namespace: sandbox
+  labels:
+    {{- include "botSlot.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "botSlot.taskWorkerSelector" . | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:

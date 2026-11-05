@@ -125,7 +125,7 @@ resource "github_repository_ruleset" "main_review" {
   }
 }
 
-# C. deploy/** 브랜치는 ukyi-deploy App만 만들고 바꾼다(키는 앱 main push의 태그 고정 app-build만 받는다).
+# C. deploy/ 아래 모든 브랜치는 ukyi-deploy App만 만들고 바꾼다(키는 앱 main push의 태그 고정 app-build만 받는다).
 # 삭제는 막지 않는다. 병합 뒤 브랜치 삭제 설정이 deploy 브랜치를 지운다.
 resource "github_repository_ruleset" "deploy_branches" {
   repository  = local.homelab
@@ -135,7 +135,10 @@ resource "github_repository_ruleset" "deploy_branches" {
 
   conditions {
     ref_name {
-      include = ["refs/heads/deploy/**"]
+      # GitHub은 File.fnmatch를 FNM_PATHNAME으로 쓴다. 끝의 `**`는 `*`처럼 한 단계만 맞아 `deploy/x/y` 같은 중첩
+      # 브랜치에는 걸리지 않는다. `**/*`가 그 아래 깊이를 덮고, 한 단계 `deploy/<앱>`은 두 패턴 모두로 확실히 덮는다.
+      # 적용 범위는 GET /repos/ukyi-app/homelab/rules/branches/<이름을 URL 인코딩>으로 이름마다 확인한다.
+      include = ["refs/heads/deploy/**", "refs/heads/deploy/**/*"]
       exclude = []
     }
   }
@@ -250,6 +253,51 @@ resource "github_repository_ruleset" "app_main" {
       require_last_push_approval        = false
       required_review_thread_resolution = false
       allowed_merge_methods             = ["merge", "squash", "rebase"]
+    }
+  }
+}
+
+# E. 설치 저장소의 bot/ 아래 브랜치는 ukyi-writer App만 만들고 바꾸고 지운다(D-24). 다른 신원이 열린 봇 PR의 브랜치를
+# 덮거나 지우지 못하게 삭제까지 막는다. 함정: repository rule은 병합 뒤 브랜치 자동 삭제도 막을 수 있어(GitHub 문서),
+# 병합된 bot/ 브랜치가 남으면 지우는 것도 writer 몫이다.
+# E는 writer를 bot/ 안에 가두지 않는다. bypass는 이 ruleset에만 걸려 writer는 ruleset 밖 브랜치를 그대로 만들 수 있다.
+# 그것은 게시 서버의 ref 제한과 main·deploy·태그 ruleset이 막는다. 이 bypass를 다른 ruleset에 복사하지 않는다(guard 4).
+# prevent_destroy를 두지 않는다. 설치를 거두면 인스턴스를 지워야 하고, 그 delete plan은 래퍼가 --allow-destroy 없이 멈춘다.
+resource "github_repository_ruleset" "bot_branches" {
+  for_each = local.writer_repos
+
+  repository  = each.key
+  name        = "bot-branches"
+  target      = "branch"
+  enforcement = "active"
+
+  conditions {
+    ref_name {
+      # deploy-branches와 같은 함정이다. 끝의 `**`는 FNM_PATHNAME에서 `*`처럼 한 단계만 맞아 `bot/x/y`에 걸리지 않는다.
+      # 적용 범위는 GET /repos/ukyi-app/<저장소>/rules/branches/<이름을 URL 인코딩>으로 이름마다 확인한다.
+      include = ["refs/heads/bot/**", "refs/heads/bot/**/*"]
+      exclude = []
+    }
+  }
+
+  bypass_actors {
+    actor_id    = var.homelab_writer_app_id
+    actor_type  = "Integration"
+    bypass_mode = "always"
+  }
+
+  rules {
+    creation = true
+    update   = true
+    deletion = true
+  }
+
+  lifecycle {
+    # 앱 저장소 밖이면 이 ruleset이 guard 3의 앱 저장소 기대에 들지 않는다. homelab에 만들면 apply 뒤 guard 3이 실패한 채로
+    # ruleset이 남고, 템플릿·오타에는 guard 3이 아예 돌지 않거나 맞지 않는다. 그래서 만들기 전에 plan에서 멈춘다.
+    precondition {
+      condition     = contains(local.app_repos, each.key)
+      error_message = "writer_repos의 저장소가 app-repos.json에 없다. 오타이거나, homelab처럼 guard 3·4의 앱 저장소 기대 밖이다. homelab을 더하려면 별도 승인(D-24)을 받고 homelab 쪽 guard 기대를 같은 PR에서 고친다."
     }
   }
 }

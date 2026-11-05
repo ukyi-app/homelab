@@ -1,0 +1,140 @@
+{{- /*
+작업 레인 작업자(설계 C.8 "작업자 파드 둘"). 비신뢰 코드를 돌리는 파드라 대화·리뷰 worker와 자격·영속 공간·라벨을 나눈다.
+worker-deployment.yaml에 있는 env·프로브 설명은 여기서 되풀이하지 않는다. 다른 점만 적는다.
+보안 조합은 봇 저장소 docs/ai-bot/DECISIONS.md "(2) 파드 실측 결과와 대가 수용"이고 tools/ci/policy.ts가 이 파드에만 허용한다.
+*/}}
+{{- if .Values.task.enabled }}
+{{- $proxy := printf "http://%s:%d" .Values.proxy.clusterIP (int .Values.proxy.port) }}
+{{- $profile := .Values.worker.profile }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-task
+  namespace: sandbox
+  labels:
+    {{- include "sandbox.taskWorkerLabels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  # 작업은 직렬 하나다. 작업 전용 파드라는 전제 위에 정리 판정이 선다: 끝난 작업의 프로세스를 파드 PID 공간 기준으로 끝내고
+  # 기준 상태(작업자 자신만)로 돌아와야 stopped:true다(설계 C.8). 두 파드가 겹치면 같은 PVC를 함께 쓴다.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "sandbox.taskWorkerLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sandbox.taskWorkerLabels" . | nindent 8 }}
+    spec:
+      # bwrap이 namespace를 만들려면 필요하다. 파드 root가 노드 root가 아니게 되는 쪽이기도 하다.
+      # idmap 마운트로 붙으므로 Secret·PVC가 uid 10001에 보인다(2026-11-04 실측).
+      hostUsers: false
+      # pause를 PID 1로 두어 고아 좀비를 회수하게 한다. Node가 PID 1이면 회수하지 않아, 악성 작업이 PID 상한까지 좀비를 채우면
+      # 다음 턴이 뜨지 못한다. 함정: 정리 sweep은 PID 1과 작업자만 남기고 파드 PID 공간의 나머지를 모두 끝낸다. 그래서 exec probe·
+      # exec lifecycle·kubectl exec는 sweep에 죽는다. pause는 다른 uid라 작업자 uid의 kill(-1)이 닿지 않는다.
+      shareProcessNamespace: true
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        # init 방화벽이 이 값을 받는다. Localhost 프로필은 worker 컨테이너에만 건다. 파드에 걸면 NET_ADMIN을 든 init까지 넓어진다.
+        seccompProfile:
+          type: RuntimeDefault
+        # 자격 Secret을 그룹으로 읽는 데 필요하다. local 볼륨에는 kubelet이 fsGroup을 적용해 기본값이면 파드마다 볼륨 전체를 다시 훑는다.
+        # 비신뢰 코드가 파일을 늘려 기동을 늦추지 못하게 루트가 맞으면 건너뛴다(data는 설치 때 10001:10001 2770이다).
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        {{- include "sandbox.egressFirewall" . | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ .Values.task.image }}
+          command: ["node", "dist/src/worker-main.js"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: HTTPS_PROXY
+              value: {{ $proxy | quote }}
+            - name: NO_PROXY
+              value: 127.0.0.1,localhost
+            - name: WORKER_EXECUTOR
+              value: {{ $profile.executor | quote }}
+            - name: WORKER_MODEL
+              value: {{ $profile.model | quote }}
+            - name: WORKER_CREDENTIAL_DIR
+              value: /run/worker-credential
+            - name: WORKER_CREDENTIAL_KEY
+              value: {{ $profile.credentialKey | quote }}
+            - name: WORKER_NONCE_DIR
+              value: /worker-state/.homelab-worker/nonces
+            - name: WORKER_CONTROL_PUBLIC_KEY
+              value: {{ .Values.worker.controlPublicKey | quote }}
+            # 이 작업자는 작업 레인만 받는다. 미설정이면 chat·review다.
+            - name: WORKER_LANES
+              value: task
+            # 작업별 home·config·workspace·tmp가 이 아래에 있다. 재개를 위해 파드 재시작 뒤에도 남는다.
+            - name: TASK_STATE_ROOT
+              value: /worker-state
+          # httpGet만 쓴다. exec probe는 정리 sweep에 죽어 파드가 NotReady로 흔들린다(tools/ci/policy.ts가 막는다).
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            # 샌드박스 안 새 /proc 마운트에 필요하다. 없으면 bwrap이 --proc에서 실패한다.
+            procMount: Unmasked
+            # 이름은 host/sandbox-profiles/의 정식 이름이다. 노드에 없으면 컨테이너가 뜨지 않는다(host/install.sh --sandbox-profiles).
+            # 프로필을 올릴 때는 새 버전 이름을 먼저 설치하고 이 줄을 바꾼다. 같은 이름을 다시 적재하면 도는 파드의 규칙이 바뀐다.
+            seccompProfile:
+              type: Localhost
+              localhostProfile: homelab/sandbox-worker-v1.json
+            appArmorProfile:
+              type: Localhost
+              localhostProfile: homelab-sandbox-worker-v1
+          volumeMounts:
+            - name: worker-state
+              mountPath: /worker-state
+            # 샌드박스 안 명령에서 가린다(denyRead). 실행기 자식 env로 토큰을 넣는 쪽은 worker와 같다.
+            - name: credential
+              mountPath: /run/worker-credential
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          # [가정] 빌드·시험을 돌리는 만큼 대화 작업자(1Gi)보다 크게 둔다. 작업 레인 실측이 쌓이면 다시 잰다.
+          # 넘으면 컨테이너가 OOM으로 재시작되고 실행 중이던 턴은 unknown이다.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 128Mi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: worker-state
+          persistentVolumeClaim:
+            claimName: worker-task-state
+        # subPath로 붙이지 않는다. kubelet이 Secret 갱신을 반영하지 않아 토큰 교체가 파드 재시작까지 안 보인다.
+        - name: credential
+          secret:
+            secretName: {{ include "sandbox.taskCredentialSecret" . }}
+            defaultMode: 0440
+        # 작업 임시 파일은 작업 공간의 tmp(TMPDIR)로 간다. 여기는 기동 확인과 작업자 자신의 임시 파일 자리다. 넘으면 kubelet이 파드를 쫓아낸다.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: firewall-run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+{{- end }}

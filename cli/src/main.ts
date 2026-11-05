@@ -28,7 +28,7 @@ function flagsOf(c: CommandSpec) {
 
 function overview(): string {
   const lines = ["사용법: homelab <명령> [인자] [--apply] [--json]", "", "명령:"];
-  for (const c of REGISTRY) lines.push(`  ${usageLine(c.path, c.args, c.flags).slice("homelab ".length).padEnd(70)} ${c.summary}${c.placeholder ? ` (아직 구현 전, ${c.placeholder})` : ""}`);
+  for (const c of REGISTRY) lines.push(`  ${usageLine(c.path, c.args, c.flags).slice("homelab ".length).padEnd(70)} ${c.summary}`);
   lines.push("", "바꾸는 명령은 기본이 plan(아무것도 바꾸지 않음)이고 --apply로 실행한다.", "종료 코드: 0 완료·변경 없음·plan, 1 실패, 3 대기(PR 병합·동기화), 64 사용법 오류. github 하위 명령은 래퍼 코드 그대로.");
   return lines.join("\n") + "\n";
 }

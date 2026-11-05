@@ -1,0 +1,16 @@
+# check: sandbox
+# expect: pass
+# node-exporter의 유닛 읽기 AppArmor(host/sandbox-profiles/)는 허용한다.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: node-exporter, namespace: observability}
+spec:
+  selector: {matchLabels: {app: node-exporter}}
+  template:
+    metadata: {labels: {app: node-exporter}}
+    spec:
+      containers:
+        - name: node-exporter
+          image: x
+          securityContext:
+            appArmorProfile: {type: Localhost, localhostProfile: homelab-sandbox-node-exporter-v1}

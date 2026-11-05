@@ -1,0 +1,17 @@
+# 봇 작업 레인 저장 공간(PV worker-task-state, 설계 C.8). 2GiB 고정 크기 파일 위의 ext4라 비신뢰 코드가 노드 디스크를 채우지 못한다.
+# host/install.sh --task-state-volume이 /etc/systemd/system/로 복사하고 켠다. 유닛 이름은 Where에서 나온다(systemd-escape).
+[Unit]
+Description=Bot task lane fixed-size volume
+# k3s보다 먼저 붙인다. 못 붙이면 data 디렉터리가 보이지 않아 PV를 쓰는 파드만 뜨지 못한다(루트 디스크로 새지 않는다).
+# Requires를 두지 않는다. 이 볼륨이 없어도 나머지 클러스터는 뜬다(LAN DNS가 AdGuard다).
+Before=k3s.service
+
+[Mount]
+What=/var/lib/taskstate/volume.img
+Where=/var/lib/taskstate/mnt
+Type=ext4
+# noexec를 두지 않는다. 작업이 시험·빌드 산출물을 실행한다. discard를 두지 않는다. 지운 파일이 이미지에 구멍을 뚫어 미리 할당이 줄어든다.
+Options=loop,nodev,nosuid
+
+[Install]
+WantedBy=local-fs.target

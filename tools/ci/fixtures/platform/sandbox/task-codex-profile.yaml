@@ -1,0 +1,13 @@
+# expect: fail
+# match: value must be 'claude-subscription'
+# 작업 레인은 Claude 샌드박스 전제다(설계 C.8). Codex 프로필과 함께 켜면 격리 없이 뜬다.
+task:
+  enabled: true
+  nodeName: ci-node
+worker:
+  profile:
+    id: codex-subscription
+    executor: codex
+    model: cli-default
+    credentialKey: CODEX_AUTH_JSON
+    egressHosts: [api.openai.com]

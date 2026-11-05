@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # k3s 설치 뒤 라이브 클러스터가 Git(host/)과 같은지 본다. 읽기만 하고 sudo 없이 실행한다(C.3.2 4번).
-# 예외 둘: 커널 nft 표와 삭제 원장 파일(0750 디렉터리 안)은 root만 읽어서 sudo -n(비밀번호를 묻지 않음)으로 읽어 본다.
+# 예외 넷: 커널 nft 표, 삭제 원장 파일(0750 디렉터리 안), 샌드박스 프로필(kubelet 디렉터리, 커널 AppArmor 목록), 작업 레인 이미지의
+# 파일시스템(0600 파일)은 root만 읽어서 sudo -n(비밀번호를 묻지 않음)으로 읽어 본다.
 #
 # 사용: host/verify.sh --cluster <이름> [--identity]
 #   기본        정체성, 노드 Ready, k3s 버전, 라이브 node-args = 렌더한 k3s-config.yaml,
 #               serving cert SAN, local-retain StorageClass, 파드 egress(유닛, 규칙 파일, 대역, 커널 표),
 #               inotify 인스턴스 한도(설치된 sysctl 파일, 커널 값), 삭제 원장 SSD(마운트, fstab, 원장 디렉터리·
-#               파일 소유·모드, 표식 형식. BULK_SSD_LABEL이 빈 클러스터는 건너뜀), kubeconfig 권한.
+#               파일 소유·모드, 표식 형식. BULK_SSD_LABEL이 빈 클러스터는 건너뜀), 샌드박스 프로필(containerd 판,
+#               호스트 조건, 깔린 파일 소유·모드·해시, AppArmor enforce 적재), 작업 레인 볼륨(유닛, 마운트 원본·ext4·rw·크기,
+#               이미지 크기·할당·UUID, data 소유·모드), kubeconfig 권한.
 #   --identity  정체성만 본다. 파괴 명령(삭제, 복구, 제거) 앞에서 대상 클러스터를 확인할 때 쓴다.
 #
 # 종료 코드: 0 통과, 1 실패, 2 실패는 없지만 커널 표를 못 읽어 미검증(sudo 자격이 없다).
@@ -235,6 +238,115 @@ check_inotify() {
   fi
 }
 
+# 샌드박스 프로필(install.sh --sandbox-profiles). containerd 판은 root 없이 보고, 파일과 커널 목록은 as_root로 본다.
+# 판이 다르면 프로필의 출발점이 라이브 기본값과 어긋난 것이다. k3s를 올리고 프로필을 다시 만들지 않으면 여기서 걸린다.
+check_sandbox_profiles() {
+  local live p
+  live="$(kc get node "$NODE_NAME" -o jsonpath='{.status.nodeInfo.containerRuntimeVersion}')" || live=""
+  if [ "$live" = "containerd://${SANDBOX_PROFILE_CONTAINERD}" ]; then
+    ok "containerd ${SANDBOX_PROFILE_CONTAINERD}가 샌드박스 프로필의 판과 같다"
+  else
+    bad "containerd가 샌드박스 프로필의 판과 다르다: 라이브 ${live:-없음}, versions.env ${SANDBOX_PROFILE_CONTAINERD}. tools/sandbox-profiles/regen.sh로 다시 만들고 다시 잰다"
+  fi
+  if ! as_root true; then
+    skip "샌드박스 프로필: kubelet 디렉터리와 커널 AppArmor 목록은 root만 읽는다. sudo -v 뒤 같은 터미널에서 다시 실행한다"
+    return
+  fi
+  p="$(sandbox_host_problems)"
+  if [ -z "$p" ]; then
+    ok "샌드박스 호스트 조건: apparmor.service enabled, Ubuntu bwrap·unpriv_bwrap enforce"
+  else
+    bad "샌드박스 호스트 조건:"$'\n'"${p}"
+  fi
+  p="$(sandbox_installed_problems)"
+  if [ -z "$p" ]; then
+    ok "샌드박스 프로필이 Git과 같다(소유·모드·해시, AppArmor enforce)"
+  else
+    bad "샌드박스 프로필이 Git과 다르다. sudo host/install.sh --cluster ${CLUSTER} --sandbox-profiles:"$'\n'"${p}"
+  fi
+}
+
+# 작업 레인 고정 크기 볼륨(install.sh --task-state-volume). 읽기만 한다. 값 파일로 건너뛰지 않는다. 운영·VM이 task.enabled를 함께 쓴다.
+# 마운트가 없으면 이미지를 더 보지 않고, 대신 루트 디스크 쪽에 data가 생겼는지 본다. 그것이 있으면 상한 없이 PV가 붙는다.
+check_task_state_volume() {
+  local en p
+  if cmp -s "$HOST_DIR/task-state/${TASK_STATE_UNIT_NAME}" "$TASK_STATE_UNIT"; then
+    ok "${TASK_STATE_UNIT}가 Git과 같다"
+  else
+    bad "${TASK_STATE_UNIT}가 없거나 host/task-state/와 다르다. sudo host/install.sh --cluster ${CLUSTER} --task-state-volume"
+  fi
+  en="$(systemctl is-enabled "$TASK_STATE_UNIT_NAME" 2>/dev/null || true)"
+  if [ "$en" = enabled ]; then
+    ok "${TASK_STATE_UNIT_NAME} enabled"
+  else
+    bad "${TASK_STATE_UNIT_NAME}가 enabled가 아니다(${en:-없음}). 재부팅하면 작업 레인 파드가 뜨지 않는다"
+  fi
+  p="$(task_state_mount_problem)"
+  if [ -n "$p" ]; then
+    bad "${p}. sudo host/install.sh --cluster ${CLUSTER} --task-state-volume"
+    if [ -z "$(task_state_mount_lines)" ] && { [ -e "$TASK_STATE_DATA" ] || [ -L "$TASK_STATE_DATA" ]; }; then
+      bad "마운트 안 된 루트 디스크 쪽에 ${TASK_STATE_DATA}가 있다. 크기 상한 없이 PV가 이 디렉터리를 붙일 수 있다"
+    fi
+    return
+  fi
+  ok "${TASK_STATE_MOUNT} 마운트(${TASK_STATE_IMAGE}, ext4, rw, nodev, nosuid, 상한 ${TASK_STATE_BYTES}바이트)"
+  p="$(task_state_file_problems)"
+  if [ -z "$p" ]; then
+    ok "이미지 크기 ${TASK_STATE_BYTES}바이트, 미리 할당, ${TASK_STATE_IMAGE_OWNER} 0600"
+  else
+    bad "이미지가 기대와 다르다:"$'\n'"${p}"
+  fi
+  p="$(stat_problem "$(stat -c '%u:%g %a %F' -- "$TASK_STATE_DATA" 2>/dev/null)" "$TASK_STATE_DATA_OWNER" 2770 directory "$TASK_STATE_DATA")"
+  if [ -z "$p" ]; then
+    ok "${TASK_STATE_DATA}(${TASK_STATE_DATA_OWNER} 2770)"
+  else
+    bad "data 디렉터리가 기대와 다르다: ${p}"
+  fi
+  if ! as_root true; then
+    skip "작업 레인 이미지 fs·UUID: 0600 파일이라 root만 읽는다. sudo -v 뒤 같은 터미널에서 다시 실행한다"
+    return
+  fi
+  p="$(task_state_fs_problems)"
+  if [ -z "$p" ]; then
+    ok "이미지 ext4, UUID가 기록과 같다"
+  else
+    bad "이미지 파일시스템이 기대와 다르다:"$'\n'"${p}"
+  fi
+}
+
+# tailnet TLS 감시(install.sh --tls-monitor). 결과 파일은 누구나 읽어 sudo가 필요 없다.
+check_tls_monitor() {
+  local src dest en act p
+  if [ "$TAILNET_JOIN" != "true" ]; then
+    if grep -qxF "$TLS_MONITOR_DISABLED_LINE" "$TLS_MONITOR_PROM" 2>/dev/null; then
+      ok "${TLS_MONITOR_PROM}에 끔 표시 있음(호스트가 tailnet에 들지 않아 타이머 없음)"
+    else
+      bad "${TLS_MONITOR_PROM}에 끔 표시가 없다. TailnetTLSMissing이 울린다. sudo host/install.sh --cluster ${CLUSTER} --tls-monitor"
+    fi
+    return
+  fi
+  while IFS=$'\t' read -r src dest _; do
+    if cmp -s "$src" "$dest"; then
+      ok "${dest}가 Git과 같다"
+    else
+      bad "${dest}가 없거나 ${src#"$HOST_DIR"/}와 다르다. sudo host/install.sh --cluster ${CLUSTER} --tls-monitor"
+    fi
+  done < <(tls_monitor_files)
+  en="$(systemctl is-enabled "$TLS_MONITOR_TIMER" 2>/dev/null || true)"
+  act="$(systemctl is-active "$TLS_MONITOR_TIMER" 2>/dev/null || true)"
+  if [ "$en" = enabled ] && [ "$act" = active ]; then
+    ok "${TLS_MONITOR_TIMER} enabled, active"
+  else
+    bad "${TLS_MONITOR_TIMER}가 enabled·active가 아니다(${en:-없음}, ${act:-없음})"
+  fi
+  p="$(tls_monitor_output_problems)"
+  if [ -z "$p" ]; then
+    ok "tailnet TLS 수집 결과가 최근 것이고 실패가 없다"
+  else
+    bad "tailnet TLS 수집 결과:"$'\n'"${p}"
+  fi
+}
+
 # kubeconfig에는 cluster-admin 자격이 있다.
 check_kubeconfig_mode() {
   local m
@@ -278,7 +390,7 @@ main() {
     return 0
   fi
 
-  require_cmds openssl timeout tr stat diff cmp systemctl sha256sum findmnt lsblk readlink
+  require_cmds openssl timeout tr stat diff cmp systemctl sha256sum findmnt lsblk readlink losetup
   resolve_magicdns
   K3S_CFG="$(render_k3s_config)"
   check_ready
@@ -289,19 +401,11 @@ main() {
   check_egress
   check_inotify
   check_bulk_ssd
+  check_sandbox_profiles
+  check_task_state_volume
+  check_tls_monitor
   check_kubeconfig_mode
   finish
-}
-
-# root만 읽는 것을 읽는다. root면 그대로, 아니면 sudo -n(비밀번호를 묻지 않는다). 자격이 없으면 2로 끝난다.
-as_root() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-  elif sudo -n true 2>/dev/null; then
-    sudo -n "$@"
-  else
-    return 2
-  fi
 }
 
 # 삭제 원장 SSD(install.sh --bulk-ssd). 읽기만 한다. 원장 파일 내용은 출력하지 않는다(기억 ID·시각).
@@ -372,5 +476,6 @@ finish() {
   log "verify 통과"
 }
 
-# tools/host-egress.test.sh(check_egress·finish)와 tools/host-k3s.test.sh(check_san·check_inotify)가 source한다. 그때는 main을 돌리지 않는다.
+# tools/host-egress.test.sh(check_egress·finish), tools/host-k3s.test.sh(check_san·check_inotify), tools/host-sandbox-profiles.test.sh(check_sandbox_profiles),
+# tools/host-task-state.test.sh(check_task_state_volume)가 source한다. 그때는 main을 돌리지 않는다.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

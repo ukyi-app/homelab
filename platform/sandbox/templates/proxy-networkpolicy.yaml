@@ -25,6 +25,15 @@ spec:
           podSelector:
             matchLabels:
               {{- include "sandbox.workerLabels" . | nindent 14 }}
+        {{- if .Values.task.enabled }}
+        # 작업 레인 작업자도 같은 프록시·같은 허용 이름으로 나간다.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sandbox
+          podSelector:
+            matchLabels:
+              {{- include "sandbox.taskWorkerLabels" . | nindent 14 }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: {{ .Values.proxy.port }}

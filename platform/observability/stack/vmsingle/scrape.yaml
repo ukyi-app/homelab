@@ -28,6 +28,11 @@ scrape_configs:
       - source_labels: [__meta_kubernetes_pod_phase]
         regex: (Pending|Succeeded|Failed)
         action: drop
+      # role: pod는 컨테이너 포트마다 대상을 만들고, 아래에서 주소를 주석 포트로 바꾼다. 포트가 둘인 파드(vmauth)는 같은 대상이
+      # 둘이 되어 30초마다 중복 오류를 남기므로 주석 포트의 대상만 남긴다. 주석 포트는 containerPort로 선언돼 있어야 한다.
+      # 선언이 없으면 대상이 사라지고 TargetMissing이 잡는다.
+      - source_labels: [__meta_kubernetes_pod_container_port_number, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: keep_if_equal
       - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
         regex: ([^:]+)(?::\d+)?;(\d+)
         replacement: $1:$2
@@ -44,7 +49,7 @@ scrape_configs:
         target_label: namespace
 
   # honor_labels: kube_* 지표의 namespace·pod는 대상 파드의 값이다. 덮어쓰면 모두 observability가 되고
-  # 진짜 값은 exported_*로 밀린다(옛 PodOOMKilled join 고장). 그래서 대상 라벨을 더하지 않는다.
+  # 진짜 값은 exported_*로 밀려 namespace·pod로 잇는 join이 깨진다. 그래서 대상 라벨을 더하지 않는다.
   - job_name: kube-state-metrics
     honor_labels: true
     kubernetes_sd_configs:
@@ -58,7 +63,7 @@ scrape_configs:
       - target_label: instance
         replacement: kube-state-metrics
 
-  # argocd_app_info. application-controller 8082는 상류 NetworkPolicy가 모든 ns에 연다(2026-10-22 실측).
+  # argocd_app_info. application-controller 8082는 상류 NetworkPolicy가 모든 ns에 연다(실측).
   - job_name: argocd
     kubernetes_sd_configs:
       - role: pod
@@ -73,7 +78,7 @@ scrape_configs:
     # 앱 지표의 namespace 라벨(Application이 있는 argocd)을 대상 라벨로 덮지 않는다.
     honor_labels: true
 
-  # externalsecret_status_condition. external-secrets ns에는 NetworkPolicy가 없다(2026-10-22 실측).
+  # externalsecret_status_condition. external-secrets ns에는 NetworkPolicy가 없다(실측).
   - job_name: external-secrets
     honor_labels: true
     kubernetes_sd_configs:
@@ -87,7 +92,7 @@ scrape_configs:
       - target_label: instance
         replacement: external-secrets
 
-  # certmanager_certificate_*(T24). 컨트롤러만 인증서 지표를 낸다. webhook·cainjector도 http-metrics 포트가 있어
+  # certmanager_certificate_*. 컨트롤러만 인증서 지표를 낸다. webhook·cainjector도 http-metrics 포트가 있어
   # component 라벨로 거른다. cert-manager ns에는 NetworkPolicy가 없다.
   # honor_labels: 지표의 namespace·name은 인증서의 것이다. 덮으면 cert-manager가 되고 진짜 값은 exported_*로 밀린다.
   - job_name: cert-manager
@@ -116,7 +121,41 @@ scrape_configs:
       - target_label: instance
         replacement: adguard-querylog
 
-  # CNPG 인스턴스(T11). 아직 파드가 없으면 대상이 0개라 up 시계열도 없다.
+  # 공개 경로의 두 구성 요소. 받는 쪽 허용은 platform/root/templates/traefik.yaml과
+  # platform/cloudflared/templates/networkpolicy.yaml이 연다.
+  # instance가 고정 이름이라 축출 등으로 끝난 파드가 남으면 살아 있는 파드와 라벨이 같아 한쪽이 중복 대상으로 버려진다.
+  # 버려지는 쪽이 살아 있는 파드면 지표가 끊기므로 phase로 거른다.
+  - job_name: traefik
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [traefik]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_container_port_name]
+        regex: traefik;metrics
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: (Pending|Succeeded|Failed)
+        action: drop
+      - target_label: instance
+        replacement: traefik
+
+  - job_name: cloudflared
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [cloudflared]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app, __meta_kubernetes_pod_container_port_name]
+        regex: cloudflared;metrics
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: (Pending|Succeeded|Failed)
+        action: drop
+      - target_label: instance
+        replacement: cloudflared
+
+  # CNPG 인스턴스. 파드가 없으면 대상이 0개라 up 시계열도 없다. 그 경우는 TargetMissing이 본다.
   - job_name: cnpg
     kubernetes_sd_configs:
       - role: pod
@@ -133,7 +172,7 @@ scrape_configs:
       - source_labels: [__meta_kubernetes_pod_name]
         target_label: instance
 
-  # 봇 지표(T16b D7 (a)). 봇 자리 Application(platform/bot-slot)이 만든 Service를 라벨로 고른다. 봇 ns·앱 이름을 여기 적지
+  # 봇 지표(봇 DECISIONS D7). 봇 자리 Application(platform/bot-slot)이 만든 Service를 라벨로 고른다. 봇 ns·앱 이름을 여기 적지
   # 않아 봇 값은 bot-slot values 한곳에 남는다(설계 C.8). 파드가 아니라 Service 주소를 수집해 파드가 없으면 대상이 사라지지
   # 않고 up == 0이 된다(TargetDown). Service가 아예 없으면 TargetMissing이 본다.
   # 받는 쪽 허용(vmsingle → 봇 지표 포트)은 bot-slot target-networkpolicy.yaml이 연다.
@@ -155,7 +194,7 @@ scrape_configs:
 
   # 컨테이너 메모리·CPU(limit 여유 산정용). metrics-server는 k3s에서 껐다.
   # kubelet 인증서는 k3s server CA가 서명해 SA의 ca.crt로 검증한다. 검증을 끄면 그 주소로 답하는 무엇에든
-  # SA 토큰이 넘어간다(옛 vmagent 정정 2026-09-02).
+  # SA 토큰이 넘어간다.
   - job_name: kubelet-cadvisor
     scheme: https
     metrics_path: /metrics/cadvisor

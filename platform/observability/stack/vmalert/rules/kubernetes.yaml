@@ -2,20 +2,30 @@
 groups:
   - name: kubernetes
     rules:
-      # 재시작 카운터의 increase 대신 대기 사유(gauge)를 본다. 카운터는 KSM 재시작에 새 시계열이 생긴다.
+      # 대기 사유(CrashLoopBackOff)가 아니라 재시작 횟수를 본다. 대기 사유는 재시작 사이에만 있다. kubelet 대기 상한 5분에서
+      # 한 번에 225초까지만 이어져(실측) for 5m을 채우지 못하고, 몇 분 돌다 죽는 컨테이너는 공백이 더 길다.
+      # 최근 20분 조건: 10분 넘게 돌면 kubelet이 대기를 초기화하므로 크래시 루프의 재시작 간격은 15분 남짓이다. 경보가 끊기지 않게 여유를 두고, 멎으면 20분 안에 해소된다.
+      # increase_prometheus는 창 안의 표본만 센다. MetricsQL의 increase·changes는 창 앞 표본이 없으면 첫 표본도 세어, 수집이
+      # 1시간 넘게 끊겼다 돌아오면 예전 재시작으로 오발화하고 새 파드의 재시작 2번을 3번으로 본다.
+      # 재부팅의 재시작은 컨테이너마다 1회라 3에 닿지 않는다(실측).
       - alert: KubePodCrashLooping
-        expr: max by (namespace, pod, container) (kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}) == 1
-        for: 5m
+        expr: |
+          max by (namespace, pod, container) (increase_prometheus(kube_pod_container_status_restarts_total[1h])) >= 3
+          and on (namespace, pod, container) max by (namespace, pod, container) (increase_prometheus(kube_pod_container_status_restarts_total[20m])) > 0
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.namespace }}/{{ $labels.pod }}의 {{ $labels.container }}가 CrashLoopBackOff다"
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }}의 {{ $labels.container }}가 최근 1시간에 3번 이상 재시작했다"
+          description: "kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c {{ $labels.container }} --previous"
 
       # 끝난 파드(Succeeded·Failed)는 Ready가 아니어도 정상이다. 실패한 Job 파드는 KubeJobFailed가 본다.
+      # Ready 조건은 스케줄된 뒤에 붙어, 스케줄되지 못한 파드는 kube_pod_status_ready 시계열이 없다. 그래서 Pending을 따로 본다.
+      # 양쪽 라벨이 같아 스케줄 전후로 for를 다시 세지 않는다.
       - alert: KubePodNotReady
         expr: |
           max by (namespace, pod) (kube_pod_status_ready{condition="true"}) == 0
           unless on (namespace, pod) max by (namespace, pod) (kube_pod_status_phase{phase=~"Succeeded|Failed"}) == 1
+          or max by (namespace, pod) (kube_pod_status_phase{phase="Pending"}) == 1
         for: 15m
         labels:
           severity: warning
@@ -23,13 +33,14 @@ groups:
           summary: "{{ $labels.namespace }}/{{ $labels.pod }}가 15분 넘게 Ready가 아니다"
 
       # 마지막 종료 사유는 다음 종료까지 남는다. 최근 10분 안에 재시작이 있었을 때만 본다.
-      # 시계열이 창 안에서 처음 생기면 VictoriaMetrics는 첫 값을 통째로 증가로 센다(단위 시험에서 확인).
-      # 그래서 수집 설정이 KSM의 instance를 고정한다. KSM 재시작마다 새 시계열이 생기면 재시작 이력이 있는 모든 컨테이너가 울린다.
+      # increase_prometheus는 창 안의 표본만 센다. increase는 창 앞 표본이 없으면 첫 값을 통째로 증가로 세어, 수집이 끊겼다
+      # 돌아오면 예전 OOM 기록이 있는 컨테이너가 재시작 없이도 울린다(단위 시험에서 확인).
+      # 대가: 새 파드가 첫 수집 전에 OOM으로 한 번 죽고 안정되면 잡지 못한다. 되풀이되면 다음 재시작에서 잡는다.
       - alert: OOMKilled
         expr: |
           max by (namespace, pod, container) (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}) == 1
           and on (namespace, pod, container)
-          max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total[10m])) > 0
+          max by (namespace, pod, container) (increase_prometheus(kube_pod_container_status_restarts_total[10m])) > 0
         labels:
           severity: warning
         annotations:

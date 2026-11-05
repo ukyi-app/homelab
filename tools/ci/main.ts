@@ -325,6 +325,22 @@ const steps: Step[] = [
     run: () => tool("host-bulk", ["bash", "tools/host-bulk.test.sh"]),
   },
   {
+    name: "host sandbox profiles",
+    // 커밋한 프로필 = base/ + generate.ts 변경, 이름·peer 규칙, k3s·containerd·go.mod 짝, install.sh --sandbox-profiles와 verify.sh 판정.
+    // containerd에서 base/를 다시 뽑는 대조와 apparmor_parser 문법은 Go·apparmor_parser가 없어 ci 밖이다(tools/sandbox-profiles/regen.sh --check).
+    run: () => tool("host-sandbox-profiles", ["bash", "tools/host-sandbox-profiles.test.sh"]),
+  },
+  {
+    name: "host task state",
+    // install.sh --task-state-volume(작업 레인 고정 크기 볼륨)의 포맷 금지·이미지 대조·마운트 대조 실패 때 data 0, verify.sh 판정을 가짜 명령과 임시 경로로 본다.
+    run: () => tool("host-task-state", ["bash", "tools/host-task-state.test.sh"]),
+  },
+  {
+    name: "host tls monitor",
+    // tailnet TLS 수집기를 실제 TLS 서버로(정상·만료·이름 불일치·모르는 CA·연결 거부·목록 실패) 보고, install.sh --tls-monitor와 verify.sh 판정을 가짜 명령과 임시 경로로 본다.
+    run: () => tool("host-tls-monitor", ["bash", "tools/host-tls-monitor.test.sh"]),
+  },
+  {
     name: "workflows",
     run: () => {
       const files = gitFiles(".github/workflows/*.yaml", ".github/workflows/*.yml").map((path) => ({ path, text: readText(path) }));
@@ -402,6 +418,19 @@ const steps: Step[] = [
       for (let c = 1; c <= 9; c++) if (!covered.has(c)) out.push({ rule: "fixture", where: dir, message: `조건 ${c}의 음성 fixture가 없다` });
       console.log(`deploy-merge fixture ${files.length}개`);
       return out;
+    },
+  },
+  {
+    name: "deploy-merge merge",
+    // 병합 단계의 재시도·상태 확인(tools/deploy-merge/merge.ts). GitHub은 가짜라 네트워크를 쓰지 않는다. 0건 통과는 실패다(B.8 E7).
+    run: () => {
+      const r = run(["bun", "cli/test/run.ts", "tools/deploy-merge/"]);
+      const out = (r.stdout + r.stderr).trim();
+      console.log(out);
+      const pass = Number(out.match(/^\s*(\d+) pass$/m)?.[1] ?? 0);
+      if (r.code !== 0) return [{ rule: "deploy-merge-merge", where: "tools/deploy-merge/", message: `bun test exit ${r.code}` }];
+      if (pass === 0) return [{ rule: "deploy-merge-merge", where: "tools/deploy-merge/", message: "통과한 시험이 0건이다" }];
+      return [];
     },
   },
   {

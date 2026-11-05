@@ -486,11 +486,13 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     else if (JSON.stringify(got) !== JSON.stringify([`${nodeIp}/32`])) {
       fail(vf, `cluster.kubernetesApi.endpointCIDRs는 [${nodeIp}/32](${env}의 NODE_IP)이다. 지금 ${JSON.stringify(got)}`);
     }
-    // 원장 PV의 nodeAffinity 노드. 노드 이름이 다르면 PV에 묶인 봇 파드가 어느 노드에도 뜨지 못한다. 값이 없으면(VM) PV가 없다.
-    const ledgerNode = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) as any)?.cluster?.deletionLedger?.nodeName;
-    if (ledgerNode !== undefined) {
+    // 원장·작업 레인 PV의 nodeAffinity 노드. 노드 이름이 다르면 PV에 묶인 파드가 어느 노드에도 뜨지 못한다. 값이 없으면 PV가 없다.
+    const clusterValues = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) as any)?.cluster;
+    for (const key of ["deletionLedger", "taskStateVolume"]) {
+      const pvNode = clusterValues?.[key]?.nodeName;
+      if (pvNode === undefined) continue;
       const nodeName = existsSync(join(ROOT, env)) ? readFileSync(join(ROOT, env), "utf8").match(/^NODE_NAME=["']?([a-z0-9-]+)["']?\s*$/m)?.[1] : undefined;
-      if (ledgerNode !== nodeName) fail(vf, `cluster.deletionLedger.nodeName은 ${env}의 NODE_NAME(${nodeName ?? "못 읽음"})이다. 지금 ${JSON.stringify(ledgerNode)}`);
+      if (pvNode !== nodeName) fail(vf, `cluster.${key}.nodeName은 ${env}의 NODE_NAME(${nodeName ?? "못 읽음"})이다. 지금 ${JSON.stringify(pvNode)}`);
     }
   }
 

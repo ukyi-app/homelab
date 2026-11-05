@@ -12,7 +12,8 @@
     "platform/charts/app/ci/**",
     "tools/ci/fixtures/**",
     "tools/deploy-merge/fixtures/**",
-    "infra/github/tests/**"
+    "infra/github/tests/**",
+    "tools/sandbox-profiles/containerd-defaults/**"
   ],
   "argocd": {
     "managerFilePatterns": ["/^platform/root/.+\\.yaml$/"]

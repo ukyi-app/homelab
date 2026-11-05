@@ -7,6 +7,10 @@ locals {
   app_main_repos = setunion(["homelab-app-template"], local.app_repos)
   # guard 8의 기대 집합: org의 보관되지 않은 public 저장소 전부.
   public_repos = setunion([local.homelab], local.app_main_repos)
+  # ukyi-writer App을 설치한 저장소(D-24). ruleset E와 guard 3·4의 기대가 모두 여기서 나온다. 설치 자체는 GitHub 설정이고
+  # Terraform은 이 집합과 실제 설치 목록을 대조하지 못한다. 설치 범위를 바꾸면 같은 PR에서 이 집합을 고친다.
+  # 앱 저장소만 넣을 수 있다(rulesets.tf E의 precondition). homelab을 더할 때는 guard 3·4의 homelab 쪽 기대도 함께 고친다.
+  writer_repos = toset(["homelab-smoke"])
 
   # 저장소 관리자 역할(RepositoryRole 5). owner의 일상 병합이 이 bypass다(설계 C.4.7 사람 PR의 병합).
   admin_role = 5
@@ -24,5 +28,6 @@ locals {
     "release-tags-lock"   = []
     "release-tags-create" = ["RepositoryRole:${local.admin_role}:always"]
   }
-  app_main_bypass = ["RepositoryRole:${local.admin_role}:pull_request"]
+  app_main_bypass     = ["RepositoryRole:${local.admin_role}:pull_request"]
+  bot_branches_bypass = ["Integration:${var.homelab_writer_app_id}:always"]
 }

@@ -16,6 +16,7 @@ export const RULES = [
   "automerge-scope",
   "deploy-merge-trigger",
   "deploy-merge-env",
+  "deploy-merge-checkout",
   "reusable-call",
   "dynamic-secrets",
   "merge-key-scope",
@@ -196,6 +197,13 @@ export function checkWorkflow(file: WorkflowFile): Violation[] {
     if (Array.isArray(job.steps)) {
       job.steps.forEach((st: any, i: number) => {
         if (st && typeof st === "object" && "uses" in st) uses.push({ where: `${where} steps[${i}]`, ref: String(st.uses) });
+        // deploy-merge는 판정과 병합을 main의 코드로 한다. PR head를 체크아웃하면 그 PR의 코드가 판정하고 병합 키 옆에서 돈다.
+        if (isMergeFile && String(st?.uses).toLowerCase().startsWith("actions/checkout@")) {
+          const w = st.with ?? {};
+          if (w.ref !== "${{ github.sha }}" || w["persist-credentials"] !== false || "repository" in w) {
+            add("deploy-merge-checkout", `${where} steps[${i}]`, "deploy-merge의 checkout은 with: {ref: ${{ github.sha }}, persist-credentials: false}만 쓴다");
+          }
+        }
       });
     }
     // job 수준 uses(reusable 호출)는 로컬(./)만 받고 그 밖은 reusable-call 규칙이 막는다. 고정 규칙은 step uses에만 건다.

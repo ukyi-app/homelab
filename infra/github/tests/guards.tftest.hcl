@@ -18,6 +18,7 @@
 variables {
   homelab_deploy_app_id = 1000001
   homelab_merge_app_id  = 1000002
+  homelab_writer_app_id = 1000003
 }
 
 mock_provider "github" {}
@@ -55,6 +56,17 @@ override_data {
 override_data {
   target = data.github_rest_api.rulesets_app
   values = { code = 200, body = "[{\"name\":\"app-main\"}]" }
+}
+
+# 인스턴스 override가 같은 자원의 전체 override보다 우선한다. writer 설치 저장소만 이름이 둘이다.
+override_data {
+  target = data.github_rest_api.rulesets_app["homelab-smoke"]
+  values = { code = 200, body = "[{\"name\":\"app-main\"},{\"name\":\"bot-branches\"}]" }
+}
+
+override_data {
+  target = data.github_rest_api.bypass_bot_branches
+  values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":1000003,\"actor_type\":\"Integration\",\"bypass_mode\":\"always\"}]}" }
 }
 
 override_data {
@@ -362,6 +374,88 @@ run "g3_app_extra" {
   expect_failures = [data.github_rest_api.rulesets_app]
 }
 
+run "g3_writer_repo_without_bot_branches" {
+  # 설치 저장소에서 E가 빠졌다. 그대로 두면 아무 신원이나 bot/ 브랜치를 덮는다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.rulesets_app["homelab-smoke"]
+    values = { code = 200, body = "[{\"name\":\"app-main\"}]" }
+  }
+  expect_failures = [data.github_rest_api.rulesets_app]
+}
+
+run "g3_writer_repo_without_app_main" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.rulesets_app["homelab-smoke"]
+    values = { code = 200, body = "[{\"name\":\"bot-branches\"}]" }
+  }
+  expect_failures = [data.github_rest_api.rulesets_app]
+}
+
+run "g3_writer_repo_extra" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.rulesets_app["homelab-smoke"]
+    values = { code = 200, body = "[{\"name\":\"app-main\"},{\"name\":\"bot-branches\"},{\"name\":\"other\"}]" }
+  }
+  expect_failures = [data.github_rest_api.rulesets_app]
+}
+
+run "g3_writer_repo_duplicate" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.rulesets_app["homelab-smoke"]
+    values = { code = 200, body = "[{\"name\":\"app-main\"},{\"name\":\"bot-branches\"},{\"name\":\"bot-branches\"}]" }
+  }
+  expect_failures = [data.github_rest_api.rulesets_app]
+}
+
+run "g3_writer_repo_any_order" {
+  # GitHub의 목록 순서에 기대지 않는다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.rulesets_app["homelab-smoke"]
+    values = { code = 200, body = "[{\"name\":\"bot-branches\"},{\"name\":\"app-main\"}]" }
+  }
+}
+
+run "g3_other_app_has_bot_branches" {
+  # 설치하지 않은 앱 저장소의 bot-branches는 선언 밖 ruleset이다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.rulesets_app["files"]
+    values = { code = 200, body = "[{\"name\":\"app-main\"},{\"name\":\"bot-branches\"}]" }
+  }
+  expect_failures = [data.github_rest_api.rulesets_app]
+}
+
+run "g3_template_has_bot_branches" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.rulesets_app["homelab-app-template"]
+    values = { code = 200, body = "[{\"name\":\"app-main\"},{\"name\":\"bot-branches\"}]" }
+  }
+  expect_failures = [data.github_rest_api.rulesets_app]
+}
+
+run "g3_waits_for_bot_branches_change" {
+  # E만 바뀌어도 guard 3은 apply 뒤로 미뤄진다. depends_on에서 E가 빠지면 망가진 응답을 plan 때 읽어 이 run이 실패한다.
+  # guard 4는 이 변경과 상관없이 통과하도록 바뀐 App ID로 응답을 맞춘다.
+  command = plan
+  variables {
+    homelab_writer_app_id = 1000009
+  }
+  override_data {
+    target = data.github_rest_api.bypass_bot_branches
+    values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":1000009,\"actor_type\":\"Integration\",\"bypass_mode\":\"always\"}]}" }
+  }
+  override_data {
+    target = data.github_rest_api.rulesets_app["homelab-smoke"]
+    values = { code = 200, body = "[{\"name\":\"app-main\"}]" }
+  }
+}
+
 run "g4_checks_bypass" {
   # 필수 검사에 bypass
   command = plan
@@ -412,6 +506,95 @@ run "g4_app_main_app_bypass" {
     values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":5,\"actor_type\":\"RepositoryRole\",\"bypass_mode\":\"pull_request\"},{\"actor_id\":1000001,\"actor_type\":\"Integration\",\"bypass_mode\":\"always\"}]}" }
   }
   expect_failures = [data.github_rest_api.bypass_app]
+}
+
+run "g4_writer_bypass_copied_to_app_main" {
+  # E의 bypass를 앱 main에 복사하면 writer가 앱 main에 직접 쓴다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.bypass_app["homelab-smoke"]
+    values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":5,\"actor_type\":\"RepositoryRole\",\"bypass_mode\":\"pull_request\"},{\"actor_id\":1000003,\"actor_type\":\"Integration\",\"bypass_mode\":\"always\"}]}" }
+  }
+  expect_failures = [data.github_rest_api.bypass_app]
+}
+
+run "g4_bot_branches_extra_actor" {
+  # 다른 App이 더 들어옴
+  command = plan
+  override_data {
+    target = data.github_rest_api.bypass_bot_branches["homelab-smoke"]
+    values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":1000003,\"actor_type\":\"Integration\",\"bypass_mode\":\"always\"},{\"actor_id\":999,\"actor_type\":\"Integration\",\"bypass_mode\":\"always\"}]}" }
+  }
+  expect_failures = [data.github_rest_api.bypass_bot_branches]
+}
+
+run "g4_bot_branches_admin_actor" {
+  # 관리자 역할도 E를 우회하지 않는다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.bypass_bot_branches["homelab-smoke"]
+    values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":1000003,\"actor_type\":\"Integration\",\"bypass_mode\":\"always\"},{\"actor_id\":5,\"actor_type\":\"RepositoryRole\",\"bypass_mode\":\"always\"}]}" }
+  }
+  expect_failures = [data.github_rest_api.bypass_bot_branches]
+}
+
+run "g4_bot_branches_other_app" {
+  # 다른 App으로 바뀜(Integration 종류와 모드는 같다)
+  command = plan
+  override_data {
+    target = data.github_rest_api.bypass_bot_branches["homelab-smoke"]
+    values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":999,\"actor_type\":\"Integration\",\"bypass_mode\":\"always\"}]}" }
+  }
+  expect_failures = [data.github_rest_api.bypass_bot_branches]
+}
+
+run "g4_bot_branches_pull_request_mode" {
+  # 모드가 다르면 게시 서버의 브랜치 push가 막힌다.
+  command = plan
+  override_data {
+    target = data.github_rest_api.bypass_bot_branches["homelab-smoke"]
+    values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":1000003,\"actor_type\":\"Integration\",\"bypass_mode\":\"pull_request\"}]}" }
+  }
+  expect_failures = [data.github_rest_api.bypass_bot_branches]
+}
+
+run "g4_bot_branches_exempt" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.bypass_bot_branches["homelab-smoke"]
+    values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":1000003,\"actor_type\":\"Integration\",\"bypass_mode\":\"exempt\"}]}" }
+  }
+  expect_failures = [data.github_rest_api.bypass_bot_branches]
+}
+
+run "g4_bot_branches_no_actor" {
+  command = plan
+  override_data {
+    target = data.github_rest_api.bypass_bot_branches["homelab-smoke"]
+    values = { code = 200, body = "{\"bypass_actors\":[]}" }
+  }
+  expect_failures = [data.github_rest_api.bypass_bot_branches]
+}
+
+run "g4_bot_branches_no_bypass_field" {
+  # 쓰기 권한 없는 토큰에는 bypass_actors가 없다
+  command = plan
+  override_data {
+    target = data.github_rest_api.bypass_bot_branches["homelab-smoke"]
+    values = { code = 200, body = "{\"name\":\"bot-branches\"}" }
+  }
+  expect_failures = [data.github_rest_api.bypass_bot_branches]
+}
+
+run "g4_bot_branches_after_apply" {
+  # 빈 state에서는 E 생성이 예정돼 있어 guard 4가 apply 뒤에 평가된다.
+  command   = apply
+  state_key = "g4_bot_branches_after_apply"
+  override_data {
+    target = data.github_rest_api.bypass_bot_branches["homelab-smoke"]
+    values = { code = 200, body = "{\"bypass_actors\":[{\"actor_id\":999,\"actor_type\":\"Integration\",\"bypass_mode\":\"always\"}]}" }
+  }
+  expect_failures = [data.github_rest_api.bypass_bot_branches]
 }
 
 run "g5_no_codeowners" {
@@ -539,6 +722,14 @@ run "app_id_placeholder" {
   expect_failures = [var.homelab_deploy_app_id]
 }
 
+run "writer_app_id_placeholder" {
+  command = plan
+  variables {
+    homelab_writer_app_id = 0
+  }
+  expect_failures = [var.homelab_writer_app_id]
+}
+
 run "g5_codeowners_partial" {
   # 오류 없는 파일이지만 /docs/만 소유한다.
   command = plan
@@ -573,5 +764,30 @@ run "main_update_restricted" {
   assert {
     condition     = !coalesce(github_repository_ruleset.main_review.rules[0].update_allows_fetch_and_merge, false) && alltrue([for r in github_repository_ruleset.app_main : !coalesce(r.rules[0].update_allows_fetch_and_merge, false)])
     error_message = "update_allows_fetch_and_merge를 켜지 않는다."
+  }
+}
+
+run "bot_branches_shape" {
+  # guard 4는 bypass만 본다. 대상과 규칙은 선언을 직접 확인한다. 끝의 `**`만 두면 bot/x/y가 빠진다(FNM_PATHNAME).
+  command = plan
+  assert {
+    condition     = contains(keys(github_repository_ruleset.bot_branches), "homelab-smoke")
+    error_message = "homelab-smoke에 bot-branches가 없다."
+  }
+  assert {
+    condition     = alltrue([for r in github_repository_ruleset.bot_branches : r.name == "bot-branches" && r.target == "branch" && r.enforcement == "active"])
+    error_message = "bot-branches의 이름·대상 종류·enforcement가 다르다."
+  }
+  assert {
+    condition     = alltrue([for r in github_repository_ruleset.bot_branches : jsonencode(r.conditions[0].ref_name[0].include) == jsonencode(["refs/heads/bot/**", "refs/heads/bot/**/*"]) && length(r.conditions[0].ref_name[0].exclude) == 0])
+    error_message = "bot-branches의 대상 패턴이 bot/**와 bot/**/* 둘이 아니다."
+  }
+  assert {
+    condition     = alltrue([for r in github_repository_ruleset.bot_branches : r.rules[0].creation == true && r.rules[0].update == true && r.rules[0].deletion == true])
+    error_message = "bot-branches에 생성·갱신·삭제 제한 중 빠진 것이 있다."
+  }
+  assert {
+    condition     = alltrue([for r in github_repository_ruleset.bot_branches : jsonencode([for a in r.bypass_actors : "${a.actor_type}:${a.actor_id}:${a.bypass_mode}"]) == jsonencode(["Integration:1000003:always"])])
+    error_message = "bot-branches의 선언된 bypass가 ukyi-writer App(always) 하나가 아니다."
   }
 }

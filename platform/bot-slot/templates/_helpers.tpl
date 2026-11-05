@@ -21,6 +21,11 @@ matchExpressions:
 app: worker
 {{- end }}
 
+{{/* 작업 레인 작업자 파드 라벨. platform/sandbox의 sandbox.taskWorkerLabels와 같아야 한다. */}}
+{{- define "botSlot.taskWorkerSelector" -}}
+app: worker-task
+{{- end }}
+
 {{- define "botSlot.labels" -}}
 app.kubernetes.io/part-of: bot-slot
 app.kubernetes.io/managed-by: argocd

@@ -122,6 +122,31 @@ tests:
               summary: 호스트 유닛 backup.service의 상태가 failed다
               description: systemctl status backup.service, journalctl -u backup.service
 
+  - name: NodeSystemdCollectorFailed는 systemd 수집기만 본다
+    interval: 1m
+    input_series:
+      - series: 'node_scrape_collector_success{instance="nuc", collector="systemd"}'
+        values: "1x5 0x20"
+      # 기능이 없는 수집기는 늘 0이다. 이 시계열로는 발화하지 않아야 한다.
+      - series: 'node_scrape_collector_success{instance="nuc", collector="zfs"}'
+        values: "0x25"
+    alert_rule_test:
+      - eval_time: 20m
+        groupname: node
+        alertname: NodeSystemdCollectorFailed
+        exp_alerts: []
+      - eval_time: 22m
+        groupname: node
+        alertname: NodeSystemdCollectorFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: nuc
+              collector: systemd
+            exp_annotations:
+              summary: nuc의 호스트 유닛 상태 수집이 실패한다. NodeSystemdUnitFailed가 울리지 못한다
+              description: kubectl -n observability logs ds/node-exporter. AppArmor 거부는 journalctl -k -g dbus_method_call, 프로필 설치는 sudo host/install.sh --sandbox-profiles.
+
   - name: TargetMissing은 발견 대상이 사라진 job마다 발화한다
     interval: 1m
     input_series:
@@ -150,6 +175,8 @@ tests:
       - series: 'up{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
         values: "1x15"
       - series: 'up{job="cnpg", cluster="pg", instance="pg-1", namespace="database"}'
+        values: "1x15"
+      - series: 'up{job="traefik", instance="traefik"}'
         values: "1x15"
     alert_rule_test:
       - eval_time: 9m
@@ -197,6 +224,8 @@ tests:
         values: "1x15"
       - series: 'up{job="cnpg", cluster="pg", instance="pg-1", namespace="database"}'
         values: "1x15"
+      - series: 'up{job="traefik", instance="traefik"}'
+        values: "1x15"
     alert_rule_test:
       - eval_time: 11m
         groupname: core
@@ -240,6 +269,8 @@ tests:
         values: "1x30"
       - series: 'up{job="cnpg", cluster="pg", instance="pg-1", namespace="database"}'
         values: "1x5 _x25"
+      - series: 'up{job="traefik", instance="traefik"}'
+        values: "1x30"
     alert_rule_test:
       - eval_time: 5m
         groupname: core
@@ -254,6 +285,55 @@ tests:
               job: cnpg
             exp_annotations:
               summary: 수집 대상 cnpg이 10분 넘게 발견되지 않는다
+              description: 파드가 없거나 수집 설정의 라벨·포트 선택이 맞지 않는다(vmsingle/scrape.yaml).
+
+  - name: TargetMissing은 Traefik 파드가 사라지면 발화한다
+    interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics", instance="kube-state-metrics"}'
+        values: "1x30"
+      - series: 'up{job="node-exporter", instance="nuc"}'
+        values: "1x30"
+      - series: 'up{job="vector", instance="nuc"}'
+        values: "1x30"
+      - series: 'up{job="vmalert", instance="vmalert"}'
+        values: "1x30"
+      - series: 'up{job="alertmanager", instance="alertmanager"}'
+        values: "1x30"
+      - series: 'up{job="victorialogs", instance="victorialogs"}'
+        values: "1x30"
+      - series: 'up{job="grafana", instance="grafana"}'
+        values: "1x30"
+      - series: 'up{job="vmauth", instance="vmauth"}'
+        values: "1x30"
+      - series: 'up{job="argocd", instance="argocd-application-controller"}'
+        values: "1x30"
+      - series: 'up{job="external-secrets", instance="external-secrets"}'
+        values: "1x30"
+      - series: 'up{job="cert-manager", instance="cert-manager"}'
+        values: "1x30"
+      - series: 'up{job="kubelet-cadvisor", instance="nuc"}'
+        values: "1x30"
+      - series: 'up{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x30"
+      - series: 'up{job="cnpg", cluster="pg", instance="pg-1", namespace="database"}'
+        values: "1x30"
+      - series: 'up{job="traefik", instance="traefik"}'
+        values: "1x5 _x25"
+    alert_rule_test:
+      - eval_time: 5m
+        groupname: core
+        alertname: TargetMissing
+        exp_alerts: []
+      - eval_time: 25m
+        groupname: core
+        alertname: TargetMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: traefik
+            exp_annotations:
+              summary: 수집 대상 traefik이 10분 넘게 발견되지 않는다
               description: 파드가 없거나 수집 설정의 라벨·포트 선택이 맞지 않는다(vmsingle/scrape.yaml).
 
   - name: TargetDown은 cert-manager 컨트롤러가 응답하지 않으면 발화한다

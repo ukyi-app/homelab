@@ -14,7 +14,7 @@ CLUSTER_KEYS="NODE_NAME NODE_IP NODE_IFACE TAILNET_JOIN KUBE_CONTEXT POD_CIDR SE
 # 비워 둘 수 있는 클러스터 값. TAILNET_DEVICE_NAME이 비면 NODE_NAME을 쓴다.
 # BULK_SSD_LABEL·BULK_MOUNT는 둘 다 비우거나 둘 다 채운다. 비면 SSD 단계(install --bulk-ssd, verify)를 건너뛴다.
 OPTIONAL_KEYS="TAILNET_DEVICE_NAME BULK_SSD_LABEL BULK_MOUNT"
-COMMON_KEYS="INSTALL_K3S_VERSION TIMEZONE NODE_UPSTREAM_DNS"
+COMMON_KEYS="INSTALL_K3S_VERSION SANDBOX_PROFILE_K3S SANDBOX_PROFILE_CONTAINERD TIMEZONE NODE_UPSTREAM_DNS"
 NODE_MAGICDNS=""
 # 파드 egress 규칙(install.sh --egress). 표 이름은 k3s·Tailscale의 표와 겹치지 않게 따로 둔다.
 # 표 이름과 경로는 host/egress/의 두 파일에도 글자로 있다. 바꾸면 셋을 함께 바꾼다.
@@ -40,6 +40,55 @@ EGRESS_UNIT="/etc/systemd/system/${EGRESS_UNIT_NAME}"
   # 첫 초기화의 generation 원천. 시험이 바꾼다.
   UUID_SRC=/proc/sys/kernel/random/uuid
 }
+# 샌드박스 프로필(install.sh --sandbox-profiles). 경로·소유는 tools/host-sandbox-profiles.test.sh가 root 없이 돌리려고 바꾼다.
+# seccomp는 kubelet이 <root-dir>/seccomp 아래에서 찾는다. 파드의 localhostProfile은 homelab/<파일>이다.
+# shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
+{
+  KUBELET_DIR=/var/lib/kubelet
+  SANDBOX_SECCOMP_DIR="${KUBELET_DIR}/seccomp/homelab"
+  APPARMOR_DIR=/etc/apparmor.d
+  APPARMOR_KERNEL_PROFILES=/sys/kernel/security/apparmor/profiles
+  SANDBOX_OWNER=0:0
+}
+# 작업 레인 고정 크기 볼륨(install.sh --task-state-volume). 경로·크기는 platform/sandbox의 PV worker-task-state와 같은 값이고
+# tools/ci/policy.ts가 대조한다. /var/lib/homelab 아래에 두지 않는다. --k3s가 그 폴더를 0700으로 만들어 sudo 없는 verify가 못 읽는다.
+# 경로에 -를 쓰지 않는다. systemd 유닛 이름에서 \x2d가 된다.
+# data 소유는 worker-task의 uid·gid다. hostUsers: false 파드의 볼륨은 idmap으로 붙어 파일의 10001이 파드 안 10001로 보인다.
+# 크기·소유는 tools/host-task-state.test.sh가 root 없이 작게 돌리려고 바꾼다.
+# shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
+{
+  TASK_STATE_IMAGE=/var/lib/taskstate/volume.img
+  TASK_STATE_UUID_FILE=/var/lib/taskstate/volume.uuid
+  TASK_STATE_MOUNT=/var/lib/taskstate/mnt
+  TASK_STATE_DATA="${TASK_STATE_MOUNT}/data"
+  TASK_STATE_BYTES=2147483648
+  TASK_STATE_LABEL=homelab-task
+  TASK_STATE_UNIT_NAME=var-lib-taskstate-mnt.mount
+  TASK_STATE_UNIT="/etc/systemd/system/${TASK_STATE_UNIT_NAME}"
+  TASK_STATE_IMAGE_OWNER=0:0
+  TASK_STATE_DATA_OWNER=10001:10001
+}
+# tailnet TLS 감시(install.sh --tls-monitor). 출력 디렉터리는 node-exporter --collector.textfile.directory와 같은 값이다.
+# 경로와 사용자 이름은 host/tls-monitor/의 유닛에도 글자로 있다. 바꾸면 함께 바꾼다.
+# 경로·소유는 tools/host-tls-monitor.test.sh가 root 없이 돌리려고 바꾼다.
+# shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
+{
+  TLS_MONITOR_USER=homelab-tls-monitor
+  TLS_MONITOR_DIR=/var/lib/homelab-tls-monitor
+  TLS_MONITOR_DIR_OWNER="${TLS_MONITOR_USER}:${TLS_MONITOR_USER}"
+  TLS_MONITOR_PROM="${TLS_MONITOR_DIR}/tailnet_tls.prom"
+  TLS_MONITOR_LIB=/usr/local/lib/homelab/tls-monitor
+  TLS_MONITOR_UNIT_DIR=/etc/systemd/system
+  TLS_MONITOR_SERVICE=homelab-tls-monitor.service
+  TLS_MONITOR_TIMER=homelab-tls-monitor.timer
+  TLS_MONITOR_FILE_OWNER=0:0
+  TLS_MONITOR_PYTHON=/usr/bin/python3
+  # 타이머 5분의 세 배. 넘으면 타이머가 멈춘 것이다.
+  TLS_MONITOR_MAX_AGE=900
+  # 호스트가 tailnet에 들지 않는 클러스터의 표시. 그런 클러스터도 operator의 Ingress(vm- 접두)는 있을 수 있는데 호스트에서 확인하지 못한다.
+  # TailnetTLSMissing이 이 지표를 보고 조용하다. 클러스터별 값을 Helm에 두지 않으려고 호스트 값(TAILNET_JOIN)에서 내보낸다.
+  TLS_MONITOR_DISABLED_LINE="homelab_tailnet_tls_disabled 1"
+}
 
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
@@ -63,6 +112,17 @@ assert_host_tree_clean() {
   out="$("${git_cmd[@]}" 2>&1)" || die "host/의 git 상태를 읽지 못했다: ${out}"
   [ -z "$out" ] || die "host/에 커밋하지 않은 변경이나 무시된 파일이 있다. 커밋하거나 지운 뒤 다시 실행한다:
 ${out}"
+}
+
+# root만 읽는 것을 읽는다. root면 그대로, 아니면 sudo -n(비밀번호를 묻지 않는다). 자격이 없으면 2로 끝난다.
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif sudo -n true 2>/dev/null; then
+    sudo -n "$@"
+  else
+    return 2
+  fi
 }
 
 # MagicDNS 전체 이름은 tailnet 이름을 담는다. 출력이 작업 기록(공개 저장소)에 붙을 수 있어 가린다.
@@ -125,6 +185,159 @@ load_cluster() {
     # 루트(/)·상대 경로·..을 받지 않는다. 원장 경로가 이 아래에 붙는다.
     [[ "$BULK_MOUNT" =~ ^(/[A-Za-z0-9_-]+)+$ ]] || die "BULK_MOUNT는 /로 시작하는 절대 경로다(/ 자체, ., 공백 금지): ${BULK_MOUNT}"
   fi
+}
+
+# ---------------------------------------------------------------- 샌드박스 프로필
+
+# Git의 프로필을 "종류<TAB>원본<TAB>대상" 줄로 낸다. Git에 있는 옛 버전도 함께 깔고 확인한다(파드가 참조할 수 있다).
+# 종류마다 0건이면 성공으로 읽지 않고 멈춘다. AppArmor는 커널에 올라가는 이름이 파일 안의 선언에서 오므로 파일 이름과 맞춘다.
+sandbox_targets() {
+  local f b seccomp=0 apparmor=0
+  for f in "$HOST_DIR"/sandbox-profiles/seccomp/*; do
+    [ -e "$f" ] || continue
+    b="$(basename "$f")"
+    [[ "$b" =~ ^sandbox-[a-z0-9-]+-v[0-9]+\.json$ ]] || die "seccomp 프로필 이름 형식이 아니다(sandbox-<이름>-v<버전>.json): ${f}"
+    printf 'seccomp\t%s\t%s\n' "$f" "${SANDBOX_SECCOMP_DIR}/${b}"
+    seccomp=$((seccomp + 1))
+  done
+  for f in "$HOST_DIR"/sandbox-profiles/apparmor/*; do
+    [ -e "$f" ] || continue
+    b="$(basename "$f")"
+    [[ "$b" =~ ^homelab-sandbox-[a-z0-9-]+-v[0-9]+$ ]] || die "AppArmor 프로필 이름 형식이 아니다(homelab-sandbox-<이름>-v<버전>): ${f}"
+    grep -qE "^profile ${b} flags=" "$f" || die "${f}의 프로필 선언이 파일 이름과 다르다"
+    printf 'apparmor\t%s\t%s\n' "$f" "${APPARMOR_DIR}/${b}"
+    apparmor=$((apparmor + 1))
+  done
+  [ "$seccomp" -ge 1 ] && [ "$apparmor" -ge 1 ] \
+    || die "host/sandbox-profiles/에서 프로필을 찾지 못했다(seccomp ${seccomp}개, AppArmor ${apparmor}개)"
+}
+
+# 프로필이 기대는 호스트 조건을 본다. 문제를 한 줄씩 내고 빈 출력이 통과다.
+# apparmor.service: 부팅 때 /etc/apparmor.d를 커널에 올린다. 꺼져 있으면 재부팅 뒤 Localhost 프로필이 없어 파드가 뜨지 않는다.
+# bwrap·unpriv_bwrap: 샌드박스의 userns·mount 허용은 Ubuntu 프로필에서 온다. 커널 적재와 파일(재부팅 뒤)을 함께 본다.
+sandbox_host_problems() {
+  local en loaded p
+  en="$(systemctl is-enabled apparmor.service 2>/dev/null || true)"
+  [ "$en" = enabled ] \
+    || printf 'apparmor.service가 enabled가 아니다(%s). 재부팅하면 프로필이 커널에 올라가지 않는다\n' "${en:-없음}"
+  [ -e "${APPARMOR_DIR}/bwrap-userns-restrict" ] \
+    || printf '%s가 없다. bwrap이 /usr/bin/bwrap에서 userns를 얻지 못한다. 다시 잰다\n' "${APPARMOR_DIR}/bwrap-userns-restrict"
+  if ! loaded="$(as_root cat "$APPARMOR_KERNEL_PROFILES" 2>/dev/null)"; then
+    printf '%s를 읽지 못했다. AppArmor가 꺼져 있는지 본다\n' "$APPARMOR_KERNEL_PROFILES"
+    return 0
+  fi
+  for p in bwrap unpriv_bwrap; do
+    grep -qxF -- "${p} (enforce)" <<<"$loaded" || printf '호스트 프로필 %s가 enforce로 올라와 있지 않다. 다시 잰다\n' "$p"
+  done
+}
+
+# 깔린 프로필을 Git과 대조한다. 문제를 한 줄씩 내고 빈 출력이 통과다.
+# 소유·모드·해시, AppArmor는 enforce 적재와 disable 표시까지 본다. /var/lib/kubelet은 0750이고 커널 목록은 root만 읽어 as_root로 읽는다.
+sandbox_installed_problems() {
+  local targets kind src dest loaded="" profile git_sum live_sum
+  targets="$(sandbox_targets)"
+  stat_problem "$(as_root stat -c '%u:%g %a %F' -- "$SANDBOX_SECCOMP_DIR" 2>/dev/null)" "$SANDBOX_OWNER" 755 directory "$SANDBOX_SECCOMP_DIR"
+  loaded="$(as_root cat "$APPARMOR_KERNEL_PROFILES" 2>/dev/null)" || printf '%s를 읽지 못했다\n' "$APPARMOR_KERNEL_PROFILES"
+  while IFS=$'\t' read -r kind src dest; do
+    stat_problem "$(as_root stat -c '%u:%g %a %F' -- "$dest" 2>/dev/null)" "$SANDBOX_OWNER" 644 "regular file" "$dest"
+    git_sum="$(sha256sum -- "$src")"
+    live_sum="$(as_root sha256sum -- "$dest" 2>/dev/null)" || live_sum=""
+    [ "${live_sum%% *}" = "${git_sum%% *}" ] || printf '%s: sha256 %s (Git %s)\n' "$dest" "${live_sum%% *}" "${git_sum%% *}"
+    [ "$kind" = apparmor ] || continue
+    profile="$(basename "$dest")"
+    grep -qxF -- "${profile} (enforce)" <<<"$loaded" || printf 'AppArmor %s가 커널에 enforce로 올라와 있지 않다\n' "$profile"
+    if [ -e "${APPARMOR_DIR}/disable/${profile}" ]; then
+      printf '%s가 있어 재부팅하면 %s가 올라가지 않는다\n' "${APPARMOR_DIR}/disable/${profile}" "$profile"
+    fi
+  done <<<"$targets"
+}
+
+# ------------------------------------------------------- 작업 레인 고정 크기 볼륨
+
+# 이미지 파일을 root 없이 대조한다. 문제를 한 줄씩 내고 빈 출력이 통과다. 할당이 크기보다 작으면 쓰는 도중 노드 디스크가
+# 차서 실패할 수 있어 미리 할당(구멍 없음)까지 본다.
+task_state_file_problems() {
+  local info size blocks unit
+  stat_problem "$(stat -c '%u:%g %a %F' -- "$TASK_STATE_IMAGE" 2>/dev/null)" "$TASK_STATE_IMAGE_OWNER" 600 "regular file" "$TASK_STATE_IMAGE"
+  info="$(stat -c '%s %b %B' -- "$TASK_STATE_IMAGE" 2>/dev/null)" || return 0
+  read -r size blocks unit <<<"$info"
+  [ "$size" = "$TASK_STATE_BYTES" ] || printf '%s 크기가 %s바이트다(기대 %s)\n' "$TASK_STATE_IMAGE" "$size" "$TASK_STATE_BYTES"
+  [ $((blocks * unit)) -ge "$TASK_STATE_BYTES" ] || printf '%s가 미리 할당되지 않았다(할당 %s바이트, 크기 %s)\n' "$TASK_STATE_IMAGE" "$((blocks * unit))" "$size"
+}
+
+# 이미지 안 파일시스템을 대조한다. 이미지가 0600이라 root가 필요하다(부르는 쪽이 as_root true를 먼저 본다).
+# UUID는 처음 만들 때 적어 둔 값과 같아야 한다. 다른 이미지로 바뀐 것을 잡는다. 값은 저장소·공개 기록에 옮기지 않는다.
+task_state_fs_problems() {
+  local fstype uuid recorded
+  # -c /dev/null: 캐시를 쓰지 않고 파일을 직접 읽는다.
+  fstype="$(as_root blkid -c /dev/null -s TYPE -o value "$TASK_STATE_IMAGE" 2>/dev/null || true)"
+  [ "$fstype" = ext4 ] || printf '%s의 파일시스템이 ext4가 아니다(%s)\n' "$TASK_STATE_IMAGE" "${fstype:-읽지 못함}"
+  uuid="$(as_root blkid -c /dev/null -s UUID -o value "$TASK_STATE_IMAGE" 2>/dev/null || true)"
+  recorded="$(cat -- "$TASK_STATE_UUID_FILE" 2>/dev/null || true)"
+  [ -n "$uuid" ] && [ "$uuid" = "$recorded" ] || printf '%s의 UUID가 기록(%s)과 다르다\n' "$TASK_STATE_IMAGE" "$TASK_STATE_UUID_FILE"
+}
+
+# 지금 마운트 지점에 걸린 것을 "원본 형식 옵션 크기(바이트)" 줄로 낸다. --mountpoint만 쓴다(bulk_mount_lines 주석).
+task_state_mount_lines() {
+  findmnt -n -r -b -o SOURCE,FSTYPE,OPTIONS,SIZE --mountpoint "$TASK_STATE_MOUNT" 2>/dev/null || true
+}
+
+# 마운트가 이 이미지의 ext4 하나이고 쓰기 가능·nodev·nosuid이며 이미지보다 크지 않으면 빈 출력, 아니면 이유 한 줄.
+# 원본은 loop 장치라 그 뒤의 파일까지 본다. 다른 이미지나 다른 디스크를 같은 자리에 붙이면 크기 상한이 사라진다.
+task_state_mount_problem() {
+  local lines src fstype opts size back
+  lines="$(task_state_mount_lines)"
+  if [ -z "$lines" ]; then
+    printf '%s에 마운트가 없다\n' "$TASK_STATE_MOUNT"
+    return
+  fi
+  if [ "$(grep -c . <<<"$lines")" -ne 1 ]; then
+    printf '%s에 마운트가 여러 개 겹쳐 있다: %s\n' "$TASK_STATE_MOUNT" "${lines//$'\n'/; }"
+    return
+  fi
+  read -r src fstype opts size <<<"$lines"
+  back="$(losetup -l -n -O BACK-FILE -- "$src" 2>/dev/null || true)"
+  if [ "$back" != "$TASK_STATE_IMAGE" ]; then
+    printf '%s의 원본 %s 뒤 파일이 %s다(기대 %s)\n' "$TASK_STATE_MOUNT" "$src" "${back:-없음}" "$TASK_STATE_IMAGE"
+  elif [ "$fstype" != ext4 ]; then
+    printf '%s의 형식이 %s다(기대 ext4)\n' "$TASK_STATE_MOUNT" "$fstype"
+  elif [[ ! "$size" =~ ^[0-9]+$ ]] || [ "$size" -gt "$TASK_STATE_BYTES" ]; then
+    printf '%s의 크기가 %s바이트다(상한 %s)\n' "$TASK_STATE_MOUNT" "$size" "$TASK_STATE_BYTES"
+  else
+    case ",${opts}," in
+      *,rw,*) ;;
+      *) printf '%s가 쓰기 가능(rw)이 아니다: %s. ext4 오류로 읽기 전용이 됐을 수 있다\n' "$TASK_STATE_MOUNT" "$opts"; return ;;
+    esac
+    if [[ ",${opts}," != *,nosuid,* || ",${opts}," != *,nodev,* ]]; then
+      printf '%s에 nodev·nosuid가 없다: %s\n' "$TASK_STATE_MOUNT" "$opts"
+    fi
+  fi
+}
+
+# ------------------------------------------------------------------- tailnet TLS 감시
+
+# Git의 파일을 "원본<TAB>대상<TAB>모드" 줄로 낸다.
+tls_monitor_files() {
+  printf '%s\t%s\t0755\n' "${HOST_DIR}/tls-monitor/collect.py" "${TLS_MONITOR_LIB}/collect.py"
+  printf '%s\t%s\t0644\n' "${HOST_DIR}/tls-monitor/${TLS_MONITOR_SERVICE}" "${TLS_MONITOR_UNIT_DIR}/${TLS_MONITOR_SERVICE}"
+  printf '%s\t%s\t0644\n' "${HOST_DIR}/tls-monitor/${TLS_MONITOR_TIMER}" "${TLS_MONITOR_UNIT_DIR}/${TLS_MONITOR_TIMER}"
+}
+
+# 마지막 결과를 본다. 문제를 한 줄씩 내고 빈 출력이 통과다.
+tls_monitor_output_problems() {
+  local ts failed
+  if [ ! -r "$TLS_MONITOR_PROM" ]; then
+    printf '%s가 없다\n' "$TLS_MONITOR_PROM"
+    return 0
+  fi
+  ts="$(awk '$1 == "homelab_tailnet_tls_collect_timestamp_seconds" { print $2 }' "$TLS_MONITOR_PROM")"
+  if [ -z "$ts" ] || [ $(($(date +%s) - ts)) -gt "$TLS_MONITOR_MAX_AGE" ]; then
+    printf '결과가 %s초보다 오래됐다. systemctl status %s\n' "$TLS_MONITOR_MAX_AGE" "$TLS_MONITOR_TIMER"
+  fi
+  grep -qxF 'homelab_tailnet_tls_collect_success 1' "$TLS_MONITOR_PROM" \
+    || printf '대상 목록을 못 읽었다. journalctl -u %s\n' "$TLS_MONITOR_SERVICE"
+  failed="$(sed -n 's/^homelab_tailnet_tls_probe_success{tls_host="\([^"]*\)"} 0$/\1/p' "$TLS_MONITOR_PROM")"
+  [ -z "$failed" ] || printf '인증서 검증 실패: %s. journalctl -u %s\n' "$(printf '%s' "$failed" | paste -sd ' ')" "$TLS_MONITOR_SERVICE"
 }
 
 # ------------------------------------------------------------------ 삭제 원장 SSD

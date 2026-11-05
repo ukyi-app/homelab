@@ -1,0 +1,16 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: hostUsers: false는
+# 다른 차트의 워크로드. sandbox ns 밖이어도 조합이 번지면 잡는다.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: other, namespace: app-other}
+spec:
+  selector: {matchLabels: {app: other}}
+  template:
+    metadata: {labels: {app: other}}
+    spec:
+      hostUsers: false
+      containers:
+        - {name: app, image: x}
