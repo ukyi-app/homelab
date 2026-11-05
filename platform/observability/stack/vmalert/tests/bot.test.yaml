@@ -74,6 +74,285 @@ tests:
         alertname: HomelabBotOutboxUnknown
         exp_alerts: []
 
+  # 작업 레인(rules/bot.yaml task-lane 그룹).
+  - name: HomelabBotTaskWorkerIntakeClosed는 작업자에 닿는데 접수가 10분 닫혀 있으면 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_worker_routed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x20"
+      - series: 'homelab_bot_task_worker_intake_open{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x2 0x18"
+    alert_rule_test:
+      - eval_time: 12m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerIntakeClosed
+        exp_alerts: []
+      - eval_time: 13m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerIntakeClosed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+            exp_annotations:
+              summary: 봇 작업자(worker-task)가 10분 넘게 새 작업을 받지 않는다
+              description: 작업자는 Ready이고 대화·리뷰는 계속된다. 사유는 라벨에 없다. 작업자 로그 task_intake_closed의 reason, 게시 서버 로그 task_worker_intake의 reasons, 작업자 /v1/task/intake로 본다. 볼륨 사유면 /list로 대기 작업을 끝내 공간을 비운다.
+
+  # 원인이 풀리면 다음 검사에 열린다. 짧게 닫힌 일이 쌓여 울리지 않는다.
+  - name: HomelabBotTaskWorkerIntakeClosed는 접수가 다시 열리면 처음부터 센다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_worker_routed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x20"
+      - series: 'homelab_bot_task_worker_intake_open{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0x7 1 0x7"
+    alert_rule_test:
+      - eval_time: 15m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerIntakeClosed
+        exp_alerts: []
+
+  # 닿지 못하면 intake_open도 0이다. 접수 닫힘으로 오인하지 않고 미연결로만 운다.
+  - name: 작업자에 닿지 않으면 HomelabBotTaskWorkerUnrouted만 10분 뒤 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_worker_routed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x2 0x18"
+      - series: 'homelab_bot_task_worker_intake_open{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x2 0x18"
+    alert_rule_test:
+      - eval_time: 12m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerUnrouted
+        exp_alerts: []
+      - eval_time: 13m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerUnrouted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+            exp_annotations:
+              summary: 봇 게시 서버가 작업자(worker-task)에 10분 넘게 닿지 않는다
+              description: 새 작업을 받지 못하고 세션 정리 재시도도 실패한다. 대화·리뷰는 계속된다. sandbox의 worker-task 파드 상태와 로그 task_lane_closed를 보고, Ready면 이미지, WORKER_LANES, NetworkPolicy, 게시 서버 TASK_WORKER_URL을 본다.
+      - eval_time: 18m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerIntakeClosed
+        exp_alerts: []
+
+  # 게시 서버 기동 직후 첫 검사 전과 작업자 Recreate 동안의 0은 울리지 않는다.
+  - name: HomelabBotTaskWorkerUnrouted는 작업자 재시작에 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_worker_routed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0 1x4 0x5 1x15"
+      - series: 'homelab_bot_task_worker_intake_open{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0 1x4 0x5 1x15"
+    alert_rule_test:
+      - eval_time: 20m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerUnrouted
+        exp_alerts: []
+      - eval_time: 20m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerIntakeClosed
+        exp_alerts: []
+
+  - name: HomelabBotTaskLaneUnknown은 5분 지나면 발화하고 해제하면 풀린다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="unknown"}'
+        values: "0x2 1x10 0x8"
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="cleanup_pending"}'
+        values: "0x20"
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="retention_full"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 7m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneUnknown
+        exp_alerts: []
+      - eval_time: 8m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneUnknown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              reason: unknown
+            exp_annotations:
+              summary: 봇 작업 레인이 unknown으로 5분 넘게 닫혀 있다. 사람이 풀어야 한다
+              description: 종료를 확인하지 못한 작업이 있고 스스로 풀리지 않는다. 대화·리뷰는 계속된다. /list로 작업을 찾아 /task-release target:<job-id>로 해제한다. 작업자가 프로세스 소멸을 확인해야 풀린다.
+      - eval_time: 14m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneUnknown
+        exp_alerts: []
+
+  - name: HomelabBotTaskLaneCleanupPending은 15분 지나야 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="unknown"}'
+        values: "0x25"
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="cleanup_pending"}'
+        values: "0x2 1x23"
+    alert_rule_test:
+      - eval_time: 17m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneCleanupPending
+        exp_alerts: []
+      - eval_time: 18m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneCleanupPending
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              reason: cleanup_pending
+            exp_annotations:
+              summary: 봇 작업 레인이 cleanup_pending으로 15분 넘게 닫혀 있다
+              description: 끝난 작업의 세션 공간을 지웠는지 확인하지 못해 새 작업을 받지 않는다. 대화·리뷰는 계속된다. 작업자에 닿는지(HomelabBotTaskWorkerUnrouted)와 작업자 로그, 작업 볼륨 상태를 본다.
+      - eval_time: 18m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneUnknown
+        exp_alerts: []
+
+  # 재시도 몇 번 만에 지워지면 울리지 않는다.
+  - name: HomelabBotTaskLaneCleanupPending은 곧 지워지면 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="cleanup_pending"}'
+        values: "0 1x5 0x20"
+    alert_rule_test:
+      - eval_time: 22m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneCleanupPending
+        exp_alerts: []
+
+  # 사유는 하나만 1이다. unknown을 해제해 cleanup_pending이 드러나면 for를 처음부터 센다.
+  - name: 가려졌던 cleanup_pending이 드러나면 for를 처음부터 센다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="unknown"}'
+        values: "1x10 0x20"
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="cleanup_pending"}'
+        values: "0x10 1x20"
+    alert_rule_test:
+      - eval_time: 25m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneCleanupPending
+        exp_alerts: []
+      - eval_time: 26m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneCleanupPending
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              reason: cleanup_pending
+            exp_annotations:
+              summary: 봇 작업 레인이 cleanup_pending으로 15분 넘게 닫혀 있다
+              description: 끝난 작업의 세션 공간을 지웠는지 확인하지 못해 새 작업을 받지 않는다. 대화·리뷰는 계속된다. 작업자에 닿는지(HomelabBotTaskWorkerUnrouted)와 작업자 로그, 작업 볼륨 상태를 본다.
+
+  - name: HomelabBotTaskLaneRetentionFull은 1시간 지나야 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="retention_full"}'
+        values: "0x2 1x70"
+    alert_rule_test:
+      - eval_time: 62m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneRetentionFull
+        exp_alerts: []
+      - eval_time: 63m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneRetentionFull
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              reason: retention_full
+            exp_annotations:
+              summary: 봇 작업 레인 보존 세션 8개가 1시간 넘게 차 있다
+              description: 새 작업을 받지 않는다. 대화·리뷰는 계속된다. /list로 대기 작업을 보고 /answer·/resume-model로 끝내거나 /task-cancel로 멈춘다.
+
+  # 질문이 만료되어 칸이 비면 1시간 전에 풀린다.
+  - name: HomelabBotTaskLaneRetentionFull은 질문 만료로 칸이 비면 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_lane_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="retention_full"}'
+        values: "0 1x55 0x20"
+    alert_rule_test:
+      - eval_time: 70m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneRetentionFull
+        exp_alerts: []
+
+  # 스위치를 끄거나 정책이 틀리면 레인 시계열이 없다. 봇의 다른 지표는 그대로 나온다.
+  - name: 레인 시계열이 없으면 작업 레인 경보는 모두 조용하다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_gateway_connected{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x90"
+    alert_rule_test:
+      - eval_time: 80m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerIntakeClosed
+        exp_alerts: []
+      - eval_time: 80m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerUnrouted
+        exp_alerts: []
+      - eval_time: 80m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneUnknown
+        exp_alerts: []
+      - eval_time: 80m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneCleanupPending
+        exp_alerts: []
+      - eval_time: 80m
+        groupname: task-lane
+        alertname: HomelabBotTaskLaneRetentionFull
+        exp_alerts: []
+
+  # 울리는 중에 스위치를 끄면 시계열이 사라져 풀린다.
+  - name: 레인 시계열이 사라지면 울리던 경보가 풀린다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_worker_routed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0x15 _x15"
+      - series: 'homelab_bot_task_worker_intake_open{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0x15 _x15"
+    alert_rule_test:
+      - eval_time: 14m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerUnrouted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+            exp_annotations:
+              summary: 봇 게시 서버가 작업자(worker-task)에 10분 넘게 닿지 않는다
+              description: 새 작업을 받지 못하고 세션 정리 재시도도 실패한다. 대화·리뷰는 계속된다. sandbox의 worker-task 파드 상태와 로그 task_lane_closed를 보고, Ready면 이미지, WORKER_LANES, NetworkPolicy, 게시 서버 TASK_WORKER_URL을 본다.
+      - eval_time: 25m
+        groupname: task-lane
+        alertname: HomelabBotTaskWorkerUnrouted
+        exp_alerts: []
+
   # 삭제 원장(rules/bot.yaml deletion-ledger 그룹). 라벨은 kube-state-metrics(honor_labels)·node-exporter(instance = 노드 이름)·
   # bot-slot job이 붙이는 모양이다. 원장 PV는 운영에만 있다(VM은 values-vm.yaml deletionLedger: {}).
   - name: HomelabBotLedgerDiskNotMounted는 원장 PV가 있는데 /mnt/bulk가 없으면 5분 뒤 발화한다
