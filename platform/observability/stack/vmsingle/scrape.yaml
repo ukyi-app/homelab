@@ -28,6 +28,11 @@ scrape_configs:
       - source_labels: [__meta_kubernetes_pod_phase]
         regex: (Pending|Succeeded|Failed)
         action: drop
+      # role: pod는 컨테이너 포트마다 대상을 만들고, 아래에서 주소를 주석 포트로 바꾼다. 포트가 둘인 파드(vmauth)는 같은 대상이
+      # 둘이 되어 30초마다 중복 오류를 남기므로 주석 포트의 대상만 남긴다. 주석 포트는 containerPort로 선언돼 있어야 한다.
+      # 선언이 없으면 대상이 사라지고 TargetMissing이 잡는다.
+      - source_labels: [__meta_kubernetes_pod_container_port_number, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: keep_if_equal
       - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
         regex: ([^:]+)(?::\d+)?;(\d+)
         replacement: $1:$2
