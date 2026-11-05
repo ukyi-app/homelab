@@ -53,3 +53,9 @@ env:
   # 켜도 Infisical RUNTIME_POLICIES의 review 절(시험 저장소 homelab-smoke 하나)과 작업자 리뷰 레인이 있어야 열린다.
   # 끄려면 이 줄을 지운다. 대기 작업과 미게시 결과는 지우지 않고 다시 켜질 때까지 기다린다.
   REVIEW_ENABLED: "true"
+  # 작업 레인 스위치(사용자 승인, T18 H4). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
+  # 켜도 Infisical RUNTIME_POLICIES의 task 절(프로젝트 homelab-smoke 하나, 기준 SHA 고정)과 작업자 worker-task가 있어야 열린다.
+  # 끄면(이 두 줄을 지우면) /task 등 작업 명령을 등록하지 않는다. 남은 작업 세션·unknown은 지우지 않고 다시 켤 때까지 그대로다.
+  # 작업자 주소는 bot-slot 정책이 여는 worker-task Service 하나다(대화·리뷰 작업자 WORKER_URL과 다른 파드).
+  TASK_LANE_ENABLED: "true"
+  TASK_WORKER_URL: "http://worker-task.sandbox:8080/"
