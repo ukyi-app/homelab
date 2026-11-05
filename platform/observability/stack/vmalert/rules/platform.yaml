@@ -78,6 +78,26 @@ groups:
         annotations:
           summary: "{{ $labels.namespace }}/{{ $labels.cluster }}의 WAL 아카이브가 마지막 성공 뒤 실패하고 있다"
 
+      # PGBackupStale·WALArchiveFailing은 보는 지표가 없으면 조건이 비어 조용하다. 플러그인·CNPG 판을 올려 지표 이름이 바뀌면
+      # 백업이 멈춰도 알 수 없으므로 지표가 없는 것 자체를 경보한다. TargetMissing은 대상만 보고 대상이 내는 지표는 보지 않는다.
+      # 대상이 없거나 PostgreSQL에 붙지 못한 경우는 TargetMissing과 CNPGClusterNotHealthy가 본다.
+      # 복원 시험의 임시 Cluster(pg-restore-*, restore.md)에는 백업 지표가 원래 없다.
+      # for 30m: 파드를 다시 띄우는 동안 잠깐 비는 것은 넘긴다.
+      - alert: PGBackupMetricsMissing
+        expr: |
+          max by (namespace, cluster) (cnpg_collector_up{cluster!~"pg-restore-.*"}) == 1
+          unless on (namespace, cluster) (
+            max by (namespace, cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)
+            and on (namespace, cluster) max by (namespace, cluster) (cnpg_pg_stat_archiver_last_failed_time)
+            and on (namespace, cluster) max by (namespace, cluster) (cnpg_pg_stat_archiver_last_archived_time)
+          )
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.cluster }}의 백업·WAL 지표가 없어 PGBackupStale·WALArchiveFailing이 울리지 못한다"
+          description: "plugin-barman-cloud 컨테이너 상태와 로그를 본다. 판을 올렸다면 지표 이름이 바뀌었는지 본다."
+
       # 백업 CronJob 이름에 valkey-backup이 들어간다고 가정한다(데이터 차트가 정할 때 맞춘다).
       # 한 번도 성공하지 않은 CronJob은 last_successful_time이 없어 여기서 잡히지 않는다. 실패는 KubeJobFailed가 본다.
       - alert: ValkeyBackupStale
