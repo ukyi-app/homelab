@@ -331,6 +331,11 @@ const steps: Step[] = [
     run: () => tool("host-sandbox-profiles", ["bash", "tools/host-sandbox-profiles.test.sh"]),
   },
   {
+    name: "host task state",
+    // install.sh --task-state-volume(작업 레인 고정 크기 볼륨)의 포맷 금지·이미지 대조·마운트 대조 실패 때 data 0, verify.sh 판정을 가짜 명령과 임시 경로로 본다.
+    run: () => tool("host-task-state", ["bash", "tools/host-task-state.test.sh"]),
+  },
+  {
     name: "workflows",
     run: () => {
       const files = gitFiles(".github/workflows/*.yaml", ".github/workflows/*.yml").map((path) => ({ path, text: readText(path) }));

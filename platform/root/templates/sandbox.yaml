@@ -1,7 +1,8 @@
 {{- /*
 sandbox: 격리 작업 공간(ns sandbox)과 허용 목록 egress 프록시(ns egress). wave -2(설계 C.3.1, C.8).
 두 ns에 걸쳐 destination.namespace를 비운다. 리소스마다 metadata.namespace를 적는다.
-켜기: values.yaml의 components.sandbox.enabled. 클러스터 값 cluster.infisical을 받는다(작업자 전용 store infisical-sandbox).
+켜기: values.yaml의 components.sandbox.enabled. 클러스터 값 cluster.infisical(작업자 전용 store infisical-sandbox)과
+cluster.taskStateVolume(작업 레인 고정 크기 볼륨의 노드, platform/sandbox task.nodeName)을 받는다.
 
 켜기 전 사람 작업: Infisical(운영 homelab/prod, VM homelab-dev/dev)에 폴더 /apps/homelab-bot/worker와 작업자 자격 키
 (platform/sandbox/values.yaml worker.profile.credentialKey, 지금 CLAUDE_CODE_OAUTH_TOKEN: 봇 전용 Claude 구독 장기 토큰).
@@ -12,6 +13,7 @@ credential_invalid로 종료 1 → CrashLoop → sandbox Degraded라 root가 이
 */}}
 {{- if .Values.components.sandbox.enabled }}
 {{- $infisical := .Values.cluster.infisical | default dict }}
+{{- $taskState := .Values.cluster.taskStateVolume | default dict }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -30,6 +32,10 @@ spec:
         infisical:
           projectSlug: {{ required "cluster.infisical.projectSlug is missing in values-<cluster>.yaml" $infisical.projectSlug | quote }}
           environmentSlug: {{ required "cluster.infisical.environmentSlug is missing in values-<cluster>.yaml" $infisical.environmentSlug | quote }}
+        {{- with $taskState.nodeName }}
+        task:
+          nodeName: {{ . | quote }}
+        {{- end }}
         {{- with include "homelab.externalSecretsValues" . }}{{ . | nindent 8 }}{{- end }}
   destination:
     server: https://kubernetes.default.svc

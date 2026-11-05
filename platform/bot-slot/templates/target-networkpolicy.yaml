@@ -58,6 +58,13 @@ spec:
           podSelector:
             matchLabels:
               {{- include "botSlot.workerSelector" . | nindent 14 }}
+        # 작업 레인 작업자. 받는 쪽 허용은 sandbox-networkpolicy.yaml의 두 번째 정책이다.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sandbox
+          podSelector:
+            matchLabels:
+              {{- include "botSlot.taskWorkerSelector" . | nindent 14 }}
       ports:
         - protocol: TCP
           port: {{ .Values.target.workerPort }}

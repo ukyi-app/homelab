@@ -203,6 +203,42 @@ h database pg-role-$APP password; h app-$APP $APP-db DATABASE_URL               
 4. 앱 `/healthz/cache`가 200인지 본다(3c 4단계의 port-forward). 영속 Valkey면 다음 백업 Job도 새 값으로 도는지 수동 Job 하나로 본다([restore.md](restore.md) 1절 0단계).
 5. `PASSWORD_PREVIOUS`를 지운다.
 
+## 3e. 봇 작업자 모델 토큰 (레인별, T18)
+
+Claude 구독 장기 토큰(`claude setup-token`, 발급 뒤 1년 만료)이다. 레인마다 따로라 한 레인만 바꾼다. 개인 `~/.claude*`를 복사하지 않는다. 다른 계정으로 자동 전환하지 않는다.
+
+| 레인 | Infisical `/apps/homelab-bot/worker` | Secret(키는 둘 다 `CLAUDE_CODE_OAUTH_TOKEN`) | 파드 |
+|---|---|---|---|
+| 대화+리뷰 | `CLAUDE_CODE_OAUTH_TOKEN` | `sandbox/worker-credential-claude-subscription` | `worker` |
+| 작업 | `CLAUDE_CODE_OAUTH_TOKEN_TASK` | `sandbox/worker-task-credential-claude-subscription` | `worker-task` |
+
+VM `homelab-dev`에는 실제 토큰을 넣지 않는다([bootstrap.md](bootstrap.md) 2.2 vm 1단계).
+
+1. drain한다. `/emergency-stop`으로 새 모델 실행을 막고 `/model-status`로 실행 중·`unknown` 작업이 0인지 본다. 지금 이 멈춤은 레인을 가리지 않는다. 작업 레인만 멈추는 게이트 `TASK_LANE_ENABLED`는 봇 쪽 구현 뒤에 쓴다. `unknown`이 있으면 정리부터 한다.
+2. 새 토큰을 발급해 Infisical UI에서 바꾼다(`secrets set`은 값이 명령행 인자라 쓰지 않는다). 옛 값은 0절대로 `<KEY>_PREVIOUS`로 옮긴다. 샌 것이 의심되면 옮기지 말고 5단계 철회를 먼저 한다.
+3. ESO를 즉시 동기화하고 Secret이 바뀐 것을 본다. 값은 해시 앞부분으로만 본다.
+
+   ```bash
+   SECRET=worker-task-credential-claude-subscription   # 대화+리뷰면 worker-credential-claude-subscription
+   DEPLOY=worker-task                                  # 대화+리뷰면 worker
+   kubectl -n sandbox annotate externalsecret "$SECRET" force-sync="$(date +%s)" --overwrite
+   kubectl -n sandbox get externalsecret "$SECRET"     # SecretSynced, refreshTime이 교체 시각 뒤
+   kubectl -n sandbox get secret "$SECRET" -o jsonpath='{.data.CLAUDE_CODE_OAUTH_TOKEN}' | base64 -d | sha256sum | cut -c1-12
+   ```
+
+4. 볼륨 반영을 본다. subPath 없는 Secret 볼륨이라 kubelet이 파드 재시작 없이 갱신하고(보통 1분 안팎), 작업자는 실행마다 파일을 다시 읽는다. 아래 해시가 3단계와 같아질 때까지 기다린다. `worker-task`의 `kubectl exec`는 정리 sweep에 죽을 수 있어 1단계 drain 뒤에 돌린다. 그다음 파드가 Ready인지 보고 승인된 최소 호출 하나로 새 토큰을 확인한다. Ready는 토큰 모양만 보므로 Ready만으로는 새 토큰이 유효한지 모른다.
+
+   ```bash
+   kubectl -n sandbox exec "deploy/$DEPLOY" -c worker -- sha256sum /run/worker-credential/CLAUDE_CODE_OAUTH_TOKEN | cut -c1-12
+   kubectl -n sandbox get deploy "$DEPLOY"
+   ```
+
+5. 옛 토큰을 철회한다. 토큰 하나만 철회할 수 있는지는 [미확인]이다. 작업 레인을 켜기 전에 사람이 확인해 이 줄을 고친다. 철회하고 `_PREVIOUS`를 지운다.
+6. `/resume-model target:emergency-stop`으로 푼다. 멈춰 있던 작업은 원인을 없앤 뒤 명시적으로 재개한다.
+7. 복구 자산의 내보내기를 새로 뜬다([recovery-assets.md](recovery-assets.md)). 옛 내보내기는 철회된 토큰을 담는다.
+
+새 토큰이 틀리면 작업은 `auth_expired` 대기로 남는다. 자동 재개·폐기는 없으니 맞는 값으로 2단계부터 다시 한다.
+
 ## 4. 아직 채우지 않은 절
 
 설계 C.6.5 표의 순서를 따른다. 자격을 만드는 티켓이 이 문서에 절을 더한다.

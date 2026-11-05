@@ -1,0 +1,19 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: 프로필 주석
+# 옛 AppArmor 주석도 kubelet이 받는다. securityContext만 보면 이 길로 빠진다.
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: other, namespace: app-other}
+spec:
+  schedule: "0 0 * * *"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            container.apparmor.security.beta.kubernetes.io/app: localhost/homelab-sandbox-worker-v1
+        spec:
+          containers:
+            - {name: app, image: x}

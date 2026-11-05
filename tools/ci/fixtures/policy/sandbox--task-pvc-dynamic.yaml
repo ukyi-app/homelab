@@ -1,0 +1,12 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: 저장 공간:
+# local-retain으로 돌아가면 루트 디스크 PV가 생겨 비신뢰 코드가 노드 디스크를 채운다.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: worker-task-state, namespace: sandbox}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-retain
+  resources: {requests: {storage: 2Gi}}

@@ -393,11 +393,27 @@ if [ -z "$(find "$(LD "$D")" -mindepth 1 2>/dev/null)" ]; then pass "UUID 이상
 
 # ------------------------------------------------------------------------------ 포맷 명령 없음
 # 주석이 아닌 줄에 포맷·파티션·라벨 변경 명령이 나오면 실패한다. 설명 주석의 "mkfs"는 #에서 걸러진다.
-if grep -nE '^[^#]*\b(mkfs(\.[a-z0-9]+)?|mke2fs|wipefs|tune2fs|e2label|sgdisk|parted|fdisk|sfdisk|dd)\b' \
-  "$ROOT/host/install.sh" "$ROOT/host/lib.sh" "$ROOT/host/verify.sh"; then
-  fail "host 스크립트에 포맷·파티션·라벨 변경 명령이 있다"
+# 예외는 작업 레인 이미지를 새로 만드는 두 줄뿐이다(--task-state-volume, 사용자 결정 2026-11-05). 줄 전체가 같을 때만 뺀다.
+# 그 포맷은 블록 장치가 아니라 새 임시 파일에만 간다. 아래에서 함수와 대상을 보고, 동작은 tools/host-task-state.test.sh가 본다.
+# shellcheck disable=SC2016  # 작은따옴표 안은 스크립트 줄 글자 그대로다
+ALLOWED_REQUIRE='  require_cmds fallocate mkfs.ext4 blkid findmnt losetup systemctl stat sync mv chown chmod install find'
+# shellcheck disable=SC2016,SC1003  # 줄 끝 역슬래시도 스크립트 줄 글자다
+ALLOWED_MKFS='  mkfs.ext4 -q -F -m 0 -L "$TASK_STATE_LABEL" -U "$uuid" -E nodiscard,lazy_itable_init=0,lazy_journal_init=0 "$tmp" \'
+hits="$(grep -hE '^[^#]*\b(mkfs(\.[a-z0-9]+)?|mke2fs|wipefs|tune2fs|e2label|sgdisk|parted|fdisk|sfdisk|dd)\b' \
+  "$ROOT/host/install.sh" "$ROOT/host/lib.sh" "$ROOT/host/verify.sh" | grep -vxF -e "$ALLOWED_REQUIRE" -e "$ALLOWED_MKFS" || true)"
+if [ -n "$hits" ]; then
+  fail "host 스크립트에 포맷·파티션·라벨 변경 명령이 있다: ${hits}"
 else
-  pass "host 스크립트에 포맷·파티션·라벨 변경 명령이 없다"
+  pass "host 스크립트에 포맷·파티션·라벨 변경 명령이 없다(작업 레인 이미지 두 줄 제외)"
+fi
+# shellcheck disable=SC2016
+make_image="$(bash -c '. "$1/host/install.sh" && declare -f task_state_make_image' _ "$ROOT")"
+# shellcheck disable=SC2016
+if [ "$(grep -cxF -- "$ALLOWED_MKFS" "$ROOT/host/install.sh")" = 1 ] && grep -q 'mkfs.ext4' <<<"$make_image" \
+  && grep -qF 'local tmp="${TASK_STATE_IMAGE}.new"' <<<"$make_image"; then
+  pass "포맷은 task_state_make_image 안 한 곳이고 대상은 새 임시 파일이다"
+else
+  fail "포맷 호출의 자리나 대상이 다르다"
 fi
 
 # ------------------------------------------------------------------------------ verify.sh check_bulk_ssd

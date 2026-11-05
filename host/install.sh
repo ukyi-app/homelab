@@ -8,9 +8,12 @@
 #   sudo host/install.sh --cluster <이름> --egress-off   (되돌리기: 파드 egress 규칙을 끄고 지운다)
 #   sudo host/install.sh --cluster <이름> --bulk-ssd     (삭제 원장 SSD 마운트와 원장 첫 초기화. 값이 빈 클러스터는 건너뜀)
 #   sudo host/install.sh --cluster <이름> --sandbox-profiles   (봇 작업 레인 worker와 node-exporter의 Localhost 프로필)
+#   sudo host/install.sh --cluster <이름> --task-state-volume  (봇 작업 레인의 2GiB 고정 크기 볼륨. 있는 이미지는 다시 포맷하지 않음)
 #
 # 순서가 계약이다: preflight --before -> install --host-config -> preflight --after
-#   -> install --egress -> install --sandbox-profiles -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
+#   -> install --egress -> install --sandbox-profiles -> install --task-state-volume -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
+#   --task-state-volume을 --k3s보다 먼저 두는 까닭은 --sandbox-profiles와 같다. 이 볼륨을 쓰는 파드는 없으면 뜨지 않는다. 이미 도는 클러스터에는
+#   따로 실행해도 된다(k3s를 다시 시작하지 않는다). k3s-uninstall.sh는 /var/lib/taskstate를 지우지 않아 k3s를 다시 깔아도 볼륨이 남는다.
 #   --sandbox-profiles를 --k3s보다 먼저 두는 까닭: 이 프로필을 참조하는 파드는 프로필이 없으면 뜨지 않고, k3s가 서면 곧 Argo CD가
 #   main을 적용한다. 이미 도는 클러스터에는 따로 실행해도 된다(k3s를 다시 시작하지 않는다). k3s-uninstall.sh가 /var/lib/kubelet을
 #   지우므로 k3s를 다시 깔기 전에 이 단계도 다시 돈다. --host-config에 넣지 않은 까닭: 그 단계는 링크를 재구성한다.
@@ -53,7 +56,7 @@ TARGETS=""
 NET_DROPINS=""
 KUBECONFIG_OUT=""
 
-usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--egress|--k3s|--egress-off|--bulk-ssd|--sandbox-profiles"; }
+usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--egress|--k3s|--egress-off|--bulk-ssd|--sandbox-profiles|--task-state-volume"; }
 cleanup() { [ -z "$TMPD" ] || rm -rf "$TMPD"; }
 trap cleanup EXIT
 
@@ -937,6 +940,117 @@ sandbox_profiles() {
   echo "    다음: host/verify.sh --cluster ${CLUSTER} (sudo -v 뒤 같은 터미널에서. 깔린 파일과 커널 목록은 root만 읽는다)"
 }
 
+# ------------------------------------------------------------------- --task-state-volume
+# 봇 작업 레인 저장 공간(사용자 결정 2026-11-05). local-retain은 루트 디스크라 비신뢰 코드가 노드 디스크를 채울 수 있어 고정 크기
+# 파일 위 ext4에 가둔다. 포맷은 새 임시 파일에만 한다. 있는 이미지는 크기·fs·UUID 대조만 하고 어긋나면 고치지 않고 멈춘다.
+
+task_state_make_image() {
+  local tmp="${TASK_STATE_IMAGE}.new" uuid
+  if [ ! -e "$(dirname "$TASK_STATE_IMAGE")" ]; then install -d -m 0755 -o root -g root "$(dirname "$TASK_STATE_IMAGE")"; fi
+  (umask 077 && fallocate -l "$TASK_STATE_BYTES" -- "$tmp") || die "fallocate ${tmp}가 실패했다(디스크 공간을 본다). 이미지를 만들지 않았다"
+  uuid="$(cat "$UUID_SRC")"
+  # 함정: mkfs.ext4는 파일의 빈 구역에 구멍을 뚫는다. nodiscard로 줄어도 inode 표·저널 자리는 그대로 뚫려(실측 134MiB 중 104MiB만 남음)
+  # 아래에서 다시 채운다. 채워도 데이터는 그대로다(e2fsck 깨끗함). lazy 초기화를 끈다. 켜면 마운트 뒤 커널이 뒤에서 표를 쓴다.
+  mkfs.ext4 -q -F -m 0 -L "$TASK_STATE_LABEL" -U "$uuid" -E nodiscard,lazy_itable_init=0,lazy_journal_init=0 "$tmp" \
+    || die "${tmp} 포맷이 실패했다. 이미지를 만들지 않았다. 사람이 ${tmp}를 보고 지운다"
+  fallocate -l "$TASK_STATE_BYTES" -- "$tmp" || die "${tmp}를 다시 채우지 못했다. 이미지를 만들지 않았다. 사람이 ${tmp}를 보고 지운다"
+  chown "$TASK_STATE_IMAGE_OWNER" "$tmp"
+  chmod 0600 "$tmp"
+  # UUID 기록을 먼저, 이미지 이름 바꾸기를 마지막에 한다. 중간에 끊기면 "기록만 있음"이 남아 다음 실행이 멈춘다.
+  # 빈 이미지가 조용히 생겨 있던 작업 공간을 대신하는 쪽으로 끊기지 않는다.
+  (umask 022 && printf '%s\n' "$uuid" >"${TASK_STATE_UUID_FILE}.new") || die "${TASK_STATE_UUID_FILE}.new를 쓰지 못했다"
+  mv -- "${TASK_STATE_UUID_FILE}.new" "$TASK_STATE_UUID_FILE"
+  mv -- "$tmp" "$TASK_STATE_IMAGE"
+  sync -- "$TASK_STATE_IMAGE" "$TASK_STATE_UUID_FILE" "$(dirname "$TASK_STATE_IMAGE")"
+  echo "    만듦 ${TASK_STATE_IMAGE}: ${TASK_STATE_BYTES}바이트, ext4, UUID ${uuid} (UUID는 대조용 출력이다. 저장소·공개 기록에 옮기지 않는다)"
+}
+
+task_state_volume() {
+  local src="$HOST_DIR/task-state/${TASK_STATE_UNIT_NAME}" have_image=false mounted=false p
+
+  log "확인"
+  require_cmds fallocate mkfs.ext4 blkid findmnt losetup systemctl stat sync mv chown chmod install find
+  # 유닛과 이 값이 어긋나면 다른 파일을 붙이거나 PV가 빈 자리를 본다.
+  if ! grep -qxF -- "What=${TASK_STATE_IMAGE}" "$src" || ! grep -qxF -- "Where=${TASK_STATE_MOUNT}" "$src"; then
+    die "${src}의 What·Where가 lib.sh 값(${TASK_STATE_IMAGE}, ${TASK_STATE_MOUNT})과 다르다"
+  fi
+  if [ -e "${TASK_STATE_IMAGE}.new" ] || [ -L "${TASK_STATE_IMAGE}.new" ]; then
+    die "${TASK_STATE_IMAGE}.new가 남아 있다. 지난 실행이 끊겼다. 쓰이지 않는 파일인지 사람이 보고 지운다"
+  fi
+  if [ -e "$TASK_STATE_IMAGE" ] || [ -L "$TASK_STATE_IMAGE" ]; then have_image=true; fi
+  if [ "$have_image" = true ]; then
+    [ -e "$TASK_STATE_UUID_FILE" ] \
+      || die "${TASK_STATE_IMAGE}가 있는데 UUID 기록 ${TASK_STATE_UUID_FILE}이 없다. 포맷하지 않고 멈춘다. 어디서 온 이미지인지 사람이 본다"
+    p="$(task_state_file_problems)"
+    p+="$(task_state_fs_problems)"
+    [ -z "$p" ] || die "있는 이미지가 기대와 다르다. 포맷하지 않고 고치지 않고 멈춘다:"$'\n'"${p}"
+  elif [ -e "$TASK_STATE_UUID_FILE" ]; then
+    die "UUID 기록 ${TASK_STATE_UUID_FILE}이 있는데 ${TASK_STATE_IMAGE}가 없다. 이미지를 잃었거나 지난 실행이 끊겼다. 빈 이미지로 대신하지 않고 멈춘다"
+  fi
+  if [ -e "$TASK_STATE_UNIT" ] && ! cmp -s "$src" "$TASK_STATE_UNIT"; then
+    die "${TASK_STATE_UNIT}가 Git과 다르다. 도는 마운트를 건드리지 않게 덮지 않고 멈춘다. 왜 다른지 사람이 본다"
+  fi
+  if [ -n "$(task_state_mount_lines)" ]; then
+    [ "$have_image" = true ] || die "${TASK_STATE_MOUNT}에 이미 무언가 마운트돼 있는데 이미지가 없다. 사람이 본다"
+    p="$(task_state_mount_problem)"
+    [ -z "$p" ] || die "${p}. 바꾸지 않고 멈춘다"
+    mounted=true
+  else
+    # 마운트 전의 자리는 루트 디스크다. 무엇이 있으면 마운트가 가려 안 보이고, 마운트가 빠진 날 그것이 작업 공간으로 드러난다.
+    if [ -L "$TASK_STATE_MOUNT" ] || { [ -e "$TASK_STATE_MOUNT" ] && [ ! -d "$TASK_STATE_MOUNT" ]; }; then
+      die "${TASK_STATE_MOUNT}가 디렉터리가 아니다(심링크 또는 파일). 바꾸지 않고 멈춘다"
+    fi
+    if [ -d "$TASK_STATE_MOUNT" ] && [ -n "$(find "$TASK_STATE_MOUNT" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+      die "마운트 안 된 ${TASK_STATE_MOUNT}(루트 디스크 쪽)가 비어 있지 않다. 마운트로 가리지 않고 멈춘다. 사람이 내용을 확인한다"
+    fi
+  fi
+
+  log "[1/3] 이미지 ${TASK_STATE_IMAGE}"
+  if [ "$have_image" = true ]; then
+    echo "    이미 있다. 포맷하지 않는다(크기·ext4·UUID 대조 통과)"
+  else
+    task_state_make_image
+    p="$(task_state_file_problems)"
+    p+="$(task_state_fs_problems)"
+    [ -z "$p" ] || die "만든 이미지가 기대와 다르다:"$'\n'"${p}"
+  fi
+
+  log "[2/3] ${TASK_STATE_UNIT_NAME} 켜기"
+  if [ -e "$TASK_STATE_UNIT" ]; then
+    echo "    그대로 ${TASK_STATE_UNIT}"
+  else
+    install -m 0644 -o root -g root "$src" "$TASK_STATE_UNIT"
+    echo "    ${TASK_STATE_UNIT}"
+  fi
+  systemctl daemon-reload
+  systemctl enable "$TASK_STATE_UNIT_NAME"
+  if [ "$mounted" = true ]; then
+    echo "    이미 마운트돼 있다"
+  else
+    if [ ! -e "$TASK_STATE_MOUNT" ]; then mkdir -m 0755 -- "$TASK_STATE_MOUNT"; fi
+    systemctl start "$TASK_STATE_UNIT_NAME" \
+      || die "${TASK_STATE_UNIT_NAME} 시작이 실패했다. data 디렉터리를 만들지 않았다. systemctl status ${TASK_STATE_UNIT_NAME}와 journalctl -b -k를 본다"
+  fi
+
+  log "[3/3] data 디렉터리"
+  # 앞 단계와 사이에 마운트가 빠졌으면 루트 디스크에 만들게 된다. 만들기 직전에 다시 본다.
+  p="$(task_state_mount_problem)"
+  [ -z "$p" ] || die "마운트 확인 실패: ${p}. data 디렉터리를 만들지 않았다"
+  # PV는 마운트 지점이 아니라 이 안의 data를 가리킨다. 마운트가 빠지면 경로가 없어 파드가 뜨지 않는다. 루트 디스크로 새지 않는다.
+  # 2770: fsGroup 10001과 맞아 kubelet이 볼륨을 다시 훑지 않는다(fsGroupChangePolicy: OnRootMismatch). lost+found는 파드에 보이지 않는다.
+  if [ ! -e "$TASK_STATE_DATA" ] && [ ! -L "$TASK_STATE_DATA" ]; then
+    install -d -m 2770 -o "${TASK_STATE_DATA_OWNER%:*}" -g "${TASK_STATE_DATA_OWNER#*:}" "$TASK_STATE_DATA"
+    echo "    만듦 ${TASK_STATE_DATA}"
+  fi
+  # 소유·모드가 다르면 고치지 않는다. 비신뢰 코드가 쓰던 공간이라 누가 왜 바꿨는지 사람이 본다.
+  p="$(stat_problem "$(stat -c '%u:%g %a %F' -- "$TASK_STATE_DATA")" "$TASK_STATE_DATA_OWNER" 2770 directory "$TASK_STATE_DATA")"
+  [ -z "$p" ] || die "${p}. 고치지 않고 멈춘다"
+
+  log "작업 레인 볼륨 준비 완료"
+  echo "    ${TASK_STATE_DATA}: ${TASK_STATE_DATA_OWNER} 2770, ${TASK_STATE_BYTES}바이트 이미지 위 ext4"
+  echo "    다음: host/verify.sh --cluster ${CLUSTER} (sudo -v 뒤 같은 터미널에서. 이미지 UUID는 root만 읽는다)"
+}
+
 # ------------------------------------------------------------------------------ main
 
 main() {
@@ -944,7 +1058,7 @@ main() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --cluster) [ "$#" -ge 2 ] || usage; cluster="$2"; shift 2 ;;
-      --host-config | --egress | --egress-off | --k3s | --bulk-ssd | --sandbox-profiles) [ -z "$mode" ] || usage; mode="$1"; shift ;;
+      --host-config | --egress | --egress-off | --k3s | --bulk-ssd | --sandbox-profiles | --task-state-volume) [ -z "$mode" ] || usage; mode="$1"; shift ;;
       *) usage ;;
     esac
   done
@@ -964,8 +1078,9 @@ main() {
     --k3s) k3s_install ;;
     --bulk-ssd) bulk_ssd ;;
     --sandbox-profiles) sandbox_profiles ;;
+    --task-state-volume) task_state_volume ;;
   esac
 }
 
-# tools/host-*.test.sh가 check_install_time_keys·k3s_install·apply_services·bulk_ssd·sandbox_profiles를 쓰려고 source한다. 그때는 main을 돌리지 않는다.
+# tools/host-*.test.sh가 check_install_time_keys·k3s_install·apply_services·bulk_ssd·sandbox_profiles·task_state_volume을 쓰려고 source한다. 그때는 main을 돌리지 않는다.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

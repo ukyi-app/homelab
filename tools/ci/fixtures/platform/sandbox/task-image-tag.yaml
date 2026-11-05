@@ -1,0 +1,5 @@
+# expect: fail
+# match: does not match pattern
+# 작업 레인 이미지도 main 빌드 digest만 받는다. 태그는 움직인다.
+task:
+  image: ghcr.io/ukyi-app/homelab-bot:latest
