@@ -1,4 +1,4 @@
-# 작업 레인을 켠 렌더. 꺼진 기본값은 root 렌더가 보고, 이 파일이 켠 쪽의 정책·kubeconform·복구 스위치 검사를 받는다.
+# 작업 레인을 켠 렌더. root 렌더는 values.yaml의 task.enabled를 따르므로, 이 파일은 그 값과 상관없이 켠 쪽의 정책·kubeconform·복구 스위치 검사를 받는다.
 infisical:
   projectSlug: ci-project
   environmentSlug: ci
