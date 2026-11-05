@@ -24,3 +24,14 @@ variable "homelab_merge_app_id" {
     error_message = "homelab_merge_app_id가 0이다. App ukyi-merge를 만든 뒤 variables.tf의 default에 숫자로 적는다."
   }
 }
+
+variable "homelab_writer_app_id" {
+  description = "App ukyi-writer의 ID(ruleset E bypass)"
+  type        = number
+  default     = 5621177
+
+  validation {
+    condition     = var.homelab_writer_app_id > 0
+    error_message = "homelab_writer_app_id가 0이다. App ukyi-writer를 만든 뒤 variables.tf의 default에 숫자로 적는다."
+  }
+}
