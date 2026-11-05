@@ -15,7 +15,7 @@ const VERSION = "v1";
 const SECCOMP_FILE = `sandbox-worker-${VERSION}.json`;
 const APPARMOR_NAME = `homelab-sandbox-worker-${VERSION}`;
 // worker와 따로 올린다. 한쪽 규칙이 바뀌어도 다른 쪽 파드가 참조하는 이름은 그대로다.
-const NODE_EXPORTER_VERSION = "v1";
+const NODE_EXPORTER_VERSION = "v2";
 const NODE_EXPORTER_APPARMOR_NAME = `homelab-sandbox-node-exporter-${NODE_EXPORTER_VERSION}`;
 const NAME_PLACEHOLDER = "@PROFILE_NAME@";
 
@@ -114,6 +114,10 @@ const NODE_EXPORTER_DBUS = `  # 시스템 버스 접속, 유닛 목록, Manager�
   dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=Hello peer=(name=org.freedesktop.DBus),
   dbus send bus=system path=/org/freedesktop/systemd1 interface=org.freedesktop.systemd1.Manager member=ListUnits peer=(name=org.freedesktop.systemd1),
   dbus send bus=system path=/org/freedesktop/systemd1{,/unit/*} interface=org.freedesktop.DBus.Properties member=Get peer=(name=org.freedesktop.systemd1),
+
+  # go-systemd가 쓰지 않는 작업 완료 신호를 구독하려고 AddMatch를 부르고 결과를 보지 않는다. 규칙이 없어도 막히지만
+  # 수집마다 커널 로그에 거부가 한 줄 남는다. deny는 같은 거부를 로그 없이 한다.
+  deny dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=AddMatch peer=(name=org.freedesktop.DBus),
 `;
 
 const NODE_EXPORTER_APPARMOR_CHANGES: [string, string][] = [

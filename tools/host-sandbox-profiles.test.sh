@@ -89,8 +89,8 @@ else
 fi
 
 # node-exporter 프로필은 호스트 루트가 보이는 파드에 붙으므로 기본값보다 넓어지면 안 된다. 기본값의 줄은 하나도 빠지지 않고,
-# 더한 규칙은 시스템 버스의 읽기 호출 셋뿐이어야 한다. 주석 줄과 빈 줄은 판정에서 뺀다.
-NE_NAME=homelab-sandbox-node-exporter-v1
+# 더한 규칙은 시스템 버스의 읽기 호출 셋과 조용한 거부 하나뿐이어야 한다. 주석 줄과 빈 줄은 판정에서 뺀다.
+NE_NAME=homelab-sandbox-node-exporter-v2
 ne_file="$PROFILES/apparmor/$NE_NAME"
 ne_rules() { grep -vE '^[[:space:]]*(#|$)' "$1" | sed "s/@PROFILE_NAME@/${NE_NAME}/g" | LC_ALL=C sort; }
 ne_removed="$(LC_ALL=C comm -23 <(ne_rules "$ROOT/tools/sandbox-profiles/base/apparmor.txt") <(ne_rules "$ne_file"))"
@@ -99,10 +99,11 @@ ne_want="$(LC_ALL=C sort <<'EOF'
   dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=Hello peer=(name=org.freedesktop.DBus),
   dbus send bus=system path=/org/freedesktop/systemd1 interface=org.freedesktop.systemd1.Manager member=ListUnits peer=(name=org.freedesktop.systemd1),
   dbus send bus=system path=/org/freedesktop/systemd1{,/unit/*} interface=org.freedesktop.DBus.Properties member=Get peer=(name=org.freedesktop.systemd1),
+  deny dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=AddMatch peer=(name=org.freedesktop.DBus),
 EOF
 )"
 if [ -z "$ne_removed" ] && [ "$ne_added" = "$ne_want" ]; then
-  pass "node-exporter AppArmor: 기본값에서 빠진 규칙이 없고 더한 것은 dbus 읽기 호출 셋뿐이다"
+  pass "node-exporter AppArmor: 기본값에서 빠진 규칙이 없고 더한 것은 dbus 읽기 호출 셋과 조용한 거부 하나뿐이다"
 else
   fail "node-exporter AppArmor 차이가 기대와 다르다. 빠짐: ${ne_removed:-없음} 더함: ${ne_added:-없음}"
 fi
