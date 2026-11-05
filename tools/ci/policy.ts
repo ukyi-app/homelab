@@ -372,6 +372,10 @@ const SANDBOX_TASK_APPARMOR = "homelab-sandbox-worker-v1";
 // host/lib.sh TASK_STATE_*와 같은 값. 2GiB 고정 크기 볼륨의 마운트 지점이다.
 const SANDBOX_TASK_VOLUME_MOUNT = "/var/lib/taskstate/mnt";
 const SANDBOX_TASK_VOLUME_SIZE = "2Gi";
+// 작업 레인 밖의 Localhost 프로필 예외는 하나다. node-exporter의 systemd 수집기는 containerd 기본 AppArmor가 시스템 버스를
+// 막아 실패해서, 기본값에 유닛 읽기 호출만 더한 AppArmor를 쓴다(host/sandbox-profiles/). seccomp Localhost는 받지 않는다.
+const NODE_EXPORTER = { ns: "observability", kind: "DaemonSet", name: "node-exporter", container: "node-exporter" };
+const NODE_EXPORTER_APPARMOR = /^homelab-sandbox-node-exporter-v\d+$/;
 const SANDBOX_TASK_VOLUME_BYTES = 2147483648;
 const LEGACY_PROFILE_ANNOTATION = /^(container\.apparmor\.security\.beta\.kubernetes\.io|container\.seccomp\.security\.alpha\.kubernetes\.io|seccomp\.security\.alpha\.kubernetes\.io)\//;
 const podTemplateMeta = (obj: any): any => (obj.kind === "Pod" ? obj.metadata : obj.kind === "CronJob" ? obj.spec?.jobTemplate?.spec?.template?.metadata : obj.spec?.template?.metadata);
@@ -432,7 +436,10 @@ function checkSandboxTaskScope(d: Doc, isTask: boolean, spec: any, inSandbox: bo
     const sc = c.securityContext ?? {};
     const cw = `${where} container ${c.name}`;
     if (sc.procMount !== undefined && sc.procMount !== "Default" && !allowed) push(cw, `procMount: ${sc.procMount}는 ${SANDBOX_TASK}의 ${SANDBOX_TASK_CONTAINER} 컨테이너만 쓴다`);
-    if ((sc.seccompProfile?.type === "Localhost" || sc.appArmorProfile?.type === "Localhost") && !allowed) push(cw, `Localhost 프로필은 ${SANDBOX_TASK}의 ${SANDBOX_TASK_CONTAINER} 컨테이너만 쓴다`);
+    const nodeExporterAppArmor = (d.obj.metadata?.namespace ?? d.ns) === NODE_EXPORTER.ns && d.obj.kind === NODE_EXPORTER.kind && d.obj.metadata?.name === NODE_EXPORTER.name
+      && !others.includes(c) && c.name === NODE_EXPORTER.container && sc.seccompProfile?.type !== "Localhost"
+      && sc.appArmorProfile?.type === "Localhost" && NODE_EXPORTER_APPARMOR.test(sc.appArmorProfile?.localhostProfile ?? "");
+    if ((sc.seccompProfile?.type === "Localhost" || sc.appArmorProfile?.type === "Localhost") && !allowed && !nodeExporterAppArmor) push(cw, `Localhost 프로필은 ${SANDBOX_TASK}의 ${SANDBOX_TASK_CONTAINER} 컨테이너(와 node-exporter AppArmor 하나)만 쓴다`);
     if (inSandbox && (sc.seccompProfile?.type === "Unconfined" || sc.appArmorProfile?.type === "Unconfined")) push(cw, "Unconfined 프로필을 쓰지 않는다");
   }
   return out;
