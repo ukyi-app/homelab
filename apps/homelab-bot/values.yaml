@@ -55,7 +55,9 @@ env:
   REVIEW_ENABLED: "true"
   # 작업 레인 스위치(사용자 승인, T18 H4). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
   # 켜도 Infisical RUNTIME_POLICIES의 task 절(프로젝트 homelab-smoke 하나, 기준 SHA 고정)과 작업자 worker-task가 있어야 열린다.
-  # 끄면(이 두 줄을 지우면) /task 등 작업 명령을 등록하지 않는다. 남은 작업 세션·unknown은 지우지 않고 다시 켤 때까지 그대로다.
+  # 끄면("false") /task 등 작업 명령을 등록하지 않는다. 남은 작업 세션·unknown은 지우지 않고 다시 켤 때까지 그대로다.
   # 작업자 주소는 bot-slot 정책이 여는 worker-task Service 하나다(대화·리뷰 작업자 WORKER_URL과 다른 파드).
-  TASK_LANE_ENABLED: "true"
+  # 지금은 꺼 둔다. SEC-02 1단계가 찾은 두 경계 결함(Write 도구의 작업 공간 밖 새 파일, 샌드박스 Bash의 CLI 메시징 소켓 연결)을
+  # 고친 작업자 이미지가 올라가고 재측정이 통과한 뒤 다시 켠다(T18 VERIFICATION "SEC-02 1단계").
+  TASK_LANE_ENABLED: "false"
   TASK_WORKER_URL: "http://worker-task.sandbox:8080/"
