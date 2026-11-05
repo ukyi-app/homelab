@@ -350,7 +350,7 @@ EOF
 
 ## 2. VM 안 호스트 단계
 
-`vmssh`로 들어가 VM 안에서 [bootstrap.md](bootstrap.md) 0.0(패키지, 작업 사본, main 일치)을 하고 1절을 `<이름>` = `vm`으로 한다. 순서는 1절과 같은 preflight → host-config → after → egress → sandbox-profiles → k3s → verify다. 1절이 기준이고, 1절의 순서가 바뀌면 이 블록도 같은 PR에서 고친다.
+`vmssh`로 들어가 VM 안에서 [bootstrap.md](bootstrap.md) 0.0(패키지, 작업 사본, main 일치)을 하고 1절을 `<이름>` = `vm`으로 한다. 순서는 1절과 같은 preflight → host-config → after → egress → sandbox-profiles → task-state-volume → k3s → verify다. 1절이 기준이고, 1절의 순서가 바뀌면 이 블록도 같은 PR에서 고친다.
 
 ```bash
 host/preflight.sh --cluster vm --before \
@@ -358,6 +358,7 @@ host/preflight.sh --cluster vm --before \
   && host/preflight.sh --cluster vm --after \
   && sudo host/install.sh --cluster vm --egress \
   && sudo host/install.sh --cluster vm --sandbox-profiles \
+  && sudo host/install.sh --cluster vm --task-state-volume \
   && sudo host/install.sh --cluster vm --k3s \
   && host/verify.sh --cluster vm
 ```

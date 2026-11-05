@@ -1,0 +1,18 @@
+# check: sandbox
+# expect: fail
+# rule: sandbox
+# match: Localhost 프로필은
+# 다른 차트가 전용 AppArmor 프로필을 가져다 쓴다. 이 프로필은 mount를 연다.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: other, namespace: observability}
+spec:
+  selector: {matchLabels: {app: other}}
+  template:
+    metadata: {labels: {app: other}}
+    spec:
+      containers:
+        - name: app
+          image: x
+          securityContext:
+            appArmorProfile: {type: Localhost, localhostProfile: homelab-sandbox-worker-v1}

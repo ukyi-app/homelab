@@ -1,0 +1,7 @@
+# 작업 레인을 켠 렌더. 꺼진 기본값은 root 렌더가 보고, 이 파일이 켠 쪽의 정책·kubeconform·복구 스위치 검사를 받는다.
+infisical:
+  projectSlug: ci-project
+  environmentSlug: ci
+task:
+  enabled: true
+  nodeName: ci-node

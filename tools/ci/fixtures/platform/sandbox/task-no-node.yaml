@@ -1,0 +1,5 @@
+# expect: fail
+# match: minLength
+# 노드 없이 켜면 PV nodeAffinity가 비어 파드가 어느 노드에도 뜨지 못한다.
+task:
+  enabled: true

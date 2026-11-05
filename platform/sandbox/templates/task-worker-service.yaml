@@ -1,0 +1,19 @@
+{{- if .Values.task.enabled }}
+# 게시 서버 → 작업 레인 작업자(TASK_WORKER_URL). 들어오는 허용은 bot-slot의 bot-slot-worker-task-ingress가 연다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-task
+  namespace: sandbox
+  labels:
+    {{- include "sandbox.taskWorkerLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "sandbox.taskWorkerLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+{{- end }}

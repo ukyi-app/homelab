@@ -1,0 +1,5 @@
+# expect: fail
+# match: CLAUDE_CODE_OAUTH_TOKEN_TASK
+# 대화·리뷰와 같은 Infisical 키를 읽으면 레인별 토큰 교체·철회가 사라진다.
+task:
+  remoteCredentialKey: CLAUDE_CODE_OAUTH_TOKEN

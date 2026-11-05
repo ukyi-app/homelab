@@ -50,6 +50,24 @@ EGRESS_UNIT="/etc/systemd/system/${EGRESS_UNIT_NAME}"
   APPARMOR_KERNEL_PROFILES=/sys/kernel/security/apparmor/profiles
   SANDBOX_OWNER=0:0
 }
+# 작업 레인 고정 크기 볼륨(install.sh --task-state-volume). 경로·크기는 platform/sandbox의 PV worker-task-state와 같은 값이고
+# tools/ci/policy.ts가 대조한다. /var/lib/homelab 아래에 두지 않는다. --k3s가 그 폴더를 0700으로 만들어 sudo 없는 verify가 못 읽는다.
+# 경로에 -를 쓰지 않는다. systemd 유닛 이름에서 \x2d가 된다.
+# data 소유는 worker-task의 uid·gid다. hostUsers: false 파드의 볼륨은 idmap으로 붙어 파일의 10001이 파드 안 10001로 보인다.
+# 크기·소유는 tools/host-task-state.test.sh가 root 없이 작게 돌리려고 바꾼다.
+# shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
+{
+  TASK_STATE_IMAGE=/var/lib/taskstate/volume.img
+  TASK_STATE_UUID_FILE=/var/lib/taskstate/volume.uuid
+  TASK_STATE_MOUNT=/var/lib/taskstate/mnt
+  TASK_STATE_DATA="${TASK_STATE_MOUNT}/data"
+  TASK_STATE_BYTES=2147483648
+  TASK_STATE_LABEL=homelab-task
+  TASK_STATE_UNIT_NAME=var-lib-taskstate-mnt.mount
+  TASK_STATE_UNIT="/etc/systemd/system/${TASK_STATE_UNIT_NAME}"
+  TASK_STATE_IMAGE_OWNER=0:0
+  TASK_STATE_DATA_OWNER=10001:10001
+}
 
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
@@ -211,6 +229,68 @@ sandbox_installed_problems() {
       printf '%s가 있어 재부팅하면 %s가 올라가지 않는다\n' "${APPARMOR_DIR}/disable/${profile}" "$profile"
     fi
   done <<<"$targets"
+}
+
+# ------------------------------------------------------- 작업 레인 고정 크기 볼륨
+
+# 이미지 파일을 root 없이 대조한다. 문제를 한 줄씩 내고 빈 출력이 통과다. 할당이 크기보다 작으면 쓰는 도중 노드 디스크가
+# 차서 실패할 수 있어 미리 할당(구멍 없음)까지 본다.
+task_state_file_problems() {
+  local info size blocks unit
+  stat_problem "$(stat -c '%u:%g %a %F' -- "$TASK_STATE_IMAGE" 2>/dev/null)" "$TASK_STATE_IMAGE_OWNER" 600 "regular file" "$TASK_STATE_IMAGE"
+  info="$(stat -c '%s %b %B' -- "$TASK_STATE_IMAGE" 2>/dev/null)" || return 0
+  read -r size blocks unit <<<"$info"
+  [ "$size" = "$TASK_STATE_BYTES" ] || printf '%s 크기가 %s바이트다(기대 %s)\n' "$TASK_STATE_IMAGE" "$size" "$TASK_STATE_BYTES"
+  [ $((blocks * unit)) -ge "$TASK_STATE_BYTES" ] || printf '%s가 미리 할당되지 않았다(할당 %s바이트, 크기 %s)\n' "$TASK_STATE_IMAGE" "$((blocks * unit))" "$size"
+}
+
+# 이미지 안 파일시스템을 대조한다. 이미지가 0600이라 root가 필요하다(부르는 쪽이 as_root true를 먼저 본다).
+# UUID는 처음 만들 때 적어 둔 값과 같아야 한다. 다른 이미지로 바뀐 것을 잡는다. 값은 저장소·공개 기록에 옮기지 않는다.
+task_state_fs_problems() {
+  local fstype uuid recorded
+  # -c /dev/null: 캐시를 쓰지 않고 파일을 직접 읽는다.
+  fstype="$(as_root blkid -c /dev/null -s TYPE -o value "$TASK_STATE_IMAGE" 2>/dev/null || true)"
+  [ "$fstype" = ext4 ] || printf '%s의 파일시스템이 ext4가 아니다(%s)\n' "$TASK_STATE_IMAGE" "${fstype:-읽지 못함}"
+  uuid="$(as_root blkid -c /dev/null -s UUID -o value "$TASK_STATE_IMAGE" 2>/dev/null || true)"
+  recorded="$(cat -- "$TASK_STATE_UUID_FILE" 2>/dev/null || true)"
+  [ -n "$uuid" ] && [ "$uuid" = "$recorded" ] || printf '%s의 UUID가 기록(%s)과 다르다\n' "$TASK_STATE_IMAGE" "$TASK_STATE_UUID_FILE"
+}
+
+# 지금 마운트 지점에 걸린 것을 "원본 형식 옵션 크기(바이트)" 줄로 낸다. --mountpoint만 쓴다(bulk_mount_lines 주석).
+task_state_mount_lines() {
+  findmnt -n -r -b -o SOURCE,FSTYPE,OPTIONS,SIZE --mountpoint "$TASK_STATE_MOUNT" 2>/dev/null || true
+}
+
+# 마운트가 이 이미지의 ext4 하나이고 쓰기 가능·nodev·nosuid이며 이미지보다 크지 않으면 빈 출력, 아니면 이유 한 줄.
+# 원본은 loop 장치라 그 뒤의 파일까지 본다. 다른 이미지나 다른 디스크를 같은 자리에 붙이면 크기 상한이 사라진다.
+task_state_mount_problem() {
+  local lines src fstype opts size back
+  lines="$(task_state_mount_lines)"
+  if [ -z "$lines" ]; then
+    printf '%s에 마운트가 없다\n' "$TASK_STATE_MOUNT"
+    return
+  fi
+  if [ "$(grep -c . <<<"$lines")" -ne 1 ]; then
+    printf '%s에 마운트가 여러 개 겹쳐 있다: %s\n' "$TASK_STATE_MOUNT" "${lines//$'\n'/; }"
+    return
+  fi
+  read -r src fstype opts size <<<"$lines"
+  back="$(losetup -l -n -O BACK-FILE -- "$src" 2>/dev/null || true)"
+  if [ "$back" != "$TASK_STATE_IMAGE" ]; then
+    printf '%s의 원본 %s 뒤 파일이 %s다(기대 %s)\n' "$TASK_STATE_MOUNT" "$src" "${back:-없음}" "$TASK_STATE_IMAGE"
+  elif [ "$fstype" != ext4 ]; then
+    printf '%s의 형식이 %s다(기대 ext4)\n' "$TASK_STATE_MOUNT" "$fstype"
+  elif [[ ! "$size" =~ ^[0-9]+$ ]] || [ "$size" -gt "$TASK_STATE_BYTES" ]; then
+    printf '%s의 크기가 %s바이트다(상한 %s)\n' "$TASK_STATE_MOUNT" "$size" "$TASK_STATE_BYTES"
+  else
+    case ",${opts}," in
+      *,rw,*) ;;
+      *) printf '%s가 쓰기 가능(rw)이 아니다: %s. ext4 오류로 읽기 전용이 됐을 수 있다\n' "$TASK_STATE_MOUNT" "$opts"; return ;;
+    esac
+    if [[ ",${opts}," != *,nosuid,* || ",${opts}," != *,nodev,* ]]; then
+      printf '%s에 nodev·nosuid가 없다: %s\n' "$TASK_STATE_MOUNT" "$opts"
+    fi
+  fi
 }
 
 # ------------------------------------------------------------------ 삭제 원장 SSD

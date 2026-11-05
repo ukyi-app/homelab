@@ -51,6 +51,11 @@ cluster:
     nodeName: nuc-15-pro
     path: /mnt/bulk/homelab-bot/deletion-ledger
 
+  # 봇 작업 레인 2GiB 고정 크기 볼륨의 노드(platform/sandbox PV worker-task-state). host/clusters/prod.env의 NODE_NAME이고 ci가 대조한다.
+  # 볼륨은 사람이 sudo host/install.sh --task-state-volume으로 만든다. task.enabled가 꺼져 있으면 이 값을 쓰는 리소스가 없다.
+  taskStateVolume:
+    nodeName: nuc-15-pro
+
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈추는 값(values-vm.yaml의 같은 블록에 쓰는 법).
   # 운영은 비워 둔다. 빈 값이면 root가 ApplicationSet에 넘기지 않아 렌더가 이 블록이 없을 때와 같다.
   # 빈 NUC 복구는 지금 restore.md 3절 1단계대로 apps/·data/ values를 쓴다(운영이 곧 복구 대상이라).

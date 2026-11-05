@@ -350,12 +350,175 @@ export function checkIngress(docs: Doc[]): Violation[] {
 // HTTPS_PROXY는 같은 렌더 맥락의 egress/egress-proxy Service clusterIP·포트여야 한다. 어긋나면 init 규칙이 허용한 주소와
 // 작업자가 쓰는 주소가 달라 모든 외부 연결이 끊기거나, 다른 주소를 허용하게 된다. Service가 없으면 비교할 기준이 없어 실패로 본다.
 // sandbox 구성 요소를 끄면 대상이 0이라 세지 않는다.
+//
+// 작업 레인 보안 조합(봇 DECISIONS "(2) 파드 실측 결과와 대가 수용"). hostUsers: false·procMount: Unmasked·Localhost 프로필은
+// bwrap을 돌리려고 연 권한이고 전용 프로필은 containerd 기본의 복사본이다. worker-task의 worker 컨테이너 밖으로 번지면 그 파드의
+// seccomp·AppArmor 경계가 조용히 넓어진다. 그래서 모든 ns의 워크로드를 본다. 켠 렌더는 platform/sandbox/ci/task-enabled.yaml이다.
+// 옛 AppArmor 주석도 같은 효과라 함께 막는다.
+// shareProcessNamespace는 pause를 PID 1로 두어 좀비를 회수하게 하려고 worker-task에 꼭 있어야 한다. 다른 파드에서는 컨테이너끼리
+// 프로세스와 그 환경이 보이므로 허용하지 않는다. 정리 sweep이 PID 1과 작업자 밖을 모두 끝내므로 exec probe·lifecycle을 막는다.
+// 저장 공간은 호스트 고정 크기 볼륨의 정적 PV에 묶는다. local 볼륨은 크기를 강제하지 않아 상한은 그 파일시스템에서만 온다.
+// 라벨·자격·PVC도 나눈다. app: worker를 함께 달면 Service worker가 대화·리뷰 요청을 작업 파드로 보내고, 자격을 함께 붙이면
+// 한 레인의 토큰만 철회한다는 분리가 사라진다.
 const SANDBOX_NS = "sandbox";
+const SANDBOX_TASK = "worker-task";
+const SANDBOX_TASK_CONTAINER = "worker";
+const SANDBOX_TASK_LABELS = { app: SANDBOX_TASK };
+const SANDBOX_TASK_SECRET = "worker-task-credential-claude-subscription";
+const SANDBOX_TASK_PVC = "worker-task-state";
+// host/lib.sh SANDBOX_SECCOMP_DIR(kubelet seccomp 아래 homelab/)와 host/sandbox-profiles/의 정식 이름.
+const SANDBOX_TASK_SECCOMP = "homelab/sandbox-worker-v1.json";
+const SANDBOX_TASK_APPARMOR = "homelab-sandbox-worker-v1";
+// host/lib.sh TASK_STATE_*와 같은 값. 2GiB 고정 크기 볼륨의 마운트 지점이다.
+const SANDBOX_TASK_VOLUME_MOUNT = "/var/lib/taskstate/mnt";
+const SANDBOX_TASK_VOLUME_SIZE = "2Gi";
+// 작업 레인 밖의 Localhost 프로필 예외는 하나다. node-exporter의 systemd 수집기는 containerd 기본 AppArmor가 시스템 버스를
+// 막아 실패해서, 기본값에 유닛 읽기 호출만 더한 AppArmor를 쓴다(host/sandbox-profiles/). seccomp Localhost는 받지 않는다.
+const NODE_EXPORTER = { ns: "observability", kind: "DaemonSet", name: "node-exporter", container: "node-exporter" };
+const NODE_EXPORTER_APPARMOR = /^homelab-sandbox-node-exporter-v\d+$/;
+const SANDBOX_TASK_VOLUME_BYTES = 2147483648;
+const LEGACY_PROFILE_ANNOTATION = /^(container\.apparmor\.security\.beta\.kubernetes\.io|container\.seccomp\.security\.alpha\.kubernetes\.io|seccomp\.security\.alpha\.kubernetes\.io)\//;
+const podTemplateMeta = (obj: any): any => (obj.kind === "Pod" ? obj.metadata : obj.kind === "CronJob" ? obj.spec?.jobTemplate?.spec?.template?.metadata : obj.spec?.template?.metadata);
+
+// 커밋한 프로필과 이름이 어긋나면 노드에 없는 프로필을 참조해 파드가 뜨지 않는다.
+function sandboxTaskProfileFiles(): Violation[] {
+  const where = "host/sandbox-profiles";
+  const out: Violation[] = [];
+  const seccomp = SANDBOX_TASK_SECCOMP.replace(/^homelab\//, "");
+  if (!gitFiles(`host/sandbox-profiles/seccomp/${seccomp}`).length) out.push({ rule: "sandbox", where, message: `seccomp 프로필 ${seccomp}이 없다` });
+  if (!readText("host/lib.sh").includes('/seccomp/homelab"')) out.push({ rule: "sandbox", where: "host/lib.sh", message: "SANDBOX_SECCOMP_DIR가 kubelet seccomp 아래 homelab이 아니다" });
+  const apparmor = `host/sandbox-profiles/apparmor/${SANDBOX_TASK_APPARMOR}`;
+  if (!gitFiles(apparmor).length || !readText(apparmor).includes(`\nprofile ${SANDBOX_TASK_APPARMOR} `)) out.push({ rule: "sandbox", where, message: `AppArmor 프로필 ${SANDBOX_TASK_APPARMOR}이 없다` });
+  const lib = readText("host/lib.sh");
+  if (!lib.includes(`TASK_STATE_MOUNT=${SANDBOX_TASK_VOLUME_MOUNT}\n`) || !lib.includes(`TASK_STATE_BYTES=${SANDBOX_TASK_VOLUME_BYTES}\n`) || !lib.includes('TASK_STATE_DATA="${TASK_STATE_MOUNT}/data"\n')) {
+    out.push({ rule: "sandbox", where: "host/lib.sh", message: `TASK_STATE_* 값이 PV ${SANDBOX_TASK_PVC}와 다르다(${SANDBOX_TASK_VOLUME_MOUNT}/data, ${SANDBOX_TASK_VOLUME_BYTES}바이트)` });
+  }
+  return out;
+}
+
+// 저장 공간이 고정 크기 볼륨 안에 있는지. 동적 local-retain으로 돌아가거나 경로가 어긋나면 비신뢰 코드가 노드 루트 디스크를 채운다.
+function checkSandboxTaskVolume(d: Doc): Violation[] {
+  const out: Violation[] = [];
+  const bad = (message: string) => out.push({ rule: "sandbox", where: id(d), message: `저장 공간: ${message}` });
+  const s = d.obj.spec ?? {};
+  if (d.obj.kind === "PersistentVolumeClaim") {
+    if (s.storageClassName !== "" || s.volumeName !== SANDBOX_TASK_PVC) bad(`PVC는 storageClassName ""와 volumeName ${SANDBOX_TASK_PVC}로 정적 PV에 묶는다(지금 ${JSON.stringify(s.storageClassName)}, ${s.volumeName})`);
+    if (s.resources?.requests?.storage !== SANDBOX_TASK_VOLUME_SIZE) bad(`PVC 요청이 ${SANDBOX_TASK_VOLUME_SIZE}가 아니다`);
+    return out;
+  }
+  if (s.local?.path !== `${SANDBOX_TASK_VOLUME_MOUNT}/data` || s.hostPath !== undefined) bad(`PV는 local ${SANDBOX_TASK_VOLUME_MOUNT}/data여야 한다(마운트 지점 자체면 마운트가 빠질 때 루트 디스크로 샌다)`);
+  if (s.persistentVolumeReclaimPolicy !== "Retain" || s.storageClassName !== "" || s.capacity?.storage !== SANDBOX_TASK_VOLUME_SIZE) bad(`PV는 Retain, storageClassName "", 용량 ${SANDBOX_TASK_VOLUME_SIZE}다`);
+  const ref = s.claimRef ?? {};
+  if (Object.keys(ref).sort().join() !== "name,namespace" || ref.name !== SANDBOX_TASK_PVC || ref.namespace !== SANDBOX_NS) bad(`claimRef는 ${SANDBOX_NS}/${SANDBOX_TASK_PVC}의 이름·ns만 적는다(uid를 적으면 재구축 때 묶이지 않는다)`);
+  const terms: any[] = s.nodeAffinity?.required?.nodeSelectorTerms ?? [];
+  const e = terms[0]?.matchExpressions?.[0];
+  if (terms.length !== 1 || terms[0]?.matchExpressions?.length !== 1 || e?.key !== "kubernetes.io/hostname" || e?.operator !== "In" || e?.values?.length !== 1 || !e.values[0]) bad("nodeAffinity는 kubernetes.io/hostname In [노드 하나] 하나다");
+  return out;
+}
+
+// 조합이 worker-task의 worker 컨테이너에만 있는지. 모든 ns의 워크로드에 적용한다.
+function checkSandboxTaskScope(d: Doc, isTask: boolean, spec: any, inSandbox: boolean): Violation[] {
+  const out: Violation[] = [];
+  const where = id(d);
+  const push = (w: string, message: string) => out.push({ rule: "sandbox", where: w, message });
+  if (spec.hostUsers === false && !isTask) push(where, `hostUsers: false는 ${SANDBOX_TASK}에만 쓴다`);
+  if (spec.shareProcessNamespace === true && !isTask) push(where, `shareProcessNamespace: true는 ${SANDBOX_TASK}에만 쓴다`);
+  const podSc = spec.securityContext ?? {};
+  // 파드 수준 값은 NET_ADMIN을 든 init 방화벽까지 받는다.
+  if (podSc.seccompProfile?.type === "Localhost" || podSc.appArmorProfile?.type === "Localhost") push(where, `Localhost 프로필은 파드 수준에 두지 않는다(${SANDBOX_TASK}의 ${SANDBOX_TASK_CONTAINER} 컨테이너만)`);
+  if (inSandbox && (podSc.seccompProfile?.type === "Unconfined" || podSc.appArmorProfile?.type === "Unconfined")) push(where, "Unconfined 프로필을 쓰지 않는다");
+  for (const k of Object.keys(podTemplateMeta(d.obj)?.annotations ?? {})) {
+    if (LEGACY_PROFILE_ANNOTATION.test(k)) push(where, `프로필 주석 ${k}을 쓰지 않는다(securityContext로만 고른다)`);
+  }
+  const others: any[] = [...(spec.initContainers ?? []), ...(spec.ephemeralContainers ?? [])];
+  for (const c of [...others, ...(spec.containers ?? [])]) {
+    const allowed = isTask && !others.includes(c) && c.name === SANDBOX_TASK_CONTAINER;
+    const sc = c.securityContext ?? {};
+    const cw = `${where} container ${c.name}`;
+    if (sc.procMount !== undefined && sc.procMount !== "Default" && !allowed) push(cw, `procMount: ${sc.procMount}는 ${SANDBOX_TASK}의 ${SANDBOX_TASK_CONTAINER} 컨테이너만 쓴다`);
+    const nodeExporterAppArmor = (d.obj.metadata?.namespace ?? d.ns) === NODE_EXPORTER.ns && d.obj.kind === NODE_EXPORTER.kind && d.obj.metadata?.name === NODE_EXPORTER.name
+      && !others.includes(c) && c.name === NODE_EXPORTER.container && sc.seccompProfile?.type !== "Localhost"
+      && sc.appArmorProfile?.type === "Localhost" && NODE_EXPORTER_APPARMOR.test(sc.appArmorProfile?.localhostProfile ?? "");
+    if ((sc.seccompProfile?.type === "Localhost" || sc.appArmorProfile?.type === "Localhost") && !allowed && !nodeExporterAppArmor) push(cw, `Localhost 프로필은 ${SANDBOX_TASK}의 ${SANDBOX_TASK_CONTAINER} 컨테이너(와 node-exporter AppArmor 하나)만 쓴다`);
+    if (inSandbox && (sc.seccompProfile?.type === "Unconfined" || sc.appArmorProfile?.type === "Unconfined")) push(cw, "Unconfined 프로필을 쓰지 않는다");
+  }
+  return out;
+}
+
+// 작업 레인 Deployment가 있으면 조합이 다 있어야 한다. 하나라도 빠지면 작업 격리가 다른 것이 된다.
+function checkSandboxTaskShape(d: Doc, spec: any): Violation[] {
+  const out: Violation[] = [];
+  const where = id(d);
+  const bad = (message: string, w = where) => out.push({ rule: "sandbox", where: w, message: `${SANDBOX_TASK}: ${message}` });
+  if (spec.hostUsers !== false) bad("hostUsers: false가 아니다");
+  if (spec.shareProcessNamespace !== true) bad("shareProcessNamespace: true가 아니다(PID 1이 좀비를 회수하지 않는다)");
+  if (d.obj.spec?.replicas !== 1 || d.obj.spec?.strategy?.type !== "Recreate") bad("replicas 1, Recreate가 아니다");
+  const containers: any[] = spec.containers ?? [];
+  if (containers.length !== 1 || containers[0]?.name !== SANDBOX_TASK_CONTAINER) bad(`본 컨테이너는 ${SANDBOX_TASK_CONTAINER} 하나여야 한다`);
+  // 재시작형 init(사이드카)은 PID 공간을 함께 써 정리 sweep이 끝내고, 그동안 기준 상태 확인이 어긋난다.
+  if ((spec.initContainers ?? []).length !== 1) bad(`init은 ${SANDBOX_FIREWALL} 하나여야 한다`);
+  for (const c of [...(spec.initContainers ?? []), ...containers]) {
+    const cw = `${where} container ${c.name}`;
+    for (const p of ["readinessProbe", "livenessProbe", "startupProbe"]) if (c[p]?.exec) bad(`${p}에 exec를 쓰지 않는다(정리 sweep에 죽는다)`, cw);
+    for (const h of ["postStart", "preStop"]) if (c.lifecycle?.[h]?.exec) bad(`lifecycle ${h}에 exec를 쓰지 않는다(정리 sweep에 죽는다)`, cw);
+  }
+  const c = containers.find((x) => x?.name === SANDBOX_TASK_CONTAINER);
+  if (c) {
+    const cw = `${where} container ${c.name}`;
+    const sc = c.securityContext ?? {};
+    if (sc.procMount !== "Unmasked") bad("procMount: Unmasked가 아니다", cw);
+    if (sc.seccompProfile?.type !== "Localhost" || sc.seccompProfile?.localhostProfile !== SANDBOX_TASK_SECCOMP) bad(`seccomp가 Localhost ${SANDBOX_TASK_SECCOMP}가 아니다`, cw);
+    if (sc.appArmorProfile?.type !== "Localhost" || sc.appArmorProfile?.localhostProfile !== SANDBOX_TASK_APPARMOR) bad(`AppArmor가 Localhost ${SANDBOX_TASK_APPARMOR}가 아니다`, cw);
+    if (sc.runAsNonRoot !== true || sc.runAsUser !== 10001 || sc.runAsGroup !== 10001) bad("uid·gid 10001 비root가 아니다", cw);
+    if (sc.readOnlyRootFilesystem !== true) bad("readOnlyRootFilesystem: true가 아니다", cw);
+  }
+  const labels = d.obj.spec?.template?.metadata?.labels ?? {};
+  if (JSON.stringify(labels) !== JSON.stringify(SANDBOX_TASK_LABELS) || JSON.stringify(d.obj.spec?.selector?.matchLabels) !== JSON.stringify(SANDBOX_TASK_LABELS)) {
+    bad(`파드 라벨·selector가 정확히 app: ${SANDBOX_TASK}가 아니다(Service worker에 섞인다)`);
+  }
+  return out;
+}
+
+// 레인 사이 공유 금지와 Service selector. 같은 렌더 맥락의 sandbox 문서를 함께 본다.
+function checkSandboxLaneSplit(docs: Doc[], nsOf: (d: Doc) => string | undefined): Violation[] {
+  const out: Violation[] = [];
+  const inSandbox = docs.filter((d) => nsOf(d) === SANDBOX_NS);
+  for (const d of inSandbox) {
+    if (!WORKLOAD_KINDS.has(d.obj.kind)) continue;
+    const isTask = d.obj.kind === "Deployment" && d.obj.metadata?.name === SANDBOX_TASK;
+    const vols: any[] = podSpec(d.obj)?.volumes ?? [];
+    const secrets = vols.flatMap((v) => [v?.secret?.secretName, ...(v?.projected?.sources ?? []).map((s: any) => s?.secret?.name)]).filter(Boolean);
+    const claims = vols.map((v) => v?.persistentVolumeClaim?.claimName).filter(Boolean);
+    const where = id(d);
+    if (isTask) {
+      if (secrets.join() !== SANDBOX_TASK_SECRET) out.push({ rule: "sandbox", where, message: `자격 분리: Secret은 ${SANDBOX_TASK_SECRET} 하나만 붙인다(지금 ${secrets.join(", ")})` });
+      if (claims.join() !== SANDBOX_TASK_PVC) out.push({ rule: "sandbox", where, message: `자격 분리: PVC는 ${SANDBOX_TASK_PVC} 하나만 붙인다(지금 ${claims.join(", ")})` });
+    } else if (secrets.includes(SANDBOX_TASK_SECRET) || claims.includes(SANDBOX_TASK_PVC)) {
+      out.push({ rule: "sandbox", where, message: `자격 분리: ${SANDBOX_TASK}의 Secret·PVC를 다른 워크로드에 붙이지 않는다` });
+    }
+  }
+  const tasks = inSandbox.filter((d) => d.obj.kind === "Deployment" && d.obj.metadata?.name === SANDBOX_TASK);
+  for (const svc of inSandbox.filter((d) => d.obj.kind === "Service")) {
+    const sel: Record<string, unknown> = svc.obj.spec?.selector ?? {};
+    const name = svc.obj.metadata?.name;
+    if (name === SANDBOX_TASK && JSON.stringify(sel) !== JSON.stringify(SANDBOX_TASK_LABELS)) {
+      out.push({ rule: "sandbox", where: id(svc), message: `Service selector 분리: selector가 정확히 app: ${SANDBOX_TASK}가 아니다` });
+    }
+    for (const t of tasks) {
+      if (context(t.origin) !== context(svc.origin) || name === SANDBOX_TASK) continue;
+      const labels = t.obj.spec?.template?.metadata?.labels ?? {};
+      if (Object.keys(sel).length > 0 && Object.entries(sel).every(([k, v]) => labels[k] === v)) {
+        out.push({ rule: "sandbox", where: id(svc), message: `Service selector 분리: 이 Service가 ${SANDBOX_TASK} 파드를 고른다` });
+      }
+    }
+  }
+  return out;
+}
 const SANDBOX_FIREWALL = "egress-firewall";
 const SANDBOX_FIREWALL_CAPS = new Set(["NET_ADMIN"]);
 // sandbox SA를 담는 그룹. 바인딩 subject로 오면 sandbox:default에 권한이 생긴다.
 const SANDBOX_GROUPS = new Set([`system:serviceaccounts:${SANDBOX_NS}`, "system:serviceaccounts", "system:authenticated"]);
-// platform/sandbox/templates/worker-deployment.yaml의 egress-firewall. 규칙을 바꾸면 같은 PR에서 이 고정본도 바꾼다.
+// platform/sandbox/templates/_helpers.tpl의 sandbox.egressFirewall. 규칙을 바꾸면 같은 PR에서 이 고정본도 바꾼다.
 const SANDBOX_FIREWALL_COMMAND = ["/bin/sh", "-euc"];
 const SANDBOX_FIREWALL_IMAGE = "docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70";
 // iptables 잠금 파일(/run/xtables.lock) 자리. 이름은 emptyDir 볼륨이어야 한다.
@@ -391,8 +554,20 @@ export function checkSandbox(docs: Doc[]): Violation[] {
     // 고정 IPv4 clusterIP·숫자 포트여야 init 규칙에 쓸 수 있다(None·빈 값이면 Service가 없는 것과 같다).
     if (typeof ip === "string" && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && Number.isInteger(port)) proxies.set(context(d.origin), { ip, port, url: `http://${ip}:${port}` });
   }
+  out.push(...checkSandboxLaneSplit(docs, nsOf));
+  let taskSeen = false;
   for (const d of docs) {
     const k = d.obj.kind;
+    if (d.obj.metadata?.name === SANDBOX_TASK_PVC && (k === "PersistentVolume" || (k === "PersistentVolumeClaim" && nsOf(d) === SANDBOX_NS))) out.push(...checkSandboxTaskVolume(d));
+    if (WORKLOAD_KINDS.has(k)) {
+      const isTask = k === "Deployment" && nsOf(d) === SANDBOX_NS && d.obj.metadata?.name === SANDBOX_TASK;
+      const taskSpec = podSpec(d.obj) ?? {};
+      out.push(...checkSandboxTaskScope(d, isTask, taskSpec, nsOf(d) === SANDBOX_NS));
+      if (isTask) {
+        taskSeen = true;
+        out.push(...checkSandboxTaskShape(d, taskSpec));
+      }
+    }
     if (k === "RoleBinding" || k === "ClusterRoleBinding") {
       const bound = (d.obj.subjects ?? []).some(
         (s: any) =>
@@ -463,6 +638,7 @@ export function checkSandbox(docs: Doc[]): Violation[] {
     for (const c of inits) check(c, true);
     for (const c of spec.containers ?? []) check(c, false);
   }
+  if (taskSeen) out.push(...sandboxTaskProfileFiles());
   return out;
 }
 
