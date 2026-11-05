@@ -1,0 +1,11 @@
+# 멈추면 결과 시각이 오래되어 TailnetTLSCollectorFailing이 본다.
+[Unit]
+Description=tailnet TLS certificate check every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

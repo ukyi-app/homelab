@@ -1,0 +1,35 @@
+# tailnet TLS 인증서를 확인해 node-exporter textfile로 쓴다. host/install.sh --tls-monitor가
+# /etc/systemd/system/로 복사한다. 경로와 사용자 이름은 host/lib.sh의 TLS_MONITOR_*와 같다.
+[Unit]
+Description=tailnet TLS certificate check (node-exporter textfile)
+After=tailscaled.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=homelab-tls-monitor
+Group=homelab-tls-monitor
+ExecStart=/usr/bin/python3 /usr/local/lib/homelab/tls-monitor/collect.py --out /var/lib/homelab-tls-monitor/tailnet_tls.prom
+# 대상마다 10초 상한이 있어 대상이 늘어도 넉넉하다.
+TimeoutStartSec=300
+
+# 필요한 것은 tailscaled 소켓, 443 연결, 출력 디렉터리 쓰기뿐이다.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ReadWritePaths=/var/lib/homelab-tls-monitor
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native

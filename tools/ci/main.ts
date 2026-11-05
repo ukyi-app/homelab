@@ -336,6 +336,11 @@ const steps: Step[] = [
     run: () => tool("host-task-state", ["bash", "tools/host-task-state.test.sh"]),
   },
   {
+    name: "host tls monitor",
+    // tailnet TLS 수집기를 실제 TLS 서버로(정상·만료·이름 불일치·모르는 CA·연결 거부·목록 실패) 보고, install.sh --tls-monitor와 verify.sh 판정을 가짜 명령과 임시 경로로 본다.
+    run: () => tool("host-tls-monitor", ["bash", "tools/host-tls-monitor.test.sh"]),
+  },
+  {
     name: "workflows",
     run: () => {
       const files = gitFiles(".github/workflows/*.yaml", ".github/workflows/*.yml").map((path) => ({ path, text: readText(path) }));
