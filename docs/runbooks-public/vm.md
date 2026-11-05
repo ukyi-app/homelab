@@ -359,6 +359,7 @@ host/preflight.sh --cluster vm --before \
   && sudo host/install.sh --cluster vm --egress \
   && sudo host/install.sh --cluster vm --sandbox-profiles \
   && sudo host/install.sh --cluster vm --task-state-volume \
+  && sudo host/install.sh --cluster vm --tls-monitor \
   && sudo host/install.sh --cluster vm --k3s \
   && host/verify.sh --cluster vm
 ```

@@ -9,9 +9,10 @@
 #   sudo host/install.sh --cluster <이름> --bulk-ssd     (삭제 원장 SSD 마운트와 원장 첫 초기화. 값이 빈 클러스터는 건너뜀)
 #   sudo host/install.sh --cluster <이름> --sandbox-profiles   (봇 작업 레인 worker와 node-exporter의 Localhost 프로필)
 #   sudo host/install.sh --cluster <이름> --task-state-volume  (봇 작업 레인의 2GiB 고정 크기 볼륨. 있는 이미지는 다시 포맷하지 않음)
+#   sudo host/install.sh --cluster <이름> --tls-monitor  (tailnet TLS 인증서 감시 타이머. tailnet에 들지 않는 클러스터는 디렉터리만)
 #
 # 순서가 계약이다: preflight --before -> install --host-config -> preflight --after
-#   -> install --egress -> install --sandbox-profiles -> install --task-state-volume -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
+#   -> install --egress -> install --sandbox-profiles -> install --task-state-volume -> install --tls-monitor -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
 #   --task-state-volume을 --k3s보다 먼저 두는 까닭은 --sandbox-profiles와 같다. 이 볼륨을 쓰는 파드는 없으면 뜨지 않는다. 이미 도는 클러스터에는
 #   따로 실행해도 된다(k3s를 다시 시작하지 않는다). k3s-uninstall.sh는 /var/lib/taskstate를 지우지 않아 k3s를 다시 깔아도 볼륨이 남는다.
 #   --sandbox-profiles를 --k3s보다 먼저 두는 까닭: 이 프로필을 참조하는 파드는 프로필이 없으면 뜨지 않고, k3s가 서면 곧 Argo CD가
@@ -56,7 +57,7 @@ TARGETS=""
 NET_DROPINS=""
 KUBECONFIG_OUT=""
 
-usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--egress|--k3s|--egress-off|--bulk-ssd|--sandbox-profiles|--task-state-volume"; }
+usage() { die "사용: sudo host/install.sh --cluster <이름> --host-config|--egress|--k3s|--egress-off|--bulk-ssd|--sandbox-profiles|--task-state-volume|--tls-monitor"; }
 cleanup() { [ -z "$TMPD" ] || rm -rf "$TMPD"; }
 trap cleanup EXIT
 
@@ -1051,6 +1052,55 @@ task_state_volume() {
   echo "    다음: host/verify.sh --cluster ${CLUSTER} (sudo -v 뒤 같은 터미널에서. 이미지 UUID는 root만 읽는다)"
 }
 
+# ------------------------------------------------------------------------ --tls-monitor
+# tailnet TLS 인증서 감시. 타이머가 tag:k8s 기기의 실제 인증서를 확인해 node-exporter textfile로 쓴다.
+# 대상은 실행 때 tailscale status에서 찾는다. 저장소에 tailnet 이름도 대상 목록도 두지 않는다.
+# --k3s보다 먼저 두는 까닭: node-exporter가 이 디렉터리를 읽는다. 없어도 파드는 뜨지만 수집마다 오류를 남긴다.
+# 호스트가 tailnet에 들지 않는 클러스터는 끔 표시만 쓴다(host/lib.sh TLS_MONITOR_DISABLED_LINE). 이미 도는 클러스터에는 따로 실행해도 된다.
+
+tls_monitor() {
+  local src dest mode problems
+
+  log "확인"
+  require_cmds install systemctl id
+  if [ "$TAILNET_JOIN" != "true" ]; then
+    install -d -m 0755 -o "${TLS_MONITOR_FILE_OWNER%:*}" -g "${TLS_MONITOR_FILE_OWNER#*:}" "$TLS_MONITOR_DIR"
+    printf '%s\n' "$TLS_MONITOR_DISABLED_LINE" >"$TMPD/tailnet_tls.prom"
+    install -m 0644 -o "${TLS_MONITOR_FILE_OWNER%:*}" -g "${TLS_MONITOR_FILE_OWNER#*:}" "$TMPD/tailnet_tls.prom" "$TLS_MONITOR_PROM"
+    echo "    TAILNET_JOIN=false라 타이머를 깔지 않는다. ${TLS_MONITOR_PROM}에 끔 표시만 쓴다"
+    return 0
+  fi
+  require_cmds tailscale useradd
+  [ -x "$TLS_MONITOR_PYTHON" ] || die "${TLS_MONITOR_PYTHON}가 없다. 수집기는 호스트 파이썬으로 돈다"
+
+  log "[1/3] 사용자·디렉터리"
+  if ! id -u "$TLS_MONITOR_USER" >/dev/null 2>&1; then
+    useradd --system --user-group --no-create-home --home-dir / --shell /usr/sbin/nologin "$TLS_MONITOR_USER"
+    echo "    사용자 ${TLS_MONITOR_USER}"
+  fi
+  # 소유자만 쓰고 node-exporter(uid 65534)는 읽는다.
+  install -d -m 0755 -o "${TLS_MONITOR_DIR_OWNER%:*}" -g "${TLS_MONITOR_DIR_OWNER#*:}" "$TLS_MONITOR_DIR"
+
+  log "[2/3] 수집기·유닛 파일"
+  install -d -m 0755 -o "${TLS_MONITOR_FILE_OWNER%:*}" -g "${TLS_MONITOR_FILE_OWNER#*:}" "$TLS_MONITOR_LIB"
+  while IFS=$'\t' read -r src dest mode; do
+    install -m "$mode" -o "${TLS_MONITOR_FILE_OWNER%:*}" -g "${TLS_MONITOR_FILE_OWNER#*:}" "$src" "$dest"
+    echo "    ${dest}"
+  done < <(tls_monitor_files)
+
+  log "[3/3] 타이머 켜고 한 번 돌리기"
+  systemctl daemon-reload
+  systemctl enable --now "$TLS_MONITOR_TIMER"
+  # oneshot이라 끝날 때까지 기다린다.
+  systemctl start "$TLS_MONITOR_SERVICE" || die "${TLS_MONITOR_SERVICE}가 실패했다. journalctl -u ${TLS_MONITOR_SERVICE}"
+  problems="$(tls_monitor_output_problems)"
+  [ -z "$problems" ] || die "수집 결과에 문제가 있다:"$'\n'"${problems}"
+
+  log "tailnet TLS 감시 설치 완료"
+  echo "    끄기: sudo systemctl disable --now ${TLS_MONITOR_TIMER}"
+  echo "    다음: host/verify.sh --cluster ${CLUSTER} (sudo 없이)"
+}
+
 # ------------------------------------------------------------------------------ main
 
 main() {
@@ -1058,7 +1108,7 @@ main() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --cluster) [ "$#" -ge 2 ] || usage; cluster="$2"; shift 2 ;;
-      --host-config | --egress | --egress-off | --k3s | --bulk-ssd | --sandbox-profiles | --task-state-volume) [ -z "$mode" ] || usage; mode="$1"; shift ;;
+      --host-config | --egress | --egress-off | --k3s | --bulk-ssd | --sandbox-profiles | --task-state-volume | --tls-monitor) [ -z "$mode" ] || usage; mode="$1"; shift ;;
       *) usage ;;
     esac
   done
@@ -1079,8 +1129,9 @@ main() {
     --bulk-ssd) bulk_ssd ;;
     --sandbox-profiles) sandbox_profiles ;;
     --task-state-volume) task_state_volume ;;
+    --tls-monitor) tls_monitor ;;
   esac
 }
 
-# tools/host-*.test.sh가 check_install_time_keys·k3s_install·apply_services·bulk_ssd·sandbox_profiles·task_state_volume을 쓰려고 source한다. 그때는 main을 돌리지 않는다.
+# tools/host-*.test.sh가 check_install_time_keys·k3s_install·apply_services·bulk_ssd·sandbox_profiles·task_state_volume·tls_monitor를 쓰려고 source한다. 그때는 main을 돌리지 않는다.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

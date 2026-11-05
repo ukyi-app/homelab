@@ -314,6 +314,39 @@ check_task_state_volume() {
   fi
 }
 
+# tailnet TLS 감시(install.sh --tls-monitor). 결과 파일은 누구나 읽어 sudo가 필요 없다.
+check_tls_monitor() {
+  local src dest en act p
+  if [ "$TAILNET_JOIN" != "true" ]; then
+    if grep -qxF "$TLS_MONITOR_DISABLED_LINE" "$TLS_MONITOR_PROM" 2>/dev/null; then
+      ok "${TLS_MONITOR_PROM}에 끔 표시 있음(호스트가 tailnet에 들지 않아 타이머 없음)"
+    else
+      bad "${TLS_MONITOR_PROM}에 끔 표시가 없다. TailnetTLSMissing이 울린다. sudo host/install.sh --cluster ${CLUSTER} --tls-monitor"
+    fi
+    return
+  fi
+  while IFS=$'\t' read -r src dest _; do
+    if cmp -s "$src" "$dest"; then
+      ok "${dest}가 Git과 같다"
+    else
+      bad "${dest}가 없거나 ${src#"$HOST_DIR"/}와 다르다. sudo host/install.sh --cluster ${CLUSTER} --tls-monitor"
+    fi
+  done < <(tls_monitor_files)
+  en="$(systemctl is-enabled "$TLS_MONITOR_TIMER" 2>/dev/null || true)"
+  act="$(systemctl is-active "$TLS_MONITOR_TIMER" 2>/dev/null || true)"
+  if [ "$en" = enabled ] && [ "$act" = active ]; then
+    ok "${TLS_MONITOR_TIMER} enabled, active"
+  else
+    bad "${TLS_MONITOR_TIMER}가 enabled·active가 아니다(${en:-없음}, ${act:-없음})"
+  fi
+  p="$(tls_monitor_output_problems)"
+  if [ -z "$p" ]; then
+    ok "tailnet TLS 수집 결과가 최근 것이고 실패가 없다"
+  else
+    bad "tailnet TLS 수집 결과:"$'\n'"${p}"
+  fi
+}
+
 # kubeconfig에는 cluster-admin 자격이 있다.
 check_kubeconfig_mode() {
   local m
@@ -370,6 +403,7 @@ main() {
   check_bulk_ssd
   check_sandbox_profiles
   check_task_state_volume
+  check_tls_monitor
   check_kubeconfig_mode
   finish
 }

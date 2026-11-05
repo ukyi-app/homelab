@@ -68,6 +68,27 @@ EGRESS_UNIT="/etc/systemd/system/${EGRESS_UNIT_NAME}"
   TASK_STATE_IMAGE_OWNER=0:0
   TASK_STATE_DATA_OWNER=10001:10001
 }
+# tailnet TLS 감시(install.sh --tls-monitor). 출력 디렉터리는 node-exporter --collector.textfile.directory와 같은 값이다.
+# 경로와 사용자 이름은 host/tls-monitor/의 유닛에도 글자로 있다. 바꾸면 함께 바꾼다.
+# 경로·소유는 tools/host-tls-monitor.test.sh가 root 없이 돌리려고 바꾼다.
+# shellcheck disable=SC2034  # install.sh·verify.sh가 쓴다
+{
+  TLS_MONITOR_USER=homelab-tls-monitor
+  TLS_MONITOR_DIR=/var/lib/homelab-tls-monitor
+  TLS_MONITOR_DIR_OWNER="${TLS_MONITOR_USER}:${TLS_MONITOR_USER}"
+  TLS_MONITOR_PROM="${TLS_MONITOR_DIR}/tailnet_tls.prom"
+  TLS_MONITOR_LIB=/usr/local/lib/homelab/tls-monitor
+  TLS_MONITOR_UNIT_DIR=/etc/systemd/system
+  TLS_MONITOR_SERVICE=homelab-tls-monitor.service
+  TLS_MONITOR_TIMER=homelab-tls-monitor.timer
+  TLS_MONITOR_FILE_OWNER=0:0
+  TLS_MONITOR_PYTHON=/usr/bin/python3
+  # 타이머 5분의 세 배. 넘으면 타이머가 멈춘 것이다.
+  TLS_MONITOR_MAX_AGE=900
+  # 호스트가 tailnet에 들지 않는 클러스터의 표시. 그런 클러스터도 operator의 Ingress(vm- 접두)는 있을 수 있는데 호스트에서 확인하지 못한다.
+  # TailnetTLSMissing이 이 지표를 보고 조용하다. 클러스터별 값을 Helm에 두지 않으려고 호스트 값(TAILNET_JOIN)에서 내보낸다.
+  TLS_MONITOR_DISABLED_LINE="homelab_tailnet_tls_disabled 1"
+}
 
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
@@ -291,6 +312,32 @@ task_state_mount_problem() {
       printf '%s에 nodev·nosuid가 없다: %s\n' "$TASK_STATE_MOUNT" "$opts"
     fi
   fi
+}
+
+# ------------------------------------------------------------------- tailnet TLS 감시
+
+# Git의 파일을 "원본<TAB>대상<TAB>모드" 줄로 낸다.
+tls_monitor_files() {
+  printf '%s\t%s\t0755\n' "${HOST_DIR}/tls-monitor/collect.py" "${TLS_MONITOR_LIB}/collect.py"
+  printf '%s\t%s\t0644\n' "${HOST_DIR}/tls-monitor/${TLS_MONITOR_SERVICE}" "${TLS_MONITOR_UNIT_DIR}/${TLS_MONITOR_SERVICE}"
+  printf '%s\t%s\t0644\n' "${HOST_DIR}/tls-monitor/${TLS_MONITOR_TIMER}" "${TLS_MONITOR_UNIT_DIR}/${TLS_MONITOR_TIMER}"
+}
+
+# 마지막 결과를 본다. 문제를 한 줄씩 내고 빈 출력이 통과다.
+tls_monitor_output_problems() {
+  local ts failed
+  if [ ! -r "$TLS_MONITOR_PROM" ]; then
+    printf '%s가 없다\n' "$TLS_MONITOR_PROM"
+    return 0
+  fi
+  ts="$(awk '$1 == "homelab_tailnet_tls_collect_timestamp_seconds" { print $2 }' "$TLS_MONITOR_PROM")"
+  if [ -z "$ts" ] || [ $(($(date +%s) - ts)) -gt "$TLS_MONITOR_MAX_AGE" ]; then
+    printf '결과가 %s초보다 오래됐다. systemctl status %s\n' "$TLS_MONITOR_MAX_AGE" "$TLS_MONITOR_TIMER"
+  fi
+  grep -qxF 'homelab_tailnet_tls_collect_success 1' "$TLS_MONITOR_PROM" \
+    || printf '대상 목록을 못 읽었다. journalctl -u %s\n' "$TLS_MONITOR_SERVICE"
+  failed="$(sed -n 's/^homelab_tailnet_tls_probe_success{tls_host="\([^"]*\)"} 0$/\1/p' "$TLS_MONITOR_PROM")"
+  [ -z "$failed" ] || printf '인증서 검증 실패: %s. journalctl -u %s\n' "$(printf '%s' "$failed" | paste -sd ' ')" "$TLS_MONITOR_SERVICE"
 }
 
 # ------------------------------------------------------------------ 삭제 원장 SSD
