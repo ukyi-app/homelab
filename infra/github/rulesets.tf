@@ -125,7 +125,7 @@ resource "github_repository_ruleset" "main_review" {
   }
 }
 
-# C. deploy/** 브랜치는 ukyi-deploy App만 만들고 바꾼다(키는 앱 main push의 태그 고정 app-build만 받는다).
+# C. deploy/ 아래 모든 브랜치는 ukyi-deploy App만 만들고 바꾼다(키는 앱 main push의 태그 고정 app-build만 받는다).
 # 삭제는 막지 않는다. 병합 뒤 브랜치 삭제 설정이 deploy 브랜치를 지운다.
 resource "github_repository_ruleset" "deploy_branches" {
   repository  = local.homelab
@@ -135,7 +135,10 @@ resource "github_repository_ruleset" "deploy_branches" {
 
   conditions {
     ref_name {
-      include = ["refs/heads/deploy/**"]
+      # GitHub은 File.fnmatch를 FNM_PATHNAME으로 쓴다. 끝의 `**`는 `*`처럼 한 단계만 맞아 `deploy/x/y` 같은 중첩
+      # 브랜치에는 걸리지 않는다. `**/*`가 그 아래 깊이를 덮고, 한 단계 `deploy/<앱>`은 두 패턴 모두로 확실히 덮는다.
+      # 적용 범위는 GET /repos/ukyi-app/homelab/rules/branches/<이름을 URL 인코딩>으로 이름마다 확인한다.
+      include = ["refs/heads/deploy/**", "refs/heads/deploy/**/*"]
       exclude = []
     }
   }
