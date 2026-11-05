@@ -83,3 +83,14 @@ groups:
         annotations:
           summary: "호스트 유닛 {{ $labels.name }}의 상태가 failed다"
           description: "systemctl status {{ $labels.name }}, journalctl -u {{ $labels.name }}"
+
+      # 수집기가 실패하면 node_systemd_unit_state가 없어져 NodeSystemdUnitFailed가 조용히 울리지 못한다.
+      # collector를 고른다. 하드웨어나 기능이 없는 수집기(zfs, nfs, rapl 등)는 늘 0이라 전체를 보면 항상 참이다.
+      - alert: NodeSystemdCollectorFailed
+        expr: node_scrape_collector_success{collector="systemd"} == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}의 호스트 유닛 상태 수집이 실패한다. NodeSystemdUnitFailed가 울리지 못한다"
+          description: "kubectl -n observability logs ds/node-exporter. AppArmor 거부는 journalctl -k -g dbus_method_call, 프로필 설치는 sudo host/install.sh --sandbox-profiles."
