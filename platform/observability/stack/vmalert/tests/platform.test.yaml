@@ -258,6 +258,90 @@ tests:
             exp_annotations:
               summary: Valkey 백업 app-a/a-valkey-backup의 마지막 성공이 26시간보다 오래됐다
 
+  - name: PGBackupMetricsMissing은 백업이나 WAL 지표가 없는 Cluster를 30분 뒤에 알린다
+    interval: 1m
+    input_series:
+      # 지표가 모두 있으면 조용하다. 실패한 적이 없으면 last_failed_time은 -1이다.
+      - series: 'cnpg_collector_up{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "1x40"
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "946684800x40"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "-1x40"
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "946684800x40"
+      # 백업 지표만 없다.
+      - series: 'cnpg_collector_up{namespace="database", cluster="no-backup", instance="no-backup-1"}'
+        values: "1x40"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="database", cluster="no-backup", instance="no-backup-1"}'
+        values: "-1x40"
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="database", cluster="no-backup", instance="no-backup-1"}'
+        values: "946684800x40"
+      # WAL 지표 하나만 없다.
+      - series: 'cnpg_collector_up{namespace="database", cluster="no-wal", instance="no-wal-1"}'
+        values: "1x40"
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database", cluster="no-wal", instance="no-wal-1"}'
+        values: "946684800x40"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="database", cluster="no-wal", instance="no-wal-1"}'
+        values: "-1x40"
+      # 복원 시험의 임시 Cluster에는 백업 지표가 원래 없다.
+      - series: 'cnpg_collector_up{namespace="database", cluster="pg-restore-20261103", instance="pg-restore-20261103-1"}'
+        values: "1x40"
+      # PostgreSQL에 붙지 못한 Cluster는 CNPGClusterNotHealthy가 본다.
+      - series: 'cnpg_collector_up{namespace="database", cluster="down", instance="down-1"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 29m
+        groupname: data
+        alertname: PGBackupMetricsMissing
+        exp_alerts: []
+      - eval_time: 31m
+        groupname: data
+        alertname: PGBackupMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              cluster: no-backup
+            exp_annotations:
+              summary: database/no-backup의 백업·WAL 지표가 없어 PGBackupStale·WALArchiveFailing이 울리지 못한다
+              description: plugin-barman-cloud 컨테이너 상태와 로그를 본다. 판을 올렸다면 지표 이름이 바뀌었는지 본다.
+          - exp_labels:
+              severity: warning
+              namespace: database
+              cluster: no-wal
+            exp_annotations:
+              summary: database/no-wal의 백업·WAL 지표가 없어 PGBackupStale·WALArchiveFailing이 울리지 못한다
+              description: plugin-barman-cloud 컨테이너 상태와 로그를 본다. 판을 올렸다면 지표 이름이 바뀌었는지 본다.
+
+  - name: PGBackupMetricsMissing은 있던 지표가 사라져도 알린다
+    interval: 1m
+    input_series:
+      - series: 'cnpg_collector_up{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "1x60"
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "946684800x10 _x50"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "-1x60"
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="database", cluster="pg", instance="pg-1"}'
+        values: "946684800x60"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: data
+        alertname: PGBackupMetricsMissing
+        exp_alerts: []
+      - eval_time: 55m
+        groupname: data
+        alertname: PGBackupMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: database
+              cluster: pg
+            exp_annotations:
+              summary: database/pg의 백업·WAL 지표가 없어 PGBackupStale·WALArchiveFailing이 울리지 못한다
+              description: plugin-barman-cloud 컨테이너 상태와 로그를 본다. 판을 올렸다면 지표 이름이 바뀌었는지 본다.
+
   # 시각은 946684800(2000-01-01 UTC)에서 시작한다. 만료 시각 = 946684800 + 남은 초.
   # 정상 15일(갱신 직전), 6일, 12시간, 발급 전(0) 인증서를 함께 둔다. eval_time 1h는 남은 시간을 거의 바꾸지 않는다.
   - name: CertificateExpiring은 7일 미만 warning, 1일 미만 critical, 15일은 조용하다

@@ -12,10 +12,13 @@ groups:
           summary: "{{ $labels.namespace }}/{{ $labels.pod }}의 {{ $labels.container }}가 CrashLoopBackOff다"
 
       # 끝난 파드(Succeeded·Failed)는 Ready가 아니어도 정상이다. 실패한 Job 파드는 KubeJobFailed가 본다.
+      # Ready 조건은 스케줄된 뒤에 붙어, 스케줄되지 못한 파드는 kube_pod_status_ready 시계열이 없다. 그래서 Pending을 따로 본다.
+      # 양쪽 라벨이 같아 스케줄 전후로 for를 다시 세지 않는다.
       - alert: KubePodNotReady
         expr: |
           max by (namespace, pod) (kube_pod_status_ready{condition="true"}) == 0
           unless on (namespace, pod) max by (namespace, pod) (kube_pod_status_phase{phase=~"Succeeded|Failed"}) == 1
+          or max by (namespace, pod) (kube_pod_status_phase{phase="Pending"}) == 1
         for: 15m
         labels:
           severity: warning

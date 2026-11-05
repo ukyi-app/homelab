@@ -55,6 +55,43 @@ tests:
             exp_annotations:
               summary: app-a/a-1가 15분 넘게 Ready가 아니다
 
+  - name: KubePodNotReady는 스케줄되지 못해 ready 시계열이 없는 파드도 15분 뒤에 발화한다
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_phase{namespace="app-a", pod="unscheduled", phase="Pending"}'
+        values: "1x20"
+      # 스케줄되어 Ready 조건이 붙어도 for를 다시 세지 않는다.
+      - series: 'kube_pod_status_phase{namespace="app-a", pod="late", phase="Pending"}'
+        values: "1x20"
+      - series: 'kube_pod_status_ready{namespace="app-a", pod="late", condition="true"}'
+        values: "_x8 0x12"
+      # 곧 Running이 되면 조용하다.
+      - series: 'kube_pod_status_phase{namespace="app-a", pod="recovered", phase="Pending"}'
+        values: "1x5 0x15"
+      - series: 'kube_pod_status_ready{namespace="app-a", pod="recovered", condition="true"}'
+        values: "_x5 1x15"
+    alert_rule_test:
+      - eval_time: 14m
+        groupname: kubernetes
+        alertname: KubePodNotReady
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: kubernetes
+        alertname: KubePodNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: app-a
+              pod: late
+            exp_annotations:
+              summary: app-a/late가 15분 넘게 Ready가 아니다
+          - exp_labels:
+              severity: warning
+              namespace: app-a
+              pod: unscheduled
+            exp_annotations:
+              summary: app-a/unscheduled가 15분 넘게 Ready가 아니다
+
   # 창보다 먼저 있던 시계열로 시험한다. 창 안에서 새로 생긴 시계열은 첫 값이 증가로 세어진다(룰 주석).
   - name: OOMKilled는 최근 재시작이 있을 때만 발화한다
     interval: 1m
