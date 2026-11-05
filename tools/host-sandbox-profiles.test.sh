@@ -107,6 +107,14 @@ else
   fail "node-exporter AppArmor 차이가 기대와 다르다. 빠짐: ${ne_removed:-없음} 더함: ${ne_added:-없음}"
 fi
 
+# 참조한 이름의 프로필이 노드에 없으면 파드가 뜨지 못하고 노드 지표가 모두 끊긴다. Git에 있는 이름만 참조해야 깔린다.
+ne_ref="$(awk '$1 == "localhostProfile:" { print $2 }' "$ROOT/platform/observability/stack/node-exporter.yaml")"
+if [ -n "$ne_ref" ] && [ -e "$PROFILES/apparmor/$ne_ref" ]; then
+  pass "node-exporter가 참조하는 프로필 ${ne_ref}가 Git에 있다"
+else
+  fail "node-exporter가 참조하는 프로필 '${ne_ref}'가 host/sandbox-profiles/apparmor/에 없다"
+fi
+
 # shellcheck source=../host/versions.env
 versions="$(. "$ROOT/host/versions.env" && printf '%s|%s|%s' "$INSTALL_K3S_VERSION" "$SANDBOX_PROFILE_K3S" "$SANDBOX_PROFILE_CONTAINERD")"
 IFS='|' read -r k3s pair_k3s pair_ctr <<<"$versions"
