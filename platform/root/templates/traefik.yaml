@@ -83,7 +83,7 @@ spec:
         accessLog:
           enabled: true
           format: json
-        # 공개 web(8000)에는 cloudflared만 들어온다. 지표(9100)·ping(8080)은 열지 않는다. 지표는 수집하지 않는다(vmsingle/scrape.yaml에 job이 없다).
+        # 공개 web(8000)에는 cloudflared만, 지표(9100)에는 vmsingle만 들어온다(vmsingle/scrape.yaml의 job traefik). ping(8080)은 열지 않는다.
         # kubelet 프로브는 노드에서 오므로 이 정책과 상관없다.
         extraObjects:
           - apiVersion: networking.k8s.io/v1
@@ -108,6 +108,28 @@ spec:
                   ports:
                     - protocol: TCP
                       port: 8000
+          - apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: traefik-metrics-from-vmsingle
+              namespace: traefik
+            spec:
+              podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: traefik
+              policyTypes:
+                - Ingress
+              ingress:
+                - from:
+                    - namespaceSelector:
+                        matchLabels:
+                          kubernetes.io/metadata.name: observability
+                      podSelector:
+                        matchLabels:
+                          app.kubernetes.io/name: vmsingle
+                  ports:
+                    - protocol: TCP
+                      port: 9100
         # serviceAccount.name을 지정하면 차트가 SA를 만들지 않는다(설계 P22 함정). 기본 이름을 쓴다.
         resources:
           requests:

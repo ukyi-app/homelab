@@ -116,6 +116,40 @@ scrape_configs:
       - target_label: instance
         replacement: adguard-querylog
 
+  # 공개 경로의 두 구성 요소. 받는 쪽 허용은 platform/root/templates/traefik.yaml과
+  # platform/cloudflared/templates/networkpolicy.yaml이 연다.
+  # instance가 고정 이름이라 축출 등으로 끝난 파드가 남으면 살아 있는 파드와 라벨이 같아 한쪽이 중복 대상으로 버려진다.
+  # 버려지는 쪽이 살아 있는 파드면 지표가 끊기므로 phase로 거른다.
+  - job_name: traefik
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [traefik]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_container_port_name]
+        regex: traefik;metrics
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: (Pending|Succeeded|Failed)
+        action: drop
+      - target_label: instance
+        replacement: traefik
+
+  - job_name: cloudflared
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [cloudflared]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app, __meta_kubernetes_pod_container_port_name]
+        regex: cloudflared;metrics
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: (Pending|Succeeded|Failed)
+        action: drop
+      - target_label: instance
+        replacement: cloudflared
+
   # CNPG 인스턴스. 파드가 없으면 대상이 0개라 up 시계열도 없다. 그 경우는 TargetMissing이 본다.
   - job_name: cnpg
     kubernetes_sd_configs:
