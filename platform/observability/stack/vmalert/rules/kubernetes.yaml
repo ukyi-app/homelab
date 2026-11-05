@@ -33,13 +33,14 @@ groups:
           summary: "{{ $labels.namespace }}/{{ $labels.pod }}가 15분 넘게 Ready가 아니다"
 
       # 마지막 종료 사유는 다음 종료까지 남는다. 최근 10분 안에 재시작이 있었을 때만 본다.
-      # 시계열이 창 안에서 처음 생기면 VictoriaMetrics는 첫 값을 통째로 증가로 센다(단위 시험에서 확인).
-      # 그래서 수집 설정이 KSM의 instance를 고정한다. KSM 재시작마다 새 시계열이 생기면 재시작 이력이 있는 모든 컨테이너가 울린다.
+      # increase_prometheus는 창 안의 표본만 센다. increase는 창 앞 표본이 없으면 첫 값을 통째로 증가로 세어, 수집이 끊겼다
+      # 돌아오면 예전 OOM 기록이 있는 컨테이너가 재시작 없이도 울린다(단위 시험에서 확인).
+      # 대가: 새 파드가 첫 수집 전에 OOM으로 한 번 죽고 안정되면 잡지 못한다. 되풀이되면 다음 재시작에서 잡는다.
       - alert: OOMKilled
         expr: |
           max by (namespace, pod, container) (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}) == 1
           and on (namespace, pod, container)
-          max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total[10m])) > 0
+          max by (namespace, pod, container) (increase_prometheus(kube_pod_container_status_restarts_total[10m])) > 0
         labels:
           severity: warning
         annotations:
