@@ -43,6 +43,8 @@ spec:
             # 호스트 유닛 실패(NodeSystemdUnitFailed).
             - --collector.systemd
             - --collector.systemd.unit-exclude=.+\.(automount|device|mount|scope|slice)
+            # tailnet 인증서 확인 결과. 호스트 타이머가 쓴다(host/tls-monitor, sudo host/install.sh --tls-monitor).
+            - --collector.textfile.directory=/host/root/var/lib/homelab-tls-monitor
           env:
             # 시스템 버스는 호스트 루트 마운트 안에서 찾는다. 유닛 목록 읽기는 root가 아니어도 된다.
             - name: DBUS_SYSTEM_BUS_ADDRESS

@@ -424,3 +424,180 @@ tests:
             exp_annotations:
               summary: 인증서 cnpg-system/barman-cloud-server가 10분 넘게 Ready가 아니다
               description: kubectl describe certificate로 조건 메시지를 보고, Issuer와 cert-manager 컨트롤러 로그를 본다.
+
+  # 시각은 946684800(2000-01-01 UTC)에서 시작한다. 만료 시각 = 946684800 + 남은 초. eval_time 1h는 남은 시간을 거의 바꾸지 않는다.
+  - name: TailnetTLSExpiring은 20일 미만 warning, 7일 미만 critical, 25일은 조용하다
+    interval: 1m
+    input_series:
+      - series: 'homelab_tailnet_tls_not_after_seconds{instance="nuc", tls_host="fresh"}'
+        values: "948844800x70"
+      - series: 'homelab_tailnet_tls_not_after_seconds{instance="nuc", tls_host="soon"}'
+        values: "948326400x70"
+      - series: 'homelab_tailnet_tls_not_after_seconds{instance="nuc", tls_host="critical"}'
+        values: "947203200x70"
+      # 이 클러스터의 Ingress가 아닌 기기(다른 클러스터의 프록시)는 만료가 가까워도 조용하다.
+      - series: 'homelab_tailnet_tls_not_after_seconds{instance="nuc", tls_host="vm-grafana"}'
+        values: "947203200x70"
+      - series: 'kube_ingress_tls{namespace="a", ingress="fresh", tls_host="fresh", secret=""}'
+        values: "1x70"
+      - series: 'kube_ingress_info{namespace="a", ingress="fresh", ingressclass="tailscale"}'
+        values: "1x70"
+      - series: 'kube_ingress_tls{namespace="a", ingress="soon", tls_host="soon", secret=""}'
+        values: "1x70"
+      - series: 'kube_ingress_info{namespace="a", ingress="soon", ingressclass="tailscale"}'
+        values: "1x70"
+      - series: 'kube_ingress_tls{namespace="a", ingress="critical", tls_host="critical", secret=""}'
+        values: "1x70"
+      - series: 'kube_ingress_info{namespace="a", ingress="critical", ingressclass="tailscale"}'
+        values: "1x70"
+    alert_rule_test:
+      - eval_time: 1h
+        groupname: tailnet-tls
+        alertname: TailnetTLSExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tls_host: soon
+            exp_annotations:
+              summary: tailnet 인증서 soon가 20일 안에 만료된다. 자동 갱신이 실패하고 있다
+              description: kubectl -n tailscale logs로 ts-soon 프록시 로그의 cert·acme 줄을 본다.
+      - eval_time: 1h
+        groupname: tailnet-tls
+        alertname: TailnetTLSExpiringCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tls_host: critical
+            exp_annotations:
+              summary: tailnet 인증서 critical가 7일 안에 만료된다
+              description: kubectl -n tailscale logs로 ts-critical 프록시 로그의 cert·acme 줄을 본다. 프록시를 다시 띄우면 갱신을 다시 시도한다.
+
+  - name: TailnetTLSProbeFailing은 Ingress가 있는 대상만 15분 뒤에 발화한다
+    interval: 1m
+    input_series:
+      - series: 'kube_ingress_tls{namespace="observability", ingress="grafana", tls_host="grafana", secret=""}'
+        values: "1x20"
+      - series: 'kube_ingress_info{namespace="observability", ingress="grafana", ingressclass="tailscale"}'
+        values: "1x20"
+      - series: 'homelab_tailnet_tls_probe_success{instance="nuc", tls_host="grafana"}'
+        values: "0x20"
+      # 지운 Ingress의 옛 기기. 오프라인으로 남아 계속 실패하지만 대상이 아니다.
+      - series: 'homelab_tailnet_tls_probe_success{instance="nuc", tls_host="old-proxy"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 14m
+        groupname: tailnet-tls
+        alertname: TailnetTLSProbeFailing
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: tailnet-tls
+        alertname: TailnetTLSProbeFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tls_host: grafana
+            exp_annotations:
+              summary: tailnet 인증서 grafana를 15분 넘게 검증하지 못했다. 만료, 이름 불일치, 연결 실패 중 하나다
+              description: journalctl -u homelab-tls-monitor로 실패 종류를 보고, kubectl -n tailscale get pods로 ts-grafana 프록시를 본다.
+
+  - name: TailnetTLSMissing은 결과가 없는 tailnet Ingress만 15분 뒤에 발화한다
+    interval: 1m
+    input_series:
+      # 새 tailnet Ingress. 수집기 결과가 없다.
+      - series: 'kube_ingress_tls{namespace="app-a", ingress="a", tls_host="new-ui", secret=""}'
+        values: "1x20"
+      - series: 'kube_ingress_info{namespace="app-a", ingress="a", ingressclass="tailscale"}'
+        values: "1x20"
+      # 결과가 있는 대상은 조용하다.
+      - series: 'kube_ingress_tls{namespace="observability", ingress="grafana", tls_host="grafana", secret=""}'
+        values: "1x20"
+      - series: 'kube_ingress_info{namespace="observability", ingress="grafana", ingressclass="tailscale"}'
+        values: "1x20"
+      - series: 'homelab_tailnet_tls_probe_success{instance="nuc", tls_host="grafana"}'
+        values: "1x20"
+      # tailnet이 아닌 Ingress는 대상이 아니다.
+      - series: 'kube_ingress_tls{namespace="app-b", ingress="b", tls_host="public.example", secret="tls"}'
+        values: "1x20"
+      - series: 'kube_ingress_info{namespace="app-b", ingress="b", ingressclass="traefik"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 14m
+        groupname: tailnet-tls
+        alertname: TailnetTLSMissing
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: tailnet-tls
+        alertname: TailnetTLSMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tls_host: new-ui
+            exp_annotations:
+              summary: tailnet Ingress new-ui의 인증서 확인 결과가 없다
+              description: tailscale status에 tag:k8s 기기로 있는지, 호스트의 /var/lib/homelab-tls-monitor/tailnet_tls.prom이 있는지 본다. 없으면 sudo host/install.sh --tls-monitor.
+
+  # 호스트가 tailnet에 들지 않는 클러스터. operator의 Ingress는 있지만 호스트에서 확인하지 못한다.
+  - name: TailnetTLSMissing은 끔 표시가 있으면 조용하다
+    interval: 1m
+    input_series:
+      - series: 'kube_ingress_tls{namespace="observability", ingress="grafana", tls_host="vm-grafana", secret=""}'
+        values: "1x20"
+      - series: 'kube_ingress_info{namespace="observability", ingress="grafana", ingressclass="tailscale"}'
+        values: "1x20"
+      - series: 'homelab_tailnet_tls_disabled{instance="vm"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 16m
+        groupname: tailnet-tls
+        alertname: TailnetTLSMissing
+        exp_alerts: []
+
+  # time()이 946684800부터 간다. 시각이 그대로면 오래된다.
+  - name: TailnetTLSCollectorFailing은 멈추면 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_tailnet_tls_collect_timestamp_seconds{instance="nuc"}'
+        values: "946684800x40"
+      - series: 'homelab_tailnet_tls_collect_success{instance="nuc"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 20m
+        groupname: tailnet-tls
+        alertname: TailnetTLSCollectorFailing
+        exp_alerts: []
+      - eval_time: 27m
+        groupname: tailnet-tls
+        alertname: TailnetTLSCollectorFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: tailnet 인증서 수집기가 멈췄거나 tailscale status를 읽지 못한다
+              description: systemctl status homelab-tls-monitor.timer, journalctl -u homelab-tls-monitor
+
+  - name: TailnetTLSCollectorFailing은 목록을 못 읽어도 발화하고 정상이면 조용하다
+    interval: 1m
+    input_series:
+      # 시각은 계속 간다. 수집기는 돌지만 tailscale status를 못 읽는다.
+      - series: 'homelab_tailnet_tls_collect_timestamp_seconds{instance="nuc"}'
+        values: "946684800+60x40"
+      - series: 'homelab_tailnet_tls_collect_success{instance="nuc"}'
+        values: "1x5 0x35"
+    alert_rule_test:
+      - eval_time: 4m
+        groupname: tailnet-tls
+        alertname: TailnetTLSCollectorFailing
+        exp_alerts: []
+      - eval_time: 19m
+        groupname: tailnet-tls
+        alertname: TailnetTLSCollectorFailing
+        exp_alerts: []
+      - eval_time: 22m
+        groupname: tailnet-tls
+        alertname: TailnetTLSCollectorFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: tailnet 인증서 수집기가 멈췄거나 tailscale status를 읽지 못한다
+              description: systemctl status homelab-tls-monitor.timer, journalctl -u homelab-tls-monitor
