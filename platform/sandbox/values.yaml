@@ -78,9 +78,10 @@ task:
   enabled: true
   # 작업 레인 코드가 든 main 빌드 digest. 사람 PR로만 바꾼다(worker.image와 같은 이유). 이 줄 하나만 바꾸면 worker를 건드리지 않고
   # 작업 레인 이미지를 올린다. 작업 레인 코드가 없는 이미지는 WORKER_LANES를 읽지 않아 대화·리뷰 작업자로 뜬다.
-  # 지금 값: 봇 main 88b37c4 빌드(B5 조립 #68, scrub 모드 빈 stub을 정책 밖 변경에서 빼는 #71 포함). 빌드 증명은
-  # gh attestation verify로 대조했다(서명 워크플로 homelab app-build.yaml, 원본 build.yaml@refs/heads/main 88b37c4, GitHub 호스트 runner).
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:f786523c513cde6d7b105532c070596854a04d962202d94201772d638b4962de
+  # 지금 값: 봇 main 5fb4a20 빌드. Write 도구를 작업 공간 안으로 묶고 CLI 메시징 소켓을 실제 위치에서 가리는 #73과
+  # API 오류 진단·취소 완료 안내 #72가 들어 있다. 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab
+  # app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main 5fb4a20, GitHub 호스트 runner).
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:16ab9a52244bc5061eb48261e43fa3879ff084ed3c6b67069a1e638c2b5eb5bd
   # Infisical 키 이름. Secret 키와 파일 이름은 worker.profile.credentialKey 그대로다(봇 프로필 표가 그 이름을 읽는다).
   # 키를 레인마다 나눠 한 레인의 토큰만 교체·철회한다. 두 토큰을 한 Secret에 모으지 않는다.
   remoteCredentialKey: CLAUDE_CODE_OAUTH_TOKEN_TASK
