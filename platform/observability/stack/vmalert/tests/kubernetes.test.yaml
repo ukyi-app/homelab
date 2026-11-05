@@ -2,29 +2,91 @@ rule_files:
   - ../rules/kubernetes.yaml
 evaluation_interval: 1m
 tests:
-  - name: KubePodCrashLooping은 대기 사유를 본다
+  - name: KubePodCrashLooping은 3번 재시작하면 발화하고 멎으면 20분 안에 해소된다
     interval: 1m
     input_series:
-      - series: 'kube_pod_container_status_waiting_reason{job="kube-state-metrics", instance="kube-state-metrics", namespace="app-a", pod="a-1", container="app", reason="CrashLoopBackOff"}'
-        values: "1x10"
-      - series: 'kube_pod_container_status_waiting_reason{job="kube-state-metrics", instance="kube-state-metrics", namespace="app-b", pod="b-1", container="app", reason="ContainerCreating"}'
-        values: "1x10"
+      - series: 'kube_pod_container_status_restarts_total{job="kube-state-metrics", instance="kube-state-metrics", namespace="app-a", pod="a-1", container="app"}'
+        values: "0 1 2 3x30"
+      # 재시작 2번은 조용하다. 재부팅의 재시작은 컨테이너마다 1회다.
+      - series: 'kube_pod_container_status_restarts_total{job="kube-state-metrics", instance="kube-state-metrics", namespace="app-b", pod="b-1", container="app"}'
+        values: "0x5 1x5 2x30"
     alert_rule_test:
-      - eval_time: 4m
+      - eval_time: 2m
         groupname: kubernetes
         alertname: KubePodCrashLooping
         exp_alerts: []
-      - eval_time: 6m
+      - eval_time: 4m
         groupname: kubernetes
         alertname: KubePodCrashLooping
-        exp_alerts:
+        exp_alerts: &crashloop-a1
           - exp_labels:
               severity: warning
               namespace: app-a
               pod: a-1
               container: app
             exp_annotations:
-              summary: app-a/a-1의 app가 CrashLoopBackOff다
+              summary: app-a/a-1의 app가 최근 1시간에 3번 이상 재시작했다
+              description: kubectl -n app-a logs a-1 -c app --previous
+      - eval_time: 20m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: *crashloop-a1
+      - eval_time: 24m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: []
+
+  # 대기 상한 5분에 이른 크래시 루프. 재시작이 5분마다 있어 경보가 끊기지 않는다.
+  - name: KubePodCrashLooping은 재시작 대기가 5분이어도 이어서 발화한다
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{job="kube-state-metrics", instance="kube-state-metrics", namespace="app-a", pod="a-1", container="app"}'
+        values: "0x4 1x4 2x4 3x4 4x4 5x4 6x4 7x4 8x4 9x4"
+    alert_rule_test:
+      - eval_time: 12m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: *crashloop-a1
+      - eval_time: 44m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: *crashloop-a1
+
+  # 9분 돌다 죽고 5분 기다리는 크래시 루프. Ready가 돌아와 KubePodNotReady의 for가 끊겨도 여기서 잡는다.
+  - name: KubePodCrashLooping은 몇 분 돌다 죽는 컨테이너도 발화한다
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{job="kube-state-metrics", instance="kube-state-metrics", namespace="app-a", pod="a-1", container="app"}'
+        values: "0x13 1x13 2x13 3x13 4x13"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: []
+      - eval_time: 43m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: *crashloop-a1
+      - eval_time: 55m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: *crashloop-a1
+
+  # 첫 값을 증가로 세면 예전 재시작 5회로 발화한다.
+  - name: KubePodCrashLooping은 수집이 1시간 넘게 끊겼다 돌아와도 조용하다
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{job="kube-state-metrics", instance="kube-state-metrics", namespace="app-a", pod="a-1", container="app"}'
+        values: "5x10 _x90 5x30"
+    alert_rule_test:
+      - eval_time: 105m
+        groupname: kubernetes
+        alertname: KubePodCrashLooping
+        exp_alerts: []
 
   - name: KubePodNotReady는 끝난 파드를 빼고 15분 뒤에 발화한다
     interval: 1m
