@@ -57,7 +57,7 @@ env:
   # 켜도 Infisical RUNTIME_POLICIES의 task 절(프로젝트 homelab-smoke 하나, 기준 SHA 고정)과 작업자 worker-task가 있어야 열린다.
   # 끄면("false") /task 등 작업 명령을 등록하지 않는다. 남은 작업 세션·unknown은 지우지 않고 다시 켤 때까지 그대로다.
   # 작업자 주소는 bot-slot 정책이 여는 worker-task Service 하나다(대화·리뷰 작업자 WORKER_URL과 다른 파드).
-  # 지금은 꺼 둔다. SEC-02 1단계가 찾은 두 경계 결함(Write 도구의 작업 공간 밖 새 파일, 샌드박스 Bash의 CLI 메시징 소켓 연결)을
-  # 고친 작업자 이미지가 올라가고 재측정이 통과한 뒤 다시 켠다(T18 VERIFICATION "SEC-02 1단계").
-  TASK_LANE_ENABLED: "false"
+  # 경계 근거는 봇 VERIFICATION "SEC-02 1단계"(합성 환경)·"2단계"(운영 파드 무모델 재측정)다. 작업자 이미지의 CLI 버전이나
+  # 작업 레인 settings 생성 코드가 바뀌면 같은 실행기로 운영 파드를 다시 잰 뒤 켠다. 경계가 도구별로 달라 단위 시험만으로는 못 본다.
+  TASK_LANE_ENABLED: "true"
   TASK_WORKER_URL: "http://worker-task.sandbox:8080/"
