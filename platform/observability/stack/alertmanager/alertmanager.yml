@@ -34,6 +34,8 @@ receivers:
         send_resolved: true
         # HTML 모드에서 Alertmanager가 {{ }} 값을 자동으로 escape한다. 수동 escape를 더하면 &amp;lt;처럼
         # 이중 escape돼 메시지가 깨진다(옛 실측). <b> 같은 리터럴 태그는 템플릿 문자열이라 그대로 남는다.
+        # summary는 문제가 있는 상태로 적혀 있어 해소된 경보에는 표시를 붙이고, 끝난 일의 진단 명령은 뺀다.
+        # 그룹이 아니라 경보마다 본다. 한 메시지에 발생과 해소가 섞일 수 있다.
         message: |-
           {{- if eq .Status "resolved" }}🔵 <b>해소</b>
           {{- else if eq .CommonLabels.severity "critical" }}🔴 <b>발생</b>
@@ -41,12 +43,14 @@ receivers:
           {{- end }} · {{ .CommonLabels.alertname }}
           {{- range .Alerts }}
 
-          {{ .Annotations.summary }}
+          {{ if eq .Status "resolved" }}해소됨: {{ end }}{{ .Annotations.summary }}
+          {{- if eq .Status "firing" }}
           {{- if .Annotations.description }}
           {{ .Annotations.description }}
           {{- end }}
           {{- if .Annotations.runbook }}
           → {{ .Annotations.runbook }}
+          {{- end }}
           {{- end }}
           {{- end }}
   - name: bot
