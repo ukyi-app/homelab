@@ -71,16 +71,40 @@ for f in "$PROFILES"/apparmor/*; do
   others="$(grep -E '^[[:space:]]*(signal|ptrace) ' "$f" | grep -oE 'peer=[^,]*' \
     | grep -vE "^peer=(\*\*)?${n}(\*\*)?\$|^peer=(unconfined|runc|crun)\$" || true)"
   [ -z "$others" ] || bad_names+=" ${n}:peer(${others})"
-  for rule in "signal (send,receive) peer=${n}," "signal (send,receive) peer=**${n}**," \
-    "ptrace (trace,tracedby,read,readby) peer=${n}," "ptrace (trace,tracedby,read,readby) peer=**${n}**,"; do
-    grep -qF -- "  ${rule}" "$f" || bad_names+=" ${n}:없음(${rule})"
-  done
-  if grep -q '^[[:space:]]*deny mount' "$f"; then bad_names+=" ${n}:deny-mount"; fi
+  # 겹친 라벨과 bwrap의 mount는 userns를 쓰는 worker에만 있다.
+  case "$n" in
+    homelab-sandbox-worker-*)
+      for rule in "signal (send,receive) peer=${n}," "signal (send,receive) peer=**${n}**," \
+        "ptrace (trace,tracedby,read,readby) peer=${n}," "ptrace (trace,tracedby,read,readby) peer=**${n}**,"; do
+        grep -qF -- "  ${rule}" "$f" || bad_names+=" ${n}:없음(${rule})"
+      done
+      if grep -q '^[[:space:]]*deny mount' "$f"; then bad_names+=" ${n}:deny-mount"; fi
+      ;;
+  esac
 done
 if [ -z "$bad_names" ]; then
-  pass "AppArmor: 선언·peer 규칙이 파일 이름과 맞고, 겹친 라벨 규칙이 있고, deny mount가 없다"
+  pass "AppArmor: 선언·peer 규칙이 파일 이름과 맞고, worker에 겹친 라벨 규칙이 있고 deny mount가 없다"
 else
   fail "AppArmor 이름 규칙:${bad_names}"
+fi
+
+# node-exporter 프로필은 호스트 루트가 보이는 파드에 붙으므로 기본값보다 넓어지면 안 된다. 기본값의 줄은 하나도 빠지지 않고,
+# 더한 규칙은 시스템 버스의 읽기 호출 셋뿐이어야 한다. 주석 줄과 빈 줄은 판정에서 뺀다.
+NE_NAME=homelab-sandbox-node-exporter-v1
+ne_file="$PROFILES/apparmor/$NE_NAME"
+ne_rules() { grep -vE '^[[:space:]]*(#|$)' "$1" | sed "s/@PROFILE_NAME@/${NE_NAME}/g" | LC_ALL=C sort; }
+ne_removed="$(LC_ALL=C comm -23 <(ne_rules "$ROOT/tools/sandbox-profiles/base/apparmor.txt") <(ne_rules "$ne_file"))"
+ne_added="$(LC_ALL=C comm -13 <(ne_rules "$ROOT/tools/sandbox-profiles/base/apparmor.txt") <(ne_rules "$ne_file"))"
+ne_want="$(LC_ALL=C sort <<'EOF'
+  dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=Hello peer=(name=org.freedesktop.DBus),
+  dbus send bus=system path=/org/freedesktop/systemd1 interface=org.freedesktop.systemd1.Manager member=ListUnits peer=(name=org.freedesktop.systemd1),
+  dbus send bus=system path=/org/freedesktop/systemd1{,/unit/*} interface=org.freedesktop.DBus.Properties member=Get peer=(name=org.freedesktop.systemd1),
+EOF
+)"
+if [ -z "$ne_removed" ] && [ "$ne_added" = "$ne_want" ]; then
+  pass "node-exporter AppArmor: 기본값에서 빠진 규칙이 없고 더한 것은 dbus 읽기 호출 셋뿐이다"
+else
+  fail "node-exporter AppArmor 차이가 기대와 다르다. 빠짐: ${ne_removed:-없음} 더함: ${ne_added:-없음}"
 fi
 
 # shellcheck source=../host/versions.env
