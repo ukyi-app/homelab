@@ -7,7 +7,7 @@
 #   sudo host/install.sh --cluster <이름> --k3s
 #   sudo host/install.sh --cluster <이름> --egress-off   (되돌리기: 파드 egress 규칙을 끄고 지운다)
 #   sudo host/install.sh --cluster <이름> --bulk-ssd     (삭제 원장 SSD 마운트와 원장 첫 초기화. 값이 빈 클러스터는 건너뜀)
-#   sudo host/install.sh --cluster <이름> --sandbox-profiles   (봇 작업 레인 worker의 Localhost seccomp·AppArmor 프로필)
+#   sudo host/install.sh --cluster <이름> --sandbox-profiles   (봇 작업 레인 worker와 node-exporter의 Localhost 프로필)
 #
 # 순서가 계약이다: preflight --before -> install --host-config -> preflight --after
 #   -> install --egress -> install --sandbox-profiles -> install --k3s -> verify. sudo 단계를 한 파이프라인이나 다른 스크립트로 잇지 않는다.
@@ -861,7 +861,7 @@ bulk_ssd() {
 }
 
 # -------------------------------------------------------------------- --sandbox-profiles
-# 봇 작업 레인 worker의 Localhost seccomp·AppArmor 프로필. 만드는 법은 tools/sandbox-profiles/regen.sh다.
+# 봇 작업 레인 worker의 Localhost seccomp·AppArmor 프로필과 node-exporter의 AppArmor 프로필. 만드는 법은 tools/sandbox-profiles/regen.sh다.
 # Git에 있는 모든 버전을 깐다. 깔린 옛 버전은 지우지 않는다. 그 이름을 참조하는 파드가 있을 수 있다.
 
 # 깔린 파일이 Git과 다르면 덮지 않고 멈춘다. 내용을 바꿀 때는 이름의 버전을 올리는 것이 규칙이고, 같은 이름을 덮으면

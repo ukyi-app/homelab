@@ -14,8 +14,9 @@
 #      또는 k3s 저장소 해당 태그 go.mod의 containerd replace.
 #   2. host/versions.env의 SANDBOX_PROFILE_K3S·SANDBOX_PROFILE_CONTAINERD와 containerd-defaults/go.mod를 옮긴다(go mod tidy).
 #   3. 이 스크립트를 인자 없이 돌린다. 기본값 차이로 generate.ts가 멈추면 변경을 그 판에 맞게 고친다.
-#   4. git diff host/sandbox-profiles/. 내용이 바뀌었으면 generate.ts의 VERSION을 올려 새 이름으로 만들고, 옛 파일은 되돌린다.
-#      새 이름은 sudo host/install.sh --cluster <이름> --sandbox-profiles로 깔고, 다시 잰 뒤 platform/sandbox에서 참조를 옮긴다.
+#   4. git diff host/sandbox-profiles/. 내용이 바뀌었으면 generate.ts에서 그 프로필의 버전을 올려 새 이름으로 만들고, 옛 파일은 되돌린다.
+#      새 이름은 sudo host/install.sh --cluster <이름> --sandbox-profiles로 깔고, 다시 잰 뒤 참조를 옮긴다
+#      (worker는 platform/sandbox, node-exporter는 platform/observability/stack/node-exporter.yaml).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,10 +1,10 @@
-// 봇 작업 레인 worker 전용 Localhost 프로필을 containerd 기본값(base/) + 아래 변경으로 만든다.
+// Localhost 프로필(봇 작업 레인 worker, node-exporter)을 containerd 기본값(base/) + 아래 변경으로 만든다.
 //
 // 사용: bun tools/sandbox-profiles/generate.ts [--check] [--host-dir <host 경로>]
 //   인자 없음  host/sandbox-profiles/에 쓴다.
 //   --check   쓰지 않고 커밋한 프로필과 대조한다. ci가 부른다. base/를 containerd에서 다시 뽑는 일은 regen.sh가 한다.
 //
-// 이 파일은 지금 버전(VERSION) 하나만 만든다. 내용을 바꾸면 VERSION을 올려 새 이름의 파일을 만들고 옛 파일은 그대로 둔다.
+// 이 파일은 프로필마다 지금 버전 하나만 만든다. 내용을 바꾸면 그 버전을 올려 새 이름의 파일을 만들고 옛 파일은 그대로 둔다.
 // 도는 파드는 시작할 때 고른 이름을 참조하므로, 같은 이름을 덮으면 그 파드가 검증 안 된 규칙을 받는다.
 //
 // 변경은 바꿀 줄을 정확히 한 번씩 찾아 적용한다. containerd를 올려 기본값이 달라지면 조용히 어긋나지 않고 여기서 멈춘다.
@@ -14,6 +14,9 @@ import { dirname, join, resolve } from "node:path";
 const VERSION = "v1";
 const SECCOMP_FILE = `sandbox-worker-${VERSION}.json`;
 const APPARMOR_NAME = `homelab-sandbox-worker-${VERSION}`;
+// worker와 따로 올린다. 한쪽 규칙이 바뀌어도 다른 쪽 파드가 참조하는 이름은 그대로다.
+const NODE_EXPORTER_VERSION = "v1";
+const NODE_EXPORTER_APPARMOR_NAME = `homelab-sandbox-node-exporter-${NODE_EXPORTER_VERSION}`;
 const NAME_PLACEHOLDER = "@PROFILE_NAME@";
 
 const HERE = dirname(new URL(import.meta.url).pathname);
@@ -94,6 +97,33 @@ const APPARMOR_CHANGES: [string, string][] = [
   ],
 ];
 
+const NODE_EXPORTER_HEADER = `#
+# 생성물이다. 손으로 고치지 않는다: tools/sandbox-profiles/generate.ts(containerd 기본값 + 변경).
+# 내용을 바꾸려면 이름의 버전을 올린다. 같은 이름에 apparmor_parser -r을 하면 도는 파드의 규칙이 그 자리에서 바뀐다.
+#
+# containerd 기본 프로필의 복사본이라 upstream 수정이 저절로 들어오지 않는다. 출발점은 host/versions.env의
+# SANDBOX_PROFILE_CONTAINERD 판이다. k3s·containerd를 올리면 다시 생성한다.
+#
+# 기본 프로필에는 dbus 규칙이 없어 시스템 버스가 Hello부터 거부한다. 그러면 node-exporter의 systemd 수집기가 실패하고
+# node_systemd_unit_state가 사라져 NodeSystemdUnitFailed가 울리지 못한다. 기본값에 더하는 것은 아래 dbus 규칙뿐이다.
+#
+`;
+
+// systemd 수집기(go-systemd)가 uid 65534로 부르는 호출만 연다. 모두 읽기다. 유닛을 바꾸는 호출과 GetAll은 열지 않는다.
+const NODE_EXPORTER_DBUS = `  # 시스템 버스 접속, 유닛 목록, Manager·유닛 속성 읽기.
+  dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=Hello peer=(name=org.freedesktop.DBus),
+  dbus send bus=system path=/org/freedesktop/systemd1 interface=org.freedesktop.systemd1.Manager member=ListUnits peer=(name=org.freedesktop.systemd1),
+  dbus send bus=system path=/org/freedesktop/systemd1{,/unit/*} interface=org.freedesktop.DBus.Properties member=Get peer=(name=org.freedesktop.systemd1),
+`;
+
+const NODE_EXPORTER_APPARMOR_CHANGES: [string, string][] = [
+  ["\nabi <abi/3.0>,", `\n${NODE_EXPORTER_HEADER}abi <abi/3.0>,`],
+  [
+    `  ptrace (trace,tracedby,read,readby) peer=${NAME_PLACEHOLDER},\n`,
+    `  ptrace (trace,tracedby,read,readby) peer=${NAME_PLACEHOLDER},\n\n${NODE_EXPORTER_DBUS}`,
+  ],
+];
+
 function replaceOnce(text: string, from: string, to: string): string {
   const n = text.split(from).length - 1;
   if (n !== 1) throw new Error(`기본값에서 이 줄을 ${n}번 찾았다(기대 1). containerd 기본값이 바뀌었는지 본다:\n${from}`);
@@ -106,10 +136,10 @@ export function renderSeccomp(base: string): string {
   return JSON.stringify(profile, null, 2);
 }
 
-export function renderAppArmor(base: string, name: string): string {
+export function renderAppArmor(base: string, name: string, changes: [string, string][] = APPARMOR_CHANGES): string {
   if (!base.includes(`profile ${NAME_PLACEHOLDER} `)) throw new Error(`기본값에 ${NAME_PLACEHOLDER} 프로필 선언이 없다`);
   let text = base;
-  for (const [from, to] of APPARMOR_CHANGES) text = replaceOnce(text, from, to);
+  for (const [from, to] of changes) text = replaceOnce(text, from, to);
   return text.replace(/\n{3,}/g, "\n\n").replaceAll(NAME_PLACEHOLDER, name);
 }
 
@@ -117,9 +147,14 @@ function main(argv: string[]): number {
   const check = argv.includes("--check");
   const hostFlag = argv.indexOf("--host-dir");
   const hostDir = hostFlag >= 0 ? resolve(argv[hostFlag + 1] ?? "") : resolve(HERE, "../../host");
+  const baseAppArmor = readFileSync(join(HERE, "base/apparmor.txt"), "utf8");
   const outputs: [string, string][] = [
     [join(hostDir, "sandbox-profiles/seccomp", SECCOMP_FILE), renderSeccomp(readFileSync(join(HERE, "base/seccomp.json"), "utf8"))],
-    [join(hostDir, "sandbox-profiles/apparmor", APPARMOR_NAME), renderAppArmor(readFileSync(join(HERE, "base/apparmor.txt"), "utf8"), APPARMOR_NAME)],
+    [join(hostDir, "sandbox-profiles/apparmor", APPARMOR_NAME), renderAppArmor(baseAppArmor, APPARMOR_NAME)],
+    [
+      join(hostDir, "sandbox-profiles/apparmor", NODE_EXPORTER_APPARMOR_NAME),
+      renderAppArmor(baseAppArmor, NODE_EXPORTER_APPARMOR_NAME, NODE_EXPORTER_APPARMOR_CHANGES),
+    ],
   ];
   let bad = 0;
   for (const [path, want] of outputs) {
