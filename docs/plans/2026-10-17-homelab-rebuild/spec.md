@@ -487,6 +487,7 @@ AC-X1·AC-X2는 모든 티켓에 적용된다. 티켓 머리말의 연결 AC에 
 20. **public 앱 저장소 노출 (D-29).** 앱 코드, Actions 로그, 이미지가 공개된다. GHCR 패키지는 public으로 바꾸면 되돌릴 수 없고, `GITHUB_TOKEN`으로 만든 패키지의 가시성 상속은 문서끼리 어긋난다. 대응: D-23 금지 항목을 앱 저장소 코드·로그·이미지까지 넓히고 템플릿 CI에 금지 패턴 검사, push job 캐시 없음, T10에서 `homelab-probe` 첫 push로 시험, public 앱 저장소 기본 설정(§5.1 D-29).
 21. **병합 키 sync의 PAT 의존 (D-04).** App Connection의 fine-grained PAT는 owner 계정에 묶이고 만료가 없다(사용자 2026-10-21). 새면 회수할 때까지 homelab의 secret·environment를 바꿀 수 있다. 회수되면 sync가 멈추고, 실패 알림은 Infisical 프로젝트 Admin 메일로만 온다. 대응: 월 1회 verify(environment 정책·secret 범위 변경을 잡는다), 회전 뒤 environment secret `updated_at` 확인(§5.1 D-04).
 22. **커밋 작성자 이메일 공개.** public 저장소 커밋에는 작성자 이메일이 남는다. 원격 `rebuild`의 커밋 3개(`56eeb54`, `53fc932`, `4bb61ef`)는 noreply가 아닌 주소이고, force push를 하지 않으므로(D-03) 그대로 남는다. 대응 없음: 사용자가 커밋 작성자 이메일 공개를 받아들였다(2026-10-18). GitHub 이메일 비공개 설정은 하지 않고, 잠시 noreply로 바꿨던 작업 사본의 로컬 git 설정도 지워 개인 이메일로 커밋한다. 이 결정은 커밋 작성자 정보에만 해당한다.
+23. **NUC 커널 고정.** `7.0.0-42`에서 AppArmor가 컨테이너 시그널을 막아 Postgres가 멈췄고(2026-11-06, 원인은 전후 차이에 근거한 추론), `7.0.0-38`은 같은 날 부하 중 크래시했다(원인 미확정). 대응: `7.0.0-38` 고정, 전체 시험을 겹치지 않음, 고정 해제는 owner 결정. 고정 동안 커널 보안 패치가 늦어진다. 절차는 `docs/runbooks-public/nuc-kernel-pin.md`.
 
 ---
 
