@@ -58,6 +58,33 @@ function scenario(s: { pulls: Api[]; puts?: Api[]; facts?: Facts[] }) {
   return { io, calls, sleeps };
 }
 
+describe("봇 변경 PR 신원(AC-P8)", () => {
+  const WRITER = patched("1-writer-author");
+
+  test("deploy/ 브랜치의 정상 digest PR이어도 작성자가 writer면 조건 1 하나로 거부한다", () => {
+    expect(evaluate(WRITER).failures.map((x) => x.cond)).toEqual([1]);
+  });
+
+  test("실제 모양(bot/ head)은 조건 1·2로 거부하고, 조건 2에서 끝나도 조건 1이 사유에 남는다", () => {
+    const facts: Facts = {
+      ...WRITER,
+      pr: { ...WRITER.pr!, headRef: "bot/ac-p8-synthetic" },
+      run: { ...WRITER.run, headBranch: "bot/ac-p8-synthetic" },
+    };
+    const { failures } = evaluate(facts);
+    expect(failures.map((x) => x.cond)).toEqual([1, 2]);
+    expect(failures[0].message).toContain("2000003");
+  });
+
+  test("판정 뒤 조건이 어긋나면 재검사에서 멈추고 PUT하지 않는다", async () => {
+    const { io, calls } = scenario({ pulls: [open()], facts: [WRITER] });
+    const out = await mergeWithRetry(io, SHA);
+    expect(out).toMatchObject({ ok: false, kind: "conditions" });
+    expect(out.reason).toContain("조건 1 불일치");
+    expect(calls.puts).toBe(0);
+  });
+});
+
 describe("검증 사례", () => {
   test("502 → 미병합 → 재시도 성공", async () => {
     const { io, calls, sleeps } = scenario({ pulls: [open(), open()], puts: [http(502, "Server Error"), putOk()] });

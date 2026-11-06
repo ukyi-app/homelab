@@ -1,4 +1,4 @@
-# homelab ruleset 여섯(설계 C.4.7 서버 쪽 장치). 지우지 않고 enforcement를 disabled로만 끈다. 정답은 이 HCL이다.
+# homelab ruleset 여섯(설계 C.4.7 서버 쪽 장치)과 E. 여섯은 지우지 않고 enforcement를 disabled로만 끈다. 정답은 이 HCL이다.
 # 콘솔·gh api로 바꾸면 다음 verify가 차이(exit 2)나 guard 오류(exit 1)로 보인다.
 
 # 임시 ruleset(E1, gh api로 만듦). E5 1단계에서 active 그대로 import하고, ruleset B가 main에 걸린 것을 확인한 뒤
@@ -293,11 +293,11 @@ resource "github_repository_ruleset" "bot_branches" {
   }
 
   lifecycle {
-    # 앱 저장소 밖이면 이 ruleset이 guard 3의 앱 저장소 기대에 들지 않는다. homelab에 만들면 apply 뒤 guard 3이 실패한 채로
-    # ruleset이 남고, 템플릿·오타에는 guard 3이 아예 돌지 않거나 맞지 않는다. 그래서 만들기 전에 plan에서 멈춘다.
+    # 허용 목록 밖이면 guard 3의 이름 기대에 들지 않아 apply 뒤 guard가 실패한 채로 ruleset이 남는다. 오타에는 guard 3이
+    # 아예 돌지 않는다. 그래서 만들기 전에 plan에서 멈춘다.
     precondition {
-      condition     = contains(local.app_repos, each.key)
-      error_message = "writer_repos의 저장소가 app-repos.json에 없다. 오타이거나, homelab처럼 guard 3·4의 앱 저장소 기대 밖이다. homelab을 더하려면 별도 승인(D-24)을 받고 homelab 쪽 guard 기대를 같은 PR에서 고친다."
+      condition     = contains(local.writer_allowed_repos, each.key)
+      error_message = "writer_repos의 저장소가 homelab도 app-repos.json의 앱 저장소도 아니다. 오타이거나 writer를 설치하지 않는 저장소(템플릿)다. 설치 범위를 넓히려면 별도 승인(D-24)을 받는다."
     }
   }
 }

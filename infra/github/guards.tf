@@ -107,17 +107,19 @@ data "github_rest_api" "rulesets_homelab" {
     github_repository_ruleset.deploy_branches,
     github_repository_ruleset.release_tags_lock,
     github_repository_ruleset.release_tags_create,
+    github_repository_ruleset.bot_branches,
   ]
 
   lifecycle {
     postcondition {
-      condition     = try(jsonencode(sort([for r in jsondecode(self.body) : r.name])) == jsonencode(sort(keys(local.homelab_bypass))), false)
-      error_message = "guard 3: homelab의 ruleset 이름 집합·개수가 선언과 다르다(선언 밖 ruleset 또는 중복)."
+      condition     = try(jsonencode(sort([for r in jsondecode(self.body) : r.name])) == jsonencode(local.homelab_ruleset_names), false)
+      error_message = "guard 3: homelab의 ruleset 이름 집합·개수가 선언과 다르다(선언 밖 ruleset 또는 중복. writer_repos에 homelab이 있으면 bot-branches까지 일곱)."
     }
   }
 }
 
 locals {
+  homelab_ruleset_names = sort(concat(keys(local.homelab_bypass), contains(local.writer_repos, local.homelab) ? ["bot-branches"] : []))
   app_ruleset_names = {
     for r in local.app_main_repos : r => sort(concat(["app-main"], contains(local.writer_repos, r) ? ["bot-branches"] : []))
   }
