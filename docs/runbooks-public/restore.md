@@ -1047,7 +1047,7 @@ YAML
 
    그다음 PR로 `suspended` 줄을 지운다. 마이그레이션 Job이 다시 돌고 앱이 뜬다.
 
-   삭제 원장이 있는 앱(`homelab-bot`)은 재개 PR 병합 뒤 2.1의 재개 확인 블록이 통과해야 다음으로 간다. 봇 Ready는 원장과 묶이지 않아(T20 2단계 계약) Ready만으로는 지운 기억이 다시 지워졌는지 모른다.
+   삭제 원장이 있는 앱(`homelab-bot`)은 재개 PR 병합 뒤 2.1의 재개 확인 블록이 통과해야 다음으로 간다. 봇 Ready는 원장과 묶이지 않아(T20 2단계 계약) Ready만으로는 지운 기억이 다시 지워졌는지 모른다. `homelab-bot`은 **재개 PR을 병합하기 전에** 2.1의 "R08 복원 세대"도 올린다.
 
 6. **정리:** 임시 Cluster, 그 PVC, 도우미 Job 둘, 잠금을 지우고 0개를 본다. 잠금은 앱을 재개한 뒤에 지운다(그 전에 지우면 다른 실행이 DB를 지울 수 있다). 잠금은 이 실행의 파드가 모두 없어진 것을 확인한 뒤 마지막에 지운다. `kubectl delete job`의 기본(background)은 Job 객체를 먼저 없애고 파드를 나중에 지워, 끝나지 않은 `pg_restore`·`psql`이 도는 동안 잠금이 풀릴 수 있다. 그래서 Job은 foreground로 지우고 기다린다. 앞의 삭제·확인이 하나라도 실패하면 잠금은 남는다(다음 실행이 멈춘다). 원인을 고치고 이 블록을 다시 돌린다.
 
@@ -1112,6 +1112,23 @@ sudo -v && host/verify.sh --cluster prod     # 삭제 원장 SSD 항목이 모�
 ```
 
 `disabled`가 나오면 봇 values에 `MEMORY_LEDGER_DIR`이 없는 것이다(원장·기억이 꺼져 있다). 재기동 직후 잠깐의 `failed`(옛 세션이 잠금을 쥔 `lock_held`)는 60초마다 다시 열어 풀린다. 이 확인이 통과하기 전에는 복원을 끝난 것으로 기록하지 않고, CLI `--finish`도 하지 않는다.
+
+**R08 복원 세대(`EXTERNAL_TASK_RESTORE_EPOCH`).** DB를 T1로 되돌리면 T1 뒤에 폐기한 R08 연결의 키와 그때 막은 미게시 알림이 행과 함께 돌아온다. 봇은 기동과 수신 때마다 `timeline:<WAL timeline>;epoch:<세대>`를 DB에 저장된 값과 비교하고, 다르면 모든 활성 연결을 `restore_fence`로 닫고 미게시 알림을 막는다(봇 `docs/ai-bot/ARCHITECTURE.md` §15 "복원"). 이 절의 복원은 pg_dump라 timeline이 그대로여서 **세대를 올리지 않으면 값이 같아 아무것도 닫히지 않는다.**
+
+1. **언제:** 3단계 앱 멈춤이 반영된 뒤, 5단계 재개 PR을 병합하기 전. 봇이 멈춰 있어 값을 바꿔도 그때까지 아무 일도 없다. 재개한 뒤에 올리면 그 사이 폐기한 키가 유효하고 미게시 알림이 나갈 수 있다.
+2. **어떻게:** 별도 PR로 `apps/homelab-bot/values.yaml`의 `env`에 새 값을 넣는다. CLI `homelab db restore`의 재개 PR은 `suspended` 줄만 고쳐 이 값을 올려 주지 않는다. CLI 재개 PR이 이미 열려 있으면 이 PR 병합 뒤 같은 명령을 다시 쳐 재개 PR을 main에 맞춘다.
+
+   ```yaml
+   EXTERNAL_TASK_RESTORE_EPOCH: "20261106-123456-a1b2c3"   # 이 복원의 실행 id(0.1의 $RUN). 형식의 예시이고 값은 복원마다 새로
+   ```
+
+   형식은 `^[A-Za-z0-9._-]{1,64}$`이고, 어기면 스위치가 꺼져 있어도 봇이 기동하지 않는다. 쓴 값을 다시 쓰거나 줄을 지우지 않는다(지우면 기본값 `"0"`이다). 같은 값이 저장된 백업을 복원하면 차이가 없어 잡지 못한다. `EXTERNAL_TASK_EVENTS_ENABLED`가 꺼져 있어도 올린다. 꺼진 동안은 장벽이 돌지 않고 다시 켤 때 잡는다. 되돌림 사본으로 다시 되돌릴 때도 복원이므로 새 값을 쓴다. `--abort`처럼 DB를 지우기 전에 그만두면 올리지 않아도 된다.
+3. **확인:** 재개 뒤 봇 로그의 `external_task_fence`를 본다. 첫 줄의 `fenced`가 닫힌 연결 수이고, 다시 기동하면 0이다. owner가 `/attach-list`로 스레드마다 활성 연결이 없는지 본다.
+4. **다시 연결:** 닫힌 연결은 되살리지 않는다. owner가 기기마다 `/attach`로 새 연결을 만들고 helper 설정(연결 ID, seed)을 바꾼다.
+
+**전체 복구는 다르다.** 3절 빈 NUC 복구는 CNPG 물리 복구라 timeline이 올라가 봇이 스스로 모든 연결을 닫는다. 세대를 올리지 않아도 되고, 4단계의 다시 연결만 한다(Postgres·봇 시험 기준, 이 절차로는 실측 전).
+
+**VM 복원 시험에서는 올리지 않는다.** `apps/homelab-bot/values.yaml`은 운영과 VM이 함께 읽어, VM 시험 PR에 넣으면 운영 봇이 재기동하며 운영 연결이 모두 닫힌다. VM에는 지킬 연결도 없다. `cluster.r08.enabled`가 꺼져 수신 경로가 없고 봇 파드도 Pending이다(4절 머리).
 
 ### 2.2 복원 시험 `homelab db restore-check`와 결과 기록 (T24)
 
@@ -1243,7 +1260,7 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
    렌더 결과는 `bootstrap.recovery` + 원본 전용 ObjectStore `r2-source`(옛 serverName) + 아카이브 plugin(새 serverName)이다. 새 serverName을 빠뜨리면 렌더가 실패한다(같은 prefix에 두 세대가 섞이면 되돌릴 수 없다). `cnpg.io/skipEmptyWalArchiveCheck` 주석은 쓰지 않는다.
 
 2. **분기: 실제 빈 NUC 복구 / VM 시험(시나리오 13)**
-   - 실제 빈 NUC 복구: Tailscale 콘솔에서 잃은 클러스터의 operator·프록시 기기(`tag:k8s-operator`, `tag:k8s`)를 지운다. OS를 다시 깔았으면 `tailscale up` 전에 옛 NUC 호스트 기기도 지운다(남아 있으면 새 이름에 `-1`이 붙고 되돌아가지 않는다).
+   - 실제 빈 NUC 복구: Tailscale 콘솔에서 잃은 클러스터의 operator·프록시 기기(`tag:k8s-operator`, `tag:k8s`, `tag:k8s-go`, `tag:k8s-r08`)를 지운다. `tag:k8s-r08` 기기가 남으면 새 프록시 이름에 `-1`이 붙어 helper 주소가 어긋난다. OS를 다시 깔았으면 `tailscale up` 전에 옛 NUC 호스트 기기도 지운다(남아 있으면 새 이름에 `-1`이 붙고 되돌아가지 않는다).
    - VM 시험: 이 단계를 건너뛴다. 그 기기들은 살아 있는 운영 클러스터의 것이다. 시험 뒤 `vm-*` 기기만 지운다.
 3. [bootstrap.md](bootstrap.md) 순서로 host → k3s → Argo CD → ESO 부트스트랩 Secret → root apply.
 
@@ -2015,7 +2032,7 @@ EOF
    ```
 
    경로가 `/mnt/bulk/homelab-bot/deletion-ledger`, claimRef가 `app-homelab-bot/deletion-ledger`여야 한다. PVC는 `volumeName`으로 이 PV를 직접 고르므로 봇이 멈춰 있어도 `Bound`가 되는 것으로 안다(실측 전). 다른 PV에 묶였거나 `Lost`면 멈춘다.
-4. **DB 복구 확인 뒤 봇 재개.** 3절 4단계(Cluster healthy, 표식 행)가 끝난 뒤 `suspended` 줄을 지우는 PR을 올린다. 봇은 기동 장벽에서 SSD 원장을 R2에서 돌아온 DB에 다시 적용한다. 원장 세대가 복구한 DB의 행과 다르면 봇이 원장을 열지 않는다(2.1 "원장 세대").
+4. **DB 복구 확인 뒤 봇 재개.** 3절 4단계(Cluster healthy, 표식 행)가 끝난 뒤 `suspended` 줄을 지우는 PR을 올린다. 봇은 기동 장벽에서 SSD 원장을 R2에서 돌아온 DB에 다시 적용한다. 원장 세대가 복구한 DB의 행과 다르면 봇이 원장을 열지 않는다(2.1 "원장 세대"). R08 연결은 timeline이 올라가 봇이 스스로 모두 닫는다. owner가 다시 연결한다(2.1 "R08 복원 세대").
 5. **재개 확인.** 2.1의 재개 확인 블록(원장 `ready`, 삭제 대기 0)이 통과해야 복구 완료다. 원장 파일을 R2 DB 백업으로 대체하지 않는다.
 
 ### 4.2 SSD를 잃었을 때 (받아들인 위험)

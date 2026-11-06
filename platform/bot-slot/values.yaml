@@ -21,9 +21,10 @@ tailscale: {}
 
 # R08 수신 경로: 사람 helper → tailnet 전용 프록시 → 봇 R08 리스너(설계 C.3.5·C.8, 사용자 결정 2026-11-06). templates/r08.yaml.
 r08:
-  # 켜는 순서: infra/tailscale/policy.hujson 병합 → owner가 그 root를 apply → 이 값을 true로 바꾸는 PR.
+  # 여기는 기본값(꺼짐)이다. 클러스터별 값은 root의 cluster.r08.enabled이고, true일 때만 root가 넘긴다(values-prod.yaml, 운영만).
+  # 켜는 순서: infra/tailscale/policy.hujson 병합 → owner가 그 root를 apply → cluster.r08.enabled를 true로 바꾸는 PR.
   # ACL에 태그가 없으면 operator가 키를 못 받아 Ingress가 Progressing에 머문다. CI는 저장소의 ACL만 보고 적용 여부는 못 본다.
-  # 끌 때는 반대로 이 값을 먼저 false로 두고, 프록시 기기가 사라진 뒤 ACL을 고친다.
+  # 끌 때는 반대로 cluster.r08.enabled를 먼저 false로 두고, 프록시 기기가 사라진 뒤 ACL을 고친다.
   enabled: false
   # 봇 R08 전용 리스너. 봇 PORTS.externalEvents와 같은 값이라 schema가 묶는다(차트가 달라 참조하지 못한다).
   port: 8082

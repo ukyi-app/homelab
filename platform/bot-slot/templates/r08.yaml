@@ -2,7 +2,7 @@
 R08 수신 경로(설계 C.3.5·C.8, 사용자 결정 2026-11-06): 사람 helper → https://<접두><serviceName>.<tailnet>.ts.net/external-task-events
 → 전용 Tailscale 프록시 → 이 Service → 봇 R08 리스너. 인터넷 공개·Funnel·NodePort는 없다.
 
-켜는 순서가 중요하다: ACL apply → r08.enabled를 켜는 PR. 태그가 ACL에 없으면 operator의 인증 키 발급이 실패해
+켜는 순서가 중요하다: ACL apply → root의 cluster.r08.enabled를 켜는 PR. 태그가 ACL에 없으면 operator의 인증 키 발급이 실패해
 (v1.104.1 sts.go newAuthKey) Ingress status가 비고, Argo CD는 그동안 Progressing으로 본다(v3.5.5 health_ingress.go).
 Degraded가 아니라 ArgoCDAppDegraded가 울리지 않는다. operator가 재시도하므로 나중에 apply하면 Ingress를 다시 만들지 않아도 풀린다.
 다른 리소스는 막지 않는다. 이 차트는 단일 wave(probe와 함께 켜지 않는다, schema)라 Application이 Ingress health를 기다리지 않고,

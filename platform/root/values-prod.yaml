@@ -56,6 +56,12 @@ cluster:
   taskStateVolume:
     nodeName: nuc-15-pro
 
+  # R08 수신 경로(사용자 승인 2026-11-06, 운영만). true일 때만 root가 bot-slot의 r08.enabled로 넘긴다(templates/bot-slot.yaml).
+  # 구성 요소 스위치(values.yaml components)와 달리 클러스터 값이다. 승인 범위가 운영뿐이고, 켜면 tailnet 기기가 하나 더 생긴다.
+  # 켜고 끄는 순서는 platform/bot-slot/values.yaml의 r08 주석, 봇 env는 apps/homelab-bot/values.yaml이다.
+  r08:
+    enabled: true
+
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈추는 값(values-vm.yaml의 같은 블록에 쓰는 법).
   # 운영은 비워 둔다. 빈 값이면 root가 ApplicationSet에 넘기지 않아 렌더가 이 블록이 없을 때와 같다.
   # 빈 NUC 복구는 지금 restore.md 3절 1단계대로 apps/·data/ values를 쓴다(운영이 곧 복구 대상이라).

@@ -3,14 +3,15 @@
 작은 Helm 차트 platform/bot-slot이고 대상 값 target은 그 차트의 values.yaml에 둔다(지금 봇 ns).
 대상 ns를 만들지 않는다(CreateNamespace 없음). 봇 ns는 앱 Application(ApplicationSet apps, wave 0)이 만든다.
 클러스터 값은 cluster.kubernetesApi.endpointCIDRs(봇 파드 → Kubernetes API egress, T16b D8), cluster.deletionLedger(원장 PV),
-cluster.tailscale.prefix(R08 tailnet 이름 접두)만 넘긴다. target과 r08.enabled는 넘기지 않는다. deletionLedger는 nodeName이 있을 때만
-enabled: true로 넘기고, 없으면(VM) 키를 넘기지 않아 bot-slot 기본값(꺼짐)이 그대로다.
+cluster.tailscale.prefix(R08 tailnet 이름 접두), cluster.r08.enabled(R08 수신 경로)만 넘긴다. target은 넘기지 않는다.
+deletionLedger는 nodeName이 있을 때만, r08은 enabled가 true일 때만 enabled: true로 넘기고, 아니면(VM) 키를 넘기지 않아 bot-slot 기본값(꺼짐)이 그대로다.
 켜기: values.yaml의 components.botSlot.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
 */}}
 {{- if .Values.components.botSlot.enabled }}
 {{- $api := .Values.cluster.kubernetesApi | default dict }}
 {{- $ledger := .Values.cluster.deletionLedger | default dict }}
 {{- $ts := .Values.cluster.tailscale | default dict }}
+{{- $r08 := .Values.cluster.r08 | default dict }}
 {{- /* 운영 접두는 빈 문자열이라 required를 쓸 수 없다. 키가 있는지로 확인한다. */}}
 {{- if not (hasKey $ts "prefix") }}
 {{- fail "cluster.tailscale.prefix is missing in values-<cluster>.yaml (prod \"\", vm \"vm-\")" }}
@@ -35,6 +36,10 @@ spec:
             {{- required "cluster.kubernetesApi.endpointCIDRs is required in values-<cluster>.yaml" $api.endpointCIDRs | toYaml | nindent 12 }}
         tailscale:
           prefix: {{ $ts.prefix | quote }}
+        {{- if $r08.enabled }}
+        r08:
+          enabled: true
+        {{- end }}
         {{- if $ledger.nodeName }}
         deletionLedger:
           enabled: true
