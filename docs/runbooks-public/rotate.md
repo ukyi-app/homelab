@@ -251,10 +251,10 @@ VM `homelab-dev`에는 실제 토큰을 넣지 않는다([bootstrap.md](bootstra
    curl -sS -o /dev/null -w '%{http_code}\n' -X POST "https://task-events.<tailnet>.ts.net/external-task-events"
    ```
 
-4. 경로 전체를 닫아야 하면 `platform/bot-slot/values.yaml`의 `r08.enabled`를 `false`로 하는 PR을 낸다. ACL은 프록시 기기가 사라진 뒤에 고친다.
+4. 경로 전체를 닫아야 하면 `platform/root/values-prod.yaml`의 `cluster.r08.enabled`를 `false`로 하고 `apps/homelab-bot/values.yaml`의 `EXTERNAL_TASK_EVENTS_ENABLED`·`EXTERNAL_TASK_ENVIRONMENT`를 지우는 PR을 낸다. 끄면 해제 명령도 사라지므로 1단계를 먼저 한다. ACL은 프록시 기기가 사라진 뒤에 고친다.
 5. [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄을 남긴다. 기기 이름·tailnet 이름은 저장소에 적지 않는다.
 
-봇 백업을 복원하면 복원 시점 뒤의 해제가 되돌아갈 수 있다. 복원 뒤에는 목록 명령으로 폐기한 연결이 되살아나지 않았는지 보고, 있으면 1단계를 다시 한다. 복원과 연결 폐기의 상호작용은 [미확인]이고 봇 저장소 시험으로 확인한다.
+봇 DB를 복원하면 복원 시점 뒤의 해제가 되돌아간다. 봇은 복원을 감지하면 활성 연결을 모두 닫는데, 한 앱 복원(pg_dump)은 `EXTERNAL_TASK_RESTORE_EPOCH`를 올려야 감지한다([restore.md](restore.md) 2.1 "R08 복원 세대").
 
 ## 4. 아직 채우지 않은 절
 

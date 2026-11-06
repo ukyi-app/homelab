@@ -61,3 +61,13 @@ env:
   # 작업 레인 settings 생성 코드가 바뀌면 같은 실행기로 운영 파드를 다시 잰 뒤 켠다. 경계가 도구별로 달라 단위 시험만으로는 못 본다.
   TASK_LANE_ENABLED: "true"
   TASK_WORKER_URL: "http://worker-task.sandbox:8080/"
+  # R08 읽기 전용 알림 스위치(사용자 승인 2026-11-06, 봇 ARCHITECTURE §15). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
+  # 이 파일은 운영·VM이 함께 읽는다. 켜도 bot-slot 프록시가 없는 클러스터(VM, root cluster.r08.enabled)는 리스너 8082에 닿는 길이 없다.
+  # 끄는 순서: 연결을 폐기하려면 먼저 /detach 한다(끄면 명령이 사라진다) → 아래 두 값을 지우고 cluster.r08.enabled를 false로 하는 PR
+  # → 프록시 기기가 사라진 뒤 ACL. 스위치만 남기고 환경 값을 지우면 봇이 기동하지 않는다. 끈 뒤에도 쌓인 미게시 알림은 계속 나간다.
+  EXTERNAL_TASK_EVENTS_ENABLED: "true"
+  # 서명 입력에 들어가 helper 설정의 environment와 같아야 한다. 바꾸면 기기마다 helper 설정도 바꿔야 수신이 된다.
+  EXTERNAL_TASK_ENVIRONMENT: "prod"
+  # 복원 세대 EXTERNAL_TASK_RESTORE_EPOCH는 아직 없다(봇 기본값 "0"). 한 앱 DB 복원(pg_dump)은 timeline이 그대로라 봇이 스스로 못 알아챈다.
+  # 복원마다 여기에 새 값을 더해 모든 연결을 닫는다. 안 올리면 폐기한 연결 키와 미게시 알림이 백업에서 되살아난다(restore.md 2.1).
+  # 한 번 넣으면 지우거나 옛 값으로 되돌리지 않는다. 그 값을 저장한 백업을 복원할 때 차이가 없어 장벽이 돌지 않는다.

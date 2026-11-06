@@ -1,4 +1,4 @@
-# R08을 켠 렌더. root 렌더는 values.yaml의 r08.enabled를 따르므로, 이 파일은 그 값과 상관없이 켠 쪽의 정책·태그·kubeconform 검사를 받는다.
+# R08을 켠 렌더. root 렌더는 cluster.r08.enabled를 따르므로, 이 파일은 그 값과 상관없이 켠 쪽의 정책·태그·kubeconform 검사를 받는다.
 tailscale:
   prefix: ""
 r08:

@@ -1,0 +1,7 @@
+# expect: fail
+# cluster: prod
+# match: cluster.r08.enabled는 true 또는 false다
+# 따옴표를 붙인 "false"는 문자열이다. root가 참으로 읽어 끄려던 프록시가 켜진 채 남는다.
+cluster:
+  r08:
+    enabled: "false"

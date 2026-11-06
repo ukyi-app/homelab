@@ -23,7 +23,16 @@
 {{- if not (kindIs "bool" $es) }}
 {{- fail (printf "cluster.restore.externalSecrets는 true 또는 false다(지금 %v, %s). 따옴표를 붙이면 문자열이라 스위치가 켜진 채 남는다" $es (kindOf $es)) }}
 {{- end }}
+{{- /* templates/bot-slot.yaml은 참·거짓으로만 읽어 문자열 "false"가 프록시를 켠다. 그래서 bool만 받는다. */}}
+{{- $r08 := dig "r08" "enabled" false $cluster }}
+{{- if not (kindIs "bool" $r08) }}
+{{- fail (printf "cluster.r08.enabled는 true 또는 false다(지금 %v, %s). 따옴표를 붙이면 문자열 \"false\"도 켬으로 읽힌다" $r08 (kindOf $r08)) }}
+{{- end }}
 {{- if ne $name "prod" }}
+{{- /* 사용자 승인(2026-11-06)이 운영뿐이다. 봇 env는 클러스터 공용이라 VM 경로를 열면 서명 환경 값도 운영(prod)과 같다. */}}
+{{- if $r08 }}
+{{- fail (printf "cluster.r08.enabled는 운영에서만 켠다(지금 %s에서 true). R08 수신 경로 승인은 운영뿐이다" $name) }}
+{{- end }}
 {{- $prod := get (.Files.Get "values-prod.yaml" | fromYaml) "cluster" | default dict }}
 {{- $prodProject := dig "infisical" "projectSlug" "" $prod | toString }}
 {{- $prodBucket := dig "backup" "bucket" "" $prod | toString }}

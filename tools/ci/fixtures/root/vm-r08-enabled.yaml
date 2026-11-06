@@ -1,0 +1,7 @@
+# expect: fail
+# cluster: vm
+# match: cluster.r08.enabled는 운영에서만 켠다
+# VM에 R08 프록시를 열면 승인 범위를 넘고, 공용 봇 env 때문에 서명 환경 값도 운영과 같다.
+cluster:
+  r08:
+    enabled: true
