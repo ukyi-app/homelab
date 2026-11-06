@@ -1,7 +1,7 @@
 # T19 봇 CHANGE_PR
 
 - 단계: P4 봇 V1
-- 상태: 대기
+- 상태: 진행 중 (2026-11-06 착수. 봇 저장소 PR #79~#83으로 B0~B4를 조립 없이 병합, B5 조립 진행. 기능은 꺼져 있다. 사람 단계 H0~H3, 실제 `ukyi-writer` AC-P8, live 시험이 남음)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T17, T18
 - 선행 결정: D-07 (자동 병합 범위. 확정(사용자 2026-10-18, T05): 배포 App이 만든 한 앱의 digest PR만 자동 병합, 서버 강제), D-24 (봇 변경 PR 작성 자격. 확정(사용자 2026-10-18, T15): 봇 전용 쓰기 GitHub App. Contents write + Pull requests write + Metadata read, Workflows·Actions·Administration·Issues 없음, webhook 끔, 선택 저장소 설치, 작업마다 저장소 하나로 좁힌 1시간 토큰. 토큰 분리, ruleset E 여부, App 이름·설치 저장소, 허용 파일 경로는 이 티켓에서 정한다), D-15 (확정(사용자 2026-10-18, T15): 작업자는 GitHub 자격 없이 `codeload.github.com` 압축본만 읽고, push와 PR 생성은 게시 서버가 D-24 App으로 한다), D-16 (확정(사용자 2026-10-18, T15): 허용 봇 작성자 목록에 D-24 App의 봇 사용자를 생성 뒤 넣는다)
