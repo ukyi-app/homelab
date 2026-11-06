@@ -441,6 +441,166 @@ describe("db restore: 흐름(가짜 세계)", () => {
   });
 });
 
+// R08 복원 세대(restore.md 2.1). 값 파일 env에 EXTERNAL_TASK_* 키가 있는 앱만 재개 PR이 같은 PR에서 세대를 실행 id로 올린다.
+describe("db restore: R08 복원 세대", () => {
+  const EPOCH = "EXTERNAL_TASK_RESTORE_EPOCH";
+  const BOT_ENV = `env:
+  # 사람이 쓴 주석은 그대로 남아야 한다
+  WORKER_URL: "http://worker.sandbox:8080/"
+  EXTERNAL_TASK_EVENTS_ENABLED: "true"
+  EXTERNAL_TASK_ENVIRONMENT: "prod"
+  # 세대 주석
+`;
+  const rec = (w: World) => w.records.get(`${NS}/restore-pg`)!;
+  const branch = `cli/db-restore-resume-${APP}`;
+  const prFile = (w: World) => w.commits.get(w.refs.get(branch)!)!.files.get(APPS)!;
+
+  // 재개 PR이 열린 세계(DB를 T1로 되돌린 뒤)
+  async function resumeOpen(env?: string): Promise<World> {
+    const w = dbWorld(APP, { env });
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    suspendApplied(w);
+    expect((await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT })).status).toBe("waiting");
+    expect(w.openPrs().map((p) => p.head)).toEqual([branch]);
+    return w;
+  }
+  function resumeApplied(w: World) {
+    w.merge(w.openPrs()[0].number);
+    w.obj("deployment", NS, APP)!.spec.replicas = 1;
+    w.obj("deployment", NS, APP)!.status = { observedGeneration: 3, replicas: 1, updatedReplicas: 1, readyReplicas: 1 };
+  }
+
+  test("세대를 쓰는 앱: 재개 PR 하나가 suspended를 지우고 세대를 실행 id로 올린다. 사람 주석은 남고 멈춤 PR에는 세대가 없다", async () => {
+    const w = dbWorld(APP, { env: BOT_ENV });
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(w.commits.get(w.refs.get(`cli/db-restore-${APP}`)!)!.files.get(APPS)).not.toContain(EPOCH);
+    suspendApplied(w);
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    const text = prFile(w);
+    expect(text).toContain(`  ${EPOCH}: "${rec(w).run}"\n`);
+    expect(text).not.toContain("suspended");
+    expect(text).toContain("# 사람이 쓴 주석은 그대로 남아야 한다");
+    expect(text).toContain("# 세대 주석");
+    expect(w.openPrs()).toHaveLength(1);
+    expect(rec(w).run).toMatch(/^[A-Za-z0-9._-]{1,64}$/);
+  });
+
+  test("세대를 안 쓰는 앱: 재개 PR은 suspended만 지운다(env가 없는 앱, EXTERNAL_TASK_ 없는 env)", async () => {
+    for (const env of [undefined, `env:\n  # 주석\n  OTHER: "1"\n`]) {
+      const w = await resumeOpen(env);
+      expect(prFile(w)).not.toContain(EPOCH);
+      expect(prFile(w)).not.toContain("suspended");
+      resumeApplied(w);
+      expect((await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT })).status).toBe("done");
+      expect(w.main().get(APPS)).not.toContain(EPOCH);
+    }
+  });
+
+  test("다시 쳐도 같은 값이다: 열린 PR에 커밋이 늘지 않고, 병합 뒤에는 main과 같아 새 PR이 없다", async () => {
+    const w = await resumeOpen(BOT_ENV);
+    const run = rec(w).run;
+    const head = w.refs.get(branch);
+    const again = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(again.status).toBe("waiting");
+    expect(w.refs.get(branch)).toBe(head);
+
+    resumeApplied(w);
+    expect(w.main().get(APPS)).toContain(`${EPOCH}: "${run}"`);
+    const merged = w.main().get(APPS);
+    expect((await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT })).status).toBe("done");
+    expect(w.openPrs()).toEqual([]);
+    w.writes = [];
+    expect((await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT })).status).toBe("same");
+    expect(w.writes).toEqual([]);
+    expect(w.main().get(APPS)).toBe(merged);
+  });
+
+  test("이미 세대가 있으면 그 줄만 이 실행 값으로 바꾼다. 다음 복원은 또 새 값이다", async () => {
+    const w = await resumeOpen(`${BOT_ENV}  ${EPOCH}: "old-run"\n`);
+    const first = rec(w).run;
+    expect(prFile(w)).toContain(`${EPOCH}: "${first}"`);
+    expect(prFile(w)).not.toContain("old-run");
+    expect(prFile(w).match(new RegExp(EPOCH, "g"))).toHaveLength(1);
+    resumeApplied(w);
+    expect((await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT })).status).toBe("done");
+    expect((await runIn(w, cmd, "apply", { app: APP }, { finish: true })).status).toBe("done");
+
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    suspendApplied(w);
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    const second = rec(w).run;
+    expect(second).not.toBe(first);
+    expect(prFile(w)).toContain(`${EPOCH}: "${second}"`);
+  });
+
+  test("스위치가 꺼져 있어도 올린다(꺼진 동안은 장벽이 돌지 않고 다시 켤 때 잡는다)", async () => {
+    const w = await resumeOpen(`env:\n  EXTERNAL_TASK_EVENTS_ENABLED: "false"\n`);
+    expect(prFile(w)).toContain(`${EPOCH}: "${rec(w).run}"`);
+  });
+
+  test("한 줄 flow env(CLI가 만든 꼴)도 올린다", async () => {
+    const w = await resumeOpen(`env: { EXTERNAL_TASK_EVENTS_ENABLED: "true", EXTERNAL_TASK_ENVIRONMENT: prod }\n`);
+    expect((Bun.YAML.parse(prFile(w)) as any).env).toEqual({ EXTERNAL_TASK_EVENTS_ENABLED: "true", EXTERNAL_TASK_ENVIRONMENT: "prod", [EPOCH]: rec(w).run });
+  });
+
+  test("세대 없이 손으로 재개했으면 세대 PR을 열고 재개를 기록하지 않는다", async () => {
+    const w = dbWorld(APP, { env: BOT_ENV });
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    suspendApplied(w);
+    // 다른 호출이 재개 PR을 열지 못하게 끊은 채 DB까지만 되돌리고, 사람이 suspended를 지웠다
+    w.fail.set("gh POST git/trees", new Error("주입"));
+    expect((await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT })).status).toBe("failed");
+    expect(w.db).toBe("t1");
+    w.main().set(APPS, w.main().get(APPS)!.replace("suspended: true\n", ""));
+    w.obj("deployment", NS, APP)!.spec.replicas = 1;
+    w.obj("deployment", NS, APP)!.status = { observedGeneration: 3, replicas: 1, updatedReplicas: 1, readyReplicas: 1 };
+
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("waiting");
+    expect(prFile(w)).toContain(`${EPOCH}: "${rec(w).run}"`);
+    expect(rec(w).data["ok.resumed"]).toBeUndefined();
+    expect(r.steps.find((s) => s.id === "running")!.result).toBe("not-run");
+  });
+
+  test("--abort는 DB를 지우기 전이라 세대를 올리지 않는다", async () => {
+    const abort = dbWorld(APP, { env: BOT_ENV });
+    await runIn(abort, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    suspendApplied(abort);
+    expect((await runIn(abort, cmd, "apply", { app: APP }, { abort: true })).status).toBe("waiting");
+    expect(abort.db).toBe("live");
+    const text = abort.commits.get(abort.refs.get(`cli/db-restore-abort-${APP}`)!)!.files.get(APPS)!;
+    expect(text).not.toContain("suspended");
+    expect(text).not.toContain(EPOCH);
+  });
+
+  test("기록의 실행 id가 세대 형식이 아니면 재개 PR을 만들지 않고 멈춘다(기록은 사람이 고칠 수 있다)", async () => {
+    const w = dbWorld(APP, { env: BOT_ENV });
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    suspendApplied(w);
+    w.fail.set("gh POST git/trees", new Error("주입"));
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    const r0 = rec(w);
+    for (const [, o] of w.objects) if (o.metadata?.labels?.[LABEL] === r0.run) o.metadata.labels[LABEL] = "bad run!";
+    w.records.set(`${NS}/restore-pg`, { run: "bad run!", data: r0.data });
+    const r = await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    expect(r.status).toBe("failed");
+    expect(r.error!.message).toContain("세대 형식");
+    expect(w.openPrs()).toEqual([]);
+  });
+
+  test("plan은 쓰기 없이 세대 변경을 보여 준다", async () => {
+    const w = dbWorld(APP, { env: BOT_ENV });
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    suspendApplied(w);
+    w.fail.set("gh POST git/trees", new Error("주입"));
+    await runIn(w, cmd, "apply", { app: APP }, { to: T1_INPUT });
+    w.writes = [];
+    const p = await runIn(w, cmd, "plan", { app: APP }, { to: T1_INPUT });
+    expect(p.steps.find((s) => s.id === "pr-resume")!.detail).toContain(`${EPOCH}: 없음 → ${rec(w).run}`);
+    expect(w.writes).toEqual([]);
+  });
+});
+
 // 삭제 원장이 있는 앱(restore.md 2.1, homelab-bot). 원장 PVC가 있으면 재개 단계가 Deployment Ready에 더해
 // 원장 ready·삭제 대기 0을 본다. 아니면 기록하지 않고 hold로 멈춘다(정리·--finish로 가지 않는다).
 describe("db restore: 삭제 원장 재개 확인", () => {

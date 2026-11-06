@@ -11,7 +11,7 @@ import { render } from "../../src/core/output";
 import { PG_PASSWORD_CHECK, VALKEY_CLI } from "../../src/core/podops";
 import { prStep } from "../../src/core/pr";
 import { Secret } from "../../src/core/secret";
-import { flow, setTopLevel } from "../../src/core/values";
+import { flow, setMapString, setTopLevel } from "../../src/core/values";
 import { FAKE_PROJECT, FAKE_SECRETS, FAKE_SHA, REST, applyWith, expectNoSecrets, expectPlanReadOnly, ghGet, ghResponse, ghSend, infisicalList, kubectlRule, rule, sha256, testCtx } from "../harness";
 
 const b64 = (s: string) => Buffer.from(s).toString("base64");
@@ -146,6 +146,55 @@ port: 8080
 
   test("다시 읽은 값이 기대와 다르면 던진다(0열 주석 뒤 들여쓴 줄처럼 경계가 애매한 블록)", () => {
     expect(() => setTopLevel("a:\n  x: 1\n# 주석\n  y: 2\nb: 1\n", { a: { z: 1 } })).toThrow();
+  });
+
+  describe("setMapString", () => {
+    const ENV = `port: 8080
+env:
+  # 주소 주석
+  URL: "http://x/"  # 줄 끝 주석
+  # 끝 주석
+next: 1
+`;
+
+    test("블록에 없는 키는 블록 끝(들여쓴 주석 뒤)에 한 줄 더하고, 주석·다른 줄은 그대로다", () => {
+      expect(setMapString(ENV, "env", "EPOCH", "r1")).toBe(`port: 8080
+env:
+  # 주소 주석
+  URL: "http://x/"  # 줄 끝 주석
+  # 끝 주석
+  EPOCH: "r1"
+next: 1
+`);
+    });
+
+    test("있는 키는 그 줄만 바꾼다. 같은 값이면 원문 그대로다", () => {
+      const once = setMapString(ENV, "env", "URL", "http://y/");
+      expect(once).toBe(ENV.replace('"http://x/"  # 줄 끝 주석', '"http://y/"'));
+      const added = setMapString(ENV, "env", "EPOCH", "r1");
+      expect(setMapString(added, "env", "EPOCH", "r1")).toBe(added);
+      expect(setMapString(ENV, "env", "URL", "http://x/")).toBe(ENV);
+    });
+
+    test("숫자로 보이는 값도 문자열로 남는다(차트 schema는 env 값이 문자열만이다)", () => {
+      const out = setMapString(ENV, "env", "EPOCH", "20261106123456123456");
+      expect((Bun.YAML.parse(out) as any).env.EPOCH).toBe("20261106123456123456");
+    });
+
+    test("한 줄 flow 블록은 flow로 고친다", () => {
+      expect(setMapString(`env: { A: "1" }\nnext: 1\n`, "env", "B", "2")).toBe(`env: { A: "1", B: "2" }\nnext: 1\n`);
+    });
+
+    test("맵이 아니거나 없거나, 줄 하나로 고칠 수 없는 꼴은 던진다", () => {
+      expect(() => setMapString("next: 1\n", "env", "B", "2")).toThrow("env");
+      expect(() => setMapString("env: 1\n", "env", "B", "2")).toThrow("env");
+      expect(() => setMapString("env:\n  A: |\n    여러 줄\n", "env", "A", "2")).toThrow();
+      expect(() => setMapString("env: {}\n", "env", "bad key", "2")).toThrow("키 이름");
+    });
+
+    test("시크릿 객체는 넣지 않는다", () => {
+      expect(() => setMapString(ENV, "env", "EPOCH", new Secret(FAKE_SECRETS[1]) as unknown as string)).toThrow("시크릿");
+    });
   });
 });
 

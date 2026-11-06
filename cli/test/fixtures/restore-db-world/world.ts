@@ -330,9 +330,10 @@ export const T1_INPUT = "2026-10-20T10:00:00+09:00";
 export const T1_NORMAL = "2026-10-20 01:00:00+00";
 
 // 앱 하나가 DB를 쓰는 처음 상태(복원 가능한 백업·WAL 아카이브 있음).
-export function dbWorld(app: string, opts: { cache?: boolean } = {}): World {
+// env: 값 파일에 그대로 덧붙일 env 블록 원문(사람이 쓴 주석이 든 꼴을 시험한다).
+export function dbWorld(app: string, opts: { cache?: boolean; env?: string } = {}): World {
   const w = new World({
-    [`apps/${app}/values.yaml`]: `chartVersion: 1.1.0\nport: 8080\nuses: { postgres: true }\n${opts.cache ? "cache: { enabled: true }\n" : ""}`,
+    [`apps/${app}/values.yaml`]: `chartVersion: 1.1.0\nport: 8080\nuses: { postgres: true }\n${opts.cache ? "cache: { enabled: true }\n" : ""}${opts.env ?? ""}`,
     [`data/${app}/values.yaml`]: "chartVersion: 1.0.1\npostgres: { enabled: true }\n",
   });
   w.put("cluster", "database", "pg", {

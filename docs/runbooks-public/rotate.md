@@ -251,10 +251,10 @@ VM `homelab-dev`에는 실제 토큰을 넣지 않는다([bootstrap.md](bootstra
    curl -sS -o /dev/null -w '%{http_code}\n' -X POST "https://task-events.<tailnet>.ts.net/external-task-events"
    ```
 
-4. 경로 전체를 닫아야 하면 `platform/root/values-prod.yaml`의 `cluster.r08.enabled`를 `false`로 하고 `apps/homelab-bot/values.yaml`의 `EXTERNAL_TASK_EVENTS_ENABLED`·`EXTERNAL_TASK_ENVIRONMENT`를 지우는 PR을 낸다. 끄면 해제 명령도 사라지므로 1단계를 먼저 한다. ACL은 프록시 기기가 사라진 뒤에 고친다.
+4. 경로 전체를 닫아야 하면 `platform/root/values-prod.yaml`의 `cluster.r08.enabled`를 `false`로 하고 `apps/homelab-bot/values.yaml`의 `EXTERNAL_TASK_EVENTS_ENABLED`를 `"false"`로, `EXTERNAL_TASK_ENVIRONMENT`를 지우는 PR을 낸다. 스위치 줄은 지우지 않는다. `env`에 `EXTERNAL_TASK_*` 줄이 하나도 없으면 `homelab db restore`가 복원 세대를 올리지 않아, 다시 켤 때 폐기한 연결이 되살아난다. 끄면 해제 명령도 사라지므로 1단계를 먼저 한다. ACL은 프록시 기기가 사라진 뒤에 고친다.
 5. [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄을 남긴다. 기기 이름·tailnet 이름은 저장소에 적지 않는다.
 
-봇 DB를 복원하면 복원 시점 뒤의 해제가 되돌아간다. 봇은 복원을 감지하면 활성 연결을 모두 닫는데, 한 앱 복원(pg_dump)은 `EXTERNAL_TASK_RESTORE_EPOCH`를 올려야 감지한다([restore.md](restore.md) 2.1 "R08 복원 세대").
+봇 DB를 복원하면 복원 시점 뒤의 해제가 되돌아간다. 봇은 복원을 감지하면 활성 연결을 모두 닫는데, 한 앱 복원(pg_dump)은 `EXTERNAL_TASK_RESTORE_EPOCH`가 바뀌어야 감지한다. `homelab db restore`의 재개 PR이 이 값을 함께 올리고, CLI 없이 복원하면 직접 올린다([restore.md](restore.md) 2.1 "R08 복원 세대"). 그 복원 뒤에는 활성 연결이 모두 닫혀 있으니 기기마다 다시 연결한다.
 
 ## 4. 아직 채우지 않은 절
 
