@@ -10,7 +10,7 @@ import { defineCommand, type LedgerMetrics, type Observation, type ReadCtx, type
 import { APP_NAME, newRunId } from "../core/names";
 import { prStep } from "../core/pr";
 import { UsageError } from "../core/result";
-import { parseYaml, setTopLevel } from "../core/values";
+import { parseYaml, setMapString, setTopLevel } from "../core/values";
 
 const RECORD = "restore-pg";
 const LABEL = "homelab.ukyi.app/restore";
@@ -205,6 +205,59 @@ function suspendEdit(n: Names, on: boolean) {
     const text = cur[n.appsFile];
     if (text === null) throw new Error(`${n.appsFile}가 없다`);
     return { [n.appsFile]: setTopLevel(text, { suspended: on ? true : undefined }) };
+  };
+}
+
+// R08 복원 세대(restore.md 2.1). 한 앱 복원은 WAL timeline이 그대로라 봇은 이 env가 바뀌어야 복원을 알아채고, 안 바뀌면 폐기한
+// 연결 키와 미게시 알림이 되살아난다. 빠뜨릴 수 없게 재개 PR이 같은 커밋에서 올린다. 앱은 멈춰 있어 재개와 함께 한 번만 뜬다.
+const EPOCH_KEY = "EXTERNAL_TASK_RESTORE_EPOCH";
+// 봇 RESTORE_EPOCH와 같다. 어기면 스위치가 꺼져 있어도 봇이 기동하지 않는다.
+const EPOCH = /^[A-Za-z0-9._-]{1,64}$/;
+// 앱 이름이 아니라 값 파일로 고른다(원장 PVC와 같은 관례). 스위치 값은 보지 않는다: 꺼져 있어도 연결 행은 복원되고 다시 켤 때 장벽이 잡는다.
+// 함정: env에서 EXTERNAL_TASK_* 줄을 모두 지우면 대상에서 빠진다. 그래서 R08을 끌 때 스위치 줄은 "false"로 남긴다(rotate.md 3f).
+const usesEpoch = (appValues: any): boolean => Object.keys(appValues?.env ?? {}).some((k) => k.startsWith("EXTERNAL_TASK_"));
+
+function resumeSummary(before: string | null, after: string | null): string {
+  const a = before === null ? null : (parseYaml(before) as any);
+  const b = after === null ? null : (parseYaml(after) as any);
+  const parts = a?.suspended !== b?.suspended ? ["suspended 지움"] : [];
+  if (a?.env?.[EPOCH_KEY] !== b?.env?.[EPOCH_KEY]) parts.push(`${EPOCH_KEY}: ${a?.env?.[EPOCH_KEY] ?? "없음"} → ${b?.env?.[EPOCH_KEY]}`);
+  return parts.join(", ");
+}
+
+// 값은 이 실행 id라 다시 쳐도 같다. 읽기는 기록에서, 쓰기는 이 호출이 받아들인 실행(mine)에서 얻는다.
+function resumePr(n: Names): Step {
+  let run: string | null = null;
+  const step = gatedPr(
+    n,
+    "pr-resume",
+    ["ok.verify"],
+    "ok.resumed",
+    prStep({
+      command: "db restore resume",
+      app: n.app,
+      title: `db restore ${n.app}: 앱 재개`,
+      body: `\`homelab db restore ${n.app}\` 5단계(restore.md 2절). \`suspended\` 줄을 지운다. 마이그레이션 Job이 다시 돌고 앱이 뜬다. DB는 T1로 되돌렸고 ACL·역할 확인을 마쳤다. \`env\`에 \`EXTERNAL_TASK_*\`가 있는 앱은 같은 커밋에서 \`${EPOCH_KEY}\`를 이 복원의 실행 id로 올린다(restore.md 2.1). 그 앱의 R08 연결은 재개 때 모두 닫힌다.`,
+      files: [n.appsFile],
+      edit(cur) {
+        const text = suspendEdit(n, false)(cur)[n.appsFile];
+        if (!usesEpoch(parseYaml(text))) return { [n.appsFile]: text };
+        if (run === null || !EPOCH.test(run)) throw new Error(`실행 id(${run})가 세대 형식(${EPOCH.source})이 아니다. 기록을 확인한다`);
+        return { [n.appsFile]: setMapString(text, "env", EPOCH_KEY, run) };
+      },
+      describe: (_path, before, after) => resumeSummary(before, after),
+    }),
+  );
+  return {
+    ...step,
+    read(ctx) {
+      run = record(ctx, n)?.run ?? null;
+      return step.read(ctx);
+    },
+    apply(w, seen) {
+      run = mine(w, n).run;
+      return step.apply!(w, seen);
+    },
   };
 }
 
@@ -502,20 +555,7 @@ function mainSteps(n: Names, to: { t1: string; ms: number } | null): Step[] {
         await withLease(w, n, "cacheflush", async (r) => cacheFlush(w, n, r));
       },
     },
-    gatedPr(
-      n,
-      "pr-resume",
-      ["ok.verify"],
-      "ok.resumed",
-      prStep({
-        command: "db restore resume",
-        app,
-        title: `db restore ${app}: 앱 재개`,
-        body: `\`homelab db restore ${app}\` 5단계(restore.md 2절). \`suspended\` 줄을 지운다. 마이그레이션 Job이 다시 돌고 앱이 뜬다. DB는 T1로 되돌렸고 ACL·역할 확인을 마쳤다.`,
-        files: [n.appsFile],
-        edit: suspendEdit(n, false),
-      }),
-    ),
+    resumePr(n),
     {
       id: "running",
       target: `앱 ${app} 재개`,

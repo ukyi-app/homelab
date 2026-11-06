@@ -299,6 +299,74 @@ tests:
         alertname: HomelabBotTaskLaneRetentionFull
         exp_alerts: []
 
+  # 게이트 시계열은 스위치·정책과 무관하게 나오고 닫힌 사유만 1이다.
+  # 라벨은 다른 bot-slot 시계열과 같다. 이 시계열은 아직 운영 봇 이미지에 없어 라이브로 맞춰 보지 못했다.
+  - name: HomelabBotTaskGateClosed는 스위치가 켜졌는데 정책이 틀리면 10분 뒤 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_gate_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="switch_off"}'
+        values: "0x25"
+      - series: 'homelab_bot_task_gate_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="policy_invalid"}'
+        values: "0x2 1x23"
+    alert_rule_test:
+      - eval_time: 12m
+        groupname: task-lane
+        alertname: HomelabBotTaskGateClosed
+        exp_alerts: []
+      - eval_time: 13m
+        groupname: task-lane
+        alertname: HomelabBotTaskGateClosed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              reason: policy_invalid
+            exp_annotations:
+              summary: 봇 작업 레인이 policy_invalid 사유로 10분 넘게 닫혀 있다. 스위치는 켜져 있다
+              description: 작업 명령을 등록하지 않고 작업 레인 지표도 없다. 대화·리뷰는 계속된다. 게시 서버 로그 task_gate를 보고 Infisical RUNTIME_POLICIES의 task 절을 고친다. 기동 때 한 번만 판정하므로 고친 뒤 봇을 다시 띄워야 풀린다.
+
+  # 스위치를 끈 것은 사람의 결정이다.
+  - name: HomelabBotTaskGateClosed는 스위치를 끈 경우에 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_gate_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="switch_off"}'
+        values: "1x40"
+      - series: 'homelab_bot_task_gate_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="policy_invalid"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: task-lane
+        alertname: HomelabBotTaskGateClosed
+        exp_alerts: []
+
+  # 열렸거나 작업자를 기다리는 동안은 모든 사유가 0이다. 정책을 고쳐 다시 띄우면 풀린다.
+  - name: HomelabBotTaskGateClosed는 게이트가 열리면 풀린다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_task_gate_closed{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", reason="policy_invalid"}'
+        values: "1x20 0x10"
+    alert_rule_test:
+      - eval_time: 15m
+        groupname: task-lane
+        alertname: HomelabBotTaskGateClosed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              reason: policy_invalid
+            exp_annotations:
+              summary: 봇 작업 레인이 policy_invalid 사유로 10분 넘게 닫혀 있다. 스위치는 켜져 있다
+              description: 작업 명령을 등록하지 않고 작업 레인 지표도 없다. 대화·리뷰는 계속된다. 게시 서버 로그 task_gate를 보고 Infisical RUNTIME_POLICIES의 task 절을 고친다. 기동 때 한 번만 판정하므로 고친 뒤 봇을 다시 띄워야 풀린다.
+      - eval_time: 22m
+        groupname: task-lane
+        alertname: HomelabBotTaskGateClosed
+        exp_alerts: []
+
+  # 게이트 시계열이 없는 봇 이미지(이 경보를 넣은 시점의 운영)에서는 조용하다.
   # 스위치를 끄거나 정책이 틀리면 레인 시계열이 없다. 봇의 다른 지표는 그대로 나온다.
   - name: 레인 시계열이 없으면 작업 레인 경보는 모두 조용하다
     interval: 1m
@@ -306,6 +374,10 @@ tests:
       - series: 'homelab_bot_gateway_connected{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
         values: "1x90"
     alert_rule_test:
+      - eval_time: 80m
+        groupname: task-lane
+        alertname: HomelabBotTaskGateClosed
+        exp_alerts: []
       - eval_time: 80m
         groupname: task-lane
         alertname: HomelabBotTaskWorkerIntakeClosed
@@ -351,6 +423,140 @@ tests:
       - eval_time: 25m
         groupname: task-lane
         alertname: HomelabBotTaskWorkerUnrouted
+        exp_alerts: []
+
+  # R08 수신(rules/bot.yaml external-task 그룹). 이름·라벨은 2026-11-06 운영 vmsingle에서 질의한 값과 같다.
+  # 요청 수는 _total 없는 카운터이고 outcome 라벨이 고정 값 전체로 처음부터 0이다.
+  - name: HomelabBotExternalTaskUnposted는 미게시 알림이 15분 이어지면 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_external_task_unposted{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0x2 3x25"
+    alert_rule_test:
+      - eval_time: 17m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnposted
+        exp_alerts: []
+      - eval_time: 18m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnposted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+            exp_annotations:
+              summary: 봇 R08 미게시 알림 3건이 15분 넘게 Discord에 나가지 않았다
+              description: 사람 세션의 턴 완료 알림이 밀려 있다. 전체 1,000건·연결별 100건이 차면 수신도 거절한다. 봇 로그의 게시 오류와 HomelabBotOutboxUnknown을 보고 Discord 토큰(REST 401)과 정책을 확인한다. 받지 않을 연결은 /detach로 막는다.
+
+  # 평소 게시는 몇 초다. 새 알림이 이어져도 게시되면 표본이 0으로 돌아와 for가 다시 센다.
+  - name: HomelabBotExternalTaskUnposted는 게시되면 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_external_task_unposted{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0 1 1 0 2 2 2 0 1 1 1 1 1 0x15"
+    alert_rule_test:
+      - eval_time: 25m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnposted
+        exp_alerts: []
+
+  # helper 재시도 간격은 15분까지 벌어진다. 실패가 드문드문 이어져도 for가 끊기지 않고, 재기동으로 카운터가 0이 되어도 센다.
+  - name: HomelabBotExternalTaskUnavailable은 503이 드문드문 이어져도 30분 뒤 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_external_task_requests{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", outcome="unavailable"}'
+        values: "0x2 1x13 2x13 0x1 1x13 2x13"
+      - series: 'homelab_bot_external_task_requests{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", outcome="accepted"}'
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 32m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnavailable
+        exp_alerts: []
+      - eval_time: 33m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: bot-slot
+              instance: homelab-bot-metrics
+              namespace: app-homelab-bot
+              outcome: unavailable
+            exp_annotations:
+              summary: 봇 R08 수신이 30분 넘게 503(unavailable)으로 실패한다
+              description: helper가 큐에 두고 재시도하지만 발생 뒤 24시간이 지난 알림은 버린다. 봇 로그 external_task_error, 정책 RUNTIME_POLICIES 읽기, DB 지연을 본다. 대화·리뷰와 경보 수신은 R08에 묶이지 않는다.
+
+  # DB 장애 조치처럼 짧은 실패는 helper 재시도로 풀린다.
+  - name: HomelabBotExternalTaskUnavailable은 짧은 실패에 울리지 않고 멎으면 풀린다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_external_task_requests{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", outcome="unavailable"}'
+        values: "0x2 3x60"
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnavailable
+        exp_alerts: []
+      - eval_time: 33m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnavailable
+        exp_alerts: []
+      - eval_time: 50m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnavailable
+        exp_alerts: []
+
+  # 거절은 내부 오류가 아니다. 폐기·만료 키(unauthorized), 속도 제한, 과부하는 이 경보의 대상이 아니다.
+  - name: HomelabBotExternalTaskUnavailable은 다른 outcome에 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_external_task_requests{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", outcome="unauthorized"}'
+        values: "0+1x60"
+      - series: 'homelab_bot_external_task_requests{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", outcome="overloaded"}'
+        values: "0+1x60"
+      - series: 'homelab_bot_external_task_requests{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", outcome="rate_limited_connection"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 50m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnavailable
+        exp_alerts: []
+
+  # 스위치를 끄거나 봇 파드가 Pending이면(VM은 원장 PV가 없다) 시계열이 없다.
+  - name: R08 시계열이 없으면 external-task 경보는 조용하다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_gateway_connected{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 50m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnposted
+        exp_alerts: []
+      - eval_time: 50m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnavailable
+        exp_alerts: []
+
+  # 스위치가 켜져도 프록시가 없는 클러스터(VM, cluster.r08.enabled false)에는 요청이 닿지 않아 모두 0이다.
+  - name: 요청이 닿지 않는 클러스터에서 external-task 경보는 조용하다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_external_task_unposted{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0x60"
+      - series: 'homelab_bot_external_task_requests{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", outcome="unavailable"}'
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 50m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnposted
+        exp_alerts: []
+      - eval_time: 50m
+        groupname: external-task
+        alertname: HomelabBotExternalTaskUnavailable
         exp_alerts: []
 
   # 삭제 원장(rules/bot.yaml deletion-ledger 그룹). 라벨은 kube-state-metrics(honor_labels)·node-exporter(instance = 노드 이름)·

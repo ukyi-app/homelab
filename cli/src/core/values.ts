@@ -1,5 +1,6 @@
 // values YAML 편집. 사람이 쓴 주석이 있는 파일이라 다시 직렬화하지 않고, 바꿀 최상위 키 블록만
-// 한 줄 flow 꼴(`uses: { postgres: true }`)로 바꾸거나 지우거나 끝에 더한다. 다른 줄과 주석은 그대로 둔다.
+// 한 줄 flow 꼴(`uses: { postgres: true }`)로 바꾸거나 지우거나 끝에 더한다(setTopLevel). 맵 블록 안의 키 한 줄만 고칠 수도 있다
+// (setMapString). 다른 줄과 주석은 그대로 둔다.
 // 결과를 다시 parse해 "원래 객체 + 편집"과 다르면 던진다(블록 경계를 잘못 읽었거나 직렬화가 틀린 경우의 그물).
 // 명령이 import할 수 있는 core 모듈이다(정적 시험의 허용 목록).
 import { isArray, jsonStringify } from "./intrinsics";
@@ -109,5 +110,36 @@ export function setTopLevel(text: string, edits: Record<string, unknown>): strin
     else want[k] = v;
   }
   if (canonical(asObject(parseYaml(out))) !== canonical(want)) throw new Error("values: 고친 결과를 다시 읽은 값이 기대와 다르다(파일을 고치지 않았다)");
+  return out;
+}
+
+// 최상위 맵 안의 문자열 키 하나만 고치거나 더한다. setTopLevel은 블록 전체를 한 줄 flow로 다시 써 안쪽 주석을 지우므로,
+// 사람이 주석을 단 블록(env 등)은 이 함수로 그 줄만 바꾼다. 없던 키는 블록 끝에 더한다.
+// 값은 늘 큰따옴표로 쓴다. 숫자처럼 보이는 값이 수로 읽히면 차트 schema(env 값은 문자열만)가 거부한다.
+export function setMapString(text: string, parent: string, key: string, value: string): string {
+  if (isSecret(value)) throw new Error("values: 시크릿 객체는 저장소 파일에 넣지 않는다");
+  if (typeof value !== "string") throw new Error("values: 문자열만 쓴다");
+  if (!KEY.test(key)) throw new Error(`values: 키 이름 형식이 아니다: ${jsonStringify(key)}`);
+  if (/^(---|\.\.\.)(\s|$)/m.test(text.replace(/^---\s*\n/, ""))) throw new Error("values: 여러 문서 YAML은 고치지 않는다");
+  const original = asObject(parseYaml(text));
+  const map = original[parent];
+  if (map === null || typeof map !== "object" || isArray(map)) throw new Error(`values: ${parent}가 맵이 아니다`);
+  if ((map as Record<string, unknown>)[key] === value) return text;
+  const merged = { ...(map as Record<string, unknown>), [key]: value };
+  const lines = text.split("\n");
+  const b = blocks(lines).get(parent);
+  if (!b) throw new Error(`values: ${parent} 블록을 찾지 못했다(따옴표 키·flow 문서는 고치지 않는다)`);
+  // 한 줄 flow 블록은 안쪽 주석이 없다.
+  if (b[1] - b[0] === 1) return setTopLevel(text, { [parent]: merged });
+
+  const child = lines.slice(b[0] + 1, b[1]).find((l) => l.trim() !== "" && !l.trimStart().startsWith("#"));
+  const indent = /^ +/.exec(child ?? "")?.[0];
+  if (!indent) throw new Error(`values: ${parent} 블록의 들여쓰기를 읽지 못했다`);
+  const line = `${indent}${key}: ${jsonStringify(value)}`;
+  const at = lines.findIndex((l, i) => i > b[0] && i < b[1] && l.startsWith(`${indent}${key}:`));
+  if (at >= 0) lines[at] = line;
+  else lines.splice(b[1], 0, line);
+  const out = lines.join("\n");
+  if (canonical(asObject(parseYaml(out))) !== canonical({ ...original, [parent]: merged })) throw new Error("values: 고친 결과를 다시 읽은 값이 기대와 다르다(파일을 고치지 않았다)");
   return out;
 }
