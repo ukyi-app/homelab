@@ -17,7 +17,7 @@
 
 ## 할 일
 
-1. R08 연결 방식을 다시 판단한다(아래 "R08 연결 방식"). 후보와 근거를 봇 저장소 `DECISIONS.md`에 적고 사용자가 정한다.
+1. R08 연결 방식을 다시 판단한다(아래 "R08 연결 방식"). 후보와 근거를 봇 저장소 `DECISIONS.md`에 적고 사용자가 정한다. **수신 경로는 tailnet 전용으로 확정(사용자 2026-11-06).** 남은 일은 그 절의 켜는 순서다.
 2. 봇 소유 작업은 아래 "실행 경로"대로 만든다. 봇 저장소 `ARCHITECTURE.md` §4의 능력 표시 초안을 출발점으로 쓰되, `attach_task`(R08)는 1번 판단 전에는 정하지 않는다.
 3. 다시 시드하는 절차를 정한다. 첫 시드는 T16b 전(모델을 처음 쓰는 단계 전)에 사람이 했다(D-14, T16b 할 일 4.2). 설계 C.8의 작업자 자격 전달(Infisical `/apps/homelab-bot/worker` → ESO)과 영속 쓰기 공간의 관계는 설계 C.8 변경(D-14)을 따른다: 작업자는 영속 공간에 파일이 없을 때만 시드를 복사한다. 파드를 다시 만들 때 옛 시드로 덮으면 회전된 갱신 토큰과 어긋나 사람이 다시 시드해야 한다 [확인: https://learn.chatgpt.com/docs/auth/ci-cd-auth , 2026-10-18].
 4. `shell_environment_policy`를 `inherit = "none"` 또는 명시 `include`로 고정한다. 기본값은 `KEY`·`SECRET`·`TOKEN` 이름의 변수를 모델이 띄우는 명령에 넘긴다 [확인: https://learn.chatgpt.com/docs/config-file/config-advanced , 2026-10-18].
@@ -37,8 +37,11 @@
 - `--approve-for-me`(자동 검토)는 사람 승인이 아니라서 쓰지 않는다(T15 제안, `ARCHITECTURE.md` §4).
 - 승인 요청을 받는 API가 있는 `codex app-server`는 공식 문서가 "experimental and aren't supported for production workloads"라고 적는다 [확인: https://learn.chatgpt.com/docs/app-server , 2026-10-18]. V1 기본 경로가 아니라 어댑터 뒤 후보다(T15 제안).
 
-## R08 연결 방식 (보류, 이 티켓에서 다시 판단)
+## R08 연결 방식 (수신 경로 tailnet 전용, 사용자 결정 2026-11-06)
 
+- **수신 경로:** 사람 helper → 전용 Tailscale 프록시(태그 `tag:k8s-r08` 하나, owner 기기만 TCP 443) → ClusterIP Service → 봇 R08 리스너 8082. 공개 경로는 없다. 설계 C.3.5·C.8.
+- **플랫폼 구현과 켜는 순서:** `platform/bot-slot`의 `r08.enabled`(기본 꺼짐)와 `infra/tailscale/policy.hujson`을 먼저 병합한다. owner가 `infra/tailscale`을 apply한 뒤에 `r08.enabled`와 봇 `EXTERNAL_TASK_EVENTS_ENABLED`·`EXTERNAL_TASK_ENVIRONMENT`를 켜는 PR을 낸다. 순서를 어기면 bot-slot과 root가 Progressing에 머문다(설계 C.8).
+- **켠 뒤 인수:** 프록시 기기의 태그가 `tag:k8s-r08` 하나, owner 기기 성공, 다른 member와 `tag:nuc` 실패, 공개 host로 닿지 않음, 집 밖 맥에서 성공, 다른 경로·다른 메서드 거절. 프록시 라벨로 좁힌 NetworkPolicy가 실제 프록시 요청을 통과하는지도 본다. 연결 폐기·기기 분실은 [rotate.md](../../../runbooks-public/rotate.md) 3f.
 - R08(V1 기능 3, 사용자가 명시적으로 연결한 기존 Codex 작업)은 요구 그대로다. 연결 방식만 T15에서 정하지 않고 이 티켓으로 넘겼다(확정(사용자 2026-10-18, T15)).
 - herdr 경유는 쓰지 않는다. herdr는 Codex 상태를 화면으로 추정하고 소켓에 인증이 없다(T15 조사, 봇 저장소 `DISCOVERY.md`).
 - 판단 전에는 사람 개인 세션 연결을 `capability=false`로 정했다고 쓰지 않는다.

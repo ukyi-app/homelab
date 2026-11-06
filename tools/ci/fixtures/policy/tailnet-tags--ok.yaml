@@ -1,0 +1,10 @@
+# check: tailnet-tags
+# expect: pass
+# 전용 태그 하나만 붙인 R08 Ingress. 대조군이다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: homelab-bot-r08
+  namespace: app-homelab-bot
+  annotations:
+    tailscale.com/tags: tag:k8s-r08

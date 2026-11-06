@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["target", "probe", "kubernetesApi", "deletionLedger"],
+  "required": ["target", "tailscale", "r08", "probe", "kubernetesApi", "deletionLedger"],
   "properties": {
     "target": {
       "type": "object",
@@ -12,8 +12,26 @@
         "namespace": { "type": "string", "pattern": "^(bot-slot-probe|app-[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?)$" },
         "app": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$" },
         "workerPort": { "const": 8080 },
-        "alertPort": { "type": "integer", "minimum": 1024, "maximum": 65535, "not": { "const": 8080 } },
+        "alertPort": { "type": "integer", "minimum": 1024, "maximum": 65535, "not": { "enum": [8080, 8082] } },
         "metricsPort": { "const": 8080 }
+      }
+    },
+    "tailscale": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prefix": { "type": "string", "pattern": "^([a-z][a-z0-9-]*-)?$" }
+      }
+    },
+    "r08": {
+      "description": "R08 수신 경로(templates/r08.yaml). port는 봇 PORTS.externalEvents와 같다. serviceName은 문자로 시작·끝나는 DNS 라벨이다(tools/ci/policy.ts TAILNET_NAME과 같은 규칙).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "port", "serviceName"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "const": 8082 },
+        "serviceName": { "type": "string", "pattern": "^[a-z]([a-z0-9-]{0,50}[a-z])?$" }
       }
     },
     "probe": { "type": "boolean" },
@@ -53,6 +71,11 @@
     {
       "if": { "properties": { "target": { "properties": { "namespace": { "const": "bot-slot-probe" } } } } },
       "then": { "properties": { "probe": { "const": true } } }
+    },
+    {
+      "$comment": "R08은 실제 봇 리스너로만 간다. 시험 값(probe)과 함께 켜지 않는다. probe의 wave -1이 Application을 다단계로 만들어 Ingress의 Progressing을 기다리게도 한다. 접두는 root가 넘긴다(운영 빈 문자열이라 required로 키만 본다).",
+      "if": { "properties": { "r08": { "properties": { "enabled": { "const": true } } } } },
+      "then": { "properties": { "probe": { "const": false }, "tailscale": { "required": ["prefix"] } } }
     },
     {
       "$comment": "원장은 봇 ns의 PVC에만 묶인다. 시험 값(probe)과 함께 켜지 않고, 끌 때는 값을 반쯤 남기지 않는다.",

@@ -1,0 +1,7 @@
+# expect: fail
+# match: prefix
+# root가 클러스터 접두를 넘기지 않은 렌더. VM이 운영 이름을 차지할 수 있다.
+r08: {enabled: true, port: 8082, serviceName: task-events}
+kubernetesApi:
+  endpointCIDRs:
+    - 192.0.2.10/32

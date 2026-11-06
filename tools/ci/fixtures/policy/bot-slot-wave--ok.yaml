@@ -1,0 +1,16 @@
+# check: bot-slot-wave
+# expect: pass
+# 같은 wave의 다른 Application은 괜찮다(go). 대조군이다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bot-slot
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: go
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"

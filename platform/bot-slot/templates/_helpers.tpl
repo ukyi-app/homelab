@@ -26,6 +26,11 @@ app: worker
 app: worker-task
 {{- end }}
 
+{{/* R08 Service·Ingress 이름. Ingress 이름은 프록시 파드의 tailscale.com/parent-resource 라벨이 되어 NetworkPolicy가 함께 쓴다. */}}
+{{- define "botSlot.r08Name" -}}
+{{ .Values.target.app }}-r08
+{{- end }}
+
 {{- define "botSlot.labels" -}}
 app.kubernetes.io/part-of: bot-slot
 app.kubernetes.io/managed-by: argocd

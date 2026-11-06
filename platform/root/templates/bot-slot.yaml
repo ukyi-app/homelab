@@ -2,14 +2,19 @@
 자리: bot-slot(봇 자리 Application, 설계 C.8). wave 1(맨 뒤, 설계 C.3.1).
 작은 Helm 차트 platform/bot-slot이고 대상 값 target은 그 차트의 values.yaml에 둔다(지금 봇 ns).
 대상 ns를 만들지 않는다(CreateNamespace 없음). 봇 ns는 앱 Application(ApplicationSet apps, wave 0)이 만든다.
-클러스터 값은 cluster.kubernetesApi.endpointCIDRs(봇 파드 → Kubernetes API egress, T16b D8)와 cluster.deletionLedger(원장 PV)만
-넘긴다. target은 넘기지 않는다. deletionLedger는 nodeName이 있을 때만 enabled: true로 넘기고, 없으면(VM) 키를 넘기지 않아
-bot-slot 기본값(꺼짐)이 그대로다.
+클러스터 값은 cluster.kubernetesApi.endpointCIDRs(봇 파드 → Kubernetes API egress, T16b D8), cluster.deletionLedger(원장 PV),
+cluster.tailscale.prefix(R08 tailnet 이름 접두)만 넘긴다. target과 r08.enabled는 넘기지 않는다. deletionLedger는 nodeName이 있을 때만
+enabled: true로 넘기고, 없으면(VM) 키를 넘기지 않아 bot-slot 기본값(꺼짐)이 그대로다.
 켜기: values.yaml의 components.botSlot.enabled를 true로 바꾼다. 꺼져 있으면 아무것도 렌더하지 않는다.
 */}}
 {{- if .Values.components.botSlot.enabled }}
 {{- $api := .Values.cluster.kubernetesApi | default dict }}
 {{- $ledger := .Values.cluster.deletionLedger | default dict }}
+{{- $ts := .Values.cluster.tailscale | default dict }}
+{{- /* 운영 접두는 빈 문자열이라 required를 쓸 수 없다. 키가 있는지로 확인한다. */}}
+{{- if not (hasKey $ts "prefix") }}
+{{- fail "cluster.tailscale.prefix is missing in values-<cluster>.yaml (prod \"\", vm \"vm-\")" }}
+{{- end }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -28,6 +33,8 @@ spec:
         kubernetesApi:
           endpointCIDRs:
             {{- required "cluster.kubernetesApi.endpointCIDRs is required in values-<cluster>.yaml" $api.endpointCIDRs | toYaml | nindent 12 }}
+        tailscale:
+          prefix: {{ $ts.prefix | quote }}
         {{- if $ledger.nodeName }}
         deletionLedger:
           enabled: true
@@ -42,7 +49,7 @@ spec:
       selfHeal: true
     # 다른 Application과 달리 homelab.retry를 쓰지 않는다(설계 C.3.3).
     # 빈 클러스터에서 봇 ns가 아직 없으면 sync가 실패한 채 생길 때까지 무제한으로 기다린다(limit -1).
-    # 이보다 뒤 wave가 없어 root는 이 health를 기다리지 않고 끝난다. 그래서 교착이 아니다(설계 C.3.1).
+    # 이보다 뒤 wave가 없어 root는 이 health를 기다리지 않고 끝난다. 그래서 교착이 아니다(설계 C.3.1). ci가 맨 뒤 wave인지 본다(checkBotSlotLastWave).
     # refresh: true가 없으면 무제한 재시도가 처음 실패한 revision을 계속 써서, 고치는 PR이 반영되지 않는다.
     retry:
       limit: -1

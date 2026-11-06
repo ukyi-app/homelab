@@ -1,0 +1,12 @@
+# check: tailnet-tags
+# expect: fail
+# rule: tailnet-tags
+# match: 다른 태그와 함께 붙이지 않는다
+# 이름과 상관없이 전용 태그는 혼자다. tag:k8s를 함께 붙이면 member·tag:nuc → tag:k8s:443이 그 프록시에도 적용된다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: x
+  namespace: app-x
+  annotations:
+    tailscale.com/tags: tag:k8s-r08,tag:k8s

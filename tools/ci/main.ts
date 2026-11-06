@@ -10,7 +10,7 @@ import { basename, dirname, join } from "node:path";
 import { checkAlerting } from "./alerting";
 import { checkPgAclOrder, checkSecretPaths, checkValkeyWiring, checkVendoredCharts } from "./data";
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
-import { checkAll, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkSandbox, checkWorkloads } from "./policy";
+import { checkAll, checkBotSlotLastWave, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkSandbox, checkTailnetPolicy, checkTailnetTags, checkWorkloads, readTailnetPolicy } from "./policy";
 import { kubeconform, renderAll } from "./render";
 import { checkExternalSecretsSwitch } from "./switch";
 import { checkVolumes } from "./volume";
@@ -518,9 +518,18 @@ const steps: Step[] = [
     },
   },
   {
+    name: "tailnet policy",
+    // R08 ACL 범위(tools/ci/policy.ts checkTailnetPolicy). Terraform은 자격 없이 plan하지 않아 이 검사가 파일 내용을 본다.
+    run: () => checkTailnetPolicy(readTailnetPolicy()),
+  },
+  {
     name: "policy fixtures",
     run: () => {
       const checks: Record<string, (d: Doc[]) => Violation[]> = {
+        "tailnet-tags": (d) => checkTailnetTags(d),
+        // 파일의 첫 문서가 정책 본문이다(hujson 대신 같은 모양의 YAML).
+        "tailnet-policy": (d) => checkTailnetPolicy(d[0].obj),
+        "bot-slot-wave": checkBotSlotLastWave,
         "no-secret": checkNoSecrets,
         workload: checkWorkloads,
         revision: checkRevisions,

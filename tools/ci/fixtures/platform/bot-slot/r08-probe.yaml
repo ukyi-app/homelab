@@ -1,0 +1,10 @@
+# expect: fail
+# match: value must be false
+# 시험 값(probe)에는 R08 리스너가 없고, probe의 wave -1이 Application을 다단계로 만들어 Ingress health를 기다리게 한다.
+target: {namespace: bot-slot-probe, app: bot-slot-probe, workerPort: 8080, alertPort: 8081, metricsPort: 8080}
+probe: true
+tailscale: {prefix: ""}
+r08: {enabled: true, port: 8082, serviceName: task-events}
+kubernetesApi:
+  endpointCIDRs:
+    - 192.0.2.10/32

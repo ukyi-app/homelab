@@ -1,0 +1,11 @@
+# check: tailnet-policy
+# expect: fail
+# rule: tailnet-policy
+# match: grants에 tag:k8s-r08를 두지 않는다
+# ACL 줄을 지키고 grant로 우회해 넓힌다.
+tagOwners:
+  tag:k8s-r08: [tag:k8s-operator]
+acls:
+  - {action: accept, src: [autogroup:owner], proto: tcp, dst: ["tag:k8s-r08:443"]}
+grants:
+  - {src: [autogroup:member], dst: [tag:k8s-r08], ip: ["tcp:443"]}

@@ -1,0 +1,8 @@
+# check: tailnet-policy
+# expect: pass
+# R08 경로가 owner 한 줄뿐인 정책. 대조군이다.
+tagOwners:
+  tag:k8s-r08: [tag:k8s-operator]
+acls:
+  - {action: accept, src: [autogroup:member, tag:nuc], dst: ["tag:k8s:443"]}
+  - {action: accept, src: [autogroup:owner], proto: tcp, dst: ["tag:k8s-r08:443"]}

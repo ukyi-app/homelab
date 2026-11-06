@@ -49,6 +49,24 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.target.metricsPort }}
+    {{- if .Values.r08.enabled }}
+    # R08 수신(r08.yaml). 그 Ingress의 프록시 파드 하나만 연다. 라벨은 operator가 프록시 파드에 붙이는 부모 표시다
+    # (v1.104.1 cmd/k8s-operator/sts.go가 StatefulSet 라벨을 파드에 복사, svc.go childResourceLabels). Ingress 프록시는 userspace L7이라 출처가 그 파드 IP다.
+    # 공유 차트의 같은 ns 허용은 합집합으로 남아, 봇 ns의 다른 파드는 이 포트에 닿는다. 클러스터 안 절대 격리가 아니고 서명이 막는다.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+          podSelector:
+            matchLabels:
+              tailscale.com/managed: "true"
+              tailscale.com/parent-resource-type: ingress
+              tailscale.com/parent-resource-ns: {{ .Values.target.namespace }}
+              tailscale.com/parent-resource: {{ include "botSlot.r08Name" . }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.r08.port }}
+    {{- end }}
   egress:
     # 작업 전달. 받는 쪽 허용은 sandbox-networkpolicy.yaml.
     - to:
