@@ -6,7 +6,8 @@ port: 8080
 resources: { cpu: "100m", memory: "256Mi" }
 # GITHUB_REVIEW_APP_ID·_PRIVATE_KEY: 리뷰 App ukyi-review. 둘 다 있어야 하고 하나만 있으면 봇이 기동하지 않는다.
 # 넣기만 해서는 리뷰가 열리지 않는다. env REVIEW_ENABLED가 true여야 하고(기본 꺼짐) 정책·작업자 조건도 맞아야 한다.
-secrets: [DISCORD_BOT_TOKEN, GITHUB_REVIEW_APP_ID, GITHUB_REVIEW_APP_PRIVATE_KEY, GITHUB_REVIEW_WEBHOOK_SECRET, GRAFANA_READER_TOKEN, HEALTHCHECKS_PING_URL, RUNTIME_POLICIES, WORKER_CONTROL_PRIVATE_KEY]
+# GITHUB_WRITER_APP_ID·_PRIVATE_KEY: 쓰기 App ukyi-writer(D-24). env CHANGE_PR_ENABLED가 true가 아니면 봇이 읽지 않아 변경 PR 경로는 닫힌 채다.
+secrets: [DISCORD_BOT_TOKEN, GITHUB_REVIEW_APP_ID, GITHUB_REVIEW_APP_PRIVATE_KEY, GITHUB_REVIEW_WEBHOOK_SECRET, GITHUB_WRITER_APP_ID, GITHUB_WRITER_APP_PRIVATE_KEY, GRAFANA_READER_TOKEN, HEALTHCHECKS_PING_URL, RUNTIME_POLICIES, WORKER_CONTROL_PRIVATE_KEY]
 uses: { postgres: true }
 # GitHub webhook 공개 경로 https://hooks.ukyi.app/github(설계 C.8, D6 (a)). 차트 Ingress는 설계의 /github Exact가 아니라
 # / Prefix다. 밖에서는 Cloudflare WAF 규칙 1(infra/cloudflare/main.tf)이 /github POST 밖을 먼저 막고, 봇도 8080의 그 밖
@@ -52,14 +53,14 @@ env:
   # PR 자동 리뷰 스위치(사용자 승인). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
   # 켜도 Infisical RUNTIME_POLICIES의 review 절(시험 저장소 homelab-smoke 하나)과 작업자 리뷰 레인이 있어야 열린다.
   # 끄려면 이 줄을 지운다. 대기 작업과 미게시 결과는 지우지 않고 다시 켜질 때까지 기다린다.
-  REVIEW_ENABLED: "true"
+  REVIEW_ENABLED: "false"
   # 작업 레인 스위치(사용자 승인, T18 H4). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
   # 켜도 Infisical RUNTIME_POLICIES의 task 절(프로젝트 homelab-smoke 하나, 기준 SHA 고정)과 작업자 worker-task가 있어야 열린다.
   # 끄면("false") /task 등 작업 명령을 등록하지 않는다. 남은 작업 세션·unknown은 지우지 않고 다시 켤 때까지 그대로다.
   # 작업자 주소는 bot-slot 정책이 여는 worker-task Service 하나다(대화·리뷰 작업자 WORKER_URL과 다른 파드).
   # 경계 근거는 봇 VERIFICATION "SEC-02 1단계"(합성 환경)·"2단계"(운영 파드 무모델 재측정)다. 작업자 이미지의 CLI 버전이나
   # 작업 레인 settings 생성 코드가 바뀌면 같은 실행기로 운영 파드를 다시 잰 뒤 켠다. 경계가 도구별로 달라 단위 시험만으로는 못 본다.
-  TASK_LANE_ENABLED: "true"
+  TASK_LANE_ENABLED: "false"
   TASK_WORKER_URL: "http://worker-task.sandbox:8080/"
   # R08 읽기 전용 알림 스위치(사용자 승인 2026-11-06, 봇 ARCHITECTURE §15). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
   # 이 파일은 운영·VM이 함께 읽는다. 켜도 bot-slot 프록시가 없는 클러스터(VM, root cluster.r08.enabled)는 리스너 8082에 닿는 길이 없다.
