@@ -30,12 +30,10 @@ worker:
   # main 빌드(app-build)가 GHCR에 올린 digest만 쓴다. 로컬 빌드 digest는 CI 빌드와 다르다.
   # 사람 PR로만 바꾼다(D2). 게시 서버는 apps/homelab-bot/image.yaml 자동 병합으로 따라가지만, 모델 자격을 든 sandbox까지
   # 자동 경로를 넓히지 않는다(설계 C.4.4·C.4.7). 작업자 요청 계약(version)을 바꾸는 봇 PR은 이 값을 바꾸는 PR과 짝으로 낸다.
-  # 지금 값: 봇 main 3520f32 빌드. 리뷰 레인, #46 내장 플러그인 끔, #50 제외 파일 입력, #52(정책 위반으로 멈춘
-  # 실행의 위반 종류를 작업자 로그 run_policy_violation에 값 없이 남김), 작업 레인 샌드박스용 bubblewrap 0.12.0·socat 1.8.0.3
-  # (#61, /usr/bin/bwrap)이 들어 있다. 이 파드는 아직 RuntimeDefault라 bwrap을 쓰지 않는다. 결과 reason·요청 계약(version)·
-  # REVIEW_INSTRUCTIONS는 7a4dfe6과 같다. 빌드 증명은 GitHub API의 SLSA provenance로 대조했다(소스 3520f32, build.yaml@main → app-build v1.0.1).
-  # gh attestation verify가 sigstore 신뢰 루트 단계에서 실패해(이전 digest도 같다) 대신 썼다.
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:ba39bb5046e938c9a12dc18238b9b6dc0b4c4cc04ecf2c19bf922f818cccfc1f
+  # 지금 값: 봇 main d4c8bda 빌드. 리뷰 레인과 미게시 변경 리뷰 경로 /v1/change-review가 들어 있다. 경로는 게시 서버의 CHANGE_PR_ENABLED가
+  # 꺼져 있으면 쓰이지 않는다. 이 파드는 RuntimeDefault라 이미지의 bwrap을 쓰지 않는다. 빌드 증명은 gh attestation verify로 대조했다
+  # (서명 워크플로 homelab app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main d4c8bda, GitHub 호스트 runner).
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:b3331339d5b157dd1fa0b3b9941f9094918335d9cdc4ea9e8e91eed87cd9803d
   # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
   # WORKER_CONTROL_PRIVATE_KEY다. 둘이 어긋나면 작업자가 모든 실행 요청을 403으로 거부하니 회전은 두 값을 함께 바꾼다.
   # 모양이 틀리면 작업자가 기동하지 못해(종료 1) sandbox가 Degraded가 되므로 values.schema.json이 Ed25519 공개 키 모양만 받는다.
@@ -78,10 +76,10 @@ task:
   enabled: true
   # 작업 레인 코드가 든 main 빌드 digest. 사람 PR로만 바꾼다(worker.image와 같은 이유). 이 줄 하나만 바꾸면 worker를 건드리지 않고
   # 작업 레인 이미지를 올린다. 작업 레인 코드가 없는 이미지는 WORKER_LANES를 읽지 않아 대화·리뷰 작업자로 뜬다.
-  # 지금 값: 봇 main 5fb4a20 빌드. Write 도구를 작업 공간 안으로 묶고 CLI 메시징 소켓을 실제 위치에서 가리는 #73과
-  # API 오류 진단·취소 완료 안내 #72가 들어 있다. 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab
-  # app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main 5fb4a20, GitHub 호스트 runner).
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:16ab9a52244bc5061eb48261e43fa3879ff084ed3c6b67069a1e638c2b5eb5bd
+  # 지금 값: 봇 main d4c8bda 빌드. v2 작업 계약과 무자격 검증 실행기(고정 Bun 1.4.3, /opt/verifier)가 들어 있다. CLI 버전과 작업 레인
+  # settings 생성 코드는 SEC-02 2단계를 잰 5fb4a20과 같다. 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab
+  # app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main d4c8bda, GitHub 호스트 runner).
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:b3331339d5b157dd1fa0b3b9941f9094918335d9cdc4ea9e8e91eed87cd9803d
   # Infisical 키 이름. Secret 키와 파일 이름은 worker.profile.credentialKey 그대로다(봇 프로필 표가 그 이름을 읽는다).
   # 키를 레인마다 나눠 한 레인의 토큰만 교체·철회한다. 두 토큰을 한 Secret에 모으지 않는다.
   remoteCredentialKey: CLAUDE_CODE_OAUTH_TOKEN_TASK
