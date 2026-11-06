@@ -1,7 +1,7 @@
 # T19 봇 CHANGE_PR
 
 - 단계: P4 봇 V1
-- 상태: 진행 중 (2026-11-06 착수. 봇 저장소 PR #79~#83, #85로 B0~B5를 병합. 기능은 꺼져 있다. 사람 단계 H0~H3, 실제 `ukyi-writer` AC-P8, live 시험, B6 인수가 남음)
+- 상태: 진행 중 (2026-11-06 착수. 봇 저장소 PR #79~#83, #85로 B0~B5를 병합. 사람 단계 H2 작업자 갱신·운영 무모델 측정, 정책 등록, H0 smoke 앱, H1 실제 `ukyi-writer` AC-P8 끝. H3 live 시험, 인수 뒤 homelab 설치·smoke 앱 제거, B6 인수가 남음)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T17, T18
 - 선행 결정: D-07 (자동 병합 범위. 확정(사용자 2026-10-18, T05): 배포 App이 만든 한 앱의 digest PR만 자동 병합, 서버 강제), D-24 (봇 변경 PR 작성 자격. 확정(사용자 2026-10-18, T15): 봇 전용 쓰기 GitHub App. Contents write + Pull requests write + Metadata read, Workflows·Actions·Administration·Issues 없음, webhook 끔, 선택 저장소 설치, 작업마다 저장소 하나로 좁힌 1시간 토큰. 토큰 분리, ruleset E 여부, App 이름·설치 저장소, 허용 파일 경로는 이 티켓에서 정한다), D-15 (확정(사용자 2026-10-18, T15): 작업자는 GitHub 자격 없이 `codeload.github.com` 압축본만 읽고, push와 PR 생성은 게시 서버가 D-24 App으로 한다), D-16 (확정(사용자 2026-10-18, T15): 허용 봇 작성자 목록에 D-24 App의 봇 사용자를 생성 뒤 넣는다)
@@ -39,7 +39,7 @@
 
 ## 스위치를 켜기(H3) 전에 볼 것
 
-- 봇 #85 `cf1d3c2`의 보안 리뷰가 지적 있음을 표시했지만 내용이 PR에 보이지 않았다. 다음 head `b7d7a25`의 보안 리뷰에는 지적 표시가 없었다. 앞 지적의 내용은 리포트를 볼 수 있는 owner가 확인한다.
+- 봇 #85 `cf1d3c2`의 보안 리뷰가 지적 있음을 표시했지만 내용이 PR에 보이지 않았다. 다음 head `b7d7a25`의 보안 리뷰 영수증은 "No security issues were found in this pull request"다. 앞 지적의 영수증과 리포트 링크는 PR에 남아 있지 않다.
 - `messagePages()`는 줄이 아니라 길이로 자른다. 페이지 경계가 digest에 걸리면 `/change-publish` 승인 명령이 두 메시지로 갈린다. 다른 digest는 거부되고 `/change-status`가 digest를 온전히 보여 주므로 안전 문제는 아니다. 승인 안내를 줄 단위로 나누는 수정을 켜기 전에 넣을지 정한다.
 
 ## 검증
