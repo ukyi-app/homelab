@@ -182,9 +182,11 @@ groups:
           description: "journalctl -u homelab-tls-monitor로 실패 종류를 보고, kubectl -n tailscale get pods로 ts-{{ $labels.tls_host }} 프록시를 본다."
 
       # 호스트가 tailnet에 들지 않는 클러스터(VM)는 install.sh --tls-monitor가 끔 표시를 쓴다. Ingress가 있어도 호스트에서 확인하지 못한다.
+      # R08 프록시(homelab-bot-r08)는 대상에서 뺀다. tag:k8s-r08이라 수집기가 보지 않고, ACL이 tag:nuc → 그 프록시를 일부러 막아(설계 C.3.5) 호스트에서 확인할 길이 없다.
+      # 대가: 그 인증서는 만료 경보가 없다. 갱신이 실패하면 helper 전송이 실패하고 기기의 sender.mjs status에 나온다. 작업·대화 경로에는 영향이 없다.
       - alert: TailnetTLSMissing
         expr: |
-          max by (tls_host) (kube_ingress_tls and on (namespace, ingress) kube_ingress_info{ingressclass="tailscale"})
+          max by (tls_host) (kube_ingress_tls{ingress!="homelab-bot-r08"} and on (namespace, ingress) kube_ingress_info{ingressclass="tailscale"})
           unless on (tls_host) homelab_tailnet_tls_probe_success
           unless on () homelab_tailnet_tls_disabled
         for: 15m

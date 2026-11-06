@@ -43,6 +43,7 @@
 - **플랫폼 구현과 켜는 순서:** `platform/bot-slot`의 `r08.enabled`(기본 꺼짐)와 `infra/tailscale/policy.hujson`을 먼저 병합한다. owner가 `infra/tailscale`을 apply한 뒤에 root 클러스터 값 `cluster.r08.enabled`(운영만 `true`)와 봇 `EXTERNAL_TASK_EVENTS_ENABLED`·`EXTERNAL_TASK_ENVIRONMENT`를 켜는 PR을 낸다. 순서를 어기면 bot-slot과 root가 Progressing에 머문다(설계 C.8).
 - **상태:** 운영에서 켬(사용자 승인 2026-11-06), VM 꺼짐. 한 앱 DB 복원 뒤에는 봇 `EXTERNAL_TASK_RESTORE_EPOCH`를 올린다([restore.md](../../../runbooks-public/restore.md) 2.1).
 - **켠 뒤 인수:** 프록시 기기의 태그가 `tag:k8s-r08` 하나, owner 기기 성공, 다른 member와 `tag:nuc` 실패, 공개 host로 닿지 않음, 집 밖 맥에서 성공, 다른 경로·다른 메서드 거절. 프록시 라벨로 좁힌 NetworkPolicy가 실제 프록시 요청을 통과하는지도 본다. 연결 폐기·기기 분실은 [rotate.md](../../../runbooks-public/rotate.md) 3f.
+- **켠 뒤 인수 결과(2026-11-06):** 프록시 태그 `tag:k8s-r08` 하나, owner 기기에서 정확한 경로 POST 415·GET 405로 리스너 도달(프록시 라벨 NetworkPolicy 통과), 후행 슬래시·하위 경로·쿼리·다른 경로 404, `tag:nuc`에서 프록시 IP 연결 시간 초과, 공개 DNS 응답 0, Funnel 없음. 서명 E2E: 실제 Claude Stop 훅 → helper 서명 전송 → 봇 수락 → 스레드 게시(발생→수신 2초), `/detach` 뒤 같은 세션은 401. **미확인:** 다른 member 차단(시험 기기 없음), 집 밖 맥, 실제 Codex notify. TLS 감시 대상에서는 R08 프록시를 뺐다(`TailnetTLSMissing`, ACL이 호스트를 막음).
 - R08(V1 기능 3, 사용자가 명시적으로 연결한 기존 Codex 작업)은 요구 그대로다. 연결 방식만 T15에서 정하지 않고 이 티켓으로 넘겼다(확정(사용자 2026-10-18, T15)).
 - herdr 경유는 쓰지 않는다. herdr는 Codex 상태를 화면으로 추정하고 소켓에 인증이 없다(T15 조사, 봇 저장소 `DISCOVERY.md`).
 - 판단 전에는 사람 개인 세션 연결을 `capability=false`로 정했다고 쓰지 않는다.

@@ -520,6 +520,11 @@ tests:
         values: "1x20"
       - series: 'kube_ingress_info{namespace="app-b", ingress="b", ingressclass="traefik"}'
         values: "1x20"
+      # R08 프록시는 결과가 없어도 대상이 아니다. ACL이 호스트를 막아 결과가 생길 수 없다.
+      - series: 'kube_ingress_tls{namespace="app-homelab-bot", ingress="homelab-bot-r08", tls_host="task-events", secret=""}'
+        values: "1x20"
+      - series: 'kube_ingress_info{namespace="app-homelab-bot", ingress="homelab-bot-r08", ingressclass="tailscale"}'
+        values: "1x20"
     alert_rule_test:
       - eval_time: 14m
         groupname: tailnet-tls
