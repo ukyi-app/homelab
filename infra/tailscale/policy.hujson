@@ -3,6 +3,8 @@
     "tag:k8s-operator": ["autogroup:admin"],
     "tag:k8s": ["tag:k8s-operator"],
     "tag:k8s-go": ["tag:k8s-operator"],
+    // R08 수신 프록시 전용(설계 C.3.5). platform/bot-slot의 r08.enabled를 켜기 전에 이 파일이 apply돼 있어야 한다.
+    "tag:k8s-r08": ["tag:k8s-operator"],
     // NUC(D-11 (c)). 태그 기기는 사용자 소유가 아니라 self 규칙에 들지 않고, 키 만료가 기본으로 꺼진다.
     "tag:nuc": ["autogroup:owner", "autogroup:admin"]
   },
@@ -23,7 +25,9 @@
     { "action": "accept", "src": ["autogroup:owner", "autogroup:admin"], "proto": "udp", "dst": ["tag:nuc:60000-61000"] },
     { "action": "accept", "src": ["autogroup:member", "tag:nuc"], "dst": ["tag:k8s:443"] },
     // 짧은 주소 리다이렉터(D-30). 모든 프록시에 80을 열지 않으려고 태그를 나눈다.
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s-go:80"] }
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:k8s-go:80"] },
+    // R08 수신(사용자 결정 2026-11-06). 사람 helper를 쓰는 owner 기기만 HTTPS로. 다른 member와 tag:nuc는 열지 않는다(tools/ci checkTailnetPolicy).
+    { "action": "accept", "src": ["autogroup:owner"], "proto": "tcp", "dst": ["tag:k8s-r08:443"] }
   ],
   "grants": [
     // 공유기 관리 화면(사용자 설정). 콘솔에서 직접 고치면 다음 apply가 지운다.

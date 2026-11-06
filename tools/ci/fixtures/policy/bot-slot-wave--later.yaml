@@ -1,0 +1,18 @@
+# check: bot-slot-wave
+# expect: fail
+# rule: bot-slot-wave
+# match: 맨 뒤 wave다
+# bot-slot 뒤에 wave를 더하면 root가 bot-slot의 Healthy를 기다린다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bot-slot
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: later
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"

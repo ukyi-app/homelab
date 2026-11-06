@@ -16,6 +16,20 @@ target:
   # apps/homelab-bot/values.yaml의 port와 같은 값이다(차트가 달라 참조하지 못해 schema가 8080으로 묶는다).
   metricsPort: 8080
 
+# tailnet 이름의 클러스터 접두. root가 cluster.tailscale.prefix를 넘긴다(운영 "", VM "vm-"). r08.enabled일 때만 쓴다.
+tailscale: {}
+
+# R08 수신 경로: 사람 helper → tailnet 전용 프록시 → 봇 R08 리스너(설계 C.3.5·C.8, 사용자 결정 2026-11-06). templates/r08.yaml.
+r08:
+  # 켜는 순서: infra/tailscale/policy.hujson 병합 → owner가 그 root를 apply → 이 값을 true로 바꾸는 PR.
+  # ACL에 태그가 없으면 operator가 키를 못 받아 Ingress가 Progressing에 머문다. CI는 저장소의 ACL만 보고 적용 여부는 못 본다.
+  # 끌 때는 반대로 이 값을 먼저 false로 두고, 프록시 기기가 사라진 뒤 ACL을 고친다.
+  enabled: false
+  # 봇 R08 전용 리스너. 봇 PORTS.externalEvents와 같은 값이라 schema가 묶는다(차트가 달라 참조하지 못한다).
+  port: 8082
+  # tailnet 기기 이름. 인증서를 받으면 공개 CT 로그에 실리므로(설계 C.3.5) 봇·개인을 드러내지 않는 일반 이름만 쓴다.
+  serviceName: task-events
+
 # E4b~E8 준비 확인용. 시험 ns, 공유 차트 정책을 손으로 옮긴 정책, 시험 파드 둘을 만든다.
 # target.namespace가 bot-slot-probe일 때만 true다(values.schema.json).
 probe: false

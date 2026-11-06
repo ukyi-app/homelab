@@ -1,0 +1,8 @@
+# expect: fail
+# match: '/r08/port': value must be 8082
+# 봇 PORTS.externalEvents와 다른 포트. 정책과 Service가 엉뚱한 포트를 연다.
+tailscale: {prefix: ""}
+r08: {enabled: true, port: 9090, serviceName: task-events}
+kubernetesApi:
+  endpointCIDRs:
+    - 192.0.2.10/32

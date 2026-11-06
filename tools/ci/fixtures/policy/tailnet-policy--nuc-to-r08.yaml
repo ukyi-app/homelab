@@ -1,0 +1,10 @@
+# check: tailnet-policy
+# expect: fail
+# rule: tailnet-policy
+# match: 한 줄뿐이다
+# 정상 줄 옆에 tag:nuc 줄을 더한다. NUC의 파드가 프록시로 나가 서명 수신에 닿는다.
+tagOwners:
+  tag:k8s-r08: [tag:k8s-operator]
+acls:
+  - {action: accept, src: [autogroup:owner], proto: tcp, dst: ["tag:k8s-r08:443"]}
+  - {action: accept, src: [tag:nuc], dst: ["tag:k8s-r08:443"]}

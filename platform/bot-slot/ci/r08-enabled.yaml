@@ -1,0 +1,10 @@
+# R08을 켠 렌더. root 렌더는 values.yaml의 r08.enabled를 따르므로, 이 파일은 그 값과 상관없이 켠 쪽의 정책·태그·kubeconform 검사를 받는다.
+tailscale:
+  prefix: ""
+r08:
+  enabled: true
+  port: 8082
+  serviceName: task-events
+kubernetesApi:
+  endpointCIDRs:
+    - 192.0.2.10/32

@@ -642,6 +642,81 @@ export function checkSandbox(docs: Doc[]): Violation[] {
   return out;
 }
 
+// R08 수신 프록시 전용 태그(설계 C.3.5, platform/bot-slot/templates/r08.yaml).
+const R08_TAG = "tag:k8s-r08";
+const TAILNET_POLICY = "infra/tailscale/policy.hujson";
+
+export function readTailnetPolicy(): any {
+  return Bun.JSONC.parse(readText(TAILNET_POLICY));
+}
+
+// operator 프록시 태그가 저장소의 ACL에 있는지 본다. 없으면 operator가 인증 키를 못 받아 Ingress·Service가 Progressing에 머물고
+// 경보도 울리지 않는다. 저장소의 파일만 본다. owner가 실제로 apply했는지는 CI가 알 수 없어 켜는 PR 전에 사람이 확인한다(설계 C.8).
+export function checkTailnetTags(docs: Doc[], policy: any = readTailnetPolicy()): Violation[] {
+  const out: Violation[] = [];
+  for (const d of expand(docs)) {
+    const annotations = d.obj.metadata?.annotations ?? {};
+    const raw = annotations["tailscale.com/tags"];
+    const where = id(d);
+    if (d.obj.kind === "Ingress" && String(d.obj.metadata?.name).endsWith("-r08")) {
+      if (raw !== R08_TAG) out.push({ rule: "tailnet-tags", where, message: `R08 Ingress의 태그는 ${R08_TAG} 하나다. 없으면 operator 기본 태그 tag:k8s로 member·tag:nuc에 열린다: ${raw}` });
+      if (annotations["tailscale.com/funnel"] !== undefined) out.push({ rule: "tailnet-tags", where, message: "R08 Ingress는 Funnel을 쓰지 않는다(인터넷 공개)" });
+    }
+    if (raw === undefined) continue;
+    const tags = String(raw).split(",");
+    for (const t of tags) {
+      if (!policy.tagOwners?.[t]?.includes("tag:k8s-operator")) out.push({ rule: "tailnet-tags", where, message: `${t}의 tagOwners에 tag:k8s-operator가 없다(${TAILNET_POLICY}). 프록시가 태그를 받지 못한다` });
+    }
+    if (tags.includes(R08_TAG) && tags.length !== 1) out.push({ rule: "tailnet-tags", where, message: `${R08_TAG}는 다른 태그와 함께 붙이지 않는다. 함께 붙이면 그 태그의 ACL도 이 프록시에 적용된다: ${raw}` });
+  }
+  return out;
+}
+
+// ACL이 R08 경로를 넓히지 않는지 본다(사용자 결정 2026-11-06). 사람은 owner만, tag:nuc → 사람 기기 경로는 없다(D-11 (c)).
+export function checkTailnetPolicy(policy: any): Violation[] {
+  const out: Violation[] = [];
+  const v = (message: string) => out.push({ rule: "tailnet-policy", where: TAILNET_POLICY, message });
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  if (!same(policy.tagOwners?.[R08_TAG], ["tag:k8s-operator"])) v(`${R08_TAG}의 tagOwners는 tag:k8s-operator 하나다`);
+  const acls: any[] = policy.acls ?? [];
+  const r08 = acls.filter((r) => [...(r.src ?? []), ...(r.dst ?? [])].some((x: string) => x.startsWith(R08_TAG)));
+  const exact = r08.length === 1 && r08[0].action === "accept" && r08[0].proto === "tcp" && same(r08[0].src, ["autogroup:owner"]) && same(r08[0].dst, [`${R08_TAG}:443`]);
+  if (!exact) v(`${R08_TAG}를 쓰는 ACL은 autogroup:owner → ${R08_TAG}:443(proto tcp) 한 줄뿐이다`);
+  for (const r of acls) {
+    if ((r.dst ?? []).some((x: string) => x.startsWith("*"))) v(`ACL의 와일드카드 목적지는 ${R08_TAG}도 연다: ${r.dst}`);
+    if ((r.src ?? []).includes("tag:nuc") && (r.dst ?? []).some((x: string) => !x.startsWith("tag:"))) v(`tag:nuc의 목적지는 태그 기기만이다(D-11 (c)): ${r.dst}`);
+  }
+  for (const key of ["grants", "ssh"]) {
+    const rules: any[] = policy[key] ?? [];
+    if (JSON.stringify(rules).includes(R08_TAG)) v(`${key}에 ${R08_TAG}를 두지 않는다`);
+    if (rules.some((r) => (r.dst ?? []).some((x: string) => x === "*" || x.startsWith("*:")))) v(`${key}의 와일드카드 목적지는 ${R08_TAG}도 연다`);
+  }
+  return out;
+}
+
+// bot-slot은 root의 맨 뒤 wave여야 한다. 맨 뒤 wave는 Argo CD가 health를 기다리지 않아(gitops-engine sync_context.go, "EVEN if those
+// objects subsequently degrades") 이 Application의 무제한 재시도나 R08 Ingress의 Progressing이 root를 막지 않는다(설계 C.3.1).
+// 뒤에 wave를 더하면 root가 bot-slot의 Healthy를 기다려 그 wave가 막힌다.
+export function checkBotSlotLastWave(docs: Doc[]): Violation[] {
+  const out: Violation[] = [];
+  const all = expand(docs);
+  const wave = (d: Doc) => Number(d.obj.metadata?.annotations?.["argocd.argoproj.io/sync-wave"] ?? 0);
+  for (const slot of all.filter((d) => d.obj.kind === "Application" && d.obj.metadata?.name === "bot-slot")) {
+    const later = all.filter((d) => d.origin === slot.origin && wave(d) > wave(slot));
+    if (later.length > 0) out.push({ rule: "bot-slot-wave", where: id(slot), message: `bot-slot은 root의 맨 뒤 wave다. 더 뒤에 있다: ${later.map(id).join(", ")}` });
+  }
+  return out;
+}
+
 export function checkAll(docs: Doc[]): Violation[] {
-  return [...checkNoSecrets(docs), ...checkWorkloads(docs), ...checkRevisions(docs), ...checkReadonlyRbac(docs), ...checkIngress(docs), ...checkSandbox(docs)];
+  return [
+    ...checkNoSecrets(docs),
+    ...checkWorkloads(docs),
+    ...checkRevisions(docs),
+    ...checkReadonlyRbac(docs),
+    ...checkIngress(docs),
+    ...checkSandbox(docs),
+    ...checkTailnetTags(docs),
+    ...checkBotSlotLastWave(docs),
+  ];
 }

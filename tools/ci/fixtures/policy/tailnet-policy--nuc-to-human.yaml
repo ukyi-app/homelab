@@ -1,0 +1,10 @@
+# check: tailnet-policy
+# expect: fail
+# rule: tailnet-policy
+# match: D-11 (c)
+# NUC → 사람 기기 경로. 파드가 NUC 주소로 운영자 기기에 닿는다(U28).
+tagOwners:
+  tag:k8s-r08: [tag:k8s-operator]
+acls:
+  - {action: accept, src: [autogroup:owner], proto: tcp, dst: ["tag:k8s-r08:443"]}
+  - {action: accept, src: [tag:nuc], dst: ["autogroup:owner:22"]}

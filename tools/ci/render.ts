@@ -154,6 +154,14 @@ export function clusterRestore(vf: string, overlay?: RootOverlay): Restore {
 // 덧씌우기가 있으면 3.(남은 kustomization) build는 건너뛴다. 배포되지 않는 디렉터리라 스위치와 상관없고, 켠 렌더가 이미 본다.
 export type RootOverlay = { cluster?: { restore?: Record<string, unknown> } };
 export type RenderOptions = { rootOverlay?: RootOverlay; chartOverlay?: Record<string, unknown> };
+// 차트 schema가 덧씌우기의 키를 거부하는가. 복구 스위치가 없는 닫힌 schema(bot-slot은 ExternalSecret이 없다)는 root도 그 키를 넘기지 않으므로 덧씌우지 않는다.
+function schemaRejects(dir: string, overlay: Record<string, unknown>): boolean {
+  const path = join(ROOT, dir, "values.schema.json");
+  if (!existsSync(path)) return false;
+  const schema = JSON.parse(readFileSync(path, "utf8"));
+  return schema.additionalProperties === false && Object.keys(overlay).some((k) => !(k in (schema.properties ?? {})));
+}
+
 // 복구 스위치를 끈 값. ApplicationSet이 생성 Application에 넣는 값과 같다(platform/appsets/*/files/external-secrets-patch.tpl).
 export const EXTERNAL_SECRETS_OFF = { externalSecrets: { enabled: false } };
 const ES_PATCH_LINE = '{{- $_ := set $v "externalSecrets" (dict "enabled" false) }}';
@@ -524,7 +532,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     for (const f of ciFiles) {
       const origin = `chart:${relative("platform", dir)}/${relative(dir, f)}`;
       const files = [f];
-      if (opts.chartOverlay) {
+      if (opts.chartOverlay && !schemaRejects(dir, opts.chartOverlay)) {
         const vfile = join(tmp, `chart-overlay-${relative("platform", dir).replaceAll("/", "_")}.json`);
         writeFileSync(vfile, JSON.stringify(opts.chartOverlay));
         files.push(vfile);

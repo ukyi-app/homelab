@@ -1,0 +1,9 @@
+# check: tailnet-policy
+# expect: fail
+# rule: tailnet-policy
+# match: 한 줄뿐이다
+# 다른 member까지 R08에 닿는다. owner만 연다(사용자 결정 2026-11-06).
+tagOwners:
+  tag:k8s-r08: [tag:k8s-operator]
+acls:
+  - {action: accept, src: [autogroup:member], proto: tcp, dst: ["tag:k8s-r08:443"]}

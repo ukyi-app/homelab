@@ -1,0 +1,7 @@
+# expect: fail
+# match: '/target/alertPort'
+# 경보 수신과 R08 수신을 같은 포트에 두면 Alertmanager와 사람 기기의 경계가 섞인다.
+target: {namespace: app-homelab-bot, app: homelab-bot, workerPort: 8080, alertPort: 8082, metricsPort: 8080}
+kubernetesApi:
+  endpointCIDRs:
+    - 192.0.2.10/32
