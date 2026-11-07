@@ -4,7 +4,7 @@
 - 상태: 대기
 - 명세: [../spec.md](../spec.md)
 - Blocked by: 없음
-- 선행 결정: 할 일 1 (사용자 결정, 미정)
+- 선행 결정: 할 일 1 (확정(사용자 2026-11-07): `codex_questions.answer`와 `change_request_inputs.text` 모두 7일. digest·영수증은 남긴다. CHANGE artifact·리뷰 원문과 같은 기간)
 - 연결 AC: AC-B8 (F04)
 - 수행: 에이전트 + 사람(보존 기간 결정)
 
@@ -21,6 +21,7 @@
 ## 할 일
 
 1. 원문 종류별 보존 기간, 삭제 요청, 진행 중·`unknown` 예외, 백업 복원 때 재적용을 정한다(사용자 결정).
+   - 결과(2026-11-07, 사용자 결정): 두 원문 모두 7일, digest·영수증은 남긴다. 진행 중·`unknown` 예외와 복원 때 재적용은 구현에서 정하고 기록한다.
 2. 정리 경로를 구현한다. cutoff 전후, 재개·`unknown`, 중복 정리, 복원 뒤 삭제된 원문이 다시 보이지 않는지 시험한다.
 3. 봇 저장소 PR, 운영 배포, 봇 `ARCHITECTURE.md`·`VERIFICATION.md` 기록.
 
