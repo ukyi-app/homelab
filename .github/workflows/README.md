@@ -36,7 +36,7 @@
 - ruleset B `main-review`: main은 PR로만, 승인 1, code owner 리뷰, 새 push 때 승인 무효화, 마지막 push 승인. bypass는 저장소 관리자(`pull_request` 모드)와 `ukyi-merge` App뿐.
 - ruleset C `deploy-branches`: `deploy/` 아래 모든 브랜치(`deploy/**`, `deploy/**/*`)를 만들고 바꾸는 것은 `ukyi-deploy` App뿐.
 - ruleset D1·D2: 버전 태그(`app-chart-v*`, `data-chart-v*`, `app-build-v*`)는 관리자만 만들고 아무도 옮기거나 지우지 못한다.
-- ruleset E `bot-branches`: `ukyi-writer` App을 설치한 저장소(지금 `homelab-smoke`와, 실제 신원 AC-P8 시험 동안 `homelab`)의 `bot/` 아래 모든 브랜치(`bot/**`, `bot/**/*`)를 만들고 바꾸고 지우는 것은 그 App뿐.
+- ruleset E `bot-branches`: `writer_repos` 저장소(`homelab-smoke`, 그리고 실제 신원 AC-P8 뒤 설치는 뺐지만 E는 남긴 `homelab`)의 `bot/` 아래 모든 브랜치(`bot/**`, `bot/**/*`)를 만들고 바꾸고 지우는 것은 그 App뿐.
 - 앱 저장소와 `homelab-app-template`의 `app-main`.
 - 병합 키 `HOMELAB_MERGE_KEY`는 environment `automerge`(배포 브랜치 main)의 secret이고 `deploy-merge`의 merge job만 쓴다. 배포 키는 Infisical OIDC identity가 앱 main push의 태그 고정 `app-build`에만 준다.
 
