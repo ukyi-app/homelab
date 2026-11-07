@@ -145,7 +145,7 @@ T13 할 일 4·5로 2026-10-27 17:47~17:50(KST)에 운영에서 읽기만으로 
 | 자리 | 준비 티켓 | 확인 방법(설계 C.8) | 판정 | 근거(핵심 값) | 남은 일 |
 |---|---|---|---|---|---|
 | 병합 조건 공개 | T10 | C.8 `병합 조건 공개` 행: 시나리오 15, `homelab github verify` exit 0(guard 통과, plan 무변경). | 실제 검증 완료 | `.github/workflows/README.md` 9조건 공개(공개 URL 200), ruleset 6개(5 active, `main-interim` disabled), environment `automerge` 배포 브랜치 main·secret 하나, repo·org secret 0, `allow_auto_merge` false. 시나리오 15-12 `homelab github verify` 0 → 1 → 0 | 없음 |
-| 봇 변경 PR의 자동 병합 차단 | T10(시험 신원. 실제 신원은 T19) | C.8 `봇 변경 PR 작성 자격` 행과 T13 할 일 5: 시험 App(예: `ukyi-homelab-bot-standin-2`)으로 `bot/x` push 성공, homelab main·`deploy/x`·앱 main push 거부, digest만 바꾼 PR이 `deploy-merge`의 "조건 1 불일치"로 병합되지 않음. 시나리오 15. | 실제 검증 완료(시나리오 15-7) | 대역 App PR #953 조건 1로 미병합, `PUT merge` 405, homelab main·`deploy/s15-x`·smoke main push GH013. 대역 App은 시험 뒤 삭제(404) | T19가 실제 봇 쓰기 App으로 다시 본다 |
+| 봇 변경 PR의 자동 병합 차단 | T10(시험 신원. 실제 신원은 T19) | C.8 `봇 변경 PR 작성 자격` 행과 T13 할 일 5: 시험 App(예: `ukyi-homelab-bot-standin-2`)으로 `bot/x` push 성공, homelab main·`deploy/x`·앱 main push 거부, digest만 바꾼 PR이 `deploy-merge`의 "조건 1 불일치"로 병합되지 않음. 시나리오 15. | 실제 검증 완료(시나리오 15-7) | 대역 App PR #953 조건 1로 미병합, `PUT merge` 405, homelab main·`deploy/s15-x`·smoke main push GH013. 대역 App은 시험 뒤 삭제(404). 실제 `ukyi-writer`(T19, 2026-11-07): `bot/` 브랜치 생성 가능, homelab main·`deploy/`·smoke main push GH013, digest PR #1165 조건 1·2로 미병합, 정리 완료 | 없음. `PUT merge`는 실제 신원으로 보지 않았다(승인 범위 밖, 거부되지 않으면 봇이 직전 digest로 돌아간다. 대역 #953은 405) |
 
 ### AC-P11
 

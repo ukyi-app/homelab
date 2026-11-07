@@ -62,6 +62,10 @@ env:
   # 작업 레인 settings 생성 코드가 바뀌면 같은 실행기로 운영 파드를 다시 잰 뒤 켠다. 경계가 도구별로 달라 단위 시험만으로는 못 본다.
   TASK_LANE_ENABLED: "true"
   TASK_WORKER_URL: "http://worker-task.sandbox:8080/"
+  # 변경 PR 스위치(사용자 승인, T19 H3). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
+  # 켜도 Infisical RUNTIME_POLICIES의 change 절(저장소 homelab-smoke 하나)과 쓰기 App 키, 열린 작업·리뷰 레인이 있어야 열린다.
+  # 게시는 change 절의 writerAccepted(실제 신원 AC-P8 확인)가 true여야 하고, 결과마다 owner가 미리보기의 digest를 승인해야 한다.
+  CHANGE_PR_ENABLED: "true"
   # R08 읽기 전용 알림 스위치(사용자 승인 2026-11-06, 봇 ARCHITECTURE §15). "true"·"false"만 받고 다른 값이면 봇이 기동하지 않는다.
   # 이 파일은 운영·VM이 함께 읽는다. 켜도 bot-slot 프록시가 없는 클러스터(VM, root cluster.r08.enabled)는 리스너 8082에 닿는 길이 없다.
   # 끄는 순서: 연결을 폐기하려면 먼저 /detach 한다(끄면 명령이 사라진다) → 이 줄을 "false"로, 환경 값을 지우고 cluster.r08.enabled를 false로 하는 PR
