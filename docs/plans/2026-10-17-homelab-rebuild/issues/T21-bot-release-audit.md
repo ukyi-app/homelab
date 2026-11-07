@@ -20,6 +20,23 @@ V1을 판정한다. 판정 정의는 `04` §9, end-to-end 흐름은 `01` §9, �
 4. `01` §9의 end-to-end 흐름 5개를 확인한다.
 5. 판정을 내린다: `NOT_READY`, `LOCAL_VERIFIED_INTEGRATION_PENDING`, `READY_FOR_SCOPED_PILOT`, `V1_ACCEPTED`.
 
+## T19에서 넘긴 것 (2026-11-07)
+
+근거는 봇 `docs/ai-bot/VERIFICATION.md` "T19 완료 판정"과 그 앞 T19 절들이다.
+
+- **운영에서 만들지 않은 사례(`not_run`, 로컬 pass):** 질문·`/answer`를 거치는 여러 턴 작성(CHANGE-01), 실제 신원의 `PUT merge`와 워크플로 파일 git push 거부(CHANGE-02), live 경합 PR(CHANGE-03), Argo stale·unready(DEPLOY-01), 실모델이 공개 입력으로 비공개 값을 지어내는 경우(DATA-01), TaskLane 조립 경로의 SEC-02·실모델 악성 시험·실자격 직접 Read(SEC-02), 실제 프로세스 kill·live fault(EVENT-02).
+- **알려진 한계·결함(티켓 없음, 감사에서 수정 티켓으로 나눌지 정한다):**
+  - 스위치·정책 변경은 게시 서버 재시작 때 반영된다. 종료 중인 프로세스는 진행 중인 바퀴에서 쓰기를 보낼 수 있다. 즉시 중단은 `/revoke`·`/change-cancel`이다.
+  - 검증 실행기는 bwrap 설정 실패를 `not_run(sandbox_unavailable)`가 아니라 `failed`로 기록한다.
+  - `/task` v1 모델 질문은 비밀 검사 없이 스레드로 나간다(CHANGE 질문·공개 답은 봇 #86에서 막음).
+  - CHANGE 단계 전이가 게시 서버 로그에 남지 않아 운영자는 `/change-status`로만 진행을 본다.
+  - 승인 안내를 길이로 나눠 digest가 두 메시지로 갈릴 수 있다. 다른 digest는 거부된다.
+  - CHANGE 자식 실패에도 "/retry로 재시도" 안내가 나가지만 `/retry`는 자식 job을 되살리지 않는다.
+  - `change_request_inputs`와 `codex_questions.answer`의 비공개 원문은 7일 정리 대상이 아니다.
+  - 정책 revision을 올리면 진행 중인 CHANGE가 막힌다. `reserveUnknownProbes`(`ORDER BY id LIMIT 50`)는 #85에서 고친 것과 같은 굶주림 모양이다. `registerCommands`는 재시작마다 같은 목록도 다시 쓴다.
+  - 게시 서버 둘을 동시에 돌리는 `change-pg` 시험이 부하에서 간헐적으로 `verification_not_run`으로 닫힌다(수정 전 코드에서도 재현, 운영은 게시 서버 하나).
+- **운영 상태:** `CHANGE_PR_ENABLED`는 정책의 `homelab-smoke` 하나로 켜져 있다. 시험 앱 `homelab-smoke`는 뺐으므로 smoke 변경의 배포 관측은 `deploy_config_unregistered`로 닫힌다. `ukyi-writer`는 `homelab-smoke`에만 설치돼 있고 homelab의 ruleset E는 남겼다.
+
 ## T20에서 넘긴 것 (2026-11-03)
 
 - SEC-01 기억 경로: V1 코드에는 기억을 모델 맥락에 넣는 경로가 없다. 봇 main `dab3de1`에서 `memories` 표는 `src/memory.ts`만 읽고, 그 서비스를 쓰는 곳은 기억 명령과 모델을 부르지 않는 브리핑뿐이다. 감사 때 이 경로가 여전히 없는지 본다. 생겼다면 기억을 비신뢰 자료 블록으로 넘기는지(봇 `ARCHITECTURE.md` 위협 표의 프롬프트 인젝션 행) SEC-01로 확인한다.
