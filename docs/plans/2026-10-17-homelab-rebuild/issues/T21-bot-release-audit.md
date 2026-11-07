@@ -1,9 +1,9 @@
 # T21 봇 V1 RELEASE_AUDIT
 
 - 단계: P4 봇 V1 (봇 V1 통합 검증 담당)
-- 상태: 대기
+- 상태: 진행 중 (1회차 감사 2026-11-07, 판정 `NOT_READY`. 수정 T25~T29와 승인·연동 T30 뒤 다시 실행)
 - 명세: [../spec.md](../spec.md)
-- Blocked by: T17, T18, T19, T20
+- Blocked by: T17, T18, T19, T20, T25, T26, T27, T28, T29, T30(재실행)
 - 연결 AC: AC-B8
 - 수행: 구현 세션과 다른 독립 감사 에이전트 (`MODE=audit`). 사람은 수용 결정
 
@@ -19,6 +19,19 @@ V1을 판정한다. 판정 정의는 `04` §9, end-to-end 흐름은 `01` §9, �
 3. F01~F09, R01~R18의 구현 위치와 증거를 추적한다.
 4. `01` §9의 end-to-end 흐름 5개를 확인한다.
 5. 판정을 내린다: `NOT_READY`, `LOCAL_VERIFIED_INTEGRATION_PENDING`, `READY_FOR_SCOPED_PILOT`, `V1_ACCEPTED`.
+
+## 1회차 감사 결과 (2026-11-07)
+
+독립 감사 에이전트(Codex `gpt-6-astra`, `MODE=audit`)가 봇 `dda891f`, homelab `691b532e`, ops `6caf4cb` 기준으로 했다. 감사자는 읽기와 로컬 시험만 했다(운영 접근·외부 쓰기 없음). 공개 산출물은 봇 저장소 `docs/ai-bot/V1_RELEASE_REPORT.md`·`V1_TRACE.md`(봇 #88), 감사 인계·증거·운영 관찰 요청은 `homelab-bot-ops`의 `handoffs/release-audit.md`, `evidence/release-audit/`다.
+
+- **판정 `NOT_READY`.** 출시 차단 두 건을 현재 코드에서 재현했다. A01 `/task` 질문·완료 요약이 비밀 검사 없이 Discord로 나간다. A02 `/revoke`가 끝난 뒤에도 이미 권한 확인을 지난 Discord 발송이 시작될 수 있다. lead가 두 건을 코드로 다시 확인했다.
+- **시험:** 수용 시험 30개 pass 21, fail 2(AUTH-02·DATA-01), blocked 7. 봇 전체 시험 2,085개 fail 0·skip 22, SEC-02 감사 이미지 시험 10/10·24/24.
+- **발견 8건(high 2, medium 2, low 4)과 티켓:**
+  - 결함: A01 → [T25](T25-bot-task-output-scan.md), A02 → [T26](T26-bot-revoke-dispatch-order.md), A03 원문 보존 → [T27](T27-bot-raw-input-retention.md), A04 준비 실패 분류 → [T28](T28-bot-verifier-setup-failure.md), A06 `/retry` 안내 → [T29](T29-bot-change-child-retry-notice.md).
+  - 승인·연동: blocked 7건 → [T30](T30-bot-v1-integration-tests.md).
+  - 개선 후보(티켓 없음, 재감사에서 다시 본다): A05 승인 digest가 메시지 두 개로 갈릴 수 있음, A07 `reserveUnknownProbes` 첫 50행 고정(도달 조건 미입증), A08 명령 재등록(운영 응답 모양 확인은 T30 INT-03).
+- **T19·T20에서 넘긴 것:** 모두 처리했다(보고서 "T19·T20 이관 항목 전수 처리"). 정책 revision 변경 때 진행 중 CHANGE가 막히는 것은 의도된 동작으로 수용, 게시 서버 둘의 간헐 `verification_not_run`은 운영 단일 게시 서버 제약으로 유지, T20 기억 → 모델 경로는 여전히 없다.
+- 사람 수용 결정은 아직 없다. 재실행은 T25~T30 뒤다.
 
 ## T19에서 넘긴 것 (2026-11-07)
 
