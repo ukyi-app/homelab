@@ -76,10 +76,11 @@ task:
   enabled: true
   # 작업 레인 코드가 든 main 빌드 digest. 사람 PR로만 바꾼다(worker.image와 같은 이유). 이 줄 하나만 바꾸면 worker를 건드리지 않고
   # 작업 레인 이미지를 올린다. 작업 레인 코드가 없는 이미지는 WORKER_LANES를 읽지 않아 대화·리뷰 작업자로 뜬다.
-  # 지금 값: 봇 main d4c8bda 빌드. v2 작업 계약과 무자격 검증 실행기(고정 Bun 1.4.3, /opt/verifier)가 들어 있다. CLI 버전과 작업 레인
+  # 지금 값: 봇 main 630c48d 빌드. v2 작업 계약과 무자격 검증 실행기(고정 Bun 1.4.3, /opt/verifier)에, 검증 실행기가 bwrap 준비
+  # 실패를 시험 실패가 아니라 not_run(sandbox_unavailable)으로 가르는 시작 표식(봇 #92, T28)이 더해졌다. CLI 버전과 작업 레인
   # settings 생성 코드는 SEC-02 2단계를 잰 5fb4a20과 같다. 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab
-  # app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main d4c8bda, GitHub 호스트 runner).
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:b3331339d5b157dd1fa0b3b9941f9094918335d9cdc4ea9e8e91eed87cd9803d
+  # app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main 630c48d, GitHub 호스트 runner).
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:ff5d453eaf10c374e4e94649d9761bf839025dd90f3fbe3abe9918b35bf4101e
   # Infisical 키 이름. Secret 키와 파일 이름은 worker.profile.credentialKey 그대로다(봇 프로필 표가 그 이름을 읽는다).
   # 키를 레인마다 나눠 한 레인의 토큰만 교체·철회한다. 두 토큰을 한 Secret에 모으지 않는다.
   remoteCredentialKey: CLAUDE_CODE_OAUTH_TOKEN_TASK
