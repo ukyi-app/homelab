@@ -1,7 +1,7 @@
 # T30 봇 V1 승인·연동 시험 (T21 blocked 7건)
 
 - 단계: P4 후속 (T21 1회차 감사에서 나옴)
-- 상태: 대기
+- 상태: 진행 중 (INT-05 pass 2026-11-08, INT-01 기존 증거 수용 2026-11-08. 나머지 5항목 남음)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T25(INT-04·INT-07만), T26(INT-04만)
 - 연결 AC: AC-B8 (SEC-02, EVENT-02, TASK-01, CHANGE-01, CHANGE-02, CHANGE-03, DEPLOY-01, DATA-01)
@@ -28,6 +28,17 @@ T21 1회차 감사에서 수용 시험 7개가 `blocked`였다. 로컬 시험은
 | INT-05 (O05) | CHANGE-02 | 실제 writer 신원의 merge·workflow push 거부와 원인 계층. 실패하지 않으면 실제 효과가 생기므로 대상·정리·복구를 따로 승인 | 없음 |
 | INT-06 (O06) | DEPLOY-01 | 기존 읽기 관찰 기록 먼저, 없으면 시험 앱 재등록으로 stale·unready·미등록이 성공으로 보이지 않음 확인 | 없음 |
 | INT-07 (O07) | DATA-01 | 공개 입력과 합성 표식으로 실모델 출력이 공개 경계에서 막히는지. 모델 출력 유무와 실행기 거부를 따로 기록 | T25 |
+
+## 진행 (2026-11-07~)
+
+실행안은 NUC `/home/ukyi/t21/t30/T30-PLAN.md`(읽기 전용 Codex 조사, 2026-11-07), 원본 기록은 `homelab-bot-ops` `evidence/t30/`. 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T30 승인·연동 시험 진행".
+
+| 항목 | 상태 |
+|---|---|
+| INT-05 (CHANGE-02) | **pass**(2026-11-08, `authorized_external`). writer 신원의 `PUT merge` → 405 ruleset 거부, workflow 파일 `git push` → GH013(`workflows` 권한 없음). main 불변, 정리 끝 |
+| INT-01 (SEC-02) | **기존 증거 수용**(사용자 결정 2026-11-08), live `not_run`. 남은 제약: 서명된 작업 레인 전체 경로의 운영 프로필 실측 없음. 격리 하네스는 Claude 작업자 두 번 모두 모델 안전 분류기에 막혀 만들지 못했고, 만들어도 진입 래퍼 때문에 운영과 다르다 |
+| INT-06 (DEPLOY-01) | 진행 중(읽기 driver부터) |
+| INT-02·03·04·07 | 미실시 |
 
 ## 완료 조건
 
