@@ -37,6 +37,7 @@ owner의 멘션 요청에 대한 답이 라벨 목록이 아니라 결론부터 
 7. v2 응답의 `proposal`은 이 티켓에서 버린다(저장·게시하지 않음). 감사에 제안이 있었다는 사실과 동작 이름만 남길지는 C13과 맞춘다.
 8. 시험: 라벨 없는 게시, `ack_only` 👍(가짜 Discord REST 호출 순서), 공개 검사 걸림 → 고정 문구, 50개·80KiB 경계와 현재 메시지 보존, 정리 표시 칸, 스위치 두 상태의 surface, v2 서버 + v1 작업자 조합이 요청 거부로 닫히고 성공으로 보이지 않음.
 8a. C04에서 넘어온 반응 정리(봇 PR #114 Codex 3차 P2, 댓글 4515364186): 모델 실행 중 `/stop`으로 대화가 비활성이 되면 `Runtime.execute()`(`src/runtime.ts` 170행 근처)와 `Store.finish()`의 비활성 경로가 작업을 `superseded`로 끝내고 답을 게시하지 않는데, 이 경로에 `settleReactions()`가 없어 👀·⏳와 `reaction:` 행이 남는다. 그 종료 전이와 함께 반응을 지움 상태로 옮기고, 실행 중 `/stop` → 성공 → 반응 정리를 시험으로 고정한다(`src/store.ts`는 C04 소유 연결 파일이라 그 자리만 고친다).
+8b. C08에서 넘어옴: 작업자 대화 프롬프트(`src/chat-lane.ts` `chatPrompt`)가 대화 기록의 `owner`·`bot` 항목만 설명한다. C08이 더한 `replied_bot_post`(owner가 답장한 봇 글 본문, 자료) 항목을 v2 프롬프트에 한 줄로 설명한다.
 9. 기록: 봇 `docs/ai-bot/ARCHITECTURE.md` §13 "대화 답 형식"과 "봇 답 문맥" 문단을 v2로 고치고, `docs/ai-bot/VERIFICATION.md`에 "C11 대화 v2 전환" 절, 이 계획 폴더 `README.md`의 C11 상태 줄 갱신.
 
 ## 완료 조건

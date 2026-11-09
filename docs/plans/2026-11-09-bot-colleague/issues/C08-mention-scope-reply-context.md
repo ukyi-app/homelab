@@ -1,7 +1,7 @@
 # C08 멘션 받는 범위와 봇 글 답장 맥락
 
 - 단계: 2 배포와 표면
-- 상태: 대기 (선행: C02, C07)
+- 상태: integrated (봇 #121 병합 `a3d0a7b`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.1(받는 자리, 봇 글 답장, 멘션 표기 제거), §5 AC-1·AC-2 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C02, C07
 - 연결 AC: AC-1, AC-2
@@ -33,11 +33,11 @@ owner가 알림 채널의 경보 글 아래 부모 채널에서도 봇을 `@`로
 
 ## 완료 조건
 
-- [ ] owner가 대화·알림 채널 부모에서 멘션하면 받아들여 스레드가 열리고 답이 달린다(AC-1, 스레드 열기는 C07).
-- [ ] 봇이 만들지 않은 스레드, 7일 넘게 쉰 스레드의 멘션과 활성 스레드의 이어 말하기를 받는다(AC-1).
-- [ ] owner가 아닌 사람, 허용 밖 채널, 비공개 스레드는 지금처럼 무시한다(AC-1).
-- [ ] 봇 글에 답장하면 그 봇 글 본문이 자료 항목에 있고, 남의 글이면 없다(AC-2).
-- [ ] 모델에 가는 owner 원문에 봇 멘션 표기가 없다.
+- [x] owner가 대화·알림 채널 부모에서 멘션하면 받아들여 스레드가 열리고 답이 달린다(AC-1, 스레드 열기는 C07).
+- [x] 봇이 만들지 않은 스레드, 7일 넘게 쉰 스레드의 멘션과 활성 스레드의 이어 말하기를 받는다(AC-1).
+- [x] owner가 아닌 사람, 허용 밖 채널, 비공개 스레드는 지금처럼 무시한다(AC-1).
+- [x] 봇 글에 답장하면 그 봇 글 본문이 자료 항목에 있고, 남의 글이면 없다(AC-2).
+- [x] 모델에 가는 owner 원문에 봇 멘션 표기가 없다.
 
 ## 검증
 
@@ -47,4 +47,9 @@ owner가 알림 채널의 경보 글 아래 부모 채널에서도 봇을 `@`로
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #121(`feat/colleague-c08-mention-scope-reply-context`, 결과 head `3e12e6a`), 병합 `a3d0a7b`(2026-11-10). 스위치 밖이라 병합과 함께 운영 배포.
+- 구현: `src/discord.ts` `DiscordIngress.receive`가 알림 채널 부모의 멘션도 받음('/' 대화 명령은 대화 채널만), `EventSchema` `botUser`·`replyTo`, `gatewayMessage`의 `referenced_message`(참조 글 작성자가 봇일 때만 `replyTo`). `src/discord-protocol.ts` `MessageSchema.referenced_message`. `src/contracts.ts` `EventInput`에 `botUser?`·`replyTo?`(작업자 요청 스키마는 그대로). `src/store.ts` `save`가 payload에 `bot_user`·`reply_to`. `src/chat-context.ts` `ownerText()`(모델에 가는 owner 원문에서 봇 멘션 표기 제거, C13도 씀), `replied_bot_post` 자료 항목(outbox `sent`이고 정리 안 된 그 글 본문, 해당 owner 항목 앞).
+- 완료 조건 근거: `test/c08-mention-scope.test.ts`(알림 채널 부모 멘션 → 스레드·답, 고치기 전 실패 확인; 경보 글 답장 멘션; 봇이 안 만든 공개 스레드·7일 넘게 쉰 스레드 받음; 비공개 스레드·허용 밖 채널·비 owner·거부된 owner·멘션 없는 채널 말 거부), `test/c08-reply-context.test.ts`(봇 글 답장 → 자료 항목, 남의 글·지워진 글·생략·7일 정리 → 없음, history 복구, 지시 자리 아님, 상한 포함, 멘션 표기 제거와 저장 원문 그대로), `s16-display` 키 목록.
+- 검사: 작업자 관련 19개 파일 377/377(실제 PG). 통합 담당 전체 검사(`3e12e6a`, node 24.22.0, 실제 PG, 잠금): 2290 tests / 2268 pass / 0 fail / 22 skip(SEC02_IMAGE). Codex 코드·보안 지적 없음, `build / test` 통과.
+- 분해 불일치(작음): `EventInput.botUser` 칸(Store가 Gateway READY 전에 만들어져 봇 ID를 모름). 이 칸이 없는 옛 이벤트는 멘션 표기가 남은 채 모델에 간다.
+- 남은 것: 본문 출처는 outbox 하나(ACK 대체 글은 자료에 없음, 여러 쪽 글은 답장한 쪽만). 채널 부모의 핑 없는 답장은 멘션이 아니라 받지 않음(명세 미정). 작업자 프롬프트(`chatPrompt`, C02 소유)가 `replied_bot_post`를 설명하지 않음 → C11.
