@@ -1022,3 +1022,11 @@
 | 2026-11-09 18:5x | 사용자 결정 | homelab PR #1205 생성 | `docs/t33-t34-tickets`(문서만): T33·T34 티켓, spec §2·§8, README, 승인 7줄. 같은 PR에 T35를 더함 | `gh pr create` | T33, T34, T35 |
 | 2026-11-09 19:2x | 사용자 결정 | T35 | V1 시범 운영은 지금 범위 그대로(owner·허용 채널·`homelab-smoke`), 기간 2주(T33 배포 다음 날 시작), 끝에 사용자가 수용하면 `V1_ACCEPTED` | 대화 기록 | T35 |
 | 2026-11-09 19:3x | 사용자 결정 | T35 | T35 시작을 동료 봇 작업(멘션 호출·동료 말투·제안+확인 버튼·CLI 계정 전환, `docs/plans/2026-11-09-bot-colleague/` C01~C24) 완료 뒤로 미룸. 다른 세션이 전한 결정을 사용자에게 직접 확인. 범위·기간은 그대로. T33·T34는 그대로 진행 | 대화 기록 | T35 |
+| 2026-11-09 19:1x | 사용자 결정 | 봇 PR #108 생성 | `fix/t33-v1-polish`(head `8e00cf6`): `messagePages` 줄 단위 자르기(A05), guild 명령 비교에서 `contexts`·`integration_types` 제외(A08). lead 전체 2,159 중 실패 0 | `gh pr create` | T33 |
+| 2026-11-09 19:2x | 사용자 결정 | homelab PR #1206 생성 | `fix/t34-ci-download-resilience`(head `cad7a34`): `ci.yaml` 도구·provider·스키마 캐시, `GITHUB_TOKEN` REST 다운로드, 긴 재시도, 설계 C.4.10 위협 줄. 병합은 사용자 확인 | `gh pr create` | T34 |
+| 2026-11-09 19:4x | 확인 | homelab PR #1206 `ci` | 첫 실행 캐시 미스: API 경로로 10개 받고 두 캐시 저장. 재실행 캐시 적중: 10개 모두 캐시, 저장 단계 건너뜀. 둘 다 성공 | `gh run rerun` | T34 |
+| 2026-11-09 19:5x | 사용자 결정(위임 병합) | 봇 PR #108 | T33. Codex 코드·보안 지적 없음, `build / test` 통과, head `8e00cf6` 고정, 병합 `af9dd3e` | `gh pr merge 108 --squash --admin --match-head-commit` | T33 |
+| 2026-11-09 20:0x | 사용자 결정(위임 병합) | homelab PR #1205 | T33~T35 티켓·spec·README·승인 10줄(문서만). 새 커밋은 자동 리뷰되지 않아 `@codex review`로 다시 요청, `4b615ae`에서 지적 없음. `ci` 통과, 병합 `918f11c` | `gh pr merge 1205 --squash --admin --match-head-commit` | T33, T34, T35 |
+| 2026-11-09 20:1x | 사용자 승인(병합) | homelab PR #1206 | T34. Codex 코드·보안 지적 없음, `ci` 미스·적중 두 경로 통과, head `cad7a34` 고정, 병합 `90e5e10` | `gh pr merge 1206 --squash --admin --match-head-commit` | T34 |
+| 2026-11-09 20:1x | 배포(자동)·확인 | homelab #1207, main `ci` | 봇 `af9dd3e` 11:15:39Z 자동 병합, 파드 Ready, imageID 일치, error/warn 0, 재시작 로그 `commands_registered` `guild` unchanged(A08 운영 확인). main push `ci`가 main 범위 캐시(도구 302MB, provider·스키마 53MB) 생성 | 배포 App 자동 병합, `homelab status homelab-bot`, `gh api .../actions/caches` | T33, T34 |
+| 2026-11-09 20:2x | 사용자 결정 | 봇 PR #109 생성 | `docs/t33-verification`(head `63d8740`, 문서만): `VERIFICATION` T33 절, `PROJECT_STATUS` 남은 low A07·T35 시작 조건 | `gh pr create` | T33 |
