@@ -1,7 +1,7 @@
 # C06 작업자 v2 배포
 
 - 단계: 2 배포와 표면
-- 상태: 대기 (선행: C02, C03, C25)
+- 상태: 진행 중 (homelab PR #1223, 이미지 봇 main `9b067e9` `sha256:666a2f63…`, 증명 대조 완료. owner 검토·병합과 운영 확인 승인 대기)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.2(계약 배포 순서), §4.10 "변경 질문 줄이기"(작업자 변경 작성 v2), §5 AC-4 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C02, C03, C25
 - 연결 AC: AC-4(운영)

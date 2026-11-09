@@ -1,7 +1,7 @@
 # C25 작업자 변경 작성 v2: 확인할 것·선택지 질문·수정 차례 입력
 
 - 단계: 1 기반
-- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 C03 integrated)
+- 상태: integrated (봇 #119 병합 `fc93fe2`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10 "변경 질문 줄이기"·"수정 요청"·"안내 댓글", §5 AC-25, AC-28 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C03
 - 연결 AC: AC-25(S2: 작성 모델 출력 계약), AC-28(S2: 작성 입력의 자료 블록)
@@ -42,11 +42,11 @@
 
 ## 완료 조건
 
-- [ ] 작업자가 새 판 요청에 확인할 것(위치 선택)과 남은 위험을 `snapshot` 결과에 싣고, 진행 불가면 선택지 2~4개가 붙은 `needs_input`을 낸다(AC-25 S2).
-- [ ] 선택지 개수가 틀리거나 자격이 반사된 출력은 결과로 나가지 않는다.
-- [ ] 수정 차례 요청에서 PR 리뷰·댓글은 자료 블록 태그 안에만 들어가고, 지시 자리는 owner 지시뿐이다(AC-28 S2).
-- [ ] 옛 판 요청에 대한 작업자 응답과 게시 서버 동작이 지금과 같다.
-- [ ] intake가 받는 지시문 판을 알리고, 옛 작업자의 intake도 게시 서버가 받는다.
+- [x] 작업자가 새 판 요청에 확인할 것(위치 선택)과 남은 위험을 `snapshot` 결과에 싣고, 진행 불가면 선택지 2~4개가 붙은 `needs_input`을 낸다(AC-25 S2).
+- [x] 선택지 개수가 틀리거나 자격이 반사된 출력은 결과로 나가지 않는다.
+- [x] 수정 차례 요청에서 PR 리뷰·댓글은 자료 블록 태그 안에만 들어가고, 지시 자리는 owner 지시뿐이다(AC-28 S2).
+- [x] 옛 판 요청에 대한 작업자 응답과 게시 서버 동작이 지금과 같다.
+- [x] intake가 받는 지시문 판을 알리고, 옛 작업자의 intake도 게시 서버가 받는다.
 
 ## 검증
 
@@ -56,4 +56,9 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #119(`feat/colleague-c25-change-authoring-v2`, 결과 head `ca73a56`), 병합 `fc93fe2`(2026-11-10). 게시 서버는 여전히 `task-v1`만 보낸다.
+- 구현: `src/task-contracts.ts` 판 목록 `TASK_INSTRUCTIONS_REVISIONS = ['task-v1', 'change-v2']`(서버가 보내는 판 상수 `TASK_INSTRUCTIONS_REVISION`은 C09 소유 브리지가 쓰므로 그대로), v2 시작 요청 선택 칸 `amendment`(끝에, `head === base` refine), v2 결과 `needs_input.options`·`snapshot.checks`·`risks`, 상한 `CHANGE_NOTE_LIMITS`·`AMENDMENT_LIMITS`·`boundAmendmentMaterials`. `src/executor-claude-task.ts` 새 지시문 `change-v2`, `<owner_instruction>`·`<review_material>` 울타리, `CHANGE_OUTPUT_JSON_SCHEMA`, `judgeTaskRun` 선택지 개수·반사 검사·위치 검사(틀린 줄만 버림). `src/task-http.ts` intake `change.instructions`와 `taskWorkerChangeInstructions`. `src/change-contracts.ts` 타입만(`ClaudeChangeAuthor`는 그대로).
+- 완료 조건 근거: C25 시험 11개(`change-artifact`의 `C25 가정 진행`·`C25 진행 불가`·`C25 출력 검사`·`C25 수정 차례`·`C25 호환`, `task-contracts`의 `C25 결과 칸`·`C25 수정 차례 입력`·`C25 자료 블록 상한`·`C25 지시문 판`·`C25 intake`).
+- 검사: 작업자 관련 10개 파일 378/378. 통합 담당 전체 검사(`ca73a56`, node 24.22.0, 실제 PG, 잠금): 2261 tests / 2239 pass / 0 fail / 22 skip(SEC02_IMAGE). Codex 코드·보안 지적 없음, `build / test` 통과.
+- 남은 것: TDD 빨강은 타입 검사 실패로만 확인(시험 실행으로는 보지 않음). 옛 작업자 이미지의 새 판 거부는 코드 대조만(`instructions: z.literal('task-v1')`). 고정 CLI 2.1.308이 중첩 객체 배열 출력 스키마를 지키는지는 S5(C24). 상한 값(자료 50개·본문 4,000자·합계 40,000자, 메모 10개·300자, 선택지 100자)은 제안 값. 롤백 주의는 C06에.
+- 뒤 티켓에 넘김: C27은 PR 토론을 `ReviewMaterial`로 바꾸고(경로가 `ChangePathSchema`를 못 지나면 `location: null`, 탈퇴 작성자는 `authorId: null`) `boundAmendmentMaterials`로 줄이며, `changeInstructions()`에 `change-v2`가 있을 때만 새 판을 보낸다. C28은 `ClaudeChangeAuthor`가 `options`를 `AuthorResult`로 옮기게 잇고 선택지에 공개 검사. C29는 `checks`·`risks`에 `scanPublicText`.

@@ -1,7 +1,7 @@
 # C07 답장·owner 호출·스레드 제목·작은 표식
 
 - 단계: 2 배포와 표면
-- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 C04·C09 integrated)
+- 상태: integrated (봇 #120 병합 `9b067e9`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.4(대조 표식, 스레드 제목, 답장과 owner 호출), §5 AC-12 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C04, C09
 - 연결 AC: AC-12
@@ -34,10 +34,10 @@
 
 ## 완료 조건
 
-- [ ] 봇 글의 대조 표식이 작은 글씨 줄이고, 응답 유실 뒤 대조가 새·옛 표식을 모두 찾아 재게시하지 않는다(AC-12).
-- [ ] 멘션으로 연 스레드의 제목이 owner 메시지 앞부분이고, 같은 메시지로 스레드를 두 번 만들지 않는다(AC-12).
-- [ ] 봇 답이 owner 메시지에 대한 답장이고 알림이 울리지 않는다(AC-12).
-- [ ] owner 호출 목록 넷의 글만 owner를 부른다(AC-12).
+- [x] 봇 글의 대조 표식이 작은 글씨 줄이고, 응답 유실 뒤 대조가 새·옛 표식을 모두 찾아 재게시하지 않는다(AC-12).
+- [x] 멘션으로 연 스레드의 제목이 owner 메시지 앞부분이고, 같은 메시지로 스레드를 두 번 만들지 않는다(AC-12).
+- [x] 봇 답이 owner 메시지에 대한 답장이고 알림이 울리지 않는다(AC-12).
+- [x] owner 호출 목록 넷의 글만 owner를 부른다(AC-12).
 
 ## 검증
 
@@ -47,4 +47,10 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #120(`feat/colleague-c07-reply-owner-call-thread`, 결과 head `591db2e`), 병합 `9b067e9`(2026-11-10). 스위치 밖이라 병합과 함께 운영 배포.
+- 구현: `src/discord.ts` `DiscordPublisher`의 첫 쪽 답장(`message_reference`, 답장 알림 끔)과 owner 호출 머리(`<@owner>`, `allowed_mentions.users=[owner]`), `markedContent` 끝 `\n-# ref:<marker>`(대조는 새·옛 `[ref:]` 둘 다), `threadTitle`(멘션·마크업 뺀 앞 40자, 비면 "새 대화"), 채널 멘션의 스레드는 그 메시지에서(`fromMessage`). `src/discord-protocol.ts` `POST …/messages/{m}/threads`, 유실 대조는 `GET …/messages/{m}`의 `thread`(스레드 ID = 메시지 ID, Discord 문서 확인 2026-11-10). `src/store.ts` `Delivery.payload`의 `replyTo`·`ownerCall`·`fromMessage`, `addressing()`, `fail`·`finish`의 선택 인수 `notify`. owner 호출은 작업 질문·작업 완료·작업·대화 실패·변경 미리보기·변경 실패만(작업 브리지·`change-runtime.ts`).
+- 완료 조건 근거: `test/c07-reply-call-thread.test.ts` 13개(표식 작은 글씨·2000자 안, 유실 뒤 새·옛 표식 대조, 멘션 스레드 제목 리터럴, 스레드 생성 유실 뒤 같은 메시지 스레드 대조, 답장·답장 알림 없음, 명령 대화는 답장 아님, owner 호출 첫 쪽만), `task-bridge`·`codex-bridge` TASK-01·`change-assembly` CHANGE-01·A06, `foundation` EVENT-02.
+- 검사: 작업자 관련 29개 파일 770/770. 통합 담당 전체 검사 첫 회(`bb7eda8`) 1 fail은 C04 반응 시험의 답 위치 기대값(메시지에서 연 스레드 ID = 메시지 ID로 바뀜)이라 주 진행자가 기대값을 고쳤다. 둘째 회(`591db2e`) 1 fail(`T19 B5 EVENT-02 실제 PostgreSQL`)은 단독 3회 14/14 통과·앞 회차 같은 코드 통과라 부하 흔들림. 셋째 회: 2275 tests / 2253 pass / 0 fail / 22 skip(SEC02_IMAGE). Codex 코드·보안 지적 없음, `build / test` 통과.
+- 범위 해석: 채널 멘션으로 연 스레드의 첫 답과 명령으로 받은 대화는 답장하지 않는다. owner 호출 제외: 변경 blocked·cancelled, 작업 막힘·한도 대기, 24시간 확인 요청, CHANGE 자식 job 실패(부모 실패 알림만).
+- 남은 위험·미확인(C24 S5): 메시지에서 스레드를 열 권한(`CREATE_PUBLIC_THREADS`·`READ_MESSAGE_HISTORY`)은 운영이 이미 공개 스레드 생성·기록 읽기를 써서 있는 것으로 봄(배포 뒤 로그 확인). 실제 알림 동작, `-#` 작은 글씨 표시, 지워진 답장 대상의 `fail_if_not_exists:false`, 메시지 스레드 응답 모양.
+- 뒤 티켓에 넘김: C17·C18은 `change-runtime.ts` `send(…, ownerCall)` 인수를 유지. C08은 수신 쪽 답장 참조. owner 호출 글은 본문이 `<@owner> `로 시작하므로 그 글을 `startsWith`로 비교하는 시험은 머리를 고려.
