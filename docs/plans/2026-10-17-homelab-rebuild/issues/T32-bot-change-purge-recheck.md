@@ -1,7 +1,7 @@
 # T32 봇 CHANGE 정리의 선정 조건 재확인 (T21 2회차 A09)
 
 - 단계: P4 후속 (T21 2회차 감사에서 나옴)
-- 상태: 진행 중 (2026-11-09 착수, 사용자 결정)
+- 상태: 완료 (2026-11-09. 1차 봇 #104 `4a10f3c`, 2차 봇 #106 `772599f`, 배포 homelab #1200·#1202. T21 4회차 A09 fixed·DATA-02 pass)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: 없음
 - 연결 AC: AC-B8 (F04, R13, DATA-02)
@@ -28,3 +28,12 @@ T21 2회차 감사(2026-11-09, 판정 `NOT_READY`)의 유일한 출시 차단 A0
 ## 검증
 
 `04` §4 DATA-02(원문 수명). 결과는 T21 재검증이 판정한다.
+
+## 결과 (2026-11-09)
+
+- 1차(봇 #104 `4a10f3c`, 배포 homelab #1200): 부모 행을 `FOR UPDATE`로 잠근 뒤 선정 조건 전체(`changePurgeDue`)를 그 id로 다시 보고 맞을 때만 지운다. `linkChildJob`은 부모를 `FOR SHARE`로 잡는다. 같은 모양의 T31 네 칸과 T27 질문 답 정리는 UPDATE 한 문장이라 해당 없음.
+- T21 3회차 감사: 원래 경합은 해소됐지만 A09 `partially_fixed`. 정리 제외 조건이 정리 전 세션을 진행 중 상태와 `cleanup_state='pending'`으로만 알아봐서, 세션이 `completed`로 커밋된 뒤 pending이 붙기 전 틈(`session_retained=true`)에 7일 지난 변경을 지우고 다음 generation을 `input_purged`로 막았다(PostgreSQL 두 연결).
+- 2차(봇 #106 `772599f`, 배포 homelab #1202): 제외 조건에 `session_retained`를 더했다. retained는 작업자 정리를 확인한 뒤에만 false가 되고 true가 되는 곳은 세션 시작뿐이라 재검사 뒤 뒤집히지 않는다. `change-purge-race` 11/11, 전체 2,147 중 실패 0.
+- T21 4회차 감사: A09 fixed, DATA-02 pass, 판정 `READY_FOR_SCOPED_PILOT`. 남은 조건: 작업자 정리를 끝내 확인하지 못한 세션의 변경 원문은 7일을 넘겨 남는다(pending과 같은 성질, retained·cleanup 지표로 보임).
+- 같이 고친 것: 봇 #105(`1835f11`, 시험만). `codex-bridge` hang 시험이 빈 `env.json`을 읽던 경합(main `1079cb4` 빌드 실패).
+- 기록: 봇 `VERIFICATION.md` "T32 CHANGE 정리의 선정 조건 재확인", `DECISIONS.md` "CHANGE 정리의 선정·삭제 경합", 감사 증거는 private `homelab-bot-ops` `evidence/release-audit-3/`·`release-audit-4/`.
