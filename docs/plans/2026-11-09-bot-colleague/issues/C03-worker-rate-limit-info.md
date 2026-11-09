@@ -1,7 +1,7 @@
 # C03 작업자 한도 정보 읽기
 
 - 단계: 1 기반
-- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 C02 integrated)
+- 상태: integrated (봇 #116 병합 `551f0ad`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.2(한도 정보), §4.7(한도 정보 읽기), §5 AC-16, §8 "`rate_limit_event` 필드" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C02
 - 연결 AC: AC-16(S2)
@@ -33,10 +33,10 @@
 
 ## 완료 조건
 
-- [ ] 고정 stream-json의 `rate_limit_event`가 대화 v2·리뷰·작업 레인 응답의 한도 칸으로 나온다(AC-16 S2).
-- [ ] 한도 오류 결과에 `rejected`의 풀리는 시각이 붙고, 오류 분류(한도·인증·결제)는 바뀌지 않는다.
-- [ ] 게시 서버 쪽 응답 스키마가 한도 칸이 있는 응답과 없는 응답을 둘 다 받는다.
-- [ ] 2.1.308 실측이 미확인으로 `VERIFICATION.md`에 남아 있다.
+- [x] 고정 stream-json의 `rate_limit_event`가 대화 v2·리뷰·작업 레인 응답의 한도 칸으로 나온다(AC-16 S2).
+- [x] 한도 오류 결과에 `rejected`의 풀리는 시각이 붙고, 오류 분류(한도·인증·결제)는 바뀌지 않는다.
+- [x] 게시 서버 쪽 응답 스키마가 한도 칸이 있는 응답과 없는 응답을 둘 다 받는다.
+- [x] 2.1.308 실측이 미확인으로 `VERIFICATION.md`에 남아 있다.
 
 ## 검증
 
@@ -46,4 +46,11 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #116(`feat/colleague-c03-rate-limit-info`, 결과 head `31c83d8`), 병합 `551f0ad`(2026-11-10).
+- 구현: `src/executor-claude.ts` `compactClaudeEvent`가 `rate_limit_event`의 status·resetsAt·rateLimitType·utilization만 검사해 남기고(모르는 status면 이벤트 버림), `classifyClaudeError`는 분류를 그대로 두고 원인 `rate_limit`(429)·`billing`(402)을 붙이며, `interpretClaudeStream`이 마지막 이벤트와 한도 대기 때 마지막 `rejected`의 `resetsAt`을 싣는다. `src/contracts.ts` `RateLimitSlotSchema = RateLimitInfoSchema.nullable()`(`{event?, stop?: {cause, resetsAt?}}`, strict, 빈 객체 거부). 대화 v2(`chat-lane`)·리뷰(`review-lane`·`review-http`·`review-input` 타입)·작업 v1·v2(`task-contracts`·`executor-claude-task`) 결과의 선택 칸 `rateLimit`(unknown·v1 대화에는 없음).
+- 완료 조건 근거: C03 시험 11개(고정 fixture `test/rate-limit-fixture.ts`): `C03 대화 v2 한도 칸`, `C03 대화 v1 요청의 응답에는 한도 칸이 없다`, `C03 리뷰 한도 칸`, `C03 작업 v1·v2 한도 칸`, `C03 한도 이벤트 축약`, `C03 대화 v2 한도 대기`, `C03 한도 정보 읽기`(분류 `CLD-05` 그대로), `C03 게시 서버 리뷰 응답 스키마`·`C03 작업 응답 한도 칸`·`C03 게시 서버 v2 응답 스키마`(칸 있음·없음 받고 깨진·빈·원문 칸 거부). VERIFICATION C03 절에 2.1.308 실측 미확인.
+- 검사: 작업자 관련 14개 파일 500/500. 통합 담당 전체 검사(`31c83d8`, node 24.22.0, 실제 PG, 잠금): 2232 tests / 2210 pass / 0 fail / 22 skip(SEC02_IMAGE). Codex 코드·보안 지적 없음, `build / test` 통과.
+- 분해 불일치(작음): DECISIONS 구현 위치는 "동료 봇 전환" 7 대신 파일 끝 절. 결제·한도 원인은 `rateLimit.stop.cause` 한 곳. `review-input.ts`는 README 5절 C02 묶음의 C03 칸 자리라 타입·전달만 고쳤다.
+- **롤백 순서 주의(C06으로 넘김):** 게시 서버만 이 PR 이전으로 되돌리면 새 작업자의 리뷰·작업 응답이 strict 스키마에 거부된다. 작업자를 먼저 되돌린다.
+- 미확인: 이벤트 모양은 로컬 CLI 2.1.319 스키마로만 확인. 이미지 2.1.308 `-p` 구독 모드에서 오는지는 C24(S5).
+- 뒤 티켓에 넘김: C19는 `stop.cause === 'billing'`이면 자동 재개하지 않고 그 밖의 한도는 `stop.resetsAt`(없으면 30분)으로 재개, 리뷰 미루기는 `event.status === 'allowed_warning'`과 `event.resetsAt`. 미게시 후보 리뷰(`change-review.ts`) 결과 스키마에는 칸이 없어 지금은 버려진다(C19가 정함). C11은 대화 v2 응답 칸이 `null` 또는 한도 정보다.

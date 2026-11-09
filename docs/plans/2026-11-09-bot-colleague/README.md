@@ -15,14 +15,14 @@ homelab-bot을 회사에서 같이 일하는 동료처럼 바꾸는 계획의 �
 |---|---|---|---|---|---|
 | [C01](issues/C01-colleague-switch.md) | 동료 기능 스위치 | 1 기반 | 없음 | integrated | 에이전트 |
 | [C02](issues/C02-worker-contract-v2.md) | 작업자 대화·리뷰 계약 v2 받기 | 1 기반 | 없음 | integrated | 에이전트 |
-| [C03](issues/C03-worker-rate-limit-info.md) | 작업자 한도 정보 읽기 | 1 기반 | C02 | 진행 중 | 에이전트 |
-| [C04](issues/C04-reaction-lifecycle.md) | 반응 수명 | 1 기반 | 없음 | 진행 중 | 에이전트 |
+| [C03](issues/C03-worker-rate-limit-info.md) | 작업자 한도 정보 읽기 | 1 기반 | C02 | integrated | 에이전트 |
+| [C04](issues/C04-reaction-lifecycle.md) | 반응 수명 | 1 기반 | 없음 | integrated | 에이전트 |
 | [C05](issues/C05-admin-cli-homelab-bot.md) | 관리 CLI `homelab bot` | 1 기반 | C01 | 진행 중 | 에이전트 + 사람(운영 확인) |
 | [C06](issues/C06-deploy-worker-v2.md) | 작업자 v2 배포 | 2 배포와 표면 | C02, C03, C25 | 대기 | 에이전트 + 사람(배포 PR) |
-| [C07](issues/C07-reply-owner-call-thread-marker.md) | 답장·owner 호출·스레드 제목·작은 표식 | 2 배포와 표면 | C04, C09 | 대기 | 에이전트 |
+| [C07](issues/C07-reply-owner-call-thread-marker.md) | 답장·owner 호출·스레드 제목·작은 표식 | 2 배포와 표면 | C04, C09 | 진행 중 | 에이전트 |
 | [C08](issues/C08-mention-scope-reply-context.md) | 멘션 받는 범위와 봇 글 답장 맥락 | 2 배포와 표면 | C02, C07 | 대기 | 에이전트 |
-| [C09](issues/C09-fixed-text-chat-task-control.md) | 고정 문구 1: 대화·작업·제어 안내 | 2 배포와 표면 | C01, C04 | 대기 | 에이전트 |
-| [C10](issues/C10-fixed-text-memory-briefing.md) | 고정 문구 2: 기억·브리핑 | 2 배포와 표면 | C01, C04 | 대기 | 에이전트 |
+| [C09](issues/C09-fixed-text-chat-task-control.md) | 고정 문구 1: 대화·작업·제어 안내 | 2 배포와 표면 | C01, C04 | integrated | 에이전트 |
+| [C10](issues/C10-fixed-text-memory-briefing.md) | 고정 문구 2: 기억·브리핑 | 2 배포와 표면 | C01, C04 | integrated | 에이전트 |
 | [C11](issues/C11-chat-v2-switchover.md) | 대화 v2 전환 | 3 새 형식 켜기 | C01, C04, C06, C08 | 대기 | 에이전트 |
 | [C12](issues/C12-pr-review-voice.md) | PR 리뷰 말투 | 3 새 형식 켜기 | C06 | 대기 | 에이전트 |
 | [C13](issues/C13-proposal-run-confirmation.md) | 제안과 실행 확인 | 4 말로 실행 | C01, C11 | 대기 | 에이전트 |
@@ -37,7 +37,7 @@ homelab-bot을 회사에서 같이 일하는 동료처럼 바꾸는 계획의 �
 | [C22](issues/C22-account-switch-token-expiry.md) | 계정 등록·전환(구독)과 토큰 만료 알림 | 5 멈춤과 계정 | C05, C10, C19, C21 | 대기 | 에이전트 + 사람(실토큰·운영 전환) |
 | [C23](issues/C23-api-credit-mode.md) | API 크레딧 방식 | 5 멈춤과 계정 | C06, C22 | 대기 | 에이전트 + 사람(Console 키·배포 PR) |
 | [C24](issues/C24-pilot-integration-verification.md) | 시범 통합 검증 | 7 통합 | C01~C23, C25~C31 전부 | 대기 | 에이전트 + 사람 |
-| [C25](issues/C25-change-authoring-v2.md) | 작업자 변경 작성 v2: 확인할 것·선택지 질문·수정 차례 입력 | 1 기반 | C03 | 대기 | 에이전트 |
+| [C25](issues/C25-change-authoring-v2.md) | 작업자 변경 작성 v2: 확인할 것·선택지 질문·수정 차례 입력 | 1 기반 | C03 | 진행 중 | 에이전트 |
 | [C26](issues/C26-github-io-extension.md) | GitHub 쓰기·읽기 확장 | 1 기반 | 없음 | integrated | 에이전트 |
 | [C27](issues/C27-change-pr-revision.md) | 수정 요청 | 6 PR 수정 | C06, C13, C17, C25, C26, C29, C31 | 대기 | 에이전트 |
 | [C28](issues/C28-change-question-choices.md) | 변경 질문 선택지 | 4 말로 실행 | C06, C16, C25 | 대기 | 에이전트 |
@@ -90,8 +90,8 @@ C24 → 재구축 T35(V1 시범 운영)
 
 - **통합 기준:** 봇 `main`, 시작 기준 `e160cb1`(2026-11-09). 티켓마다 봇 PR 하나를 선행 순서대로 main에 병합한다(7절, 사용자 2026-11-09 feature-build 커밋 질문). 명세 머리말에도 같은 줄이 있다.
 - **실행 가능:** 없음(아래 진행 중 외에는 선행 대기).
-- **integrated:** C01(봇 #111 `bfdb5d9`), C26(봇 #113 `1ef5843`), C02(봇 #112 `477d01c`).
-- **진행 중:** C04(2026-11-09 착수), C05·C03(2026-11-10 착수). 티켓별 worktree.
+- **integrated:** C01(봇 #111 `bfdb5d9`), C26(봇 #113 `1ef5843`), C02(봇 #112 `477d01c`), C04(봇 #114 `ca243f5`), C03(봇 #116 `551f0ad`), C10(봇 #117 `fb7d693`), C09(봇 #118 `e19e760`).
+- **진행 중:** C05(봇 #115 병합, homelab #1216 owner 검토 대기, 나머지 세 동작 결정 대기), C25(봇 #119), C07(2026-11-10 착수). 티켓별 worktree.
 - **대기:** 나머지(1절 Blocked by).
 - **외부 선행:** 충족. 재구축 T33(봇 PR #108)이 2026-11-09 병합됐고 homelab #1209로 배포, 봇 #109에 검증을 기록했다. C17은 C13만 기다린다.
 - **통합 검증 담당:** C24. AC-24와 AC-25~AC-31의 S5 범위를 포함해, 각 AC에서 S1~S4로 못 잡아 S5로 넘긴 범위(말투 품질, 제안 오독, 2.1.308 한도 필드, 실제 Discord·GitHub·Telegram 동작, 계정 전환)를 모두 본다. 각 티켓은 자기 AC의 S1~S4 시험을 맡는다.
@@ -124,7 +124,7 @@ C24 → 재구축 T35(V1 시범 운영)
 | 봇 실행기·응답 계약(`src/executor.ts`, `src/executor-claude.ts`, `src/executor-claude-task.ts`, `src/task-contracts.ts`, `src/review-http.ts`, `src/review-lane.ts`) | C03 | C12 리뷰 프롬프트 줄, C23 인증 방식별 env·크레딧 소진 분류, C25 변경 작성 지시·출력 | 응답 칸은 C03, 인증 방식은 C23 |
 | 봇 `src/chat-context.ts` | C08 | C11 상한 50개·80KiB, 정리된 앞부분 표시 | |
 | 봇 `src/runtime.ts` | C11 | C13 제안 처리, C19 한도 대기 결과, C20 멈춤 배선 | 대화 성공·대기 분기마다 자기 자리만 |
-| 봇 `src/main.ts` | C19 | C20 Gateway 상태 배선, C21 지표 배선, C30 조립 인수(바뀔 때만) | |
+| 봇 `src/main.ts` | C19 | C20 Gateway 상태 배선, C21 지표 배선, C30 조립 인수(바뀔 때만) | C19보다 앞 티켓(C09·C10 등)은 동료 기능 스위치 값(`config.colleagueEnabled === true`)을 자기 처리기 생성 인수·설정 칸 하나로 넘기는 줄만 더한다(주 진행자 2026-11-10, C10에서 배선 누락이 드러남) |
 | 봇 `src/briefing.ts` | C10 | C19 미룬 리뷰 건수 줄, C22 토큰 만료 줄 | 줄 단위 추가 |
 | 봇 `src/review.ts` | C12 | C18 Discord 리뷰 안내 문구, C19 리뷰 claim·한도 처리, C20 리뷰 대기 안내, C30 리뷰 요청의 대상 해석 | 렌더러는 C12, Discord 문구 자리는 C18 |
 | 봇 `src/change-runtime.ts` | C07 | C17 미리보기 버튼, C18 변경 알림 문구, C27 수정 결과 알림, C28 선택지 공개 검사, C29 미리보기의 확인할 것, C31 고치기 차례 분기 | |

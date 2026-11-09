@@ -1,7 +1,7 @@
 # C04 반응 수명
 
 - 단계: 1 기반
-- 상태: 진행 중 (ready-for-agent, 2026-11-09 착수)
+- 상태: integrated (봇 #114 병합 `ca243f5`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.5, §5 AC-14, §8 "반응 rate limit" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: 없음
 - 연결 AC: AC-14(👀·⏳·지우기·실패)
@@ -30,10 +30,10 @@ owner가 보낸 메시지에 봇이 받으면 👀, 다른 모델 일이 자리�
 
 ## 완료 조건
 
-- [ ] 받으면 👀, 다른 일 뒤에 기다리면 ⏳가 더해지고, 답이 게시되면 봇 반응이 모두 지워진다(AC-14).
-- [ ] 실패가 확정되면 반응이 지워지고 실패 한 줄이 달린다(AC-14).
-- [ ] 남의 반응을 지우는 호출이 0이다.
-- [ ] 👍·💤를 더할 자리가 같은 훅에 있다(뒤 티켓이 상태만 더하면 된다).
+- [x] 받으면 👀, 다른 일 뒤에 기다리면 ⏳가 더해지고, 답이 게시되면 봇 반응이 모두 지워진다(AC-14).
+- [x] 실패가 확정되면 반응이 지워지고 실패 한 줄이 달린다(AC-14).
+- [x] 남의 반응을 지우는 호출이 0이다.
+- [x] 👍·💤를 더할 자리가 같은 훅에 있다(뒤 티켓이 상태만 더하면 된다).
 
 ## 검증
 
@@ -43,4 +43,9 @@ owner가 보낸 메시지에 봇이 받으면 👀, 다른 모델 일이 자리�
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #114(`feat/colleague-c04-reactions`, 결과 head `267ece6`), 병합 `ca243f5`(2026-11-10). 스위치 밖이라 병합과 함께 운영 배포. 첫 작업자는 2026-11-09 22:48 커널 크래시로 끊겼고, 이어받은 작업자가 코드 추가 없이 완료 검사를 했다. Codex 리뷰 세 차례: 1차 P1 1·P2 3, 2차 P2 3을 새 작업자 둘이 고쳤고(각 지적을 빨강→초록 시험으로), 3차 P2 1(실행 중 `/stop` 뒤 `superseded` 종료의 반응 정리)은 PR 리뷰 규칙대로 C11 할 일 8a로 넘겼다.
+- 구현: `src/reactions.ts`(상태 표 `REACTIONS`·`FROM`, `recordReceived`·`moveReactions`·`settleReactions`·`ReactionSync`, 행은 `controls`의 `reaction:<event id>`, 끝 상태까지 맞추면 행 삭제, 결과 불확실한 더하기는 `maybe`로 기록해 지움 대상, 행마다 lease 표 재확인). `src/discord-protocol.ts`·`src/discord.ts` 봇 자신의 반응 더하기·지우기(`@me`만), 게시 루프는 반응 동기화를 최대 1초만 기다림. `src/store.ts` `claim`·`refreshWaiting`의 ⏳ 판단, `fail`·`resolveUnknown`·`cancelledNotice`의 정리, 복구 버퍼 폐기 경로의 정리. `src/runtime.ts`는 고치지 않았다.
+- 완료 조건 근거: `test/reaction-lifecycle.test.ts`(1차 17개 + 리뷰 수정 6개): `흐름: 받음 👀 → 답 게시 → 봇 반응 모두 지움(✅ 없음)`, `흐름: 다른 모델 일 뒤에 기다리면 ⏳를 더하고…`(운영과 같은 순차 tick), `흐름: 실패가 확정되면 반응을 지우고 실패 한 줄을 단다`, `protocol 흐름: 반응 REST는 모두 @me이고 남의 반응을 지우는 호출은 0이다`. 👍(C11)·💤(C20)는 `REACTIONS`·`FROM`에 상태만 더하면 된다.
+- 검사: 통합 담당 전체 검사(`267ece6`, node 24.22.0, 실제 PG, 잠금): 2211 tests / 2189 pass / 0 fail / 22 skip(SEC02_IMAGE). 앞 head `ad88503` 전체 검사의 1 fail(`R08 실제 PostgreSQL: 같은 event_id를 동시에…`, 외부 작업 수신)은 단독 2회 12/12 통과라 부하 흔들림으로 기록. `build / test` 통과.
+- 분해 불일치: 반응 상태는 전용 표가 아니라 `controls` 행(마이그레이션 없음). `runtime.ts` 반응 훅 자리 불필요. 실패 고정 문구 추가 불필요(실패 안내 없는 확정 실패 경로 없음). `test/helpers.ts`의 `MockDiscord`에 반응 메서드 둘을 더했다(컴파일에 필요).
+- 남은 위험: 작업 루프를 끈 배치에서 task가 대화를 막는 경우는 `claim` 때만 ⏳. 반응 REST가 30초를 넘기면 그 행을 다른 서버가 가져갈 수 있다(기록은 덮지 않음). 답할 때마다 반응 지우기 호출이 늘어 실제 rate limit 영향은 C24(S5).

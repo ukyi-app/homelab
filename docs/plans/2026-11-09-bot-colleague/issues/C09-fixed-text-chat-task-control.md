@@ -1,7 +1,7 @@
 # C09 고정 문구 1: 대화·작업·제어 안내
 
 - 단계: 2 배포와 표면
-- 상태: 대기 (선행: C01, C04)
+- 상태: integrated (봇 #118 병합 `e19e760`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.4 고정 문구와 말투, §4.9 스위치와 배포 순서, §4.1 '/' 명령 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01, C04
 - 연결 AC: AC-11(대화·작업·제어 안내 범위), AC-23(문구 두 판)
@@ -36,11 +36,11 @@ owner가 Discord에서 보는 대화·작업·제어 안내가 해요체 동료 
 
 ## 완료 조건
 
-- [ ] 소유 파일의 Discord 고정 문구가 해요체이고 "봇"이라는 자기 지칭이 없다.
-- [ ] 스위치 꺼짐이면 '/' 안내 줄이 지금과 같은 '/' 이름을 안내한다.
-- [ ] 스위치 켜짐이면 소유 파일의 고정 문구 어디에도 '/' 명령 이름이 없다(시험으로 확인).
-- [ ] 멱등 키, 분류(`safe_summary`), 멘션 막음, 질문 답이 승인·권한 변경이 아니라는 안내가 그대로다.
-- [ ] 바뀐 파일 관련 시험이 통과한다.
+- [x] 소유 파일의 Discord 고정 문구가 해요체이고 "봇"이라는 자기 지칭이 없다.
+- [x] 스위치 꺼짐이면 '/' 안내 줄이 지금과 같은 '/' 이름을 안내한다.
+- [x] 스위치 켜짐이면 소유 파일의 고정 문구 어디에도 '/' 명령 이름이 없다(시험으로 확인). 예외 한 줄: 질문 답 안내(`questionFooter`)는 보안 리뷰에 따라 켜짐 판도 `/answer`를 안내하고, 자연어 답 경로를 만드는 C16·C28이 바꾼다.
+- [x] 멱등 키, 분류(`safe_summary`), 멘션 막음, 질문 답이 승인·권한 변경이 아니라는 안내가 그대로다.
+- [x] 바뀐 파일 관련 시험이 통과한다.
 
 ## 검증
 
@@ -50,4 +50,10 @@ owner가 Discord에서 보는 대화·작업·제어 안내가 해요체 동료 
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #118(`feat/colleague-c09-fixed-text-chat-task`, 결과 head `b15cbb5`), 병합 `e19e760`(2026-11-10).
+- 구현: 새 `src/chat-task-text.ts` `CHAT_TASK_TEXT` 83항목(두 판 26), `jobStateText`·`waitReasonText`·`laneReasonText`. `src/store.ts` 문구를 상수로, 생성자 셋째 인자 `colleague = false`. 작업 브리지(`task-bridge`·`claude-task-bridge`·`codex`)·`control-format`·`task-commands`의 문구. `src/discord.ts` 두 줄과 제어 결과 호출 3곳에 스위치 값. `src/main.ts` `new Store(deps.db, now, config.colleagueEnabled === true)`.
+- 완료 조건 근거: `test/chat-task-text.test.ts`(두 판 해요체·"봇" 없음, 켜짐 판 등록 '/' 이름·`/이름` 모양 0, 꺼짐 판 지금 '/' 안내, 질문 답 안내는 두 판 모두 `/answer`), `test/chat-task-text-assembly.test.ts`(`startPublisher` 조립을 거친 켜짐·꺼짐 판), `status-notice` 켜짐 판(멱등 키·`safe_summary`·`allowed_mentions.parse=[]`).
+- 검사: 작업자 관련 20개 파일 621개 중 619 통과·0 실패·skip 2. 보안 수정 뒤 관련 306/306. 통합 담당 전체 검사(`b15cbb5`, node 24.22.0, 실제 PG, 잠금): 2250 tests / 2228 pass / 0 fail / 22 skip(SEC02_IMAGE). Codex 보안 리뷰 1차 P2 1(켜짐 판 질문 안내가 봉인 안 된 답 경로로 유도)을 주 진행자가 고쳤고(빨강→초록), 재리뷰 지적 없음. `build / test` 통과.
+- 분해 불일치: `store.ts` 생성자 인자 추가(기본 false), `discord.ts` 제어 결과 호출 3곳, 표 밖 시험 파일(`unknown-probe`·`change-assembly`·`task-cancel-notice`) 리터럴 갱신.
+- **C24 전에 풀 것:** 켜짐 판의 unknown 해제·멈춘 작업 재개 안내가 `homelab bot` CLI를 가리키는데 CLI는 그 두 동작이 미지원이다(C05 나머지 동작, 사용자 결정 대기). 켜짐 판 `/stop` 안내는 "구독을 다시 켜 주세요"뿐이다(말로 구독을 켜는 동작 없음, owner 검토). `/codex-release`는 등록되지 않은 이름인데 꺼짐 판에 그대로 남겼다.
+- 뒤 티켓에 넘김: C16·C28 질문 답 안내(위 예외), C19·C20 한도·인증 문구 → 자리 비움, C24 말투 표본.
