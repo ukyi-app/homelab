@@ -13,11 +13,11 @@ homelab-bot을 회사에서 같이 일하는 동료처럼 바꾸는 계획의 �
 
 | ID | 제목 | 단계 | Blocked by | 상태 | 수행 |
 |---|---|---|---|---|---|
-| [C01](issues/C01-colleague-switch.md) | 동료 기능 스위치 | 1 기반 | 없음 | 진행 중 | 에이전트 |
-| [C02](issues/C02-worker-contract-v2.md) | 작업자 대화·리뷰 계약 v2 받기 | 1 기반 | 없음 | 진행 중 | 에이전트 |
-| [C03](issues/C03-worker-rate-limit-info.md) | 작업자 한도 정보 읽기 | 1 기반 | C02 | 대기 | 에이전트 |
+| [C01](issues/C01-colleague-switch.md) | 동료 기능 스위치 | 1 기반 | 없음 | integrated | 에이전트 |
+| [C02](issues/C02-worker-contract-v2.md) | 작업자 대화·리뷰 계약 v2 받기 | 1 기반 | 없음 | integrated | 에이전트 |
+| [C03](issues/C03-worker-rate-limit-info.md) | 작업자 한도 정보 읽기 | 1 기반 | C02 | 진행 중 | 에이전트 |
 | [C04](issues/C04-reaction-lifecycle.md) | 반응 수명 | 1 기반 | 없음 | 진행 중 | 에이전트 |
-| [C05](issues/C05-admin-cli-homelab-bot.md) | 관리 CLI `homelab bot` | 1 기반 | C01 | 대기 | 에이전트 + 사람(운영 확인) |
+| [C05](issues/C05-admin-cli-homelab-bot.md) | 관리 CLI `homelab bot` | 1 기반 | C01 | 진행 중 | 에이전트 + 사람(운영 확인) |
 | [C06](issues/C06-deploy-worker-v2.md) | 작업자 v2 배포 | 2 배포와 표면 | C02, C03, C25 | 대기 | 에이전트 + 사람(배포 PR) |
 | [C07](issues/C07-reply-owner-call-thread-marker.md) | 답장·owner 호출·스레드 제목·작은 표식 | 2 배포와 표면 | C04, C09 | 대기 | 에이전트 |
 | [C08](issues/C08-mention-scope-reply-context.md) | 멘션 받는 범위와 봇 글 답장 맥락 | 2 배포와 표면 | C02, C07 | 대기 | 에이전트 |
@@ -38,7 +38,7 @@ homelab-bot을 회사에서 같이 일하는 동료처럼 바꾸는 계획의 �
 | [C23](issues/C23-api-credit-mode.md) | API 크레딧 방식 | 5 멈춤과 계정 | C06, C22 | 대기 | 에이전트 + 사람(Console 키·배포 PR) |
 | [C24](issues/C24-pilot-integration-verification.md) | 시범 통합 검증 | 7 통합 | C01~C23, C25~C31 전부 | 대기 | 에이전트 + 사람 |
 | [C25](issues/C25-change-authoring-v2.md) | 작업자 변경 작성 v2: 확인할 것·선택지 질문·수정 차례 입력 | 1 기반 | C03 | 대기 | 에이전트 |
-| [C26](issues/C26-github-io-extension.md) | GitHub 쓰기·읽기 확장 | 1 기반 | 없음 | 진행 중 | 에이전트 |
+| [C26](issues/C26-github-io-extension.md) | GitHub 쓰기·읽기 확장 | 1 기반 | 없음 | integrated | 에이전트 |
 | [C27](issues/C27-change-pr-revision.md) | 수정 요청 | 6 PR 수정 | C06, C13, C17, C25, C26, C29, C31 | 대기 | 에이전트 |
 | [C28](issues/C28-change-question-choices.md) | 변경 질문 선택지 | 4 말로 실행 | C06, C16, C25 | 대기 | 에이전트 |
 | [C29](issues/C29-guide-comments-check-items.md) | 안내 댓글과 확인할 것 | 4 말로 실행 | C06, C17, C25, C26 | 대기 | 에이전트 |
@@ -90,7 +90,8 @@ C24 → 재구축 T35(V1 시범 운영)
 
 - **통합 기준:** 봇 `main`, 시작 기준 `e160cb1`(2026-11-09). 티켓마다 봇 PR 하나를 선행 순서대로 main에 병합한다(7절, 사용자 2026-11-09 feature-build 커밋 질문). 명세 머리말에도 같은 줄이 있다.
 - **실행 가능:** 없음(아래 진행 중 외에는 선행 대기).
-- **진행 중:** C01, C02, C04, C26(2026-11-09 착수, 티켓별 worktree).
+- **integrated:** C01(봇 #111 `bfdb5d9`), C26(봇 #113 `1ef5843`), C02(봇 #112 `477d01c`).
+- **진행 중:** C04(2026-11-09 착수), C05·C03(2026-11-10 착수). 티켓별 worktree.
 - **대기:** 나머지(1절 Blocked by).
 - **외부 선행:** 충족. 재구축 T33(봇 PR #108)이 2026-11-09 병합됐고 homelab #1209로 배포, 봇 #109에 검증을 기록했다. C17은 C13만 기다린다.
 - **통합 검증 담당:** C24. AC-24와 AC-25~AC-31의 S5 범위를 포함해, 각 AC에서 S1~S4로 못 잡아 S5로 넘긴 범위(말투 품질, 제안 오독, 2.1.308 한도 필드, 실제 Discord·GitHub·Telegram 동작, 계정 전환)를 모두 본다. 각 티켓은 자기 AC의 S1~S4 시험을 맡는다.

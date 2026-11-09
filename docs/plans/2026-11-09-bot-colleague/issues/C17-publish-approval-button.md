@@ -11,7 +11,7 @@
   - 봇 `src/change-runtime.ts`: 소유(연결 파일. 뒤에 C18이 변경 알림 문구를 고친다). 자리: 미리보기 글(`preview`)과 그 게시(`notifyPhase`의 `awaiting_publish_approval` 줄, `send`).
   - 봇 `src/change-commands.ts`: 게시 승인 경로(`publish`)를 버튼에서도 부를 수 있게 하는 자리. 연결 표에 없는 공유 파일이다(C18이 문구를, C14가 변경 요청·취소 연결에서 같은 파일을 쓴다. README 5절에 반영).
   - 봇 `src/discord.ts`, `src/discord-protocol.ts`: 연결 파일, 소유 C04. 이 티켓은 게시 버튼 줄(C13이 만든 custom_id 허용 목록 표에 한 줄)과 버튼 수신 분기만 고친다.
-  - 봇 `src/store.ts`(outbox 게시 payload에 버튼을 싣는 자리): 연결 파일, 소유 C09. 버튼을 실은 글의 outbox 모양은 C13이 만든 것을 쓰기만 한다.
+  - 봇 `src/store.ts`(outbox 게시 payload에 버튼을 싣는 자리): 연결 파일, 소유 C04. 버튼을 실은 글의 outbox 모양은 C13이 만든 것을 쓰기만 한다.
   - 봇 `migrations/`: 버튼과 승인 대상(변경 ID·generation·digest)을 묶는 행이 필요하면 순번 공유로 하나 더한다.
   - 봇 시험: `test/change-assembly.test.ts`, `test/change-pg.test.ts` 등 미리보기·승인 시험의 해당 줄.
 - 설계 계약:

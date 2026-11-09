@@ -10,7 +10,7 @@
 - 파일 소유:
   - 봇 `src/gateway.ts`: Gateway 상태(presence) 보내기와 재연결 때 복원. 소유(연결 표에 없고 다른 티켓이 고치지 않는다).
   - 봇 `src/discord.ts`, `src/discord-protocol.ts`: 연결 파일, 소유 C04. 이 티켓은 C04의 반응 훅에 💤 상태를 더하는 자리만 고친다.
-  - 봇 `src/store.ts`: 연결 파일, 소유 C09. 대화 레인 한도·인증 대기 안내(`waitForUser`의 `waiting:<job>:<attempt>` 글)를 자리 비움으로 바꾸는 자리만.
+  - 봇 `src/store.ts`: 연결 파일, 소유 C04. 대화 레인 한도·인증 대기 안내(`waitForUser`의 `waiting:<job>:<attempt>` 글)를 자리 비움으로 바꾸는 자리만.
   - 봇 `src/claude-task-bridge.ts`, `src/codex.ts`: 연결 파일, 소유 C09. 작업 레인 한도·인증 대기 안내 자리만.
   - 봇 `src/review.ts`: 연결 파일, 소유 C12. 리뷰 대기 안내(`review-waiting`) 자리만.
   - 봇 `src/change-assembly.ts`: 변경 리뷰 자식의 한도·인증 대기 안내. 연결 표에 없는 파일이다(README 5절에 반영). 이 안내 한 자리만 고친다.

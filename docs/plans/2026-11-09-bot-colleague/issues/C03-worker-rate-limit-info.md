@@ -1,7 +1,7 @@
 # C03 작업자 한도 정보 읽기
 
 - 단계: 1 기반
-- 상태: 대기 (선행: C02)
+- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 C02 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.2(한도 정보), §4.7(한도 정보 읽기), §5 AC-16, §8 "`rate_limit_event` 필드" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C02
 - 연결 AC: AC-16(S2)

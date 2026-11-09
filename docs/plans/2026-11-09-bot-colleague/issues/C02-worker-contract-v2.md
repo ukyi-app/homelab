@@ -1,7 +1,7 @@
 # C02 작업자 대화·리뷰 계약 v2 받기
 
 - 단계: 1 기반
-- 상태: 진행 중 (ready-for-agent, 2026-11-09 착수)
+- 상태: integrated (봇 #112 병합 `477d01c`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.1('/' 명령), §4.2, §4.4(PR 리뷰), §5 AC-3·AC-4·AC-5·AC-11·AC-13 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: 없음
 - 연결 AC: AC-3(S2), AC-4, AC-5(작업자), AC-11(신뢰 문맥), AC-13(S2)
@@ -33,12 +33,12 @@
 
 ## 완료 조건
 
-- [ ] v2 작업자가 v1·v2 요청을 둘 다 받고, v1 서버 + v2 작업자, v2 서버 + v2 작업자 조합에서 대화가 성공한다(AC-4).
-- [ ] v1 작업자에 v2 요청을 보내면 요청 거부로 닫히고 성공처럼 보이지 않는다(AC-4).
-- [ ] v2 응답이 `reply`·`proposal`·`ack_only` 모양이고 스키마가 다르면 실패다(AC-3 S2).
-- [ ] 작업자가 50개·80KiB 기록과 정리 표시를 받는다(AC-5 작업자 쪽).
-- [ ] speech 신뢰 문맥에 '/' 명령 이름이 없다(AC-11 신뢰 문맥).
-- [ ] 리뷰 요청이 v2 지시문 literal을 받고 출력 스키마는 그대로다(AC-13 S2).
+- [x] v2 작업자가 v1·v2 요청을 둘 다 받고, v1 서버 + v2 작업자, v2 서버 + v2 작업자 조합에서 대화가 성공한다(AC-4).
+- [x] v1 작업자에 v2 요청을 보내면 요청 거부로 닫히고 성공처럼 보이지 않는다(AC-4).
+- [x] v2 응답이 `reply`·`proposal`·`ack_only` 모양이고 스키마가 다르면 실패다(AC-3 S2).
+- [x] 작업자가 50개·80KiB 기록과 정리 표시를 받는다(AC-5 작업자 쪽).
+- [x] speech 신뢰 문맥에 '/' 명령 이름이 없다(AC-11 신뢰 문맥).
+- [x] 리뷰 요청이 v2 지시문 literal을 받고 출력 스키마는 그대로다(AC-13 S2).
 
 ## 검증
 
@@ -48,4 +48,9 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #112(`feat/colleague-c02-worker-contract-v2`, 결과 head `b827302`), 병합 `477d01c`(2026-11-10).
+- 구현: `src/worker.ts` `WorkerRequestSchema` = v1 | v2 판별 합(**v1 키 순서를 옛 순서로 고정**. capability digest가 `JSON.stringify` 순서에 의존해, 칸을 합치자 옛 게시 서버가 서명한 v1 요청이 모두 거부되는 것을 작업자가 찾아 고쳤다. 뒤 티켓도 v2 칸 순서를 바꾸지 않는다), `WorkerResultV2`, 작업자용 `VersionedWorker`(게시 서버 `WorkerClient`는 v1 그대로). `src/contracts.ts` `SYSTEM_INSTRUCTIONS_V2`, `WORKER_ACCEPT`(v1 20개, v2 50개·80KiB, 실행 본문 96KiB), 제안 동작 ID 21개('/' 명령 이름의 하이픈→밑줄), `ProposalSchema`(target·content), `CHAT_REPLY_LIMITS`, `RateLimitSlotSchema`(지금 `z.null()`, C03이 채움). `src/worker-http.ts` 보낸 요청의 판으로 응답 스키마 선택, `/v1/execute`만 96KiB. `src/chat-lane.ts` v2 출력 스키마·반사 검사(reply와 제안 값 전체). `src/bot-facts.ts` `botFacts(surface, earlierPurged)`. `src/review-input.ts` 지시문 v1·v2 literal.
+- 완료 조건 근거: 새 `test/worker-contract-v2.test.ts` 10개(`C02 v1 서버 + v2 작업자`, `C02 v2 요청`, `C02 배포 순서`, `C02 v2 서버 + v1 작업자`, `C02 v2 스키마`, `C02 v2 반사 검사`, `C02 기록 상한`, `C02 정리 표시`, `C02 신뢰 문맥`, `C02 지시문 literal`)와 `worker-entry`·`review-lane`의 C02 시험(`C02 리뷰 지시문`, `C02 Codex 프로필`).
+- 검사: 작업자 관련 24개 파일 640개(실제 PG 포함, 소켓 경로 문제 2건은 짧은 경로로 재실행 통과). 통합 담당 전체 검사(`b827302`, node 24.22.0, 실제 PG, 잠금): 2188 tests / 2166 pass / 0 fail / 22 skip(SEC02_IMAGE). Codex 코드·보안 지적 없음(`9ce3f0f`, `2b46e86`, `dc1b145`, `b827302`), `build / test` 통과.
+- 분해 불일치: 신뢰 문맥은 요청에 실리지 않고 작업자가 만든다. 그래서 본문 상한 96KiB는 기록 80KiB와 나머지 칸 기준이다. DECISIONS 구현 위치는 파일 끝 "동료 봇 전환: 작업자 계약 v1·v2 공존 (C02)" 절.
+- 뒤 티켓에 넘김: C03은 v2 응답 `rateLimit` 칸을 채운다(`settled`가 그대로 통과시킴). C11은 `WorkerClient`를 넓히고 조립 상한을 50개·80KiB로 올린다(`HttpWorker`에 v2 overload가 이미 있음). C13·C14는 동작 ID 21개·제안 값 두 칸(`target`·`content`)·상한 초과는 실패(reply만 자름)를 쓴다. 작업자 이미지 배포는 C06.
