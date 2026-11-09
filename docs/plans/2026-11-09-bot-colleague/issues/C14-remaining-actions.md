@@ -10,7 +10,7 @@
 - 파일 소유:
   - 연결 파일, 소유 C13: 봇 제안 모듈(C13이 만든 동작 표에 읽기 요청 6줄(작업 목록은 C13)과 실행 요청 줄을 더하고 각 동작의 허용 대상 대조를 채움)
   - 연결 파일, 소유 C04: 봇 `src/discord.ts`(확인 버튼 실행을 기존 처리기 분기, 즉 제어·작업 취소·기억·세션 연결·변경 명령 분기로 넘기는 자리)
-  - 연결 파일, 소유 C09: 봇 `src/store.ts`의 `control`(취소·재시도·리뷰 재개·취소)과 `src/task-bridge.ts`의 작업 취소를 부르기만
+  - 연결 파일, `src/store.ts`는 소유 C04·`src/task-bridge.ts`는 소유 C09: 봇 `src/store.ts`의 `control`(취소·재시도·리뷰 재개·취소)과 `src/task-bridge.ts`의 작업 취소를 부르기만
   - 쓰기만 함(처리기를 고치지 않고 부름): 봇 `src/memory-commands.ts`·`src/memory.ts`(기억 검색·저장·정정·제외·삭제), `src/change-commands.ts`(변경 요청·취소·상태), `src/external-task-commands.ts`(세션 연결 해제·목록, 파일 소유는 C15), `src/task-commands.ts`(작업 상태), `src/read.ts`·`src/catalog.ts`(읽기 템플릿)
   - 순번 공유: 봇 `migrations/`는 C13 표에 칸이 더 필요할 때만 다음 번호
   - 시험: C13 제안 시험에 동작별 줄을 더하고, 기존 처리기 시험(`memory-commands`, `change-assembly`, `external-task-assembly`, `read-lane`, `review-9`)과 같은 권한 결과를 내는지 비교

@@ -12,7 +12,7 @@
   - 공유 파일(README 5절에 반영): 봇 `src/runtime.ts`의 대화 성공 분기(`reply`·`ack_only`·공개 검사로 게시 내용을 정하는 자리). C13이 같은 분기에 제안 처리를, C19·C20이 한도 대기 분기를 더한다
   - 연결 파일, 소유 C02: 봇 `src/worker.ts`(서버 쪽 요청 조립을 v2로), `src/contracts.ts`(v2 답 스키마와 대화 기록 상한 상수를 쓰기만), `src/bot-facts.ts`(surface 값 선택만, 변형 내용은 C02)
   - 연결 파일, 소유 C08: 봇 `src/chat-context.ts`(상한 50개·80KiB, 정리돼 빠진 앞부분 표시)
-  - 연결 파일, 소유 C09: 봇 `src/store.ts`의 `context()`·`finish()` 호출 자리(시그니처는 C09 tip 위에서 맞춘다)
+  - 연결 파일, 소유 C04: 봇 `src/store.ts`의 `context()`·`finish()` 호출 자리(C09도 이 파일의 문구 자리를 고치므로 시그니처는 C09가 통합된 main 위에서 맞춘다)
   - 연결 파일, 소유 C04: 봇 `src/discord.ts`·`src/discord-protocol.ts`의 반응 훅을 불러 👍를 단다(훅 자체는 고치지 않음)
   - 시험: `test/chat-format.test.ts`, `test/s16-display.test.ts`, `test/chat-ack.test.ts`, `test/chat-context.test.ts`, `test/foundation.test.ts`의 대화 게시 줄
 - 설계 계약:
