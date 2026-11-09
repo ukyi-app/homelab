@@ -1,7 +1,7 @@
 # T30 봇 V1 승인·연동 시험 (T21 blocked 7건)
 
 - 단계: P4 후속 (T21 1회차 감사에서 나옴)
-- 상태: 진행 중 (INT-05 pass 2026-11-08, INT-01 기존 증거 수용 2026-11-08, INT-06 pass 2026-11-08, INT-02 pass 2026-11-08, INT-07 pass 2026-11-08, INT-03 pass 2026-11-09. INT-04 남음)
+- 상태: 완료 (2026-11-09. 7항목: INT-02·03·04·05·06·07 pass, INT-01 기존 증거 수용. 판정은 T21 재실행)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T25(INT-04·INT-07만), T26(INT-04만)
 - 연결 AC: AC-B8 (SEC-02, EVENT-02, TASK-01, CHANGE-01, CHANGE-02, CHANGE-03, DEPLOY-01, DATA-01)
@@ -41,7 +41,7 @@ T21 1회차 감사에서 수용 시험 7개가 `blocked`였다. 로컬 시험은
 | INT-02 (EVENT-02) | **pass**(2026-11-08, `authorized_external`, fixture `mock`). NUC 격리 시험 게시자(운영과 같은 코드, 로컬 시험 DB)로 Discord 시험 스레드 `T30-INT-02`의 메시지 A 게시 성공과 `homelab-smoke` PR #20 생성 201 뒤 로컬 confirm 전에 SIGKILL 1회 → 재기동 1회. A는 검색으로, PR은 대조로 확정, 재전송 0, 뒤 메시지 B는 A 확정 뒤. 제약: wire 응답 손실 아님, 시험 PR만 draft(운영은 non-draft, 모델 0을 위해). 정리 끝(PR 닫음, ref·메시지 삭제) |
 | INT-07 (DATA-01) | **pass**(2026-11-08, `authorized_external`). 운영 봇 `/task` 2건에서 실제 모델이 합성 `sk-` 조합을 질문·완료 요약에 넣었고 둘 다 `secret_detected`로 막힘(질문 작업은 `failed(task_question_sensitive)`, 요약은 고정 문구), Discord 노출 0, 모델 2회. 발견: 대문자 `SK-`·U+2011 대시 변형은 탐지기를 통과(T21 재감사 판정) |
 | INT-03 (TASK-01) | **pass**(2026-11-09, `authorized_external`). iMac 실제 Codex notify → R08 수신 accepted → Discord 알림 1건, 재전달 duplicate·알림 0, detach 뒤 401. 복원 fence는 로컬(`local_integration`), A08은 guild 명령 32개 필드 없음·재시작마다 재등록. 첫 턴 notify 2회, seed 붙여넣기 실패로 재연결(연결·키 2, Codex 3턴, 사용자 승인) |
-| INT-04 (CHANGE-01·03) | 실행안 준비 중(정상 사례는 운영, 경합 사례는 격리 게시자 하네스, 실행 전 다시 승인) |
+| INT-04 (CHANGE-01·03) | **pass**(2026-11-09). A(운영 실모델): 질문→답→resume→`smoke-unit` passed(T28 표식 운영 첫 실측)→digest 승인→smoke PR #22(tree·부모 일치)→닫은 뒤 `cancelled(closed_unmerged)`. B·C·D(격리 시험 게시자, 실제 smoke GitHub, receipt `mock`): 승인 뒤 base 이동 `superseded(base_moved)`(사람 PR smoke #21, 문서 한 줄 시험 흔적), 새 generation·옛 digest 거부, 예정 ref 다른 SHA `blocked(head_changed)`. 25 검사, 모델 5회. 제약: 작성 도구 상한은 job 합계 8회, D는 gate 경우만 실측 |
 
 ## 완료 조건
 
