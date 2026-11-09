@@ -1,7 +1,7 @@
 # T30 봇 V1 승인·연동 시험 (T21 blocked 7건)
 
 - 단계: P4 후속 (T21 1회차 감사에서 나옴)
-- 상태: 진행 중 (INT-05 pass 2026-11-08, INT-01 기존 증거 수용 2026-11-08, INT-06 pass 2026-11-08, INT-02 pass 2026-11-08. 나머지 3항목 남음)
+- 상태: 진행 중 (INT-05 pass 2026-11-08, INT-01 기존 증거 수용 2026-11-08, INT-06 pass 2026-11-08, INT-02 pass 2026-11-08, INT-07 pass 2026-11-08, INT-03 pass 2026-11-09. INT-04 남음)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T25(INT-04·INT-07만), T26(INT-04만)
 - 연결 AC: AC-B8 (SEC-02, EVENT-02, TASK-01, CHANGE-01, CHANGE-02, CHANGE-03, DEPLOY-01, DATA-01)
@@ -39,8 +39,9 @@ T21 1회차 감사에서 수용 시험 7개가 `blocked`였다. 로컬 시험은
 | INT-01 (SEC-02) | **기존 증거 수용**(사용자 결정 2026-11-08), live `not_run`. 남은 제약: 서명된 작업 레인 전체 경로의 운영 프로필 실측 없음. 격리 하네스는 Claude 작업자 두 번 모두 모델 안전 분류기에 막혀 만들지 못했고, 만들어도 진입 래퍼 때문에 운영과 다르다 |
 | INT-06 (DEPLOY-01) | **pass**(2026-11-08, `authorized_external`), `argo_compare_stale` 단독 `not_run`. 운영 코드 `DeploymentReader`로 시험 앱 `homelab-smoke`를 H0 재등록(#1185) → H3 전환(#1186) 직후 `argo_config_stale` 2회 → readiness `/healthz/db` 실패(#1187) `pod_unready` 9회 → 제거(#1188) 뒤 `blocked(deploy_config_unregistered)`. 잘못된 `observed` 0. 제약: values만 바뀐 병합은 stale로 보이지 않음, unready는 파드 단위에서만 잡힘. 시험 앱 `KubePodNotReady` 1회(제거 뒤 2분 32초 해소) |
 | INT-02 (EVENT-02) | **pass**(2026-11-08, `authorized_external`, fixture `mock`). NUC 격리 시험 게시자(운영과 같은 코드, 로컬 시험 DB)로 Discord 시험 스레드 `T30-INT-02`의 메시지 A 게시 성공과 `homelab-smoke` PR #20 생성 201 뒤 로컬 confirm 전에 SIGKILL 1회 → 재기동 1회. A는 검색으로, PR은 대조로 확정, 재전송 0, 뒤 메시지 B는 A 확정 뒤. 제약: wire 응답 손실 아님, 시험 PR만 draft(운영은 non-draft, 모델 0을 위해). 정리 끝(PR 닫음, ref·메시지 삭제) |
-| INT-03·07 (TASK-01, DATA-01) | 실행안 준비 중(실행 전 다시 승인) |
-| INT-04 | 미실시 |
+| INT-07 (DATA-01) | **pass**(2026-11-08, `authorized_external`). 운영 봇 `/task` 2건에서 실제 모델이 합성 `sk-` 조합을 질문·완료 요약에 넣었고 둘 다 `secret_detected`로 막힘(질문 작업은 `failed(task_question_sensitive)`, 요약은 고정 문구), Discord 노출 0, 모델 2회. 발견: 대문자 `SK-`·U+2011 대시 변형은 탐지기를 통과(T21 재감사 판정) |
+| INT-03 (TASK-01) | **pass**(2026-11-09, `authorized_external`). iMac 실제 Codex notify → R08 수신 accepted → Discord 알림 1건, 재전달 duplicate·알림 0, detach 뒤 401. 복원 fence는 로컬(`local_integration`), A08은 guild 명령 32개 필드 없음·재시작마다 재등록. 첫 턴 notify 2회, seed 붙여넣기 실패로 재연결(연결·키 2, Codex 3턴, 사용자 승인) |
+| INT-04 (CHANGE-01·03) | 실행안 준비 중(정상 사례는 운영, 경합 사례는 격리 게시자 하네스, 실행 전 다시 승인) |
 
 ## 완료 조건
 
