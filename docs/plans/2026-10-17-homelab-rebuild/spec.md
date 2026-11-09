@@ -325,7 +325,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | [T18](issues/T18-bot-codex-bridge.md) | 봇 CODEX_BRIDGE | P4 | T16a(착수), T16b(완료) | 완료(2026-11-06. 작업 레인 owner·`homelab-smoke`만 열림, R08 수신 경로 운영 켬. 배정 시험 5개 fail 없음, 운영 not_run은 로컬 증거와 해소 티켓 T19·T21) | 에이전트 + 사람 |
 | [T19](issues/T19-bot-change-pr.md) | 봇 CHANGE_PR | P4 | T17, T18 | 완료(2026-11-07. `homelab-smoke` 하나로 켬. 배정 시험 7개와 호환·스위치 fail 없음, live 한 건이 PR 게시·병합·배포 관측까지 통과. 운영 not_run은 로컬 증거와 해소 티켓 T21) | 에이전트 + 사람 |
 | [T20](issues/T20-bot-memory-briefing.md) | 봇 MEMORY_BRIEFING | P4 | T16a(착수), T16b(완료) | 완료(2026-11-03. MEM-01·BRIEF-01·DATA-02·AUTH-02(기억 경로) live pass, fail 없음. 미확인 칸 해소는 T24·T18·T21. 시범 P-1 확장으로 기억·브리핑 실사용 2026-11-03~) | 에이전트 |
-| [T21](issues/T21-bot-release-audit.md) | 봇 V1 RELEASE_AUDIT | P4 | T17, T18, T19, T20, T25, T26, T27, T28, T29, T30(재실행) | 진행 중(1회차 감사 2026-11-07, 판정 `NOT_READY`. 출시 차단 A01·A02, 수용 시험 pass 21·fail 2·blocked 7. 수정 T25~T29 배포 끝. 남은 T30 뒤 다시 실행, T31은 결정 때 정함) | 독립 감사 에이전트 + 사람 |
+| [T21](issues/T21-bot-release-audit.md) | 봇 V1 RELEASE_AUDIT | P4 | T17, T18, T19, T20, T25, T26, T27, T28, T29, T30(재실행) | 진행 중(1회차 감사 2026-11-07, 판정 `NOT_READY`. 출시 차단 A01·A02, 수용 시험 pass 21·fail 2·blocked 7. 수정 T25~T29 배포 끝. T30 끝(2026-11-09). T31 결정 뒤 다시 실행) | 독립 감사 에이전트 + 사람 |
 | [T22](issues/T22-reconnect-apps.md) | 기존 앱 저장소 재연결·옛 저장소 정리 | P5 | T13, T16b | 완료 (2026-11-02) | 에이전트 + 사람 |
 | [T23](issues/T23-platform-followups.md) | 플랫폼 후속(T13에서 넘김: U40 2회차, 재부팅 오경보) | P2 | T13 | 완료(2026-10-30. U40 `실제 검증 완료`(앱 0개 한계), 재부팅 오경보 해결) | 에이전트 + 사람 |
 | [T24](issues/T24-bot-briefing-sources.md) | 봇 브리핑 관측 원본(인증서·복원 검증, T20에서 넘김) | P4 후속 | T20 | 완료(2026-11-04. 인증서 칸 cert-manager 지표·만료 경보, 복원 검증 칸 `restore-check` 기록 annotation, BRIEF-01 두 칸 live pass. 봇 읽기 권한 그대로) | 에이전트 + 사람 |
@@ -334,7 +334,7 @@ T15 진행: T15 결정(D-14~D-17, D-24)과 R08 보류, V1 범위 조정은 2026-
 | [T27](issues/T27-bot-raw-input-retention.md) | 봇 작업 답·변경 요청 원문의 보존과 삭제(T21 A03) | P4 후속 | 없음 | 완료(2026-11-07. 봇 #94, 배포 #1179. 두 원문 7일 정리, 다른 원문 칸은 T31) | 에이전트 + 사람 |
 | [T28](issues/T28-bot-verifier-setup-failure.md) | 봇 검증 실행기의 샌드박스 준비 실패 분류(T21 A04) | P4 후속 | 없음 | 완료(2026-11-07. 봇 #92, 작업 레인 작업자 #1180. 준비 실패 `not_run`) | 에이전트 |
 | [T29](issues/T29-bot-change-child-retry-notice.md) | 봇 CHANGE 자식 실패 안내의 복구 명령(T21 A06) | P4 후속 | 없음 | 완료(2026-11-07. 봇 #93, 배포 #1179. 자식 안내에 `/retry` 없음) | 에이전트 |
-| [T30](issues/T30-bot-v1-integration-tests.md) | 봇 V1 승인·연동 시험(T21 blocked 7건) | P4 후속 | T25(INT-04·INT-07만), T26(INT-04만) | 진행 중(INT-05 pass, INT-01 기존 증거 수용, 2026-11-08) | 에이전트 + 사람 |
+| [T30](issues/T30-bot-v1-integration-tests.md) | 봇 V1 승인·연동 시험(T21 blocked 7건) | P4 후속 | T25(INT-04·INT-07만), T26(INT-04만) | 완료(2026-11-09. INT-02·03·04·05·06·07 pass, INT-01 기존 증거 수용) | 에이전트 + 사람 |
 | [T31](issues/T31-bot-raw-text-retention.md) | 봇 원문 칸의 보존 기간 정리(T27에서 넘김) | P4 후속 | T27 | 대기(보존 기간 사용자 결정 먼저) | 에이전트 + 사람 |
 
 ### 8.2 의존성 그래프
