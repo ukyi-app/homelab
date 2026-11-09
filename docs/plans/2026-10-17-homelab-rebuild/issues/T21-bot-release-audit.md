@@ -1,9 +1,9 @@
 # T21 봇 V1 RELEASE_AUDIT
 
 - 단계: P4 봇 V1 (봇 V1 통합 검증 담당)
-- 상태: 진행 중 (1회차 감사 2026-11-07, 판정 `NOT_READY`. 수정 T25~T29 배포, 승인·연동 T30 끝, 원문 보존 T31 배포(2026-11-09). 다시 실행 대기)
+- 상태: 진행 중 (2회차 감사 2026-11-09, 판정 `NOT_READY`. 1회차 출시 차단·blocked 7건 해소, 남은 출시 차단 A09는 T32로 고친 뒤 재검증)
 - 명세: [../spec.md](../spec.md)
-- Blocked by: T17, T18, T19, T20, T25, T26, T27, T28, T29, T30(재실행), T31(재실행, 사용자 결정 2026-11-09)
+- Blocked by: T17, T18, T19, T20, T25, T26, T27, T28, T29, T30(재실행), T31(재실행, 사용자 결정 2026-11-09), T32(재검증)
 - 연결 AC: AC-B8
 - 수행: 구현 세션과 다른 독립 감사 에이전트 (`MODE=audit`). 사람은 수용 결정
 
@@ -73,3 +73,11 @@ V1을 판정한다. 판정 정의는 `04` §9, end-to-end 흐름은 `01` §9, �
 ## 검증
 
 `04` §8 보고 양식, §9 판정 기준.
+
+## 2회차 감사 (2026-11-09)
+
+- 독립 감사 Codex(`codex-work` 한도로 대체 계정 `codex`), 기준 봇 `9da65f5`·homelab `c1c0e5b`·ops `4563a2c`. 판정 `NOT_READY`.
+- 1회차 발견: A01·A02·A03·A04·A06 fixed, A05·A07·A08(low) not_fixed. 새 A09(medium, CHANGE 정리가 후보 선정 뒤 phase만 다시 봐서 새 세대 원문·증거를 즉시 지움, PGlite·PostgreSQL 18 재현)가 남은 출시 차단이다. 감사는 "A09가 없었다면 제한 대상에서 `READY_FOR_SCOPED_PILOT` 근거가 성립한다"고 적었다(두 번째 판정 아님).
+- 수용 시험 30개: pass 29·fail 1(DATA-02)·blocked 0. 1회차 blocked 7건은 T30 증거로 pass(INT-01 SEC-02는 사용자의 기존 증거 수용 범위). 전체 코드 시험 2,136 중 실패 0, SEC-02 10/10·24/24.
+- 공개 보고서는 봇 `docs/ai-bot/V1_RELEASE_REPORT.md`·`V1_TRACE.md`, 인계·증거는 ops `handoffs/release-audit-2.md`·`evidence/release-audit-2/`.
+- 다음: T32(A09) 수정·배포 뒤 A09와 DATA-02 재검증(사용자 결정 2026-11-09).
