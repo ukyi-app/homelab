@@ -1,7 +1,7 @@
 # T21 봇 V1 RELEASE_AUDIT
 
 - 단계: P4 봇 V1 (봇 V1 통합 검증 담당)
-- 상태: 진행 중 (2회차 감사 2026-11-09, 판정 `NOT_READY`. 1회차 출시 차단·blocked 7건 해소, 남은 출시 차단 A09는 T32로 고친 뒤 재검증)
+- 상태: 완료 (2026-11-09. 4회차 판정 `READY_FOR_SCOPED_PILOT`, 사용자가 기존 제한 대상 범위로 수용. V1 전체 수용(`V1_ACCEPTED`)은 아님)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T17, T18, T19, T20, T25, T26, T27, T28, T29, T30(재실행), T31(재실행, 사용자 결정 2026-11-09), T32(재검증)
 - 연결 AC: AC-B8
@@ -81,3 +81,13 @@ V1을 판정한다. 판정 정의는 `04` §9, end-to-end 흐름은 `01` §9, �
 - 수용 시험 30개: pass 29·fail 1(DATA-02)·blocked 0. 1회차 blocked 7건은 T30 증거로 pass(INT-01 SEC-02는 사용자의 기존 증거 수용 범위). 전체 코드 시험 2,136 중 실패 0, SEC-02 10/10·24/24.
 - 공개 보고서는 봇 `docs/ai-bot/V1_RELEASE_REPORT.md`·`V1_TRACE.md`, 인계·증거는 ops `handoffs/release-audit-2.md`·`evidence/release-audit-2/`.
 - 다음: T32(A09) 수정·배포 뒤 A09와 DATA-02 재검증(사용자 결정 2026-11-09).
+
+## 3회차·4회차 좁은 재검증 (2026-11-09)
+
+- 사용자 결정: T32 배포 뒤 A09·DATA-02만 다시 본다. 감사자는 Codex(`codex` 계정), 읽기·로컬 시험만.
+- 3회차(봇 `4a10f3c`): 판정 `NOT_READY` 유지. A09 `partially_fixed`(새 generation 0ms 소거는 해소, 세션 `completed` 커밋 뒤 pending 전 틈이 남음), DATA-02 fail. 관련 83/83, 전체 2,143 중 실패 0. 3회차 공개 보고서는 4회차판으로 대체해 공개하지 않았고 private ops `evidence/release-audit-3/`에 있다.
+- 4회차(봇 `772599f`, T32 2차 뒤): 판정 `READY_FOR_SCOPED_PILOT`. A09 fixed, DATA-02 pass. 수용 시험 30 pass·0 fail(요구 27/0, E2E 5/0), 활성 발견 low 3(A05·A07·A08), 관련 159/159, 전체(Node 24) 2,147 중 실패 0.
+- 판정 범위: 기존 owner·허용 채널·`homelab-smoke` 제한 시험 범위와 T30의 제한된 실연동·SEC-02 대체 증거 수용 범위. 전체 signed TaskLane 악성 경로 등 미실시 하위 사례는 그대로다.
+- 남은 위험: 작업자 정리를 끝내 확인하지 못한 세션의 CHANGE 원문 장기 보존, 백업 14일, 이미 게시한 외부 사본.
+- 사용자 결정(2026-11-09): 판정 수용, T21 완료. 대상 확대·V1 전체 수용은 별도 결정이다.
+- 공개 보고서는 봇 `docs/ai-bot/V1_RELEASE_REPORT.md`·`V1_TRACE.md`, 인계·증거는 ops `handoffs/release-audit-3.md`·`release-audit-4.md`, `evidence/release-audit-3/`·`release-audit-4/`.
