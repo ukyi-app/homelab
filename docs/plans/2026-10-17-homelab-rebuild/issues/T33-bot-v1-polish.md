@@ -1,7 +1,7 @@
 # T33 봇 V1 정비: 승인 digest 분할과 명령 재등록 (T21 4회차 low)
 
 - 단계: P4 후속 (T21 4회차 감사의 low 발견)
-- 상태: 진행 중 (2026-11-09 착수, 사용자 결정: 시범 운영 전에 정비)
+- 상태: 완료 (2026-11-09. 봇 #108 `af9dd3e`, 배포 homelab #1207, 재시작 로그 `guild` unchanged)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T21
 - 연결 AC: AC-B6 (R13), AC-B3 (F05·R02)
@@ -30,3 +30,11 @@ A07(unknown 후보 상한 뒤 진행성, `needs_verification`)은 이번 범위�
 ## 검증
 
 `04` §4의 R13(승인 digest)·F05(명령 등록) 관련 시험.
+
+## 결과 (2026-11-09)
+
+- A05: `messagePages()`가 1,800자 안의 마지막 줄바꿈에서 자른다(줄바꿈이 없거나 앞쪽이 공백 줄뿐일 때만 글자 수로). 1,800자보다 짧은 줄은 갈리지 않아 승인 명령이 한 메시지에 남는다. 별도 메시지 방식은 outbox 키가 둘이 돼 복구·순서 규칙을 새로 따져야 해서 쓰지 않았다.
+- A08: guild 명령 비교에서 `contexts`·`integration_types`를 뺐다(Discord 문서상 전역 명령 전용, guild GET은 생략). PUT 본문에는 남긴다.
+- 봇 #108(`af9dd3e`): 새 시험 `change-preview-pages` 8/8·`commands-register` 4/4(수정 전 코드에서 9건 실패), 전체 2,159 중 실패 0, Codex 지적 없음.
+- 배포 homelab #1207 뒤 재시작 로그 `commands_registered` `"guild":"unchanged"`(배포 전에는 늘 `updated`). A05는 운영에서 긴 CHANGE 안내가 아직 없어 시험으로만 확인했다.
+- 기록: 봇 `VERIFICATION.md` "T33 V1 정비", `DECISIONS.md` "T33 V1 정비". 남은 low는 A07.
