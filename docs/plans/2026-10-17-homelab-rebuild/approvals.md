@@ -1012,3 +1012,13 @@
 | 2026-11-09 16:2x | 사용자 결정 | private `ukyi-app/homelab-bot-ops` main | T21 4회차 산출물 `evidence/release-audit-4/`, `handoffs/release-audit-4.md` push `13d2066`. gitleaks 0건 | `git push` | T21 |
 | 2026-11-09 16:3x | 사용자 결정 | T21, T32 | T21 4회차 판정 `READY_FOR_SCOPED_PILOT` 수용(기존 제한 대상 범위), T21·T32 완료로 기록. 봇·homelab 문서 PR은 Codex 리뷰 뒤 병합 | 대화 기록 | T21, T32 |
 | 2026-11-09 16:3x | 사용자 결정 | 봇 PR #107 생성 | `docs/t32-verification`(head `2c14d23`, 문서만): `V1_RELEASE_REPORT`·`V1_TRACE` 4회차판, `VERIFICATION` T32 절, `PROJECT_STATUS` 판정 수용 | `gh pr create` | T21, T32 |
+| 2026-11-09 16:4x | 사용자 결정 | homelab PR #1203 생성 | `docs/t32-done`(head `d575555`, 문서만): T21·T32 완료, §8.3, 승인 16줄 | `gh pr create` | T21, T32 |
+| 2026-11-09 17:1x | 사용자 결정(위임 병합) | 봇 PR #107 | T21 4회차 `V1_RELEASE_REPORT`·`V1_TRACE`, `VERIFICATION` T32, `PROJECT_STATUS`(문서만). Codex 코드·보안 지적 없음, `build / test` 통과, head `2c14d23` 고정, 병합 `25393a5` | `gh pr merge 107 --squash --admin --match-head-commit` | T21, T32 |
+| 2026-11-09 17:3x | 사용자 결정(위임 병합) | homelab PR #1203 | Codex 코드·보안 지적 없음. `ci`는 GitHub 릴리스 다운로드 504로 실패, 다운로드 정상 확인 뒤 재실행 통과. head `d575555` 고정, 병합 `98b27a1` | `gh run rerun --failed`, `gh pr merge 1203 --squash --admin --match-head-commit` | T21, T32 |
+| 2026-11-09 17:4x | 배포(자동) | homelab #1204 | 봇 `25393a5`(문서만) 08:35:43Z 자동 병합, 파드 Ready, imageID 일치, error/warn 0 | 배포 App 자동 병합, `homelab status homelab-bot` | T21 |
+| 2026-11-09 17:4x | 사용자 승인(정리) | 로컬 작업 폴더·worktree·로컬 브랜치, 봇 원격 브랜치 20개, 로컬 이미지 5개, 재측정 도구 폴더 | T21~T32 작업 흔적. 감사 산출물은 private ops에 사본, 작업 계약 파일과 HANDOFF는 남김. 원격 브랜치는 병합 PR과 같은 head일 때만 | 대화 기록 | T21 |
+| 2026-11-09 18:0x | 실행(정리) | 위 정리 | 봇 원격 브랜치 20개(모두 병합 PR·같은 head), worktree 16개, 로컬 브랜치 34개(이전 세션 T23 브랜치 3개는 남김), 이미지 5개, 재측정 도구 폴더 삭제. private ops `0e88e1b`(인계 두 곳에 삭제 사실) | `git push --delete`, `git worktree remove`, `docker rmi`, `rm` | T21 |
+| 2026-11-09 18:2x | 사용자 결정 | T33, T34 | 다음 작업은 정비 먼저: 봇 A05(승인 digest 분할)·A08(guild 명령 재등록)은 T33, homelab CI 도구 다운로드의 GitHub 장애 내성은 T34. 이어서 V1 시범 운영 계획(`V1_ACCEPTED`) 초안 | 대화 기록 | T33, T34 |
+| 2026-11-09 18:5x | 사용자 결정 | homelab PR #1205 생성 | `docs/t33-t34-tickets`(문서만): T33·T34 티켓, spec §2·§8, README, 승인 7줄. 같은 PR에 T35를 더함 | `gh pr create` | T33, T34, T35 |
+| 2026-11-09 19:2x | 사용자 결정 | T35 | V1 시범 운영은 지금 범위 그대로(owner·허용 채널·`homelab-smoke`), 기간 2주(T33 배포 다음 날 시작), 끝에 사용자가 수용하면 `V1_ACCEPTED` | 대화 기록 | T35 |
+| 2026-11-09 19:3x | 사용자 결정 | T35 | T35 시작을 동료 봇 작업(멘션 호출·동료 말투·제안+확인 버튼·CLI 계정 전환, `docs/plans/2026-11-09-bot-colleague/` C01~C24) 완료 뒤로 미룸. 다른 세션이 전한 결정을 사용자에게 직접 확인. 범위·기간은 그대로. T33·T34는 그대로 진행 | 대화 기록 | T35 |
