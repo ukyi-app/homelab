@@ -39,11 +39,30 @@ jobs:
           # 토큰을 .git/config에 남기지 않는다. 뒤 단계는 쓰기도 인증도 필요 없다.
           persist-credentials: false
 
+      # 도구 압축 파일 캐시. GitHub 익명 다운로드 장애(2026-11-09, 504가 수십 분) 때도 캐시가 있으면 밖에서 받지 않는다.
+      # 캐시는 믿지 않는다: 아래 설치 단계가 복원한 파일마다 sha256을 다시 보고, 다르면 지우고 새로 받는다.
+      # 범위(GitHub 문서 dependency-caching): PR 실행이 저장한 캐시는 그 PR의 merge ref에만 보이고, main 범위에는
+      # push 같은 신뢰 트리거만 쓴다. 그래서 평소 PR은 main push가 저장한 캐시를 읽기만 한다.
+      # key에 ci.yaml을 넣어 sha256이 바뀌면 새 항목으로 저장한다. restore-keys는 그때 옛 항목을 복원해
+      # 바뀐 도구만 받게 한다. 파일 이름이 도구마다 하나라 옛 버전이 쌓이지 않는다.
+      # path는 아래 설치 단계의 $RUNNER_TEMP/ci-tools와 같아야 한다. path가 캐시 version에 들어가 다르면 적중하지 않는다.
+      - name: Restore tool archives
+        id: tools-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ci-tools
+          key: ci-tools-${{ hashFiles('.tool-versions', '.github/workflows/ci.yaml') }}
+          restore-keys: ci-tools-
+
       - name: Install pinned tools
         # 버전은 .tool-versions에서 읽고, 받은 파일은 아래 sha256과 대조한다. TLS만 믿지 않는다.
         # .tool-versions에서 버전을 바꾸면 아래 sha256도 같은 커밋에서 바꾼다. 안 바꾸면 여기서 실패한다.
         # GITHUB_PATH는 PATH 앞에 붙으므로 러너 이미지에 깔린 같은 이름의 도구보다 이것이 먼저 잡힌다.
         env:
+          # 캐시에 없는 GitHub 릴리스 자산을 인증 REST API로 받는 데만 쓴다(아래 fetch_gh). 권한은 job의 contents: read
+          # 그대로다. 공개 저장소 릴리스는 권한 없이 읽히고, 토큰은 익명 IP 한도(시간당 60) 대신
+          # 저장소 한도(시간당 1,000)를 쓰게 한다. fork PR에도 읽기 전용 토큰이 나온다.
+          GH_TOKEN: ${{ github.token }}
           ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8" # 1.7.12 linux_amd64
           GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb" # 8.30.1 linux_x64
           KUSTOMIZE_SHA256: "029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d" # 5.8.1 linux_amd64
@@ -56,8 +75,15 @@ jobs:
           VMUTILS_SHA256: "989c8f73edc5d131eb169bb689d7b77bb1d31b14314159c7f6bbae38ba655938" # 1.154.1 linux-amd64(enterprise 아님)
         run: |
           bin="$RUNNER_TEMP/bin"
-          dl="$RUNNER_TEMP/dl"
+          # 위 Restore tool archives의 path와 같은 곳이다. 받은 압축 파일만 두고, 푼 바이너리는 두지 않는다.
+          dl="$RUNNER_TEMP/ci-tools"
           mkdir -p "$bin" "$dl"
+
+          # 재시도는 curl 기본 대상(시간 초과, HTTP 408·429·500·502·503·504·522·524)에 연결 거부를 더한다.
+          # 간격은 1초부터 두 배씩, 파일 하나에 240초까지다. 짧은 끊김용이고, 수십 분짜리 장애는 캐시가 맡는다.
+          # --retry-all-errors는 쓰지 않는다. 404(버전·자산 이름 오타)도 4분씩 다시 시도해 원인만 늦게 보인다.
+          # 응답은 파일(-o)로만 받는다. 파이프로 받으면 중간에 끊긴 뒤 재시도한 내용이 이어 붙는다(curl 문서).
+          retry=(--retry 8 --retry-connrefused --retry-max-time 240 --connect-timeout 20 --max-time 300)
 
           # 결과는 전역 v에 둔다. $(...)로 받으면 아래 ::error:: 줄까지 삼켜 로그에 안 남는다.
           ver() {
@@ -68,51 +94,94 @@ jobs:
             fi
           }
 
-          fetch() {
-            local url=$1 sum=$2 out=$3
-            curl -fsSL --retry 3 -o "$out" "$url"
+          # 캐시에서 온 파일이 sha256과 맞으면 받지 않는다. 다르면(버전을 올렸거나 캐시가 깨졌으면) 지우고 새로 받는다.
+          # 캐시 오염도 여기서 막힌다: 맞는 파일을 만들려면 sha256 원상(preimage)이 있어야 한다.
+          cached() {
+            local sum=$1 out=$2
+            if [[ -f $out ]] && echo "$sum  $out" | sha256sum -c --status -; then
+              echo "캐시 사용: ${out##*/}"
+              return 0
+            fi
+            rm -f "$out"
+            return 1
+          }
+
+          verify() {
+            local sum=$1 out=$2 src=$3
             if ! echo "$sum  $out" | sha256sum -c --quiet -; then
-              echo "::error::sha256 불일치: $url (.tool-versions 버전을 바꿨다면 ci.yaml의 sha256도 바꾼다)"
+              echo "::error::sha256 불일치: $src (.tool-versions 버전을 바꿨다면 ci.yaml의 sha256도 바꾼다)"
               return 1
             fi
           }
 
+          # GitHub 밖 호스트(helm, terraform)는 주소에서 바로 받는다.
+          fetch_url() {
+            local url=$1 sum=$2 out=$3
+            cached "$sum" "$out" && return 0
+            curl -fsSL "${retry[@]}" -o "$out" "$url"
+            verify "$sum" "$out" "$url"
+          }
+
+          # GitHub 릴리스 자산은 웹 주소(github.com/<저장소>/releases/download/...) 대신 REST API를 토큰으로 부른다.
+          # 2026-11-09 장애("surge in anonymous users")에서 504가 난 것은 익명 웹 주소였다. 웹 주소에 토큰을 붙이는 방법은
+          # 문서에 없어 쓰지 않는다. 자산 받기는 문서대로 Accept: application/octet-stream이고, 302(다른 호스트의 서명 주소)와
+          # 200을 모두 받을 수 있다. curl은 --oauth2-bearer 자격을 처음 호스트에만 보내고 리디렉션된 다른 호스트에는 넘기지
+          # 않는다(curl 문서 -L. --location-trusted를 쓰지 않는다). 러너와 같은 curl 8.5.0으로 release-assets 호스트에
+          # Authorization이 가지 않는 것을 확인했다(2026-11-09).
+          # 자산 id는 tags API 응답에서 이름이 정확히 같은 것으로 고른다. 응답은 임시 파일로 받고 캐시 경로에는 두지 않는다.
+          fetch_gh() {
+            local repo=$1 tag=$2 name=$3 sum=$4 out=$5 id
+            local meta="$RUNNER_TEMP/release.json"
+            cached "$sum" "$out" && return 0
+            curl -fsSL "${retry[@]}" --oauth2-bearer "$GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              -o "$meta" "https://api.github.com/repos/$repo/releases/tags/$tag"
+            id=$(jq -r --arg n "$name" '.assets[] | select(.name == $n) | .id' "$meta")
+            if [[ ! $id =~ ^[0-9]+$ ]]; then
+              echo "::error::릴리스 자산을 찾지 못했다: $repo $tag $name"
+              return 1
+            fi
+            curl -fsSL "${retry[@]}" --oauth2-bearer "$GH_TOKEN" -H "Accept: application/octet-stream" \
+              -o "$out" "https://api.github.com/repos/$repo/releases/assets/$id"
+            verify "$sum" "$out" "$repo $tag $name"
+          }
+
           ver actionlint
-          fetch "https://github.com/rhysd/actionlint/releases/download/v${v}/actionlint_${v}_linux_amd64.tar.gz" "$ACTIONLINT_SHA256" "$dl/actionlint.tar.gz"
+          fetch_gh rhysd/actionlint "v${v}" "actionlint_${v}_linux_amd64.tar.gz" "$ACTIONLINT_SHA256" "$dl/actionlint.tar.gz"
           tar -xzf "$dl/actionlint.tar.gz" -C "$bin" actionlint
 
           ver gitleaks
-          fetch "https://github.com/gitleaks/gitleaks/releases/download/v${v}/gitleaks_${v}_linux_x64.tar.gz" "$GITLEAKS_SHA256" "$dl/gitleaks.tar.gz"
+          fetch_gh gitleaks/gitleaks "v${v}" "gitleaks_${v}_linux_x64.tar.gz" "$GITLEAKS_SHA256" "$dl/gitleaks.tar.gz"
           tar -xzf "$dl/gitleaks.tar.gz" -C "$bin" gitleaks
 
+          # 태그 이름에 /가 들어 있다(kustomize/v5.8.1). tags API는 그대로 받는다(2026-11-09 확인).
           ver kustomize
-          fetch "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${v}/kustomize_v${v}_linux_amd64.tar.gz" "$KUSTOMIZE_SHA256" "$dl/kustomize.tar.gz"
+          fetch_gh kubernetes-sigs/kustomize "kustomize/v${v}" "kustomize_v${v}_linux_amd64.tar.gz" "$KUSTOMIZE_SHA256" "$dl/kustomize.tar.gz"
           tar -xzf "$dl/kustomize.tar.gz" -C "$bin" kustomize
 
           # actionlint가 run: 블록을 검사할 때 PATH의 shellcheck를 쓴다. 러너 이미지 버전에 맡기면 결과가 바뀐다.
           ver shellcheck
-          fetch "https://github.com/koalaman/shellcheck/releases/download/v${v}/shellcheck-v${v}.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256" "$dl/shellcheck.tar.xz"
+          fetch_gh koalaman/shellcheck "v${v}" "shellcheck-v${v}.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256" "$dl/shellcheck.tar.xz"
           tar -xJf "$dl/shellcheck.tar.xz" -C "$bin" --strip-components=1 "shellcheck-v${v}/shellcheck"
 
           ver bun
-          fetch "https://github.com/oven-sh/bun/releases/download/bun-v${v}/bun-linux-x64.zip" "$BUN_SHA256" "$dl/bun.zip"
+          fetch_gh oven-sh/bun "bun-v${v}" bun-linux-x64.zip "$BUN_SHA256" "$dl/bun.zip"
           unzip -q -j "$dl/bun.zip" bun-linux-x64/bun -d "$bin"
 
           ver helm
-          fetch "https://get.helm.sh/helm-v${v}-linux-amd64.tar.gz" "$HELM_SHA256" "$dl/helm.tar.gz"
+          fetch_url "https://get.helm.sh/helm-v${v}-linux-amd64.tar.gz" "$HELM_SHA256" "$dl/helm.tar.gz"
           tar -xzf "$dl/helm.tar.gz" -C "$bin" --strip-components=1 linux-amd64/helm
 
           ver kubeconform
-          fetch "https://github.com/yannh/kubeconform/releases/download/v${v}/kubeconform-linux-amd64.tar.gz" "$KUBECONFORM_SHA256" "$dl/kubeconform.tar.gz"
+          fetch_gh yannh/kubeconform "v${v}" kubeconform-linux-amd64.tar.gz "$KUBECONFORM_SHA256" "$dl/kubeconform.tar.gz"
           tar -xzf "$dl/kubeconform.tar.gz" -C "$bin" kubeconform
 
           ver terraform
-          fetch "https://releases.hashicorp.com/terraform/${v}/terraform_${v}_linux_amd64.zip" "$TERRAFORM_SHA256" "$dl/terraform.zip"
+          fetch_url "https://releases.hashicorp.com/terraform/${v}/terraform_${v}_linux_amd64.zip" "$TERRAFORM_SHA256" "$dl/terraform.zip"
           unzip -q "$dl/terraform.zip" terraform -d "$bin"
 
           # amtool만 쓴다(tools/ci/alerting.ts). .tool-versions의 이름은 mise backend 접두가 붙은 aqua:prometheus/alertmanager다.
           ver aqua:prometheus/alertmanager
-          fetch "https://github.com/prometheus/alertmanager/releases/download/v${v}/alertmanager-${v}.linux-amd64.tar.gz" "$ALERTMANAGER_SHA256" "$dl/alertmanager.tar.gz"
+          fetch_gh prometheus/alertmanager "v${v}" "alertmanager-${v}.linux-amd64.tar.gz" "$ALERTMANAGER_SHA256" "$dl/alertmanager.tar.gz"
           tar -xzf "$dl/alertmanager.tar.gz" -C "$bin" --strip-components=1 "alertmanager-${v}.linux-amd64/amtool"
 
           # vmalert-tool-prod만 쓴다. .tool-versions의 이름에 mise 옵션 괄호가 붙어 ver의 정확한 일치 대신 접두로 찾는다.
@@ -121,7 +190,7 @@ jobs:
             echo "::error::.tool-versions에 vmutils(github:VictoriaMetrics/VictoriaMetrics) 버전이 없다"
             exit 1
           fi
-          fetch "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v${v}/vmutils-linux-amd64-v${v}.tar.gz" "$VMUTILS_SHA256" "$dl/vmutils.tar.gz"
+          fetch_gh VictoriaMetrics/VictoriaMetrics "v${v}" "vmutils-linux-amd64-v${v}.tar.gz" "$VMUTILS_SHA256" "$dl/vmutils.tar.gz"
           tar -xzf "$dl/vmutils.tar.gz" -C "$bin" vmalert-tool-prod
 
           "$bin/actionlint" -version
@@ -136,9 +205,50 @@ jobs:
           "$bin/vmalert-tool-prod" --version
           echo "$bin" >> "$GITHUB_PATH"
 
+      # 열 개가 모두 sha256을 통과한 뒤에만 저장한다. bun run ci보다 앞에 둬 검사가 실패한 실행도 다음 실행에 캐시를 남긴다.
+      # PR 실행의 저장은 그 PR 범위에만 남는다. 정확히 적중했으면 같은 key로 다시 저장할 수 없어 건너뛴다.
+      - name: Save tool archives
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ci-tools
+          key: ${{ steps.tools-cache.outputs.cache-primary-key }}
+
+      # bun run ci도 GitHub에서 익명으로 받는 것이 있다: provider(registry가 github.com 릴리스 주소를 준다)와
+      # kubeconform 스키마(raw.githubusercontent.com, tools/ci/render.ts). 도구 캐시만 두면 장애 때 여기서 멈춘다.
+      # provider는 Terraform이 .terraform.lock.hcl 해시와 맞을 때만 캐시에서 쓴다(-lockfile=readonly, Terraform 문서
+      # provider plugin cache). 스키마는 커밋 SHA로 고정한 주소의 내용이고 검증 장치가 없어, main 범위에 쓸 수 있는
+      # 신뢰 트리거(push)와 그 PR 자신만 이 캐시를 만든다는 범위 규칙에 기댄다.
+      # restore-keys를 두지 않는다. provider 캐시는 옛 버전을 지우지 않아(Terraform 문서) 이어 받으면 계속 쌓인다.
+      - name: Restore check downloads
+        id: deps-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/tf-plugins
+            ${{ runner.temp }}/kubeconform-cache
+          key: ci-deps-${{ hashFiles('infra/*/.terraform.lock.hcl', 'tools/ci/render.ts', '.tool-versions') }}
+
       - name: bun run ci
         # npm 패키지(typescript·@types/bun, devDependencies)는 bun run ci의 cli typecheck 단계가 받는다(로컬과 같은 명령, L42).
         # bun install --frozen-lockfile --ignore-scripts라 bun.lock의 무결성 해시와 다른 내용이나 설치 스크립트는 돌지 않는다.
-        # 캐시는 두지 않는다(매 실행 registry에서 받고 해시로 확인).
+        # npm 패키지는 캐시하지 않는다(registry.npmjs.org라 GitHub 장애와 무관, 매 실행 받고 해시로 확인).
         # provider는 Terraform registry에서 받고 .terraform.lock.hcl 해시로 확인한다(-lockfile=readonly).
-        run: bun run ci
+        # 두 캐시 경로는 위 Restore check downloads의 path와 같다. tools/ci가 이 환경 변수를 읽는다.
+        env:
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugins
+          KUBECONFORM_CACHE: ${{ runner.temp }}/kubeconform-cache
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR" "$KUBECONFORM_CACHE"
+          bun run ci
+
+      # bun run ci가 통과한 실행만 저장한다(if의 기본 success()). 중간에 멈춘 실행의 빈 캐시가 정확한 key를 차지하면
+      # 그 key가 바뀔 때까지 복원만 되고 다시 저장되지 않는다.
+      - name: Save check downloads
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/tf-plugins
+            ${{ runner.temp }}/kubeconform-cache
+          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
