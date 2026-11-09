@@ -1,7 +1,7 @@
 # C25 작업자 변경 작성 v2: 확인할 것·선택지 질문·수정 차례 입력
 
 - 단계: 1 기반
-- 상태: 대기 (선행: C03)
+- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 C03 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10 "변경 질문 줄이기"·"수정 요청"·"안내 댓글", §5 AC-25, AC-28 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C03
 - 연결 AC: AC-25(S2: 작성 모델 출력 계약), AC-28(S2: 작성 입력의 자료 블록)

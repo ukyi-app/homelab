@@ -1,7 +1,7 @@
 # C05 관리 CLI `homelab bot`
 
 - 단계: 1 기반
-- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 C01 integrated)
+- 상태: 진행 중 (봇 #115 병합 `cad247e`: 비상 정지·해제·상태 보기. homelab #1216 owner 검토 대기. 차단·unknown 해제·멈춘 작업 재개는 기존 함수가 owner 행위자를 요구해 미지원, 분할 여부 사용자 결정 대기)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3(동작 목록의 관리 기능 행), §4.8(관리 기능, ARCHITECTURE 계약 변경), §5 AC-20 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01
 - 연결 AC: AC-20

@@ -1,7 +1,7 @@
 # C07 답장·owner 호출·스레드 제목·작은 표식
 
 - 단계: 2 배포와 표면
-- 상태: 대기 (선행: C04, C09)
+- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 C04·C09 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.4(대조 표식, 스레드 제목, 답장과 owner 호출), §5 AC-12 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C04, C09
 - 연결 AC: AC-12
