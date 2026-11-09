@@ -1,7 +1,7 @@
 # C26 GitHub 쓰기·읽기 확장: fast-forward 갱신, PR 리뷰·댓글 읽기, 안내 리뷰 게시 포트
 
 - 단계: 1 기반
-- 상태: 진행 중 (ready-for-agent, 2026-11-09 착수)
+- 상태: integrated (봇 #113 병합 `1ef5843`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10 "GitHub 쓰기"·"수정 요청"·"안내 댓글"·"PR 댓글 경계", §5 AC-27, AC-28, §8 "PR 댓글 자료" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: 없음
 - 연결 AC: AC-27(포트), AC-28(포트)
@@ -37,10 +37,10 @@
 
 ## 완료 조건
 
-- [ ] writer가 자기 변경 브랜치를 기대 head에서 새 커밋으로만 fast-forward 갱신하고, 강제 갱신·다른 브랜치·기대 head 불일치는 요청을 보내지 않는다.
-- [ ] 리뷰 App 읽기 포트가 PR 하나의 리뷰·리뷰 댓글·대화 댓글을 작성자 ID·association과 함께 자료로 돌려주고, 다른 PR의 글이 섞이지 않는다.
-- [ ] 게시 포트가 봇 PR에 `COMMENT` 리뷰(인라인 포함)만 달고, 유실 뒤에는 표식으로 회수하며 다시 보내지 않는다.
-- [ ] 병합해도 GitHub에 나가는 요청과 owner가 보는 동작이 그대로다(부르는 곳 없음).
+- [x] writer가 자기 변경 브랜치를 기대 head에서 새 커밋으로만 fast-forward 갱신하고, 강제 갱신·다른 브랜치·기대 head 불일치는 요청을 보내지 않는다.
+- [x] 리뷰 App 읽기 포트가 PR 하나의 리뷰·리뷰 댓글·대화 댓글을 작성자 ID·association과 함께 자료로 돌려주고, 다른 PR의 글이 섞이지 않는다.
+- [x] 게시 포트가 봇 PR에 `COMMENT` 리뷰(인라인 포함)만 달고, 유실 뒤에는 표식으로 회수하며 다시 보내지 않는다.
+- [x] 병합해도 GitHub에 나가는 요청과 owner가 보는 동작이 그대로다(부르는 곳 없음).
 
 ## 검증
 
@@ -50,4 +50,10 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #113(`feat/colleague-c26-github-io`, 결과 head `9ae002d`), 병합 `1ef5843`(2026-11-10). 첫 작업자는 2026-11-09 22:48 NUC 커널 크래시로 최종 답 없이 끊겼고, 이어받은 작업자가 커밋 6개를 티켓과 대조해 코드 추가 없이 완료 검사만 했다.
+- 구현: `src/github-writer.ts` `GitHubWriterPort.fastForwardBranch`(ROUTES에 자기 변경 브랜치 `PATCH git/refs` 한 줄, body는 `sha`·`force:false`만, 부모 불일치는 `not_sent(not_fast_forward)`, 유실·409·422는 ref 재조회 대조만). `src/github-review-io.ts` `discussion.read`(리뷰·리뷰 댓글·대화 댓글, 작성자 ID·association, 상한·truncated, 다른 PR·저장소 거부)와 `guidance.post`·`guidance.find`(COMMENT·RIGHT 인라인, `guidanceMarker` 회수, 재전송 없음). `src/github-app.ts` ALLOWED에 GET 두 줄.
+- 완료 조건 근거: `test/github-writer.test.ts` "C26 writer:" 6건, `test/github-review-app.test.ts` "PR 자료 읽기:" 4건·"안내 리뷰 게시:" 3건·허용 경로 1건. 부르는 곳: `src`에서 두 파일 밖 사용 0(grep).
+- 검사: 작업자 관련 시험 372 pass·0 fail·0 skip(실제 PG 포함). 통합 담당 전체 검사(`9ae002d`, node 24.22.0, 실제 PG, 잠금): 2176 tests / 2154 pass / 0 fail / 22 skip(SEC02_IMAGE). Codex 코드·보안 지적 없음, `build / test` 통과.
+- 분해 불일치(작은 차이): 갱신 거부는 422 외 409도 같은 대조. 부모 불일치는 `head_changed`가 아니라 `not_sent(not_fast_forward)`.
+- [미확인] 대화 댓글 읽기(`issues/{n}/comments`)가 리뷰 App의 `pull_requests:read`로 되는지. 첫 실제 호출(C27·C24 S5)에서 403이면 App에 `issues:read` 추가가 사람 작업이다.
+- 뒤 티켓에 넘김: C27은 `fastForwardBranch`를 `ChangeWriterPort`에 올리고 `discussion.read`에 두 App의 사용자 ID(`selfAuthors`)를 넘긴다. C29는 `guidance.post`·`find`와 outbox 처리(`unknown`인데 `find`로도 못 찾으면 포트는 다시 게시하지 않음). C30은 정책 목록 밖 저장소 설치 조회(지금은 `Denied`, 게시는 `not_sent(repository_denied)`).

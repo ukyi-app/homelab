@@ -8,7 +8,7 @@
 - 수행: 에이전트
 - 저장소·PR: 봇 PR
 - 파일 소유:
-  - 봇 `src/store.ts`: 연결 파일, 소유 C09. 이 티켓은 모델 멈춤 기록·재개 자리를 고친다: `waitForUser`(멈춤 시작), `releaseScheduler`, `controlLocked`의 `resume-model`(해제 때 바로 재개), 작업 레인 장벽(`taskLaneStopped`), 대화 claim.
+  - 봇 `src/store.ts`: 연결 파일, 소유 C04. 이 티켓은 모델 멈춤 기록·재개 자리를 고친다: `waitForUser`(멈춤 시작), `releaseScheduler`, `controlLocked`의 `resume-model`(해제 때 바로 재개), 작업 레인 장벽(`taskLaneStopped`), 대화 claim.
   - 봇 `src/claude-task-bridge.ts`, `src/codex.ts`: 연결 파일, 소유 C09. 작업 레인 응답의 한도 정보를 읽어 같은 멈춤 기록에 넣는 자리만.
   - 봇 `src/runtime.ts`: 대화 레인 결과 처리(`limited`·`auth_expired` → `waitForUser`). 연결 표에 없는 공유 파일이다(C11이 v2 답 처리를, C20이 대기 안내를 같은 파일에서 고친다. README 5절에 반영).
   - 봇 `src/review.ts`: 리뷰 claim(`ReviewRuntime.claim`)과 리뷰 결과의 한도 처리. 연결 파일, 소유 C12(README 5절, 뒤 티켓 C18·C19·C20). 이 티켓은 claim 조건과 한도 정보 저장 자리만 고친다.

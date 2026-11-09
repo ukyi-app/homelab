@@ -1,14 +1,14 @@
 # C05 관리 CLI `homelab bot`
 
 - 단계: 1 기반
-- 상태: 대기 (선행: C01)
+- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 C01 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3(동작 목록의 관리 기능 행), §4.8(관리 기능, ARCHITECTURE 계약 변경), §5 AC-20 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01
 - 연결 AC: AC-20
 - 수행: 에이전트 + 사람(운영 확인: 봇 배포 뒤 승인받고 운영 1회 실행)
 - 저장소·PR: 봇 PR → homelab PR (봇 이미지가 운영에 배포된 뒤 homelab PR을 병합한다)
 - 파일 소유:
-  - 봇: 새 관리 진입점(예: `src/admin-main.ts`와 명령 처리 모듈, 이름은 구현 때 정함) 소유. 기존 처리 경로를 부르기만 한다: `src/store.ts`(`control`의 `emergency-stop`·`resume-model`·`model-status`, `audit`. 연결 파일, 소유 C09. 시그니처를 바꾸지 않는다), `src/policy.ts`(거부 목록 `denied_actors`. 표에 없는 공유 파일, C01도 고침), 작업 레인 해제 `src/claude-task-bridge.ts`·`src/codex.ts`의 `release`(연결 파일, 소유 C09. 시그니처를 바꾸지 않는다). `docs/ai-bot/ARCHITECTURE.md` §6 "허용 목록 반영"의 "즉시 철회 명령의 경계" 문단은 이 티켓이 고친다(추가만 규칙의 예외, 명세 4.8이 지정). 시험 `test/revoke-dispatch.test.ts`·`test/revoke-dispatch-pg.test.ts` 계열과 새 관리 진입점 시험.
+  - 봇: 새 관리 진입점(예: `src/admin-main.ts`와 명령 처리 모듈, 이름은 구현 때 정함) 소유. 기존 처리 경로를 부르기만 한다: `src/store.ts`(`control`의 `emergency-stop`·`resume-model`·`model-status`, `audit`. 연결 파일, 소유 C04(README 5절). 시그니처를 바꾸지 않는다), `src/policy.ts`(거부 목록 `denied_actors`. 표에 없는 공유 파일, C01도 고침), 작업 레인 해제 `src/claude-task-bridge.ts`·`src/codex.ts`의 `release`(연결 파일, 소유 C09. 시그니처를 바꾸지 않는다). `docs/ai-bot/ARCHITECTURE.md` §6 "허용 목록 반영"의 "즉시 철회 명령의 경계" 문단은 이 티켓이 고친다(추가만 규칙의 예외, 명세 4.8이 지정). 시험 `test/revoke-dispatch.test.ts`·`test/revoke-dispatch-pg.test.ts` 계열과 새 관리 진입점 시험.
   - homelab: `cli/` `homelab bot` 명령 묶음 소유(연결 파일, 뒤에 C22 `account add/use/list`, C23 `--by api`가 더한다). 새 명령 파일(예: `cli/src/commands/bot.ts`), 등록 `cli/src/registry.ts`, 봇 파드 exec 도우미(`cli/src/core/podops.ts`, 문맥 타입 `cli/src/core/command.ts`, 조립 `cli/src/core/runtime.ts`), 시험 `cli/test/commands/` 새 파일과 `cli/test/stub.ts` 필요분, 안내 `cli/README.md`, 설계 `docs/plans/2026-10-17-homelab-rebuild/platform/design.md` C.7 명령 표 행. 공유 파일(README 5절에 반영): `cli/src/core/podops.ts`·`command.ts`·`runtime.ts`, `cli/README.md`, design C.7 표(C22·C23도 고침).
 - 설계 계약:
   - 봇 관리 진입점: ARCHITECTURE §6 "보안 경계"의 "허용 목록 반영(F01, AUTH-02)" 문단(즉시 철회의 경계, `revocationRestores` 해제 규칙), §11 "조회·예산·작업자 제어", §12 "작업 정리와 `unknown` 막힘" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/ARCHITECTURE.md). DECISIONS "동료 봇 전환 (사용자 2026-11-09)" 3, "작업 레인 unknown과 비상 중지 (사용자 2026-11-05)" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/DECISIONS.md).
