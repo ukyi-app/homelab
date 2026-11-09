@@ -9,7 +9,7 @@ import { runEngine } from "./engine";
 import { PLAN_WRITE_BLOCKED, makeExec, makeForward, makePipe, type Exec } from "./exec";
 import { pgRestoreWrite } from "./pgrestore";
 import { appRepoWrite, ghRead, ghcrRead, githubDelegate, webRead, wrapperApply } from "./github";
-import { httpWrite, pgWrite, valkeyWrite } from "./podops";
+import { botRead, botWrite, httpWrite, pgWrite, valkeyWrite } from "./podops";
 import { infisicalRead, infisicalWrite, projectResolver } from "./infisical";
 import { readSecretInput } from "./input";
 import { kubeRead, kubeWrite } from "./kubectl";
@@ -72,6 +72,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       valkey: valkeyWrite(exec, k8sRead, kube.pollMs ?? 2_000),
       http: httpWrite(makeForward(exec, { env: o.env, live: () => live })),
       pgRestore: pgRestoreWrite(exec, k8sRead, makePipe({ env: o.env, live: () => live }), (ns, job) => k8sRead.waitCondition("job", ns, { jobPods: job }, "Ready", 60)),
+      bot: botWrite(exec, k8sRead),
       progress: o.progress,
     };
     if (o.wrapper && delegateRead) {
@@ -93,6 +94,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
     repo: repoRead(readExec),
     ghcr: ghcrRead(readExec),
     web: webRead(readExec),
+    bot: botRead(kubeRead(readExec, kube)),
     tools: toolsRead(readExec, o.env),
     progress: o.progress,
     // 엔진은 한 번에 하나만 돈다(중첩·병렬 거부). 한 apply의 쓰기 문맥이 살아 있는 동안 다른 엔진의 단계가 돌 수 없다.

@@ -2,7 +2,7 @@
 // 셸 텍스트는 이 파일의 상수이고 명령이 넘기는 것은 정규식을 거친 이름과 Secret뿐이다. 이름은 셸에 끼우지 않고 위치 인자로
 // 넘긴다(sh -c '...' sh <인자>). 비밀번호는 stdin으로만 넘기고(-a·env는 ps에 보인다, restore.md 0.3), 거부 판정은 core 고정
 // 정규식(exec signals)으로 받는다(민감 호출의 stderr 원문은 버린다).
-import type { HttpWrite, KubeRead, PgWrite, ValkeyCommand, ValkeyWrite } from "./command";
+import type { BotAdminCommand, BotAdminReport, BotRead, BotWrite, HttpWrite, KubeRead, PgWrite, ValkeyCommand, ValkeyWrite } from "./command";
 import { ExecTimeout, why, type Exec, type Forward } from "./exec";
 import { jsonParse } from "./intrinsics";
 import { APP_NAME, fullMatch } from "./names";
@@ -150,6 +150,99 @@ export function valkeyWrite(exec: Exec, k8s: KubeRead, pollMs: number): ValkeyWr
       if (r.signals?.includes("rejected")) return "rejected";
       if (r.code === 0 && r.stdout.trim() === "PONG") return "accepted";
       throw new Error(`Valkey 인증 확인: ${why(r)}`);
+    },
+  };
+}
+
+// 봇 관리 기능(homelab bot). 대상(ns·앱·컨테이너)과 진입점은 봇 계약이라 여기 고정한다(설계 C.8 봇 저장소, 봇 ARCHITECTURE §14
+// "연결 지점"의 admin-main). 명령은 동작과 형식 검사를 거친 ID만 넘기고, 그것도 위치 인자로만 간다(셸 없음).
+export const BOT_NS = "app-homelab-bot";
+const BOT_APP = "homelab-bot";
+export const BOT_ENTRY = ["node", "/app/dist/src/admin-main.js"];
+const BOT_SCHEMA = "homelab-bot-admin/v1";
+const BOT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const BOT_SNOWFLAKE = /^[1-9][0-9]{16,19}$/;
+const BOT_RESULTS = new Set(["stopped", "already_stopped", "released", "not_stopped", "running_jobs", "status", "unsupported", "usage", "failed"]);
+const BOT_EXITS = new Set([0, 1, 3, 4, 64]);
+
+function botWords(cmd: BotAdminCommand): string[] {
+  const id = (re: RegExp, v: string) => {
+    if (!re.test(v)) throw new Error("봇 관리 명령의 ID 형식이 아니다");
+    return v;
+  };
+  switch (cmd.name) {
+    case "emergency-stop":
+    case "status":
+      return [cmd.name];
+    case "resume":
+      return cmd.target === "emergency-stop" ? ["resume", "emergency-stop"] : ["resume", "job", id(BOT_UUID, cmd.job)];
+    case "block":
+      return ["block", id(BOT_SNOWFLAKE, cmd.user)];
+    case "release":
+      return ["release", id(BOT_UUID, cmd.job)];
+  }
+  throw new Error("봇 관리 명령이 아니다");
+}
+
+const ready = (p: any) => (p?.status?.conditions ?? []).some((c: any) => c?.type === "Ready" && c?.status === "True");
+
+// 봇 출력의 마지막 줄 JSON에서 결과 이름과 상태 값만 꺼낸다. 꼴이 다르면 원문 없이 던진다.
+function botReport(stdout: string, exit: number): BotAdminReport {
+  const fail = () => new Error(`봇 관리 진입점 출력이 정해진 꼴이 아니다(exit ${exit})`);
+  if (!BOT_EXITS.has(exit)) throw fail();
+  let doc: any;
+  try {
+    doc = jsonParse(stdout.trim().split("\n").at(-1) ?? "");
+  } catch {
+    throw fail();
+  }
+  if (doc === null || typeof doc !== "object" || doc.schema !== BOT_SCHEMA || typeof doc.result !== "string" || !BOT_RESULTS.has(doc.result)) throw fail();
+  const s = doc.state;
+  if (s === undefined) return { exit, result: doc.result, state: null };
+  const flags = ["emergency", "paused", "executionPending"].every((k) => typeof s?.[k] === "boolean");
+  const lane = s?.taskLaneClosed === null || (typeof s?.taskLaneClosed === "string" && /^[a-z_]{1,32}$/.test(s.taskLaneClosed));
+  if (!flags || !lane) throw fail();
+  return { exit, result: doc.result, state: { emergency: s.emergency, paused: s.paused, executionPending: s.executionPending, taskLaneClosed: s.taskLaneClosed } };
+}
+
+export function botRead(k8s: KubeRead): BotRead {
+  return {
+    pod() {
+      const live = k8s.list("pod", BOT_NS, `homelab.ukyi.app/app=${BOT_APP}`).filter(
+        (p) =>
+          p?.metadata?.namespace === BOT_NS &&
+          p?.metadata?.labels?.["homelab.ukyi.app/app"] === BOT_APP &&
+          p?.metadata?.labels?.["homelab.ukyi.app/role"] === undefined &&
+          (p?.metadata?.ownerReferences ?? []).some((o: any) => o?.kind === "ReplicaSet") &&
+          p?.metadata?.deletionTimestamp === undefined &&
+          p?.status?.phase === "Running" &&
+          ready(p),
+      );
+      if (live.length !== 1) throw new Error(`${BOT_NS}에 Running·Ready인 봇 게시 서버 파드가 ${live.length}개다(하나여야 실행한다)`);
+      const name = live[0].metadata.name;
+      if (typeof name !== "string" || !NAME.test(name) || name.length > 253) throw new Error("봇 파드 이름 형식이 아니다");
+      return name;
+    },
+    argv(pod, cmd) {
+      if (!NAME.test(pod) || pod.length > 253) throw new Error("봇 파드 이름 형식이 아니다");
+      // --request-timeout은 -- 앞에 둔다(뒤에 두면 node의 인자가 된다). 컨테이너 app은 공유 차트의 앱 컨테이너 이름이다.
+      return ["kubectl", "-n", BOT_NS, "exec", pod, "-c", "app", REQUEST_TIMEOUT, "--", ...BOT_ENTRY, ...botWords(cmd)];
+    },
+  };
+}
+
+export function botWrite(exec: Exec, k8s: KubeRead): BotWrite {
+  const read = botRead(k8s);
+  return {
+    ...read,
+    admin(cmd) {
+      const argv = read.argv(read.pod(), cmd);
+      // 진입점은 DB 트랜잭션 하나로 끝난다. 답이 없으면 결과 미상으로 엔진이 다시 읽는다(재시도하지 않는다).
+      const r = exec(argv, { timeoutMs: 60_000 });
+      if (r.errKind === "timeout") throw new ExecTimeout("봇 관리 진입점: 시간 초과(결과 미상)");
+      // 출력이 없으면 진입점까지 가지 못한 것이다(kubectl 오류). 진입점의 stderr에는 오류 이름·코드만 있다.
+      if (r.errKind || r.code === null || (r.code !== 0 && r.stdout.trim() === "")) throw new Error(`봇 관리 진입점: ${why(r)}`);
+      return botReport(r.stdout, r.code);
     },
   };
 }
