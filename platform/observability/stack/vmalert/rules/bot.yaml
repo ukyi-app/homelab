@@ -31,6 +31,34 @@ groups:
           summary: "봇 게시 {{ $value }}건의 Discord 전달 여부를 15분 넘게 확인하지 못했다"
           description: "자동 재전송은 하지 않는다. 해당 스레드에 답이 올라갔는지 Discord에서 보고, 봇 감사 로그를 확인한다."
 
+      # 모델 멈춤(봇 COLLEAGUE_SPEC §4.7 "운영 알림", AC-18). 한도·인증 만료·결제로 모델을 못 써 대기에 든 작업이 있으면 종류마다 운다.
+      # Discord에는 자리 비움만 보이고 원인·풀리는 시각·할 일은 이 경보(Telegram)로만 간다. service 라벨이 없어 봇 receiver가 버린다.
+      # 경보 값은 풀리는 시각(Unix 초, 모르면 0)이고, 멈춤 여부는 paused_jobs로 가른다. 봇은 멈춤이 없어도 두 계열을 0으로 낸다.
+      # max: 두 파드가 같은 DB 값을 낸다(봇 ARCHITECTURE §13 "지표"). 함정: 이름·라벨(kind, account, method)은 봇 src/ops-metrics.ts와 같아야 한다.
+      # for 없음: 도착 예산 2분(수집 30초 + 평가 30초 + group_wait 30초)을 지킨다. 봇은 멈춘 작업을 1분 넘게 기다리게 해 잠깐 튀는 1이 없다.
+      # keep_firing_for 5m: 시각 모르는 한도·인증 만료는 30분마다, 풀리는 시각이 오면 그 1분 뒤 봇이 작업을 다시 돌린다. 다시 도는 동안
+      # 값이 0이 됐다가 또 멈추면 1이 된다. 그 틈(보통 1분 안)과 짧은 수집 공백에 해소·새 발생이 Telegram으로 가지 않게 잇는다.
+      # 그래서 진짜로 풀린 해소도 5분 늦게 온다. 수집이 오래 끊기면 TargetDown이 본다.
+      # KST: 템플릿에 시간대 함수가 없다. 한국은 서머타임이 없어 UTC에 9시간(32400000000000ns)을 더해 적는다. .UTC로 파드 TZ와 떼어 둔다.
+      # 지금 계정은 봇이 homelab_bot_model_account{account,method}로 낸다. 계정 전환(봇 C22) 전에는 method="none"이라 "미등록"이다.
+      # 명령은 봇 COLLEAGUE_SPEC §4.8의 이름(homelab bot account use, --by api)이다. CLI에 생길 때(봇 C22·C23) 이름이 같은지 본다.
+      - alert: HomelabBotModelPaused
+        expr: |
+          max by (kind) (homelab_bot_model_pause_resets_at_seconds)
+            and on (kind) (max by (kind) (homelab_bot_model_paused_jobs) > 0)
+        keep_firing_for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: '봇 모델 멈춤: {{ if eq $labels.kind "rate_limit" }}사용 한도{{ else if eq $labels.kind "auth_expired" }}인증 만료{{ else if eq $labels.kind "billing" }}결제{{ else }}{{ $labels.kind }}{{ end }}'
+          description: |-
+            풀리는 시각: {{ if gt $value 0.0 }}{{ ((toTime $value).UTC.Add 32400000000000).Format "2006-01-02 15:04" }} KST{{ else if eq $labels.kind "rate_limit" }}모름{{ else }}없음{{ end }}
+            지금 계정: {{ with query "max by (account, method) (homelab_bot_model_account)" }}{{ $account := . | first }}{{ if eq ($account | label "method") "none" }}미등록{{ else }}{{ $account | label "account" }}({{ if eq ($account | label "method") "api" }}API 크레딧{{ else }}구독{{ end }}){{ end }}{{ else }}모름{{ end }}
+            할 일 1) {{ if eq $labels.kind "billing" }}결제를 풀고 해제하기: 저절로 다시 하지 않는다. homelab bot status로 작업 ID를 보고 homelab bot resume <작업 ID> --apply{{ else if eq $labels.kind "auth_expired" }}기다리기: 토큰을 다른 길로 바꿨으면 30분 안에 다시 시도한다{{ else if gt $value 0.0 }}기다리기: 풀리는 시각 1분 뒤 같은 계정으로 저절로 이어서 한다{{ else }}기다리기: 30분마다 다시 시도한다{{ end }}
+            할 일 2) API 크레딧 계정으로 바꾸기: homelab bot account use <이름> --by api
+            할 일 3) 다른 구독 계정으로 바꾸기: homelab bot account use <이름>
+            계정을 바꾸면 멈춘 일을 바로 이어서 한다. 계정 목록: homelab bot account list
+
   # 작업 레인(봇 T18). 게시 서버는 TASK_LANE_ENABLED가 켜져 있고 정책의 task 절이 유효할 때만 작업자·레인 시계열을 낸다.
   # 스위치를 끄면 그 시계열이 통째로 없어 이 그룹은 조용하다.
   # 함정: 스위치를 켰는데 정책이 틀려도(policy_invalid) 그 시계열은 똑같이 없다. 둘을 가르는 것은 스위치·정책과 무관하게 나오는

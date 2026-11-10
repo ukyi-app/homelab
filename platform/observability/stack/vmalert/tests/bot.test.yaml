@@ -806,3 +806,162 @@ tests:
               summary: 봇 기억 삭제가 30분 넘게 끝나지 않았다
               description: 삭제한 기억은 숨겨져 있지만 원장·DB 정리가 끝나지 않았다. HomelabBotLedger* 경보, DB 연결, 봇 로그의 원장·삭제 오류를 본다.
               runbook: https://github.com/ukyi-app/homelab/blob/main/docs/runbooks-public/restore.md
+
+  # 모델 멈춤(봇 C21). 봇은 멈춤 종류 셋을 늘 내고(멈춤 없으면 0), 지금 계정은 계정 전환(봇 C22) 전에 method="none"이다.
+  # 두 파드(pod 라벨만 다름)가 같은 DB 값을 내도 경보는 종류마다 하나다. 풀리는 시각 946720800은 2000-01-01 10:00 UTC = 19:00 KST.
+  - name: HomelabBotModelPaused는 사용 한도 멈춤 다음 평가에 풀리는 시각(KST)과 할 일을 담아 발화한다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_model_paused_jobs{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", pod="homelab-bot-a", kind="rate_limit"}'
+        values: "0 2x10"
+      - series: 'homelab_bot_model_paused_jobs{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", pod="homelab-bot-b", kind="rate_limit"}'
+        values: "0 2x10"
+      - series: 'homelab_bot_model_pause_resets_at_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", pod="homelab-bot-a", kind="rate_limit"}'
+        values: "0 946720800x10"
+      - series: 'homelab_bot_model_pause_resets_at_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", pod="homelab-bot-b", kind="rate_limit"}'
+        values: "0 946720800x10"
+      - series: 'homelab_bot_model_paused_jobs{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", pod="homelab-bot-a", kind="auth_expired"}'
+        values: "0x10"
+      - series: 'homelab_bot_model_pause_resets_at_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", pod="homelab-bot-a", kind="auth_expired"}'
+        values: "0x10"
+      - series: 'homelab_bot_model_account{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", pod="homelab-bot-a", method="none"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 0m
+        groupname: bot
+        alertname: HomelabBotModelPaused
+        exp_alerts: []
+      - eval_time: 1m
+        groupname: bot
+        alertname: HomelabBotModelPaused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              kind: rate_limit
+            exp_annotations:
+              summary: "봇 모델 멈춤: 사용 한도"
+              description: |-
+                풀리는 시각: 2000-01-01 19:00 KST
+                지금 계정: 미등록
+                할 일 1) 기다리기: 풀리는 시각 1분 뒤 같은 계정으로 저절로 이어서 한다
+                할 일 2) API 크레딧 계정으로 바꾸기: homelab bot account use <이름> --by api
+                할 일 3) 다른 구독 계정으로 바꾸기: homelab bot account use <이름>
+                계정을 바꾸면 멈춘 일을 바로 이어서 한다. 계정 목록: homelab bot account list
+
+  - name: HomelabBotModelPaused는 풀리는 시각을 모르는 사용 한도에 모름과 30분 재시도를 적는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_model_paused_jobs{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="rate_limit"}'
+        values: "1x5"
+      - series: 'homelab_bot_model_pause_resets_at_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="rate_limit"}'
+        values: "0x5"
+      - series: 'homelab_bot_model_account{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", method="none"}'
+        values: "1x5"
+    alert_rule_test:
+      - eval_time: 1m
+        groupname: bot
+        alertname: HomelabBotModelPaused
+        # 아래 재시도·수집 공백 시험이 이 기대값을 다시 쓴다.
+        exp_alerts: &model-paused-rate-limit-unknown
+          - exp_labels:
+              severity: warning
+              kind: rate_limit
+            exp_annotations:
+              summary: "봇 모델 멈춤: 사용 한도"
+              description: |-
+                풀리는 시각: 모름
+                지금 계정: 미등록
+                할 일 1) 기다리기: 30분마다 다시 시도한다
+                할 일 2) API 크레딧 계정으로 바꾸기: homelab bot account use <이름> --by api
+                할 일 3) 다른 구독 계정으로 바꾸기: homelab bot account use <이름>
+                계정을 바꾸면 멈춘 일을 바로 이어서 한다. 계정 목록: homelab bot account list
+
+  # 계정 전환(봇 C22) 뒤 모양: account·method 라벨. 인증 만료와 결제가 함께 멈추면 종류마다 경보가 하나씩이다.
+  - name: HomelabBotModelPaused는 인증 만료·결제 멈춤을 종류별로 알리고 지금 계정 이름과 방식을 적는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_model_paused_jobs{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="rate_limit"}'
+        values: "0x5"
+      - series: 'homelab_bot_model_paused_jobs{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="auth_expired"}'
+        values: "1x5"
+      - series: 'homelab_bot_model_paused_jobs{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="billing"}'
+        values: "1x5"
+      - series: 'homelab_bot_model_pause_resets_at_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="rate_limit"}'
+        values: "0x5"
+      - series: 'homelab_bot_model_pause_resets_at_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="auth_expired"}'
+        values: "0x5"
+      - series: 'homelab_bot_model_pause_resets_at_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="billing"}'
+        values: "0x5"
+      - series: 'homelab_bot_model_account{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", account="main", method="api"}'
+        values: "1x5"
+    alert_rule_test:
+      - eval_time: 1m
+        groupname: bot
+        alertname: HomelabBotModelPaused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              kind: auth_expired
+            exp_annotations:
+              summary: "봇 모델 멈춤: 인증 만료"
+              description: |-
+                풀리는 시각: 없음
+                지금 계정: main(API 크레딧)
+                할 일 1) 기다리기: 토큰을 다른 길로 바꿨으면 30분 안에 다시 시도한다
+                할 일 2) API 크레딧 계정으로 바꾸기: homelab bot account use <이름> --by api
+                할 일 3) 다른 구독 계정으로 바꾸기: homelab bot account use <이름>
+                계정을 바꾸면 멈춘 일을 바로 이어서 한다. 계정 목록: homelab bot account list
+          - exp_labels:
+              severity: warning
+              kind: billing
+            exp_annotations:
+              summary: "봇 모델 멈춤: 결제"
+              description: |-
+                풀리는 시각: 없음
+                지금 계정: main(API 크레딧)
+                할 일 1) 결제를 풀고 해제하기: 저절로 다시 하지 않는다. homelab bot status로 작업 ID를 보고 homelab bot resume <작업 ID> --apply
+                할 일 2) API 크레딧 계정으로 바꾸기: homelab bot account use <이름> --by api
+                할 일 3) 다른 구독 계정으로 바꾸기: homelab bot account use <이름>
+                계정을 바꾸면 멈춘 일을 바로 이어서 한다. 계정 목록: homelab bot account list
+
+  - name: HomelabBotModelPaused는 모델 멈춤이 없으면 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_model_paused_jobs{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="rate_limit"}'
+        values: "0x30"
+      - series: 'homelab_bot_model_pause_resets_at_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="rate_limit"}'
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: bot
+        alertname: HomelabBotModelPaused
+        exp_alerts: []
+
+  # 시각 모르는 한도는 30분마다 다시 돈다. 다시 도는 동안(4~5분) 값이 0이 되고, 그 틈과 수집 공백(9~10분)에 해소가 나가면 안 된다.
+  # 정말 풀리면(14분부터 0) 마지막으로 멈춰 있던 13분에서 keep_firing_for 5분 뒤 해소된다.
+  - name: HomelabBotModelPaused는 재시도·수집 공백에 해소되지 않고 풀리면 5분 뒤 해소된다
+    interval: 1m
+    input_series:
+      - series: 'homelab_bot_model_paused_jobs{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="rate_limit"}'
+        values: "1 1 1 1 0 0 1 1 1 _ _ 1 1 1 0x20"
+      - series: 'homelab_bot_model_pause_resets_at_seconds{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", kind="rate_limit"}'
+        values: "0 0 0 0 0 0 0 0 0 _ _ 0 0 0 0x20"
+      - series: 'homelab_bot_model_account{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot", method="none"}'
+        values: "1x34"
+    alert_rule_test:
+      - eval_time: 5m
+        groupname: bot
+        alertname: HomelabBotModelPaused
+        exp_alerts: *model-paused-rate-limit-unknown
+      - eval_time: 10m
+        groupname: bot
+        alertname: HomelabBotModelPaused
+        exp_alerts: *model-paused-rate-limit-unknown
+      - eval_time: 17m
+        groupname: bot
+        alertname: HomelabBotModelPaused
+        exp_alerts: *model-paused-rate-limit-unknown
+      - eval_time: 20m
+        groupname: bot
+        alertname: HomelabBotModelPaused
+        exp_alerts: []
