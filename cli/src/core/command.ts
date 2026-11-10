@@ -200,6 +200,32 @@ export type PgRestoreWrite = {
   aclCompare(app: string, run: string): { same: boolean; diff: string[] };
 };
 
+// 봇 관리 기능(homelab bot). 봇 저장소 admin-main의 명령과 같다(봇 COLLEAGUE_SPEC §4.8). ID 형식은 core가 다시 본다.
+export type BotAdminCommand =
+  | { name: "emergency-stop" }
+  | { name: "status" }
+  | { name: "resume"; target: "emergency-stop" }
+  | { name: "resume"; target: "job"; job: string }
+  | { name: "block"; user: string }
+  | { name: "release"; job: string };
+export type BotAdminState = { emergency: boolean; paused: boolean; executionPending: boolean; taskLaneClosed: string | null };
+// 봇이 낸 결과 이름과 상태 값만. exit는 admin-main의 종료 코드(0 완료, 1 실패, 3 거부, 4 미지원, 64 사용법).
+export type BotAdminReport = { exit: number; result: string; state: BotAdminState | null };
+
+export type BotRead = {
+  // 봇 게시 서버 파드 이름. ns app-homelab-bot, 라벨 homelab.ukyi.app/app=homelab-bot의 Deployment 파드(ReplicaSet 소유,
+  // 마이그레이션 Job 제외)로 Running·Ready이고 지우는 중이 아닌 것이 정확히 하나여야 한다. 아니면 던진다.
+  pod(): string;
+  // 그 파드에서 실행할 kubectl argv(plan이 그대로 보인다).
+  argv(pod: string, cmd: BotAdminCommand): string[];
+};
+
+// 쓰기 문맥만: kubectl exec는 바꾸는 것이 없어도 쓰기로 판정한다(설계 C.7). 상태 보기도 --apply에서만 돈다.
+export type BotWrite = BotRead & {
+  // 대상 파드를 다시 찾아 관리 진입점을 한 번 실행한다. 봇 출력이 정해진 꼴이 아니면 던진다(원문은 옮기지 않는다).
+  admin(cmd: BotAdminCommand): BotAdminReport;
+};
+
 export type HttpWrite = {
   // port-forward로 앱 파드에 붙어 헬스 경로의 응답 코드. 경로는 셋만.
   appStatus(ns: string, deployment: string, port: number, path: "/healthz" | "/healthz/db" | "/healthz/cache"): Promise<number>;
@@ -284,6 +310,7 @@ export type ReadCtx = {
   ghcr: GhcrRead;
   tools: ToolsRead;
   web: WebRead;
+  bot: BotRead;
   // kind delegate 명령과 wrapper 표시 명령(app new)에만 있다.
   github?: GithubDelegate;
   engine(plan: Plan): Promise<Result>;
@@ -309,6 +336,7 @@ export type WriteCtx = {
   valkey: ValkeyWrite;
   http: HttpWrite;
   pgRestore: PgRestoreWrite;
+  bot: BotWrite;
   // wrapper 표시 명령(app new)에만 있다.
   github?: { apply(): number };
   appRepo?: AppRepoWrite;

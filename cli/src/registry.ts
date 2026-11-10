@@ -22,6 +22,7 @@ import purge from "./commands/purge";
 import githubPlan from "./commands/github-plan";
 import githubApply from "./commands/github-apply";
 import githubVerify from "./commands/github-verify";
+import bot from "./commands/bot";
 
 export const REGISTRY: CommandSpec[] = [
   doctor,
@@ -45,4 +46,5 @@ export const REGISTRY: CommandSpec[] = [
   githubPlan,
   githubApply,
   githubVerify,
+  bot,
 ];

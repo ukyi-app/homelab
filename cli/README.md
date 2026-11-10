@@ -27,6 +27,7 @@ homelab doctor                    # 도구·로그인·kubectl context
 ## 동작 규칙
 
 - 바꾸는 명령은 기본이 plan(아무것도 바꾸지 않음)이고 `--apply`로 실행한다. 읽기 명령에 `--apply`를 주면 사용법 오류다.
+- `homelab bot`(봇 관리 기능)은 봇 게시 서버 파드 안의 관리 진입점을 `kubectl exec`로 부른다. exec는 쓰기로 판정하므로 **상태 보기(`homelab bot status`)도 plan에서는 대상 파드와 argv만 보이고 `--apply`에서만 실행한다.** 읽기로 허용하는 exec 종류는 두지 않는다(설계 C.7 표). 파드는 ns `app-homelab-bot`에서 라벨로 찾고 Running·Ready인 Deployment 파드가 정확히 하나가 아니면 실행 전에 멈춘다. 결과는 봇이 낸 결과 이름과 상태 값 한 줄(notes)이다.
 - 종료 코드: 0 완료·변경 없음·plan, 1 실패(원인과 다음 행동), 3 대기(apply 뒤 PR 병합·동기화), 64 사용법 오류. `github` 하위 명령은 `tools/tf-github.sh` 코드 그대로(0 같음, 2 차이, 1 guard·실패).
 - 중복·모르는 플래그는 거부한다. 값에 줄바꿈·제어 문자가 있으면 거부하고 값 전체를 형식과 맞춘다.
 - 재실행 안전: 단계마다 실행 직전에 현재 상태를 읽고 된 단계는 건너뛴다. 타임아웃은 재시도하지 않고 다시 읽는다.
@@ -47,6 +48,7 @@ homelab doctor                    # 도구·로그인·kubectl context
 - **쓰기 문맥 `w`(`Step.apply(w, seen)`만):** 위 읽기에 더해 `w.k8s`(forceSync·rolloutRestart·createRestoreObject·deleteRestoreObjects), `w.infisical`(setValue·removeKey), `w.generatePassword()`, `w.readSecretInput(prompt)`. 엔진이 apply 한 번마다 새로 만들고 끝나면 폐기한다. 붙잡아 두었다가 쓰면 모든 호출이 막힌다. 엔진은 한 번에 하나만 돈다(중첩·병렬 거부).
 - **T12 어댑터 묶음(02·03·04 요청):** 읽기에 `ctx.k8s`의 `secretEmbeds`·`waitSecret`·`waitFor`·`waitCondition`·`podSecretsCurrent`·`restoreRecord`·Job 로그, `ctx.infisical.folderExists`, `ctx.web.publicStatus`. 쓰기에 `w.k8s`의 `restartForSecrets`·복원 기록 셋·`deleteRestoreObject`·`createJobFromCronJob`·`setPvReclaimDelete`·`forceSync({ waitSec })`, `w.infisical.createFolder`, `w.pg.passwordCheck`, `w.valkey`(정해진 다섯 명령·`waitAof`·`authCheck`), `w.http.appStatus`(port-forward 헬스 셋), `w.confirm`. `wrapper: "plan-json"` 명령(app new)만 `ctx.github.planChanges`·`w.github.apply`·`w.appRepo`. 파드 안 셸·SQL 텍스트는 core 상수다(명령은 이름과 Secret만 넘긴다).
 - **DB 복원(`w.pgRestore`, restore.md 2절):** 흐름·SQL·Job·임시 Cluster 매니페스트는 core가 갖는다. 명령은 (app, run)과 검증된 값만 넘기고 단계 순서와 표식만 정한다. 4-2 산출물은 core가 기록 `restore-pg`의 `in.*`에 고정하고(명령은 `in.*`·`dropped`를 못 쓴다), DB 다시 만들기·본 복원·ACL 복원 앞에서 core가 잠금·앱 멈춤·입력 고정을 다시 본다. 덤프는 kubectl 둘을 잇는 파이프로만 흐른다.
+- **봇 관리 기능(`ctx.bot`·`w.bot`, C05):** 읽기 문맥의 `ctx.bot`은 대상 파드 찾기(`pod()`)와 실행할 argv(`argv()`)만 내고 exec하지 않는다. 쓰기 문맥의 `w.bot.admin(cmd)`가 파드를 다시 찾아 `node /app/dist/src/admin-main.js <동작> [ID]`를 한 번 실행하고, 봇 출력의 결과 이름·상태 값만 돌려준다(꼴이 다르면 원문 없이 던진다). ns·라벨·컨테이너·진입점 경로는 core 상수(`podops.ts`)다. 뒤 티켓(C22 `account`, C23 `--by api`)도 같은 어댑터에 동작을 더한다.
 - **기다림 단계:** 바깥(PR 병합 등)을 기다리는 동안 뒤 단계를 돌리면 안 되면 관찰에 `hold`를 둔다(`same`일 때만). apply가 그 단계에서 멈추고 3(대기)으로 끝난다. 같은 명령을 다시 치면 이어 간다. 전체 읽기 때 알린 대기 주의는 apply가 그 단계를 다시 읽어 풀렸으면 지운다.
 - **values YAML:** `../core/values`의 `setTopLevel(text, edits)`가 최상위 키만 한 줄 flow로 고치고 주석은 둔다. `setMapString(text, parent, key, value)`는 주석이 든 맵 블록(`env` 등)의 키 한 줄만 고치거나 더한다. 다시 읽은 값이 기대와 다르면 던진다.
 - **PR:** `prStep({ command, app, title, body, files, edit })`. `edit(현재 내용)`은 같은 키로 원하는 내용(지우려면 null)을 돌려준다. 읽을 때와 apply 때 모두 그 시점의 main 스냅샷에서 다시 부른다.
