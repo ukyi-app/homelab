@@ -79,6 +79,33 @@ describe("bot", () => {
     }
   });
 
+  test("apply: 차단·unknown 해제·멈춘 작업 재개의 결과 이름을 받고, 처리하지 않은 결과는 다음 행동과 함께 실패로 알린다", async () => {
+    const done: [string[], string[], string][] = [
+      [["block", USER], ["block", USER], "blocked"],
+      [["block", USER], ["block", USER], "already_blocked"],
+      [["release", JOB], ["release", JOB], "released"],
+      [["resume", JOB], ["resume", "job", JOB], "resumed"],
+    ];
+    for (const [args, words, result] of done) {
+      const r = await runCli(["bot", ...args, "--apply", "--json"], [pods(pod()), admin(words, { stdout: report(words.join(" "), result, STATE) })]);
+      expect([result, r.code]).toEqual([result, 0]);
+      expect(r.json.notes[0]).toContain(`결과 ${result} `);
+    }
+    const refused: [string[], string[], string, string][] = [
+      [["release", JOB], ["release", JOB], "not_releasable", "unknown"],
+      [["release", JOB], ["release", JOB], "running_jobs", "종료를 확인하지 못한"],
+      [["resume", JOB], ["resume", "job", JOB], "not_waiting", "모델 멈춤"],
+      [["resume", JOB], ["resume", "job", JOB], "emergency_stopped", "resume emergency-stop"],
+      [["resume", JOB], ["resume", "job", JOB], "queue_full", "대기열"],
+    ];
+    for (const [args, words, result, hint] of refused) {
+      const r = await runCli(["bot", ...args, "--apply", "--json"], [pods(pod()), admin(words, { stdout: report(words.join(" "), result, STATE), code: 3 })]);
+      expect([result, r.code]).toEqual([result, 1]);
+      expect(r.json.error.message).toContain(result);
+      expect(r.json.error.next).toContain(hint);
+    }
+  });
+
   test("apply: 봇이 거부하면(실행 중 작업) exit 1이고 결과 이름을 알린다", async () => {
     const r = await runCli(["bot", "resume", "emergency-stop", "--apply", "--json"], [pods(pod()), admin(["resume", "emergency-stop"], { stdout: report("resume emergency-stop", "running_jobs", STATE), code: 3 })]);
     expect(r.code).toBe(1);
