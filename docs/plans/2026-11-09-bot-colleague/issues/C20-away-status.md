@@ -1,7 +1,7 @@
 # C20 자리 비움
 
 - 단계: 5 멈춤과 계정
-- 상태: 대기 (선행: C04, C09, C12, C19, C21)
+- 상태: 진행 중 (2026-11-11 01:3x 착수, 선행 모두 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.5 "모델 멈춤 중"·"자리 비움", §4.7 "지금 안내문 교체", §5 AC-14·AC-15 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C04, C09, C12, C19, C21
 - 연결 AC: AC-15, AC-14(💤)
