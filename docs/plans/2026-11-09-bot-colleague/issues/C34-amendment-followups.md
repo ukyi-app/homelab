@@ -1,7 +1,7 @@
 # C34 수정 요청 후속(스위치 켜기 전)
 
 - 단계: 6 PR 수정
-- 상태: 진행 중 (2026-11-10 22:3x 착수, 선행 C27 integrated)
+- 상태: integrated (봇 #139 병합 `4867315`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10 "수정 요청", §5 AC-28 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C27
 - 연결 AC: AC-28(재시작 복구, 닫힌 PR 거절)
@@ -28,8 +28,8 @@
 
 ## 완료 조건
 
-- [ ] 시험이 모두 통과한 뒤 재시작해도 수정 차례의 작성 job이 끝 상태가 되고 작업 레인이 풀린다.
-- [ ] 이미 병합되거나 닫힌 PR의 수정 요청은 확인 버튼 없이 거절되고 수정 횟수를 쓰지 않는다.
+- [x] 시험이 모두 통과한 뒤 재시작해도 수정 차례의 작성 job이 끝 상태가 되고 작업 레인이 풀린다.
+- [x] 이미 병합되거나 닫힌 PR의 수정 요청은 확인 버튼 없이 거절되고 수정 횟수를 쓰지 않는다.
 
 ## 검증
 
@@ -39,4 +39,7 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #139, 병합 `4867315`(2026-11-10). `amendLane`이 시험 통과 뒤 `settleAmendAuthor`로 작성 세션 정리를 잇는다. `proposed`는 열 차례가 기다리면 병합 읽기를 먼저 하고 PR이 열려 있을 때만 차례를 연다. `prepareAmendment`는 PR 글 읽기 결과의 `open`이 false면 거절한다(`discussion.read`가 이미 허용된 `GET pulls/{n}`을 먼저 읽음).
+- 완료 조건 2개 충족(S1): `change-assembly` "AC-28 시험 통과 receipt 저장 직후 끊김(C34)"·"AC-28 차례 열기 직전 병합(C34)", `c27-change-amend` "C34 수정 요청 닫힌 PR", `github-review-app` "PR 자료 읽기(C34)".
+- 검사: 결과 `198ad7e`에서 전체 2,557개 중 통과 2,535, 실패 0, skip 22. CI `build / test` 통과. Codex 지적 없음.
+- 한계: 확인 글을 낸 뒤 누르기 전에 닫힌 PR은 누를 때 다시 읽지 않는다(작성은 돌지 않지만 대기열에 차례 한 줄이 생김). 명령 쪽은 병합 읽기 포트 대신 리뷰 App 읽기의 `open` 칸을 쓴다. 실제 GitHub의 상태 지연은 C24 S5.
