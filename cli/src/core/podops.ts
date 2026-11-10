@@ -162,7 +162,10 @@ export const BOT_ENTRY = ["node", "/app/dist/src/admin-main.js"];
 const BOT_SCHEMA = "homelab-bot-admin/v1";
 const BOT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BOT_SNOWFLAKE = /^[1-9][0-9]{16,19}$/;
-const BOT_RESULTS = new Set(["stopped", "already_stopped", "released", "not_stopped", "running_jobs", "status", "unsupported", "usage", "failed"]);
+const BOT_RESULTS = new Set([
+  "stopped", "already_stopped", "released", "not_stopped", "running_jobs", "status", "unsupported", "usage", "failed",
+  "blocked", "already_blocked", "resumed", "not_releasable", "not_waiting", "emergency_stopped", "queue_full",
+]);
 const BOT_EXITS = new Set([0, 1, 3, 4, 64]);
 
 function botWords(cmd: BotAdminCommand): string[] {

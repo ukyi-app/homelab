@@ -31,7 +31,11 @@ function describe(report: BotAdminReport): string {
 // 봇이 받지 않거나 거부한 결과의 다음 행동. 결과 이름은 봇 admin.ts의 AdminResult다.
 const NEXT: Record<string, string> = {
   running_jobs: "실행 중이거나 종료를 확인하지 못한 작업이 있다. homelab bot status --apply로 보고, 끝난 뒤 다시 실행한다",
-  unsupported: "지금 봇 이미지의 관리 진입점이 이 동작을 받지 않는다. 시범 동안의 '/' 명령(/revoke·/task-release·/resume-model)으로 한다",
+  unsupported: "지금 봇 이미지의 관리 진입점이 이 동작을 받지 않는다(봇 C32 이전 이미지). 봇 배포 버전을 확인하고, 그동안은 '/' 명령(/revoke·/task-release·/resume-model)으로 한다",
+  not_releasable: "unknown으로 막힌 작업이 아니거나 없는 작업 ID다. homelab bot status --apply로 상태를 본다",
+  not_waiting: "모델 멈춤(한도·인증)으로 기다리는 작업이 아니라 재개하지 않았다. 작업 상태를 확인한다",
+  emergency_stopped: "비상 정지 중이라 재개하지 않았다. 먼저 homelab bot resume emergency-stop --apply",
+  queue_full: "대화 대기열이 차 있어 재개하지 않았다. 대기열이 줄어든 뒤 다시 실행한다",
   usage: "봇 이미지와 CLI의 관리 명령 꼴이 다르다. 봇 배포 버전을 확인한다",
 };
 
