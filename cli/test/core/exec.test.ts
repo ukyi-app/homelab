@@ -63,6 +63,18 @@ describe("직접 stdio", () => {
     expect(e.calls().calls).toEqual([]);
   });
 
+  test("claude setup-token 로그인(homelab bot account add)만 쓰기 문맥에서 stdio를 넘기고, 다른 claude argv·읽기 문맥은 막는다", () => {
+    const e = execs([rule(["claude", REST], {}, { noStdin: true })]);
+    expect(() => e.read(["claude", "setup-token"], { stdio: "inherit" })).toThrow(PLAN_WRITE_BLOCKED);
+    expect(() => e.write(["claude", "setup-token", "--print"], { stdio: "inherit" })).toThrow("github 위임 명령만");
+    expect(() => e.write(["claude", "-p", "hi"], { stdio: "inherit" })).toThrow("github 위임 명령만");
+    expect(() => e.write(["claude", "setup-token"], { stdio: "stdout-to-stderr" })).toThrow("github 위임 명령만");
+    expect(() => e.write(["claude", "setup-token"], { stdio: "inherit", input: new Secret("fakevalue-stdio-0002") })).toThrow("시크릿 입출력");
+    expect(e.calls().calls).toEqual([]);
+    expect(e.write(["claude", "setup-token"], { stdio: "inherit" }).code).toBe(0);
+    expect(e.calls().calls.map((c) => c.argv)).toEqual([["claude", "setup-token"]]);
+  });
+
   test("위임도 직접 stdio에 시크릿 입출력을 섞지 못한다", () => {
     const sb = stubSandbox([rule(["gh", REST])]);
     const r = makeExec("read", { env: sb.env, delegate: true });

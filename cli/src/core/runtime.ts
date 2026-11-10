@@ -11,7 +11,7 @@ import { pgRestoreWrite } from "./pgrestore";
 import { appRepoWrite, ghRead, ghcrRead, githubDelegate, webRead, wrapperApply } from "./github";
 import { botRead, botWrite, httpWrite, pgWrite, valkeyWrite } from "./podops";
 import { infisicalRead, infisicalWrite, projectResolver } from "./infisical";
-import { readSecretInput } from "./input";
+import { readSecretInput, readSetupTokens, setupTokenLogin } from "./input";
 import { kubeRead, kubeWrite } from "./kubectl";
 import { writeStderr } from "./output";
 import { repoRead } from "./pr";
@@ -65,6 +65,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       ghcr: ghcrRead(readExec),
       generatePassword: () => (alive(), newPassword()),
       readSecretInput: (prompt) => (alive(), readSecretInput(o.isTTY, (q) => writeStderr(q), prompt)),
+      readSetupTokens: (lanes) => (alive(), readSetupTokens(o.isTTY, (q) => writeStderr(q), lanes, (lane) => setupTokenLogin(exec, lane, o.progress))),
       // 파이프로 대신 답할 수 없게 tty만 받는다(purge의 Infisical 삭제 직전 확인).
       confirm: (question, expected) => (alive(), o.isTTY && o.ask(question) === expected),
       web: webRead(readExec),
@@ -72,7 +73,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       valkey: valkeyWrite(exec, k8sRead, kube.pollMs ?? 2_000),
       http: httpWrite(makeForward(exec, { env: o.env, live: () => live })),
       pgRestore: pgRestoreWrite(exec, k8sRead, makePipe({ env: o.env, live: () => live }), (ns, job) => k8sRead.waitCondition("job", ns, { jobPods: job }, "Ready", 60)),
-      bot: botWrite(exec, k8sRead),
+      bot: botWrite(exec, k8sRead, kube.pollMs ?? 2_000),
       progress: o.progress,
     };
     if (o.wrapper && delegateRead) {

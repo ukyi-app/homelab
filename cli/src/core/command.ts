@@ -207,10 +207,21 @@ export type BotAdminCommand =
   | { name: "resume"; target: "emergency-stop" }
   | { name: "resume"; target: "job"; job: string }
   | { name: "block"; user: string }
-  | { name: "release"; job: string };
+  | { name: "release"; job: string }
+  | { name: "account"; action: "record" | "use"; account: string; method: "subscription" }
+  | { name: "account"; action: "list" };
 export type BotAdminState = { emergency: boolean; paused: boolean; executionPending: boolean; taskLaneClosed: string | null };
+// 봇 계정 기록(봇 src/model-accounts.ts AccountView). 값은 없다. 시각은 초 단위 RFC3339 UTC(…Z) 또는 null.
+export type BotAccountLimit = { status: string | null; rateLimitType: string | null; utilization: number | null; resetsAt: string | null; observedAt: string | null };
+export type BotAccount = { name: string; method: "subscription" | "api"; current: boolean; issuedAt: string | null; expiresAt: string | null; limit: BotAccountLimit | null };
+export type BotPaused = { rate_limit: number; auth_expired: number; billing: number };
+// 계정 전환 뒤 해제의 결과(다시 큐에 넣은 수, 아직 기다리는 수, 해제를 못 한 이유).
+export type BotAccountSwitch = { resumed: number; waiting: number; held: "emergency_stopped" | "queue_full" | null };
 // 봇이 낸 결과 이름과 상태 값만. exit는 admin-main의 종료 코드(0 완료, 1 실패, 3 거부, 4 미지원, 64 사용법).
-export type BotAdminReport = { exit: number; result: string; state: BotAdminState | null };
+// accounts·paused는 account list, switch는 account use의 결과에만 있다.
+export type BotAdminReport = { exit: number; result: string; state: BotAdminState | null; accounts?: BotAccount[]; paused?: BotPaused; switch?: BotAccountSwitch };
+// 작업자 두 레인. chat은 대화+리뷰(Deployment worker), task는 작업(Deployment worker-task)이다(rotate.md 3e 표).
+export type WorkerLane = "chat" | "task";
 
 export type BotRead = {
   // 봇 게시 서버 파드 이름. ns app-homelab-bot, 라벨 homelab.ukyi.app/app=homelab-bot의 Deployment 파드(ReplicaSet 소유,
@@ -224,6 +235,9 @@ export type BotRead = {
 export type BotWrite = BotRead & {
   // 대상 파드를 다시 찾아 관리 진입점을 한 번 실행한다. 봇 출력이 정해진 꼴이 아니면 던진다(원문은 옮기지 않는다).
   admin(cmd: BotAdminCommand): BotAdminReport;
+  // 작업자 두 파드의 자격 파일 sha256 앞 12자가 want와 같아질 때까지 기다린다(rotate.md 3e 4단계의 지문 확인).
+  // 레인마다 맞았는지를 낸다. 시간 초과면 그때까지 맞지 않은 레인이 false다. timeoutSec ≤ 300.
+  waitWorkerCredentials(want: Record<WorkerLane, string>, timeoutSec: number): Record<WorkerLane, boolean>;
 };
 
 export type HttpWrite = {
@@ -329,6 +343,10 @@ export type WriteCtx = {
   generatePassword(): Secret;
   // stdin(파이프) 또는 tty(에코 없음)에서 시크릿 한 개. 16자 이상만.
   readSecretInput(prompt: string): Secret;
+  // Claude 구독 장기 토큰을 레인 수만큼(homelab bot account add). tty면 레인마다 `claude setup-token`을 띄워 owner가
+  // 브라우저 로그인을 하고, 화면에 나온 토큰을 에코 없는 입력으로 받는다. 파이프면 stdin의 줄 하나가 레인 하나다(레인 수와 같아야 한다).
+  // 값마다 readSecretInput과 같은 검사를 거친다.
+  readSetupTokens(lanes: string[]): Secret[];
   // tty에서 한 줄(보임)을 받아 expected와 같으면 true. tty가 아니면 false(파이프로 대신 답할 수 없다).
   confirm(question: string, expected: string): boolean;
   web: WebRead;

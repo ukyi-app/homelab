@@ -161,6 +161,9 @@ export function classify(argv: string[]): Verdict {
     case "terraform":
       // CLI는 terraform을 직접 부르지 않는다(래퍼가 부른다). 버전 확인만 읽기.
       return args.length === 1 && ["version", "-version", "--version"].includes(args[0]) ? read("terraform version") : write("terraform");
+    case "claude":
+      // homelab bot account add만 부른다. 새 토큰을 발급하므로 쓰기다.
+      return args.length === 1 && args[0] === "setup-token" ? write("claude setup-token(토큰 발급)") : write(`claude ${args[0] ?? ""}`.trim());
     case "tf-github.sh":
       return args[0] === "plan" || args[0] === "verify" ? read(`tf-github.sh ${args[0]}`) : write(`tf-github.sh ${args[0] ?? ""}`.trim());
     default:

@@ -2,7 +2,7 @@
 // 셸 텍스트는 이 파일의 상수이고 명령이 넘기는 것은 정규식을 거친 이름과 Secret뿐이다. 이름은 셸에 끼우지 않고 위치 인자로
 // 넘긴다(sh -c '...' sh <인자>). 비밀번호는 stdin으로만 넘기고(-a·env는 ps에 보인다, restore.md 0.3), 거부 판정은 core 고정
 // 정규식(exec signals)으로 받는다(민감 호출의 stderr 원문은 버린다).
-import type { BotAdminCommand, BotAdminReport, BotRead, BotWrite, HttpWrite, KubeRead, PgWrite, ValkeyCommand, ValkeyWrite } from "./command";
+import type { BotAccount, BotAccountLimit, BotAdminCommand, BotAdminReport, BotRead, BotWrite, HttpWrite, KubeRead, PgWrite, ValkeyCommand, ValkeyWrite, WorkerLane } from "./command";
 import { ExecTimeout, why, type Exec, type Forward } from "./exec";
 import { jsonParse } from "./intrinsics";
 import { APP_NAME, fullMatch } from "./names";
@@ -165,7 +165,12 @@ const BOT_SNOWFLAKE = /^[1-9][0-9]{16,19}$/;
 const BOT_RESULTS = new Set([
   "stopped", "already_stopped", "released", "not_stopped", "running_jobs", "status", "unsupported", "usage", "failed",
   "blocked", "already_blocked", "resumed", "not_releasable", "not_waiting", "emergency_stopped", "queue_full",
+  "recorded", "accounts", "switched", "unknown_account",
 ]);
+// 봇 계정 이름(봇 src/model-accounts.ts ACCOUNT_NAME와 같다). Infisical 폴더 이름 조각이자 지표 라벨 값이 된다.
+const BOT_ACCOUNT = /^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/;
+const BOT_TIME = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
+const BOT_WORD = /^[a-z_]{1,32}$/;
 const BOT_EXITS = new Set([0, 1, 3, 4, 64]);
 
 function botWords(cmd: BotAdminCommand): string[] {
@@ -183,6 +188,10 @@ function botWords(cmd: BotAdminCommand): string[] {
       return ["block", id(BOT_SNOWFLAKE, cmd.user)];
     case "release":
       return ["release", id(BOT_UUID, cmd.job)];
+    case "account":
+      if (cmd.action === "list") return ["account", "list"];
+      if ((cmd.action === "record" || cmd.action === "use") && cmd.method === "subscription") return ["account", cmd.action, id(BOT_ACCOUNT, cmd.account), cmd.method];
+      break;
   }
   throw new Error("봇 관리 명령이 아니다");
 }
@@ -200,13 +209,60 @@ function botReport(stdout: string, exit: number): BotAdminReport {
     throw fail();
   }
   if (doc === null || typeof doc !== "object" || doc.schema !== BOT_SCHEMA || typeof doc.result !== "string" || !BOT_RESULTS.has(doc.result)) throw fail();
+  const extra = accountParts(doc);
+  if (extra === null) throw fail();
   const s = doc.state;
-  if (s === undefined) return { exit, result: doc.result, state: null };
+  if (s === undefined) return { exit, result: doc.result, state: null, ...extra };
   const flags = ["emergency", "paused", "executionPending"].every((k) => typeof s?.[k] === "boolean");
   const lane = s?.taskLaneClosed === null || (typeof s?.taskLaneClosed === "string" && /^[a-z_]{1,32}$/.test(s.taskLaneClosed));
   if (!flags || !lane) throw fail();
-  return { exit, result: doc.result, state: { emergency: s.emergency, paused: s.paused, executionPending: s.executionPending, taskLaneClosed: s.taskLaneClosed } };
+  return { exit, result: doc.result, state: { emergency: s.emergency, paused: s.paused, executionPending: s.executionPending, taskLaneClosed: s.taskLaneClosed }, ...extra };
 }
+
+// 계정 결과 칸(accounts·paused·switch)을 정해진 꼴로만 옮긴다. 모르는 칸은 버리고, 꼴이 다르면 null(출력 거부).
+// 봇 출력에는 값이 없지만, 꼴이 다른 출력(예 다른 판의 진입점)이 문자열을 실어 와도 그대로 보이지 않게 한 칸씩 본다.
+function accountParts(doc: any): Pick<BotAdminReport, "accounts" | "paused" | "switch"> | null {
+  const out: Pick<BotAdminReport, "accounts" | "paused" | "switch"> = {};
+  const count = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) < 1_000_000;
+  const time = (v: unknown) => v === null || (typeof v === "string" && BOT_TIME.test(v));
+  const word = (v: unknown) => v === null || (typeof v === "string" && BOT_WORD.test(v));
+  if (doc.accounts !== undefined) {
+    if (!Array.isArray(doc.accounts) || doc.accounts.length > 100) return null;
+    const accounts: BotAccount[] = [];
+    for (const a of doc.accounts) {
+      if (typeof a?.name !== "string" || !BOT_ACCOUNT.test(a.name) || (a.method !== "subscription" && a.method !== "api") || typeof a.current !== "boolean") return null;
+      if (!time(a.issuedAt) || !time(a.expiresAt)) return null;
+      const l = a.limit;
+      let limit: BotAccountLimit | null = null;
+      if (l !== null) {
+        const utilization = l?.utilization === null || (typeof l?.utilization === "number" && l.utilization >= 0 && l.utilization <= 10);
+        if (!word(l?.status) || !word(l?.rateLimitType) || !utilization || !time(l?.resetsAt) || !time(l?.observedAt)) return null;
+        limit = { status: l.status, rateLimitType: l.rateLimitType, utilization: l.utilization, resetsAt: l.resetsAt, observedAt: l.observedAt };
+      }
+      accounts.push({ name: a.name, method: a.method, current: a.current, issuedAt: a.issuedAt, expiresAt: a.expiresAt, limit });
+    }
+    out.accounts = accounts;
+  }
+  if (doc.paused !== undefined) {
+    const p = doc.paused;
+    if (!count(p?.rate_limit) || !count(p?.auth_expired) || !count(p?.billing)) return null;
+    out.paused = { rate_limit: p.rate_limit, auth_expired: p.auth_expired, billing: p.billing };
+  }
+  if (doc.switch !== undefined) {
+    const s = doc.switch;
+    if (!count(s?.resumed) || !count(s?.waiting) || ![null, "emergency_stopped", "queue_full"].includes(s?.held)) return null;
+    out.switch = { resumed: s.resumed, waiting: s.waiting, held: s.held };
+  }
+  return out;
+}
+
+// 작업자 자격 파일(rotate.md 3e 4단계). ns·Deployment·컨테이너·경로는 sandbox 차트의 고정 값이다.
+const WORKER_NS = "sandbox";
+const WORKER_DEPLOY: Record<WorkerLane, string> = { chat: "worker", task: "worker-task" };
+const WORKER_FILE = "/run/worker-credential/CLAUDE_CODE_OAUTH_TOKEN";
+const HASH12 = /^[0-9a-f]{12}$/;
+export const workerHashArgv = (lane: WorkerLane) =>
+  ["kubectl", "-n", WORKER_NS, "exec", `deploy/${WORKER_DEPLOY[lane]}`, "-c", "worker", REQUEST_TIMEOUT, "--", "sha256sum", WORKER_FILE];
 
 export function botRead(k8s: KubeRead): BotRead {
   return {
@@ -234,7 +290,7 @@ export function botRead(k8s: KubeRead): BotRead {
   };
 }
 
-export function botWrite(exec: Exec, k8s: KubeRead): BotWrite {
+export function botWrite(exec: Exec, k8s: KubeRead, pollMs = 2_000): BotWrite {
   const read = botRead(k8s);
   return {
     ...read,
@@ -246,6 +302,24 @@ export function botWrite(exec: Exec, k8s: KubeRead): BotWrite {
       // 출력이 없으면 진입점까지 가지 못한 것이다(kubectl 오류). 진입점의 stderr에는 오류 이름·코드만 있다.
       if (r.errKind || r.code === null || (r.code !== 0 && r.stdout.trim() === "")) throw new Error(`봇 관리 진입점: ${why(r)}`);
       return botReport(r.stdout, r.code);
+    },
+    waitWorkerCredentials(want, timeoutSec) {
+      if (!Number.isInteger(timeoutSec) || timeoutSec < 1 || timeoutSec > 300) throw new Error("기다림은 1~300초다");
+      const lanes = Object.keys(WORKER_DEPLOY) as WorkerLane[];
+      for (const lane of lanes) if (!HASH12.test(want[lane] ?? "")) throw new Error("작업자 자격 지문은 sha256 앞 12자다");
+      const seen: Record<WorkerLane, boolean> = { chat: false, task: false };
+      const deadline = Date.now() + timeoutSec * 1000;
+      for (;;) {
+        for (const lane of lanes) {
+          if (seen[lane]) continue;
+          // 실패(파드 교체 중, worker-task의 exec가 정리 sweep에 죽음)는 기다림의 일부다. 다음 바퀴에 다시 본다.
+          const r = exec(workerHashArgv(lane), { timeoutMs: 30_000 });
+          const hash = r.code === 0 ? /^([0-9a-f]{64})\s/.exec(r.stdout)?.[1]?.slice(0, 12) : undefined;
+          if (hash === want[lane]) seen[lane] = true;
+        }
+        if (lanes.every((lane) => seen[lane]) || Date.now() + pollMs > deadline) return seen;
+        Bun.sleepSync(pollMs);
+      }
     },
   };
 }

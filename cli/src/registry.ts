@@ -23,6 +23,9 @@ import githubPlan from "./commands/github-plan";
 import githubApply from "./commands/github-apply";
 import githubVerify from "./commands/github-verify";
 import bot from "./commands/bot";
+import botAccountAdd from "./commands/bot-account-add";
+import botAccountUse from "./commands/bot-account-use";
+import botAccountList from "./commands/bot-account-list";
 
 export const REGISTRY: CommandSpec[] = [
   doctor,
@@ -47,4 +50,7 @@ export const REGISTRY: CommandSpec[] = [
   githubApply,
   githubVerify,
   bot,
+  botAccountAdd,
+  botAccountUse,
+  botAccountList,
 ];

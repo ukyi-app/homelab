@@ -86,6 +86,13 @@ type MakeOpts = {
   delegate?: boolean;
 };
 
+// homelab bot account add의 브라우저 로그인(`claude setup-token`). 사람이 터미널에서 직접 답해야 하는 호출이라 stdio를 넘긴다.
+// 함정: 이 명령은 발급한 토큰을 터미널에 출력한다(공식 문서). CLI는 그 출력을 잡지 않으므로 값이 CLI 결과·로그에 들어가지 않지만
+// 화면 스크롤에는 남는다. 출력 자동 수집은 출력 꼴이 문서에 없어 하지 않는다(봇 DECISIONS C22).
+function interactiveLogin(argv: string[]): boolean {
+  return argv.length === 2 && argv[0] === "claude" && argv[1] === "setup-token";
+}
+
 function cloneAllowed(argv: string[], opts: ExecOpts): boolean {
   if (!opts.cloneInto || !ownedTemp(opts.cloneInto)) return false;
   const pos = argv.slice(1).filter((a) => !a.startsWith("-"));
@@ -108,7 +115,8 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
     if (verdict.sensitiveOutput && !opts.secretStdout) throw new Error(`값을 내는 호출은 secretStdout으로만 실행한다: ${verdict.reason}`);
     const stdio = opts.stdio ?? "pipe";
     if (stdio !== "pipe") {
-      if (!m.delegate) throw new Error(`stdio ${stdio}는 github 위임 명령만 쓴다(출력 계층을 거치지 않는다)`);
+      if (!m.delegate && !(kind === "write" && stdio === "inherit" && interactiveLogin(argv)))
+        throw new Error(`stdio ${stdio}는 github 위임 명령만 쓴다(쓰기 문맥의 claude setup-token 로그인은 예외, 출력 계층을 거치지 않는다)`);
       if (opts.secretStdout || isSecret(opts.input)) throw new Error(`stdio ${stdio}에 시크릿 입출력을 함께 쓰지 않는다`);
     }
     const sensitive = Boolean(opts.secretStdout) || isSecret(opts.input) || Boolean(verdict.sensitiveOutput);
