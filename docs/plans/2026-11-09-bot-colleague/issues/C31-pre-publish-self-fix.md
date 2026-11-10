@@ -1,7 +1,7 @@
 # C31 게시 전 자체 리뷰 고치기
 
 - 단계: 6 PR 수정
-- 상태: 대기 (선행: C06, C17, C25)
+- 상태: 진행 중 (2026-11-10 16:3x 착수, 선행 C06, C17, C25 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10, §5 AC-31 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06, C17, C25
 - 연결 AC: AC-31
@@ -12,7 +12,7 @@
   - 연결 파일, 소유 C17: 봇 `src/change-store.ts`(같은 generation 안에서 `reviewing` → `authoring`으로 돌아가는 전이와 차례 수)
   - 연결 파일, 소유 C25: 봇 `src/change-contracts.ts`(전이 표·차례 칸. C25가 만든 수정 차례 입력을 쓴다)
   - 연결 파일, 이 티켓이 소유하고 C27이 뒤에 고친다: 봇 `src/change-review.ts`(차례 키로 receipt를 저장·조회하는 자리)
-  - 연결 파일, 소유 C09: 봇 `src/claude-task-bridge.ts`(작성 실행에 자체 리뷰 발견을 자료 블록으로 넘기는 자리)
+  - 연결 파일, 소유 C09: 봇 `src/claude-task-bridge.ts`(작성 실행에 자체 리뷰 발견을 자료 블록으로 넘기는 자리. 고치기 요청만 `change-v2`이고 보통 요청의 판 전환은 C28, 주 진행자 2026-11-10)
   - 봇 `migrations/`(순번 공유)
   - 시험: `test/change-store.test.ts`·`test/change-store-pg.test.ts`, `test/change-assembly.test.ts`, `test/change-review.test.ts`와 새 고치기 차례 시험
   - 봇 `docs/ai-bot/VERIFICATION.md`·`DECISIONS.md`·`ARCHITECTURE.md`는 추가만

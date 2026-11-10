@@ -1,7 +1,7 @@
 # C21 운영 알림 (지표 + vmalert → Telegram)
 
 - 단계: 5 멈춤과 계정
-- 상태: 대기 (선행: C19)
+- 상태: 진행 중 (2026-11-10 16:3x 착수, 선행 C19 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.7 "운영 알림", §5 AC-18 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C19
 - 연결 AC: AC-18

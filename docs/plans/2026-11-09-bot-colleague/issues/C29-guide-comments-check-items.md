@@ -1,7 +1,7 @@
 # C29 안내 댓글과 확인할 것
 
 - 단계: 4 말로 실행
-- 상태: 대기 (선행: C06, C17, C25, C26)
+- 상태: 진행 중 (2026-11-10 16:3x 착수, 선행 C06, C17, C25, C26 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10 "변경 질문 줄이기"(확인할 것을 미리보기와 PR 설명에), "안내 댓글", §5 AC-27, AC-25(미리보기·PR 설명 줄) (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06, C17, C25, C26
 - 연결 AC: AC-27, AC-25(미리보기·PR 설명의 확인할 것 줄)
@@ -11,6 +11,7 @@
   - 소유(연결 파일, 뒤에 C27이 고침): 봇 `src/change-publication.ts`(PR 설명에 확인할 것·남은 위험 절을 그리는 `renderBody`와 입력 스키마 `PublicationInputSchema`, 안내 댓글 본문을 그리고 공개 검사하는 새 함수. C27이 수정 커밋 뒤 같은 함수를 부른다)
   - 연결 파일, 소유 C07: 봇 `src/change-runtime.ts`(미리보기 글 `preview`에 확인할 것 줄, 게시 확정(`proposed`) 뒤 안내 댓글을 한 번 부르는 자리)
   - 연결 파일, 소유 C25: 봇 `src/change-contracts.ts`(확인할 것·남은 위험 항목 모양을 읽기만. 안내 댓글 전송 기록을 게시 effect 표에 둘 경우 그 단계 줄)
+  - 연결 파일, 소유 C09: 봇 `src/claude-task-bridge.ts`(`fetchResult`의 snapshot 반환에 `checks`·`risks`를 넘기는 자리만. 요청 판 전환은 C28, 주 진행자 2026-11-10)
   - 연결 파일, 소유 C26: 봇 `src/github-review-io.ts`·`src/github-app.ts`의 `COMMENT` 리뷰(인라인) 게시 포트를 쓰기만
   - 공유 파일(README 5절 표에 없음): 봇 `src/change-publisher.ts`(`prepareApproval`이 `renderPublication`에 확인할 것을 넘기는 자리, 게시 확정 뒤 안내 댓글 호출을 여기에 둘 경우 그 자리). C27의 fast-forward 갱신도 이 파일을 쓸 수 있다
   - 고치지 않음: 봇 `src/change-review.ts`(자체 리뷰 지시·판정·`findings` 비공개 규칙 그대로. hunk 판단 도우미가 있으면 쓰기만)

@@ -1,14 +1,14 @@
 # C28 변경 질문 선택지
 
 - 단계: 4 말로 실행
-- 상태: 대기 (선행: C06, C16, C25)
+- 상태: 진행 중 (2026-11-10 16:3x 착수, 선행 C06, C16, C25 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10 "변경 질문 줄이기", §4.3 "작업 질문 바로 답", §4.9 스위치와 배포 순서, §5 AC-25 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06, C16, C25
 - 연결 AC: AC-25(질문 글·선택지 버튼·답 경로, S1)
 - 수행: 에이전트
 - 저장소·PR: 봇 PR
 - 파일 소유:
-  - 연결 파일, 소유 C09: 봇 `src/task-bridge.ts`(`ask`: 선택지를 질문 행과 함께 저장하고, 켜짐 판 질문 글에 선택지 버튼과 "직접 답하기" 버튼을 다는 자리. 꺼짐 판 질문 글은 그대로), `src/claude-task-bridge.ts`(변경 작성 결과 `needs_input`의 선택지를 `ask`까지 넘기는 자리, `fetchResult`의 질문 공개 검사에 선택지를 더하는 자리)
+  - 연결 파일, 소유 C09: 봇 `src/task-bridge.ts`(`ask`: 선택지를 질문 행과 함께 저장하고, 켜짐 판 질문 글에 선택지 버튼과 "직접 답하기" 버튼을 다는 자리. 꺼짐 판 질문 글은 그대로), `src/claude-task-bridge.ts`(변경 작성 결과 `needs_input`의 선택지를 `ask`까지 넘기는 자리, `fetchResult`의 질문 공개 검사에 선택지를 더하는 자리, 변경 작성 요청 `start`·`resume`의 판을 `change-v2`로 바꾸는 자리. 판 전환은 이 티켓 한 곳이다(주 진행자 2026-11-10))
   - 연결 파일, 소유 C04: 봇 `src/discord.ts`(선택지 버튼·"직접 답하기" 상호작용 분기, C16이 만든 바로 답 분기에 CHANGE 질문을 더하는 자리, 저장 전 봉인 판단을 일반 메시지에도 쓰는 자리), `src/discord-protocol.ts`(C13이 만든 custom_id 허용 목록 표에 "변경 선택지"·"직접 답하기" 두 줄), `src/store.ts`(C13이 만든 outbox 버튼 칸을 쓰기만)
   - 연결 파일, 소유 C07: 봇 `src/change-runtime.ts`의 `changeAuthorSource.questionRisk`(질문과 함께 선택지 글도 공개 검사)
   - 연결 파일, 소유 C16: C16이 만든 질문 고르기 버튼과 같은 표·같은 검사(누른 사람 owner, 질문 열림, 기한 전)를 쓴다. 고르기 대기 중 메시지 원문 처리만 CHANGE 질문에 맞춰 더한다
