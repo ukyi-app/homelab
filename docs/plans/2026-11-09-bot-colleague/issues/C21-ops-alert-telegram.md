@@ -53,4 +53,7 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #131, 병합 `9d5621a`(2026-11-10): `/metrics`에 `homelab_bot_model_paused_jobs{kind}`·`homelab_bot_model_pause_resets_at_seconds{kind}`·`homelab_bot_model_account{method}`·`homelab_bot_model_reviews_deferred`. 전체 2,420개 중 통과 2,398, 실패 0, skip 22. Codex 지적 없음. 배포 뒤 vmsingle에서 새 계열 확인.
+- homelab PR #1238(owner 검토 대기): 경보 `HomelabBotModelPausedRateLimit`·`AuthExpired`·`Billing`(Codex P2: 종류별 그룹 분리, 수정 뒤 재리뷰 지적 없음), `bun run ci` 30단계 통과.
+- 남은 것: #1238 병합, 운영 발화 시험 1회(주입 방법 승인 필요)와 그 기록.
+- 넘김(C22): 결제로 멈춘 작업 ID를 CLI로 볼 길이 없다. 경보 문구의 `homelab bot account use/list` 이름은 C22·C23이 만들 때 맞춘다.

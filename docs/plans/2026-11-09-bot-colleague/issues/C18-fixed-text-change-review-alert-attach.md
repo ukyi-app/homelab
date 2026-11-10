@@ -1,7 +1,7 @@
 # C18 고정 문구 3: 변경·리뷰 알림·경보·세션 연결
 
 - 단계: 4 말로 실행
-- 상태: 대기 (선행: C01, C12, C15, C17)
+- 상태: 진행 중 (2026-11-10 20:0x 착수, 선행 C01, C12, C15, C17 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.4 "고정 문구", §4.9, §5 AC-11·AC-23 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01, C12, C15, C17
 - 연결 AC: AC-11(일부: 변경·리뷰 알림·경보·세션 연결 문구), AC-23(문구 두 판)
