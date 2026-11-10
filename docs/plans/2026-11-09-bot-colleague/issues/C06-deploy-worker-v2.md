@@ -1,7 +1,7 @@
 # C06 작업자 v2 배포
 
 - 단계: 2 배포와 표면
-- 상태: 진행 중 (homelab PR #1223, 이미지 봇 main `9b067e9` `sha256:666a2f63…`, 증명 대조 완료. owner 검토·병합과 운영 확인 승인 대기)
+- 상태: integrated (homelab #1223 병합 `2544044`, 운영 확인 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.2(계약 배포 순서), §4.10 "변경 질문 줄이기"(작업자 변경 작성 v2), §5 AC-4 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C02, C03, C25
 - 연결 AC: AC-4(운영)
@@ -30,10 +30,10 @@ sandbox의 두 작업자(대화·리뷰 `worker`, 작업 `worker-task`)가 C02·
 
 ## 완료 조건
 
-- [ ] `worker`·`worker-task` 이미지가 C02·C03·C25가 든 main 빌드 digest이고, 증명 대조 결과가 PR에 있다. C25 작업자 변경 작성 v2도 같은 이미지로 배포됐다.
-- [ ] 배포 뒤 v1 게시 서버 + v2 작업자 조합에서 대화·리뷰·작업이 성공한다(AC-4 운영).
-- [ ] 작업 작업자 intake가 변경 작성 옛 판·새 판을 알리고, 옛 판 요청의 동작은 그대로다.
-- [ ] 승인과 확인 결과가 `approvals.md`와 봇 `VERIFICATION.md`에 있다.
+- [x] `worker`·`worker-task` 이미지가 C02·C03·C25가 든 main 빌드 digest이고, 증명 대조 결과가 PR에 있다. C25 작업자 변경 작성 v2도 같은 이미지로 배포됐다.
+- [x] 배포 뒤 v1 게시 서버 + v2 작업자 조합에서 대화·리뷰·작업이 성공한다(AC-4 운영).
+- [x] 작업 작업자 intake가 변경 작성 옛 판·새 판을 알리고, 옛 판 요청의 동작은 그대로다.
+- [x] 승인과 확인 결과가 `approvals.md`와 봇 `VERIFICATION.md`에 있다.
 
 ## 검증
 
@@ -43,4 +43,14 @@ sandbox의 두 작업자(대화·리뷰 `worker`, 작업 `worker-task`)가 C02·
 
 ## 결과
 
-(구현 뒤 채운다)
+- homelab PR #1223(`feat/colleague-c06-worker-v2`, head `9e2218a`), 병합 `2544044`(2026-11-10 10:1x, 사용자 "진행해"). `worker.image`·`task.image` = 봇 main `9b067e9`(C02·C03·C25·C07 포함) `sha256:666a2f638d31fa69d2f18d4bbcfd748f4eaec45246dda64a64effb0537553d32`. C25가 든 앞 빌드 `fc93fe2`는 push 단계가 시작되지 않은 채 실패해(재실행 불가) 다음 빌드를 썼다.
+- 빌드 증명: `gh attestation verify oci://…@sha256:666a2f63… --repo ukyi-app/homelab-bot --signer-workflow ukyi-app/homelab/.github/workflows/app-build.yaml` → 서명 `app-build.yaml@refs/tags/app-build-v1.0.1`, 원본 `build.yaml@refs/heads/main` `9b067e9`, GitHub 호스트 runner. CLI 버전(package.json·lock·Dockerfile)과 작업 레인 `taskSettings`·`taskArgs`는 `630c48d`와 같다.
+- 병합 전: 봇 DB에 끝나지 않은 작업 0건(작업 레인 비어 있음). 검사: `bun run ci` 30단계, pre-commit(gitleaks), Codex 코드·보안 지적 없음, `ci` 통과.
+- 배포: Argo CD sandbox Synced·Healthy, `worker`·`worker-task` 새 digest Running·Ready, 재시작 0, 기동 로그 `worker_started`(CLI 2.1.308, 자격 present, 작업 레인 막힘 사유 없음).
+- 운영 확인(v1 게시 서버 + v2 작업자, 2026-11-10):
+  - intake: 게시 서버 파드에서 GET `/v1/task/intake` → 200, open, `change.instructions` = `task-v1`·`change-v2`(C25 옛 판·새 판 수용).
+  - 대화 1회: 10:32:53 #작업공간에서 `@욱이봇 지금 노드 상태 어때?`(작업용 Mac의 Discord, agent-desktop) → 👀, 그 메시지에서 스레드 "지금 노드 상태 어때?", 10:33 답(옛 라벨 형식, C11 전), 답 끝 작은 글씨 `ref:` 줄, 답 뒤 👀 지워짐(C04·C07 운영 동작 함께 확인). 봇 감사 `model_timing` 10:33:08.
+  - 작업 레인 1회: 10:34:42 `/task project:homelab-smoke` → 접수, 스레드, 10:34 완료(작업 `111c92e8…` succeeded, 변경 파일 0).
+  - 리뷰 1회: `homelab-smoke` #12의 `/homelab-review`는 같은 세대라 `duplicate_generation`(설계대로)이어서, 시험 PR #23을 열어 10:44:08 웹훅 queued → 10:44:18 `ukyi-review` COMMENTED 리뷰. PR은 닫고 브랜치 삭제.
+- 관찰: 11-04 메시지의 👀는 C04 전 반응이라 정리 대상이 아니어서 남아 있다(새 메시지는 지워짐). 작업 레인 완료 글이 `homelab-smoke` 작업 공간에 추적되지 않는 파일(.bashrc·.idea·.mcp.json·scripts)이 있다고 알렸다(손대지 않음, 별도 확인 거리).
+- 이제 C11(대화 v2)·C12(리뷰 말투)를 시작할 수 있고, C27~C29가 새 판 `change-v2`를 보낼 수 있다.

@@ -1,7 +1,7 @@
 # C11 대화 v2 전환
 
 - 단계: 3 새 형식 켜기
-- 상태: 대기 (선행: C01, C04, C06, C08)
+- 상태: integrated (봇 #124 병합 `860b591`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.2 대화 답과 작업자 계약 v2, §4.5 반응과 봇 상태(`ack_only`의 👍) (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01, C04, C06, C08
 - 연결 AC: AC-3, AC-4(서버), AC-5, AC-14(👍)
@@ -42,11 +42,11 @@ owner의 멘션 요청에 대한 답이 라벨 목록이 아니라 결론부터 
 
 ## 완료 조건
 
-- [ ] 대화 답이 `사실:`·`가설:` 같은 라벨 없이 `reply` 문장으로 게시된다(스위치 두 상태 모두).
-- [ ] `ack_only`면 글 없이 👍만 남고 👀는 지워진다.
-- [ ] 공개 검사에 걸리는 답은 모델 글 없이 고정 문구만 나간다.
-- [ ] 대화 기록이 50개·80KiB까지 들어가고, 넘치면 현재 owner 메시지가 마지막에 남고 오래된 것부터 빠진다. 정리돼 빠진 앞부분이 있으면 신뢰 문맥 표시 칸이 채워진다.
-- [ ] v2 서버 + v2 작업자 대화가 성공하고, v2 서버 + v1 작업자는 요청 거부로 닫힌다.
+- [x] 대화 답이 `사실:`·`가설:` 같은 라벨 없이 `reply` 문장으로 게시된다(스위치 두 상태 모두).
+- [x] `ack_only`면 글 없이 👍만 남고 👀는 지워진다.
+- [x] 공개 검사에 걸리는 답은 모델 글 없이 고정 문구만 나간다.
+- [x] 대화 기록이 50개·80KiB까지 들어가고, 넘치면 현재 owner 메시지가 마지막에 남고 오래된 것부터 빠진다. 정리돼 빠진 앞부분이 있으면 신뢰 문맥 표시 칸이 채워진다.
+- [x] v2 서버 + v2 작업자 대화가 성공하고, v2 서버 + v1 작업자는 요청 거부로 닫힌다.
 
 ## 검증
 
@@ -56,4 +56,11 @@ owner의 멘션 요청에 대한 답이 라벨 목록이 아니라 결론부터 
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #124(`feat/colleague-c11-chat-v2-switchover`, 결과 head `de20e41`), 병합 `860b591`(2026-11-10). 스위치와 무관하게 병합과 함께 운영 대화 답 모양이 바뀐다(라벨 목록 → `reply` 문장, 짧은 인사는 👍).
+- 구현: `src/runtime.ts` 대화 성공 분기(v2 요청 조립, surface = `store.colleague`, `ChatReplySchema`, ack_only·공개 검사·일반 답 세 갈래, proposal은 버림 → C13), `src/chat-format.ts`(`chatReplyContent`·`EMPTY_REPLY_NOTICE`·`WITHHELD_REPLY_NOTICE`·`ACK_ONLY_NOTICE`·`chatReplyRisk`), `src/worker.ts` `workerRequest` v2만·`WorkerClient` v2(칸 순서 그대로), `src/chat-context.ts` 50개·80KiB와 `earlierPurged()`, `src/store.ts` `finish()`의 ack_only(반응 행 있으면 👍, 없으면 고정 완료 글 "알겠어요." — Codex P2 반영), `complete(superseded)`의 반응 정리(할 일 8a), `src/reactions.ts` 표에 `acked: ['👍']`, `src/chat-lane.ts` v2 프롬프트에 `replied_bot_post` 설명(할 일 8b, 작업자 재배포 때 효과).
+- 완료 조건 근거: `chat-format` 스위치 두 상태 라벨 없는 reply·공개 검사 고정 문구, `chat-ack` ack_only REST 순서(👀 PUT → 👍 PUT → 👀 DELETE)·outbox 0·`/chat` 명령은 고정 완료 글·실행 중 `/stop` 뒤 정리, `chat-context` 50개·80KiB·정리 표시, `foundation` v2 서버 + v1 작업자 `worker_rejected`, `s16-display` 프롬프트.
+- 검사: 작업자 관련 42개 파일 1,201개 중 실패 0(+PG 122/122), 수정 뒤 관련 132/132. 통합 담당 전체 검사(`de20e41`, node 24.22.0, 실제 PG, 잠금): 2331 / 2309 pass / 0 fail / 22 skip. Codex 1차 P2 1 수정 뒤 지적 없음, `build / test` 통과.
+- 운영 영향: 대화 답에도 `scanPublicText` metadata 패턴(17~20자리 숫자, 이메일, `/home/` 경로, 사설 IP)이 걸려 그런 답은 고정 문구로 바뀐다(명세대로). 롤백은 게시 서버 이미지만.
+- 분해 불일치: 👍 순서는 C04 동기화 훅이 정해 "👀 지우고 👍" 대신 👍 PUT → 👀 DELETE. `src/reactions.ts`(C04) 표에 이름만 더함. 소유 밖 시험 8개 파일·`test/helpers.ts`의 v1 기대를 v2로.
+- 운영 확인(2026-11-10 13:0x, 작업용 Mac의 Discord): 질문 → 메시지 스레드, 20초 안에 라벨 없는 해요체 한 문단 답과 `ref:` 줄(스위치 꺼짐이라 '/read' 안내 포함). 스레드의 `고마워` → 👀 뒤 👍만, 글 없음.
+- 뒤 티켓: C13은 proposal을 받고 감사 기록 여부를 정함, C19는 `rateLimit`을 읽음. `DEFAULTS.contextMessages`(20)는 쓰는 곳이 없음(C02 소유, 정리 후보).

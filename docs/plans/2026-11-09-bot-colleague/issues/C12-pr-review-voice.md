@@ -1,7 +1,7 @@
 # C12 PR 리뷰 말투
 
 - 단계: 3 새 형식 켜기
-- 상태: 대기 (선행: C06)
+- 상태: integrated (봇 #123 병합 `c99b38e`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.4 "PR 리뷰(GitHub)"·"리뷰 지시문 변경의 대가" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06
 - 연결 AC: AC-13
@@ -34,11 +34,11 @@ GitHub PR 리뷰 본문과 인라인 댓글이 동료가 쓴 글처럼 읽힌다
 
 ## 완료 조건
 
-- [ ] GitHub 리뷰 본문과 인라인 댓글에 심각도 표시가 남고, 지적마다 조건·영향·근거·개선이 한 문단으로 나온다.
-- [ ] "승인·병합 판단이 아니다"가 남고, 리뷰 대조 표식이 그대로라 응답 유실 뒤 대조가 깨지지 않는다.
-- [ ] Discord 리뷰 요약에 모델 문장이 없다.
-- [ ] 게시 상한(지적·인라인·본문 길이) 동작이 그대로다.
-- [ ] 지시문 변경 배포 때 재리뷰가 몰리는지 확인한 결과와 대응이 기록돼 있다.
+- [x] GitHub 리뷰 본문과 인라인 댓글에 심각도 표시가 남고, 지적마다 조건·영향·근거·개선이 한 문단으로 나온다.
+- [x] "승인·병합 판단이 아니다"가 남고, 리뷰 대조 표식이 그대로라 응답 유실 뒤 대조가 깨지지 않는다.
+- [x] Discord 리뷰 요약에 모델 문장이 없다.
+- [x] 게시 상한(지적·인라인·본문 길이) 동작이 그대로다.
+- [x] 지시문 변경 배포 때 재리뷰가 몰리는지 확인한 결과와 대응이 기록돼 있다.
 
 ## 검증
 
@@ -48,4 +48,10 @@ GitHub PR 리뷰 본문과 인라인 댓글이 동료가 쓴 글처럼 읽힌다
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #123(`feat/colleague-c12-pr-review-voice`, 결과 head `8ba7612`), 병합 `c99b38e`(2026-11-10). 리뷰 App이 설치된 `homelab-smoke`에서 바로 보인다.
+- 구현: `src/review.ts` `render`(첫 줄 대조 표식 그대로, 둘째 줄 "참고용 자동 리뷰예요. 승인·병합 판단이 아니고 안전을 보증하지도 않아요.", 지적은 `**[P1] 제목** · 위치` 아래 조건·영향·근거·개선 한 문단, 인라인 댓글도 같은 문단), `SERVER_REVIEW_INSTRUCTIONS = REVIEW_INSTRUCTIONS_V2`, `reviewRevision(review, instructions)`, `sameReviewContent`·`ReviewQueue.admit`의 `instructions_only`(말투만 다른 지시문 판 사이에서 같은 PR·head·비교 기준의 결과가 게시됐거나 게시 대기면 자동 이벤트로 다시 리뷰하지 않음, 그때도 남긴 세대의 `pr_updated_at`을 갱신 — Codex P2 반영), `ReviewPublisher.publishable`(그 대기 결과를 새 렌더로 게시).
+- 완료 조건 근거: `pr-review` "AC-13 PR 리뷰 말투: 심각도·한 문단 지적·…"(본문·인라인 리터럴, Discord 요약에 모델 문장 없음), "AC-13 리뷰 지시문 v1→v2 배포: …", "AC-13 지시문 판만 바뀌어 재리뷰를 건너뛴 이벤트도 최신 시각을 남겨 …"(주 진행자 수정, 빨강→초록), REVIEW-04·DATA-01·EVENT-02·게시 상한 시험, `publisher-review` 조립.
+- 재리뷰 몰림: 대응 전 코드라면 열린 PR 2건(`homelab-smoke` #12·#16)이 새 세대로 다시 리뷰됐을 것이고, 대응 뒤 예상 0건(둘 다 현재 head에 봇 리뷰). DECISIONS "C12 PR 리뷰 말투" 절.
+- 검사: 작업자 관련 11개 파일 388/388, 수정 뒤 관련 168/168(실제 PG). 통합 담당 전체 검사(`8ba7612`, node 24.22.0, 실제 PG, 잠금): 2316 tests / 2294 pass / 0 fail / 22 skip. Codex 1차 P2 1 수정 뒤 지적 없음, `build / test` 통과.
+- 분해 불일치: 설계 계약이 가리킨 ARCHITECTURE §16.2는 미게시 후보 리뷰라 무관(실제 근거 DECISIONS T17 4·16, 명세 §4.4). 티켓 할 일 5와 명세의 `policy_changed` 규칙은 "결과가 나온 세대는 지키고 모델 전 작업만 새 세대"로 나눠 맞췄다.
+- 남은 것: 근거 칸 여러 줄 코드 블록은 한 줄로 접힌다. draft로 보류된 v1 결과는 ready가 되면 한 번 다시 리뷰된다. v1 수용을 뺄 때 `VOICE_ONLY_INSTRUCTIONS`에서 v1은 남긴다. 실제 GitHub 모양은 C24.

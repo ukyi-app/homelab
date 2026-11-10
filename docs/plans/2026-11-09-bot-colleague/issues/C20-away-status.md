@@ -11,7 +11,7 @@
   - 봇 `src/gateway.ts`: Gateway 상태(presence) 보내기와 재연결 때 복원. 소유(연결 표에 없고 다른 티켓이 고치지 않는다).
   - 봇 `src/discord.ts`, `src/discord-protocol.ts`: 연결 파일, 소유 C04. 이 티켓은 C04의 반응 훅에 💤 상태를 더하는 자리만 고친다.
   - 봇 `src/store.ts`: 연결 파일, 소유 C04. 대화 레인 한도·인증 대기 안내(`waitForUser`의 `waiting:<job>:<attempt>` 글)를 자리 비움으로 바꾸는 자리만.
-  - 봇 `src/claude-task-bridge.ts`, `src/codex.ts`: 연결 파일, 소유 C09. 작업 레인 한도·인증 대기 안내 자리만.
+  - 봇 `src/claude-task-bridge.ts`, `src/codex.ts`: 연결 파일, 소유 C09. 작업 레인 한도·인증 대기 안내 자리와, `claude-task-bridge.ts` `settle`의 한도 경고 기록 자리(할 일 6a)만.
   - 봇 `src/review.ts`: 연결 파일, 소유 C12. 리뷰 대기 안내(`review-waiting`) 자리만.
   - 봇 `src/change-assembly.ts`: 변경 리뷰 자식의 한도·인증 대기 안내. 연결 표에 없는 파일이다(README 5절에 반영). 이 안내 한 자리만 고친다.
   - 봇 `src/runtime.ts`, `src/main.ts`: 멈춤 시작·해제를 Gateway 상태와 반응으로 잇는 배선. 연결 표에 없는 공유 파일이다(C11·C19·C21과 겹친다. README 5절에 반영).
@@ -36,6 +36,7 @@
 4. 자리 비움 한 줄: 멈춘 동안 스레드마다 처음 부를 때 한 번만 단다. 같은 멈춤 동안 같은 스레드에는 다시 달지 않고, 새 멈춤이 시작되면 다시 한 번 단다. 중복 방지는 outbox 멱등 키(스레드와 멈춤 회차)처럼 기존 장치로 하고, 새 저장이 필요하면 마이그레이션(순번 공유)을 더한다. 문구는 고정 문구 상수로 둔다.
 5. 지금의 한도·인증 대기 Discord 안내를 원인 없는 자리 비움으로 바꾼다: 대화(`src/store.ts` `waitForUser`), 작업 레인(`src/claude-task-bridge.ts`, `src/codex.ts`), PR 리뷰(`src/review.ts` `review-waiting`), 변경 리뷰 자식(`src/change-assembly.ts`). 이 글들에서 원인(한도·인증), 시각, '/' 재개 명령을 뺀다. 결제 멈춤도 Discord에서는 같은 자리 비움이다.
 6. 입력 중 표시는 그대로 둔다(명세 4.5).
+6a. C19 넘김(봇 PR #126 Codex P2, 2026-11-10): 작업 레인(`src/claude-task-bridge.ts` `settle`)이 대기가 아닌 응답(`completed`·`needs_input`·`failed`)에 실린 한도 경고를 계정 기록에 남기지 않아, 작업 레인에서 본 `allowed_warning`이 리뷰 미루기를 걸지 않는다. 대화(`src/runtime.ts`)·리뷰(`src/review.ts`)처럼 `Store.observeRateLimit`을 부르되, `settle`의 트랜잭션 안에서 기록이 실패하면 트랜잭션 전체가 깨지므로 트랜잭션 밖에서 부르고 실패는 로그만 남긴다. 시험: 작업 완료 응답의 `allowed_warning` 뒤 `reviewDeferredUntil`이 그 시각이다.
 7. 시험: 가짜 Gateway로 멈춤 시작 → idle, 해제 → online, 재연결 뒤 복원. 가짜 Discord REST로 👀·⏳ → 💤 → 답 뒤 지움 순서, 남의 반응을 지우지 않음. 같은 스레드 반복 안내 0, 안내 글에 원인·시각·'/' 이름 없음(리터럴 검사).
 8. 기록: 봇 `docs/ai-bot/VERIFICATION.md`에 "C20 자리 비움" 절, `docs/ai-bot/ARCHITECTURE.md`에 Gateway 상태 절과 "상태 안내" 표 갱신, `docs/ai-bot/DECISIONS.md`에 자리 비움 구현 위치 한 줄을 더한다. 이 계획 폴더 `README.md`의 C20 상태 줄을 갱신한다.
 

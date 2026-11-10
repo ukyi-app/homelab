@@ -1,7 +1,7 @@
 # C05 관리 CLI `homelab bot`
 
 - 단계: 1 기반
-- 상태: 진행 중 (봇 #115 병합 `cad247e`: 비상 정지·해제·상태 보기. homelab #1216 owner 검토 대기. 차단·unknown 해제·멈춘 작업 재개는 기존 함수가 owner 행위자를 요구해 미지원, 분할 여부 사용자 결정 대기)
+- 상태: integrated (봇 #115 병합 `cad247e`, homelab #1216 병합 `03971f9`, 운영 확인 2026-11-10. 차단·unknown 해제·멈춘 작업 재개는 C32로 나눔)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3(동작 목록의 관리 기능 행), §4.8(관리 기능, ARCHITECTURE 계약 변경), §5 AC-20 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01
 - 연결 AC: AC-20
@@ -33,11 +33,11 @@ owner가 대화와 섞지 않고 클러스터 접근 권한으로 `homelab bot <
 
 ## 완료 조건
 
-- [ ] `homelab bot`으로 비상 정지, 해제, 차단, 상태 보기, unknown 해제가 된다(AC-20).
-- [ ] 차단은 거부만 더하고 모델을 부르지 않으며, 감사 기록에 CLI 행위자가 남는다(AC-20).
-- [ ] 시범 동안 같은 '/' 관리 명령도 동작한다(AC-20).
-- [ ] 봇 ARCHITECTURE §6 계약이 CLI 관리 명령으로 바뀌고, AUTH-02 재검증 결과가 `VERIFICATION.md`에 있다.
-- [ ] 운영 1회 확인이 `approvals.md`에 있다.
+- [x] `homelab bot`으로 비상 정지, 해제(비상 정지), 상태 보기가 된다(AC-20). 차단·unknown 해제·멈춘 작업 재개는 C32.
+- [x] 관리 기능은 모델을 부르지 않고, 상태를 바꾼 명령은 감사 `admin_command`에 행위자 `cli`가 남는다(AC-20). 차단의 거부만 더하기는 C32.
+- [x] 시범 동안 같은 '/' 관리 명령도 동작한다(AC-20).
+- [x] 봇 ARCHITECTURE §6 계약이 CLI 관리 명령으로 바뀌고, AUTH-02 재검증 결과가 `VERIFICATION.md`에 있다.
+- [x] 운영 1회 확인이 `approvals.md`에 있다.
 
 ## 검증
 
@@ -47,4 +47,10 @@ owner가 대화와 섞지 않고 클러스터 접근 권한으로 `homelab bot <
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #115(`feat/colleague-c05-admin-cli`, 결과 head `b4fcbe4`), 병합 `cad247e`. homelab PR #1216(`feat/colleague-c05-homelab-bot-cli`, head `ea5c54d`), 병합 `03971f9`(2026-11-10, 사용자 "진행해").
+- 구현: 봇 `src/admin.ts`(고정 동작 단어, UUID·snowflake 형식만, `Store.control`을 대화 자리 `admin:cli`로 불러 상태 확인과 바꾸기를 한 트랜잭션에서, 상태를 바꾼 명령만 감사 `admin_command` 행위자 `cli`), `src/admin-main.ts`(`DATABASE_URL`만 읽음, stdout은 `homelab-bot-admin/v1` JSON 한 줄, 오류 로그는 stderr — Codex P2 반영). homelab `cli/src/commands/bot.ts`와 `core/podops.ts`의 `botRead`·`botWrite`(ns `app-homelab-bot`, Running·Ready 게시 서버 파드 정확히 1개, `kubectl exec … -c app -- node /app/dist/src/admin-main.js <동작> [ID]`, 위치 인자, 출력 꼴 검사). 설계 C.7대로 `kubectl exec`는 쓰기로 판정해 모든 명령이 `--apply`일 때만 실행.
+- 완료 조건 근거: 봇 `test/admin-cli.test.ts` 10건(비상 정지·해제·상태 보기, '/' 경로와 같은 상태, 모델 호출 0, 감사 행위자, 사용법 64·미지원 4, 실패해도 stdout 한 줄), 기존 `foundation` OPS-01·AUTH-02. homelab `cli/test/commands/bot.test.ts` 8건(가짜 kubectl), `bun run ci` 30단계.
+- 검사: 통합 담당 전체 검사(`b4fcbe4`, node 24.22.0, 실제 PG, 잠금): 2221 tests / 2199 pass / 0 fail / 22 skip. Codex 1차 P2 1 수정 뒤 지적 없음.
+- 운영 확인(2026-11-10 10:2x, `KUBECONFIG=~/.kube/homelab.yaml`, homelab main 소스 `bun run cli -- bot …`): `bot status` plan → `--apply` 결과 `status (emergency=false, paused=false, executionPending=false, taskLaneClosed=none)`, `bot resume emergency-stop --apply` 결과 `not_stopped`(상태 변화 없음, 감사 행 없음은 설계대로). 진입점 경로 `/app/dist/src/admin-main.js`·컨테이너 `app`·owner kubeconfig의 `pods/exec` 권한 확인.
+- 나눈 것: 차단(`PolicyGate.revoke`가 owner 행위자 요구), unknown 해제(`TaskBridge.releasable`이 owner·대화 대조), 멈춘 작업 재개(`Store.control resume-model <job>`이 owner·대화·구독 요구)는 C32(사용자 2026-11-10). 그때까지 진입점은 셋에 미지원(종료 4)으로 답하고 '/' 명령이 예비다.
+- 남은 것: 상태 보기에서 대화에 묶인 대기 작업 목록은 빠진다. 설치된 `homelab` 바이너리는 다시 빌드해야 `homelab bot`이 생긴다(그때까지 소스 실행).

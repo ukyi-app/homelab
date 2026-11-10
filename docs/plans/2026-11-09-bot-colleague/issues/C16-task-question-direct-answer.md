@@ -1,7 +1,7 @@
 # C16 작업 질문 바로 답
 
 - 단계: 4 말로 실행
-- 상태: 대기 (선행: C09, C13)
+- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3 "작업 질문 바로 답", §4.9 스위치와 배포 순서, §4.10 "변경 질문 줄이기"(CHANGE 질문은 C28) (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C09, C13
 - 연결 AC: AC-8
