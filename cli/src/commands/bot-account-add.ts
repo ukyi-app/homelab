@@ -2,6 +2,7 @@
 // 레인이 둘(대화·리뷰, 작업)이라 토큰도 둘이다. tty면 레인마다 `claude setup-token`을 띄워 owner는 브라우저 로그인만 하고,
 // 화면에 나온 토큰을 에코 없는 입력으로 붙여 넣는다. 파이프면 stdin 두 줄(대화·리뷰, 작업 순서)이다. 그래서 `claude`가
 // 이 CLI를 돌리는 기기에 있어야 한다. 출력 자동 수집은 하지 않는다(출력 꼴이 문서에 없다, 봇 DECISIONS C22).
+// claude의 출력(발급 토큰 포함)은 stderr로 간다. stdout은 결과 문서 하나이고, stderr가 터미널이 아니면 로그인을 띄우지 않는다.
 // 값은 argv·출력·파일에 두지 않고(secret set과 같은 입력 경로) Infisical 계정 폴더에만 둔다. 작업자 키는 바꾸지 않는다
 // (그건 account use). 둘 다 받은 뒤에만 쓴다. 끝나면 관리 진입점으로 봇 DB에 이름·방식·발급일(지금)을 적는다.
 import { defineCommand, type BotAdminCommand, type Observation, type Step } from "../core/command";
@@ -74,7 +75,7 @@ export default defineCommand({
     return ctx.engine({
       command: "bot account add",
       steps: [tokens, record],
-      notes: [`claude setup-token은 이 기기에서 실행한다(Claude Code CLI 필요). 토큰은 claude가 화면에 한 번 출력하므로 붙여 넣은 뒤 터미널 스크롤을 지운다`],
+      notes: [`claude setup-token은 이 기기에서 실행한다(Claude Code CLI 필요). 토큰은 claude가 화면(stderr)에 한 번 출력하므로 붙여 넣은 뒤 터미널 스크롤을 지운다. stderr가 터미널이 아니면 로그인을 띄우지 않는다(그때는 토큰을 stdin 두 줄로 넘긴다)`],
       next: (status) => (status === "done" ? `봇이 이 계정을 쓰게 하려면: homelab bot account use ${name}` : undefined) as string | null,
     });
   },
