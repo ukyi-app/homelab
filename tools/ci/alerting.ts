@@ -71,6 +71,11 @@ export function checkAlerting(): Violation[] {
     [["severity=warning"], "bot,telegram"],
     [["severity=critical"], "bot,telegram"],
     [["severity=info"], "telegram"],
+    // 봇 모델 멈춤(봇 C21)은 원인을 Telegram으로만 알린다. 봇 receiver에도 가지만 service 라벨이 없어 봇이 버린다(Discord에 안 감).
+    // 종류마다 경보 이름이 다르다. 이 이름·kind 라벨로 Telegram을 빼는 route가 생기면 여기서 막힌다.
+    [["alertname=HomelabBotModelPausedRateLimit", "severity=warning", "kind=rate_limit"], "bot,telegram"],
+    [["alertname=HomelabBotModelPausedAuthExpired", "severity=warning", "kind=auth_expired"], "bot,telegram"],
+    [["alertname=HomelabBotModelPausedBilling", "severity=warning", "kind=billing"], "bot,telegram"],
     [["alertname=Watchdog", "severity=none"], "healthchecks"],
   ];
   for (const [labels, want] of ROUTES) {
