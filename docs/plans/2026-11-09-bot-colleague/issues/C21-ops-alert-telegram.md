@@ -1,7 +1,7 @@
 # C21 운영 알림 (지표 + vmalert → Telegram)
 
 - 단계: 5 멈춤과 계정
-- 상태: 진행 중 (2026-11-10 16:3x 착수, 선행 C19 integrated)
+- 상태: integrated (2026-11-11, 운영 발화 시험 통과)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.7 "운영 알림", §5 AC-18 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C19
 - 연결 AC: AC-18
@@ -40,10 +40,10 @@
 
 ## 완료 조건
 
-- [ ] 봇 `/metrics`에 멈춤 종류·풀리는 시각·지금 계정·미룬 리뷰 수 지표가 있고, 라벨에 ID·본문이 없다.
-- [ ] 모델 멈춤이 되면 2분 안에 Telegram에 원인 종류, 풀리는 시각(KST), 할 일, 지금 계정이 온다. Discord에는 이 경보가 가지 않는다.
-- [ ] 멈춘 동안 4시간마다 다시 오고, 풀리면 해소가 온다.
-- [ ] 운영 발화 시험 1회 결과가 [approvals.md](../../2026-10-17-homelab-rebuild/approvals.md)와 봇 `VERIFICATION.md`에 있다.
+- [x] 봇 `/metrics`에 멈춤 종류·풀리는 시각·지금 계정·미룬 리뷰 수 지표가 있고, 라벨에 ID·본문이 없다.
+- [x] 모델 멈춤이 되면 2분 안에 Telegram에 원인 종류, 풀리는 시각(KST), 할 일, 지금 계정이 온다. Discord에는 이 경보가 가지 않는다.
+- [x] 멈춘 동안 4시간마다 다시 오고, 풀리면 해소가 온다.
+- [x] 운영 발화 시험 1회 결과가 [approvals.md](../../2026-10-17-homelab-rebuild/approvals.md)와 봇 `VERIFICATION.md`에 있다.
 
 ## 검증
 
@@ -54,6 +54,8 @@
 ## 결과
 
 - 봇 PR #131, 병합 `9d5621a`(2026-11-10): `/metrics`에 `homelab_bot_model_paused_jobs{kind}`·`homelab_bot_model_pause_resets_at_seconds{kind}`·`homelab_bot_model_account{method}`·`homelab_bot_model_reviews_deferred`. 전체 2,420개 중 통과 2,398, 실패 0, skip 22. Codex 지적 없음. 배포 뒤 vmsingle에서 새 계열 확인.
-- homelab PR #1238(owner 검토 대기): 경보 `HomelabBotModelPausedRateLimit`·`AuthExpired`·`Billing`(Codex P2: 종류별 그룹 분리, 수정 뒤 재리뷰 지적 없음), `bun run ci` 30단계 통과.
-- 남은 것: #1238 병합, 운영 발화 시험 1회(주입 방법 승인 필요)와 그 기록.
+- homelab PR #1238, 병합 `5a67a6d`(2026-11-11, 사용자 "너가 병합해줘"). 병합 뒤 vmalert에 세 규칙 확인: 경보 `HomelabBotModelPausedRateLimit`·`AuthExpired`·`Billing`(Codex P2: 종류별 그룹 분리, 수정 뒤 재리뷰 지적 없음), `bun run ci` 30단계 통과.
+- 운영 발화 시험(2026-11-11 01:14~01:25 KST, owner 승인 "A로"): 운영 DB에 시험용 대기 작업과 멈춤 기록(`rate_limit`, 풀리는 시각 1시간 뒤)을 넣어 실제 지표로 발화시켰다. 주입 약 57초 뒤 Telegram 도착(owner가 글 확인: 풀리는 시각 KST, 지금 계정 미등록, 할 일 셋), Discord에는 가지 않음(봇 `alert_ignored`, outbox 변화 없음, owner 확인). 행을 지운 뒤 `keep_firing_for` 5분이 지나 꺼졌고 다음 묶음 주기에 해소 전송(Telegram 전송 수 2, 실패 0). 기록은 [approvals.md](../../2026-10-17-homelab-rebuild/approvals.md) 2026-11-11 01:1x 줄과 봇 `VERIFICATION.md` "C21 운영 알림"의 "운영 발화 시험".
+- 완료 조건 근거: 지표는 봇 #131(`ops-metrics` 시험 15개 통과, 전체 2,420 중 실패 0), 2분 도착·Discord 미도착·해소는 위 발화 시험, 4시간 반복은 Alertmanager `repeat_interval: 4h`와 route 시험(`bun run ci` 30단계 통과, homelab #1238). 4시간 반복의 실제 도착과 해소 글의 owner 확인은 하지 않았다(전송 수가 근거, C24 S5에서 다시 본다).
+- 발화 시험에서 알게 된 것: `model_pauses` 행만으로는 발화하지 않는다(지표가 `jobs`의 한도·인증 대기를 센다).
 - 넘김(C22): 결제로 멈춘 작업 ID를 CLI로 볼 길이 없다. 경보 문구의 `homelab bot account use/list` 이름은 C22·C23이 만들 때 맞춘다.
