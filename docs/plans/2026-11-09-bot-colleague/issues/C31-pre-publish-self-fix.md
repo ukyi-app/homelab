@@ -1,7 +1,7 @@
 # C31 게시 전 자체 리뷰 고치기
 
 - 단계: 6 PR 수정
-- 상태: 대기 (선행: C06, C17, C25)
+- 상태: integrated (봇 #135 병합 `6b6d86b`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10, §5 AC-31 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06, C17, C25
 - 연결 AC: AC-31
@@ -12,7 +12,7 @@
   - 연결 파일, 소유 C17: 봇 `src/change-store.ts`(같은 generation 안에서 `reviewing` → `authoring`으로 돌아가는 전이와 차례 수)
   - 연결 파일, 소유 C25: 봇 `src/change-contracts.ts`(전이 표·차례 칸. C25가 만든 수정 차례 입력을 쓴다)
   - 연결 파일, 이 티켓이 소유하고 C27이 뒤에 고친다: 봇 `src/change-review.ts`(차례 키로 receipt를 저장·조회하는 자리)
-  - 연결 파일, 소유 C09: 봇 `src/claude-task-bridge.ts`(작성 실행에 자체 리뷰 발견을 자료 블록으로 넘기는 자리)
+  - 연결 파일, 소유 C09: 봇 `src/claude-task-bridge.ts`(작성 실행에 자체 리뷰 발견을 자료 블록으로 넘기는 자리. 고치기 요청만 `change-v2`이고 보통 요청의 판 전환은 C28, 주 진행자 2026-11-10)
   - 봇 `migrations/`(순번 공유)
   - 시험: `test/change-store.test.ts`·`test/change-store-pg.test.ts`, `test/change-assembly.test.ts`, `test/change-review.test.ts`와 새 고치기 차례 시험
   - 봇 `docs/ai-bot/VERIFICATION.md`·`DECISIONS.md`·`ARCHITECTURE.md`는 추가만
@@ -40,10 +40,10 @@
 
 ## 완료 조건
 
-- [ ] 자체 리뷰가 P0·P1을 내면 게시 전에 최대 2번 스스로 고치고, 고친 뒤 시험·리뷰를 새로 돈다.
-- [ ] 2번 뒤에도 P0·P1이 남으면 지금처럼 `review_blocked`로 닫히고 Discord에 이유가 간다.
-- [ ] P2·P3만 남으면 고치기 없이 미리보기로 가고, 남은 위험으로 넘어간다.
-- [ ] 승인 digest는 마지막 차례 증거로만 만들어진다.
+- [x] 자체 리뷰가 P0·P1을 내면 게시 전에 최대 2번 스스로 고치고, 고친 뒤 시험·리뷰를 새로 돈다.
+- [x] 2번 뒤에도 P0·P1이 남으면 지금처럼 `review_blocked`로 닫히고 Discord에 이유가 간다.
+- [x] P2·P3만 남으면 고치기 없이 미리보기로 가고, 남은 위험으로 넘어간다.
+- [x] 승인 digest는 마지막 차례 증거로만 만들어진다.
 
 ## 검증
 
@@ -53,4 +53,9 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #135, 병합 `6b6d86b`(2026-11-10). 게시 전 자체 리뷰 고치기 차례(상한 2번), 마지막 차례 증거만 남기는 저장, 마이그레이션 026. 작업자 계약 `amendment.pullNumber`를 null로 받게 넓힘(주 진행자 결정: 게시 전에는 PR이 없다).
+- 완료 조건 4개 충족(S1·S2): `test/change-self-fix.test.ts`와 `change-assembly`·`change-store`·`change-store-pg`·`task-contracts`·`change-artifact` 시험.
+- 검사: 결과 `f44db18`에서 전체 2,506개 중 통과 2,484, 실패 0, skip 22. CI `build / test` 통과.
+- Codex: 1차 P2 1(고치기 세션 재개 판)은 C28 병합으로 해결하고 시험 추가, 재리뷰 지적 없음.
+- 병합에서 고친 것: 고치기 차례를 열 때 앞 차례의 확인할 것 목록(`change_notes`, C29)도 지운다(고치기 전 목록이 PR에 실리던 문제).
+- 한계: 작업자 이미지 교체 전(운영 `9b067e9`)에는 P0·P1 건이 차례를 하나 연 뒤 지금처럼 `review_blocked`로 닫힌다. 실제 고치기 품질은 C24 S5.

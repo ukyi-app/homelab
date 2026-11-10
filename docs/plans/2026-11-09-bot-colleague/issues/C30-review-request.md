@@ -1,7 +1,7 @@
 # C30 리뷰 요청(Discord, 조직 저장소)
 
 - 단계: 4 말로 실행
-- 상태: 대기 (선행: C12, C13, C19, C26)
+- 상태: integrated (봇 #132 병합 `5e66d78`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10 "리뷰 요청"·"사람 작업", §4.3 동작 목록의 "PR 리뷰 부탁" 줄, §4.9 스위치와 배포 순서, §5 AC-30, §8 "리뷰 App 설치 범위" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C12, C13, C19, C26
 - 연결 AC: AC-30
@@ -9,6 +9,7 @@
 - 저장소·PR: 봇 PR(사람의 GitHub 설정 변경과 승인 기록은 homelab `approvals.md`)
 - 파일 소유:
   - 연결 파일, 소유 C13: 봇 제안 모듈(동작 표에 "리뷰 요청" 줄: 종류 실행이지만 확인 없음, 스위치 뒤, 대상 값은 저장소 이름과 PR 번호)
+  - 연결 파일, 소유 C02: 봇 `src/contracts.ts`(`PROPOSAL_RUN_ACTIONS` 끝에 리뷰 요청 ID 한 줄. 목록에 없어 더한다. 작업자 계약 digest·이미지 영향은 구현 때 확인, 주 진행자 2026-11-10)
   - 연결 파일, 소유 C12: 봇 `src/review.ts`(`ReviewQueue.admitLive`에 Discord 리뷰 요청을 명시 트리거로 넣는 자리, 정책 목록 밖 저장소의 대상 기록(저장소 ID·이름·설치 ID·visibility)을 받는 자리, 실행 직전·게시 직전 판단이 그 기록을 쓰는 자리. 조직 이름을 정책에 둘 경우 `ReviewPolicySchema` 한 칸). `GitHubIngress`의 웹훅 저장소 검사(`repository`)는 고치지 않는다
   - 연결 파일, 소유 C26: 봇 `src/github-review-io.ts`(`policyRepositories`가 정책 목록 밖이라도 Discord 리뷰 요청으로 접수된 저장소 기록이면 토큰 범위를 정하는 자리), `src/github-app.ts`(허용 경로 표에 저장소의 App 설치 조회와 저장소 정보 읽기 두 줄)
   - 연결 파일, 소유 C04: 봇 `src/discord.ts`(리뷰 요청 동작을 실행해 접수 결과를 그 스레드에 일반 답으로 다는 분기). 버튼이 없으므로 `src/discord-protocol.ts`는 고치지 않는다
@@ -41,11 +42,11 @@
 
 ## 완료 조건
 
-- [ ] owner가 Discord에서 ukyi-app 저장소 PR의 리뷰를 부탁하면 확인 버튼 없이 리뷰 작업이 생기고 GitHub에 `COMMENT` 리뷰가 달린다.
-- [ ] 리뷰 App이 없는 저장소나 조직 밖 PR은 못 한다고 답하고 리뷰 작업이 생기지 않는다.
-- [ ] 정책 목록 밖 저장소의 PR 이벤트와 댓글 명령은 자동 리뷰를 만들지 않는다.
-- [ ] 스위치가 꺼져 있으면 리뷰 요청이 동작하지 않는다.
-- [ ] `ukyi-review` 설치 범위 변경이 owner 승인 뒤 수행되고 homelab `approvals.md`에 기록돼 있다.
+- [x] owner가 Discord에서 ukyi-app 저장소 PR의 리뷰를 부탁하면 확인 버튼 없이 리뷰 작업이 생기고 GitHub에 `COMMENT` 리뷰가 달린다.
+- [x] 리뷰 App이 없는 저장소나 조직 밖 PR은 못 한다고 답하고 리뷰 작업이 생기지 않는다.
+- [x] 정책 목록 밖 저장소의 PR 이벤트와 댓글 명령은 자동 리뷰를 만들지 않는다.
+- [x] 스위치가 꺼져 있으면 리뷰 요청이 동작하지 않는다.
+- [x] `ukyi-review` 설치 범위 변경이 owner 승인 뒤 수행되고 homelab `approvals.md`에 기록돼 있다.
 
 ## 검증
 
@@ -55,4 +56,9 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #132, 병합 `5e66d78`(2026-11-10). Discord 리뷰 요청(스위치 뒤), 제안 동작 ID `review_request`, 목록 밖 조직 저장소의 요청 세대, 마이그레이션 023.
+- 완료 조건: 1~4 충족(S1, `test/c30-review-request.test.ts`·`github-review-app`·`pr-review`). 5(설치 범위)는 2026-11-10 사용자 승인으로 All repositories로 넓히고 approvals.md에 기록.
+- 검사: 결과 `0f8d5f0`에서 전체 2,437개 중 통과 2,415, 실패 0, skip 22. CI `build / test` 통과.
+- Codex: 1차 P2 1(비공개 대상은 접수에서 거절) 수정. 2차 P2 2(신뢰 문맥에 리뷰 요청 없음, GitHub 조회 뒤 최신성 재검사)는 C18 할 일 3b·3c로 넘김.
+- 운영: 배포 확인(마이그레이션 23, 파드 Ready, digest 일치, 로그 오류 0).
+- 한계: 모델이 이 제안을 내려면 작업자 이미지 교체가 필요하다(게시 서버 먼저). 목록 밖 저장소는 공개 저장소만 받는다(비공개는 인증된 압축본 경로가 없어 거절). 실제 다른 저장소 리뷰 1건은 C24 S5.

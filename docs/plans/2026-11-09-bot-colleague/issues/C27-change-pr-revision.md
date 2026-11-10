@@ -1,7 +1,7 @@
 # C27 수정 요청
 
 - 단계: 6 PR 수정
-- 상태: 대기 (선행: C06, C13, C17, C25, C26, C29, C31)
+- 상태: 진행 중 (2026-11-10 20:1x 착수, 선행 C06, C13, C17, C25, C26, C29, C31 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3 동작 목록("변경 PR 수정" 줄), §4.9(스위치가 수정 요청을 막음), §4.10 "수정 요청"·"PR 댓글 경계(D-16 변경)"·"변경 상태"·"GitHub 쓰기", §5 AC-28, AC-29, §8 "PR 댓글 자료" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06, C13, C17, C25, C26, C29, C31
 - 연결 AC: AC-28, AC-29, AC-27(수정 뒤 diff 밖 항목의 Discord 요약)

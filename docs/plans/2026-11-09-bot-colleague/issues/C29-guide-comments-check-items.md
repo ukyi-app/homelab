@@ -1,7 +1,7 @@
 # C29 안내 댓글과 확인할 것
 
 - 단계: 4 말로 실행
-- 상태: 대기 (선행: C06, C17, C25, C26)
+- 상태: integrated (봇 #134 병합 `83b2de6`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10 "변경 질문 줄이기"(확인할 것을 미리보기와 PR 설명에), "안내 댓글", §5 AC-27, AC-25(미리보기·PR 설명 줄) (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06, C17, C25, C26
 - 연결 AC: AC-27, AC-25(미리보기·PR 설명의 확인할 것 줄)
@@ -11,6 +11,7 @@
   - 소유(연결 파일, 뒤에 C27이 고침): 봇 `src/change-publication.ts`(PR 설명에 확인할 것·남은 위험 절을 그리는 `renderBody`와 입력 스키마 `PublicationInputSchema`, 안내 댓글 본문을 그리고 공개 검사하는 새 함수. C27이 수정 커밋 뒤 같은 함수를 부른다)
   - 연결 파일, 소유 C07: 봇 `src/change-runtime.ts`(미리보기 글 `preview`에 확인할 것 줄, 게시 확정(`proposed`) 뒤 안내 댓글을 한 번 부르는 자리)
   - 연결 파일, 소유 C25: 봇 `src/change-contracts.ts`(확인할 것·남은 위험 항목 모양을 읽기만. 안내 댓글 전송 기록을 게시 effect 표에 둘 경우 그 단계 줄)
+  - 연결 파일, 소유 C09: 봇 `src/claude-task-bridge.ts`(`fetchResult`의 snapshot 반환에 `checks`·`risks`를 넘기는 자리만. 요청 판 전환은 C28, 주 진행자 2026-11-10)
   - 연결 파일, 소유 C26: 봇 `src/github-review-io.ts`·`src/github-app.ts`의 `COMMENT` 리뷰(인라인) 게시 포트를 쓰기만
   - 공유 파일(README 5절 표에 없음): 봇 `src/change-publisher.ts`(`prepareApproval`이 `renderPublication`에 확인할 것을 넘기는 자리, 게시 확정 뒤 안내 댓글 호출을 여기에 둘 경우 그 자리). C27의 fast-forward 갱신도 이 파일을 쓸 수 있다
   - 고치지 않음: 봇 `src/change-review.ts`(자체 리뷰 지시·판정·`findings` 비공개 규칙 그대로. hunk 판단 도우미가 있으면 쓰기만)
@@ -43,11 +44,11 @@
 
 ## 완료 조건
 
-- [ ] 변경 작업이 가정해서 진행하면 미리보기와 PR 설명에 확인할 것 목록이 있고, 승인 digest가 그 목록을 묶는다.
-- [ ] 처음 게시 뒤 봇 PR에 확인할 것·남은 위험 중 diff 안 위치가 있는 것만 `COMMENT` 리뷰 인라인 댓글로 달린다. 위치가 diff 밖이면 PR 설명에만 있다.
-- [ ] 자체 리뷰 전체(모델 `findings` 글)는 PR 설명과 댓글 어디에도 게시되지 않는다.
-- [ ] 확인할 것·남은 위험 글은 공개 검사를 지나고, 걸리면 게시하지 않는다.
-- [ ] C27이 수정 차례 뒤 같은 함수로 안내 댓글을 달 수 있고, 같은 차례에 두 번 달리지 않는다.
+- [x] 변경 작업이 가정해서 진행하면 미리보기와 PR 설명에 확인할 것 목록이 있고, 승인 digest가 그 목록을 묶는다.
+- [x] 처음 게시 뒤 봇 PR에 확인할 것·남은 위험 중 diff 안 위치가 있는 것만 `COMMENT` 리뷰 인라인 댓글로 달린다. 위치가 diff 밖이면 PR 설명에만 있다.
+- [x] 자체 리뷰 전체(모델 `findings` 글)는 PR 설명과 댓글 어디에도 게시되지 않는다.
+- [x] 확인할 것·남은 위험 글은 공개 검사를 지나고, 걸리면 게시하지 않는다.
+- [x] C27이 수정 차례 뒤 같은 함수로 안내 댓글을 달 수 있고, 같은 차례에 두 번 달리지 않는다.
 
 ## 검증
 
@@ -57,4 +58,9 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #134, 병합 `83b2de6`(2026-11-10). PR 설명·미리보기의 확인할 것·남은 위험, 게시 뒤 diff 안 항목의 `COMMENT` 줄 댓글 한 번, 목록의 7일 원문 정리, 마이그레이션 025(`change_notes`·`change_guidance`). 스위치 밖.
+- 완료 조건 5개 충족(S1): `test/change-guidance.test.ts`와 `change-publication`·`change-assembly`·`change-purge-race` 시험.
+- 검사: 결과 `74cf7cc`(뒤 커밋은 문서만)에서 전체 2,487개 중 통과 2,464, 실패 1, skip 22. 실패 1은 기존 경합 EVENT-02(원인 확정, C33)이고 그 파일 단독 3회 중 2회 통과. CI `build / test` 통과.
+- Codex: 1차 P2 1(목록 원문 7일 정리) 수정, 재리뷰 지적 없음.
+- 전제: 리뷰 App `ukyi-review` 설치 범위를 2026-11-10 조직 All repositories로 넓혔다(approvals.md).
+- 한계: 안내 댓글은 변경 저장소가 리뷰 정책 저장소 목록(지금 `homelab-smoke`)에 있을 때만 달린다(목록 밖은 `repository_denied`로 건너뜀, 넓힐지는 owner 결정 대기). GitHub hunk와 artifact patch의 문맥 줄 차이, main 배선의 기동 경로는 C24 S5.

@@ -1,7 +1,7 @@
 # C21 운영 알림 (지표 + vmalert → Telegram)
 
 - 단계: 5 멈춤과 계정
-- 상태: 대기 (선행: C19)
+- 상태: 진행 중 (2026-11-10 16:3x 착수, 선행 C19 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.7 "운영 알림", §5 AC-18 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C19
 - 연결 AC: AC-18
@@ -53,4 +53,7 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #131, 병합 `9d5621a`(2026-11-10): `/metrics`에 `homelab_bot_model_paused_jobs{kind}`·`homelab_bot_model_pause_resets_at_seconds{kind}`·`homelab_bot_model_account{method}`·`homelab_bot_model_reviews_deferred`. 전체 2,420개 중 통과 2,398, 실패 0, skip 22. Codex 지적 없음. 배포 뒤 vmsingle에서 새 계열 확인.
+- homelab PR #1238(owner 검토 대기): 경보 `HomelabBotModelPausedRateLimit`·`AuthExpired`·`Billing`(Codex P2: 종류별 그룹 분리, 수정 뒤 재리뷰 지적 없음), `bun run ci` 30단계 통과.
+- 남은 것: #1238 병합, 운영 발화 시험 1회(주입 방법 승인 필요)와 그 기록.
+- 넘김(C22): 결제로 멈춘 작업 ID를 CLI로 볼 길이 없다. 경보 문구의 `homelab bot account use/list` 이름은 C22·C23이 만들 때 맞춘다.
