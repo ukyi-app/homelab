@@ -1,7 +1,7 @@
 # C33 시험 거절 뒤 다시 확인(게시 서버 둘 경합)
 
 - 단계: 1 기반
-- 상태: 진행 중 (2026-11-10 19:3x 착수, 선행 없음)
+- 상태: integrated (봇 #136 병합 `ef27723`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/ARCHITECTURE.md` "16. T19 CHANGE_PR 계약"의 흐름·전이 표·"끝 상태와 재시작", "16.4 작업 레인 v2: artifact와 무자격 검증 (B1)", "16.5 조립과 꺼짐 배포 (B5)"의 EVENT-02 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/ARCHITECTURE.md). 동료 봇 명세의 AC가 아니라 그 전(봇 #85)부터 있던 결함의 수정이다(사용자 2026-11-10 "그래 그렇게 진행해").
 - Blocked by: 없음
 - 연결 AC: 없음(기존 T19 B5 EVENT-02 "게시 서버 둘이 같은 부모를 동시에 밀어도 모델·시험·PR이 하나다")
@@ -33,9 +33,9 @@
 
 ## 완료 조건
 
-- [ ] 같은 밀리초에 두 게시 서버가 verify를 보내도 변경이 `awaiting_publish_approval`까지 가고 모델·시험·PR이 하나다(결정적 시험).
-- [ ] 시험이 정말 시작되지 않았을 때는 지금처럼 `verification_not_run`으로 닫힌다.
-- [ ] 기존 EVENT-02 실제 PostgreSQL 시험이 반복 실행에서 실패하지 않는다.
+- [x] 같은 밀리초에 두 게시 서버가 verify를 보내도 변경이 `awaiting_publish_approval`까지 가고 모델·시험·PR이 하나다(결정적 시험).
+- [x] 시험이 정말 시작되지 않았을 때는 지금처럼 `verification_not_run`으로 닫힌다.
+- [x] 기존 EVENT-02 실제 PostgreSQL 시험이 반복 실행에서 실패하지 않는다.
 
 ## 검증
 
@@ -45,4 +45,8 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #136, 병합 `ef27723`(2026-11-10). 거부를 받으면 `/v2/task/verification`에 다시 묻고 `running`·`done`이면 그 결과를 따른다. `absent`면 verify를 한 번만 다시 보내고 그것도 거부될 때만 `not_run`, 기한까지 모르면 `unknown`.
+- 완료 조건 3개 충족(S1): `test/change-verify-recheck.test.ts`, `change-pg`의 같은 밀리초 결정적 시험, `change-verification` port 시험. 기존 EVENT-02 실제 PostgreSQL 시험은 반복 90번 중 실패 0(고치기 전 55번 중 5).
+- 검사: 결과 `b566712`에서 전체 2,511개 중 통과 2,489, 실패 0, skip 22. CI `build / test`는 무관한 C28 시험의 러너 시간 초과로 1회 실패 뒤 재실행 통과.
+- Codex: 지적 없음.
+- 한계: 토큰이 같아지는 것 자체는 남는다(근본 수정: capability에 무작위 nonce, 작업자 먼저 배포). 작업자에 닿지 않을 때는 최대 약 3분 다시 물은 뒤 `verification_unknown`으로 막힌다. 실제 배포 교체 순간은 C24 S5.

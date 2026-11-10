@@ -30,22 +30,23 @@ homelab-bot을 회사에서 같이 일하는 동료처럼 바꾸는 계획의 �
 | [C15](issues/C15-attach-key-button.md) | 세션 연결 키 버튼 | 4 말로 실행 | C13 | integrated | 에이전트 |
 | [C16](issues/C16-task-question-direct-answer.md) | 작업 질문 바로 답 | 4 말로 실행 | C09, C13 | integrated | 에이전트 |
 | [C17](issues/C17-publish-approval-button.md) | 게시 승인 버튼 | 4 말로 실행 | C13, 재구축 T33(외부, 충족) | integrated | 에이전트 |
-| [C18](issues/C18-fixed-text-change-review-alert-attach.md) | 고정 문구 3: 변경·리뷰 알림·경보·세션 연결 | 4 말로 실행 | C01, C12, C15, C17 | 진행 중 | 에이전트 |
+| [C18](issues/C18-fixed-text-change-review-alert-attach.md) | 고정 문구 3: 변경·리뷰 알림·경보·세션 연결 | 4 말로 실행 | C01, C12, C15, C17 | integrated | 에이전트 |
 | [C19](issues/C19-limit-resume-review-deferral.md) | 한도 재개와 리뷰 미루기 | 5 멈춤과 계정 | C05, C09, C10, C11, C12 | integrated | 에이전트 |
 | [C20](issues/C20-away-status.md) | 자리 비움 | 5 멈춤과 계정 | C04, C09, C12, C19, C21 | 대기 | 에이전트 |
 | [C21](issues/C21-ops-alert-telegram.md) | 운영 알림 | 5 멈춤과 계정 | C19 | 진행 중 | 에이전트 + 사람(발화 시험) |
 | [C22](issues/C22-account-switch-token-expiry.md) | 계정 등록·전환(구독)과 토큰 만료 알림 | 5 멈춤과 계정 | C05, C10, C19, C21 | 대기 | 에이전트 + 사람(실토큰·운영 전환) |
 | [C23](issues/C23-api-credit-mode.md) | API 크레딧 방식 | 5 멈춤과 계정 | C06, C22 | 대기 | 에이전트 + 사람(Console 키·배포 PR) |
-| [C24](issues/C24-pilot-integration-verification.md) | 시범 통합 검증 | 7 통합 | C01~C23, C25~C33 전부 | 대기 | 에이전트 + 사람 |
+| [C24](issues/C24-pilot-integration-verification.md) | 시범 통합 검증 | 7 통합 | C01~C23, C25~C34 전부 | 대기 | 에이전트 + 사람 |
 | [C25](issues/C25-change-authoring-v2.md) | 작업자 변경 작성 v2: 확인할 것·선택지 질문·수정 차례 입력 | 1 기반 | C03 | integrated | 에이전트 |
 | [C26](issues/C26-github-io-extension.md) | GitHub 쓰기·읽기 확장 | 1 기반 | 없음 | integrated | 에이전트 |
-| [C27](issues/C27-change-pr-revision.md) | 수정 요청 | 6 PR 수정 | C06, C13, C17, C25, C26, C29, C31 | 진행 중 | 에이전트 |
+| [C27](issues/C27-change-pr-revision.md) | 수정 요청 | 6 PR 수정 | C06, C13, C17, C25, C26, C29, C31 | integrated | 에이전트 |
 | [C28](issues/C28-change-question-choices.md) | 변경 질문 선택지 | 4 말로 실행 | C06, C16, C25 | integrated | 에이전트 |
 | [C29](issues/C29-guide-comments-check-items.md) | 안내 댓글과 확인할 것 | 4 말로 실행 | C06, C17, C25, C26 | integrated | 에이전트 |
 | [C30](issues/C30-review-request.md) | 리뷰 요청(Discord, 조직 저장소) | 4 말로 실행 | C12, C13, C19, C26 | integrated | 에이전트 + 사람(리뷰 App 설치 범위) |
 | [C31](issues/C31-pre-publish-self-fix.md) | 게시 전 자체 리뷰 고치기 | 6 PR 수정 | C06, C17, C25 | integrated | 에이전트 |
 | [C32](issues/C32-admin-cli-remaining-actions.md) | 관리 CLI 나머지 동작(차단·unknown 해제·멈춘 작업 재개) | 1 기반 | C04, C05, C09 | integrated | 에이전트 + 사람(운영 확인) |
-| [C33](issues/C33-verify-reject-recheck.md) | 시험 거절 뒤 다시 확인(게시 서버 둘 경합) | 1 기반 | 없음 | 진행 중 | 에이전트 |
+| [C33](issues/C33-verify-reject-recheck.md) | 시험 거절 뒤 다시 확인(게시 서버 둘 경합) | 1 기반 | 없음 | integrated | 에이전트 |
+| [C34](issues/C34-amendment-followups.md) | 수정 요청 후속(스위치 켜기 전) | 6 PR 수정 | C27 | 진행 중 | 에이전트 |
 
 티켓 파일은 `issues/`에 있다.
 
@@ -79,7 +80,8 @@ C06, C17, C25 → C31
 C06, C13, C17, C25, C26, C29, C31 → C27
 C12, C13, C19, C26 → C30
 C04, C05, C09 → C32
-C01 … C23, C25 … C33 → C24
+C27 → C34
+C01 … C23, C25 … C34 → C24
 C24 → 재구축 T35(V1 시범 운영)
 ```
 
@@ -95,11 +97,11 @@ C24 → 재구축 T35(V1 시범 운영)
 
 - **통합 기준:** 봇 `main`, 시작 기준 `e160cb1`(2026-11-09). 티켓마다 봇 PR 하나를 선행 순서대로 main에 병합한다(7절, 사용자 2026-11-09 feature-build 커밋 질문). 명세 머리말에도 같은 줄이 있다.
 - **실행 가능:** 없음. C20·C22는 C21의 homelab PR #1238 병합과 발화 시험 뒤다.
-- **integrated:** C01(봇 #111 `bfdb5d9`), C26(봇 #113 `1ef5843`), C02(봇 #112 `477d01c`), C04(봇 #114 `ca243f5`), C03(봇 #116 `551f0ad`), C10(봇 #117 `fb7d693`), C09(봇 #118 `e19e760`), C25(봇 #119 `fc93fe2`), C07(봇 #120 `9b067e9`), C08(봇 #121 `a3d0a7b`), C05(봇 #115·homelab #1216, 세 동작. 나머지는 C32), C06(homelab #1223 `2544044`, 운영 확인), C32(봇 #122 `d353fc0`·homelab #1226), C12(봇 #123 `c99b38e`), C11(봇 #124 `860b591`), C13(봇 #125 `dd0a53f`), C17(봇 #127 `7560956`), C15(봇 #128 `dc172ff`), C19(봇 #126 `1c9c896`, 운영 확인), C14(봇 #130 `4e6d423`), C16(봇 #129 `0ef1de8`), C30(봇 #132 `5e66d78`), C28(봇 #133 `9377c33`), C29(봇 #134 `83b2de6`), C31(봇 #135 `6b6d86b`).
-- **진행 중:** C21(봇 #131 병합 `9d5621a`·배포 확인, homelab #1238 owner 검토 대기, 발화 시험 남음), C18(2026-11-10 20:0x 착수, 넘김 3a~3d 포함), C27(20:1x 착수), C33(봇 #136 검사 중).
+- **integrated:** C01(봇 #111 `bfdb5d9`), C26(봇 #113 `1ef5843`), C02(봇 #112 `477d01c`), C04(봇 #114 `ca243f5`), C03(봇 #116 `551f0ad`), C10(봇 #117 `fb7d693`), C09(봇 #118 `e19e760`), C25(봇 #119 `fc93fe2`), C07(봇 #120 `9b067e9`), C08(봇 #121 `a3d0a7b`), C05(봇 #115·homelab #1216, 세 동작. 나머지는 C32), C06(homelab #1223 `2544044`, 운영 확인), C32(봇 #122 `d353fc0`·homelab #1226), C12(봇 #123 `c99b38e`), C11(봇 #124 `860b591`), C13(봇 #125 `dd0a53f`), C17(봇 #127 `7560956`), C15(봇 #128 `dc172ff`), C19(봇 #126 `1c9c896`, 운영 확인), C14(봇 #130 `4e6d423`), C16(봇 #129 `0ef1de8`), C30(봇 #132 `5e66d78`), C28(봇 #133 `9377c33`), C29(봇 #134 `83b2de6`), C31(봇 #135 `6b6d86b`), C33(봇 #136 `ef27723`), C18(봇 #137 `edd9a4a`), C27(봇 #138 `07fd6d0`).
+- **진행 중:** C21(봇 #131 병합 `9d5621a`·배포 확인, homelab #1238 owner 검토 대기, 발화 시험 남음), C34(2026-11-10 22:3x 착수).
 - **넘김 메모(2026-11-10):** C20 할 일 6a(작업 레인 정상 응답의 한도 경고 기록, C19 Codex P2), C18 할 일 3a(attach `content` 꼴, C15), C23 할 일 6(작업자 이미지는 C19가 든 빌드), C24 할 일 1a(말로 한 기억 검색 공개 범위, 스위치 켜기 전 owner 결정, C14).
 - **C33 추가(사용자 2026-11-10 "그래 그렇게 진행해"):** 전체 검사에서 간헐로 실패하던 EVENT-02(게시 서버 둘) 시험의 원인이 실제 경합으로 확정됐다(봇 #85부터, 동료 계획과 무관). 방어 수정은 C33, 근본 수정(capability에 무작위 nonce)은 작업자를 먼저 배포해야 해 C24 전 작업자 배포 목록에 넣는다.
-- **C24 전 작업자 배포에 넣을 것:** C30 `review_request`(작업자 출력 enum), C31 고치기 입력(`amendment.pullNumber` null), C18 3a·3b(대화 스키마·신뢰 문맥 설명), 근본 수정 nonce(작업자가 새 칸을 먼저 받게). 게시 서버가 먼저다(C30·C31), nonce만 작업자가 먼저다.
+- **C24 전 작업자 배포에 넣을 것:** C30 `review_request`·C27 `change_amend`(작업자 출력 enum), C31 고치기 입력(`amendment.pullNumber` null), C18 3a·3b(대화 스키마·신뢰 문맥 설명), 근본 수정 nonce(작업자가 새 칸을 먼저 받게). 게시 서버가 먼저다(C30·C31), nonce만 작업자가 먼저다.
 - **담당 정리(주 진행자 2026-11-10 16:3x):** 게시 서버가 변경 작성 요청을 판 `change-v2`로 보내는 전환(`claude-task-bridge.ts` `start`·`resume`)은 계획에 담당이 없었다. C28이 맡는다. C29는 `fetchResult` snapshot 줄에 `checks`·`risks`를 넘기는 자리만, C31은 고치기 차례 요청에서만 `change-v2`를 쓴다(작업자가 거부하면 `review_blocked`). C30의 리뷰 요청은 작업자 대화 계약의 제안 동작 ID 목록(`contracts.ts` `PROPOSAL_RUN_ACTIONS`, 소유 C02)에 없어 C30이 목록 끝에 한 줄을 더한다. 모델이 이 제안을 내려면 작업자 이미지 교체가 필요할 수 있다(C30 결과로 확인, C24 전 작업자 배포에 넣는다).
 - **대기:** 나머지(1절 Blocked by).
 - **외부 선행:** 충족. 재구축 T33(봇 PR #108)이 2026-11-09 병합됐고 homelab #1209로 배포, 봇 #109에 검증을 기록했다. C17은 C13만 기다린다.

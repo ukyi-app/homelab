@@ -1,7 +1,7 @@
 # C27 수정 요청
 
 - 단계: 6 PR 수정
-- 상태: 진행 중 (2026-11-10 20:1x 착수, 선행 C06, C13, C17, C25, C26, C29, C31 integrated)
+- 상태: integrated (봇 #138 병합 `07fd6d0`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3 동작 목록("변경 PR 수정" 줄), §4.9(스위치가 수정 요청을 막음), §4.10 "수정 요청"·"PR 댓글 경계(D-16 변경)"·"변경 상태"·"GitHub 쓰기", §5 AC-28, AC-29, §8 "PR 댓글 자료" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06, C13, C17, C25, C26, C29, C31
 - 연결 AC: AC-28, AC-29, AC-27(수정 뒤 diff 밖 항목의 Discord 요약)
@@ -53,11 +53,11 @@ owner가 Discord에서 "이 PR에 리뷰 반영해 줘"처럼 말하면, 봇이 
 
 ## 완료 조건
 
-- [ ] owner가 Discord에서 봇 PR 수정을 요청하면 "PR #n에 리뷰 댓글 k개를 반영해서 수정 커밋을 올릴까요?" 확인 뒤, 그 PR의 리뷰·댓글을 자료로 읽고 고친다(AC-28).
-- [ ] 시험·자체 리뷰·공개 검사를 통과하면 미리보기 없이 같은 브랜치에 수정 커밋이 fast-forward로 올라가고 Discord에 owner 호출로 결과가 온다. diff 밖 확인할 것·남은 위험은 그 결과 요약에 있다(AC-27). 실패하면 커밋 없이 이유가 온다.
-- [ ] 한 PR의 11번째 수정, 병합·닫힌 PR 수정은 거부되고, 수정 중에 온 요청은 다음 차례가 된다. 동시 확정에도 차례는 하나씩만 돈다.
-- [ ] PR 리뷰·댓글 웹훅만으로는 어떤 수정·작업도 시작되지 않고, `/homelab-review`는 리뷰만 다시 부른다(AC-29).
-- [ ] 스위치가 꺼져 있으면 수정 요청 동작이 없다.
+- [x] owner가 Discord에서 봇 PR 수정을 요청하면 "PR #n에 리뷰 댓글 k개를 반영해서 수정 커밋을 올릴까요?" 확인 뒤, 그 PR의 리뷰·댓글을 자료로 읽고 고친다(AC-28).
+- [x] 시험·자체 리뷰·공개 검사를 통과하면 미리보기 없이 같은 브랜치에 수정 커밋이 fast-forward로 올라가고 Discord에 owner 호출로 결과가 온다. diff 밖 확인할 것·남은 위험은 그 결과 요약에 있다(AC-27). 실패하면 커밋 없이 이유가 온다.
+- [x] 한 PR의 11번째 수정, 병합·닫힌 PR 수정은 거부되고, 수정 중에 온 요청은 다음 차례가 된다. 동시 확정에도 차례는 하나씩만 돈다.
+- [x] PR 리뷰·댓글 웹훅만으로는 어떤 수정·작업도 시작되지 않고, `/homelab-review`는 리뷰만 다시 부른다(AC-29).
+- [x] 스위치가 꺼져 있으면 수정 요청 동작이 없다.
 
 ## 검증
 
@@ -67,4 +67,10 @@ owner가 Discord에서 "이 PR에 리뷰 반영해 줘"처럼 말하면, 봇이 
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #138, 병합 `07fd6d0`(2026-11-10). 단계 `amending`(proposed ⇄ amending), 상한 10번, 마이그레이션 027(차례 대기열과 차례별 artifact·시험·리뷰·effect), 제안 동작 `change_amend`, fast-forward 수정 커밋, 안내 댓글(C29)과 owner 호출 결과 글. 쓰기 허용은 `amending`이고 그 차례가 `change_amendment_may_send`일 때만.
+- 완료 조건 충족(S1, 실제 `assembleChange` 경로와 실제 PostgreSQL 두 연결 포함): `test/c27-change-amend.test.ts`와 `change-assembly`·`change-store`·`change-store-pg`·`change-contracts`·`pr-review` 시험.
+- 검사: 결과 `88e75ff`에서 전체 2,552개 중 통과 2,530, 실패 0, skip 22. CI `build / test` 통과.
+- Codex: 1차 P2 5(재시작 뒤 실패 전이, PR 링크 저장소 대조, 미전송 effect 해소, 안내 실패 시 요약, 알림 커서), 2차 보안 P2 1(확인 시점 자료 digest 대조) 수정. 3차 P2 2(통과 receipt 뒤 작성 세션 정리, 닫힌 PR 거절)는 C34로 넘김.
+- 주 진행자 결정: 조립 배선(`change-assembly.ts`·`main.ts`) 허용, 확인 뒤 새로 달린 댓글은 실패로 닫지 않음(모델에는 확인한 글만 간다).
+- 함께 고친 시험 흔들림: C28 "다음 말"(멘션이 남긴 대화 job이 디바운스 뒤 리뷰 claim을 양보시킴), R08 변형 시험(시각을 변형마다 다시 읽음). 둘 다 시험만의 문제.
+- 한계: 모델이 `change_amend`를 제안하려면 작업자 이미지 교체가 필요하다(게시 서버 먼저). PR 글 읽기는 리뷰 정책 저장소 목록(지금 `homelab-smoke`)을 거친다. 번호만 말하면 같은 스레드의 가장 최근 변경을 고른다(확인 글에 저장소 표시). 실제 push·CI·ruleset 아래 fast-forward는 C24 S5.

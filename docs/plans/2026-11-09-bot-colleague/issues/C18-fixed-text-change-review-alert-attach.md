@@ -1,7 +1,7 @@
 # C18 고정 문구 3: 변경·리뷰 알림·경보·세션 연결
 
 - 단계: 4 말로 실행
-- 상태: 진행 중 (2026-11-10 20:0x 착수, 선행 C01, C12, C15, C17 integrated)
+- 상태: integrated (봇 #137 병합 `edd9a4a`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.4 "고정 문구", §4.9, §5 AC-11·AC-23 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01, C12, C15, C17
 - 연결 AC: AC-11(일부: 변경·리뷰 알림·경보·세션 연결 문구), AC-23(문구 두 판)
@@ -46,10 +46,10 @@
 
 ## 완료 조건
 
-- [ ] 변경·Discord 리뷰 안내·경보·세션 연결 고정 문구가 해요체다.
-- [ ] 스위치가 켜지면 이 문구들 어디에도 '/' 명령 이름이 없고, 꺼지면 지금처럼 '/'를 안내한다.
-- [ ] 경보 원문은 게시되지 않고, Discord 리뷰 요약에 모델 문장이 없으며, 공개 글에 세션 연결 키가 없다.
-- [ ] 바뀐 문구의 리터럴 시험이 상수 참조로 통과한다.
+- [x] 변경·Discord 리뷰 안내·경보·세션 연결 고정 문구가 해요체다.
+- [x] 스위치가 켜지면 이 문구들 어디에도 '/' 명령 이름이 없고, 꺼지면 지금처럼 '/'를 안내한다.
+- [x] 경보 원문은 게시되지 않고, Discord 리뷰 요약에 모델 문장이 없으며, 공개 글에 세션 연결 키가 없다.
+- [x] 바뀐 문구의 리터럴 시험이 상수 참조로 통과한다.
 
 ## 검증
 
@@ -59,4 +59,7 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #137, 병합 `edd9a4a`(2026-11-10). 문구 표 `CHANGE_TEXT`·`CHANGE_NOTICE_TEXT`·`DEPLOYMENT_TEXT`·`REVIEW_NOTICE_TEXT`·`ALERT_TEXT`·`ATTACH_COMMAND_TEXT`·`EXTERNAL_NOTICE_TEXT`와 실패 꼬리, 넘김 3a~3d(신뢰 문맥·스키마 설명, 리뷰 요청 최신성 재검사, "직접 답하기" 기한 검사), `store.ts`의 자식 실패 안내 한 줄.
+- 완료 조건 4개 충족(S1): `test/c18-fixed-text.test.ts`(해요체, 켜짐 판 '/' 이름 0, 꺼짐 판 유지, 안전 문장)와 `worker-contract-v2`·`c30-review-request`·`c28-change-question`·`change-assembly` 시험.
+- 검사: 결과 `8bfde27`에서 전체 2,523개 중 통과 2,501, 실패 0, skip 22. CI `build / test` 통과. Codex 지적 없음.
+- 한계: 문구의 자연스러움은 owner 검토와 C24 말투 표본 몫이다(전·후 표는 PR #137 설명). 3a·3b는 작업자 이미지 교체 뒤에 효과가 난다. 켜짐 판의 새 generation 안내는 "같은 내용을 다시 부탁하면 새 변경으로 받아요"다.
