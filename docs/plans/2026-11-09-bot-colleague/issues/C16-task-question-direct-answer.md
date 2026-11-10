@@ -1,7 +1,7 @@
 # C16 작업 질문 바로 답
 
 - 단계: 4 말로 실행
-- 상태: 진행 중 (ready-for-agent, 2026-11-10 착수. 선행 integrated)
+- 상태: integrated (봇 #129 병합 `0ef1de8`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3 "작업 질문 바로 답", §4.9 스위치와 배포 순서, §4.10 "변경 질문 줄이기"(CHANGE 질문은 C28) (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C09, C13
 - 연결 AC: AC-8
@@ -38,12 +38,12 @@
 
 ## 완료 조건
 
-- [ ] 스레드에 열린 작업 질문이 하나면 owner의 다음 메시지가 모델 호출 없이 그 답으로 저장되고 작업이 이어진다.
-- [ ] 둘 이상이면 질문별 버튼이 달리고, 고른 질문에만 답이 붙는다.
-- [ ] 기한 지난 질문에는 답이 붙지 않고, 같은 메시지로 대화 작업이 함께 생기지 않는다.
-- [ ] 답이 권한·도구 승인으로 쓰이지 않는다는 규칙과 안내가 그대로다.
-- [ ] 스위치가 꺼져 있으면 지금처럼 '/' `answer`로만 답하고 질문 글이 질문 ID를 안내한다.
-- [ ] CHANGE 질문은 바로 답과 질문 고르기 대상에서 빠져 있고, 지금처럼 '/' `answer` 경로로만 답한다(선택지와 다음 말 답은 C28).
+- [x] 스레드에 열린 작업 질문이 하나면 owner의 다음 메시지가 모델 호출 없이 그 답으로 저장되고 작업이 이어진다.
+- [x] 둘 이상이면 질문별 버튼이 달리고, 고른 질문에만 답이 붙는다.
+- [x] 기한 지난 질문에는 답이 붙지 않고, 같은 메시지로 대화 작업이 함께 생기지 않는다.
+- [x] 답이 권한·도구 승인으로 쓰이지 않는다는 규칙과 안내가 그대로다.
+- [x] 스위치가 꺼져 있으면 지금처럼 '/' `answer`로만 답하고 질문 글이 질문 ID를 안내한다.
+- [x] CHANGE 질문은 바로 답과 질문 고르기 대상에서 빠져 있고, 지금처럼 '/' `answer` 경로로만 답한다(선택지와 다음 말 답은 C28).
 
 ## 검증
 
@@ -53,4 +53,11 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #129(`feat/colleague-c16-task-question-direct-answer`, head `99f1e5c`), 병합 `0ef1de8`. 마이그레이션 없음.
+- 구현: 새 `src/question-pick.ts`(바로 답 판단 `offerAnswer`, 고르기 글, `pressQuestionPick`, 종류 표 `DIRECT` = `task`), `src/discord.ts` 수신 분기(스위치 켜짐·owner 일반 메시지면 수신 트랜잭션 안에서 대화 행을 잠근 뒤 열린 작업 질문을 셈)와 `questionButton`, `src/discord-protocol.ts` `BUTTONS` 끝 줄(`question-pick`), `src/task-bridge.ts` `openTaskQuestions`, `src/chat-task-text.ts` `taskQuestionFooter`·`changeQuestionFooter`.
+- 완료 조건 근거: 새 `test/c16-task-question.test.ts`(질문 하나 → 대화 job·작업자 요청 0, 같은 세션 resume / 둘 → 고른 질문에만 / 기한 지남 / 스위치 꺼짐·버튼 거부 / Codex 같은 규칙 / 재전달 한 번 / 7일 정리), `change-assembly` C16 줄(CHANGE 질문 제외), `chat-task-text` 판별. 답 쓰기는 '/answer'와 같은 `answerIn`.
+- 변이 확인: CHANGE 질문도 바로 답에 넣으면 `change-assembly` C16 시험 실패, 바로 답을 끄면 C16 시험 7개 실패.
+- Codex: 1차 P2 2(gap 복구 때 답으로 처리한 메시지의 👀가 남음, 닫힌 질문 버튼이 고르기 글의 버튼 전체를 지움) → 수정 작업자가 고침(`7ccb52f`, 빨강→초록 시험 3). 재리뷰 지적 없음.
+- 검사: 통합 담당 전체 검사(`99f1e5c`, main C14·C19 병합 뒤): 2416 / 2394 pass / 0 fail / 22 skip. CI 통과.
+- 분해 불일치: 열린 질문은 "저장 전"이 아니라 대화 행 잠금 뒤 수신 트랜잭션 안에서 센다. 버튼 이름은 질문 앞부분이 아니라 "1번 질문"(7일 정리가 `payload.content`만 비워서), 최대 5개. 고르기 행은 마이그레이션 없이 `controls`(`question-pick:<UUID>`).
+- 남은 것: 스위치를 켜면 열린 작업 질문이 있는 스레드에서 owner의 멘션·무관한 말도 답이 된다(명세 §4.3). 고르기 글이 뜬 메시지는 고르지 않으면 답도 대화도 되지 않는다. 옛 고르기 글의 닫힌 질문 버튼은 화면에 남는다(누르면 본인에게만 안내). C28이 `DIRECT`에 `change`를 더한다.
