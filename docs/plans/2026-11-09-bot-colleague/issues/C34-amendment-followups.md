@@ -1,7 +1,7 @@
 # C34 수정 요청 후속(스위치 켜기 전)
 
 - 단계: 6 PR 수정
-- 상태: 대기 (선행: C27)
+- 상태: 진행 중 (2026-11-10 22:3x 착수, 선행 C27 integrated)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.10 "수정 요청", §5 AC-28 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C27
 - 연결 AC: AC-28(재시작 복구, 닫힌 PR 거절)
