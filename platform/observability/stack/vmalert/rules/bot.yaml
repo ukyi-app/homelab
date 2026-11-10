@@ -54,7 +54,7 @@ groups:
           description: |-
             풀리는 시각: {{ if gt $value 0.0 }}{{ ((toTime $value).UTC.Add 32400000000000).Format "2006-01-02 15:04" }} KST{{ else if eq $labels.kind "rate_limit" }}모름{{ else }}없음{{ end }}
             지금 계정: {{ with query "max by (account, method) (homelab_bot_model_account)" }}{{ $account := . | first }}{{ if eq ($account | label "method") "none" }}미등록{{ else }}{{ $account | label "account" }}({{ if eq ($account | label "method") "api" }}API 크레딧{{ else }}구독{{ end }}){{ end }}{{ else }}모름{{ end }}
-            할 일 1) {{ if eq $labels.kind "billing" }}결제를 풀고 해제하기: 저절로 다시 하지 않는다. homelab bot status로 작업 ID를 보고 homelab bot resume <작업 ID> --apply{{ else if eq $labels.kind "auth_expired" }}기다리기: 토큰을 다른 길로 바꿨으면 30분 안에 다시 시도한다{{ else if gt $value 0.0 }}기다리기: 풀리는 시각 1분 뒤 같은 계정으로 저절로 이어서 한다{{ else }}기다리기: 30분마다 다시 시도한다{{ end }}
+            할 일 1) {{ if eq $labels.kind "billing" }}결제를 풀고 해제하기: 저절로 다시 하지 않는다. homelab bot resume <작업 ID> --apply{{ else if eq $labels.kind "auth_expired" }}기다리기: 토큰을 다른 길로 바꿨으면 30분 안에 다시 시도한다{{ else if gt $value 0.0 }}기다리기: 풀리는 시각 1분 뒤 같은 계정으로 저절로 이어서 한다{{ else }}기다리기: 30분마다 다시 시도한다{{ end }}
             할 일 2) API 크레딧 계정으로 바꾸기: homelab bot account use <이름> --by api
             할 일 3) 다른 구독 계정으로 바꾸기: homelab bot account use <이름>
             계정을 바꾸면 멈춘 일을 바로 이어서 한다. 계정 목록: homelab bot account list

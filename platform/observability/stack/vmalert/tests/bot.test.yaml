@@ -919,7 +919,7 @@ tests:
               description: |-
                 풀리는 시각: 없음
                 지금 계정: main(API 크레딧)
-                할 일 1) 결제를 풀고 해제하기: 저절로 다시 하지 않는다. homelab bot status로 작업 ID를 보고 homelab bot resume <작업 ID> --apply
+                할 일 1) 결제를 풀고 해제하기: 저절로 다시 하지 않는다. homelab bot resume <작업 ID> --apply
                 할 일 2) API 크레딧 계정으로 바꾸기: homelab bot account use <이름> --by api
                 할 일 3) 다른 구독 계정으로 바꾸기: homelab bot account use <이름>
                 계정을 바꾸면 멈춘 일을 바로 이어서 한다. 계정 목록: homelab bot account list
