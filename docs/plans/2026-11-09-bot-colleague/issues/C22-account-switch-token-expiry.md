@@ -1,9 +1,9 @@
 # C22 계정 등록·전환(구독)과 토큰 만료 알림
 
 - 단계: 5 멈춤과 계정
-- 상태: 대기 (선행: C05, C10, C19, C21)
+- 상태: 대기 (선행: C05, C10, C19, C21, C32)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.7 "토큰 만료 알림", §4.8 "계정 등록"·"계정 전환"·"계정 목록"·"D-14 변경", §5 AC-19·AC-21, §8 "`setup-token` 출력 수집"·"약관"·"구독 계정 공유" (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
-- Blocked by: C05, C10, C19, C21
+- Blocked by: C05, C10, C19, C21, C32
 - 연결 AC: AC-19, AC-21
 - 수행: 에이전트 + 사람(약관 재확인 결과 수용, 실토큰 등록(브라우저 로그인), 운영 전환 1회 승인)
 - 저장소·PR: 둘(봇 PR → 봇 이미지 배포 → homelab PR)

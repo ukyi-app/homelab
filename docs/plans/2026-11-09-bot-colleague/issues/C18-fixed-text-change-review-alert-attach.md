@@ -16,6 +16,7 @@
   - 봇 `src/alerts.ts`: 경보 중계 문구. 소유.
   - 봇 `src/external-task-commands.ts`: 연결 파일, 소유 C15. 이 티켓은 세션 연결 명령 응답 문구만 고친다.
   - 봇 `src/external-task-links.ts`, `src/external-task-receiver.ts`: 세션 연결 목록·R08 턴 완료 알림 문구. 소유.
+  - 봇 `src/chat-lane.ts` `CHAT_REPLY_JSON_SCHEMA`(소유 C02): 할 일 3a의 `content` 설명 자리만.
   - 봇 시험: 위 문구를 리터럴로 비교하는 시험(`test/change-assembly.test.ts`, `test/change-pg.test.ts`, `test/change-recovery.test.ts`, `test/change-freshness.test.ts`, `test/change-review.test.ts`, `test/change-deployment.test.ts`, `test/external-task-*.test.ts`, `test/review-2.test.ts`, `test/publisher-main.test.ts` 등 해당 줄).
 - 설계 계약:
   - 변경 알림(`src/change-commands.ts`, `src/change-runtime.ts`, `src/change-deployment.ts`, `src/change-advice.ts`): 봇 ARCHITECTURE "16. T19 CHANGE_PR 계약", "16.1 배포 읽기 (B4)", "16.5 조립과 꺼짐 배포 (B5)"의 명령 표 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/ARCHITECTURE.md). 미리보기에 리뷰 자유문·시험 로그·요청 원문을 싣지 않는 규칙은 `preview` 머리 주석과 "16.3 T19 B3 writer·공개 경계".
@@ -35,6 +36,7 @@
 1. 위 파일들의 Discord 고정 문구를 모아 동료 말투(해요체, 결론부터, 자기를 "봇"이라 부르지 않음)로 다시 쓴다. 문구는 상수로 모아 시험이 상수를 참조하게 한다(명세 6절). 단, 사람이 다듬는다는 결정(명세 4.4)에 맞춰 PR 설명에 바뀐 문구 표를 붙여 owner가 검토하게 한다.
 2. '/' 명령 이름이 들어간 줄(예: `/change-publish`, `/change-status`, `/change project:… text:next`, `/review-resume`, `/attach`, `/resume`)은 스위치(C01)에 따라 두 판을 둔다. 켜짐 판에는 '/' 이름이 없고 말로 하는 안내다(예: "게시하려면 위 버튼을 눌러 주세요", "다시 하려면 이 스레드에서 말해 주세요"). 미리보기 글의 켜짐 판은 C17 버튼을 가리킨다.
 3. 안전 규칙을 지킨다: 경보 중계는 원문을 싣지 않는다. Discord 리뷰 요약은 코드가 만든 숫자·리비전만 싣는다. 미리보기에 리뷰 자유문·시험 로그·요청 원문을 싣지 않는다. 세션 연결 키는 공개 글에 없다(C15). R08 알림의 사용자 값은 코드 스팬에 둔다.
+3a. C15 넘김(2026-11-10): 대화 출력 스키마 `CHAT_REPLY_JSON_SCHEMA`의 `content` 설명이 세션 연결(`attach`) 제안의 꼴(`claude`·`codex`, 동의하면 뒤에 `summary=on`)을 말하지 않아, 모델이 `content`를 null로 내면 제안이 `target_denied`로 버려진다. 설명에 그 꼴을 더한다. 스키마 문자열이 작업자 계약 digest나 작업자 쪽 대조에 들어가는지 먼저 코드로 확인하고, 들어가면 작업자 이미지 교체(C23 sandbox PR)와 순서를 맞춘다.
 4. 손대지 않는 자리를 지킨다: 리뷰 대기(한도·인증) 안내(`src/review.ts`의 `review-waiting`, `src/change-assembly.ts`의 변경 리뷰 대기 안내)는 C20이 자리 비움으로 바꾸므로 여기서 고치지 않는다. GitHub 리뷰 본문 렌더러는 C12 몫이다.
 5. 리터럴 비교 시험을 고치고, "스위치 켜짐 판의 이 파일들 문구에 '/' 명령 이름 0" 시험과 "꺼짐 판은 지금 '/' 안내 유지" 시험을 더한다. '/' 이름 목록은 등록 명령 표(`src/commands.ts`의 정의)에서 읽어 비교한다.
 6. 기록: 봇 `docs/ai-bot/VERIFICATION.md`에 "C18 고정 문구 3" 절, `docs/ai-bot/DECISIONS.md`에 문구를 둔 자리와 두 판 규칙 문단을 더한다. 이 계획 폴더 `README.md`의 C18 상태 줄을 갱신한다.

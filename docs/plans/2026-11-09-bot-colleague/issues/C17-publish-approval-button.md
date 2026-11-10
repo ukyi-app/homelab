@@ -1,7 +1,7 @@
 # C17 게시 승인 버튼
 
 - 단계: 4 말로 실행
-- 상태: 대기 (선행: C13. 외부 선행 homelab T33(봇 PR #108)은 2026-11-09 병합·배포로 충족)
+- 상태: integrated (봇 #127 병합 `7560956`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3 "게시 승인", §4.9, §5 AC-10 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C13, homelab T33(외부 선행, 봇 PR #108: A05 승인 digest 페이지)
 - 연결 AC: AC-10
@@ -39,11 +39,11 @@ owner가 변경 미리보기 글에 붙은 "게시해 주세요" 버튼 하나�
 
 ## 완료 조건
 
-- [ ] 스위치가 켜져 있으면 변경 미리보기 글(마지막 페이지)에 그 미리보기 digest에 묶인 게시 버튼이 붙고, 꺼져 있으면 붙지 않는다.
-- [ ] 버튼을 누르면 그 digest로 승인되고 승인 기록이 남으며, 게시는 기존 경로대로 게시 직전 재확인을 거친다.
-- [ ] 새 미리보기가 나온 뒤 옛 버튼은 거부되고 상태가 바뀌지 않는다.
-- [ ] owner가 아닌 사람이 누르면 거부된다. 같은 버튼을 두 번 눌러도 승인은 한 번이다.
-- [ ] digest 입력 '/' 승인이 계속 된다.
+- [x] 스위치가 켜져 있으면 변경 미리보기 글(마지막 페이지)에 그 미리보기 digest에 묶인 게시 버튼이 붙고, 꺼져 있으면 붙지 않는다.
+- [x] 버튼을 누르면 그 digest로 승인되고 승인 기록이 남으며, 게시는 기존 경로대로 게시 직전 재확인을 거친다.
+- [x] 새 미리보기가 나온 뒤 옛 버튼은 거부되고 상태가 바뀌지 않는다.
+- [x] owner가 아닌 사람이 누르면 거부된다. 같은 버튼을 두 번 눌러도 승인은 한 번이다.
+- [x] digest 입력 '/' 승인이 계속 된다.
 
 ## 검증
 
@@ -53,4 +53,9 @@ owner가 변경 미리보기 글에 붙은 "게시해 주세요" 버튼 하나�
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #127(`feat/colleague-c17-publish-approval-button`, head `4f64be2`), 병합 `7560956`. 마이그레이션 없음.
+- 구현: `src/change-runtime.ts` `notifyPhase`(스위치 켜짐일 때만 미리보기 마지막 쪽에 버튼), `src/change-commands.ts`(`PUBLISH_BUTTON`·`PUBLISH_TEXT`, 승인 단계를 `approve`로 빼 '/'와 버튼이 같은 경로, `pressPublish`), `src/discord-protocol.ts` `BUTTONS` 끝 줄, `src/discord.ts` `publishButton`(복구 메시지·스위치 꺼짐·대상 없음 거부 → owner 대조 → `claimOnce` → 대화 비활성이면 승인 없이 안내).
+- 완료 조건 근거: `c17-publish-button`(승인 행·`proposed`·PR 1건, g1 버튼 `stale`, owner 아님 거부, 두 번 눌러도 승인 1행, 누른 뒤 base 이동 `superseded`, 스위치 꺼짐 거부, '/change-publish' 그대로), `change-preview-pages` C17 두 줄(여러 쪽에서 마지막 쪽에만 버튼, 그 쪽이 전체 digest).
+- 검사: 작업자 관련 11개 파일 258개 중 257(실패 1은 시험 도우미, 고친 뒤 그 파일 5/5). 통합 담당 전체 검사(`4f64be2`): 2354 / 2332 pass / 0 fail / 22 skip. Codex 지적 없음, CI 통과.
+- 분해 불일치: 티켓은 custom_id에 다 못 담으면 묶음 행·마이그레이션을 쓰라고 했으나, `<변경>.<세대>.<digest 앞 16자>`로 100자 안에 묶었다(승인은 전체 digest로, 앞 16자는 앞단 거름). 근거는 봇 DECISIONS "C17 게시 승인 버튼 custom_id 묶음".
+- 남은 것: 봇 ARCHITECTURE §14 버튼 허용 목록 문장에 게시 버튼이 아직 없다(통합 때 정리). 행동 단위 변이 실행 없음. 실제 버튼 표시·`UPDATE_MESSAGE` 모양은 C24(S5). `change-commands.ts`를 C14·C18도 쓴다.

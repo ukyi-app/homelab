@@ -17,21 +17,21 @@ homelab-bot을 회사에서 같이 일하는 동료처럼 바꾸는 계획의 �
 | [C02](issues/C02-worker-contract-v2.md) | 작업자 대화·리뷰 계약 v2 받기 | 1 기반 | 없음 | integrated | 에이전트 |
 | [C03](issues/C03-worker-rate-limit-info.md) | 작업자 한도 정보 읽기 | 1 기반 | C02 | integrated | 에이전트 |
 | [C04](issues/C04-reaction-lifecycle.md) | 반응 수명 | 1 기반 | 없음 | integrated | 에이전트 |
-| [C05](issues/C05-admin-cli-homelab-bot.md) | 관리 CLI `homelab bot` | 1 기반 | C01 | 진행 중 | 에이전트 + 사람(운영 확인) |
-| [C06](issues/C06-deploy-worker-v2.md) | 작업자 v2 배포 | 2 배포와 표면 | C02, C03, C25 | 진행 중 | 에이전트 + 사람(배포 PR) |
+| [C05](issues/C05-admin-cli-homelab-bot.md) | 관리 CLI `homelab bot` | 1 기반 | C01 | integrated | 에이전트 + 사람(운영 확인) |
+| [C06](issues/C06-deploy-worker-v2.md) | 작업자 v2 배포 | 2 배포와 표면 | C02, C03, C25 | integrated | 에이전트 + 사람(배포 PR) |
 | [C07](issues/C07-reply-owner-call-thread-marker.md) | 답장·owner 호출·스레드 제목·작은 표식 | 2 배포와 표면 | C04, C09 | integrated | 에이전트 |
 | [C08](issues/C08-mention-scope-reply-context.md) | 멘션 받는 범위와 봇 글 답장 맥락 | 2 배포와 표면 | C02, C07 | integrated | 에이전트 |
 | [C09](issues/C09-fixed-text-chat-task-control.md) | 고정 문구 1: 대화·작업·제어 안내 | 2 배포와 표면 | C01, C04 | integrated | 에이전트 |
 | [C10](issues/C10-fixed-text-memory-briefing.md) | 고정 문구 2: 기억·브리핑 | 2 배포와 표면 | C01, C04 | integrated | 에이전트 |
-| [C11](issues/C11-chat-v2-switchover.md) | 대화 v2 전환 | 3 새 형식 켜기 | C01, C04, C06, C08 | 대기 | 에이전트 |
-| [C12](issues/C12-pr-review-voice.md) | PR 리뷰 말투 | 3 새 형식 켜기 | C06 | 대기 | 에이전트 |
-| [C13](issues/C13-proposal-run-confirmation.md) | 제안과 실행 확인 | 4 말로 실행 | C01, C11 | 대기 | 에이전트 |
-| [C14](issues/C14-remaining-actions.md) | 나머지 동작 연결 | 4 말로 실행 | C13 | 대기 | 에이전트 |
-| [C15](issues/C15-attach-key-button.md) | 세션 연결 키 버튼 | 4 말로 실행 | C13 | 대기 | 에이전트 |
-| [C16](issues/C16-task-question-direct-answer.md) | 작업 질문 바로 답 | 4 말로 실행 | C09, C13 | 대기 | 에이전트 |
-| [C17](issues/C17-publish-approval-button.md) | 게시 승인 버튼 | 4 말로 실행 | C13, 재구축 T33(외부, 충족) | 대기 | 에이전트 |
+| [C11](issues/C11-chat-v2-switchover.md) | 대화 v2 전환 | 3 새 형식 켜기 | C01, C04, C06, C08 | integrated | 에이전트 |
+| [C12](issues/C12-pr-review-voice.md) | PR 리뷰 말투 | 3 새 형식 켜기 | C06 | integrated | 에이전트 |
+| [C13](issues/C13-proposal-run-confirmation.md) | 제안과 실행 확인 | 4 말로 실행 | C01, C11 | integrated | 에이전트 |
+| [C14](issues/C14-remaining-actions.md) | 나머지 동작 연결 | 4 말로 실행 | C13 | integrated | 에이전트 |
+| [C15](issues/C15-attach-key-button.md) | 세션 연결 키 버튼 | 4 말로 실행 | C13 | integrated | 에이전트 |
+| [C16](issues/C16-task-question-direct-answer.md) | 작업 질문 바로 답 | 4 말로 실행 | C09, C13 | integrated | 에이전트 |
+| [C17](issues/C17-publish-approval-button.md) | 게시 승인 버튼 | 4 말로 실행 | C13, 재구축 T33(외부, 충족) | integrated | 에이전트 |
 | [C18](issues/C18-fixed-text-change-review-alert-attach.md) | 고정 문구 3: 변경·리뷰 알림·경보·세션 연결 | 4 말로 실행 | C01, C12, C15, C17 | 대기 | 에이전트 |
-| [C19](issues/C19-limit-resume-review-deferral.md) | 한도 재개와 리뷰 미루기 | 5 멈춤과 계정 | C05, C09, C10, C11, C12 | 대기 | 에이전트 |
+| [C19](issues/C19-limit-resume-review-deferral.md) | 한도 재개와 리뷰 미루기 | 5 멈춤과 계정 | C05, C09, C10, C11, C12 | integrated | 에이전트 |
 | [C20](issues/C20-away-status.md) | 자리 비움 | 5 멈춤과 계정 | C04, C09, C12, C19, C21 | 대기 | 에이전트 |
 | [C21](issues/C21-ops-alert-telegram.md) | 운영 알림 | 5 멈춤과 계정 | C19 | 대기 | 에이전트 + 사람(발화 시험) |
 | [C22](issues/C22-account-switch-token-expiry.md) | 계정 등록·전환(구독)과 토큰 만료 알림 | 5 멈춤과 계정 | C05, C10, C19, C21 | 대기 | 에이전트 + 사람(실토큰·운영 전환) |
@@ -44,6 +44,7 @@ homelab-bot을 회사에서 같이 일하는 동료처럼 바꾸는 계획의 �
 | [C29](issues/C29-guide-comments-check-items.md) | 안내 댓글과 확인할 것 | 4 말로 실행 | C06, C17, C25, C26 | 대기 | 에이전트 |
 | [C30](issues/C30-review-request.md) | 리뷰 요청(Discord, 조직 저장소) | 4 말로 실행 | C12, C13, C19, C26 | 대기 | 에이전트 + 사람(리뷰 App 설치 범위) |
 | [C31](issues/C31-pre-publish-self-fix.md) | 게시 전 자체 리뷰 고치기 | 6 PR 수정 | C06, C17, C25 | 대기 | 에이전트 |
+| [C32](issues/C32-admin-cli-remaining-actions.md) | 관리 CLI 나머지 동작(차단·unknown 해제·멈춘 작업 재개) | 1 기반 | C04, C05, C09 | integrated | 에이전트 + 사람(운영 확인) |
 
 티켓 파일은 `issues/`에 있다.
 
@@ -66,21 +67,24 @@ C13 → C15
 C09, C13 → C16
 C13, 재구축 T33 → C17
 C01, C12, C15, C17 → C18
-C05, C09, C10, C11, C12 → C19
+C05, C09, C10, C11, C12, C32 → C19
 C19 → C21
 C04, C09, C12, C19, C21 → C20
-C05, C10, C19, C21 → C22
+C05, C10, C19, C21, C32 → C22
 C06, C22 → C23
 C06, C16, C25 → C28
 C06, C17, C25, C26 → C29
 C06, C17, C25 → C31
 C06, C13, C17, C25, C26, C29, C31 → C27
 C12, C13, C19, C26 → C30
-C01 … C23, C25 … C31 → C24
+C04, C05, C09 → C32
+C01 … C23, C25 … C32 → C24
 C24 → 재구축 T35(V1 시범 운영)
 ```
 
 **연결 파일에서 온 간선:** C07·C08·C09·C10 ← C04(`store.ts`·`discord.ts`), C07·C16·C19·C20 ← C09(작업 브리지), C08 ← C02(`contracts.ts` `EventInput`), C19·C22 ← C10(`briefing.ts`), C18·C19·C20 ← C12(`review.ts`), C18 ← C15·C17, C11 ← C08(`chat-context.ts`), C23 ← C06(`platform/sandbox`), C22 ← C05(관리 진입점·`homelab bot` 묶음), C05 ← C01(`policy.ts`), C22 ← C21(`ops-metrics.ts`).
+
+**C32 분할(사용자 2026-11-10 "진행해"):** C05 구현 중 차단·unknown 해제·멈춘 작업 재개가 기존 함수의 owner 행위자 요구로 막혀 새 티켓 C32로 나눴다. C19는 관리 진입점의 멈춘 작업 재개를 쓰므로 C32 뒤, C22는 같은 관리 진입점을 고치므로 C32 뒤다.
 
 **사용 관계에서 온 간선:** C11이 C04의 반응 훅과 C06에 배포된 v2 작업자를 쓴다. C13이 C11의 제안 칸을 쓴다. C19가 C05의 관리 진입점 해제로 바로 재개한다. C20은 C21 뒤다: Discord의 원인 안내를 없애기 전에 운영 알림이 먼저 있어야 owner가 원인을 놓치지 않는다.
 
@@ -89,10 +93,10 @@ C24 → 재구축 T35(V1 시범 운영)
 ## 3. 실행 상태
 
 - **통합 기준:** 봇 `main`, 시작 기준 `e160cb1`(2026-11-09). 티켓마다 봇 PR 하나를 선행 순서대로 main에 병합한다(7절, 사용자 2026-11-09 feature-build 커밋 질문). 명세 머리말에도 같은 줄이 있다.
-- **실행 가능:** 없음(아래 진행 중 외에는 선행 대기).
-- **integrated:** C01(봇 #111 `bfdb5d9`), C26(봇 #113 `1ef5843`), C02(봇 #112 `477d01c`), C04(봇 #114 `ca243f5`), C03(봇 #116 `551f0ad`), C10(봇 #117 `fb7d693`), C09(봇 #118 `e19e760`), C25(봇 #119 `fc93fe2`), C07(봇 #120 `9b067e9`), C08(봇 #121 `a3d0a7b`).
-- **진행 중:** C05(봇 #115 병합, homelab #1216 owner 검토 대기, 나머지 세 동작 결정 대기), C06(homelab #1223 owner 검토·병합, 그 뒤 운영 확인). 티켓별 worktree.
-- **C06 대기 중:** C11·C12는 C06 운영 확인 뒤에 시작한다(그 뒤 C13·C19 등이 열린다).
+- **실행 가능:** C18, C21(homelab vmalert 규칙 포함, 사람 발화 시험), C28, C29, C30(사람: 리뷰 App 설치 범위), C31. 2026-11-10 16:1x 사용자 요청("멈출수있는 구간까지 작업해주고 멈췄다가 진행하자")으로 여기서 멈춘다. 다시 시작하면 이 줄부터 고른다.
+- **integrated:** C01(봇 #111 `bfdb5d9`), C26(봇 #113 `1ef5843`), C02(봇 #112 `477d01c`), C04(봇 #114 `ca243f5`), C03(봇 #116 `551f0ad`), C10(봇 #117 `fb7d693`), C09(봇 #118 `e19e760`), C25(봇 #119 `fc93fe2`), C07(봇 #120 `9b067e9`), C08(봇 #121 `a3d0a7b`), C05(봇 #115·homelab #1216, 세 동작. 나머지는 C32), C06(homelab #1223 `2544044`, 운영 확인), C32(봇 #122 `d353fc0`·homelab #1226), C12(봇 #123 `c99b38e`), C11(봇 #124 `860b591`), C13(봇 #125 `dd0a53f`), C17(봇 #127 `7560956`), C15(봇 #128 `dc172ff`), C19(봇 #126 `1c9c896`, 운영 확인), C14(봇 #130 `4e6d423`), C16(봇 #129 `0ef1de8`).
+- **진행 중:** 없음.
+- **넘김 메모(2026-11-10):** C20 할 일 6a(작업 레인 정상 응답의 한도 경고 기록, C19 Codex P2), C18 할 일 3a(attach `content` 꼴, C15), C23 할 일 6(작업자 이미지는 C19가 든 빌드), C24 할 일 1a(말로 한 기억 검색 공개 범위, 스위치 켜기 전 owner 결정, C14).
 - **대기:** 나머지(1절 Blocked by).
 - **외부 선행:** 충족. 재구축 T33(봇 PR #108)이 2026-11-09 병합됐고 homelab #1209로 배포, 봇 #109에 검증을 기록했다. C17은 C13만 기다린다.
 - **통합 검증 담당:** C24. AC-24와 AC-25~AC-31의 S5 범위를 포함해, 각 AC에서 S1~S4로 못 잡아 S5로 넘긴 범위(말투 품질, 제안 오독, 2.1.308 한도 필드, 실제 Discord·GitHub·Telegram 동작, 계정 전환)를 모두 본다. 각 티켓은 자기 AC의 S1~S4 시험을 맡는다.
@@ -140,7 +144,7 @@ C24 → 재구축 T35(V1 시범 운영)
 | 봇 `src/raw-text-retention.ts` | C28 | 없음(선택지 칸 7일 정리) | |
 | 봇 `src/github-writer.ts`, 리뷰 App 입출력(`src/github-review-io.ts`) | C26 | C27 fast-forward·댓글 읽기, C29 안내 리뷰, C30 리뷰 대상 확인(정책 목록 밖 설치 저장소 토큰) | 포트는 C26, 사용은 뒤 티켓. 리뷰 포트 타입이 있는 `review.ts`(소유 C12)는 C26이 부르기만 한다 |
 | 봇 `src/ops-metrics.ts` | C21 | C22 계정 이름·방식 값 | |
-| 봇 관리 진입점(C05가 만드는 파일) | C05 | C22 계정 기록·목록·전환 뒤 해제 | |
+| 봇 관리 진입점(C05가 만드는 파일) | C05 | C32 차단·unknown 해제·멈춘 작업 재개, C22 계정 기록·목록·전환 뒤 해제 | C32가 C22보다 먼저 |
 | 봇 `migrations/` | 순번 공유 | C13 제안, C19 재개 시각, C22 계정 정보, C27 수정 차례, C28 선택지, C31 고치기 차례 | 병합 때 다음 번호로 다시 매긴다 |
 | 봇 `docs/ai-bot/VERIFICATION.md`, `DECISIONS.md`, `ARCHITECTURE.md` | 추가만 | 모든 티켓 | 자기 절·문단만 더하거나 고친다 |
 | homelab `cli/`의 `homelab bot` 묶음(명령 파일, `cli/src/core/` 도우미, `cli/README.md`, 설계 C.7 표) | C05 | C22 `account add/use/list`, C23 `--by api` | |
@@ -172,7 +176,7 @@ C24 → 재구축 T35(V1 시범 운영)
 | AC-17 리뷰 미루기 | C19 | S1, S5(C24) |
 | AC-18 운영 알림 | C21 | S1, S4, 운영 발화 시험(C21, C24) |
 | AC-19 토큰 만료 알림 | C22 | S1 |
-| AC-20 관리 CLI | C05 | S3, S1, 운영 1회(C05) |
+| AC-20 관리 CLI | C05(비상 정지·해제·상태 보기), C32(차단·unknown 해제·멈춘 작업 재개) | S3, S1, 운영 1회(C05·C32) |
 | AC-21 계정 등록·전환·목록 | C22 | S3, S2, S5(C24) |
 | AC-22 API 크레딧 방식 | C23 | S2, S5(C24) |
 | AC-23 스위치 | C01, C09, C10, C11, C13, C15, C16, C17, C18, C27, C28, C30 | S1(두 상태) |

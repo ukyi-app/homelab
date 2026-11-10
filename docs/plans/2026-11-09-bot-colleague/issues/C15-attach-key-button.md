@@ -1,7 +1,7 @@
 # C15 세션 연결 키 버튼
 
 - 단계: 4 말로 실행
-- 상태: 대기 (선행: C13)
+- 상태: integrated (봇 #128 병합 `dc172ff`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3 "세션 연결 키", §4.9 스위치와 배포 순서 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C13
 - 연결 AC: AC-9
@@ -33,10 +33,10 @@
 
 ## 완료 조건
 
-- [ ] 세션 연결 확정 뒤 "키 보기"를 누른 owner에게만 보이는 응답으로 키가 한 번 나온다.
-- [ ] 스레드 공개 글, 이벤트 원문, outbox, 감사·로그에 키가 없다.
-- [ ] 응답 실패면 키가 폐기되고, 두 번째 누름은 거부된다.
-- [ ] 스위치가 꺼져 있으면 버튼이 없고 '/' `attach`가 지금처럼 동작한다.
+- [x] 세션 연결 확정 뒤 "키 보기"를 누른 owner에게만 보이는 응답으로 키가 한 번 나온다.
+- [x] 스레드 공개 글, 이벤트 원문, outbox, 감사·로그에 키가 없다.
+- [x] 응답 실패면 키가 폐기되고, 두 번째 누름은 거부된다.
+- [x] 스위치가 꺼져 있으면 버튼이 없고 '/' `attach`가 지금처럼 동작한다.
 
 ## 검증
 
@@ -46,4 +46,10 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #128(`feat/colleague-c15-attach-key-button`, head `f279340`), 병합 `dc172ff`. 마이그레이션 없음.
+- 구현: 새 `src/session-key-proposal.ts`(제안 동작 표 `attach` 줄의 처리기, R08 명령 모듈이 제안 코드를 import하지 않게 따로 둠), `src/external-task-commands.ts`(`SESSION_KEY_BUTTON`·`SESSION_KEY_TEXT`, `claimKey` 조건부 UPDATE, `showKey`, 기존 '/attach'의 발급·전달·폐기를 `issue`로 묶음), `src/discord-protocol.ts` `BUTTONS` 끝 줄(C17 줄 뒤), `src/discord.ts` `sessionKeyButton`. "할게요"에서는 대상만 확정하고 키는 "키 보기" 상호작용 안에서 만든다.
+- 완료 조건 근거: `c15-session-key`(13개 + Codex 수정 1개): 키 보기 → flags 64로 한 번, 둘째 누름·owner 아님·24시간 지남 거절 / 표시 뒤 DB 전체·공개 글·로그에 seed 없음(본인 응답에만 있음을 대조) / 전송 실패·상호작용 만료·일시정지 → 연결 revoked / 동료·R08 스위치 꺼짐 → 지금 그대로.
+- Codex: 1차 P1 1(확정 글에 공개 검사 없이 세션 ID를 다시 실음) → 주 진행자가 고침(`f279340`, 확정 문구는 실행기 이름만, 사설 IP 꼴 ID 시험). 재리뷰 지적 없음.
+- 검사: 작업자 관련 13개 파일 212개 통과. 통합 담당 전체 검사(`f279340`, main C17 병합 뒤): 2368 / 2346 pass / 0 fail / 22 skip. CI 통과.
+- 분해 불일치: 칸 밖 `src/runtime.ts`(C11)·`src/main.ts`(C19)에 R08 스위치를 제안 처리로 넘기는 옵션 한 줄씩(주 진행자가 받아들임). `proposals.ts`의 기존 `attach` 줄 처리기를 바꾸고 `PrepareContext.externalConnected`·`ProposalDesk` 생성자 인자 하나를 더함.
+- 남은 것: 대화 출력 스키마(`CHAT_REPLY_JSON_SCHEMA`, C02)에 attach `content` 꼴(`claude`·`codex`, `summary=on`)이 없어 스위치를 켠 뒤 말로 하는 연결이 버려질 수 있다(C18 할 일에 넘김). `foundation.test.ts` 버튼 목록에 `session-key` 없음. "키 보기" 동시 누름은 PGlite 단일 연결로만 시험.

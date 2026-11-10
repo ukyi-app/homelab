@@ -1,7 +1,7 @@
 # C13 제안과 실행 확인(작업 목록·작업 시작)
 
 - 단계: 4 말로 실행
-- 상태: 대기 (선행: C01, C11)
+- 상태: integrated (봇 #125 병합 `dd0a53f`, 2026-11-10)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.3 제안과 실행 확인, §4.9 스위치와 배포 순서 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01, C11
 - 연결 AC: AC-6, AC-7(작업 목록만), AC-23(제안 버튼)
@@ -42,12 +42,12 @@
 
 ## 완료 조건
 
-- [ ] 스위치가 켜져 있을 때 작업 시작 제안이 한 줄 되묻기와 버튼 글이 되고, 버튼을 누르기 전 실행 0건이다.
-- [ ] owner가 아닌 사람, 만료(24시간)·처리됨·값이 바뀐 제안의 버튼은 거부되고, 처리된 글의 버튼은 사라진다.
-- [ ] 같은 버튼을 두 번 눌러도 작업이 한 번만 시작된다(PostgreSQL 두 연결).
-- [ ] 기록에서 재생된 메시지는 제안만 만들고, 목록에 없는 동작이나 허용 밖 대상의 제안은 버려지고 대화 답만 나간다.
-- [ ] 작업 목록 제안은 확인 없이 '/' `list`와 같은 권한 검사로 실행돼 일반 답으로 달린다.
-- [ ] 스위치가 꺼져 있으면 제안이 있어도 버튼이 없다.
+- [x] 스위치가 켜져 있을 때 작업 시작 제안이 한 줄 되묻기와 버튼 글이 되고, 버튼을 누르기 전 실행 0건이다.
+- [x] owner가 아닌 사람, 만료(24시간)·처리됨·값이 바뀐 제안의 버튼은 거부되고, 처리된 글의 버튼은 사라진다.
+- [x] 같은 버튼을 두 번 눌러도 작업이 한 번만 시작된다(PostgreSQL 두 연결).
+- [x] 기록에서 재생된 메시지는 제안만 만들고, 목록에 없는 동작이나 허용 밖 대상의 제안은 버려지고 대화 답만 나간다.
+- [x] 작업 목록 제안은 확인 없이 '/' `list`와 같은 권한 검사로 실행돼 일반 답으로 달린다.
+- [x] 스위치가 꺼져 있으면 제안이 있어도 버튼이 없다.
 
 ## 검증
 
@@ -57,4 +57,9 @@
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #125(`feat/colleague-c13-proposal-run-confirmation`, 결과 head `162f8aa`), 병합 `dd0a53f`(2026-11-10). 스위치가 꺼져 있어 운영에서는 제안 경로가 돌지 않는다.
+- 구현: 새 `src/proposals.ts`(동작 표 `ACTIONS` — 처리기 `list`·`task`, `ProposalDesk.consider`, `pressProposal`, 값 digest, `PROPOSAL_TEXT`), `migrations/021_proposals.sql`(제안 표), `src/discord-protocol.ts` custom_id 표 `BUTTONS`(기존 네 버튼 + `proposal-yes`·`proposal-no`, 처리 뒤 버튼 없애는 type 7 응답), `src/discord.ts` 버튼 수신 `proposalButton`, `src/store.ts` outbox `payload.buttons`(마지막 쪽에만), `src/runtime.ts` 대화 성공 분기 끝 `consider`, `src/database.ts` MIGRATIONS 한 줄.
+- 완료 조건 근거: `test/c13-proposal.test.ts`(작업 시작 제안 → 버튼 글·실행 0, owner 아님·24시간·값 바뀜 거부, 아니에요·할게요, 재생 버림, 허용 밖 저장소·실행 중 새 메시지 버림, 작업 목록은 일반 답, 스위치 꺼짐 버튼 없음), `test/c13-proposal-pg.test.ts`(두 번 눌러도 한 번, 실제 PG), Codex 수정 시험 셋(확인 글 공개 검사, 구독 꺼진 대화의 할게요 거절, 잠금 아래 최신성 재검사).
+- 검사: 작업자 관련 32개 파일 658개 중 657(1은 change-pg 흔들림, 단독 14/14). 수정 뒤 69/69. 통합 담당 전체 검사(`162f8aa`, node 24.22.0, 실제 PG, 잠금): 2347 / 2325 pass / 0 fail / 22 skip. Codex 1차 P1 1·P2 2를 새 작업자가 고쳤고, 2차 P2 1(확인 글 게시 순서)은 리뷰 규칙대로 C14로 넘김. `build / test` 통과.
+- 분해 불일치: 소유 밖 `src/database.ts`·`test/helpers.ts`·마이그레이션 목록 시험들. 기존 제어 버튼도 custom_id 칸 수를 정확히 본다. 확인 글 메시지 ID는 상호작용과 대조하지 않는다(`EventInput`에 칸 없음, UUID와 owner·대화 대조로 묶음). 작업 시작은 `provider='proposal'` 이벤트로 접수해 다음 대화 기록에 원문이 한 번 더 들어간다. 버튼 응답 뒤 되묻기 글의 대조 표식이 빠진다.
+- 뒤 티켓: C14~C17은 `ACTIONS`·`BUTTONS`·`payload.buttons`에 줄만 더하고 `prepare`가 `plainQuestion`도 돌려준다. C14는 확인 글 게시 순서(Codex P2). 누르지 않은 제안 값은 새 제안 때만 정리된다(C14가 기억 진술을 값에 두면 주기 정리 검토).
