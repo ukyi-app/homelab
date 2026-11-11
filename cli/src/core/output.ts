@@ -152,11 +152,17 @@ export function startActivity(text: string): boolean {
   if (containsTracked(label)) return false;
   const done = stepLine(label);
   const bar = done.slice(0, done.indexOf("\n") + 1);
-  process.stderr.write(`${bar}${FRAMES[0]}  ${label}\n`);
-  spinnerUrl ??= URL.createObjectURL(new Blob([SPINNER_SRC], { type: "application/javascript" }));
   const st = new Int32Array(new SharedArrayBuffer(4));
   st[0] = 1;
-  const worker = new Worker(spinnerUrl);
+  let worker: Worker;
+  try {
+    spinnerUrl ??= URL.createObjectURL(new Blob([SPINNER_SRC], { type: "application/javascript" }));
+    worker = new Worker(spinnerUrl);
+  } catch {
+    // 진행 줄 때문에 명령이 깨지지 않게 한다. 부르는 쪽이 움직이지 않는 진행 줄을 쓴다.
+    return false;
+  }
+  process.stderr.write(`${bar}${FRAMES[0]}  ${label}\n`);
   // 진행 줄이 열린 채 명령이 끝나도 프로세스가 Worker를 기다리지 않는다.
   worker.unref();
   worker.postMessage({ sab: st.buffer, frames: FRAMES, label });
