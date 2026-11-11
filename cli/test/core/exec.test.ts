@@ -91,7 +91,7 @@ describe("직접 stdio", () => {
 
   test("setup-token 로그인을 띄워도 결과 stdout에는 JSON 문서 하나뿐이고 stderr 화면에 토큰이 없다(--json >파일)", async () => {
     const token = "sk-ant-oat01-fakevalue-login-0001-abcdefghijklmnop";
-    const sb = stubSandbox([rule(["claude", "setup-token"], { stdout: `토큰을 발급했다:\n\n${token}\n\n안전하게 둔다\n` }, { noStdin: true })]);
+    const sb = stubSandbox([rule(["claude", "setup-token"], { stdout: `토큰을 발급했다:\n\n${token}\n\nStore this token securely.\n` }, { noStdin: true })]);
     const child = join(import.meta.dir, "..", "fixtures", "core", "login-child.ts");
     const p = Bun.spawn([process.execPath, "--no-env-file", child], { env: sb.env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
@@ -99,7 +99,7 @@ describe("직접 stdio", () => {
     expect(out).toBe(`${JSON.stringify({ schema: "homelab-cli/v1", status: "done", got: true })}\n`);
     expect(err).not.toContain("fakevalue-login");
     expect(err).toContain("토큰을 발급했다:");
-    expect(err).toContain("안전하게 둔다");
+    expect(err).toContain("Store this token securely.");
     expect(sb.calls().calls.map((c) => c.argv)).toEqual([["claude", "setup-token"]]);
   });
 

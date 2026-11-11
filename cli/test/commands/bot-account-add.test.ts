@@ -209,7 +209,7 @@ describe("bot account add", () => {
   }, TTY_MS);
 
   test("터미널: 토큰이 다른 글과 한 줄이어도 받아 가린다", async () => {
-    const odd = `Opening browser…\n${OAUTH_URL}\nYour token: ${OAT}\n`;
+    const odd = `Opening browser…\n${OAUTH_URL}\nYour token: ${OAT}\n\nStore this token securely.\n`;
     const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(ONE), claude(odd)]);
     expect(r.code).toBe(0);
     expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${OAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${OAT}\n`]);
@@ -226,6 +226,16 @@ describe("bot account add", () => {
     expect(r.screen).toContain("값을 확신하지 못해 받지 않았다");
     expect(r.screen).toContain("다른 터미널에서 claude setup-token을 실행해");
     expect(r.screen).toContain(OAUTH_URL);
+    expect(leaks(r.screen, OAT)).toBe(false);
+  }, TTY_MS);
+
+  test("터미널: 접힌 토큰의 앞 조각만 꼴 검사를 지나도(줄 끝 공백 뒤 빈 줄, 이어지는 조각) 잘린 값을 Infisical에 쓰지 않고 가려진 입력으로 받는다", async () => {
+    const odd = ` ${OAUTH_URL}\n\n Your OAuth token (valid for 1 year):\n\n ${OAT.slice(0, 55)}  \n\n ${OAT.slice(55)}\n\n Store this token securely.\n`;
+    const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(ONE), claude(odd)], { cols: 60, steps: [{ wait: /화면에 보이지 않는다/, send: `${OAT}\r` }] });
+    expect(r.pending).toEqual([]);
+    expect(r.code).toBe(0);
+    expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${OAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${OAT}\n`]);
+    expect(r.screen).toContain("값을 확신하지 못해 받지 않았다");
     expect(leaks(r.screen, OAT)).toBe(false);
   }, TTY_MS);
 

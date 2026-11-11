@@ -1,5 +1,6 @@
 // claude setup-token 화면 거르기(homelab bot account add, C35). 자식 출력에서 토큰을 받아 가리고 나머지는 화면에 넘긴다.
 // 2026-11-11 관측(claude 2.1.322): 안내 글 → "Your OAuth token (valid for 1 year):" → 빈 줄 → sk-ant-oat01-… 한 줄 → "Store this token securely…".
+// 거르기는 토큰 뒤에 공백·빈 줄만 지나 끝 표지 "Store this token"이 와야 값을 받는다. 그래서 받는 시험의 화면은 모두 표지를 둔다.
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { tokenScreenFilter } from "../../src/core/input";
@@ -7,6 +8,7 @@ import { Secret } from "../../src/core/secret";
 import { rule, stubSandbox } from "../harness";
 
 const TOKEN = "sk-ant-oat01-FAKEfakeFAKEfake_0123456789-abcdefghijABCDEFGHIJ_klmnopqrstuvwxyzKLMNOPQRSTUVWXYZ-0123456789AA";
+const MARK = "\r\nStore this token securely. You won't be able to see it again.\r\n";
 const SCREEN = [
   "Opening browser to sign in…\r\n",
   "Browser didn't open? Use the url below to sign in:\r\n",
@@ -88,7 +90,8 @@ describe("setup-token 화면 거르기", () => {
   });
 
   test("토큰 사이에 색 escape가 끼어도 escape 앞 조각을 미리 내보내지 않는다", () => {
-    for (const colored of [`\x1b[1m${TOKEN.slice(0, 40)}\x1b[22m${TOKEN.slice(40)}\x1b[0m\r\n`, `${TOKEN} \r\x1b[K\r\n`, `\x1b[2K${TOKEN}\x1b[0K\r\n`]) {
+    for (const line of [`\x1b[1m${TOKEN.slice(0, 40)}\x1b[22m${TOKEN.slice(40)}\x1b[0m\r\n`, `${TOKEN} \r\x1b[K\r\n`, `\x1b[2K${TOKEN}\x1b[0K\r\n`]) {
+      const colored = `${line}${MARK}`;
       for (let cut = 1; cut < colored.length; cut++) {
         const r = run([colored.slice(0, cut), colored.slice(cut)]);
         expect([cut, leaked(r.screen), r.token?.equals(new Secret(TOKEN))]).toEqual([cut, false, true]);
@@ -97,9 +100,9 @@ describe("setup-token 화면 거르기", () => {
   });
 
   test("토큰이 다른 글과 한 줄이어도 머리(sk-ant-)부터 받고 가린다. 앞 글은 그대로 보인다", () => {
-    const r = run([`Your token: ${TOKEN}\r\n`]);
+    const r = run([`Your token: ${TOKEN}\r\n${MARK}`]);
     expect(r.token?.equals(new Secret(TOKEN))).toBe(true);
-    expect(r.screen).toBe("Your token: [토큰을 받아 화면에서 가렸다]\r\n");
+    expect(r.screen).toBe(`Your token: [토큰을 받아 화면에서 가렸다]\r\n${MARK}`);
   });
 
   test("토큰 꼴이 하나도 없으면 화면을 그대로 보이고 가린 것도 없다(가려진 입력으로 떨어져 사람이 화면의 값을 붙여 넣는다)", () => {
@@ -109,7 +112,7 @@ describe("setup-token 화면 거르기", () => {
   });
 
   test("같은 토큰을 다시 그려도 하나로 받고, 받은 뒤의 sk-ant- 줄은 꼴이 달라도 가린다", () => {
-    const r = run([`${TOKEN}\r\n`, `${TOKEN}\r\n`, `again ${TOKEN}\r\n`]);
+    const r = run([`${TOKEN}\r\n${MARK}`, `${TOKEN}\r\n${MARK}`, `again ${TOKEN}\r\n${MARK}`]);
     expect(r.token?.equals(new Secret(TOKEN))).toBe(true);
     expect(r.conflict).toBe(false);
     expect(leaked(r.screen)).toBe(false);
@@ -117,14 +120,14 @@ describe("setup-token 화면 거르기", () => {
 
   test("서로 다른 토큰 줄이 둘이면 받지 않고 충돌로 알린다(둘 다 가린다)", () => {
     const other = `${TOKEN.slice(0, -2)}BB`;
-    const r = run([`${TOKEN}\r\n`, `${other}\r\n`]);
+    const r = run([`${TOKEN}\r\n${MARK}`, `${other}\r\n${MARK}`]);
     expect(r.token).toBe(null);
     expect(r.conflict).toBe(true);
     expect(leaked(r.screen)).toBe(false);
   });
 
-  test("줄바꿈 없이 끝난 마지막 토큰 줄도 판정한다", () => {
-    const r = run([`ok\r\n${TOKEN}`]);
+  test("줄바꿈 없이 끝난 마지막 표지 줄도 판정한다", () => {
+    const r = run([`ok\r\n${TOKEN}\r\n\r\nStore this token securely.`]);
     expect(r.token?.equals(new Secret(TOKEN))).toBe(true);
     expect(leaked(r.screen)).toBe(false);
   });
@@ -217,7 +220,7 @@ describe("setup-token 화면 거르기: 확신이 없으면 받지 않는다(가
   });
 
   test("자식이 1초 넘게 붙들려 있으면 알림을 한 번 보인다(가짜 터미널 판)", async () => {
-    const sb = stubSandbox([rule(["claude", "setup-token"], { stdout: ` Your OAuth token (valid for 1 year):\n\n ${TOKEN}\n`, holdMs: 1_600 }, { noStdin: true })]);
+    const sb = stubSandbox([rule(["claude", "setup-token"], { stdout: ` Your OAuth token (valid for 1 year):\n\n ${TOKEN}\n\n Store this token securely.\n`, holdMs: 1_600 }, { noStdin: true })]);
     const r = await child(sb.env);
     expect([r.code, r.doc.same, leaked(r.err)]).toEqual([0, true, false]);
     expect(r.err).toContain("토큰을 받는 중(claude가 끝나기를 기다린다)");
@@ -239,4 +242,35 @@ describe("setup-token 화면 거르기: 확신이 없으면 받지 않는다(가
     expect(screen).not.toContain("Store this token");
     expect(leaked(screen)).toBe(false);
   });
+});
+
+// 접힌 토큰의 앞 조각만 꼴 검사를 지나 받히면 쓸 수 없는 자격이 두 자리에 저장되고 등록이 성공으로 끝난다.
+// 줄 끝 공백·줄 지우기·탭·조각 사이 빈 줄이 와도 (1) 완전한 값을 받거나 받지 않고 잘린 값은 받지 않으며 (2) 화면에 토큰 조각이 없다.
+describe("setup-token 화면 거르기: 잘린 값을 받지 않는다", () => {
+  const cut = (n: number) => [TOKEN.slice(0, n), TOKEN.slice(n)];
+  const [a55, b55] = cut(55);
+  // Ink가 줄을 폭까지 공백으로 채우는 꼴: 들여쓰기 한 칸 뒤 55자, 줄 끝 공백 네 칸(열 60).
+  const padded = TOKEN.match(/.{1,55}/g)!.map((p) => ` ${p}`.padEnd(60));
+  const cases: [string, string, number, "whole" | null][] = [
+    ["지적의 예 그대로(줄 끝 공백 두 칸, 표지 없음)", ` ${a55}  \r\n ${b55}\r\n`, 60, null],
+    ["지적의 예에 관측 배치(빈 줄 뒤 표지)", after([` ${a55}  `, ` ${b55}`]).join("\r\n") + "\r\n", 60, "whole"],
+    ["폭까지 공백으로 채운 접힌 줄", after(padded).join("\r\n") + "\r\n", 60, "whole"],
+    ["폭까지 공백으로 채웠지만 조각이 열 끝에서 먼 줄(50자 + 공백 아홉)", after(TOKEN.match(/.{1,50}/g)!.map((p) => ` ${p}`.padEnd(60))).join("\r\n") + "\r\n", 60, null],
+    ["줄 끝 공백 뒤 줄 지우기", after([` ${a55}  \x1b[K`, ` ${b55}\x1b[K`]).join("\r\n") + "\r\n", 60, "whole"],
+    ["줄 끝 탭", after([` ${a55}\t`, ` ${b55}`]).join("\r\n") + "\r\n", 60, "whole"],
+    ["마지막 조각 뒤 공백", after([...folded(60).slice(0, -1), `${folded(60).at(-1)}   `]).join("\r\n") + "\r\n", 60, "whole"],
+    ["조각 사이 빈 줄", after([` ${a55}  `, "", ` ${b55}`]).join("\r\n") + "\r\n", 60, null],
+    ["앞 조각 뒤 빈 줄·표지, 이어지는 조각은 표지 뒤(CUP로 순서를 바꿔 그림)", `${cup([" Your OAuth token (valid for 1 year):", "", ` ${a55}`], 10)}${cup(["", " Store this token securely."], 13)}${cup([` ${b55}`], 13)}`, 60, null],
+    ["같은 줄에서 공백 뒤 토큰 글자가 이어짐", after([` ${a55}  ${b55}`]).join("\r\n") + "\r\n", 200, null],
+    ["접힌 토큰 그대로지만 표지가 없음", folded(60).join("\r\n") + "\r\n", 60, null],
+    ["한 줄 토큰이지만 표지가 없음", ` Your OAuth token (valid for 1 year):\r\n\r\n ${TOKEN}\r\n`, 200, null],
+    ["토큰과 표지 사이에 다른 글", after([` ${TOKEN}`, " (copied)"]).join("\r\n") + "\r\n", 200, null],
+  ];
+  for (const [name, screen, cols, want] of cases) {
+    test(`${name}: ${want ? "완전한 값을 받는다" : "받지 않는다"}, 화면에 토큰 조각이 없다`, () => {
+      everyCut(screen, cols, (r, how) => {
+        expect([how, leaked(r.screen), r.token?.equals(new Secret(TOKEN)) ?? null, r.hidden]).toEqual([how, false, want ? true : null, true]);
+      });
+    });
+  }
 });

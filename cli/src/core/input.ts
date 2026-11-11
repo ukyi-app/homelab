@@ -148,7 +148,9 @@ export async function setupTokenLogin(login: TerminalLogin, slot: string, progre
 // owner 실측, claude 2.1.322): 터미널 UI(Ink)가 커서 이동·줄 지우기로 다시 그리는 화면에서는 "토큰 홀로 한 줄" 꼴이 맞지 않는다.
 // - 안내 문구(ANNOUNCE)나 토큰 머리(HEAD)가 보이면 그 자리부터 자식이 끝날 때까지 아무것도 내보내지 않고 붙든다.
 // - 끝나면 붙든 글에서 머리마다 토큰을 읽는다. 모두 확신할 수 있고 꼴 검사를 지나고 같은 값일 때만 받는다. 값이 잘리거나 다른 글이
-//   덧붙어 저장되면 등록이 조용히 깨지므로, 하나라도 확신이 없으면 받지 않는다.
+//   덧붙어 저장되면 등록이 조용히 깨지므로, 하나라도 확신이 없으면 받지 않는다. 꼴 검사는 잘린 앞 조각도 지나므로 끝은 따로 확인한다:
+//   토큰 뒤에 공백·빈 줄만 지나 끝 표지(END_MARK, 관측 배치에서 빈 줄 뒤 다음 줄)가 와야 하고, 어느 토큰에도 들지 않은 토큰 글자뿐인
+//   줄(이어 읽지 못한 조각일 수 있다)이 있으면 받지 않는다. 표지 문구가 바뀌면 받지 못하고 가려진 입력으로 넘어간다(안전한 쪽).
 // - 받았으면(또는 서로 다른 토큰이면) 붙든 글을 토큰 글자만 뺀 채(첫 자리에 MASKED) 내보낸다. 내보낼 글에 토큰 조각이 보이면
 //   내보내지 않는다. 받지 못했으면 붙든 글을 버린다. 그래서 받지 못해도 토큰은 화면에 남지 않는다.
 // - 머리·안내가 하나도 없으면 아무것도 가리지 않는다(새 꼴의 토큰은 화면에 보이고, 사람이 가려진 입력에 붙여 넣는다).
@@ -156,6 +158,7 @@ export async function setupTokenLogin(login: TerminalLogin, slot: string, progre
 // 그 앞은 곧바로 내보낸다. 그래서 코드 입력 안내("… > ")는 늦지 않고 머리 조각은 판정 전에 나가지 않는다.
 const HEAD = "sk-ant-";
 const ANNOUNCE = "Your OAuth token";
+const END_MARK = "Store this token";
 const TOKEN_FORM = /^sk-ant-oat\d{2}-[A-Za-z0-9_-]{20,}$/;
 const TOKEN_CHAR = /^[A-Za-z0-9_-]$/;
 const MASKED = "[토큰을 받아 화면에서 가렸다]";
@@ -239,11 +242,33 @@ function flatten(raw: string, col0: number): Seen[] {
 
 const tokenAt = (s: Seen[], i: number) => i < s.length && s[i].kind === "ch" && TOKEN_CHAR.test((s[i] as { ch: string }).ch);
 const charAt = (s: Seen[], i: number, ch: string) => i < s.length && s[i].kind === "ch" && (s[i] as { ch: string }).ch === ch;
+// 공백 글자(탭은 flatten에서 공백이 된다). 줄 끝 공백은 Ink가 줄을 폭까지 채울 때도 온다.
+const blankAt = (s: Seen[], i: number) => i < s.length && s[i].kind === "ch" && /^\s$/.test((s[i] as { ch: string }).ch);
+// i부터 공백·같은 줄 이동·줄 이동을 지난 다음 화면 글자 자리와 그 사이 줄 이동 수.
+function skipBlank(s: Seen[], i: number): { j: number; rows: number } {
+  let rows = 0;
+  while (i < s.length && (s[i].kind !== "ch" || blankAt(s, i))) {
+    if (s[i].kind === "row") rows++;
+    i++;
+  }
+  return { j: i, rows };
+}
+// j에서 시작하는 줄이 토큰 글자 한 묶음과 그 뒤 공백뿐인지(접힌 조각 꼴).
+function tokenOnlyLine(s: Seen[], j: number): boolean {
+  let k = j;
+  while (tokenAt(s, k)) k++;
+  if (k === j) return false;
+  while (k < s.length && s[k].kind !== "row" && (s[k].kind === "jump" || blankAt(s, k))) k++;
+  return k >= s.length || s[k].kind === "row";
+}
 
-// 머리 자리 h에서 토큰 하나를 읽는다. 토큰 글자가 끝나는 곳이 끝이다. 줄이 바뀌면 이어지는 것은 Ink식 접힘뿐이다:
-// 앞 줄이 열 끝 가까이까지 찼고, 바로 다음 줄이(들여쓰기 뒤) 토큰 글자로만 되어 있고, 접힌 줄 길이가 모두 같다.
-// 빈 줄이나 다른 글이 오면 끝이다. 토큰 글자뿐인 다음 줄인데 앞 줄이 차지 않았거나, 같은 줄에서 커서가 옮겨 간 뒤 토큰 글자가
-// 이어지면 확신할 수 없다(sure: false).
+// 머리 자리 h에서 토큰 하나를 읽는다. 토큰 글자가 끝나는 곳이 끝이다. 줄 끝 공백·같은 줄 이동·줄 이동을 지나 다음 화면 글자를 본다.
+// 줄이 바뀌면 이어지는 것은 Ink식 접힘뿐이다: 줄 이동이 하나(빈 줄 없음)이고, 앞 줄의 토큰이 열 끝 가까이(열을 넘지 않게)까지 찼고,
+// 다음 줄이(들여쓰기 뒤) 토큰 글자 한 묶음과 공백뿐이고, 접힌 줄 길이가 모두 같다. 확신할 수 없는 경우(sure: false):
+// - 같은 줄에서 공백·커서 이동 뒤 토큰 글자가 이어진다.
+// - 토큰 글자뿐인 다음 줄인데 위 접힘 조건이 아니다(빈 줄 사이, 앞 줄이 차지 않음, 길이 다름).
+// - 앞 줄이 찼는데 바로 다음 줄이 토큰 글자로 시작하는 다른 꼴이다.
+// 다른 글(토큰 글자가 아닌 글자, 다시 그린 머리)이나 흐름 끝이 오면 값이 끝난다. 그 끝이 믿을 만한지는 endMarked가 따로 본다.
 function readToken(s: Seen[], h: number, cols: number | undefined): { value: string; at: number[]; sure: boolean } {
   let value = "";
   const at: number[] = [];
@@ -256,27 +281,41 @@ function readToken(s: Seen[], h: number, cols: number | undefined): { value: str
       i++;
     }
     const endCol = (s[i - 1] as { col: number }).col + 1;
-    let j = i;
-    let rows = 0;
-    while (j < s.length && s[j].kind !== "ch") {
-      if (s[j].kind === "row") rows++;
-      j++;
-    }
-    if (j === i || (rows === 0 && j >= s.length)) return { value, at, sure: true };
-    if (rows === 0) return { value, at, sure: !tokenAt(s, j) };
-    if (rows > 1) return { value, at, sure: true };
-    let k = j;
-    while (charAt(s, k, " ")) k++;
-    let m = k;
-    while (tokenAt(s, m)) m++;
-    let t = m;
-    while (charAt(s, t, " ")) t++;
-    // 다음 줄이 머리로 시작하면 이어진 조각이 아니라 다시 그린 토큰이다.
-    if (m === k || (t < s.length && s[t].kind === "ch") || headAt(s, k)) return { value, at, sure: true };
+    const { j, rows } = skipBlank(s, i);
+    if (j >= s.length || !tokenAt(s, j)) return { value, at, sure: true };
+    if (rows === 0) return { value, at, sure: false };
+    if (headAt(s, j)) return { value, at, sure: true };
+    const full = cols !== undefined && endCol >= cols - FOLD_SLACK;
+    if (!tokenOnlyLine(s, j)) return { value, at, sure: !(rows === 1 && full) };
     ends.add(endCol);
-    if (cols === undefined || !(endCol >= cols - FOLD_SLACK) || ends.size > 1) return { value, at, sure: false };
-    i = k;
+    if (rows !== 1 || !full || endCol > (cols as number) || ends.size > 1) return { value, at, sure: false };
+    i = j;
   }
+}
+
+// 값 끝의 독립 근거: 토큰 마지막 글자 뒤에 공백·줄 이동만 지나 END_MARK가 온다(Ink가 표지 문구를 접어도 공백 하나로 본다).
+function endMarked(s: Seen[], last: number): boolean {
+  let text = "";
+  for (let i = last + 1; i < s.length && text.length < END_MARK.length; i++) {
+    const x = s[i];
+    if (x.kind === "ch" && !/^\s$/.test(x.ch)) text += x.ch;
+    else if (text !== "" && !text.endsWith(" ")) text += " ";
+  }
+  return text === END_MARK;
+}
+
+// 어느 토큰에도 들지 않은 줄 가운데 토큰 글자 한 묶음뿐인 줄이 있는지. 이어 읽지 못한 접힌 조각이 다른 자리(표지 뒤, 커서로 옮겨
+// 그린 줄)에 있으면 앞 조각만 받게 되므로 받지 않는 근거로 쓴다.
+function strayTokenLine(s: Seen[], taken: Set<number>): boolean {
+  for (let i = 0; i < s.length; ) {
+    let e = i;
+    while (e < s.length && s[e].kind !== "row") e++;
+    let k = i;
+    while (k < e && (s[k].kind === "jump" || blankAt(s, k))) k++;
+    if (k < e && !taken.has(k) && tokenOnlyLine(s, k)) return true;
+    i = e + 1;
+  }
+  return false;
 }
 
 function headAt(s: Seen[], i: number): boolean {
@@ -379,7 +418,7 @@ export function tokenScreenFilter(show: (text: string) => void, cols?: number): 
       for (const k of t.at) taken.add(k);
       found.push(t);
     }
-    const good = found.length > 0 && found.every((t) => t.sure && TOKEN_FORM.test(t.value));
+    const good = found.length > 0 && found.every((t) => t.sure && TOKEN_FORM.test(t.value) && endMarked(seen, t.at[t.at.length - 1])) && !strayTokenLine(seen, taken);
     const values = [...new Set(found.map((t) => t.value))];
     if (good && values.length === 1) token = new Secret(values[0]);
     if (good && values.length > 1) conflict = true;
