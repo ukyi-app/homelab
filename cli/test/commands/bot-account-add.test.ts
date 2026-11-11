@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { argvFor as infArgv } from "../../src/core/infisical";
 import { FAKE_PROJECT, expectNoSecrets, expectPlanReadOnly, infisicalList, infisicalSet, rule, runCli, type Rule } from "../harness";
 import { folderJson } from "../fixtures/app-add-world/world";
-import { CHAT, FOLDER, TASK, adminArgv, execCalls, pod, pods, report } from "../fixtures/bot-account";
+import { API_CHAT, API_TASK, CHAT, FOLDER, TASK, adminArgv, execCalls, pod, pods, report } from "../fixtures/bot-account";
 
 // homelab bot account add(봇 COLLEAGUE_SPEC §4.8 "계정 등록", AC-21). 경계 S3: 실제 프로세스 + PATH 스텁(가짜 infisical·kubectl).
 // 시험은 파이프 입력 경로(stdin 두 줄)를 본다. tty의 `claude setup-token` 실제 동작은 시험하지 않는다(브라우저 로그인·실토큰).
@@ -42,6 +42,35 @@ describe("bot account add", () => {
       expect([stdin.length, r.code]).toEqual([stdin.length, 1]);
       expect(r.writes).toEqual([]);
       expectNoSecrets(r);
+    }
+  });
+
+  // API 크레딧 방식(AC-22): Console API 키를 레인마다 하나씩, 보이지 않는 입력(파이프면 stdin 두 줄)으로 받는다.
+  const apiWorld = (after: Record<string, string>): Rule[] => [
+    ...world(after).slice(0, 3),
+    pods(pod()),
+    rule(adminArgv("account", "record", "main", "api"), { stdout: report("account record", "recorded") }),
+  ];
+  const API_BOTH = { ANTHROPIC_API_KEY: API_CHAT, ANTHROPIC_API_KEY_TASK: API_TASK };
+
+  test("--by api apply: 두 레인 API 키는 stdin → Infisical 요청 본문으로만 가고 argv·출력에 없으며, claude를 띄우지 않고 봇 DB에 api로 기록한다", async () => {
+    const r = await runCli(["bot", "account", "add", "main", "--by", "api", "--apply", "--json"], apiWorld(API_BOTH), { stdin: `${API_CHAT}\n${API_TASK}\n` });
+    expect(r.code).toBe(0);
+    expect(r.json.status).toBe("done");
+    const sets = r.calls.filter((c) => c.argv.join(" ") === infArgv.set(FAKE_PROJECT, FOLDER).join(" "));
+    expect(sets.map((c) => c.stdin)).toEqual([`ANTHROPIC_API_KEY=${API_CHAT}\n`, `ANTHROPIC_API_KEY_TASK=${API_TASK}\n`]);
+    expectNoSecrets({ ...r, calls: r.calls.filter((c) => !sets.includes(c)) }, [API_CHAT, API_TASK]);
+    expect(r.calls.some((c) => c.argv[0] === "claude")).toBe(false);
+    expect(execCalls(r)).toEqual([adminArgv("account", "record", "main", "api")]);
+    expect(r.json.next).toBe("봇이 이 계정을 쓰게 하려면: homelab bot account use main --by api");
+  });
+
+  test("--by api: 같은 키를 두 레인에 넣거나 줄 수가 다르거나 짧으면 아무것도 쓰지 않고 실패한다", async () => {
+    for (const stdin of [`${API_CHAT}\n${API_CHAT}\n`, `${API_CHAT}\n`, `${API_CHAT}\nshort\n`]) {
+      const r = await runCli(["bot", "account", "add", "main", "--by", "api", "--apply", "--json"], apiWorld(API_BOTH), { stdin });
+      expect([stdin.length, r.code]).toEqual([stdin.length, 1]);
+      expect(r.writes).toEqual([]);
+      expectNoSecrets(r, [API_CHAT, API_TASK]);
     }
   });
 

@@ -553,6 +553,17 @@ describe("Infisical 폴더·web·확인", () => {
     expect(() => odd.ctx.infisical.folderExists("/apps/smoke")).toThrow("모양이 다르다");
   });
 
+  test("setMarker: 봇 방식 표시·자리 표시값(subscription·api·unset)만 stdin .env 한 줄로 쓰고, 다른 값·키 모양은 쓰기 전에 거부한다", async () => {
+    const { ctx, calls } = testCtx("apply", [rule(infArgv.set(FAKE_PROJECT, "/apps/homelab-bot/worker"), {}, { captureStdin: true })]);
+    await applyWith(ctx, (w) => { w.infisical.setMarker("/apps/homelab-bot/worker", "CLAUDE_AUTH_METHOD", "api"); w.infisical.setMarker("/apps/homelab-bot/worker", "ANTHROPIC_API_KEY", "unset"); });
+    expect(calls().calls.map((c) => c.stdin)).toEqual(["CLAUDE_AUTH_METHOD=api\n", "ANTHROPIC_API_KEY=unset\n"]);
+    for (const [key, value] of [["CLAUDE_AUTH_METHOD", "credit"], ["CLAUDE_AUTH_METHOD", "api\nX=1"], ["bad key", "api"]] as const) {
+      const fresh = testCtx("apply", []);
+      await expect(applyWith(fresh.ctx, (w) => w.infisical.setMarker("/apps/homelab-bot/worker", key, value as never))).rejects.toThrow();
+      expect(fresh.calls().calls).toEqual([]);
+    }
+  });
+
   test("빈 시크릿 폴더(0.44.2 실제 출력 null): has=false, listKeys=[], getValue=null, valueHash=null(#880 2라운드)", () => {
     const { ctx, calls } = testCtx("plan", [rule(infArgv.list(FAKE_PROJECT, "/apps/smoke"), { stdout: "null" })]);
     expect(ctx.infisical.has("/apps/smoke", "PASSWORD")).toBe(false);

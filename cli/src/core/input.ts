@@ -48,16 +48,26 @@ function readTtyHidden(): string {
 // stderrTTY: 로그인 안내와 claude가 출력하는 발급 토큰은 stderr로 간다(setupTokenLogin). stderr가 터미널이 아니면 그 토큰이
 // 파일·파이프에 남으므로 로그인을 띄우지 않고 거부한다. 무엇도 쓰기 전이다.
 export function readSetupTokens(isTTY: boolean, ask: (q: string) => void, lanes: string[], login: (lane: string) => void, stderrTTY = isatty(2)): Secret[] {
+  if (isTTY && !stderrTTY)
+    throw new CliError(
+      "stderr가 터미널이 아니라 claude setup-token을 띄우지 않았다(발급 토큰이 stderr의 파일·파이프에 남는다)",
+      "stderr를 터미널에 둔 채 다시 실행하거나(--json >결과파일은 된다), 레인마다 받은 토큰을 stdin 두 줄로 넘긴다",
+    );
+  return readLaneValues(isTTY, ask, lanes, "토큰", login, "레인마다 다른 토큰이어야 한다(setup-token을 레인마다 따로 실행한다)");
+}
+
+// Claude Console API 키 여러 개(homelab bot account add --by api, 레인마다 하나). 자식을 띄우지 않아 stderr 조건이 없다.
+// 같은 키를 두 레인에 넣으면 작업 파드에서 샌 키로 대화 레인까지 잃는다(레인 분리). 그래서 Console에서 레인마다 따로 만든다.
+export function readApiKeys(isTTY: boolean, ask: (q: string) => void, lanes: string[]): Secret[] {
+  return readLaneValues(isTTY, ask, lanes, "API 키", () => {}, "레인마다 다른 API 키여야 한다(Console에서 레인마다 키를 따로 만든다)");
+}
+
+function readLaneValues(isTTY: boolean, ask: (q: string) => void, lanes: string[], what: string, before: (lane: string) => void, distinct: string): Secret[] {
   const raws: string[] = [];
   if (isTTY) {
-    if (!stderrTTY)
-      throw new CliError(
-        "stderr가 터미널이 아니라 claude setup-token을 띄우지 않았다(발급 토큰이 stderr의 파일·파이프에 남는다)",
-        "stderr를 터미널에 둔 채 다시 실행하거나(--json >결과파일은 된다), 레인마다 받은 토큰을 stdin 두 줄로 넘긴다",
-      );
     for (const lane of lanes) {
-      login(lane);
-      ask(`${lane} 레인 토큰(화면에 보이지 않는다): `);
+      before(lane);
+      ask(`${lane} 레인 ${what}(화면에 보이지 않는다): `);
       raws.push(readTtyHidden());
     }
   } else {
@@ -68,10 +78,10 @@ export function readSetupTokens(isTTY: boolean, ask: (q: string) => void, lanes:
   const values = raws.map((raw, i) => {
     const value = new Secret(raw);
     const problem = valueProblem(value);
-    if (problem) throw new Error(`${lanes[i]} 레인 토큰: ${problem}`);
+    if (problem) throw new Error(`${lanes[i]} 레인 ${what}: ${problem}`);
     return value;
   });
-  if (values.some((v, i) => values.slice(i + 1).some((w) => v.equals(w)))) throw new Error("레인마다 다른 토큰이어야 한다(setup-token을 레인마다 따로 실행한다)");
+  if (values.some((v, i) => values.slice(i + 1).some((w) => v.equals(w)))) throw new Error(distinct);
   return values;
 }
 
