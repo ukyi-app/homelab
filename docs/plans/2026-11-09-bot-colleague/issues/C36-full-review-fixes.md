@@ -12,6 +12,7 @@
   - 묶음 A(한도·계정): `src/change-review.ts`(자체 리뷰 응답·저장 결과·회수 경로의 한도 칸), `src/store.ts`(`recordPause`·`resumeDue`·`resumeWaiting`·`queueFull` 자리), `src/model-accounts.ts`, `src/claude-task-bridge.ts`(변경 작성 `snapshot` 응답의 한도 관측 자리), `src/admin.ts`(재개 자리), 마이그레이션 029(필요하면)
   - 묶음 B(제안·공개 범위): `src/proposals.ts`, `src/external-task-commands.ts`(목록 본문의 공개 검사), `src/raw-text-retention.ts`(만료 제안 정리 연결), `src/bot-facts.ts`(할 수 있는 일 목록), `src/discord.ts`(제안 실행 `later` 호출 자리와 미전송 버튼 알림의 스위치 적용 자리), `src/change-runtime.ts`(버튼 알림 본문 자리), 마이그레이션 030(필요하면)
   - 묶음 C(문구·브리핑): `src/briefing.ts`(모델 멈춤 줄), `src/chat-task-text.ts`(24시간 대기 안내), `src/claude-task-bridge.ts`(`requestOwnerConfirm` 문구 자리만), `src/discord.ts`(`CHANGE_ACK_NOTICE`·`EXTERNAL_ACK_NOTICE`와 명령 오류 답 자리만), `src/contracts.ts`(주석 한 줄)
+  - 묶음 E(묶음 B 후속): `src/discord.ts`(미전송 버튼 알림의 스위치 적용 자리), `src/proposals.ts`(읽기 결과의 공개 검사 자리), `src/memory-commands.ts`(검색 결과 본문의 출처 표기 자리)
   - 묶음 D(자체 고치기 경합): `src/change-runtime.ts`(작성 결과 수신 → 저장 자리), `src/change-store.ts`(`recordSnapshot`·`startSelfFix`), `src/change-guidance.ts`(`recordChangeNotes`)
   - 봇 문서: `docs/ai-bot/VERIFICATION.md`·`DECISIONS.md`·`ARCHITECTURE.md`에 묶음마다 "C36 <묶음>" 절·문단
 - 설계 계약:
@@ -47,20 +48,25 @@
 ### 묶음 D: 자체 고치기 경합
 13. **F-8 (AC-31):** 게시 서버 둘이 같은 작성 결과를 읽을 때, 한쪽이 결과 저장·시험·리뷰를 마치고 `startSelfFix`로 같은 `generation`의 `fix_round`를 올린 뒤 다른 쪽의 늦은 저장(`recordChangeNotes`·`recordSnapshot`)이 통과한다. 두 함수는 차례를 보지 않는다. 앞 차례 결과가 새 차례의 결과가 되고, 부모가 `verifying`으로 넘어가 새 작성 job을 찾지 못하거나 증거가 엇갈린다. 결과 수신부터 notes·artifact 저장까지 기대하는 `fix_round`(와 작성 job)를 넘기고 부모 잠금 아래에서 지금 차례와 같을 때만 저장한다. 수정 요청 차례(`amendment_round`)에 같은 구멍이 있는지 함께 본다. 시험(실제 PostgreSQL): 앞 차례 결과를 붙든 채 다른 런타임이 `startSelfFix`까지 간 뒤 풀면 옛 결과가 새 차례의 단계·artifact·notes를 바꾸지 않는다.
 
+### 묶음 E: 묶음 B의 리뷰 후속 (봇 PR #147 Codex 2차 P2 둘, 2026-11-11)
+14. 꺼짐 판이 없는 동료 전용 글(실행 확인·키 보기·질문 고르기)이 여러 쪽이면 버튼은 마지막 쪽에만 있다. 스위치를 끈 뒤 보낼 때 마지막 쪽만 막히고 앞 쪽(확인 요청과 기억 내용 일부)은 그대로 게시된다. 같은 `message_key`의 모든 쪽에 차단 판단을 적용한다. 미리보기·변경 질문처럼 꺼짐 판이 있는 글은 지금처럼 모든 쪽을 보내고 마지막 쪽만 안내를 바꾼다. 시험: 1600자 진술의 기억 저장 확인 글을 켜짐으로 저장한 뒤 꺼진 게시자로 보내면 어느 쪽도 게시되지 않는다.
+15. 말로 한 기억 검색 결과에는 출처 `conversation:<Discord ID>`가 들어가는데, 이 17~20자리 숫자가 공개 검사(`scanPublicPayload`의 `metadata_sensitive`)에 걸려 진술이 안전해도 결과 전체가 고정 문구로 바뀐다(묶음 B의 F-4 수정이 만든 켜짐 판 회귀). 일반 답으로 나가는 기억 검색 결과는 출처 ID를 먼저 가린 뒤 공개 검사를 건다. `/memory-search`의 본인 전용 응답은 그대로다. 공개 범위 자체(internal 기억을 스레드에 내도 되는지, C24 할 일 1a)는 owner 결정 대기이고 이 할 일이 정하지 않는다. 시험: 대화 출처가 있는 안전한 기억을 말로 검색하면 진술이 보이고 출처 ID는 없다. 공개 검사에 걸리는 진술은 여전히 가려진다.
+
 ## 완료 조건
 
 - [x] F-1: 변경 자체 리뷰의 결제 멈춤은 자동 재개하지 않고, 풀리는 시각이 있는 한도는 그 시각 1분 뒤에 재개한다.
 - [x] F-2: 계정 전환 뒤 도착한 옛 실행의 결제·먼 풀리는 시각이 새 계정을 멈추지 않는다. 새 계정의 결제 멈춤은 그대로다.
 - [x] F-3: 대기열이 상한이어도 한도 뒤 재개와 계정 전환 뒤 해제가 사람 개입 없이 이어진다.
 - [x] F-6: 변경 작성 `snapshot`의 한도 경고가 리뷰 미루기를 건다.
-- [ ] F-4: 말로 한 목록 답에 공개 검사에 걸리는 세션 ID가 없다.
-- [ ] F-7: 제안 확정 뒤 실행 전에 죽어도 요청이 한 번 실행되거나 실패 안내가 남는다.
-- [ ] F-9: 입력이 없어도 만료된 제안의 값이 정리된다(스위치 꺼짐 포함).
-- [ ] F-10: 대화 지시문에 변경 PR 수정이 있고 작업자 입력 계약 시험이 고정한다.
-- [ ] F-11: 스위치를 끈 뒤 보내는 알림에 버튼이 없고 필요한 '/' 안내가 있다.
+- [x] F-4: 말로 한 목록 답에 공개 검사에 걸리는 세션 ID가 없다.
+- [x] F-7: 제안 확정 뒤 실행 전에 죽어도 요청이 한 번 실행되거나 실패 안내가 남는다.
+- [x] F-9: 입력이 없어도 만료된 제안의 값이 정리된다(스위치 꺼짐 포함).
+- [x] F-10: 대화 지시문에 변경 PR 수정이 있고 작업자 입력 계약 시험이 고정한다.
+- [x] F-11: 스위치를 끈 뒤 보내는 알림에 버튼이 없고 필요한 '/' 안내가 있다.
 - [x] F-5: 한도·인증·결제 대기 중 브리핑과 24시간 안내에 원인·'/' 재개 명령이 없다(두 판). 비상 정지·미룬 리뷰 건수·토큰 만료 줄은 그대로다.
 - [x] F-12·F-13: 켜짐 판 오류·ACK 안내에 '/' 이름이 없고, 주석이 규칙에 맞다.
 - [x] F-8: 늦은 앞 차례 결과가 새 고치기 차례를 바꾸지 않는다.
+- [ ] 묶음 E: 동료 전용 글은 꺼진 뒤 어느 쪽도 게시되지 않고, 말로 한 기억 검색은 출처 ID 없이 진술을 보인다.
 - [ ] 묶음마다 전체 오프라인 검사(실제 PostgreSQL 포함)가 통과한다.
 
 ## 검증
@@ -74,4 +80,5 @@
 - 묶음 C(F-5·F-12·F-13): 봇 PR #144, 병합 `e06b5d5`(2026-11-11). 고치기 전 빨강 9건(결제 멈춤도 "중지(한도 대기 2건) · /model-status로 확인"으로 나감). 전체 검사(결과 `d4b226b`, `FPB_TEST_TIMEOUT=2400 .fpb/test.sh wt-c36c c36c-full --pg -- full`): 2,595개 중 통과 2,573, 실패 0, skip 22. `build / test` 통과, Codex 지적 없음. 분해 불일치(수용): 브리핑 작업 레인 줄 "한도·인증 대기 n건"도 "모델 대기 n건"으로 바꿨다. 24시간 안내는 문구 표 단위로만 시험했다.
 - 묶음 A(F-1·F-2·F-3·F-6): 봇 PR #145, 병합 `039de53`(2026-11-11). 전체 검사(결과 `43110f8`, `FPB_TEST_TIMEOUT=2400 .fpb/test.sh wt-c36a c36a-full --pg -- full`): 2,613개 중 통과 2,591, 실패 0, skip 22. `build / test` 통과, Codex 지적 없음. F-2의 재시도 지연은 1분. F-1은 자체 리뷰 응답의 한도 칸을 요청 머리 `x-change-review-rate-limit`로 협상한다(지금 게시 서버 + 새 작업자 호환). 작업자 쪽 동작은 작업자 이미지 배포 뒤에 나타난다. 되돌리기 전에 진행 중인 자체 리뷰를 끝낸다. 분해 불일치(수용): `/resume-model`·`/review-resume`의 대기열 상한 검사도 뺐다(재개 진입점 다섯이 한 규칙). 재개 직후 대기열이 상한을 멈춘 작업 수만큼 넘을 수 있다. 미확인: F-3 관리 재개와 F-2·F-3의 PG 시험은 수정 뒤에 써서 고치기 전 빨강을 따로 보지 못했다(같은 동작의 S1 시험은 빨강 확인).
 - 묶음 D(F-8): 봇 PR #146, 병합 `88ce87d`(2026-11-11). `recordChangeNotes`·`recordSnapshot`이 부모 잠금 아래에서 지금 고치기 차례의 작성 job인지 확인하고, 작성 job은 `ChangeArtifactPort.save`의 선택 칸으로 넘긴다. 실제 PostgreSQL 런타임 둘로 재현(고치기 전 `snapshot_ready`로 실패, 저장 직전 틈은 저장 성공으로 실패). 전체 검사(결과 `e68094e`, `FPB_TEST_TIMEOUT=2400 .fpb/test.sh wt-c36d c36d-full --pg -- full`): 2,616개 중 통과 2,594, 실패 0, skip 22. `build / test` 통과, Codex 지적 없음. 수정 요청 차례에는 같은 구멍이 없다. 분해 불일치(수용): 포트 자리(`src/change-contracts.ts`·`src/change-artifact.ts`)를 후속 작업자에게 열어 줬다.
-- 묶음 B: (구현 뒤 채운다)
+- 묶음 B(F-4·F-7·F-9·F-10·F-11): 봇 PR #147, 병합 `a2cb93f`(2026-11-11). 고치기 전 빨강 7건. 전체 검사(결과 `bab3835`, `FPB_TEST_TIMEOUT=2400 .fpb/test.sh wt-c36b c36b-full2 --pg -- full`): 2,627개 중 통과 2,605, 실패 0, skip 22. `build / test` 통과. Codex 1차 P2 1(꺼짐 치환 뒤 1900자 초과) 수정: 버튼 글은 저장할 때 마지막 쪽을 1500자 이하로 나눈다. 2차 P2 2는 묶음 E로 넘김. 분해 불일치(수용): F-7은 다시 실행하지 않고 실패 안내만 남긴다(기억 저장·정정은 멱등 키가 없어 다시 실행하면 둘이 된다). 만료 정리와 실패 안내는 `main.ts` 대신 원문 주기 정리에 이어 재시작 뒤 최대 약 1시간 10분 늦을 수 있다. `src/proposal-retention.ts`(새 파일)와 `src/format.ts`(마지막 쪽 상한 인자)를 고쳤다. 못 본 것: 게시 서버 둘이 같은 실행 대기 행을 동시에 정리하는 실제 PostgreSQL 시험, 실제 모델이 수정 요청을 제안하는지(S5).
+- 묶음 E: (구현 뒤 채운다)
