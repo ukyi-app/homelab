@@ -58,10 +58,14 @@ const carries = (map: Map<string, string>, pairs: [string, string][]) => pairs.f
 
 export default defineCommand({
   path: ["bot", "account", "use"],
-  summary: "봇이 쓰는 계정·방식 바꾸기(두 레인 자격·방식 표시 → 작업자 반영 확인 → 멈춘 일 해제)",
+  summary: "봇이 쓰는 계정·방식 바꾸기(대화용·작업용 자격·방식 표시 → 작업자 반영 확인 → 멈춘 일 해제)",
   kind: "change",
+  terminalSummary: true,
   args: [{ name: "name", required: true, help: "계정 이름(homelab bot account add로 등록한 것)", pattern: BOT_ACCOUNT_NAME }],
-  flags: [{ name: "by", kind: "value", valueName: "방식", help: "subscription(기본, 구독) 또는 api(API 크레딧)", values: ["subscription", "api"] }],
+  flags: [
+    { name: "by", kind: "value", valueName: "방식", help: "subscription(기본, 구독) 또는 api(API 크레딧)", values: ["subscription", "api"] },
+    { name: "verbose", kind: "bool", help: "터미널에서도 단계 표 전체를 보인다" },
+  ],
   async run(ctx, input) {
     const name = input.args.name as string;
     const method: BotMethod = input.flags.by === "api" ? "api" : "subscription";
@@ -90,8 +94,8 @@ export default defineCommand({
       id: "account-tokens",
       target: `계정 ${name} ${label} 자격(Infisical ${folder})`,
       async read(c) {
-        if (source(c).some((h) => h === null)) return { state: "missing", action: "none", detail: `두 레인 ${label} 자격이 다 있지 않다`, next: addHint };
-        return same(`두 레인 ${label} 자격 있음`);
+        if (source(c).some((h) => h === null)) return { state: "missing", action: "none", detail: `대화용·작업용 ${label} 자격이 다 있지 않다`, next: addHint };
+        return same(`대화용·작업용 ${label} 자격 있음`);
       },
     };
     // 확인 단계(apply 없음): 두 ExternalSecret이 이 방식의 자격을 옮기지 않으면 plan에서도 막고 아무것도 쓰지 않는다.
@@ -102,14 +106,14 @@ export default defineCommand({
         const problems: string[] = [];
         for (const l of BOT_LANES) {
           const map = esMapping(c.k8s.get("externalsecret", BOT_WORKER_NS, l.secret));
-          if (typeof map === "string") { problems.push(`${l.label} 레인 ${l.secret}: ${map}`); continue; }
+          if (typeof map === "string") { problems.push(`${l.label} ${l.secret}: ${map}`); continue; }
           const lack = carries(map, needs(l, method));
-          if (lack.length) problems.push(`${l.label} 레인 ${l.secret}이 ${lack.map(([s, k]) => `${k}→${s}`).join("·")}를 옮기지 않는다`);
+          if (lack.length) problems.push(`${l.label} ${l.secret}이 ${lack.map(([s, k]) => `${k}→${s}`).join("·")}를 옮기지 않는다`);
         }
         if (!problems.length) return same(`두 ExternalSecret이 ${label} 자격${method === "api" ? "·방식 표시" : ""}를 옮긴다`);
         return { state: "differs", action: "none", detail: `${problems.join(", ")}. 지금 배포의 작업자는 ${label} 방식으로 돌 수 없어 아무것도 쓰지 않는다`,
           next: method === "api"
-            ? "sandbox 작업자 ExternalSecret에 레인별 API 키와 방식 표시를 더하는 sandbox PR(C23)이 병합·동기화된 뒤 같은 명령을 다시 실행한다"
+            ? "sandbox 작업자 ExternalSecret에 대화용·작업용 API 키와 방식 표시를 더하는 sandbox PR(C23)이 병합·동기화된 뒤 같은 명령을 다시 실행한다"
             : "kubectl -n sandbox get externalsecrets -o yaml로 작업자 ExternalSecret을 확인한다(platform/sandbox 템플릿과 같아야 한다)" };
       },
     };
@@ -136,15 +140,15 @@ export default defineCommand({
         const hashes = source(c);
         const now = keys.map((k) => c.infisical.valueHash(BOT_WORKER_FOLDER, k));
         const shown = c.infisical.valueHash(BOT_WORKER_FOLDER, BOT_METHOD_KEY);
-        if (hashes.every((h, i) => h !== null && h === now[i]) && shown === marker) return same(`두 레인 모두 ${name}(${label}) 값, 방식 표시 ${method}`);
+        if (hashes.every((h, i) => h !== null && h === now[i]) && shown === marker) return same(`대화용·작업용 모두 ${name}(${label}) 값, 방식 표시 ${method}`);
         const lanes = BOT_LANES.filter((_, i) => hashes[i] === null || hashes[i] !== now[i]).map((l) => l.label);
-        const parts = [...(lanes.length ? [`${lanes.join("·")} 레인이 다른 값`] : []), ...(shown !== marker ? [`방식 표시가 ${method}가 아니다`] : [])];
+        const parts = [...(lanes.length ? [`${lanes.join("·")} 자격이 다른 값`] : []), ...(shown !== marker ? [`방식 표시가 ${method}가 아니다`] : [])];
         return { state: "differs", action: "update", detail: `${parts.join(", ")} → 계정 ${name}의 두 값 → 방식 표시 ${method} 순서로 쓴다(해시로만 비교, ${METHOD_LABEL[other]} 자격은 반영 확인 뒤에 비운다)` };
       },
       async apply(w) {
         // 두 값을 먼저 다 읽고 나서 쓴다. 하나라도 없으면 아무것도 쓰지 않는다.
         const values = keys.map((k) => w.infisical.getValue(folder, k));
-        if (values.some((v) => v === null)) throw new CliError(`계정 ${name}의 레인 ${label} 자격이 없다`, `${addHint} --replace --apply`);
+        if (values.some((v) => v === null)) throw new CliError(`계정 ${name}의 대화용·작업용 ${label} 자격이 없다`, `${addHint} --replace --apply`);
         keys.forEach((k, i) => w.infisical.setValue(BOT_WORKER_FOLDER, k, values[i]!));
         w.infisical.setMarker(BOT_WORKER_FOLDER, BOT_METHOD_KEY, method);
       },
@@ -178,7 +182,7 @@ export default defineCommand({
       async apply(w) {
         const seen = w.bot.waitWorkerCredentials(want(source(w)), VOLUME_WAIT_SEC, method);
         const late = BOT_LANES.filter((l) => !seen[l.lane]).map((l) => l.label);
-        if (late.length) throw new CliError(`${late.join("·")} 레인 작업자에 ${VOLUME_WAIT_SEC}초 안에 반영되지 않았다. 멈춘 일은 해제하지 않았다`,
+        if (late.length) throw new CliError(`${late.join("·")} 작업자에 ${VOLUME_WAIT_SEC}초 안에 반영되지 않았다. 멈춘 일은 해제하지 않았다`,
           "kubectl -n sandbox get pods로 작업자 파드를 보고 같은 명령을 다시 실행한다(된 단계는 건너뛴다)");
         volumes = true;
       },
@@ -196,7 +200,7 @@ export default defineCommand({
         const left = otherKeys.filter((k) => c.infisical.valueHash(BOT_WORKER_FOLDER, k) !== unset);
         const inSecret = stale(c);
         if (!left.length && !inSecret.length) return same(`${METHOD_LABEL[other]} 자격 자리가 ${BOT_UNSET}이다`);
-        const parts = [...(left.length ? [`Infisical ${left.join("·")}`] : []), ...(inSecret.length ? [`${inSecret.map((l) => l.label).join("·")} 레인 Secret`] : [])];
+        const parts = [...(left.length ? [`Infisical ${left.join("·")}`] : []), ...(inSecret.length ? [`${inSecret.map((l) => l.label).join("·")} Secret`] : [])];
         return { state: "differs", action: "update", detail: `${parts.join(", ")}에 ${METHOD_LABEL[other]} 자격이 남아 있다 → ${BOT_UNSET}으로 쓰고, 그 키를 옮기는 Secret이면 비워질 때까지 본다` };
       },
       async apply(w) {
@@ -228,7 +232,32 @@ export default defineCommand({
     return ctx.engine({
       command: "bot account use",
       steps: [tokens, mapping, account, workerKeys, secrets, mounted, clear, release],
-      ...(method === "api" ? { notes: ["API 크레딧 방식은 sandbox 작업자 ExternalSecret이 레인별 API 키와 CLAUDE_AUTH_METHOD를 옮기는 배포 뒤에만 된다(그 전에는 아무것도 쓰지 않고 거부한다)"] } : {}),
+      ...(method === "api" ? { notes: ["API 크레딧 방식은 sandbox 작업자 ExternalSecret이 대화용·작업용 API 키와 CLAUDE_AUTH_METHOD를 옮기는 배포 뒤에만 된다(그 전에는 아무것도 쓰지 않고 거부한다)"] } : {}),
+      summary: {
+        names: {
+          "account-tokens": "계정 자격 확인", "worker-mapping": "작업자 설정(ExternalSecret) 확인", "account-record": "봇 DB의 계정 기록 확인",
+          "worker-keys": "작업자 자격 바꾸기", "worker-secrets": "작업자 Secret 동기화", "worker-volumes": "작업자 두 파드 반영 확인",
+          "worker-old-keys": `${METHOD_LABEL[other]} 자격 비우기`, "bot-account-use": "봇의 지금 계정 바꾸기와 멈춘 일 해제",
+        },
+        waits: {
+          "worker-secrets": "작업자 Secret 동기화를 기다린다(최대 2분 30초)",
+          "worker-volumes": "작업자 두 파드에 새 자격이 반영되길 기다린다(보통 1분 안팎, 최대 3분)",
+          "worker-old-keys": `${METHOD_LABEL[other]} 자격을 비우고 동기화를 기다린다(최대 2분 30초)`,
+        },
+        done: (r) => {
+          const changed = r.steps.find((s) => s.id === "worker-keys")?.result === "applied";
+          const s = switched?.switch;
+          const held = s?.held === "emergency_stopped" ? "비상 정지 중이라 멈춘 일은 해제하지 않았다"
+            : s?.held === "queue_full" ? "대기열이 차 남은 일은 해제하지 않았다" : null;
+          return {
+            head: `지금 계정: ${name}(${label})`,
+            lines: [changed ? "작업자 두 파드에 새 자격 반영을 확인했다" : "작업자 자격은 이미 이 계정이었다(반영 확인)",
+              s ? `멈춘 일 ${s.resumed}건 해제 · 아직 대기 ${s.waiting}건` : "멈춘 일 해제 결과를 받지 못했다", ...(held ? [held] : [])],
+            next: s?.held === "emergency_stopped" ? "homelab bot resume emergency-stop --apply 뒤 같은 명령을 다시 실행한다"
+              : s?.held === "queue_full" ? "대기열이 줄어든 뒤 같은 명령을 다시 실행한다" : null,
+          };
+        },
+      },
     });
   },
 });

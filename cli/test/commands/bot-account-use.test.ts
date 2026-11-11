@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { argvFor as infArgv } from "../../src/core/infisical";
 import { runEngine } from "../../src/core/engine";
+import { renderSummary } from "../../src/core/output";
 import { workerHashArgv } from "../../src/core/podops";
 import { Secret, revealSecret } from "../../src/core/secret";
 import type { BotAdminCommand, BotAdminReport, BotMarker, BotMethod, Plan, ReadCtx, WorkerLane, WriteCtx } from "../../src/core/command";
 import type { Input } from "../../src/core/args";
-import { FAKE_PROJECT, applyWith, expectNoSecrets, expectPlanReadOnly, infisicalList, kubectlRule, rule, runCli, testCtx, type Resp } from "../harness";
+import { FAKE_PROJECT, applyWith, expectNoSecrets, expectPlanReadOnly, infisicalList, kubectlRule, rule, runCli, runCliTty, testCtx, type Resp } from "../harness";
 import { folderJson } from "../fixtures/app-add-world/world";
 import { API_CHAT, API_TASK, CHAT, FOLDER, POD, TASK, WORKER, hash12, pod, pods } from "../fixtures/bot-account";
 import add from "../../src/commands/bot-account-add";
@@ -69,6 +70,22 @@ describe("bot account use", () => {
     expect(r.json.error.next).toContain("sandbox PR");
     expect(r.json.steps.find((s: any) => s.id === "worker-mapping").state).toBe("differs");
   });
+
+  test("터미널 요약(plan 실패): 막힌 확인 단계의 쉬운 이름과 sandbox PR 안내가 보이고 값·kubectl exec 줄은 없다", async () => {
+    const r = await runCliTty(["bot", "account", "use", "main", "--by", "api"], planWorld({ ANTHROPIC_API_KEY: API_CHAT, ANTHROPIC_API_KEY_TASK: API_TASK }, ES_BEFORE));
+    expect(r.code).toBe(1);
+    expect(r.screen).toContain("■  실패: 작업자 설정(ExternalSecret) 확인");
+    expect(r.screen).toContain("sandbox PR(C23)");
+    for (const noise of ["admin-main.js", "fakevalue", "레인"]) expect([noise, r.screen.includes(noise)]).toEqual([noise, false]);
+  }, 30_000);
+
+  test("터미널 요약(plan): 할 일을 쉬운 말로 잇고 실행 줄을 보인다", async () => {
+    const r = await runCliTty(["bot", "account", "use", "main"], planWorld({ CLAUDE_CODE_OAUTH_TOKEN: CHAT, CLAUDE_CODE_OAUTH_TOKEN_TASK: TASK }, ES_BEFORE));
+    expect(r.code).toBe(0);
+    expect(r.screen).toContain("할 일: 봇 DB의 계정 기록 확인 → 작업자 자격 바꾸기 → 작업자 Secret 동기화 → 작업자 두 파드 반영 확인 → API 크레딧 자격 비우기 → 봇의 지금 계정 바꾸기와 멈춘 일 해제");
+    expect(r.screen).toContain("다음: homelab bot account use main --apply");
+    expect(r.screen).not.toContain("admin-main.js");
+  }, 30_000);
 });
 
 // ---- 상태가 있는 가짜 세계: Infisical·작업자 Secret(ESO)·작업자 볼륨(kubelet)·봇 DB ----
@@ -147,7 +164,8 @@ class AccountWorld {
     }
     return { exit: 0, result: "recorded", state: null };
   }
-  ctx(mode: "plan" | "apply"): ReadCtx {
+  progress: string[] = [];
+  ctx(mode: "plan" | "apply", summary = false): ReadCtx {
     const w = this;
     const infRead = {
       folderExists: (p: string) => w.infisical.has(p),
@@ -167,7 +185,7 @@ class AccountWorld {
       waitSecret: (ns: string, name: string, key: string, want: { hash: string }) => k8s.secretHash(ns, name, key) === want.hash,
     };
     const bot = { pod: () => POD, argv: (_pod: string, cmd: BotAdminCommand) => ["admin", JSON.stringify(cmd)] };
-    const ctx: any = { mode, json: true, line: "homelab bot account use main", k8s, infisical: infRead, bot, progress() {} };
+    const ctx: any = { mode, json: !summary, summary, line: "homelab bot account use main", k8s, infisical: infRead, bot, progress: (l: string) => w.progress.push(l) };
     ctx.engine = (plan: Plan) => runEngine(ctx, plan, () => ({ w: w.write(ctx), revoke() {} }));
     return ctx as ReadCtx;
   }
@@ -219,7 +237,46 @@ const SYNCS = ["forceSync sandbox/worker-credential-claude-subscription", "force
 describe("bot account use 흐름(가짜 세계)", () => {
   const subHashes = (w: AccountWorld) => LANES.map((l) => w.secrets.get(l.secret)!.get(FILE.subscription));
 
-  test("지금 배포(ExternalSecret이 구독 토큰만 옮김)에서 구독: 두 레인 자격 → 방식 표시 → 동기화 → 볼륨 확인 → API 자리 비움 → 해제 순서로 끝난다", async () => {
+  test("대화용·작업용이 같은 토큰(로그인 한 번으로 등록)이어도 Secret 해시·두 파드 지문 확인이 그대로 돌고 끝난다", async () => {
+    const w = new AccountWorld();
+    w.set(FOLDER, "CLAUDE_CODE_OAUTH_TOKEN_TASK", CHAT);
+    const r = await runUse(w);
+    expect(r.status).toBe("done");
+    expect(w.log).toEqual(["admin account list", ...SUB_NEW, ...SYNCS, "waitWorkerCredentials subscription", ...SUB_CLEAR, "admin account use subscription"]);
+    expect([w.volumes.get("chat")!.get(FILE.subscription), w.volumes.get("task")!.get(FILE.subscription)]).toEqual([CHAT, CHAT]);
+    expect(w.gaps).toEqual([]);
+  });
+
+  test("터미널 요약(전환 성공): 지금 계정·반영 확인·해제 건수 몇 줄이고, 진행 줄은 무엇을 얼마나 기다리는지 쉬운 말로 보인다", async () => {
+    const w = new AccountWorld();
+    const r = await use.run(w.ctx("apply", true), input({ name: "main" }));
+    expect(r.status).toBe("done");
+    expect(r.summary).toEqual({ head: "지금 계정: main(구독)", lines: ["작업자 두 파드에 새 자격 반영을 확인했다", "멈춘 일 2건 해제 · 아직 대기 0건"], next: null });
+    expect(w.progress).toEqual(["봇 DB의 계정 기록 확인", "작업자 자격 바꾸기", "작업자 Secret 동기화를 기다린다(최대 2분 30초)",
+      "작업자 두 파드에 새 자격이 반영되길 기다린다(보통 1분 안팎, 최대 3분)", "API 크레딧 자격을 비우고 동기화를 기다린다(최대 2분 30초)", "봇의 지금 계정 바꾸기와 멈춘 일 해제"]);
+    const text = renderSummary(r);
+    for (const noise of ["kubectl", "admin-main.js", "worker-keys", "레인", "fakevalue"]) expect([noise, text.includes(noise)]).toEqual([noise, false]);
+    expect(text).toContain("◆  지금 계정: main(구독)\n│  작업자 두 파드에 새 자격 반영을 확인했다\n│  멈춘 일 2건 해제 · 아직 대기 0건\n");
+  });
+
+  test("터미널 요약(전환 실패): 실패한 단계의 쉬운 이름·원인·다음 행동이 보이고 해제는 하지 않았다", async () => {
+    const w = new AccountWorld();
+    w.volumeLag.task = 99;
+    const r = await use.run(w.ctx("apply", true), input({ name: "main" }));
+    expect(r.status).toBe("failed");
+    expect(r.summary).toEqual({ head: "실패: 작업자 두 파드 반영 확인", lines: ["작업용 작업자에 180초 안에 반영되지 않았다. 멈춘 일은 해제하지 않았다"],
+      next: "kubectl -n sandbox get pods로 작업자 파드를 보고 같은 명령을 다시 실행한다(된 단계는 건너뛴다)" });
+    expect(renderSummary(r)).toContain("■  실패: 작업자 두 파드 반영 확인\n");
+  });
+
+  test("요약 모드가 아니면(--json·--verbose·파이프) 결과에 summary가 없고 진행 줄은 지금 꼴(번호 id: 설명)이다", async () => {
+    const w = new AccountWorld();
+    const r = await runUse(w);
+    expect(r.summary).toBeUndefined();
+    expect(w.progress[0]).toStartWith("3/8 account-record: ");
+  });
+
+  test("지금 배포(ExternalSecret이 구독 토큰만 옮김)에서 구독: 두 레인 자격 →방식 표시 → 동기화 → 볼륨 확인 → API 자리 비움 → 해제 순서로 끝난다", async () => {
     const w = new AccountWorld();
     const r = await runUse(w);
     expect(r.status).toBe("done");
@@ -277,7 +334,7 @@ describe("bot account use 흐름(가짜 세계)", () => {
     partial.esOverride.set(LANES[1]!.secret, { spec: { data: Object.entries(LANES[1]!.after).filter(([k]) => k !== MARKER).map(([secretKey, key]) => ({ secretKey, remoteRef: { key } })) } });
     const a = await runUse(partial, "api");
     expect(a.status).toBe("failed");
-    expect(a.error?.message).toContain("작업 레인");
+    expect(a.error?.message).toContain("작업용 worker-task-credential-claude-subscription");
     expect(partial.log).toEqual([]);
     const shaped = new AccountWorld();
     shaped.sandboxApi = true;
@@ -332,7 +389,7 @@ describe("bot account use 흐름(가짜 세계)", () => {
     w.volumeLag.task = 1;
     const first = await runUse(w);
     expect(first.status).toBe("failed");
-    expect(first.error?.message).toContain("작업 레인 작업자에");
+    expect(first.error?.message).toContain("작업용 작업자에");
     expect(w.log).not.toContain("admin account use subscription");
     expect(w.log.some((l) => SUB_CLEAR.includes(l))).toBe(false);
     expect(w.accounts.find((a) => a.current)?.name).toBe("old");

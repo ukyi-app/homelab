@@ -4,7 +4,7 @@ import "./core/intrinsics";
 import { readSync } from "node:fs";
 import { APPLY_FLAG, GLOBAL_FLAGS, parseInput, usageLine } from "./core/args";
 import type { CommandSpec } from "./core/command";
-import { OutputBlocked, render, writeStderr, writeStdout } from "./core/output";
+import { OutputBlocked, render, stdoutIsTerminal, stepLine, writeStderr, writeStdout } from "./core/output";
 import { CliError, EXIT, UsageError, type Mode, type Result } from "./core/result";
 import { makeRuntime } from "./core/runtime";
 import { versionLine } from "./core/version";
@@ -107,7 +107,10 @@ async function main(argv: string[]): Promise<number> {
 
   const mode: Mode = cmd.kind === "change" ? (input.apply ? "apply" : "plan") : cmd.kind === "delegate" && cmd.delegateMode === "apply" ? "apply" : "read";
   const line = ["homelab", ...argv.filter((a) => a !== "--json")].map(quote).join(" ");
-  const ctx = makeRuntime({ mode, json, line, env: { ...process.env }, isTTY: Boolean(process.stdin.isTTY), ask, progress: (l) => writeStderr(`${l}\n`), delegate: cmd.kind === "delegate", wrapper: cmd.wrapper === "plan-json" });
+  // 터미널 요약은 결과가 사람 터미널로 갈 때만(stdout). 파일·파이프로 가면 지금의 단계 표 그대로다.
+  const summary = cmd.terminalSummary === true && !json && input.flags.verbose !== true && stdoutIsTerminal();
+  const progress = summary ? (l: string) => writeStderr(stepLine(l)) : (l: string) => writeStderr(`${l}\n`);
+  const ctx = makeRuntime({ mode, json, summary, line, env: { ...process.env }, isTTY: Boolean(process.stdin.isTTY), ask, progress, delegate: cmd.kind === "delegate", wrapper: cmd.wrapper === "plan-json" });
 
   let result: Result;
   try {
@@ -120,6 +123,7 @@ async function main(argv: string[]): Promise<number> {
     }
     const next = e instanceof CliError ? e.next : `원인을 고친 뒤 다시: ${line}`;
     result = { command, mode, status: "failed", steps: [], notes: [], next, error: { message: (e as Error).message, next } };
+    if (summary) result.summary = { head: "실패", lines: [result.error!.message], next };
   }
   if (result.exitCode !== undefined && cmd.kind !== "delegate") {
     result = { ...result, status: "failed", exitCode: undefined, error: { message: "exitCode는 github 하위 명령만 쓴다", next: "버그다. 명령 파일을 고친다" } };
