@@ -1,7 +1,7 @@
 # C23 API 크레딧 방식
 
 - 단계: 5 멈춤과 계정
-- 상태: 대기 (선행: C06, C22)
+- 상태: 진행 중 (2026-11-11 09:5x 착수. C22는 코드가 모두 병합된 상태에서 사람 단계를 기다리지 않고 시작, 사용자 2026-11-11 "예")
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.8 "계정 등록"(API 크레딧)·"계정 전환"·"API 크레딧 방식"·"권장 Console 설정(사람)", §5 AC-22 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06, C22
 - 연결 AC: AC-22
