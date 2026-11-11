@@ -57,7 +57,7 @@ owner가 계정을 등록·전환할 때 묻는 것이 줄고(로그인 한 번,
 
 ## 결과
 
-- homelab PR #1260(head `e96069a`, owner 병합 대기): 로그인 한 번(토큰 하나를 대화용·작업용 두 자리에, 따로 받기는 `--separate-tokens`, `--by api`도 같음), `claude setup-token`을 가짜 터미널로 띄워 토큰 줄만 가리고 CLI가 직접 받음(꼴이 다르면 가려진 입력으로 대체), 프로젝트 ID는 한 실행에 한 번, 터미널 요약과 `--verbose`, "레인" → "대화용"·"작업용", `@clack/prompts` 1.9.0 고정(전이 의존성 다섯, 모두 MIT).
+- homelab PR #1260(head `e96069a`, 병합 `c73b337` 2026-11-11 사용자 "병합해"): 로그인 한 번(토큰 하나를 대화용·작업용 두 자리에, 따로 받기는 `--separate-tokens`, `--by api`도 같음), `claude setup-token`을 가짜 터미널로 띄워 토큰 줄만 가리고 CLI가 직접 받음(꼴이 다르면 가려진 입력으로 대체), 프로젝트 ID는 한 실행에 한 번, 터미널 요약과 `--verbose`, "레인" → "대화용"·"작업용", `@clack/prompts` 1.9.0 고정(전이 의존성 다섯, 모두 MIT).
 - 검사(결과 `e96069a`): `bun run test:cli` 831개 통과, 실패 0. `node_modules` 없이 시작한 `bun run ci` 31단계 통과. `ci` 통과. Codex 1차·재리뷰 지적 없음.
 - 고친 것(첫 `ci` 실패): `cli` 시험 단계가 `@clack/prompts` 설치 전에 돌았다. 패키지 설치를 `npm deps` 단계로 떼어 필요한 단계(`cli`, `cli typecheck`, `deploy-merge merge`)보다 먼저 한 번 돌게 했고, `cli/build.ts`는 의존성이 없거나 버전이 다르면 `bun install --frozen-lockfile --ignore-scripts`를 안내하고 멈춘다.
 - 결정(사용자 2026-11-11 "진행해"): `@clack/prompts`는 최신 1.9.0(2026-11-09 공개) 유지. `bootstrap.md`·`restore.md`·`recovery-assets.md`의 "작업 레인" 8곳은 이번 범위 밖으로 그대로 둔다.
