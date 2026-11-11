@@ -6,7 +6,8 @@
 // - read exec: 쓰기로 판정된 argv를 실행하지 않는다. 예외는 core가 만든 임시 폴더로의 git clone 하나.
 // - write exec: 엔진이 Step.apply() 한 번마다 새로 만들고 끝나면 폐기한다(live). 폐기한 exec를 붙잡아 두었다가 써도 막힌다.
 //   전역 쓰기 창이 없으므로 다른 엔진·병렬 흐름의 read가 쓰기를 빌려 쓸 수 없다.
-// - 직접 stdio(inherit, stdout-to-stderr)는 github 위임만. 위임 stdout-to-stderr는 부모 stdin을 넘긴다.
+// - 직접 stdio(inherit, stdout-to-stderr)는 github 위임만(예외: 쓰기 문맥의 claude setup-token 로그인, stdout-to-stderr만).
+//   stdout-to-stderr는 부모 stdin을 넘긴다.
 // - 값을 내는 호출은 secretStdout으로만, 민감 호출의 stderr 원문은 돌려주지 않는다.
 import { basename } from "node:path";
 import { guardInfisicalBackup } from "./infisical-backup";
@@ -86,6 +87,14 @@ type MakeOpts = {
   delegate?: boolean;
 };
 
+// homelab bot account add의 브라우저 로그인(`claude setup-token`). 사람이 터미널에서 직접 답해야 하는 호출이라 stdin·stderr를 넘긴다.
+// 함정: 이 명령은 발급한 토큰을 stdout에 출력한다(공식 문서). 그대로 넘기면 `--json >파일`의 결과 파일에 토큰이 JSON 앞에 섞이므로
+// stdout-to-stderr만 허용한다. CLI는 그 출력을 잡지 않아 값이 CLI 결과에 들어가지 않지만 화면 스크롤에는 남는다.
+// 출력 자동 수집은 출력 꼴이 문서에 없어 하지 않는다(봇 DECISIONS C22).
+function interactiveLogin(argv: string[]): boolean {
+  return argv.length === 2 && argv[0] === "claude" && argv[1] === "setup-token";
+}
+
 function cloneAllowed(argv: string[], opts: ExecOpts): boolean {
   if (!opts.cloneInto || !ownedTemp(opts.cloneInto)) return false;
   const pos = argv.slice(1).filter((a) => !a.startsWith("-"));
@@ -108,7 +117,8 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
     if (verdict.sensitiveOutput && !opts.secretStdout) throw new Error(`값을 내는 호출은 secretStdout으로만 실행한다: ${verdict.reason}`);
     const stdio = opts.stdio ?? "pipe";
     if (stdio !== "pipe") {
-      if (!m.delegate) throw new Error(`stdio ${stdio}는 github 위임 명령만 쓴다(출력 계층을 거치지 않는다)`);
+      if (!m.delegate && !(kind === "write" && stdio === "stdout-to-stderr" && interactiveLogin(argv)))
+        throw new Error(`stdio ${stdio}는 github 위임 명령만 쓴다(쓰기 문맥의 claude setup-token 로그인은 stdout-to-stderr로만 예외, 출력 계층을 거치지 않는다)`);
       if (opts.secretStdout || isSecret(opts.input)) throw new Error(`stdio ${stdio}에 시크릿 입출력을 함께 쓰지 않는다`);
     }
     const sensitive = Boolean(opts.secretStdout) || isSecret(opts.input) || Boolean(verdict.sensitiveOutput);

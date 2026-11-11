@@ -2,7 +2,8 @@
 // 각 계약마다 어기는 호출을 주입해 막히는지, 스텁 원장에 실제 호출이 없는지 본다.
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { PLAN_WRITE_BLOCKED, makeExec } from "../../src/core/exec";
+import { PLAN_WRITE_BLOCKED, makeExec, type ExecOpts } from "../../src/core/exec";
+import { readSetupTokens, setupTokenLogin } from "../../src/core/input";
 import { Secret, revealSecret } from "../../src/core/secret";
 import { tempDir } from "../../src/core/temp";
 import { REST, rule, sha256, stubSandbox } from "../harness";
@@ -61,6 +62,41 @@ describe("직접 stdio", () => {
     expect(() => e.read(["gh", "pr", "list"], { stdio: "inherit" })).toThrow("github 위임 명령만");
     expect(() => e.write(["gh", "pr", "list"], { stdio: "stdout-to-stderr" })).toThrow("github 위임 명령만");
     expect(e.calls().calls).toEqual([]);
+  });
+
+  test("claude setup-token 로그인(homelab bot account add)만 쓰기 문맥에서 stdout-to-stderr로 stdio를 넘기고, inherit·다른 claude argv·읽기 문맥은 막는다", () => {
+    const e = execs([rule(["claude", REST], {}, { noStdin: true })]);
+    expect(() => e.read(["claude", "setup-token"], { stdio: "stdout-to-stderr" })).toThrow(PLAN_WRITE_BLOCKED);
+    expect(() => e.write(["claude", "setup-token", "--print"], { stdio: "stdout-to-stderr" })).toThrow("github 위임 명령만");
+    expect(() => e.write(["claude", "-p", "hi"], { stdio: "stdout-to-stderr" })).toThrow("github 위임 명령만");
+    // inherit는 자식 stdout(발급 토큰)을 결과 stdout에 섞는다.
+    expect(() => e.write(["claude", "setup-token"], { stdio: "inherit" })).toThrow("github 위임 명령만");
+    expect(() => e.write(["claude", "setup-token"], { stdio: "stdout-to-stderr", input: new Secret("fakevalue-stdio-0002") })).toThrow("시크릿 입출력");
+    expect(e.calls().calls).toEqual([]);
+    expect(e.write(["claude", "setup-token"], { stdio: "stdout-to-stderr" }).code).toBe(0);
+    expect(e.calls().calls.map((c) => c.argv)).toEqual([["claude", "setup-token"]]);
+  });
+
+  test("setup-token 로그인은 자식 stdout을 stderr로 보내 결과 stdout에는 JSON 문서 하나뿐이다(--json >파일에 토큰이 섞이지 않는다)", async () => {
+    const seen: (ExecOpts | undefined)[] = [];
+    setupTokenLogin((argv, opts) => (seen.push(opts), { code: 0, stdout: "", stderr: "", notFound: false }), "작업", () => {});
+    expect(seen.map((o) => o?.stdio)).toEqual(["stdout-to-stderr"]);
+
+    const token = "sk-ant-oat01-fakevalue-login-0001";
+    const sb = stubSandbox([rule(["claude", "setup-token"], { stdout: `토큰을 발급했다:\n${token}\n` }, { noStdin: true })]);
+    const child = join(import.meta.dir, "..", "fixtures", "core", "login-child.ts");
+    const p = Bun.spawn([process.execPath, "--no-env-file", child], { env: sb.env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+    expect(code).toBe(0);
+    expect(out).toBe(`${JSON.stringify({ schema: "homelab-cli/v1", status: "done" })}\n`);
+    expect(err).toContain(token);
+    expect(sb.calls().calls.map((c) => c.argv)).toEqual([["claude", "setup-token"]]);
+  });
+
+  test("stdin이 tty라도 stderr가 터미널이 아니면 setup-token 로그인을 띄우지 않고 토큰을 읽지 않는다", () => {
+    const logins: string[] = [];
+    expect(() => readSetupTokens(true, () => {}, ["대화·리뷰", "작업"], (lane) => logins.push(lane), false)).toThrow("stderr가 터미널이 아니라");
+    expect(logins).toEqual([]);
   });
 
   test("위임도 직접 stdio에 시크릿 입출력을 섞지 못한다", () => {
