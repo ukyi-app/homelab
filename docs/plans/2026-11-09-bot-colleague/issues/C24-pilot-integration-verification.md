@@ -3,7 +3,7 @@
 - 단계: 7 통합
 - 상태: 대기 (선행: C01~C23, C25~C32 전부)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.9 "스위치와 배포 순서", §4.10 "변경 PR 수정 반복과 리뷰 요청", §5 AC-24와 각 AC의 S5 범위, §6 "S5 실연동", §8 위험과 미확인 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
-- Blocked by: C01~C23, C25~C32 전부
+- Blocked by: C01~C23, C25~C44 전부(C38~C44는 한도 뒤 API 크레딧 자동 사용을 꺼진 채로 배포. 켜기와 그 검증은 C45, owner 2026-11-11 결정 1/6)
 - 연결 AC: AC-24, 각 AC의 S5 범위(AC-1·3·5·6·7·9·10·12·13·14·15·16·17·18·21·22·25·27·28·29·30의 "못 잡는 범위")
 - 수행: 에이전트 + 사람(스위치 켜기 승인, Discord·GitHub 조작 승인, 말투 표본 수용, 계정 전환 승인)
 - 저장소·PR: 봇·homelab 기록(봇 `VERIFICATION.md`, homelab `approvals.md`). 코드 변경 없음. 검증에서 결함이 나오면 해당 티켓으로 되돌리거나 새 티켓을 lead에 제안한다.
