@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { argvFor as infArgv } from "../../src/core/infisical";
-import { FAKE_PROJECT, expectNoSecrets, expectPlanReadOnly, infisicalList, infisicalSet, rule, runCli, type Rule } from "../harness";
+import { FAKE_PROJECT, expectNoSecrets, expectPlanReadOnly, infisicalList, infisicalSet, rule, runCli, runCliTty, type Rule } from "../harness";
 import { folderJson } from "../fixtures/app-add-world/world";
-import { API_CHAT, API_TASK, CHAT, FOLDER, TASK, adminArgv, execCalls, pod, pods, report } from "../fixtures/bot-account";
+import { API_CHAT, API_TASK, CHAT, FOLDER, OAT, OAT2, OAUTH_URL, TASK, adminArgv, execCalls, leaks, pod, pods, report, setupScreen } from "../fixtures/bot-account";
 
 // homelab bot account add(봇 COLLEAGUE_SPEC §4.8 "계정 등록", AC-21). 경계 S3: 실제 프로세스 + PATH 스텁(가짜 infisical·kubectl).
 // 시험은 파이프 입력 경로(stdin 두 줄)를 본다. tty의 `claude setup-token` 실제 동작은 시험하지 않는다(브라우저 로그인·실토큰).
@@ -25,24 +25,59 @@ describe("bot account add", () => {
     expect(r.json.steps.map((s: any) => s.state)).toEqual(["missing", "differs"]);
   });
 
-  test("apply: 두 레인 토큰은 stdin → Infisical 요청 본문으로만 가고 argv·출력에 없으며, 봇 DB에 계정을 기록한다", async () => {
-    const r = await runCli(["bot", "account", "add", "main", "--apply", "--json"], world(BOTH), { stdin: `${CHAT}\n${TASK}\n` });
+  test("apply(파이프): 토큰 한 줄을 대화용·작업용 두 자리에 쓴다. 값은 Infisical 요청 본문으로만 가고 argv·출력에 없으며, 봇 DB에 계정을 기록한다", async () => {
+    const r = await runCli(["bot", "account", "add", "main", "--apply", "--json"], world({ CLAUDE_CODE_OAUTH_TOKEN: CHAT, CLAUDE_CODE_OAUTH_TOKEN_TASK: CHAT }), { stdin: `${CHAT}\n` });
     expect(r.code).toBe(0);
     expect(r.json.status).toBe("done");
     const sets = r.calls.filter((c) => c.argv.join(" ") === infArgv.set(FAKE_PROJECT, FOLDER).join(" "));
-    expect(sets.map((c) => c.stdin)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${CHAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${TASK}\n`]);
+    expect(sets.map((c) => c.stdin)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${CHAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${CHAT}\n`]);
     expectNoSecrets({ ...r, calls: r.calls.filter((c) => !sets.includes(c)) });
     expect(execCalls(r)).toEqual([adminArgv("account", "record", "main", "subscription")]);
     expect(r.json.next).toBe("봇이 이 계정을 쓰게 하려면: homelab bot account use main");
   });
 
-  test("같은 토큰을 두 레인에 넣거나 줄 수가 레인 수와 다르면 아무것도 쓰지 않고 실패한다", async () => {
-    for (const stdin of [`${CHAT}\n${CHAT}\n`, `${CHAT}\n`, `${CHAT}\n${TASK}\n${CHAT}\n`, `${CHAT}\nshort\n`]) {
-      const r = await runCli(["bot", "account", "add", "main", "--apply", "--json"], world(BOTH), { stdin });
+  test("apply(파이프) --separate-tokens: 두 줄을 대화용·작업용에 따로 쓴다", async () => {
+    const r = await runCli(["bot", "account", "add", "main", "--separate-tokens", "--apply", "--json"], world(BOTH), { stdin: `${CHAT}\n${TASK}\n` });
+    expect(r.code).toBe(0);
+    expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${CHAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${TASK}\n`]);
+    expectNoSecrets({ ...r, calls: r.calls.filter((c) => c.stdin === undefined) });
+  });
+
+  test("줄 수가 맞지 않거나(기본 한 줄, --separate-tokens 두 줄) 따로 받기인데 두 값이 같거나 짧으면 아무것도 쓰지 않고 실패한다", async () => {
+    const cases: [string[], string, string][] = [
+      [[], `${CHAT}\n${TASK}\n`, "한 줄이어야"],
+      [[], `${CHAT}\nshort\n`, "한 줄이어야"],
+      [[], "short\n", "16자"],
+      [["--separate-tokens"], `${CHAT}\n${CHAT}\n`, "--separate-tokens를 골랐는데 두 토큰이 같다"],
+      [["--separate-tokens"], `${CHAT}\n`, "2줄이어야"],
+      [["--separate-tokens"], `${CHAT}\n${TASK}\n${CHAT}\n`, "2줄이어야"],
+      [["--separate-tokens"], `${CHAT}\nshort\n`, "작업용 토큰"],
+    ];
+    for (const [flags, stdin, message] of cases) {
+      const r = await runCli(["bot", "account", "add", "main", ...flags, "--apply", "--json"], world(BOTH), { stdin });
       expect([stdin.length, r.code]).toEqual([stdin.length, 1]);
+      expect(r.json.error.message).toContain(message);
       expect(r.writes).toEqual([]);
       expectNoSecrets(r);
     }
+  });
+
+  test("--replace(파이프): 이미 따로 받은 두 값이 있어도 한 줄로 다시 받아 두 자리를 같은 값으로 바꾼다", async () => {
+    const rules: Rule[] = [
+      rule(infArgv.folders(FAKE_PROJECT, "/bot-accounts"), { stdout: folderJson("/bot-accounts", ["main"]) }),
+      infisicalList(FOLDER, [{ stdout: JSON.stringify([{ secretKey: "CLAUDE_CODE_OAUTH_TOKEN", secretValue: CHAT }, { secretKey: "CLAUDE_CODE_OAUTH_TOKEN_TASK", secretValue: TASK }]) },
+        { stdout: JSON.stringify([{ secretKey: "CLAUDE_CODE_OAUTH_TOKEN", secretValue: CHAT }, { secretKey: "CLAUDE_CODE_OAUTH_TOKEN_TASK", secretValue: TASK }]) },
+        { stdout: JSON.stringify([{ secretKey: "CLAUDE_CODE_OAUTH_TOKEN", secretValue: CHAT }, { secretKey: "CLAUDE_CODE_OAUTH_TOKEN_TASK", secretValue: TASK }]) },
+        { stdout: JSON.stringify([{ secretKey: "CLAUDE_CODE_OAUTH_TOKEN", secretValue: CHAT }, { secretKey: "CLAUDE_CODE_OAUTH_TOKEN_TASK", secretValue: TASK }]) },
+        { stdout: JSON.stringify([{ secretKey: "CLAUDE_CODE_OAUTH_TOKEN", secretValue: OAT }, { secretKey: "CLAUDE_CODE_OAUTH_TOKEN_TASK", secretValue: OAT }]) }]),
+      { ...infisicalSet(FOLDER), captureStdin: true },
+      pods(pod()),
+      rule(adminArgv("account", "record", "main", "subscription"), { stdout: report("account record", "recorded") }),
+    ];
+    const r = await runCli(["bot", "account", "add", "main", "--replace", "--apply", "--json"], rules, { stdin: `${OAT}\n` });
+    expect(r.code).toBe(0);
+    expect(r.json.steps.map((s: any) => s.result)).toEqual(["applied", "applied"]);
+    expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${OAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${OAT}\n`]);
   });
 
   // API 크레딧 방식(AC-22): Console API 키를 레인마다 하나씩, 보이지 않는 입력(파이프면 stdin 두 줄)으로 받는다.
@@ -53,26 +88,97 @@ describe("bot account add", () => {
   ];
   const API_BOTH = { ANTHROPIC_API_KEY: API_CHAT, ANTHROPIC_API_KEY_TASK: API_TASK };
 
-  test("--by api apply: 두 레인 API 키는 stdin → Infisical 요청 본문으로만 가고 argv·출력에 없으며, claude를 띄우지 않고 봇 DB에 api로 기록한다", async () => {
-    const r = await runCli(["bot", "account", "add", "main", "--by", "api", "--apply", "--json"], apiWorld(API_BOTH), { stdin: `${API_CHAT}\n${API_TASK}\n` });
+  test("--by api apply: API 키 한 줄을 두 자리에 쓰고(구독과 같은 기본), --separate-tokens면 두 줄을 따로. claude를 띄우지 않고 봇 DB에 api로 기록한다", async () => {
+    const r = await runCli(["bot", "account", "add", "main", "--by", "api", "--apply", "--json"], apiWorld({ ANTHROPIC_API_KEY: API_CHAT, ANTHROPIC_API_KEY_TASK: API_CHAT }), { stdin: `${API_CHAT}\n` });
     expect(r.code).toBe(0);
     expect(r.json.status).toBe("done");
-    const sets = r.calls.filter((c) => c.argv.join(" ") === infArgv.set(FAKE_PROJECT, FOLDER).join(" "));
-    expect(sets.map((c) => c.stdin)).toEqual([`ANTHROPIC_API_KEY=${API_CHAT}\n`, `ANTHROPIC_API_KEY_TASK=${API_TASK}\n`]);
-    expectNoSecrets({ ...r, calls: r.calls.filter((c) => !sets.includes(c)) }, [API_CHAT, API_TASK]);
+    expect(sets(r)).toEqual([`ANTHROPIC_API_KEY=${API_CHAT}\n`, `ANTHROPIC_API_KEY_TASK=${API_CHAT}\n`]);
+    expectNoSecrets({ ...r, calls: r.calls.filter((c) => c.stdin === undefined) }, [API_CHAT, API_TASK]);
     expect(r.calls.some((c) => c.argv[0] === "claude")).toBe(false);
     expect(execCalls(r)).toEqual([adminArgv("account", "record", "main", "api")]);
     expect(r.json.next).toBe("봇이 이 계정을 쓰게 하려면: homelab bot account use main --by api");
+
+    const s = await runCli(["bot", "account", "add", "main", "--by", "api", "--separate-tokens", "--apply", "--json"], apiWorld(API_BOTH), { stdin: `${API_CHAT}\n${API_TASK}\n` });
+    expect(s.code).toBe(0);
+    expect(sets(s)).toEqual([`ANTHROPIC_API_KEY=${API_CHAT}\n`, `ANTHROPIC_API_KEY_TASK=${API_TASK}\n`]);
   });
 
-  test("--by api: 같은 키를 두 레인에 넣거나 줄 수가 다르거나 짧으면 아무것도 쓰지 않고 실패한다", async () => {
-    for (const stdin of [`${API_CHAT}\n${API_CHAT}\n`, `${API_CHAT}\n`, `${API_CHAT}\nshort\n`]) {
-      const r = await runCli(["bot", "account", "add", "main", "--by", "api", "--apply", "--json"], apiWorld(API_BOTH), { stdin });
+  test("--by api: 줄 수가 다르거나 따로 받기인데 같은 키거나 짧으면 아무것도 쓰지 않고 실패한다", async () => {
+    const cases: [string[], string][] = [[[], `${API_CHAT}\n${API_TASK}\n`], [[], "short\n"], [["--separate-tokens"], `${API_CHAT}\n${API_CHAT}\n`], [["--separate-tokens"], `${API_CHAT}\n`], [["--separate-tokens"], `${API_CHAT}\nshort\n`]];
+    for (const [flags, stdin] of cases) {
+      const r = await runCli(["bot", "account", "add", "main", "--by", "api", ...flags, "--apply", "--json"], apiWorld(API_BOTH), { stdin });
       expect([stdin.length, r.code]).toEqual([stdin.length, 1]);
       expect(r.writes).toEqual([]);
       expectNoSecrets(r, [API_CHAT, API_TASK]);
     }
   });
+
+  // 터미널 판(C35): claude setup-token을 가짜 터미널에서 띄워 CLI가 화면에서 토큰 줄을 골라 받는다. 브라우저 로그인 한 번으로
+  // 대화용·작업용 두 자리를 채우고, 토큰은 화면 어디에도 없다(로그인 안내 URL은 보인다).
+  const claude = (...screens: string[]) => rule(["claude", "setup-token"], screens.map((s) => ({ stdout: s })), { noStdin: true });
+  const sets = (r: { calls: { argv: string[]; stdin?: string }[] }) => r.calls.filter((c) => c.argv.join(" ") === infArgv.set(FAKE_PROJECT, FOLDER).join(" ")).map((c) => c.stdin);
+  const ONE = { CLAUDE_CODE_OAUTH_TOKEN: OAT, CLAUDE_CODE_OAUTH_TOKEN_TASK: OAT };
+  // 가짜 터미널 시험은 CLI와 스텁을 각각 띄워 기본 5초보다 오래 걸릴 수 있다.
+  const TTY_MS = 30_000;
+
+  test("터미널: 로그인 한 번으로 토큰 하나를 대화용·작업용 두 자리에 쓰고, 토큰은 화면에 보이지 않는다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(ONE), claude(setupScreen(OAT))]);
+    expect(r.code).toBe(0);
+    expect(r.calls.filter((c) => c.argv[0] === "claude").length).toBe(1);
+    expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${OAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${OAT}\n`]);
+    expect(leaks(r.screen, OAT)).toBe(false);
+    expect(r.screen).toContain(OAUTH_URL);
+    expect(r.screen).toContain("[토큰을 받아 화면에서 가렸다]");
+  }, TTY_MS);
+
+  test("터미널 --separate-tokens: 자리마다 로그인해 두 토큰을 따로 쓰고, 둘 다 화면에 없다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--separate-tokens", "--apply"], [...world({ CLAUDE_CODE_OAUTH_TOKEN: OAT, CLAUDE_CODE_OAUTH_TOKEN_TASK: OAT2 }), claude(setupScreen(OAT), setupScreen(OAT2))]);
+    expect(r.code).toBe(0);
+    expect(r.calls.filter((c) => c.argv[0] === "claude").length).toBe(2);
+    expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${OAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${OAT2}\n`]);
+    expect([leaks(r.screen, OAT), leaks(r.screen, OAT2)]).toEqual([false, false]);
+    expect(r.screen).toContain("대화용 토큰");
+    expect(r.screen).toContain("작업용 토큰");
+  }, TTY_MS);
+
+  test("터미널: 같은 토큰이 두 번 나오면(따로 받기) 아무것도 쓰지 않고 실패한다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--separate-tokens", "--apply"], [...world(ONE), claude(setupScreen(OAT), setupScreen(OAT))]);
+    expect(r.code).toBe(1);
+    // claude setup-token(토큰 발급)도 쓰기로 센다. 그 밖의 쓰기(Infisical·봇 DB)는 없다.
+    expect(r.writes.map((c) => c.argv)).toEqual([["claude", "setup-token"], ["claude", "setup-token"]]);
+    expect(r.screen).toContain("두 토큰이 같다");
+    expect(leaks(r.screen, OAT)).toBe(false);
+  }, TTY_MS);
+
+  test("터미널: 출력 꼴이 다르면 토큰을 가리지 않고(지금처럼 보임) 가려진 입력으로 받는다. 붙여 넣은 값은 되찍지 않는다", async () => {
+    const odd = `Opening browser…\n${OAUTH_URL}\nYour token: ${OAT}\n`;
+    const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(ONE), claude(odd)], { steps: [{ wait: /화면에 보이지 않는다/, send: `${OAT}\r` }] });
+    expect(r.pending).toEqual([]);
+    expect(r.code).toBe(0);
+    expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${OAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${OAT}\n`]);
+    const prompt = r.screen.indexOf("화면에 보이지 않는다");
+    expect(r.screen.slice(0, prompt)).toContain(`Your token: ${OAT}`);
+    expect(r.screen).toContain("화면에서 토큰 줄을 알아보지 못했다");
+    expect(leaks(r.screen.slice(prompt), OAT)).toBe(false);
+  }, TTY_MS);
+
+  test("터미널 --by api: API 키를 가려진 입력 한 번으로 받아 두 자리에 쓰고, 화면에 되찍지 않는다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--by", "api", "--apply"], apiWorld({ ANTHROPIC_API_KEY: API_CHAT, ANTHROPIC_API_KEY_TASK: API_CHAT }), { steps: [{ wait: /대화용·작업용 API 키\(화면에 보이지 않는다\)/, send: `${API_CHAT}\r` }] });
+    expect(r.pending).toEqual([]);
+    expect(r.code).toBe(0);
+    expect(sets(r)).toEqual([`ANTHROPIC_API_KEY=${API_CHAT}\n`, `ANTHROPIC_API_KEY_TASK=${API_CHAT}\n`]);
+    expect(r.screen).not.toContain("fakevalue-api");
+    expect(r.calls.some((c) => c.argv[0] === "claude")).toBe(false);
+  }, TTY_MS);
+
+  test("터미널: 가려진 입력에서 Ctrl-C면 친 글자를 보이지 않고 아무것도 쓰지 않은 채 실패한다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--by", "api", "--apply"], apiWorld(API_BOTH), { steps: [{ wait: /화면에 보이지 않는다/, send: "fakevalue-api-half" }, { wait: /•{6}/, send: "\x03" }] });
+    expect(r.pending).toEqual([]);
+    expect(r.code).toBe(1);
+    expect(r.writes).toEqual([]);
+    expect(r.screen).toContain("입력을 취소했다");
+    expect(r.screen).not.toContain("fakevalue-api");
+  }, TTY_MS);
 
   test("계정 이름은 소문자·숫자·하이픈 32자 이하만 받는다(Infisical 경로·지표 라벨)", async () => {
     for (const name of ["Main", "-main", "main-", "a".repeat(33), "../x", "main/x"]) {

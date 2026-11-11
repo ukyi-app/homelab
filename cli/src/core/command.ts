@@ -350,13 +350,13 @@ export type WriteCtx = {
   generatePassword(): Secret;
   // stdin(파이프) 또는 tty(에코 없음)에서 시크릿 한 개. 16자 이상만.
   readSecretInput(prompt: string): Secret;
-  // Claude 구독 장기 토큰을 레인 수만큼(homelab bot account add). tty면 레인마다 `claude setup-token`을 띄워 owner가
-  // 브라우저 로그인을 하고, 화면에 나온 토큰을 에코 없는 입력으로 받는다. 파이프면 stdin의 줄 하나가 레인 하나다(레인 수와 같아야 한다).
+  // Claude 구독 장기 토큰을 자리(lanes: 대화용, 작업용) 수만큼(homelab bot account add). 기본은 토큰 하나를 모든 자리에 함께 쓴다.
+  // separate면 자리마다 따로 받고 같은 값이면 거부한다. tty면 받을 값마다 `claude setup-token`을 가짜 터미널로 띄워 화면에서
+  // 토큰 줄을 받는다(화면에는 가려 보인다. 꼴이 다르면 가려진 입력). 파이프면 stdin의 줄 하나가 값 하나다.
   // 값마다 readSecretInput과 같은 검사를 거친다.
-  readSetupTokens(lanes: string[]): Secret[];
-  // Claude Console API 키를 레인 수만큼(homelab bot account add --by api). tty면 레인마다 에코 없는 한 줄, 파이프면 stdin의 줄 하나가
-  // 레인 하나다. 로그인 자식을 띄우지 않는다. 값 검사·레인끼리 같은 값 거부는 readSetupTokens와 같다.
-  readApiKeys(lanes: string[]): Secret[];
+  readSetupTokens(lanes: string[], separate: boolean): Promise<Secret[]>;
+  // Claude Console API 키(homelab bot account add --by api). 기본·separate·검사는 readSetupTokens와 같고, tty면 가려진 입력이다.
+  readApiKeys(lanes: string[], separate: boolean): Promise<Secret[]>;
   // tty에서 한 줄(보임)을 받아 expected와 같으면 true. tty가 아니면 false(파이프로 대신 답할 수 없다).
   confirm(question: string, expected: string): boolean;
   web: WebRead;

@@ -1,6 +1,7 @@
 // 출력 계층. stdout·stderr에 쓰는 곳은 이 파일 하나다(정적 시험이 다른 곳의 console·process.stdout을 막는다).
 // stdout에는 결과 하나만(사람용 또는 JSON 문서 하나), 진행 줄과 경고는 stderr.
 // 시크릿 차단 두 겹: Result 안에 Secret 객체가 있으면 렌더하지 않고, 렌더한 글자에 추적 중인 원문이 있으면 내보내지 않는다.
+import type { Writable } from "node:stream";
 import { jsonStringify } from "./intrinsics";
 import { findSecretPath } from "./guard";
 import { containsTracked } from "./secret";
@@ -84,4 +85,29 @@ export function writeStdout(text: string): void {
 
 export function writeStderr(text: string): void {
   process.stderr.write(containsTracked(text) ? "진행 줄에 시크릿 값이 섞여 뺐다\n" : text);
+}
+
+// 사람 터미널(stderr) 크기. 가짜 터미널 로그인이 자식 화면 크기를 정할 때 쓴다.
+export function screenSize(): { cols: number; rows: number } {
+  return { cols: process.stderr.columns ?? 80, rows: process.stderr.rows ?? 24 };
+}
+
+// clack 입력 화면이 쓸 출력. stderr로 가되 writeStderr를 거친다(추적 중인 값이 섞인 글은 내보내지 않는다).
+// clack은 열 수로 글을 접고 resize 이벤트를 듣는다. 이벤트는 받지 않아도 된다(다시 그릴 때 열 수를 다시 읽는다).
+export function promptOutput(): Writable {
+  const out = {
+    write: (chunk: string | Uint8Array) => (writeStderr(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk)), true),
+    get columns() {
+      return process.stderr.columns ?? 80;
+    },
+    get rows() {
+      return process.stderr.rows ?? 24;
+    },
+    isTTY: Boolean(process.stderr.isTTY),
+    on: () => out,
+    off: () => out,
+    once: () => out,
+    removeListener: () => out,
+  };
+  return out as unknown as Writable;
 }

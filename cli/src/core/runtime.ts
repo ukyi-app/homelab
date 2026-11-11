@@ -6,12 +6,13 @@
 // makeRuntime·makeExec은 main.ts와 시험만 부른다(정적 시험).
 import type { ReadCtx, WriteCtx } from "./command";
 import { runEngine } from "./engine";
-import { PLAN_WRITE_BLOCKED, makeExec, makeForward, makePipe, type Exec } from "./exec";
+import { isatty } from "node:tty";
+import { PLAN_WRITE_BLOCKED, makeExec, makeForward, makePipe, makeTerminalLogin, type Exec } from "./exec";
 import { pgRestoreWrite } from "./pgrestore";
 import { appRepoWrite, ghRead, ghcrRead, githubDelegate, webRead, wrapperApply } from "./github";
 import { botRead, botWrite, httpWrite, pgWrite, valkeyWrite } from "./podops";
 import { infisicalRead, infisicalWrite, projectResolver } from "./infisical";
-import { readApiKeys, readSecretInput, readSetupTokens, setupTokenLogin } from "./input";
+import { askHiddenTty, readStdinAll, readApiKeys, readSecretInput, readSetupTokens, setupTokenLogin, type SlotInput } from "./input";
 import { kubeRead, kubeWrite } from "./kubectl";
 import { writeStderr } from "./output";
 import { repoRead } from "./pr";
@@ -57,6 +58,8 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       if (!live) throw new Error(`${PLAN_WRITE_BLOCKED}: 끝난 apply의 쓰기 문맥을 다시 썼다(Step.apply 밖)`);
     };
     const k8sRead = kubeRead(readExec, kube);
+    const login = makeTerminalLogin({ env: o.env, live: () => live });
+    const slots: SlotInput = { isTTY: o.isTTY, stderrTTY: isatty(2), readStdin: readStdinAll, askHidden: askHiddenTty };
     const w: WriteCtx = {
       k8s: { ...k8sRead, ...kubeWrite(exec, kube) },
       infisical: { ...infisicalRead(readExec, project), ...infisicalWrite(exec, project) },
@@ -65,8 +68,8 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       ghcr: ghcrRead(readExec),
       generatePassword: () => (alive(), newPassword()),
       readSecretInput: (prompt) => (alive(), readSecretInput(o.isTTY, (q) => writeStderr(q), prompt)),
-      readSetupTokens: (lanes) => (alive(), readSetupTokens(o.isTTY, (q) => writeStderr(q), lanes, (lane) => setupTokenLogin(exec, lane, o.progress))),
-      readApiKeys: (lanes) => (alive(), readApiKeys(o.isTTY, (q) => writeStderr(q), lanes)),
+      readSetupTokens: (lanes, separate) => (alive(), readSetupTokens(slots, lanes, separate, (slot) => setupTokenLogin(login, slot, o.progress, writeStderr))),
+      readApiKeys: (lanes, separate) => (alive(), readApiKeys(slots, lanes, separate)),
       // 파이프로 대신 답할 수 없게 tty만 받는다(purge의 Infisical 삭제 직전 확인).
       confirm: (question, expected) => (alive(), o.isTTY && o.ask(question) === expected),
       web: webRead(readExec),

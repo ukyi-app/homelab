@@ -182,6 +182,46 @@ export async function runCli(args: string[], rules: Rule[], opts: RunOpts = {}):
   return { code, stdout, stderr, json, ...summarize(calls) };
 }
 
+// 터미널 판(tty 유무 두 판 중 tty): CLI를 가짜 터미널(PTY)에서 돌린다. stdin·stdout·stderr가 모두 터미널이라 사람이 보는 화면
+// 그대로를 screen으로 받는다(출력 줄바꿈은 터미널이 \r\n으로 바꾼다). steps는 화면에 wait가 나오면 send를 친다(앞 단계 뒤의 화면만 본다).
+export type TtyStep = { wait: RegExp; send: string };
+export type TtyRun = { code: number; screen: string; calls: Call[]; writes: Call[]; unmatched: Call[]; pending: TtyStep[] };
+
+export async function runCliTty(args: string[], rules: Rule[], opts: RunOpts & { steps?: TtyStep[]; cols?: number; timeoutMs?: number } = {}): Promise<TtyRun> {
+  const s = stubDir(rules, opts.tools);
+  const steps = [...(opts.steps ?? [])];
+  let screen = "";
+  let from = 0;
+  let closed!: () => void;
+  const eof = new Promise<void>((r) => (closed = r));
+  const decoder = new TextDecoder();
+  const p = Bun.spawn([process.execPath, "--no-env-file", MAIN, ...args], {
+    cwd: s.home,
+    env: baseEnv(s, opts),
+    terminal: {
+      cols: opts.cols ?? 100,
+      rows: 40,
+      data(term, data) {
+        screen += decoder.decode(data, { stream: true });
+        while (steps.length && steps[0].wait.test(screen.slice(from))) {
+          const m = steps[0].wait.exec(screen.slice(from))!;
+          from += m.index + m[0].length;
+          term.write(steps.shift()!.send);
+        }
+      },
+      exit: () => closed(),
+    },
+  });
+  const timer = setTimeout(() => p.kill("SIGKILL"), opts.timeoutMs ?? 20_000);
+  const code = await p.exited;
+  await Promise.race([eof, Bun.sleep(500)]);
+  clearTimeout(timer);
+  p.terminal?.close();
+  const calls = readLedger(s.dir);
+  removeTree(s.dir);
+  return { code, screen, pending: steps, ...summarize(calls) };
+}
+
 // 스텁 폴더와 그 환경만. 하위 프로세스를 직접 띄우는 시험(예: stdin 전달)에 쓴다.
 export function stubSandbox(rules: Rule[], opts: RunOpts = {}): { env: Record<string, string>; bin: string; calls: () => ReturnType<typeof summarize> } {
   const s = stubDir(rules, opts.tools);

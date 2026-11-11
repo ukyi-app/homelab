@@ -60,8 +60,8 @@ export const botAccountFolder = (name: string) => `/bot-accounts/${name}`;
 // (key: 구독 장기 토큰, apiKey: API 크레딧 방식의 Console API 키. 봇 DECISIONS "C23 API 크레딧 방식" 표).
 export const BOT_WORKER_FOLDER = "/apps/homelab-bot/worker";
 export const BOT_LANES = [
-  { lane: "chat", label: "대화·리뷰", key: "CLAUDE_CODE_OAUTH_TOKEN", apiKey: "ANTHROPIC_API_KEY", secret: "worker-credential-claude-subscription" },
-  { lane: "task", label: "작업", key: "CLAUDE_CODE_OAUTH_TOKEN_TASK", apiKey: "ANTHROPIC_API_KEY_TASK", secret: "worker-task-credential-claude-subscription" },
+  { lane: "chat", label: "대화용", key: "CLAUDE_CODE_OAUTH_TOKEN", apiKey: "ANTHROPIC_API_KEY", secret: "worker-credential-claude-subscription" },
+  { lane: "task", label: "작업용", key: "CLAUDE_CODE_OAUTH_TOKEN_TASK", apiKey: "ANTHROPIC_API_KEY_TASK", secret: "worker-task-credential-claude-subscription" },
 ] as const;
 export const botLaneKey = (lane: (typeof BOT_LANES)[number], method: BotMethod) => (method === "api" ? lane.apiKey : lane.key);
 // 작업자 Secret의 ns. Secret 키 = 작업자 볼륨 파일 이름은 두 레인이 같다(작업 레인은 _TASK 원격 키를 이 이름으로 옮긴다).

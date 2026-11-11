@@ -28,3 +28,17 @@ export const ACCOUNTS: BotAccount[] = [
     limit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.97, resetsAt: "2026-11-11T05:00:00Z", observedAt: "2026-11-11T03:00:00Z" } },
   { name: "spare", method: "subscription", current: false, issuedAt: null, expiresAt: null, limit: null },
 ];
+
+// claude setup-token 스텁 화면(2026-11-11 claude 2.1.322 관측 꼴, 합성 값). 토큰은 홀로 한 줄이다.
+export const OAT = "sk-ant-oat01-FAKEfakeFAKEfake_0123456789-abcdefghijABCDEFGHIJ_klmnopqrstuvwxyz-0123456789AA";
+export const OAT2 = "sk-ant-oat01-FAKEsecondFAKEsecond_9876543210-zyxwvutsrqZYXWVUTSRQ_ponmlkjihgfedcba-9876543210BB";
+export const OAUTH_URL = "https://claude.ai/oauth/authorize?code=true&client_id=fake-client&state=fake-state";
+export const setupScreen = (token: string) =>
+  ["Opening browser to sign in…", "Browser didn't open? Use the url below to sign in:", "", OAUTH_URL, "", "✓ Long-lived authentication token created successfully!", "",
+    "Your OAuth token (valid for 1 year):", "", token, "", "Store this token securely. You won't be able to see it again.", ""].join("\n");
+// 비밀 부분(접두 뒤)의 6자 조각이 text에 있는지. 화면에 토큰이 샜는지 본다.
+export function leaks(text: string, token: string): boolean {
+  const secret = token.replace(/^sk-ant-oat01-/, "");
+  for (let i = 0; i + 6 <= secret.length; i++) if (text.includes(secret.slice(i, i + 6))) return true;
+  return false;
+}
