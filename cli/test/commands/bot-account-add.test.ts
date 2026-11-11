@@ -279,6 +279,48 @@ describe("bot account add", () => {
     }
   }, TTY_MS);
 
+  // 진행 표시(C35 할 일 10). Infisical 쓰기를 느리게 해 움직이는 표시가 몇 번 다시 그려지게 한다.
+  const slowWorld = (sleepMs: number) => world(ONE).map((r, i) => (i === 2 ? { ...infisicalSet(FOLDER, { sleepMs }), captureStdin: true } : r));
+  const SPIN = /[◒◐◓◑]  토큰 저장 중\(Infisical\)/;
+
+  test("터미널 요약: 토큰을 받은 뒤 저장·기록 중인 일을 한 줄씩 보이고, 오래 걸리면 움직이는 표시로 그 줄만 다시 그린다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...slowWorld(600), claude(setupScreen(OAT))]);
+    expect(r.code).toBe(0);
+    const tail = r.screen.slice(r.screen.indexOf("[토큰을 받아 화면에서 가렸다]"));
+    const save = tail.indexOf("토큰 저장 중(Infisical)");
+    const record = tail.indexOf("봇 DB에 계정 기록 중");
+    const head = tail.indexOf("계정 main 등록 끝(구독)");
+    expect([save > 0, record > save, head > record]).toEqual([true, true, true]);
+    expect(tail.match(new RegExp(SPIN.source, "g"))!.length).toBeGreaterThan(2);
+    expect(tail).toMatch(/◇(\x1b\[[0-9;]*m)?  토큰 저장 중\(Infisical\)\r?\n/);
+    // 다시 그리기는 한 줄 위(진행 줄 자신)로만 올라가 그 줄을 지우고 다시 쓴다. 커서는 숨기지 않는다.
+    for (const m of tail.matchAll(/\x1b\[\d*A/g)) expect(tail.slice(m.index!, m.index! + 8)).toBe("\x1b[1A\r\x1b[K");
+    expect(r.screen).not.toContain("\x1b[?25l");
+    expect(leaks(r.screen, OAT)).toBe(false);
+  }, TTY_MS);
+
+  test("파이프·--json·--verbose는 진행 표시를 더하지 않는다(지금 출력 그대로)", async () => {
+    const p = await runCli(["bot", "account", "add", "main", "--apply"], world(ONE), { stdin: `${OAT}\n` });
+    expect(p.code).toBe(0);
+    expect(p.stderr).not.toContain("저장 중");
+    expect(p.stderr).not.toMatch(/[◒◐◓◑]/);
+    for (const flag of ["--json", "--verbose"]) {
+      const r = await runCliTty(["bot", "account", "add", "main", "--apply", flag], [...slowWorld(300), claude(setupScreen(OAT))]);
+      expect([flag, r.code, r.screen.includes("토큰 저장 중"), /[◒◐◓◑]/.test(r.screen)]).toEqual([flag, 0, false, false]);
+    }
+  }, TTY_MS);
+
+  test("터미널: 움직이는 표시 도중 Ctrl-C면 곧 끝나고, 커서는 보이며 다음 프롬프트는 새 줄에서 시작한다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...slowWorld(2_500), claude(setupScreen(OAT))], { steps: [{ wait: SPIN, send: "\x03" }] });
+    expect(r.pending).toEqual([]);
+    expect(r.code).not.toBe(0);
+    expect(r.screen).not.toContain("\x1b[?25l");
+    const last = r.screen.lastIndexOf("토큰 저장 중(Infisical)");
+    expect(r.screen.slice(last)).toStartWith("토큰 저장 중(Infisical)\r\n");
+    expect(r.screen).not.toContain("계정 main 등록 끝");
+    expect(leaks(r.screen, OAT)).toBe(false);
+  }, TTY_MS);
+
   test("터미널: 가려진 입력에서 Ctrl-C면 친 글자를 보이지 않고 아무것도 쓰지 않은 채 실패한다", async () => {
     const r = await runCliTty(["bot", "account", "add", "main", "--by", "api", "--apply"], apiWorld(API_BOTH), { steps: [{ wait: /화면에 보이지 않는다/, send: "fakevalue-api-half" }, { wait: /•{6}/, send: "\x03" }] });
     expect(r.pending).toEqual([]);

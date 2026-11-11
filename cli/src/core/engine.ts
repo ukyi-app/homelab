@@ -5,6 +5,7 @@
 // Step.read는 ReadCtx(쓰기 함수 없음), Step.apply는 그 apply만의 WriteCtx를 받는다.
 import type { Observation, Plan, PlanSummary, ReadCtx, WriteCtx } from "./command";
 import { ExecTimeout } from "./exec";
+import { startActivity, stopActivity } from "./output";
 import { CliError, type Result, type Status, type StepReport } from "./result";
 
 const RERUN = "같은 명령을 다시 실행하면 된 단계는 건너뛰고 이어 간다";
@@ -65,7 +66,14 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
   // 전체 읽기에서 올린 대기 주의(단계 번호 → 줄). apply가 그 단계를 다시 읽어 대기가 풀렸으면 지운다.
   const heldNotes = new Map<number, string>();
 
+  // 터미널 요약일 때만 진행 줄이 움직인다(stderr가 터미널이 아니면 output이 지금의 진행 줄로 돌린다).
+  const summary = ctx.summary ? plan.summary : undefined;
+  const busy = (line: string) => {
+    if (!startActivity(line)) ctx.progress(line);
+  };
+
   const finish = (status: Status, error?: { message: string; next: string }, held?: string): Result => {
+    stopActivity(status !== "failed");
     let next: string | null;
     const custom = plan.next?.(status);
     // hold로 멈추면 뒤 단계가 남아 있다. 같은 apply를 다시 치는 것이 다음 행동이다(확인만 하는 plan이 아니다).
@@ -139,12 +147,15 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
       reports[i].result = "failed";
       return finish("failed", { message: `${s.target}: ${seen.detail}`, next: seen.next ?? RERUN });
     }
-    ctx.progress(ctx.summary && plan.summary ? plan.summary.waits?.[s.id] ?? plan.summary.names[s.id] ?? s.target : `${i + 1}/${plan.steps.length} ${s.id}: ${seen.detail}`);
+    if (summary) busy(summary.waits?.[s.id] ?? summary.names[s.id] ?? s.target);
+    else ctx.progress(`${i + 1}/${plan.steps.length} ${s.id}: ${seen.detail}`);
     let timedOut = false;
     try {
       // 비밀번호는 apply 안에서만 만든다. read()에서 만들면 plan이 부수효과를 갖는다.
       // 쓰기 문맥은 이 apply 한 번에만 있다. read()·재조회는 읽기 문맥이라 쓰기 함수가 없다.
       const { w, revoke } = newWrite();
+      // 터미널 요약이면 단계 안의 진행 줄(예 토큰을 받은 뒤 "저장 중")도 움직이는 진행 줄로 보인다.
+      if (summary) w.progress = busy;
       try {
         await s.apply(w, seen);
       } finally {
@@ -170,6 +181,7 @@ export async function runEngine(ctx: ReadCtx, plan: Plan, newWrite: () => { w: W
       return finish("failed", { message, next: RERUN });
     }
     changed = true;
+    stopActivity(true);
     if (timedOut) notes.push(`${s.id}: 시간 초과 뒤 다시 읽어 반영된 것을 확인했다`);
     // 실행 뒤 재조회의 warn도 올린다(전체 읽기의 warn만 올리면 apply 도중 생긴 할 일, 예 "PR #n은 이제 필요 없다, 닫는다"가
     // 사라진다). 전체 읽기에서 같은 줄을 이미 올렸으면 두 번 쓰지 않는다.

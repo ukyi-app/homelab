@@ -56,6 +56,8 @@ export default defineCommand({
       async apply(w) {
         const labels = BOT_LANES.map((l) => l.label);
         const got = api ? await w.readApiKeys(labels, separate) : await w.readSetupTokens(labels, separate);
+        // 터미널 요약에서만: 값을 받은 뒤 쓰기가 끝날 때까지 멈춘 것처럼 보이지 않게 지금 하는 일을 보인다(파이프·--json 출력은 그대로).
+        if (ctx.summary) w.progress(`${what} 저장 중(Infisical)`);
         // 쓰기 전에 기억한다. 서버에는 반영됐는데 응답이 시간 초과면 엔진이 다시 읽어 이 해시로 반영을 확인한다.
         written = got.map((v) => v.sha256Prefix(12));
         if (!w.infisical.folderExists(folder)) w.infisical.createFolder(folder);
@@ -98,6 +100,7 @@ export default defineCommand({
       next: (status) => (status === "done" ? `봇이 이 계정을 쓰게 하려면: homelab bot account use ${name}${api ? " --by api" : ""}` : undefined) as string | null,
       summary: {
         names: { "infisical-account": `${what} 받아 저장`, "bot-account-record": "봇 DB에 계정 기록" },
+        waits: { "bot-account-record": "봇 DB에 계정 기록 중" },
         done: (r) => {
           const stored = r.steps.find((s) => s.id === "infisical-account")?.result === "applied";
           return {

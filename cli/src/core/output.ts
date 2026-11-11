@@ -106,11 +106,75 @@ export function render(r: Result, json: boolean): string {
 
 export function writeStdout(text: string): void {
   if (containsTracked(text)) throw new OutputBlocked("출력에 시크릿 값이 섞여 막았다");
+  stopActivity(true);
   process.stdout.write(text);
 }
 
 export function writeStderr(text: string): void {
+  stopActivity(true);
   process.stderr.write(containsTracked(text) ? "진행 줄에 시크릿 값이 섞여 뺐다\n" : text);
+}
+
+// 터미널 요약의 움직이는 진행 줄. 함정: CLI의 쓰기·기다림은 모두 동기 호출(spawnSync·sleepSync)이라 그동안 이벤트 루프가 멈춘다.
+// 그래서 그림은 Worker 스레드가 그리고, 메인 스레드는 멈춤을 Atomics로 알린 뒤 Worker가 손을 뗄 때까지 기다린다(그 뒤에 쓴 글이
+// 프레임에 덮이지 않게). clack spinner를 쓰지 않는 이유: 같은 까닭으로 멈춰 보이고, stdin을 raw로 두어 Ctrl-C를 받으면
+// process.exit(0)으로 끝낸다(쓰기 도중 성공 종료 코드). 이 진행 줄은 raw 모드·커서 숨김·신호 처리기를 두지 않는다. Ctrl-C는 지금처럼
+// 프로세스를 바로 끝내고, 커서는 늘 진행 줄 아래 새 줄에 있어(줄을 쓴 뒤 줄바꿈, 다음 프레임은 한 줄 올라가 그 줄만 다시 쓴다)
+// 셸 프롬프트가 깨끗한 줄에서 시작한다. 진행 줄 문구는 고정 문구뿐이고 값 검사를 거친다.
+const FRAMES = ["◒", "◐", "◓", "◑"];
+const FRAME_MS = 80;
+const SPINNER_SRC = `self.onmessage = ({ data }) => {
+  const st = new Int32Array(data.sab);
+  let i = 1;
+  while (Atomics.wait(st, 0, 1, ${FRAME_MS}) === "timed-out") process.stderr.write("\\x1b[1A\\r\\x1b[K" + data.frames[i++ % data.frames.length] + "  " + data.label + "\\n");
+  Atomics.store(st, 0, 3);
+  Atomics.notify(st, 0);
+};`;
+let spinnerUrl: string | undefined;
+let active: { st: Int32Array; worker: Worker; label: string; done: string } | null = null;
+
+// 진행 줄을 열 수 안에 둔다. 접히면 한 줄 위로 올라가 다시 쓰기가 다른 줄을 지운다.
+function fitLine(text: string): string {
+  const room = Math.max(10, screenSize().cols - 4);
+  let out = "";
+  for (const ch of text) {
+    if (width(out + ch) > room) return `${out}…`;
+    out += ch;
+  }
+  return out;
+}
+
+// 움직이는 진행 줄을 연다(앞 줄은 끝난 표시로 닫는다). stderr가 터미널이 아니면 열지 않고 false: 부르는 쪽이 지금의 진행 줄을 쓴다.
+export function startActivity(text: string): boolean {
+  stopActivity(true);
+  if (!process.stderr.isTTY) return false;
+  const label = fitLine(safeBody(text));
+  if (containsTracked(label)) return false;
+  const done = stepLine(label);
+  const bar = done.slice(0, done.indexOf("\n") + 1);
+  process.stderr.write(`${bar}${FRAMES[0]}  ${label}\n`);
+  spinnerUrl ??= URL.createObjectURL(new Blob([SPINNER_SRC], { type: "application/javascript" }));
+  const st = new Int32Array(new SharedArrayBuffer(4));
+  st[0] = 1;
+  const worker = new Worker(spinnerUrl);
+  // 진행 줄이 열린 채 명령이 끝나도 프로세스가 Worker를 기다리지 않는다.
+  worker.unref();
+  worker.postMessage({ sab: st.buffer, frames: FRAMES, label });
+  active = { st, worker, label, done: done.slice(bar.length) };
+  return true;
+}
+
+// 움직이는 진행 줄을 닫고 그 자리에 끝난 표시(ok) 또는 실패 표시를 남긴다. 열린 줄이 없으면 아무것도 하지 않는다.
+export function stopActivity(ok: boolean): void {
+  if (!active) return;
+  const a = active;
+  active = null;
+  Atomics.store(a.st, 0, 2);
+  Atomics.notify(a.st, 0);
+  // Worker가 아직 뜨지 않았어도 뜨자마자 손을 뗀다. 오래 걸려도 1초 뒤에는 그냥 덮어쓴다.
+  Atomics.wait(a.st, 0, 2, 1_000);
+  a.worker.terminate();
+  process.stderr.write(`\x1b[1A\r\x1b[K${ok ? a.done : `▲  ${a.label}\n`}`);
 }
 
 // 결과(stdout)가 사람 터미널로 가는지. 터미널 요약은 이때만 쓴다(파일·파이프는 지금의 단계 표).
