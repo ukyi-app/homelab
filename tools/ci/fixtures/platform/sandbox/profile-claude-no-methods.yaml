@@ -1,0 +1,9 @@
+# expect: fail
+# match: missing property 'methods'
+# Claude 프로필에서 방식 표시·API 키 매핑이 빠지면 homelab bot account use --by api가 매핑이 없다며 거부하고,
+# 키 이름을 values 한곳에 두는 구조가 깨진다.
+task:
+  nodeName: ci-node
+worker:
+  profile:
+    methods: null

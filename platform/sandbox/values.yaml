@@ -30,13 +30,18 @@ worker:
   # main 빌드(app-build)가 GHCR에 올린 digest만 쓴다. 로컬 빌드 digest는 CI 빌드와 다르다.
   # 사람 PR로만 바꾼다(D2). 게시 서버는 apps/homelab-bot/image.yaml 자동 병합으로 따라가지만, 모델 자격을 든 sandbox까지
   # 자동 경로를 넓히지 않는다(설계 C.4.4·C.4.7). 작업자 요청 계약(version)을 바꾸는 봇 PR은 이 값을 바꾸는 PR과 짝으로 낸다.
-  # 지금 값: 봇 main 9b067e9 빌드. 대화·리뷰 요청을 계약 v1·v2 둘 다 받고(동료 봇 C02), 응답에 한도 정보 칸을 싣는다(C03).
-  # 게시 서버가 v2를 보내기 전(C11·C12)에는 v1만 온다. 리뷰 레인과 미게시 변경 리뷰 경로 /v1/change-review는 그대로이고, 그 경로는
-  # 게시 서버의 CHANGE_PR_ENABLED가 꺼져 있으면 쓰이지 않는다. 이 파드는 RuntimeDefault라 이미지의 bwrap을 쓰지 않는다.
-  # 되돌릴 때는 게시 서버보다 이 값을 먼저 되돌린다: 게시 서버만 C03 이전이면 이 작업자의 한도 칸 응답을 strict 스키마가 거부한다.
+  # 지금 값: 봇 main 4df0a4f 빌드(게시 서버 apps/homelab-bot/image.yaml과 같은 digest). 대화·리뷰 요청 계약 v1·v2를 받고(동료 봇 C02)
+  # 응답에 한도 정보 칸을 싣는다(C03). 작업자 출력의 제안 동작 ID에 review_request(C30)·change_amend(C27)가 있고, 대화 지시문에
+  # 답장 대상 글·세션 연결 설명이 있다(C18 3a·3b). 자격은 실행마다 방식 표시가 고른다(C23, 아래 profile.methods).
+  # 리뷰 레인과 미게시 변경 리뷰 경로 /v1/change-review는 그대로이고, 그 경로는 게시 서버의 CHANGE_PR_ENABLED가 꺼져 있으면 쓰이지 않는다.
+  # 이 파드는 RuntimeDefault라 이미지의 bwrap을 쓰지 않는다.
+  # 되돌릴 때 순서(이 값만 되돌리든 이 PR 전체를 되돌리든 같다):
+  #   1. 방식 표시가 api면 먼저 homelab bot account use <구독 계정> --apply로 구독에 돌린다. 이 이미지 전 작업자는 방식 표시·API 키를
+  #      읽지 않고 구독 토큰 파일만 읽는데, api 방식이면 그 자리가 unset이라 기동하지 못한다(종료 1 → root가 wave -2에서 멈춤).
+  #   2. 게시 서버보다 이 값을 먼저 되돌린다. 게시 서버만 옛 판이면 이 작업자의 새 제안 ID·한도 칸 응답을 strict 스키마가 거부한다.
   # 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main
-  # 9b067e9, GitHub 호스트 runner).
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:666a2f638d31fa69d2f18d4bbcfd748f4eaec45246dda64a64effb0537553d32
+  # 4df0a4f, GitHub 호스트 runner).
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:a0ee26b934528d98fba4ae77dd25e37c0c908e12d6798769b92642c66a9fb077
   # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
   # WORKER_CONTROL_PRIVATE_KEY다. 둘이 어긋나면 작업자가 모든 실행 요청을 403으로 거부하니 회전은 두 값을 함께 바꾼다.
   # 모양이 틀리면 작업자가 기동하지 못해(종료 1) sandbox가 Degraded가 되므로 values.schema.json이 Ed25519 공개 키 모양만 받는다.
@@ -53,18 +58,35 @@ worker:
   #      없으면 새 ExternalSecret이 Degraded라 root가 wave -2에서 멈춘다.
   #   2. 이 블록과 restore.md 3.1 4)의 canary(자격 모양을 따른다)를 같은 PR에서 바꾼다. Secret 이름이 함께 바뀌어 옛 자격을
   #      읽을 일이 없고, 옛 ExternalSecret은 Argo CD prune이, 그 Secret은 소유자 삭제로 Kubernetes가 지운다.
-  # 표에 없는 실행기·인증 방식(OpenCode, Claude API 키 등)은 봇 이미지(어댑터·표)가 먼저다. 그 digest·이 블록·schema를 한 PR로 바꾼다.
+  # 표에 없는 실행기·인증 방식(OpenCode 등)은 봇 이미지(어댑터·표)가 먼저다. 그 digest·이 블록·schema를 한 PR로 바꾼다.
+  # Claude 구독과 API 크레딧 사이의 전환은 이 블록을 바꾸지 않는다. 방식 표시(methods.marker) 값이 실행마다 고른다(아래 methods).
   profile:
-    # 봇 표의 프로필 id. Secret 이름에 들어간다.
+    # 봇 표의 프로필 id. Secret 이름에 들어간다. 이름은 구독이지만 API 크레딧 방식도 이 프로필이 맡는다(봇 src/executor-profiles.ts).
+    # 바꾸면 Secret 이름이 바뀌어 homelab bot account use가 찾는 이름(worker-credential-claude-subscription)과 어긋난다.
     id: claude-subscription
     # WORKER_EXECUTOR
     executor: claude
     # WORKER_MODEL. Claude는 전체 모델 ID만 받는다(별칭 opus, [1m]은 작업자가 거부). 실행마다 CLI가 알린 모델과 대조한다.
     model: claude-opus-5-5
-    # Infisical 키 이름 = Secret 키 = 작업자가 읽는 파일 이름(WORKER_CREDENTIAL_KEY). 인증 방식을 뜻한다(구독 장기 토큰).
+    # Infisical 키 이름 = Secret 키 = 작업자가 읽는 파일 이름(WORKER_CREDENTIAL_KEY). 프로필을 고르는 키이고 구독 장기 토큰 자리다.
     credentialKey: CLAUDE_CODE_OAUTH_TOKEN
+    # 실행마다 인증 방식을 고르는 두 파일(Infisical 키 = Secret 키 = 파일 이름, credentialKey와 같은 디렉터리). 작업자가 읽는 이름은
+    # 봇 프로필 표(PROFILES의 methods: METHOD_FILE·API_KEY_FILE)에 고정돼 env로 넘기지 않는다. 그래서 values.schema.json이 글자를
+    # 고정한다. Codex 프로필에는 없다(null).
+    #   marker: 방식 표시. subscription이면 credentialKey, api면 apiKey만 실행 env에 넣는다. 파일이 없으면 구독으로 본다.
+    #   apiKey: Claude Console API 키 자리. 안 쓰면 unset(구독 토큰 자리도 API 방식이면 unset).
+    # 이 두 키와 task.remoteApiKey가 Infisical /apps/homelab-bot/worker에 먼저 있어야 한다. 하나라도 없으면 두 ExternalSecret이
+    # Degraded라 root가 wave -2에서 멈춘다. 운영은 homelab bot account add <이름>(구독, 레인마다 setup-token)과
+    # homelab bot account use <이름> --apply가 방식 표시 subscription과 두 API 키 자리 unset을 쓴다(rotate.md 3e).
+    # homelab secret set은 이 폴더(/apps/<앱> 아래 하위 폴더)와 16자 미만 값(subscription·unset)을 받지 않아 쓸 수 없다.
+    # VM homelab-dev도 같은 세 키가 먼저 있어야 한다: 방식 표시는 subscription, 두 API 키 자리는 unset(bootstrap.md 2.2 vm 1단계).
+    methods:
+      marker: CLAUDE_AUTH_METHOD
+      apiKey: ANTHROPIC_API_KEY
     # 이 실행기가 프록시로 나가는 이름(proxy.allowedDomains에 더해진다). OAuth 교환·갱신 후보(platform.claude.com·claude.ai)는
     # 열지 않는다. S12 첫 대화(실행 3회)에서 작업자는 api.anthropic.com에만 나갔고 프록시 거부는 0건이었다.
+    # API 크레딧 방식도 모델 요청은 api.anthropic.com이다(Claude Code 네트워크 문서: claude.ai·platform.claude.com은 구독 로그인·OAuth,
+    # Datadog 호스트는 작업자가 끄는 원격 측정). API 방식의 실제 프록시 로그는 아직 보지 않았다(S5).
     # 나중에 거부 로그가 필요를 보이면 그 근거와 함께 더한다.
     egressHosts:
       - api.anthropic.com
@@ -72,24 +94,30 @@ worker:
 # 작업 레인 작업자(templates/task-worker-*.yaml, 설계 C.8 "작업자 파드 둘"). prod와 vm이 이 값 하나를 함께 쓴다.
 # 클러스터마다 전제가 둘이다. 하나라도 빠지면 그 클러스터의 root가 sandbox wave(-2)에서 멈춘다(새 노드·새 VM도 같다):
 #   1. 노드마다 sudo host/install.sh --cluster <이름> --sandbox-profiles와 --task-state-volume. 프로필이나 볼륨이 없으면 파드가 뜨지 않는다.
-#   2. Infisical /apps/homelab-bot/worker에 task.remoteCredentialKey가 있어야 한다. 운영은 작업 레인 전용 setup-token,
-#      VM homelab-dev는 같은 모양의 가짜(docs/runbooks-public/bootstrap.md 2.2 vm 1단계).
+#   2. Infisical /apps/homelab-bot/worker에 task.remoteCredentialKey·task.remoteApiKey와 방식 표시(worker.profile.methods.marker)가
+#      있어야 한다. 운영은 작업 레인 전용 setup-token과 API 키 자리(안 쓰면 unset), VM homelab-dev는 같은 모양의 가짜
+#      (docs/runbooks-public/bootstrap.md 2.2 vm 1단계).
 # 이 키가 없는 옛 내보내기로는 restore.md 3.1 4)가 missing으로 멈춘다(recovery-assets.md). 끄는 PR은 restore.md 3.1의 개수를 함께 되돌린다.
 task:
   enabled: true
   # 작업 레인 코드가 든 main 빌드 digest. 사람 PR로만 바꾼다(worker.image와 같은 이유). 이 줄 하나만 바꾸면 worker를 건드리지 않고
   # 작업 레인 이미지를 올린다. 작업 레인 코드가 없는 이미지는 WORKER_LANES를 읽지 않아 대화·리뷰 작업자로 뜬다.
-  # 지금 값: 봇 main 9b067e9 빌드(worker.image와 같은 digest). 630c48d의 v2 작업 계약·무자격 검증 실행기·시작 표식에, 응답 한도
-  # 정보 칸(동료 봇 C03)과 변경 작성 지시문 새 판 change-v2(확인할 것·선택지 질문·수정 차례 입력, C25)가 더해졌다. intake가 받는
-  # 판 목록(task-v1, change-v2)을 알리고, 게시 서버가 새 판을 보내기 전(C27~C29)에는 옛 판 task-v1만 온다. 새 판을 쓰기 시작한 뒤
-  # 이 값만 되돌리면 저장된 새 판 결과를 읽지 못하므로 진행 중 변경 턴을 끝낸 뒤 되돌린다. CLI 버전(package.json·lock·Dockerfile)과
-  # 작업 레인 settings·인자 생성 코드(taskSettings·taskArgs)는 630c48d와 같아 SEC-02 2단계를 잰 5fb4a20과 같다. 빌드 증명은
-  # gh attestation verify로 대조했다(서명 워크플로 homelab app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main 9b067e9,
-  # GitHub 호스트 runner).
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:666a2f638d31fa69d2f18d4bbcfd748f4eaec45246dda64a64effb0537553d32
-  # Infisical 키 이름. Secret 키와 파일 이름은 worker.profile.credentialKey 그대로다(봇 프로필 표가 그 이름을 읽는다).
-  # 키를 레인마다 나눠 한 레인의 토큰만 교체·철회한다. 두 토큰을 한 Secret에 모으지 않는다.
+  # 지금 값: 봇 main 4df0a4f 빌드(worker.image와 같은 digest). 630c48d의 v2 작업 계약·무자격 검증 실행기·시작 표식, 응답 한도
+  # 정보 칸(동료 봇 C03), 변경 작성 지시문 change-v2(확인할 것·선택지 질문·수정 차례 입력, C25)에 더해, 턴 번호 상한을 프로토콜
+  # 한계로 넓혔고(C19: 한도·인증 대기 턴은 게시 서버가 턴 예산에서 뺀다) amendment.pullNumber null인 게시 전 고치기 입력(C31)을 받는다.
+  # intake가 알리는 판 목록은 task-v1, change-v2다. 자격은 worker와 같이 실행마다 방식 표시가 고른다(C23).
+  # 되돌릴 때는 worker.image와 같은 순서다(방식 표시가 api면 구독으로 먼저, 게시 서버보다 먼저). 그 전 이미지는 턴 번호 17 이상인
+  # 작업(한도·인증 대기를 거친 작업)과 pullNumber null 고치기 입력을 거부한다. 새 판을 쓰기 시작한 뒤 이 값만 되돌리면 저장된 새 판
+  # 결과를 읽지 못하므로 진행 중 변경 턴을 끝낸 뒤 되돌린다. CLI 버전(package.json·lock·Dockerfile)과 작업 레인 settings·인자 생성
+  # 코드(taskSettings·taskArgs)는 630c48d와 같아 SEC-02 2단계를 잰 5fb4a20과 같다(실행 env의 자격 변수 이름만 방식 표시로 고른다).
+  # 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main
+  # 4df0a4f, GitHub 호스트 runner).
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:a0ee26b934528d98fba4ae77dd25e37c0c908e12d6798769b92642c66a9fb077
+  # Infisical 키 이름. Secret 키와 파일 이름은 worker.profile.credentialKey·methods.apiKey 그대로다(봇 프로필 표가 그 이름을 읽는다).
+  # 키를 레인마다 나눠 한 레인의 토큰·API 키만 교체·철회한다. 두 레인의 자격을 한 Secret에 모으지 않는다.
+  # 방식 표시는 레인마다 나누지 않는다(두 레인이 methods.marker 하나를 읽는다. 계정 전환은 두 레인을 함께 바꾼다).
   remoteCredentialKey: CLAUDE_CODE_OAUTH_TOKEN_TASK
+  remoteApiKey: ANTHROPIC_API_KEY_TASK
   # 고정 크기 볼륨이 있는 노드(PV nodeAffinity). 클러스터 값이라 여기는 빈 자리고, root가 cluster.taskStateVolume.nodeName을 넘긴다.
   # 운영 노드 이름을 기본값으로 두면 VM 파드가 어느 노드에도 뜨지 못한다.
   nodeName: ""

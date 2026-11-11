@@ -1,0 +1,10 @@
+# expect: fail
+# match: value must be 'ANTHROPIC_API_KEY'
+# 작업자가 읽는 API 키 파일 이름은 봇 프로필 표에 고정돼 env로 넘기지 않는다. 다른 이름이면 Secret에 키가 있어도 작업자가 못 읽는다.
+task:
+  nodeName: ci-node
+worker:
+  profile:
+    methods:
+      marker: CLAUDE_AUTH_METHOD
+      apiKey: CLAUDE_API_KEY
