@@ -229,6 +229,33 @@ describe("bot account add", () => {
     expect(r.calls.some((c) => c.argv[0] === "claude")).toBe(false);
   }, TTY_MS);
 
+  test("터미널: 좁은 화면에서 긴 값을 붙여 넣어 가림 글자가 여러 줄로 다시 그려져도 값은 화면에 없다", async () => {
+    const long = `fakevalue-api-long-${"x1Y2z3".repeat(20)}`;
+    const r = await runCliTty(["bot", "account", "add", "main", "--by", "api", "--apply"], apiWorld({ ANTHROPIC_API_KEY: long, ANTHROPIC_API_KEY_TASK: long }), { cols: 40, steps: [{ wait: /API 키\(화면에/, send: long.slice(0, 50) }, { wait: /•{30}/, send: `${long.slice(50)}\r` }] });
+    expect(r.pending).toEqual([]);
+    expect(r.code).toBe(0);
+    expect(sets(r)).toEqual([`ANTHROPIC_API_KEY=${long}\n`, `ANTHROPIC_API_KEY_TASK=${long}\n`]);
+    expect(r.screen).not.toContain("x1Y2z3");
+    expect(r.screen).not.toContain("fakevalue-api");
+  }, TTY_MS);
+
+  test("터미널: 붙여 넣은 값이 검사에 걸리면 오류 문구에 값이 없고 아무것도 쓰지 않는다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--by", "api", "--apply"], apiWorld(API_BOTH), { steps: [{ wait: /화면에 보이지 않는다/, send: `${API_CHAT} \r` }] });
+    expect(r.code).toBe(1);
+    expect(r.writes).toEqual([]);
+    expect(r.screen).toContain("공백으로 시작하거나 끝난다");
+    expect(r.screen).not.toContain("fakevalue-api");
+  }, TTY_MS);
+
+  test("터미널 --json·--verbose: 화면(stdout·stderr 모두)에 토큰이 없고, --json은 결과 문서 하나다", async () => {
+    for (const flag of ["--json", "--verbose"]) {
+      const r = await runCliTty(["bot", "account", "add", "main", "--apply", flag], [...world(ONE), claude(setupScreen(OAT))]);
+      expect([flag, r.code, leaks(r.screen, OAT)]).toEqual([flag, 0, false]);
+      expect(sets(r).length).toBe(2);
+      if (flag === "--json") expect(JSON.parse(r.screen.slice(r.screen.lastIndexOf('{"schema"')).replace(/\r\n/g, "\n")).status).toBe("done");
+    }
+  }, TTY_MS);
+
   test("터미널: 가려진 입력에서 Ctrl-C면 친 글자를 보이지 않고 아무것도 쓰지 않은 채 실패한다", async () => {
     const r = await runCliTty(["bot", "account", "add", "main", "--by", "api", "--apply"], apiWorld(API_BOTH), { steps: [{ wait: /화면에 보이지 않는다/, send: "fakevalue-api-half" }, { wait: /•{6}/, send: "\x03" }] });
     expect(r.pending).toEqual([]);
