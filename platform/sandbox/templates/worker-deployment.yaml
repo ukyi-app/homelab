@@ -63,8 +63,9 @@ spec:
               value: {{ $profile.executor | quote }}
             - name: WORKER_MODEL
               value: {{ $profile.model | quote }}
-            # 자격은 <WORKER_CREDENTIAL_DIR>/<WORKER_CREDENTIAL_KEY> 파일 하나(아래 credential 볼륨, 키 이름은 Infisical 그대로)다.
-            # Claude 토큰은 실행마다 다시 읽어 그 실행의 claude 자식 env 한 곳에만 넣는다. 파일·argv·로그·PVC에 쓰지 않는다.
+            # 자격은 <WORKER_CREDENTIAL_DIR>/<WORKER_CREDENTIAL_KEY> 파일(아래 credential 볼륨, 키 이름은 Infisical 그대로)이다.
+            # Claude 프로필은 같은 디렉터리의 방식 표시·API 키 파일(worker.profile.methods)도 읽는다. 그 이름은 봇 프로필 표에 고정돼
+            # env로 넘기지 않는다. 실행마다 다시 읽어 표시가 고른 자격 하나만 그 실행의 claude 자식 env에 넣는다. 파일·argv·로그·PVC에 쓰지 않는다.
             - name: WORKER_CREDENTIAL_DIR
               value: /run/worker-credential
             - name: WORKER_CREDENTIAL_KEY
@@ -81,8 +82,9 @@ spec:
               value: /codex-home/.homelab-worker/nonces
             - name: WORKER_CONTROL_PUBLIC_KEY
               value: {{ .Values.worker.controlPublicKey | quote }}
-          # /readyz는 자격이 쓸 수 있는 모양일 때만 200이다(모델 호출 없음). Claude는 토큰 파일이 인쇄 가능한 ASCII 한 줄(공백 없이
-          # 16~8192자), Codex는 PVC에 auth.json(일반 파일). 실행 기록을 지우지 못한 동안도 503이다.
+          # /readyz는 자격이 쓸 수 있는 모양일 때만 200이다(모델 호출 없음). Claude는 방식 표시(없으면 구독)가 고른 자격 파일이
+          # 인쇄 가능한 ASCII 한 줄(공백 없이 16~8192자, unset 아님)이고 표시가 subscription·api 중 하나일 때, Codex는 PVC에
+          # auth.json(일반 파일)일 때다. 실행 기록을 지우지 못한 동안도 503이다.
           # kubelet 프로브는 노드에서 오므로 NetworkPolicy에 막히지 않는다(설계 B.8). 응답 패킷은 init 규칙의 ESTABLISHED로 나간다.
           readinessProbe:
             httpGet:

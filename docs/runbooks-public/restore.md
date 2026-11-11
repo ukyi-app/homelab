@@ -1545,9 +1545,9 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
 
 **함정: 살아 있는 클러스터에서 끄지 않는다.** Store와 `argocd-owner`는 추적 없이 남는다. 설계한 쓰임은 빈 클러스터 복구다. 시험을 다시 할 때도 살아 있는 VM 클러스터에 끄는 PR을 다시 넣지 않고 VM을 새로 만든다.
 
-**손으로 만들 것은 11개다.** `bun run ci --only external`이 출력하는 "끌 때 빠지는 것" 줄은 앱 0개일 때 14개(Store 3 + ExternalSecret 대상 11)다. 봇 등록(#995) 뒤로는 앱 몫 3개(`app-homelab-bot/homelab-bot-app`·`homelab-bot-db`, `database/pg-role-homelab-bot`)가 더해져 17개이고, 이 셋은 아래 "한계"대로 이 절이 아직 다루지 못한다. Store 셋은 Secret이 아니라 만들 것이 없다. 남는 11개는 Owner 10개와, 새 Secret이 아니라 Argo CD 설치가 만든 `argocd/argocd-secret`에 owner 자격 두 키를 합치는 Merge 1개다. 키는 18개로, 플랫폼 ExternalSecret 키 수와 같다(등록 앱 키는 따로다). 모든 ExternalSecret의 `target.template`은 `engineVersion: v2`, `mergePolicy: Merge`뿐이라(ES 라벨·Argo CD 추적 주석이 Secret에 복사되지 않게 하는 용도, 설계 B.8 E3), 손 Secret을 키 그대로, type Opaque, 라벨·주석·`ownerReferences`·`immutable` 없이 만들면 ESO 결과와 같다.
+**손으로 만들 것은 11개다.** `bun run ci --only external`이 출력하는 "끌 때 빠지는 것" 줄은 앱 0개일 때 14개(Store 3 + ExternalSecret 대상 11)다. 봇 등록(#995) 뒤로는 앱 몫 3개(`app-homelab-bot/homelab-bot-app`·`homelab-bot-db`, `database/pg-role-homelab-bot`)가 더해져 17개이고, 이 셋은 아래 "한계"대로 이 절이 아직 다루지 못한다. Store 셋은 Secret이 아니라 만들 것이 없다. 남는 11개는 Owner 10개와, 새 Secret이 아니라 Argo CD 설치가 만든 `argocd/argocd-secret`에 owner 자격 두 키를 합치는 Merge 1개다. 키는 22개로, 플랫폼 ExternalSecret 키 수와 같다(등록 앱 키는 따로다). 모든 ExternalSecret의 `target.template`은 `engineVersion: v2`, `mergePolicy: Merge`뿐이라(ES 라벨·Argo CD 추적 주석이 Secret에 복사되지 않게 하는 용도, 설계 B.8 E3), 손 Secret을 키 그대로, type Opaque, 라벨·주석·`ownerReferences`·`immutable` 없이 만들면 ESO 결과와 같다.
 
-**작업 레인이 켜져 있다.** 이 절의 숫자는 `platform/sandbox/values.yaml`의 `task.enabled: true` 기준이다. 지도의 sandbox 항목은 `sandbox/worker-credential-claude-subscription`과 `sandbox/worker-task-credential-claude-subscription`(Secret 키 `CLAUDE_CODE_OAUTH_TOKEN` ← `/apps/homelab-bot/worker/CLAUDE_CODE_OAUTH_TOKEN_TASK`) 둘이고, 그래서 손 Secret 11개(Owner 10개 + Merge 1개), 키 18개다. canary는 sandbox 항목 전부에 들어가므로 VM 시험의 "ESO가 바꾼 항목"도 둘이다. 끄는 PR은 이 절의 개수, 1)·4)·6) 블록의 개수, canary 검사를 같은 PR에서 되돌린다. PVC `worker-task-state`는 백업하지 않는다. 디스크를 잃으면 진행 중 작업의 세션이 없으므로 봇이 명시 실패로 두고 사람이 retry한다. 새 노드에서는 root apply 전에 `sudo host/install.sh --cluster <이름> --task-state-volume`으로 빈 볼륨을 만든다(bootstrap.md 1절). 이미지가 남은 노드에서는 다시 포맷하지 않고 그대로 쓴다. UUID 기록(`/var/lib/taskstate/volume.uuid`)만 잃었으면 설치기가 멈춘다. 그 이미지를 버릴지 사람이 정한다.
+**작업 레인이 켜져 있다.** 이 절의 숫자는 `platform/sandbox/values.yaml`의 `task.enabled: true` 기준이다. 지도의 sandbox 항목은 `sandbox/worker-credential-claude-subscription`과 `sandbox/worker-task-credential-claude-subscription` 둘이고, 항목마다 키가 셋이다: 구독 토큰 `CLAUDE_CODE_OAUTH_TOKEN`, API 키 `ANTHROPIC_API_KEY`, 방식 표시 `CLAUDE_AUTH_METHOD`(`platform/sandbox/values.yaml`의 `worker.profile.methods`). 작업 레인 항목은 앞의 둘을 `/apps/homelab-bot/worker/CLAUDE_CODE_OAUTH_TOKEN_TASK`·`ANTHROPIC_API_KEY_TASK`에서 읽고, 방식 표시는 두 항목이 같은 `/apps/homelab-bot/worker/CLAUDE_AUTH_METHOD`를 읽는다. 그래서 손 Secret 11개(Owner 10개 + Merge 1개), 키 22개, 내보내기 경로 21개다. canary는 sandbox 항목 전부에 들어가므로 VM 시험의 "ESO가 바꾼 항목"도 둘이다. 끄는 PR과 인증 방식 키를 빼는 PR은 이 절의 개수, 1)·4)·6) 블록의 개수, canary 검사를 같은 PR에서 되돌린다. PVC `worker-task-state`는 백업하지 않는다. 디스크를 잃으면 진행 중 작업의 세션이 없으므로 봇이 명시 실패로 두고 사람이 retry한다. 새 노드에서는 root apply 전에 `sudo host/install.sh --cluster <이름> --task-state-volume`으로 빈 볼륨을 만든다(bootstrap.md 1절). 이미지가 남은 노드에서는 다시 포맷하지 않고 그대로 쓴다. UUID 기록(`/var/lib/taskstate/volume.uuid`)만 잃었으면 설치기가 멈춘다. 그 이미지를 버릴지 사람이 정한다.
 
 **한계: 앱 0개에서만 실행했다.** 공유 차트·ApplicationSet 생성 Application 경로는 라이브로 보지 않았다(ci가 templatePatch를 sprig v3.3.0으로 실행해 끄면 ExternalSecret이 0개인지만 본다). 등록 앱이 생기면 그 앱의 Secret도 손으로 만들어야 한다. 그런데 앱 차트의 `<앱>-db`·`<앱>-valkey-url`과 데이터 차트의 `pg-role-<앱>`은 template에 `data`·`type`·`metadata`가 있어 1)의 지도가 "손으로 같은 결과를 만들 수 없는 모양"에서 멈추고, 개수 검사(11개)도 멈춘다. 그때는 이 절을 앱 경로까지 넓힌 뒤 쓴다.
 
@@ -1603,7 +1603,7 @@ echo "지도: 손 Secret $(jq length "$map")개, 키 $(jq '[.[].keys[]] | length
 EOF
 ```
 
-출력은 "지도: 손 Secret 11개, 키 18개"다. 2026-10-29 시험은 같은 스크립트를 저장소 밖에 두고 돌렸고(이 블록은 경로와 `CLUSTER`만 바꿨다), 운영 클러스터의 ExternalSecret(읽기만)에서 같은 모양을 만들어 정렬·대조해 같았다. 2026-10-30 이 블록의 `vm`·`prod` 로컬 렌더 결과도 그때 지도와 같았다. 둘 다 작업 레인 항목이 없던 때라 10개, 키 17개였다.
+출력은 "지도: 손 Secret 11개, 키 22개"다. 2026-10-29 시험은 같은 스크립트를 저장소 밖에 두고 돌렸고(이 블록은 경로와 `CLUSTER`만 바꿨다), 운영 클러스터의 ExternalSecret(읽기만)에서 같은 모양을 만들어 정렬·대조해 같았다. 2026-10-30 이 블록의 `vm`·`prod` 로컬 렌더 결과도 그때 지도와 같았다. 둘 다 작업 레인 항목이 없던 때라 10개, 키 17개였다. 작업 레인 항목이 생긴 뒤 인증 방식 키가 더해지기 전에는 11개, 키 18개였다.
 
 **2) 암호화 내보내기.** 장애 전에 있어야 한다(복구 자산 "Infisical 암호화 내보내기", [recovery-assets.md](recovery-assets.md)). 형식은 `{project, env, at, secrets: {"<Infisical 경로>": "<값>"}}` JSON을 age 암호문구로 암호화한 파일 하나다. 아래 블록이 지도의 키만 담아 `$U40_DIR/<프로젝트>-export.age`로 만든다. 4)의 손 Secret 블록은 지도의 경로만 읽으므로 같은 형식에 키가 더 있는 내보내기도 그대로 쓴다. 실제 장애에서는 복구 자산의 최신 사본을 `$U40_DIR/homelab-export.age`로 둔다.
 
@@ -1611,6 +1611,7 @@ EOF
 - 암호문구는 비밀번호 관리자에 둔다. 암호화된 메모도 된다. 시험용이면 시험 뒤 지운다.
 - 로그인 사용자의 Infisical CLI 0.44.2가 읽은 값을 `~/.infisical/secrets-backup/`에 남기는 문제는 bootstrap.md 2.2 vm 1단계와 같은 잠금으로 막는다.
 - **H2(봇 작업자 자격) 전에 뜬 내보내기는 4)에서 못 쓴다.** sandbox가 실제 작업자로 바뀐 뒤(T16b S11)부터 지도의 sandbox 항목은 `sandbox/worker-credential-claude-subscription`이고 키는 `/apps/homelab-bot/worker/CLAUDE_CODE_OAUTH_TOKEN`이다(전에는 `sandbox/worker-seed`의 시험 키 `WORKER_PROBE`). 그 전 내보내기에는 이 경로가 없어 4)의 손 Secret 블록이 `missing`으로 멈춘다. H2 뒤 운영(`homelab`/`prod`)과 VM(`homelab-dev`/`dev`) 내보내기를 이 블록으로 새로 뜬다. Infisical에 키가 아직 없으면 이 블록도 `missing`으로 멈춘다. VM의 값은 실제 토큰이 아니라 작업자가 받는 모양의 가짜 문자열이다(`platform/root/templates/sandbox.yaml` 머리 주석). 실행기 프로필(`platform/sandbox/values.yaml`의 `worker.profile`)을 바꾸면 이 Secret 이름과 키가 함께 바뀌므로 그 뒤에도 내보내기를 새로 뜬다.
+- **인증 방식 키가 sandbox 지도에 들어가기 전에 뜬 내보내기도 4)에서 못 쓴다.** `worker.profile.methods`·`task.remoteApiKey`가 생긴 뒤 지도에 `/apps/homelab-bot/worker/CLAUDE_AUTH_METHOD`·`ANTHROPIC_API_KEY`·`ANTHROPIC_API_KEY_TASK`가 들어가, 그 전 내보내기로는 `missing`으로 멈춘다. 그 배포 뒤 운영·VM 내보내기를 새로 뜬다. 계정을 바꾼 뒤(`homelab bot account use`)에도 새로 뜬다. 옛 내보내기는 바꾸기 전 방식 표시와 자격을 담는다.
 - VM 시험: **`homelab-dev`/`dev`만 내보낸다.** 운영 내보내기를 VM에 넣으면 운영 터널 토큰·체크 URL·operator OAuth가 VM에 들어가 VM이 운영 터널에 붙는다(설계 B.8 E1, E8 VM 격리). 4)의 블록도 `vm`에서는 `homelab-dev`/`dev`가 아닌 내보내기를 거부한다. 시험 전(외부 자격을 다 넣고 bootstrap.md 2.2 vm 1단계 키 대조가 "빠진 키 0"인 뒤)에 만들고, 시험 뒤 파일과 암호문구를 지운다.
 
 ```bash
@@ -1650,7 +1651,7 @@ echo "내보내기 만듦: 키 $(wc -l <<<"$want")개(이름만 대조)"
 EOF
 ```
 
-출력은 "내보내기 만듦: 키 18개(이름만 대조)"다. 지도의 키 수라 플랫폼 ExternalSecret 키 수(18개)와 같다. 2026-10-29 시험 때는 작업 레인 키가 없어 내보내기가 17개였고, 운영 키는 그때 있던 edge-probe `GITHUB_WEBHOOK_SECRET`까지 18개였다. 멈춤: "missing"(지도 경로가 Infisical에 없음), 백업 파일 생김, 키 이름 불일치. 출력은 개수뿐이다.
+출력은 "내보내기 만듦: 키 21개(이름만 대조)"다. 지도의 서로 다른 경로 수라, 플랫폼 ExternalSecret 키 22개에서 sandbox 두 항목이 함께 읽는 방식 표시 하나를 뺀 수다. 2026-10-29 시험 때는 작업 레인 키가 없어 내보내기가 17개였고, 운영 키는 그때 있던 edge-probe `GITHUB_WEBHOOK_SECRET`까지 18개였다. 멈춤: "missing"(지도 경로가 Infisical에 없음), 백업 파일 생김, 키 이름 불일치. 출력은 개수뿐이다.
 
 **3) Argo CD와 ESO 부트스트랩 Secret.** 3절 3단계 순서(host → k3s → Argo CD → ESO 부트스트랩 Secret)대로 하고 root apply 앞에서 멈춘다. 장애 중이라 Store는 아직 없지만 부트스트랩 Secret은 켜는 PR 때 필요하니 지금 넣는다(값은 복구 자산에서 오고 Infisical이 없어도 된다).
 
@@ -1661,9 +1662,10 @@ EOF
 
 - VM 시험: **canary.** sandbox 작업자 자격 Secret 둘(지도에서 ns `sandbox` 항목, 지금 `worker-credential-claude-subscription`과 `worker-task-credential-claude-subscription`)의 `CLAUDE_CODE_OAUTH_TOKEN` 값만 비밀이 아닌 고정 문자열 `u40-canary-not-a-real-token`으로 바꿔 넣는다(`vm`에서만). 켠 뒤 그 해시가 내보내기 값으로 바뀌면 ESO가 data를 실제로 썼다는 직접 증거다. 나머지 9개는 값이 같아 ESO가 아무것도 쓰지 않아도 해시가 같다.
   - **canary는 작업자가 받는 토큰 모양이어야 한다.** 앞뒤 공백을 뺀 인쇄 가능한 ASCII 한 줄, 공백 없이 16~8192자다. 모양이 틀리면 VM 작업자가 `credential_invalid`로 종료 1 → CrashLoop → Degraded가 되어 root가 wave -2에서 멈추고 5)가 실패한다.
-  - 키를 더하지 않고 있는 키의 값만 바꾼다. 스냅숏 해시는 지도 키만 보지만 `keys=map`은 Secret의 키 집합 전체를 본다. 여분 키가 있으면 `hand`·`before`가 `keys!=map`이고, 넘겨받을 때 ESO가 여분 키를 지우는지는 라이브로 보지 않았다 [미확인](6)의 소스 근거는 data를 통째로 바꿔 쓴다고 읽는다). 블록은 지도의 sandbox 항목이 둘이 아니거나 항목마다 키가 `CLAUDE_CODE_OAUTH_TOKEN` 하나가 아니면 쓰기 전에 멈춘다. 실행기 프로필을 바꾸면 canary 값과 이 검사도 그 자격의 모양·키로 함께 바꾼다.
+  - 키를 더하지 않고 있는 키의 값만 바꾼다. 스냅숏 해시는 지도 키만 보지만 `keys=map`은 Secret의 키 집합 전체를 본다. 여분 키가 있으면 `hand`·`before`가 `keys!=map`이고, 넘겨받을 때 ESO가 여분 키를 지우는지는 라이브로 보지 않았다 [미확인](6)의 소스 근거는 data를 통째로 바꿔 쓴다고 읽는다). 블록은 지도의 sandbox 항목이 둘이 아니거나 항목마다 키가 `ANTHROPIC_API_KEY`·`CLAUDE_AUTH_METHOD`·`CLAUDE_CODE_OAUTH_TOKEN` 셋이 아니면 쓰기 전에 멈춘다. canary는 구독 토큰 자리에만 넣는다. VM의 방식 표시는 `subscription`이라(bootstrap.md 2.2 vm 1단계) 작업자가 실제로 읽는 자격이 canary다. 실행기 프로필이나 인증 방식 키를 바꾸면 canary 값과 이 검사도 그 자격의 모양·키로 함께 바꾼다.
   - 켠 뒤 ESO가 값을 내보내기 값으로 바꾸면 작업자는 파드 재시작 없이 다음 실행부터 새 값을 읽는다(실행마다 파일을 다시 읽는다). 6)의 "재시작 수 바뀐 것 0" 판정과 맞는다.
-- 실제 복구(`prod`): sandbox 파드는 내보내기의 토큰 모양만 보고 Ready가 된다(모델 호출 없음). 장기 토큰이라 Codex 시드처럼 갱신으로 낡지는 않지만, 내보내기 뒤 철회·재발급했거나 만료(발급 뒤 1년)됐으면 첫 대화가 `auth_expired`다. 그때는 새 토큰을 발급해 Infisical에 넣고, 장애가 끝나 ESO가 넘겨받으면 반영된다. 이 경우 6) 판정에서 이 항목은 `hash!=expected`로 나온다(내보내기와 Infisical 값이 달라서다. 넘겨받기 실패가 아니다).
+- **방식 표시.** 손 Secret에는 내보내기의 `CLAUDE_AUTH_METHOD` 값이 그대로 들어가고 작업자는 그 방식으로 돈다(실행마다 표시가 고른 자격 하나만 실행 env에 넣는다, 봇 `src/credentials.ts` `MethodEnvCredential`). `subscription`이면 구독 토큰, `api`면 API 키 자리가 실제 값이어야 하고, 고른 쪽이 `unset`이면 작업자가 기동하지 못해 5)에서 sandbox가 Degraded다. 내보내기에 방식 표시가 없으면(인증 방식 키 전 내보내기) 이 블록이 `missing`으로 멈춘다. 작업자만 보면 표시 파일이 없을 때 구독으로 돌지만, 그렇게 만든 손 Secret은 키 집합이 지도와 달라 스냅숏이 `keys!=map`이고 넘겨받기를 판정하지 못한다. 지도를 고쳐 돌리지 않고 새 내보내기를 쓴다.
+- 실제 복구(`prod`): sandbox 파드는 내보내기의 자격 모양만 보고 Ready가 된다(모델 호출 없음). 방식 표시가 `api`면 API 키로 돌아 아래 토큰 만료와 상관없고, 키를 철회했으면 첫 실행이 인증 멈춤, 크레딧이 없으면 결제 멈춤이다(owner가 Console에서 풀거나 `homelab bot account use`로 바꾼다). 아래는 `subscription`일 때다. 장기 토큰이라 Codex 시드처럼 갱신으로 낡지는 않지만, 내보내기 뒤 철회·재발급했거나 만료(발급 뒤 1년)됐으면 첫 대화가 `auth_expired`다. 그때는 새 토큰을 발급해 Infisical에 넣고, 장애가 끝나 ESO가 넘겨받으면 반영된다. 이 경우 6) 판정에서 이 항목은 `hash!=expected`로 나온다(내보내기와 Infisical 값이 달라서다. 넘겨받기 실패가 아니다).
 - VM 시험: Alertmanager 수신자 Secret 둘(`alertmanager-healthchecks`, `alertmanager-telegram`)은 optional 볼륨이고 Alertmanager가 보낼 때 파일을 읽어, 값이 틀려도 파드는 뜨고 그 전송만 실패한다. **알림 판정을 안 하면 `homelab-dev`의 그 키에 가짜 값(`.invalid` 주소 등)을 넣는 것으로 충분하다**(2026-10-29 시험은 시험 체크·봇을 만들지 않았다).
 
 ```bash
@@ -1677,8 +1679,8 @@ map="$U40_DIR/map.json"; exp="$U40_DIR/$project-export.age"
 if [ "$CLUSTER" = vm ]; then canary=u40-canary-not-a-real-token; else canary=; fi
 [ "$(jq length "$map")" -eq 11 ] || { echo "지도가 11개가 아니다"; exit 1; }
 # canary는 sandbox 항목(작업자 자격 Secret 둘)의 있는 키 값만 바꾼다. 키를 더하면 스냅숏이 keys!=map이 된다
-[ -z "$canary" ] || [ "$(jq -c '[.[] | select(.ns == "sandbox") | .keys[].secretKey]' "$map")" = '["CLAUDE_CODE_OAUTH_TOKEN","CLAUDE_CODE_OAUTH_TOKEN"]' ] \
-  || { echo "지도의 sandbox 항목이 CLAUDE_CODE_OAUTH_TOKEN 키 하나씩 둘이 아니다(canary 자리, 프로필이 바뀌었으면 canary도 바꾼다)"; exit 1; }
+[ -z "$canary" ] || [ "$(jq -c '[.[] | select(.ns == "sandbox") | [.keys[].secretKey] | sort]' "$map")" = '[["ANTHROPIC_API_KEY","CLAUDE_AUTH_METHOD","CLAUDE_CODE_OAUTH_TOKEN"],["ANTHROPIC_API_KEY","CLAUDE_AUTH_METHOD","CLAUDE_CODE_OAUTH_TOKEN"]]' ] \
+  || { echo "지도의 sandbox 항목이 인증 방식 키 셋(ANTHROPIC_API_KEY·CLAUDE_AUTH_METHOD·CLAUDE_CODE_OAUTH_TOKEN)씩 둘이 아니다(canary 자리, 프로필·키가 바뀌었으면 canary도 바꾼다)"; exit 1; }
 [ "$(jq -c '[.[] | select(.creationPolicy == "Merge") | .ns + "/" + .target]' "$map")" = '["argocd/argocd-secret"]' ] \
   || { echo "Merge 대상이 argocd/argocd-secret 하나가 아니다"; exit 1; }
 # Owner 대상이 이미 있으면 멈춘다. 다시 돌릴 때 ESO가 넘겨받은 Secret을 덮지 않게

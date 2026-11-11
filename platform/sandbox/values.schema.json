@@ -29,11 +29,12 @@
     "task": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "image", "remoteCredentialKey", "nodeName"],
+      "required": ["enabled", "image", "remoteCredentialKey", "remoteApiKey", "nodeName"],
       "properties": {
         "enabled": { "type": "boolean" },
         "image": { "type": "string", "pattern": "^ghcr\\.io/ukyi-app/homelab-bot@sha256:[0-9a-f]{64}$" },
         "remoteCredentialKey": { "const": "CLAUDE_CODE_OAUTH_TOKEN_TASK" },
+        "remoteApiKey": { "const": "ANTHROPIC_API_KEY_TASK" },
         "nodeName": { "type": "string", "pattern": "^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$" }
       }
     },
@@ -56,14 +57,28 @@
             "executor": { "type": "string" },
             "model": { "type": "string" },
             "credentialKey": { "type": "string" },
+            "methods": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "required": ["marker", "apiKey"],
+              "properties": {
+                "marker": { "type": "string" },
+                "apiKey": { "type": "string" }
+              }
+            },
             "egressHosts": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/host" } }
           },
           "oneOf": [
             {
+              "required": ["methods"],
               "properties": {
                 "id": { "const": "claude-subscription" },
                 "executor": { "const": "claude" },
                 "credentialKey": { "const": "CLAUDE_CODE_OAUTH_TOKEN" },
+                "methods": {
+                  "type": "object",
+                  "properties": { "marker": { "const": "CLAUDE_AUTH_METHOD" }, "apiKey": { "const": "ANTHROPIC_API_KEY" } }
+                },
                 "model": { "pattern": "^claude-[a-z0-9]+(-[a-z0-9]+){1,8}$" }
               }
             },
@@ -72,6 +87,7 @@
                 "id": { "const": "codex-subscription" },
                 "executor": { "const": "codex" },
                 "credentialKey": { "const": "CODEX_AUTH_JSON" },
+                "methods": { "type": "null" },
                 "model": { "const": "cli-default" }
               }
             }

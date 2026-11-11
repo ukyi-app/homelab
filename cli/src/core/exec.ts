@@ -6,11 +6,12 @@
 // - read exec: 쓰기로 판정된 argv를 실행하지 않는다. 예외는 core가 만든 임시 폴더로의 git clone 하나.
 // - write exec: 엔진이 Step.apply() 한 번마다 새로 만들고 끝나면 폐기한다(live). 폐기한 exec를 붙잡아 두었다가 써도 막힌다.
 //   전역 쓰기 창이 없으므로 다른 엔진·병렬 흐름의 read가 쓰기를 빌려 쓸 수 없다.
-// - 직접 stdio(inherit, stdout-to-stderr)는 github 위임만(예외: 쓰기 문맥의 claude setup-token 로그인, stdout-to-stderr만).
-//   stdout-to-stderr는 부모 stdin을 넘긴다.
+// - 직접 stdio(inherit, stdout-to-stderr)는 github 위임만. stdout-to-stderr는 부모 stdin을 넘긴다.
+// - claude setup-token 로그인은 makeTerminalLogin(가짜 터미널, 쓰기 문맥, argv 고정)만 띄운다.
 // - 값을 내는 호출은 secretStdout으로만, 민감 호출의 stderr 원문은 돌려주지 않는다.
 import { basename } from "node:path";
 import { guardInfisicalBackup } from "./infisical-backup";
+import { screenSize } from "./output";
 import { Secret, containsTracked, isSecret, revealSecret } from "./secret";
 import { ownedTemp } from "./temp";
 import { classify } from "./writes";
@@ -87,12 +88,75 @@ type MakeOpts = {
   delegate?: boolean;
 };
 
-// homelab bot account add의 브라우저 로그인(`claude setup-token`). 사람이 터미널에서 직접 답해야 하는 호출이라 stdin·stderr를 넘긴다.
-// 함정: 이 명령은 발급한 토큰을 stdout에 출력한다(공식 문서). 그대로 넘기면 `--json >파일`의 결과 파일에 토큰이 JSON 앞에 섞이므로
-// stdout-to-stderr만 허용한다. CLI는 그 출력을 잡지 않아 값이 CLI 결과에 들어가지 않지만 화면 스크롤에는 남는다.
-// 출력 자동 수집은 출력 꼴이 문서에 없어 하지 않는다(봇 DECISIONS C22).
+// homelab bot account add의 브라우저 로그인(`claude setup-token`). 사람이 터미널에서 직접 답해야 하는 호출이다.
+// 함정: 이 명령은 발급한 토큰을 출력한다. stdout-to-stderr로 넘기면 `--json >파일`에는 섞이지 않지만 화면 스크롤에 남는다.
+// 그래서 터미널에서는 makeTerminalLogin이 가짜 터미널로 띄워 출력을 직접 받고, 화면에는 거른 글만 보인다(input.ts tokenScreenFilter).
 function interactiveLogin(argv: string[]): boolean {
   return argv.length === 2 && argv[0] === "claude" && argv[1] === "setup-token";
+}
+
+export type LoginResult = { code: number | null; signal?: string; errKind?: "not-found" | "timeout" | "spawn" };
+// screen: 자식 화면 글(디코딩한 조각). 값을 거르는 것은 부르는 쪽 몫이다.
+// cols: 자식에게 줄 열 수(기본 사람 터미널 폭). 거르기가 접힌 토큰을 같은 폭으로 이어 읽으므로 부르는 쪽이 정해 함께 넘긴다.
+export type TerminalLogin = (argv: string[], screen: (text: string) => void, timeoutMs: number, cols?: number) => Promise<LoginResult>;
+
+// 쓰기 문맥 안에서만 돈다(live). 사람 터미널의 키 입력은 raw로 그대로 자식에게 넘긴다(코드 붙여 넣기·Enter·Ctrl-C).
+// 함정: 자식(Ink 화면)은 받은 열 수로 줄을 접고 커서를 옮겨 다시 그린다. 실제 터미널보다 넓게 주면 실제 터미널이 긴 줄을 한 번 더
+// 접어 다시 그리기가 엉뚱한 줄을 지운다. 그래서 실제 폭을 그대로 준다.
+export function makeTerminalLogin(m: { env: Record<string, string | undefined>; live: () => boolean }): TerminalLogin {
+  return async (argv, screen, timeoutMs, cols = screenSize().cols) => {
+    if (!m.live()) throw new Error(`${PLAN_WRITE_BLOCKED}: 끝난 apply의 쓰기 문맥을 다시 썼다(Step.apply 밖)`);
+    if (!interactiveLogin(argv)) throw new Error("가짜 터미널 로그인은 claude setup-token만 띄운다");
+    const env = childEnv(argv[0], m.env, {});
+    if (!Bun.which(argv[0], { PATH: env.PATH ?? "" })) return { code: null, errKind: "not-found" };
+    const decoder = new TextDecoder();
+    let closed!: () => void;
+    const eof = new Promise<void>((r) => (closed = r));
+    let p: ReturnType<typeof Bun.spawn>;
+    try {
+      p = Bun.spawn(argv, {
+        env,
+        terminal: {
+          cols,
+          rows: screenSize().rows,
+          data: (_t, data) => screen(decoder.decode(data, { stream: true })),
+          exit: () => closed(),
+        },
+      });
+    } catch {
+      return { code: null, errKind: "spawn" };
+    }
+    const stdin = process.stdin;
+    const forward = (d: Buffer) => p.terminal?.write(d);
+    const tty = Boolean(stdin.isTTY);
+    if (tty) {
+      stdin.setRawMode(true);
+      stdin.on("data", forward);
+      stdin.resume();
+    }
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      p.kill();
+    }, timeoutMs);
+    try {
+      await p.exited;
+      // 자식이 끝난 뒤에도 터미널에 남은 출력이 있다. 다 받은 뒤 판정해야 마지막 줄(토큰)이 빠지지 않는다.
+      await Promise.race([eof, Bun.sleep(1_000)]);
+    } finally {
+      clearTimeout(timer);
+      if (tty) {
+        stdin.off("data", forward);
+        stdin.setRawMode(false);
+        stdin.pause();
+      }
+      p.terminal?.close();
+    }
+    const rest = decoder.decode();
+    if (rest) screen(rest);
+    if (timedOut) return { code: null, errKind: "timeout" };
+    return { code: p.exitCode, ...(typeof p.signalCode === "string" ? { signal: p.signalCode } : {}) };
+  };
 }
 
 function cloneAllowed(argv: string[], opts: ExecOpts): boolean {
@@ -117,8 +181,7 @@ export function makeExec(kind: "read" | "write", m: MakeOpts): Exec {
     if (verdict.sensitiveOutput && !opts.secretStdout) throw new Error(`값을 내는 호출은 secretStdout으로만 실행한다: ${verdict.reason}`);
     const stdio = opts.stdio ?? "pipe";
     if (stdio !== "pipe") {
-      if (!m.delegate && !(kind === "write" && stdio === "stdout-to-stderr" && interactiveLogin(argv)))
-        throw new Error(`stdio ${stdio}는 github 위임 명령만 쓴다(쓰기 문맥의 claude setup-token 로그인은 stdout-to-stderr로만 예외, 출력 계층을 거치지 않는다)`);
+      if (!m.delegate) throw new Error(`stdio ${stdio}는 github 위임 명령만 쓴다(claude setup-token 로그인은 makeTerminalLogin)`);
       if (opts.secretStdout || isSecret(opts.input)) throw new Error(`stdio ${stdio}에 시크릿 입출력을 함께 쓰지 않는다`);
     }
     const sensitive = Boolean(opts.secretStdout) || isSecret(opts.input) || Boolean(verdict.sensitiveOutput);

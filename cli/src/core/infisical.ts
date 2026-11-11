@@ -36,6 +36,9 @@ export type ProjectSource = { env: Record<string, string | undefined>; isTTY: bo
 
 export function projectResolver(src: ProjectSource): { id: () => string; status: () => "ok" | "missing" | "invalid" } {
   let cached: string | undefined;
+  // 한 실행에 한 번만 묻는다. 답이 틀려도 다시 묻지 않고 같은 실패를 낸다(단계마다 다시 물으면 사람이 같은 값을 거듭 친다).
+  let answer: string | undefined;
+  let asked = false;
   return {
     status() {
       const v = src.env[PROJECT_ENV];
@@ -45,7 +48,14 @@ export function projectResolver(src: ProjectSource): { id: () => string; status:
     id() {
       if (cached) return cached;
       let v = src.env[PROJECT_ENV];
-      if ((v === undefined || v === "") && src.isTTY) v = src.ask("Infisical homelab project ID: ") ?? undefined;
+      if ((v === undefined || v === "") && src.isTTY) {
+        if (!asked) {
+          asked = true;
+          // 값은 CLI가 저장하지 않는다(설계 C.7 자체 상태 저장소 없음). 매번 묻지 않게 하는 길은 사람의 셸 설정이다.
+          answer = src.ask(`매번 묻지 않게 하려면 셸 설정에 export ${PROJECT_ENV}=<ID>를 둔다\nInfisical homelab project ID: `) ?? undefined;
+        }
+        v = answer;
+      }
       if (v === undefined || v === "") throw new CliError(`${PROJECT_ENV}가 없다`, `export ${PROJECT_ENV}=<homelab project ID> 뒤 다시 실행한다`);
       if (!fullMatch(PROJECT_ID, v)) throw new CliError(`${PROJECT_ENV} 형식이 아니다(UUID)`, `${PROJECT_ENV}를 Infisical 프로젝트 설정의 ID로 고친다`);
       cached = v;
