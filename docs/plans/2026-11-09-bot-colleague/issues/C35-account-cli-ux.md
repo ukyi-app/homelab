@@ -1,7 +1,7 @@
 # C35 계정 CLI 간소화와 보기 편한 출력
 
 - 단계: 5 멈춤과 계정
-- 상태: 진행 중 (2026-11-11 13:4x 착수)
+- 상태: integrated (2026-11-11, homelab #1260 `c73b337`·#1261 `bb4a84c`. 실제 화면에서의 토큰 거르기 확인과 옛 토큰 철회는 남음)
 - 명세: 사용자 요청 2026-11-11(계정 등록을 직접 해 본 뒤): "claude 계정 로그인 2번, 매번 project id 물어보는 것. 과정이 좀 더 간소화되었으면", "레인이라는 말이 어색하다. 더 쉬운 표현으로", "homelab cli도 좀 더 보기 편하게. @clack/prompts 같은 것 이용", "완료 후 나오는 답변도 필요한 내용만 간략하게 깔끔하게". 봇 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.8 "계정 등록"·"계정 전환"·"계정 목록"의 동작은 그대로다(값 비노출, 반영 확인 뒤 해제).
 - Blocked by: C22, C23
 - 연결 AC: AC-21, AC-22(동작은 그대로, 사용 경험만)
@@ -67,5 +67,5 @@ owner가 계정을 등록·전환할 때 묻는 것이 줄고(로그인 한 번,
 - 바뀐 입력 계약: 파이프로 토큰을 넘길 때 기본이 stdin 한 줄(예전 두 줄). 두 줄이면 `--separate-tokens` 안내와 함께 실패한다.
 - 못 본 것: 실제 `claude setup-token`을 가짜 터미널로 띄운 화면(실토큰이 생겨 스텁으로만 시험). 사람 단계(할 일 8)가 본다.
 - 사람 단계(할 일 8, 2026-11-11 15:2x): owner가 새 CLI로 `account add main --replace --apply`(로그인 1회)와 `account use main --apply`(약 40초, 요약 화면 정상)를 했다. 토큰 만료 2027-11-11 15:27. 드러난 것 둘을 할 일 9·10으로 더했다.
-- homelab PR #1261(할 일 9·10, head `3c54d0a`, owner 병합 대기): 토큰 거르기를 글자 흐름으로(안내 문구나 `sk-ant-`가 보이면 화면을 붙들고 `claude`가 끝난 뒤 읽음, 다시 그리기·접힌 줄·색 escape·커서 위치 지정), 값 뒤에 `Store this token` 표지가 와야 채택, 확신이 없으면 받지 않고 가린 채 가려진 입력으로. 자식에게 실제 터미널 폭. 등록 중 움직이는 진행 줄(Worker로 그림. clack spinner는 Ctrl-C에 종료 코드 0으로 끝나 쓰지 않음). `bun run test:cli` 874개 통과, `bun run ci` 31단계·`ci` 통과. Codex 1차 P2 1(접힌 토큰의 줄 끝 공백에서 잘린 값 채택) 수정, 재리뷰 지적 없음.
-- 남은 것: #1261 owner 병합, 실제 `claude setup-token` 화면에서 거르기 확인(다음 재등록 때), 13:1x에 발급한 옛 토큰 둘 철회(owner). 지난 줄의 할 일 8(owner가 `account add main --replace`와 `account use main`을 다시 해 보고 옛 토큰 철회).
+- homelab PR #1261(할 일 9·10, head `3c54d0a`, 병합 `bb4a84c` 2026-11-11 사용자 "진행해"): 토큰 거르기를 글자 흐름으로(안내 문구나 `sk-ant-`가 보이면 화면을 붙들고 `claude`가 끝난 뒤 읽음, 다시 그리기·접힌 줄·색 escape·커서 위치 지정), 값 뒤에 `Store this token` 표지가 와야 채택, 확신이 없으면 받지 않고 가린 채 가려진 입력으로. 자식에게 실제 터미널 폭. 등록 중 움직이는 진행 줄(Worker로 그림. clack spinner는 Ctrl-C에 종료 코드 0으로 끝나 쓰지 않음). `bun run test:cli` 874개 통과, `bun run ci` 31단계·`ci` 통과. Codex 1차 P2 1(접힌 토큰의 줄 끝 공백에서 잘린 값 채택) 수정, 재리뷰 지적 없음.
+- 남은 것: 실제 `claude setup-token` 화면에서 거르기 확인(다음 재등록 때), 13:1x에 발급한 옛 토큰 둘 철회(owner). 지난 줄의 할 일 8(owner가 `account add main --replace`와 `account use main`을 다시 해 보고 옛 토큰 철회).
