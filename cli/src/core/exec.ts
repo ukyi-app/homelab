@@ -97,15 +97,14 @@ function interactiveLogin(argv: string[]): boolean {
 
 export type LoginResult = { code: number | null; signal?: string; errKind?: "not-found" | "timeout" | "spawn" };
 // screen: 자식 화면 글(디코딩한 조각). 값을 거르는 것은 부르는 쪽 몫이다.
-export type TerminalLogin = (argv: string[], screen: (text: string) => void, timeoutMs: number) => Promise<LoginResult>;
-
-// 가짜 터미널 열 수. 함정: 자식(Ink 화면)은 열 수에서 글을 접는다. 토큰(100자 남짓)이 두 줄로 접히면 둘째 줄은 토큰 꼴이 아니라
-// 가려지지 않는다. 그래서 실제 터미널보다 넓게 둔다(넓은 줄은 실제 터미널이 화면에서만 접는다).
-const LOGIN_COLS = 320;
+// cols: 자식에게 줄 열 수(기본 사람 터미널 폭). 거르기가 접힌 토큰을 같은 폭으로 이어 읽으므로 부르는 쪽이 정해 함께 넘긴다.
+export type TerminalLogin = (argv: string[], screen: (text: string) => void, timeoutMs: number, cols?: number) => Promise<LoginResult>;
 
 // 쓰기 문맥 안에서만 돈다(live). 사람 터미널의 키 입력은 raw로 그대로 자식에게 넘긴다(코드 붙여 넣기·Enter·Ctrl-C).
+// 함정: 자식(Ink 화면)은 받은 열 수로 줄을 접고 커서를 옮겨 다시 그린다. 실제 터미널보다 넓게 주면 실제 터미널이 긴 줄을 한 번 더
+// 접어 다시 그리기가 엉뚱한 줄을 지운다. 그래서 실제 폭을 그대로 준다.
 export function makeTerminalLogin(m: { env: Record<string, string | undefined>; live: () => boolean }): TerminalLogin {
-  return async (argv, screen, timeoutMs) => {
+  return async (argv, screen, timeoutMs, cols = screenSize().cols) => {
     if (!m.live()) throw new Error(`${PLAN_WRITE_BLOCKED}: 끝난 apply의 쓰기 문맥을 다시 썼다(Step.apply 밖)`);
     if (!interactiveLogin(argv)) throw new Error("가짜 터미널 로그인은 claude setup-token만 띄운다");
     const env = childEnv(argv[0], m.env, {});
@@ -118,7 +117,7 @@ export function makeTerminalLogin(m: { env: Record<string, string | undefined>; 
       p = Bun.spawn(argv, {
         env,
         terminal: {
-          cols: Math.max(screenSize().cols, LOGIN_COLS),
+          cols,
           rows: screenSize().rows,
           data: (_t, data) => screen(decoder.decode(data, { stream: true })),
           exit: () => closed(),

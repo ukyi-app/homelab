@@ -4,7 +4,7 @@ import { isCancel, password } from "@clack/prompts";
 import { readFileSync, readSync } from "node:fs";
 import type { TerminalLogin } from "./exec";
 import { valueProblem } from "./infisical";
-import { promptOutput } from "./output";
+import { promptOutput, screenSize } from "./output";
 import { CliError } from "./result";
 import { Secret } from "./secret";
 
@@ -112,109 +112,327 @@ async function readSlots(io: SlotInput, lanes: string[], separate: boolean, what
 // 화면 글은 tokenScreenFilter로 걸러 screen(stderr)에 보인다. stdout은 결과 문서 하나뿐이다(--json >파일).
 export async function setupTokenLogin(login: TerminalLogin, slot: string, progress: (line: string) => void, screen: (text: string) => void): Promise<Secret | null> {
   progress(`${slot} 토큰: claude setup-token을 띄운다. 브라우저에서 봇 계정으로 로그인한다(토큰은 CLI가 받고 화면에는 보이지 않는다)`);
-  const filter = tokenScreenFilter(screen);
-  // 브라우저 로그인을 사람이 끝낼 때까지 기다린다(10분).
-  const r = await login(["claude", "setup-token"], (t) => filter.push(t), 600_000);
+  // 자식에게 실제 터미널 폭을 준다(화면이 자연스럽게 접힌다). 접힌 토큰은 거르기가 같은 폭으로 이어 읽는다.
+  const cols = screenSize().cols;
+  const filter = tokenScreenFilter(screen, cols);
+  // 토큰 자리부터는 자식이 끝날 때까지 화면을 붙든다. 보통 곧 끝나지만, 1초 넘게 붙들면 멈춘 것처럼 보이지 않게 한 줄 알린다.
+  let since: number | null = null;
+  const tick = setInterval(() => {
+    if (!filter.holding()) return;
+    since ??= Date.now();
+    if (Date.now() - since >= 1_000) filter.notice("토큰을 받는 중(claude가 끝나기를 기다린다)");
+  }, 200);
+  let r;
+  try {
+    // 브라우저 로그인을 사람이 끝낼 때까지 기다린다(10분).
+    r = await login(["claude", "setup-token"], (t) => filter.push(t), 600_000, cols);
+  } finally {
+    clearInterval(tick);
+  }
   filter.end();
   if (r.errKind === "not-found") throw new CliError("claude(Claude Code CLI)가 이 기기의 PATH에 없다", "Claude Code CLI를 설치한 기기에서 다시 실행한다(토큰은 이 기기에서 받는다)");
   if (r.errKind === "timeout") throw new CliError("claude setup-token: 10분 안에 끝나지 않았다", "같은 명령을 다시 실행한다");
   if (r.errKind === "spawn") throw new CliError("claude setup-token을 띄우지 못했다", "Claude Code CLI가 실행되는지(claude --version) 본 뒤 같은 명령을 다시 실행한다");
   if (r.code !== 0) throw new CliError(`claude setup-token이 실패했다(exit ${r.code ?? r.signal ?? "?"})`, "브라우저 로그인을 마친 뒤 같은 명령을 다시 실행한다");
-  const { token, conflict } = filter.result();
+  const { token, conflict, hidden } = filter.result();
   if (conflict) throw new CliError("claude setup-token 화면에 서로 다른 토큰이 둘 나왔다. 아무것도 쓰지 않았다", "같은 명령을 다시 실행하고, 이번에 발급된 토큰은 Claude 설정에서 철회한다");
-  if (!token) progress("화면에서 토큰 줄을 알아보지 못했다(claude 출력 꼴이 달라졌다). 위에 나온 토큰을 복사해 다음 입력에 붙여 넣고, 붙여 넣은 뒤 터미널 스크롤을 지운다");
+  // 가렸는데 받지 못했으면 화면에 토큰이 없어 사람도 복사할 수 없다. 같은 명령을 다시 실행해도 같은 화면 꼴이면 또 받지 못한다.
+  // 그래서 claude setup-token을 다른 터미널에서 직접 띄워 나온 토큰을 이 가려진 입력에 붙여 넣는 길을 알린다(stdin 한 줄과 같은 값 경로).
+  if (!token && hidden)
+    progress("화면의 토큰은 가렸지만 값을 확신하지 못해 받지 않았다(claude 화면 꼴이 달라졌다). 다른 터미널에서 claude setup-token을 실행해 나온 토큰을 다음 입력에 붙여 넣고 그 터미널 스크롤을 지운다. 방금 가린 토큰은 저장하지 않았으니 Claude 설정에서 철회한다");
+  else if (!token) progress("화면에서 토큰을 찾지 못했다(claude 출력 꼴이 달라졌다). 위에 나온 토큰을 복사해 다음 입력에 붙여 넣고, 붙여 넣은 뒤 터미널 스크롤을 지운다");
   return token;
 }
 
-// claude setup-token 화면에서 토큰 줄만 가리고 받는다. 관측한 꼴(claude 2.1.322, 2026-11-11)은 토큰이 홀로 한 줄이다.
-// 그 꼴(escape를 뺀 줄 전체가 토큰)에 맞을 때만 가리고 받는다. 맞지 않으면 가리지도 받지도 않는다: 그때 토큰이 지금처럼
-// 화면에 보여야 사람이 가려진 입력에 붙여 넣을 수 있다(가렸는데 못 받으면 아무도 토큰을 모른다).
-// 함정: 자식 출력은 아무 바이트에서나 잘려 온다. 줄이 끝나기 전에는 꼬리의 영숫자·_·-와 escape 묶음(토큰의 시작일 수 있다)을
-// 붙들고 그 앞만 내보낸다. 그래서 코드 입력 안내("… > ")처럼 줄바꿈 없는 글은 곧바로 보이고 토큰 조각은 판정 전에 나가지 않는다.
-const TOKEN_LINE = /^sk-ant-oat\d{2}-[A-Za-z0-9_-]{20,}$/;
-const TOKEN_MARK = "sk-ant-";
+// claude setup-token 화면에서 토큰을 받고 가린다. 줄 꼴에 기대지 않고 escape를 걷어 낸 글자 흐름으로 판정한다. 함정(2026-11-11
+// owner 실측, claude 2.1.322): 터미널 UI(Ink)가 커서 이동·줄 지우기로 다시 그리는 화면에서는 "토큰 홀로 한 줄" 꼴이 맞지 않는다.
+// - 안내 문구(ANNOUNCE)나 토큰 머리(HEAD)가 보이면 그 자리부터 자식이 끝날 때까지 아무것도 내보내지 않고 붙든다.
+// - 끝나면 붙든 글에서 머리마다 토큰을 읽는다. 모두 확신할 수 있고 꼴 검사를 지나고 같은 값일 때만 받는다. 값이 잘리거나 다른 글이
+//   덧붙어 저장되면 등록이 조용히 깨지므로, 하나라도 확신이 없으면 받지 않는다.
+// - 받았으면(또는 서로 다른 토큰이면) 붙든 글을 토큰 글자만 뺀 채(첫 자리에 MASKED) 내보낸다. 내보낼 글에 토큰 조각이 보이면
+//   내보내지 않는다. 받지 못했으면 붙든 글을 버린다. 그래서 받지 못해도 토큰은 화면에 남지 않는다.
+// - 머리·안내가 하나도 없으면 아무것도 가리지 않는다(새 꼴의 토큰은 화면에 보이고, 사람이 가려진 입력에 붙여 넣는다).
+// 함정: 자식 출력은 아무 바이트에서나 잘려 온다. 붙들기 전에는 꼬리의 토큰 글자·escape 묶음(머리의 시작일 수 있다)만 붙들고
+// 그 앞은 곧바로 내보낸다. 그래서 코드 입력 안내("… > ")는 늦지 않고 머리 조각은 판정 전에 나가지 않는다.
+const HEAD = "sk-ant-";
+const ANNOUNCE = "Your OAuth token";
+const TOKEN_FORM = /^sk-ant-oat\d{2}-[A-Za-z0-9_-]{20,}$/;
+const TOKEN_CHAR = /^[A-Za-z0-9_-]$/;
 const MASKED = "[토큰을 받아 화면에서 가렸다]";
-const ESCAPE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g;
-const visible = (s: string) => s.replace(ESCAPE, "").replace(/[\r\n]/g, "").trim();
+// 화면 폭에서 접힌 줄로 볼 여유. 접힌 줄은 들여쓰기·상자 여백을 빼고 열 끝 가까이까지 찬다. 그보다 짧은 줄 뒤의 토큰 글자 줄은
+// 이어진 것인지 다른 글인지 알 수 없어 받지 않는다.
+const FOLD_SLACK = 4;
+// 받지 못한 토큰 조각 검사의 창 길이. 영어 문구와 우연히 겹치지 않을 만큼 길고, 접힌 조각을 놓치지 않을 만큼 짧다.
+const LEAK_WINDOW = 8;
 
-// 꼬리에서 붙들 자리. 영숫자·_·-와 escape(끝나지 않은 escape 포함)만 이어진 꼬리의 시작 위치. 그 뒤에 붙은 공백·\r도
-// 함께 붙든다(토큰 줄은 \r\n으로 끝나 \r까지 온 조각이 흔하다). 공백 앞이 토큰 글자가 아니면 공백은 그대로 내보낸다.
-function holdFrom(s: string): number {
-  const end = s.length;
-  const ws = back(s, end, /[ \t\r]/);
-  const run = back(s, ws, /[A-Za-z0-9_-]/);
-  return run < ws ? run : back(s, end, null);
+// 자식 출력의 한 단위. row: 다른 줄로 간다(줄바꿈, 세로 이동, 커서 위치). jump: 같은 줄에서 커서가 옮겨 간다(\r, 가로 이동).
+// 둘 다 아니면 화면 글이 아닌 escape(색, 줄 지우기, 모드)다. col은 이 단위 뒤의 커서 열이다(모르면 NaN: 접힘 판정이 실패 쪽으로 간다).
+type Unit = { end: number; ch?: string; row?: boolean; jump?: boolean; col: (c: number) => number } | { end: number; open: true };
+
+const CSI = /\x1b\[([0-?]*)[ -/]*([@-~])/y;
+const keep = (c: number) => c;
+
+function unitAt(s: string, i: number): Unit {
+  const c = s[i];
+  if (c !== "\x1b") {
+    const ch = String.fromCodePoint(s.codePointAt(i)!);
+    const end = i + ch.length;
+    if (ch === "\n") return { end, row: true, col: () => 0 };
+    if (ch === "\r") return { end, jump: true, col: () => 0 };
+    if (ch === "\b") return { end, jump: true, col: (x) => Math.max(0, x - 1) };
+    if (ch === "\t") return { end, ch: " ", col: (x) => (Math.floor(x / 8) + 1) * 8 };
+    if (/[\u0000-\u001f\u007f-\u009f]/.test(ch)) return { end, col: keep };
+    return { end, ch, col: (x) => x + 1 };
+  }
+  if (i + 1 >= s.length) return { end: s.length, open: true };
+  const n = s[i + 1];
+  if (n === "[") {
+    CSI.lastIndex = i;
+    const m = CSI.exec(s);
+    if (!m) return /^\x1b\[[0-?]*[ -/]*$/.test(s.slice(i)) ? { end: s.length, open: true } : { end: i + 1, col: keep };
+    const end = i + m[0].length;
+    if (m[1].startsWith("?")) return { end, col: keep };
+    const [a, b] = m[1].split(";").map((x) => Number(x) || 1);
+    switch (m[2]) {
+      case "A": case "B": case "d": case "e": return { end, row: true, col: keep };
+      case "E": case "F": return { end, row: true, col: () => 0 };
+      case "H": case "f": return { end, row: true, col: () => (b ?? 1) - 1 };
+      case "G": case "`": return { end, jump: true, col: () => (a ?? 1) - 1 };
+      case "C": case "a": return { end, jump: true, col: (x) => x + (a ?? 1) };
+      case "D": return { end, jump: true, col: (x) => Math.max(0, x - (a ?? 1)) };
+      case "u": return { end, row: true, col: () => NaN };
+      default: return { end, col: keep };
+    }
+  }
+  // OSC(링크·제목)과 DCS 같은 문자열 escape는 끝 표지까지 한 단위다.
+  if (n === "]" || "PX^_".includes(n)) {
+    const st = n === "]" ? /\x07|\x1b\\/g : /\x1b\\/g;
+    st.lastIndex = i + 2;
+    const m = st.exec(s);
+    return m ? { end: m.index + m[0].length, col: keep } : { end: s.length, open: true };
+  }
+  if (n >= " " && n <= "/") return i + 2 >= s.length ? { end: s.length, open: true } : { end: i + 3, col: keep };
+  const end = i + 2;
+  if ("78Mc".includes(n)) return { end, row: true, col: () => NaN };
+  if (n === "D") return { end, row: true, col: keep };
+  if (n === "E") return { end, row: true, col: () => 0 };
+  return { end, col: keep };
 }
 
-const WHOLE_ESCAPE = new RegExp(`^(?:${ESCAPE.source})$`);
-const OPEN_ESCAPE = /^\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b]*)?$/;
+type Seen = { kind: "ch"; ch: string; col: number; a: number; b: number } | { kind: "row" } | { kind: "jump" };
 
-// from에서 앞으로 cls 글자와 escape를 건너뛴 위치. escape를 글자보다 먼저 본다: \x1b[K의 K를 글자로 세면 escape 앞(토큰)이 풀린다.
-// 문자열 끝의 끝나지 않은 escape(\x1b[3 같은 것)도 escape로 본다.
-function back(s: string, from: number, cls: RegExp | null): number {
-  let i = from;
+// 붙든 글을 화면 글자·줄 이동·같은 줄 이동의 흐름으로 편다. 화면 글이 아닌 escape는 뺀다.
+function flatten(raw: string, col0: number): Seen[] {
+  const seen: Seen[] = [];
+  let col = col0;
+  for (let i = 0; i < raw.length; ) {
+    const u = unitAt(raw, i);
+    if ("open" in u) break;
+    if (u.ch !== undefined) seen.push({ kind: "ch", ch: u.ch, col, a: i, b: u.end });
+    else if (u.row) seen.push({ kind: "row" });
+    else if (u.jump) seen.push({ kind: "jump" });
+    col = u.col(col);
+    i = u.end;
+  }
+  return seen;
+}
+
+const tokenAt = (s: Seen[], i: number) => i < s.length && s[i].kind === "ch" && TOKEN_CHAR.test((s[i] as { ch: string }).ch);
+const charAt = (s: Seen[], i: number, ch: string) => i < s.length && s[i].kind === "ch" && (s[i] as { ch: string }).ch === ch;
+
+// 머리 자리 h에서 토큰 하나를 읽는다. 토큰 글자가 끝나는 곳이 끝이다. 줄이 바뀌면 이어지는 것은 Ink식 접힘뿐이다:
+// 앞 줄이 열 끝 가까이까지 찼고, 바로 다음 줄이(들여쓰기 뒤) 토큰 글자로만 되어 있고, 접힌 줄 길이가 모두 같다.
+// 빈 줄이나 다른 글이 오면 끝이다. 토큰 글자뿐인 다음 줄인데 앞 줄이 차지 않았거나, 같은 줄에서 커서가 옮겨 간 뒤 토큰 글자가
+// 이어지면 확신할 수 없다(sure: false).
+function readToken(s: Seen[], h: number, cols: number | undefined): { value: string; at: number[]; sure: boolean } {
+  let value = "";
+  const at: number[] = [];
+  const ends = new Set<number>();
+  let i = h;
   for (;;) {
-    const esc = s.lastIndexOf("\x1b", i - 1);
-    if (esc >= 0 && i > esc) {
-      const piece = s.slice(esc, i);
-      if (WHOLE_ESCAPE.test(piece) || (i === s.length && OPEN_ESCAPE.test(piece))) {
-        i = esc;
-        continue;
-      }
+    while (tokenAt(s, i)) {
+      value += (s[i] as { ch: string }).ch;
+      at.push(i);
+      i++;
     }
-    if (cls && i > 0 && cls.test(s[i - 1])) {
-      i--;
-      continue;
+    const endCol = (s[i - 1] as { col: number }).col + 1;
+    let j = i;
+    let rows = 0;
+    while (j < s.length && s[j].kind !== "ch") {
+      if (s[j].kind === "row") rows++;
+      j++;
     }
-    return i;
+    if (j === i || (rows === 0 && j >= s.length)) return { value, at, sure: true };
+    if (rows === 0) return { value, at, sure: !tokenAt(s, j) };
+    if (rows > 1) return { value, at, sure: true };
+    let k = j;
+    while (charAt(s, k, " ")) k++;
+    let m = k;
+    while (tokenAt(s, m)) m++;
+    let t = m;
+    while (charAt(s, t, " ")) t++;
+    // 다음 줄이 머리로 시작하면 이어진 조각이 아니라 다시 그린 토큰이다.
+    if (m === k || (t < s.length && s[t].kind === "ch") || headAt(s, k)) return { value, at, sure: true };
+    ends.add(endCol);
+    if (cols === undefined || !(endCol >= cols - FOLD_SLACK) || ends.size > 1) return { value, at, sure: false };
+    i = k;
   }
 }
 
-export type TokenScreen = { push(chunk: string): void; end(): void; result(): { token: Secret | null; conflict: boolean } };
+function headAt(s: Seen[], i: number): boolean {
+  for (let k = 0; k < HEAD.length; k++) if (!charAt(s, i + k, HEAD[k])) return false;
+  return true;
+}
 
-export function tokenScreenFilter(show: (text: string) => void): TokenScreen {
-  let line = "";
-  // line 앞부분 중 이미 내보낸 길이.
-  let sent = 0;
+const flatVisible = (raw: string) => flatten(raw, 0).map((x) => (x.kind === "ch" ? x.ch : "")).join("").replace(/\s/g, "");
+
+export type TokenScreen = {
+  push(chunk: string): void;
+  end(): void;
+  // hidden: 화면의 일부를 붙들었다(머리나 안내 문구가 보였다). 이때 받지 못했으면 화면에도 토큰이 없다.
+  result(): { token: Secret | null; conflict: boolean; hidden: boolean };
+  // 붙드는 중인지(자식이 끝나기를 기다린다).
+  holding(): boolean;
+  // 붙드는 동안 한 번만 한 줄 알린다. 알린 뒤에는 끝날 때 붙든 화면을 다시 그리지 않는다(자식의 커서 계산이 이미 어긋났다).
+  notice(text: string): void;
+};
+
+// cols: 자식에게 준 열 수. 없으면 접힌 토큰을 받지 않는다.
+export function tokenScreenFilter(show: (text: string) => void, cols?: number): TokenScreen {
+  // 아직 내보내지 않은 꼬리와 그 시작의 커서 열.
+  let pend = "";
+  let pendCol = 0;
+  // 최근에 내보낸 화면 글(안내 문구 찾기용).
+  let recent = "";
+  let held: { raw: string; col: number } | null = null;
+  let ended = false;
+  let noticed = false;
   let token: Secret | null = null;
   let conflict = false;
-  const judge = (full: string, ending: string) => {
-    const text = visible(full);
-    const rest = full.slice(sent);
-    if (TOKEN_LINE.test(text)) {
-      // 받는 즉시 Secret으로만 든다(추적 목록에 올라 출력 계층이 이 값을 다시 막는다).
-      const got = new Secret(text);
-      if (token === null && !conflict) token = got;
-      else if (token !== null && !token.equals(got)) {
-        token = null;
-        conflict = true;
+
+  const startsHold = (word: string) => word.includes(HEAD) || `${recent}${word}`.replace(/\s+/g, " ").endsWith(ANNOUNCE);
+  const remember = (text: string) => (recent = `${recent}${text}`.slice(-64));
+
+  // 꼬리를 앞에서부터 읽어 내보낼 수 있는 데까지 내보낸다. 토큰 글자 묶음(사이 escape 포함)은 끝날 때까지 붙든다.
+  // 묶음이 머리를 품거나 안내 문구를 끝내면 그 묶음부터 붙들기 시작한다. last면 끝나지 않은 묶음·escape도 끝난 것으로 본다.
+  const scan = (last: boolean) => {
+    let col = pendCol;
+    let safe = 0;
+    let safeCol = col;
+    let run = -1;
+    let runCol = 0;
+    let word = "";
+    const close = (): boolean => {
+      if (run < 0) return false;
+      if (startsHold(word)) {
+        if (run > 0) show(pend.slice(0, run));
+        held = { raw: pend.slice(run), col: runCol };
+        pend = "";
+        return true;
       }
-      show(`${MASKED}${ending}`);
-    } else if ((token !== null || conflict) && visible(rest).includes(TOKEN_MARK)) {
-      show(`${MASKED}${ending}`);
-    } else show(rest);
+      remember(word);
+      run = -1;
+      word = "";
+      return false;
+    };
+    let i = 0;
+    while (i < pend.length) {
+      const u = unitAt(pend, i);
+      if ("open" in u) {
+        if (!last) break;
+        i = pend.length;
+        if (run < 0) safe = i;
+        break;
+      }
+      if (u.ch !== undefined && TOKEN_CHAR.test(u.ch)) {
+        if (run < 0) {
+          run = i;
+          runCol = col;
+        }
+        word += u.ch;
+      } else if (!(run >= 0 && u.ch === undefined && !u.row && !u.jump)) {
+        if (close()) return;
+        if (u.ch !== undefined) remember(u.ch);
+        else if (u.row || u.jump) remember(" ");
+      }
+      col = u.col(col);
+      i = u.end;
+      if (run < 0) {
+        safe = i;
+        safeCol = col;
+      }
+    }
+    if (last && close()) return;
+    if (last) safe = pend.length;
+    if (safe > 0) show(pend.slice(0, safe));
+    pend = pend.slice(safe);
+    pendCol = safeCol;
   };
+
+  const settle = (raw: string, col0: number) => {
+    const seen = flatten(raw, col0);
+    const found: { value: string; at: number[]; sure: boolean }[] = [];
+    const taken = new Set<number>();
+    for (let i = 0; i < seen.length; i++) {
+      if (taken.has(i) || !headAt(seen, i)) continue;
+      const t = readToken(seen, i, cols);
+      for (const k of t.at) taken.add(k);
+      found.push(t);
+    }
+    const good = found.length > 0 && found.every((t) => t.sure && TOKEN_FORM.test(t.value));
+    const values = [...new Set(found.map((t) => t.value))];
+    if (good && values.length === 1) token = new Secret(values[0]);
+    if (good && values.length > 1) conflict = true;
+    if (!good) return;
+    if (noticed) {
+      if (token) show(`${MASKED}\r\n`);
+      return;
+    }
+    // 토큰 글자를 빼고 첫 자리에 MASKED. escape·줄바꿈·들여쓰기는 남겨 자식이 그린 줄 수를 지킨다.
+    const drop = new Map<number, { b: number; first: boolean }>();
+    for (const t of found) t.at.forEach((k, n) => drop.set((seen[k] as { a: number }).a, { b: (seen[k] as { b: number }).b, first: n === 0 }));
+    let out = "";
+    for (let i = 0; i < raw.length; ) {
+      const d = drop.get(i);
+      if (d) {
+        if (d.first) out += MASKED;
+        i = d.b;
+      } else out += raw[i++];
+    }
+    const flat = flatVisible(out);
+    const leaks = flat.includes(HEAD) || values.some((v) => {
+      const secret = v.slice(HEAD.length);
+      for (let k = 0; k + LEAK_WINDOW <= secret.length; k++) if (flat.includes(secret.slice(k, k + LEAK_WINDOW))) return true;
+      return false;
+    });
+    show(leaks ? (token ? `${MASKED}\r\n` : "") : out);
+  };
+
   return {
     push(chunk) {
-      line += chunk;
-      for (let nl = line.indexOf("\n"); nl !== -1; nl = line.indexOf("\n")) {
-        const full = line.slice(0, nl + 1);
-        judge(full, full.endsWith("\r\n") ? "\r\n" : "\n");
-        line = line.slice(nl + 1);
-        sent = 0;
-      }
-      const upto = holdFrom(line);
-      if (upto > sent) {
-        show(line.slice(sent, upto));
-        sent = upto;
+      if (ended) return;
+      if (held) held.raw += chunk;
+      else {
+        pend += chunk;
+        scan(false);
       }
     },
     end() {
-      if (line.length > sent) judge(line, "");
-      line = "";
-      sent = 0;
+      if (ended) return;
+      if (!held) scan(true);
+      ended = true;
+      const h = held as { raw: string; col: number } | null;
+      if (h) settle(h.raw, h.col);
+      if (held) held.raw = "";
+      pend = "";
     },
-    result: () => ({ token, conflict }),
+    result: () => ({ token, conflict, hidden: held !== null }),
+    holding: () => held !== null && !ended,
+    notice(text) {
+      if (held === null || ended || noticed) return;
+      noticed = true;
+      show(`\r\n${text}\r\n`);
+    },
   };
 }
 
