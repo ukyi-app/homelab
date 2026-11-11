@@ -131,6 +131,22 @@ describe("bot account add", () => {
     expect(r.screen).toContain("[토큰을 받아 화면에서 가렸다]");
   }, TTY_MS);
 
+  test("터미널: 프로젝트 ID가 환경에 없으면 한 실행에 한 번만 묻고, 묻지 않게 하는 방법을 한 줄 알린다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(ONE), claude(setupScreen(OAT))], { project: false, steps: [{ wait: /project ID: /, send: `${FAKE_PROJECT}\r` }] });
+    expect(r.pending).toEqual([]);
+    expect(r.code).toBe(0);
+    expect(r.screen.match(/project ID: /g)?.length).toBe(1);
+    expect(r.screen).toContain("셸 설정에 export HOMELAB_INFISICAL_PROJECT_ID=<ID>");
+    expect(sets(r).length).toBe(2);
+  }, TTY_MS);
+
+  test("터미널: 프로젝트 ID 형식이 틀리면 다시 묻지 않고 한 번에 실패한다", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main"], world(ONE), { project: false, steps: [{ wait: /project ID: /, send: "not-a-uuid\r" }] });
+    expect(r.code).toBe(1);
+    expect(r.screen.match(/project ID: /g)?.length).toBe(1);
+    expect(r.screen).toContain("형식이 아니다");
+  }, TTY_MS);
+
   test("터미널 --separate-tokens: 자리마다 로그인해 두 토큰을 따로 쓰고, 둘 다 화면에 없다", async () => {
     const r = await runCliTty(["bot", "account", "add", "main", "--separate-tokens", "--apply"], [...world({ CLAUDE_CODE_OAUTH_TOKEN: OAT, CLAUDE_CODE_OAUTH_TOKEN_TASK: OAT2 }), claude(setupScreen(OAT), setupScreen(OAT2))]);
     expect(r.code).toBe(0);
