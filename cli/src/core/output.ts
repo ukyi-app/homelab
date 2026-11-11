@@ -1,6 +1,7 @@
 // 출력 계층. stdout·stderr에 쓰는 곳은 이 파일 하나다(정적 시험이 다른 곳의 console·process.stdout을 막는다).
 // stdout에는 결과 하나만(사람용 또는 JSON 문서 하나), 진행 줄과 경고는 stderr.
 // 시크릿 차단 두 겹: Result 안에 Secret 객체가 있으면 렌더하지 않고, 렌더한 글자에 추적 중인 원문이 있으면 내보내지 않는다.
+import { log, outro } from "@clack/prompts";
 import type { Writable } from "node:stream";
 import { jsonStringify } from "./intrinsics";
 import { findSecretPath } from "./guard";
@@ -70,10 +71,35 @@ export function renderHuman(r: Result): string {
   return lines.join("\n") + "\n";
 }
 
+// clack 글 꼴을 문자열로 받는다. clack은 output에 바로 쓰므로 모았다가 이 계층의 writeStdout·writeStderr로 낸다
+// (추적 중인 값 검사를 거치게). 색은 clack이 사람 터미널일 때만 넣는다.
+function clackText(draw: (output: Writable) => void): string {
+  let text = "";
+  const out = { write: (s: string) => ((text += s), true), columns: screenSize().cols, isTTY: true, on: () => out, off: () => out };
+  draw(out as unknown as Writable);
+  return text;
+}
+
+// 터미널 요약의 진행 줄 하나(stderr).
+export function stepLine(text: string): string {
+  return clackText((output) => log.step(safeBody(text), { output }));
+}
+
+// 터미널 요약(Result.summary). 머리 한 줄과 몇 줄, 끝에 다음 행동. 실패면 실패 표시로 그린다.
+export function renderSummary(r: Result): string {
+  const s = r.summary!;
+  const message = [s.head, ...s.lines].map(safeBody).join("\n");
+  return clackText((output) => {
+    const draw = r.status === "failed" ? log.error : r.status === "pending" ? log.info : r.status === "waiting" ? log.warn : log.success;
+    draw(message, { output });
+    if (s.next) outro(safeBody(`다음: ${s.next}`), { output });
+  });
+}
+
 export function render(r: Result, json: boolean): string {
   const problem = secretProblem(r);
   if (problem) throw new OutputBlocked(`출력에 시크릿 값이 섞여 막았다(${problem})`);
-  const text = json ? renderJson(r) : renderHuman(r);
+  const text = json ? renderJson(r) : r.summary ? renderSummary(r) : renderHuman(r);
   if (containsTracked(text)) throw new OutputBlocked("출력에 시크릿 값이 섞여 막았다");
   return text;
 }
@@ -85,6 +111,11 @@ export function writeStdout(text: string): void {
 
 export function writeStderr(text: string): void {
   process.stderr.write(containsTracked(text) ? "진행 줄에 시크릿 값이 섞여 뺐다\n" : text);
+}
+
+// 결과(stdout)가 사람 터미널로 가는지. 터미널 요약은 이때만 쓴다(파일·파이프는 지금의 단계 표).
+export function stdoutIsTerminal(): boolean {
+  return Boolean(process.stdout.isTTY);
 }
 
 // 사람 터미널(stderr) 크기. 가짜 터미널 로그인이 자식 화면 크기를 정할 때 쓴다.

@@ -34,8 +34,9 @@ export default defineCommand({
   path: ["bot", "account", "list"],
   summary: "봇 모델 계정 목록(이름·방식·지금 계정·만료일·마지막 사용률, 값 없음)",
   kind: "change",
+  terminalSummary: true,
   args: [],
-  flags: [],
+  flags: [{ name: "verbose", kind: "bool", help: "터미널에서도 단계 표 전체를 보인다" }],
   async run(ctx) {
     const cmd: BotAdminCommand = { name: "account", action: "list" };
     let done: BotAdminReport | null = null;
@@ -56,7 +57,18 @@ export default defineCommand({
         plan.body = accountListBody(report.accounts, report.paused);
       },
     };
-    const plan: Plan = { command: "bot account list", steps: [step] };
+    const plan: Plan = {
+      command: "bot account list",
+      steps: [step],
+      summary: {
+        names: { "bot-account-list": "봇 계정 목록 읽기" },
+        // 목록 본문의 첫 줄(지금 계정)이 머리, 나머지가 줄이다.
+        done: (r) => {
+          const [head, ...lines] = (r.body ?? "").split("\n");
+          return { head, lines, next: null };
+        },
+      },
+    };
     return ctx.engine(plan);
   },
 });

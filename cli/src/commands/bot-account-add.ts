@@ -18,6 +18,7 @@ export default defineCommand({
   path: ["bot", "account", "add"],
   summary: "봇 계정 등록(구독: claude setup-token 로그인 한 번, API 크레딧: Console API 키. 대화용·작업용에 함께 쓴다, 값은 stdin·tty)",
   kind: "change",
+  terminalSummary: true,
   args: [{ name: "name", required: true, help: "계정 이름(소문자·숫자·하이픈, 32자 이하)", pattern: BOT_ACCOUNT_NAME }],
   flags: [
     { name: "by", kind: "value", valueName: "방식", help: "subscription(기본, 구독 장기 토큰) 또는 api(API 크레딧, Console API 키)", values: ["subscription", "api"] },
@@ -95,6 +96,17 @@ export default defineCommand({
         ? `API 키는 Claude Console의 봇 전용 workspace에서 만든다(자동 충전 끔, rotate.md 3e). 키는 화면에 보이지 않게 붙여 넣거나 stdin으로 넘긴다(기본 한 줄, --separate-tokens면 대화용·작업용 두 줄)`
         : "claude setup-token은 이 기기에서 실행한다(Claude Code CLI 필요). CLI가 화면에서 토큰 줄을 받아 가린다. 출력 꼴이 달라 받지 못하면 화면에 나온 토큰을 붙여 넣고 터미널 스크롤을 지운다. stderr가 터미널이 아니면 로그인을 띄우지 않는다(그때는 토큰을 stdin으로 넘긴다)"],
       next: (status) => (status === "done" ? `봇이 이 계정을 쓰게 하려면: homelab bot account use ${name}${api ? " --by api" : ""}` : undefined) as string | null,
+      summary: {
+        names: { "infisical-account": `${what} 받아 저장`, "bot-account-record": "봇 DB에 계정 기록" },
+        done: (r) => {
+          const stored = r.steps.find((s) => s.id === "infisical-account")?.result === "applied";
+          return {
+            head: r.status === "same" ? `계정 ${name}은 이미 등록돼 있다(${api ? "API 크레딧" : "구독"})` : `계정 ${name} 등록 끝(${api ? "API 크레딧" : "구독"})`,
+            lines: [stored ? `${how} 저장했다` : `${what}는 그대로 두었다(새로 받으려면 --replace)`, "봇 DB에 기록했다"],
+            next: `homelab bot account use ${name}${api ? " --by api" : ""} --apply`,
+          };
+        },
+      },
     });
   },
 });

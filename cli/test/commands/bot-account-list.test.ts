@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { expectNoSecrets, expectPlanReadOnly, rule, runCli } from "../harness";
+import { expectNoSecrets, expectPlanReadOnly, rule, runCli, runCliTty } from "../harness";
 import { ACCOUNTS, adminArgv, execCalls, pod, pods, report } from "../fixtures/bot-account";
 
 // homelab bot account list(봇 COLLEAGUE_SPEC §4.8 "계정 목록", AC-21). 경계 S3: 실제 프로세스 + 가짜 kubectl.
@@ -24,6 +24,26 @@ describe("bot account list", () => {
       "결제 멈춤은 원인을 푼 뒤 homelab bot account use <이름> --apply로 해제한다(지금 계정이면 main)",
     ].join("\n"));
   });
+
+  test("터미널 요약: 목록만 몇 줄(지금 계정이 머리) 보이고 단계 표·kubectl 줄은 없다. --verbose면 단계 표도", async () => {
+    const paused = { rate_limit: 0, auth_expired: 0, billing: 0 };
+    const world = [pods(pod()), rule(adminArgv("account", "list"), { stdout: report("account list", "accounts", { accounts: ACCOUNTS, paused }) })];
+    const r = await runCliTty(["bot", "account", "list", "--apply"], world);
+    expect(r.code).toBe(0);
+    expect(r.screen).toContain("◆  지금 계정: main(구독)\r\n│  - main(구독, 지금 계정) · 토큰 만료 2027-11-11 09:00 KST");
+    expect(r.screen).toContain("│  모델 멈춤 작업: 한도 0 · 인증 만료 0 · 결제 0\r\n");
+    for (const noise of ["kubectl", "admin-main.js", "실행\r\n", "다음: 없음"]) expect([noise, r.screen.includes(noise)]).toEqual([noise, false]);
+    const v = await runCliTty(["bot", "account", "list", "--apply", "--verbose"], world);
+    expect(v.screen).toContain("  1 봇 모델 계정 목록");
+    expect(v.screen).toContain("admin-main.js account list");
+  }, 30_000);
+
+  test("터미널 요약(실패): 봇이 목록을 내지 않으면 실패한 단계 이름과 다음 행동이 보인다", async () => {
+    const r = await runCliTty(["bot", "account", "list", "--apply"], [pods(pod()), rule(adminArgv("account", "list"), { stdout: report("account list", "usage"), code: 64 })]);
+    expect(r.code).toBe(1);
+    expect(r.screen).toContain("■  실패: 봇 계정 목록 읽기\r\n│  봇이 목록을 내지 않았다: usage");
+    expect(r.screen).toContain("└  다음: 지금 봇 이미지의 관리 진입점이 계정 명령을 받지 않는다");
+  }, 30_000);
 
   test("봇 출력에 정해진 꼴 밖의 칸이 있으면(값처럼 보이는 문자열) 옮기지 않고 실패한다", async () => {
     // 토큰처럼 대문자·밑줄이 섞인 문자열. 계정 이름·상태 이름 규칙을 통과하지 못한다.

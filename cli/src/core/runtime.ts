@@ -24,6 +24,8 @@ import { toolsRead } from "./tools";
 export type RuntimeOpts = {
   mode: Mode;
   json: boolean;
+  // 터미널 요약(CommandSpec.terminalSummary). 없으면 false.
+  summary?: boolean;
   line: string;
   env: Record<string, string | undefined>;
   isTTY: boolean;
@@ -92,6 +94,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
   const ctx: ReadCtx = {
     mode: o.mode,
     json: o.json,
+    summary: o.summary === true,
     line: o.line,
     k8s: kubeRead(readExec, kube),
     infisical: infisicalRead(readExec, project),

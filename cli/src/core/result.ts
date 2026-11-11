@@ -30,6 +30,8 @@ export type Result = {
   title?: string;
   // 단계 뒤에 보일 여러 줄 원문(Plan.body).
   body?: string;
+  // 터미널 요약(Plan.summary). 사람용 출력이 단계 표 대신 이것을 보인다. JSON에는 넣지 않는다(renderJson).
+  summary?: { head: string; lines: string[]; next: string | null };
   // github 하위 명령(kind delegate)만 쓴다. 래퍼 코드 그대로(0 같음, 2 차이, 1 guard·실패).
   exitCode?: number;
 };

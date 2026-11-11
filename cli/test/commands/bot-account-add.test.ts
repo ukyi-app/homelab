@@ -131,6 +131,48 @@ describe("bot account add", () => {
     expect(r.screen).toContain("[토큰을 받아 화면에서 가렸다]");
   }, TTY_MS);
 
+  test("터미널 요약: 끝나면 무엇이 바뀌었나·다음 할 일 몇 줄만 보이고 단계 표·kubectl 줄은 없다. --verbose면 지금의 전체 표", async () => {
+    const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(ONE), claude(setupScreen(OAT))]);
+    expect(r.code).toBe(0);
+    const tail = r.screen.slice(r.screen.indexOf("Store this token securely"));
+    expect(tail).toContain("계정 main 등록 끝(구독)");
+    expect(tail).toContain("토큰 하나를 대화용·작업용에 함께 저장했다");
+    expect(tail).toContain("다음: homelab bot account use main --apply");
+    for (const noise of ["kubectl", "admin-main.js", "Infisical homelab/prod", "주의:", "레인"]) expect([noise, tail.includes(noise)]).toEqual([noise, false]);
+
+    const v = await runCliTty(["bot", "account", "add", "main", "--apply", "--verbose"], [...world(ONE), claude(setupScreen(OAT))]);
+    expect(v.code).toBe(0);
+    expect(v.screen).toContain("  1 Infisical homelab/prod /bot-accounts/main");
+    expect(v.screen).toContain("admin-main.js account record main subscription");
+  }, TTY_MS);
+
+  test("터미널 요약: plan이면 할 일과 실행 줄만, 실패면 실패한 단계 이름과 다음 행동이 보인다", async () => {
+    const p = await runCliTty(["bot", "account", "add", "main"], world(ONE));
+    expect(p.code).toBe(0);
+    expect(p.screen).toContain("계획만 봤다(아무것도 바꾸지 않았다)");
+    expect(p.screen).toContain("할 일: 토큰 받아 저장 → 봇 DB에 계정 기록");
+    expect(p.screen).toContain("다음: homelab bot account add main --apply");
+    expect(p.screen).not.toContain("admin-main.js");
+
+    const fail = [...world(ONE).slice(0, 4), rule(adminArgv("account", "record", "main", "subscription"), { stdout: report("account record", "usage"), code: 64 }), claude(setupScreen(OAT))];
+    const f = await runCliTty(["bot", "account", "add", "main", "--apply"], fail);
+    expect(f.code).toBe(1);
+    const tail = f.screen.slice(f.screen.indexOf("Store this token securely"));
+    expect(tail).toContain("실패: 봇 DB에 계정 기록");
+    expect(tail).toContain("봇이 계정을 기록하지 않았다: usage");
+    expect(tail).toContain("다음: 지금 봇 이미지의 관리 진입점이 이 계정 명령을 받지 않는다");
+    expect(leaks(f.screen, OAT)).toBe(false);
+  }, TTY_MS);
+
+  test("파이프·--json 출력은 터미널 요약을 쓰지 않는다(단계 표 그대로, JSON에 summary 칸 없음)", async () => {
+    const r = await runCli(["bot", "account", "add", "main", "--apply"], world(ONE), { stdin: `${OAT}\n` });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toStartWith("실행\n  1 Infisical homelab/prod /bot-accounts/main");
+    expect(r.stdout).toContain("다음: 봇이 이 계정을 쓰게 하려면: homelab bot account use main\n");
+    const j = await runCli(["bot", "account", "add", "main", "--apply", "--json"], world(ONE), { stdin: `${OAT}\n` });
+    expect(Object.keys(j.json)).toEqual(["schema", "command", "mode", "status", "steps", "notes", "next"]);
+  });
+
   test("터미널: 프로젝트 ID가 환경에 없으면 한 실행에 한 번만 묻고, 묻지 않게 하는 방법을 한 줄 알린다", async () => {
     const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(ONE), claude(setupScreen(OAT))], { project: false, steps: [{ wait: /project ID: /, send: `${FAKE_PROJECT}\r` }] });
     expect(r.pending).toEqual([]);

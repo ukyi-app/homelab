@@ -322,6 +322,8 @@ export type Observation = {
 export type ReadCtx = {
   mode: Mode;
   json: boolean;
+  // 터미널 요약으로 보일지(terminalSummary 명령이고 터미널, --json·--verbose 아님). 엔진만 본다.
+  summary?: boolean;
   // 사람이 친 명령줄(--json 뺌). 다음 행동 문구에 쓴다.
   line: string;
   k8s: KubeRead;
@@ -392,6 +394,17 @@ export type Plan = {
   body?: string;
   // 없으면 엔진의 기본 다음 행동(pending이면 같은 명령에 --apply).
   next?: (status: Status) => string | null;
+  // 터미널 요약(CommandSpec.terminalSummary 명령). 터미널이고 --json·--verbose가 아닐 때만 엔진이 쓴다. 단계 표·notes 대신 보인다.
+  summary?: PlanSummary;
+};
+
+export type PlanSummary = {
+  // 단계 id → 쉬운 말 이름. 진행 줄·plan의 할 일·실패한 단계에 쓴다.
+  names: Record<string, string>;
+  // 오래 기다리는 단계의 진행 줄(무엇을 얼마나 기다리는지).
+  waits?: Record<string, string>;
+  // 끝났을 때(done·same) 머리 한 줄, 몇 줄(무엇이 바뀌었나, 지금 상태), 다음에 할 일.
+  done(r: Result): { head: string; lines: string[]; next: string | null };
 };
 
 // change: 기본 plan, --apply로 실행. read: 상태를 안 바꾼다(--apply는 64). delegate: github 래퍼, 종료 코드 위임.
@@ -405,6 +418,8 @@ export type CommandSpec = {
   delegateMode?: "read" | "apply";
   // change 명령이 래퍼 plan JSON과 apply, 앱 저장소 쓰기를 쓴다(app new). ctx.github·w.github·w.appRepo가 생긴다.
   wrapper?: "plan-json";
+  // 터미널 요약을 쓰는 명령(account add|use|list). 터미널에서 --json·--verbose가 아니면 Plan.summary로 몇 줄만 보인다.
+  terminalSummary?: boolean;
   args: ArgSpec[];
   flags: FlagSpec[];
   run(ctx: ReadCtx, input: Input): Promise<Result>;
