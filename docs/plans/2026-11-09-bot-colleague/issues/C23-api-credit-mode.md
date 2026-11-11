@@ -61,4 +61,9 @@ owner가 봇 계정을 API 크레딧 방식(Claude Console API 키)으로 등록
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #143, 병합 `4df0a4f`(2026-11-11): `src/credentials.ts` `MethodEnvCredential`(실행마다 방식 표시와 그 방식의 자격을 다시 읽음), `CLAUDE_AUTH`에 `api-key`(env `ANTHROPIC_API_KEY`), `classifyClaudeError`의 결제 분류, 관리 진입점 `account record|use <이름> api`, 할 일 4a(한도 관측의 확인·쓰기를 scheduler 잠금 아래에서). 전체 검사(결과 `49db1a7`, `FPB_TEST_TIMEOUT=2400 .fpb/test.sh wt-c23 c23-full --pg -- full`): 2,586개 중 통과 2,564, 실패 0, skip 22. `build / test` 통과, Codex 지적 없음.
+- 키 이름(sandbox PR과 CLI가 그대로 쓴다): Infisical `/apps/homelab-bot/worker`의 `CLAUDE_AUTH_METHOD`(`subscription`·`api`, 없으면 구독), `ANTHROPIC_API_KEY`·`ANTHROPIC_API_KEY_TASK`(안 쓰면 `unset`), `CLAUDE_CODE_OAUTH_TOKEN`·`CLAUDE_CODE_OAUTH_TOKEN_TASK`(안 쓰면 `unset`). 계정 값은 `/bot-accounts/<이름>`의 `ANTHROPIC_API_KEY`·`ANTHROPIC_API_KEY_TASK`. 두 레인 Secret의 파일 이름은 `CLAUDE_AUTH_METHOD`·`CLAUDE_CODE_OAUTH_TOKEN`·`ANTHROPIC_API_KEY`.
+- 분해 불일치(주 진행자 수용): 방식 표시가 없으면 실행을 거부하지 않고 구독으로 본다(할 일 2의 글자와 다름). 거부하면 지금 Secret + 새 작업자 조합과 손 Secret 복원에서 봇 전체가 멈춘다. 표시가 없는데 API 키만 있으면 거부한다. 비교는 봇 DECISIONS "C23 API 크레딧 방식".
+- 구현 선택(owner에 알림 2026-11-11): API 방식에서는 429도 결제 멈춤으로 닫는다(429가 월 지출 상한에도 쓰이고 API 방식에는 풀리는 시각이 없다). 진짜 분당 한도에서도 owner가 `account use`로 풀어야 한다.
+- homelab CLI PR #1256(`account add|use --by api`, `rotate.md` 3e): Codex 1차 P1 1(sandbox 지원 확인 전에 구독 토큰을 `unset`으로 덮음) 수정 중.
+- 남은 것: #1256 수정·재리뷰·owner 병합, 할 일 5(봇 빌드 digest)·6(sandbox 사람 PR과 `restore.md` 3.1)·9(사람 단계). 미확인(S5, C24): API 방식 egress, 실제 `apiKeySource` 표시, 실제 크레딧 차감·소진 응답.
