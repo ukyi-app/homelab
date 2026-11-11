@@ -2,10 +2,10 @@
 // 셸 텍스트는 이 파일의 상수이고 명령이 넘기는 것은 정규식을 거친 이름과 Secret뿐이다. 이름은 셸에 끼우지 않고 위치 인자로
 // 넘긴다(sh -c '...' sh <인자>). 비밀번호는 stdin으로만 넘기고(-a·env는 ps에 보인다, restore.md 0.3), 거부 판정은 core 고정
 // 정규식(exec signals)으로 받는다(민감 호출의 stderr 원문은 버린다).
-import type { BotAccount, BotAccountLimit, BotAdminCommand, BotAdminReport, BotRead, BotWrite, HttpWrite, KubeRead, PgWrite, ValkeyCommand, ValkeyWrite, WorkerLane } from "./command";
+import type { BotAccount, BotAccountLimit, BotAdminCommand, BotAdminReport, BotMethod, BotRead, BotWrite, HttpWrite, KubeRead, PgWrite, ValkeyCommand, ValkeyWrite, WorkerLane } from "./command";
 import { ExecTimeout, why, type Exec, type Forward } from "./exec";
 import { jsonParse } from "./intrinsics";
-import { APP_NAME, fullMatch } from "./names";
+import { APP_NAME, BOT_METHOD_KEY, BOT_WORKER_FILE, fullMatch, publicHash } from "./names";
 import { Secret, isSecret, revealSecret } from "./secret";
 
 const NAME = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
@@ -190,7 +190,7 @@ function botWords(cmd: BotAdminCommand): string[] {
       return ["release", id(BOT_UUID, cmd.job)];
     case "account":
       if (cmd.action === "list") return ["account", "list"];
-      if ((cmd.action === "record" || cmd.action === "use") && cmd.method === "subscription") return ["account", cmd.action, id(BOT_ACCOUNT, cmd.account), cmd.method];
+      if ((cmd.action === "record" || cmd.action === "use") && (cmd.method === "subscription" || cmd.method === "api")) return ["account", cmd.action, id(BOT_ACCOUNT, cmd.account), cmd.method];
       break;
   }
   throw new Error("봇 관리 명령이 아니다");
@@ -259,10 +259,22 @@ function accountParts(doc: any): Pick<BotAdminReport, "accounts" | "paused" | "s
 // 작업자 자격 파일(rotate.md 3e 4단계). ns·Deployment·컨테이너·경로는 sandbox 차트의 고정 값이다.
 const WORKER_NS = "sandbox";
 const WORKER_DEPLOY: Record<WorkerLane, string> = { chat: "worker", task: "worker-task" };
-const WORKER_FILE = "/run/worker-credential/CLAUDE_CODE_OAUTH_TOKEN";
+const WORKER_DIR = "/run/worker-credential";
+const workerPath = (file: string) => `${WORKER_DIR}/${file}`;
+const MARKER_PATH = workerPath(BOT_METHOD_KEY);
 const HASH12 = /^[0-9a-f]{12}$/;
-export const workerHashArgv = (lane: WorkerLane) =>
-  ["kubectl", "-n", WORKER_NS, "exec", `deploy/${WORKER_DEPLOY[lane]}`, "-c", "worker", REQUEST_TIMEOUT, "--", "sha256sum", WORKER_FILE];
+// 그 방식의 자격 파일과 방식 표시 파일을 함께 본다. 방식 표시 파일이 없으면 sha256sum이 그 줄만 빼고 1로 끝난다(아래에서 줄로 읽는다).
+export const workerHashArgv = (lane: WorkerLane, method: BotMethod) =>
+  ["kubectl", "-n", WORKER_NS, "exec", `deploy/${WORKER_DEPLOY[lane]}`, "-c", "worker", REQUEST_TIMEOUT, "--", "sha256sum", workerPath(BOT_WORKER_FILE[method]), MARKER_PATH];
+// sha256sum 출력에서 경로별 앞 12자.
+function sums(stdout: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of stdout.split("\n")) {
+    const m = /^([0-9a-f]{64}) {2}(\S+)$/.exec(line);
+    if (m) out.set(m[2]!, m[1]!.slice(0, 12));
+  }
+  return out;
+}
 
 export function botRead(k8s: KubeRead): BotRead {
   return {
@@ -303,19 +315,25 @@ export function botWrite(exec: Exec, k8s: KubeRead, pollMs = 2_000): BotWrite {
       if (r.errKind || r.code === null || (r.code !== 0 && r.stdout.trim() === "")) throw new Error(`봇 관리 진입점: ${why(r)}`);
       return botReport(r.stdout, r.code);
     },
-    waitWorkerCredentials(want, timeoutSec) {
+    waitWorkerCredentials(want, timeoutSec, method) {
       if (!Number.isInteger(timeoutSec) || timeoutSec < 1 || timeoutSec > 300) throw new Error("기다림은 1~300초다");
+      if (method !== "subscription" && method !== "api") throw new Error("방식은 subscription·api만");
       const lanes = Object.keys(WORKER_DEPLOY) as WorkerLane[];
       for (const lane of lanes) if (!HASH12.test(want[lane] ?? "")) throw new Error("작업자 자격 지문은 sha256 앞 12자다");
       const seen: Record<WorkerLane, boolean> = { chat: false, task: false };
       const deadline = Date.now() + timeoutSec * 1000;
+      const marker = publicHash(method);
       for (;;) {
         for (const lane of lanes) {
           if (seen[lane]) continue;
           // 실패(파드 교체 중, worker-task의 exec가 정리 sweep에 죽음)는 기다림의 일부다. 다음 바퀴에 다시 본다.
-          const r = exec(workerHashArgv(lane), { timeoutMs: 30_000 });
-          const hash = r.code === 0 ? /^([0-9a-f]{64})\s/.exec(r.stdout)?.[1]?.slice(0, 12) : undefined;
-          if (hash === want[lane]) seen[lane] = true;
+          // 종료 코드는 보지 않는다. 방식 표시 파일이 없으면(sandbox 배포 전 Secret) sha256sum이 1로 끝나도 자격 줄은 있다.
+          const r = exec(workerHashArgv(lane, method), { timeoutMs: 30_000 });
+          if (r.errKind || r.code === null) continue;
+          const got = sums(r.stdout);
+          const shown = got.get(MARKER_PATH);
+          const markerOk = method === "api" ? shown === marker : shown === undefined || shown === marker;
+          if (got.get(workerPath(BOT_WORKER_FILE[method])) === want[lane] && markerOk) seen[lane] = true;
         }
         if (lanes.every((lane) => seen[lane]) || Date.now() + pollMs > deadline) return seen;
         Bun.sleepSync(pollMs);

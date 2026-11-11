@@ -9,6 +9,9 @@ export const adminArgv = (...words: string[]) => ["kubectl", "-n", NS, "exec", P
 export const FOLDER = "/bot-accounts/main";
 export const WORKER = "/apps/homelab-bot/worker";
 export const [CHAT, TASK] = FAKE_SECRETS;
+// API 크레딧 방식의 레인별 Console API 키(합성 값).
+export const API_CHAT = "fakevalue-api-chat-0123456789";
+export const API_TASK = "fakevalue-api-task-9876543210";
 
 export function pod(o: { name?: string; namespace?: string; app?: string } = {}) {
   return {

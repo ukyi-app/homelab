@@ -174,7 +174,7 @@ describe("엔진", () => {
     const k8s = ctx.k8s as unknown as Record<string, unknown>;
     const inf = ctx.infisical as unknown as Record<string, unknown>;
     for (const name of ["forceSync", "rolloutRestart", "createRestoreObject", "deleteRestoreObjects"]) expect(k8s[name]).toBeUndefined();
-    for (const name of ["setValue", "removeKey"]) expect(inf[name]).toBeUndefined();
+    for (const name of ["setValue", "setMarker", "removeKey"]) expect(inf[name]).toBeUndefined();
     expect((ctx as unknown as Record<string, unknown>).generatePassword).toBeUndefined();
     expect((ctx as unknown as Record<string, unknown>).exec).toBeUndefined();
   });

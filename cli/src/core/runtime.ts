@@ -11,7 +11,7 @@ import { pgRestoreWrite } from "./pgrestore";
 import { appRepoWrite, ghRead, ghcrRead, githubDelegate, webRead, wrapperApply } from "./github";
 import { botRead, botWrite, httpWrite, pgWrite, valkeyWrite } from "./podops";
 import { infisicalRead, infisicalWrite, projectResolver } from "./infisical";
-import { readSecretInput, readSetupTokens, setupTokenLogin } from "./input";
+import { readApiKeys, readSecretInput, readSetupTokens, setupTokenLogin } from "./input";
 import { kubeRead, kubeWrite } from "./kubectl";
 import { writeStderr } from "./output";
 import { repoRead } from "./pr";
@@ -66,6 +66,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       generatePassword: () => (alive(), newPassword()),
       readSecretInput: (prompt) => (alive(), readSecretInput(o.isTTY, (q) => writeStderr(q), prompt)),
       readSetupTokens: (lanes) => (alive(), readSetupTokens(o.isTTY, (q) => writeStderr(q), lanes, (lane) => setupTokenLogin(exec, lane, o.progress))),
+      readApiKeys: (lanes) => (alive(), readApiKeys(o.isTTY, (q) => writeStderr(q), lanes)),
       // 파이프로 대신 답할 수 없게 tty만 받는다(purge의 Infisical 삭제 직전 확인).
       confirm: (question, expected) => (alive(), o.isTTY && o.ask(question) === expected),
       web: webRead(readExec),

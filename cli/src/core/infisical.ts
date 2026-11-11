@@ -8,7 +8,7 @@
 //   .env 파싱은 앞뒤 공백을 자르고 양끝 따옴표를 벗긴다. 값 안의 #·$·${}·따옴표는 그대로 간다.
 //   줄바꿈이 있으면 다음 줄이 다른 키가 된다. 그래서 setValue가 값 전체 형식을 먼저 본다.
 import { jsonParse } from "./intrinsics";
-import type { InfisicalRead, InfisicalWrite } from "./command";
+import type { BotMarker, InfisicalRead, InfisicalWrite } from "./command";
 import { ExecTimeout, why, type Exec, type ExecResult } from "./exec";
 import { PROJECT_ID, SECRET_KEY, fullMatch, hasControl } from "./names";
 import { CliError } from "./result";
@@ -166,6 +166,8 @@ export function infisicalRead(exec: Exec, project: ReturnType<typeof projectReso
   };
 }
 
+const MARKERS: readonly BotMarker[] = ["subscription", "api", "unset"];
+
 export function infisicalWrite(exec: Exec, project: ReturnType<typeof projectResolver>): InfisicalWrite {
   return {
     setValue(path, key, value) {
@@ -178,6 +180,16 @@ export function infisicalWrite(exec: Exec, project: ReturnType<typeof projectRes
       if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${path}/${key} 쓰기: 시간 초과(결과 미상)`);
       loginExpired(r, `Infisical ${path}/${key} 쓰기`);
       // 성공 표에는 값이 가려져(******) 나오지만 쓰지 않는다.
+      if (r.code !== 0) throw new Error(`Infisical ${path}/${key} 쓰기: ${why(r)}`);
+    },
+    setMarker(path, key, value) {
+      checkFolder(path);
+      checkKey(key);
+      if (!MARKERS.includes(value)) throw new Error(`Infisical ${path}/${key}: 고정 값(${MARKERS.join("·")})만 쓴다`);
+      // 비밀이 아닌 값이라 문자열 그대로 넘긴다(Secret으로 감싸면 출력 추적 목록에 들어간다). 경로는 setValue와 같다.
+      const r = exec(argvFor.set(project.id(), path), { input: `${key}=${value}\n`, signals: LOGIN_SIGNALS });
+      if (r.errKind === "timeout") throw new ExecTimeout(`Infisical ${path}/${key} 쓰기: 시간 초과(결과 미상)`);
+      loginExpired(r, `Infisical ${path}/${key} 쓰기`);
       if (r.code !== 0) throw new Error(`Infisical ${path}/${key} 쓰기: ${why(r)}`);
     },
     createFolder(path) {

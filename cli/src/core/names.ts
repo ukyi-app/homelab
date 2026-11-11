@@ -1,6 +1,7 @@
 // 입력 값 검증. 셸·파일·API로 넘기는 값은 줄바꿈(CR·LF)과 NUL을 먼저 거부하고 값 전체를 형식과 맞춘다.
 // 함정: 줄 단위 검사(grep -q, 앵커 없는 정규식)는 여러 줄 중 한 줄만 맞아도 통과한다.
 // 그래서 fullMatch는 정규식을 ^(?:...)$로 다시 감싸고 m 플래그를 버린다.
+import type { BotMethod } from "./command";
 import { jsonStringify } from "./intrinsics";
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -55,15 +56,23 @@ export const BOT_ACCOUNT_NAME = /[a-z]([a-z0-9-]{0,30}[a-z0-9])?/;
 // 밖이다. Free 플랜은 경로 RBAC가 없어 secretsPath가 보안 경계는 아니다(platform/external-secrets 머리 주석). 이 폴더를 읽는
 // ExternalSecret이 없고, 생기려면 Git PR이 필요하다는 것이 경계다.
 export const botAccountFolder = (name: string) => `/bot-accounts/${name}`;
-// 작업자가 읽는 폴더와 레인별 키(rotate.md 3e 표). 계정 폴더도 같은 키 이름을 쓴다.
+// 작업자가 읽는 폴더와 레인별 키(rotate.md 3e 표). 계정 폴더도 같은 키 이름을 쓴다. 방식마다 키가 다르다
+// (key: 구독 장기 토큰, apiKey: API 크레딧 방식의 Console API 키. 봇 DECISIONS "C23 API 크레딧 방식" 표).
 export const BOT_WORKER_FOLDER = "/apps/homelab-bot/worker";
 export const BOT_LANES = [
-  { lane: "chat", label: "대화·리뷰", key: "CLAUDE_CODE_OAUTH_TOKEN", secret: "worker-credential-claude-subscription" },
-  { lane: "task", label: "작업", key: "CLAUDE_CODE_OAUTH_TOKEN_TASK", secret: "worker-task-credential-claude-subscription" },
+  { lane: "chat", label: "대화·리뷰", key: "CLAUDE_CODE_OAUTH_TOKEN", apiKey: "ANTHROPIC_API_KEY", secret: "worker-credential-claude-subscription" },
+  { lane: "task", label: "작업", key: "CLAUDE_CODE_OAUTH_TOKEN_TASK", apiKey: "ANTHROPIC_API_KEY_TASK", secret: "worker-task-credential-claude-subscription" },
 ] as const;
-// 작업자 Secret의 ns와 키(두 레인 모두 키 이름은 CLAUDE_CODE_OAUTH_TOKEN이다).
+export const botLaneKey = (lane: (typeof BOT_LANES)[number], method: BotMethod) => (method === "api" ? lane.apiKey : lane.key);
+// 작업자 Secret의 ns. Secret 키 = 작업자 볼륨 파일 이름은 두 레인이 같다(작업 레인은 _TASK 원격 키를 이 이름으로 옮긴다).
 export const BOT_WORKER_NS = "sandbox";
-export const BOT_WORKER_SECRET_KEY = "CLAUDE_CODE_OAUTH_TOKEN";
+export const BOT_WORKER_FILE: Record<BotMethod, string> = { subscription: "CLAUDE_CODE_OAUTH_TOKEN", api: "ANTHROPIC_API_KEY" };
+// 방식 표시 키(Infisical 키 = Secret 키 = 파일 이름, 두 레인이 같은 원격 키 하나를 읽는다)와 값. 값이 없으면 작업자는 구독으로 본다.
+// 안 쓰는 방식의 키는 지우지 않고 BOT_UNSET으로 둔다(ExternalSecret은 키가 Infisical에 있어야 Ready다).
+export const BOT_METHOD_KEY = "CLAUDE_AUTH_METHOD";
+export const BOT_UNSET = "unset";
+// 비밀이 아닌 고정 값의 sha256 앞 12자(Secret·볼륨 지문과 같은 꼴).
+export const publicHash = (value: string) => new Bun.CryptoHasher("sha256").update(value).digest("hex").slice(0, 12);
 
 export function newRunId(now: Date = new Date()): string {
   const stamp = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);

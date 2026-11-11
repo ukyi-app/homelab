@@ -123,6 +123,8 @@ export type InfisicalRead = {
 export type InfisicalWrite = {
   // 16자 이상, .env 한 줄로 왕복하는 값만(infisical.ts 실측 주석).
   setValue(path: string, key: string, value: Secret): void;
+  // 봇 작업자의 방식 표시·자리 표시값처럼 비밀이 아닌 고정 값만(BotMarker). setValue의 16자 하한을 받지 않는 대신 값은 이 셋뿐이다.
+  setMarker(path: string, key: string, value: BotMarker): void;
   removeKey(path: string, key: string): void;
   // 없는 조각만 바깥부터 만든다(/apps/x/postgres면 /apps → /apps/x → /apps/x/postgres).
   createFolder(path: string): void;
@@ -208,8 +210,12 @@ export type BotAdminCommand =
   | { name: "resume"; target: "job"; job: string }
   | { name: "block"; user: string }
   | { name: "release"; job: string }
-  | { name: "account"; action: "record" | "use"; account: string; method: "subscription" }
+  | { name: "account"; action: "record" | "use"; account: string; method: BotMethod }
   | { name: "account"; action: "list" };
+// 봇 모델 계정의 인증 방식(구독 장기 토큰, API 크레딧). 봇 DB model_accounts.method와 같은 글자다.
+export type BotMethod = "subscription" | "api";
+// 작업자 키에 쓰는 비밀 아닌 고정 값: 방식 표시(subscription·api)와 안 쓰는 방식 자격의 자리 표시값(unset).
+export type BotMarker = BotMethod | "unset";
 export type BotAdminState = { emergency: boolean; paused: boolean; executionPending: boolean; taskLaneClosed: string | null };
 // 봇 계정 기록(봇 src/model-accounts.ts AccountView). 값은 없다. 시각은 초 단위 RFC3339 UTC(…Z) 또는 null.
 export type BotAccountLimit = { status: string | null; rateLimitType: string | null; utilization: number | null; resetsAt: string | null; observedAt: string | null };
@@ -235,9 +241,10 @@ export type BotRead = {
 export type BotWrite = BotRead & {
   // 대상 파드를 다시 찾아 관리 진입점을 한 번 실행한다. 봇 출력이 정해진 꼴이 아니면 던진다(원문은 옮기지 않는다).
   admin(cmd: BotAdminCommand): BotAdminReport;
-  // 작업자 두 파드의 자격 파일 sha256 앞 12자가 want와 같아질 때까지 기다린다(rotate.md 3e 4단계의 지문 확인).
+  // 작업자 두 파드에서 그 방식의 자격 파일 sha256 앞 12자가 want와 같고 방식 표시 파일이 그 방식일 때까지 기다린다
+  // (rotate.md 3e 4단계의 지문 확인). 구독은 방식 표시 파일이 없어도 된다(작업자는 없으면 구독으로 본다, sandbox 배포 전 Secret).
   // 레인마다 맞았는지를 낸다. 시간 초과면 그때까지 맞지 않은 레인이 false다. timeoutSec ≤ 300.
-  waitWorkerCredentials(want: Record<WorkerLane, string>, timeoutSec: number): Record<WorkerLane, boolean>;
+  waitWorkerCredentials(want: Record<WorkerLane, string>, timeoutSec: number, method: BotMethod): Record<WorkerLane, boolean>;
 };
 
 export type HttpWrite = {
@@ -347,6 +354,9 @@ export type WriteCtx = {
   // 브라우저 로그인을 하고, 화면에 나온 토큰을 에코 없는 입력으로 받는다. 파이프면 stdin의 줄 하나가 레인 하나다(레인 수와 같아야 한다).
   // 값마다 readSecretInput과 같은 검사를 거친다.
   readSetupTokens(lanes: string[]): Secret[];
+  // Claude Console API 키를 레인 수만큼(homelab bot account add --by api). tty면 레인마다 에코 없는 한 줄, 파이프면 stdin의 줄 하나가
+  // 레인 하나다. 로그인 자식을 띄우지 않는다. 값 검사·레인끼리 같은 값 거부는 readSetupTokens와 같다.
+  readApiKeys(lanes: string[]): Secret[];
   // tty에서 한 줄(보임)을 받아 expected와 같으면 true. tty가 아니면 false(파이프로 대신 답할 수 없다).
   confirm(question: string, expected: string): boolean;
   web: WebRead;
