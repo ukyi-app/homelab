@@ -203,41 +203,49 @@ h database pg-role-$APP password; h app-$APP $APP-db DATABASE_URL               
 4. 앱 `/healthz/cache`가 200인지 본다(3c 4단계의 port-forward). 영속 Valkey면 다음 백업 Job도 새 값으로 도는지 수동 Job 하나로 본다([restore.md](restore.md) 1절 0단계).
 5. `PASSWORD_PREVIOUS`를 지운다.
 
-## 3e. 봇 작업자 모델 토큰 (레인별, T18)
+## 3e. 봇 작업자 모델 토큰 (레인별, T18 · CLI C22)
 
-Claude 구독 장기 토큰(`claude setup-token`, 발급 뒤 1년 만료)이다. 레인마다 따로라 한 레인만 바꾼다. 개인 `~/.claude*`를 복사하지 않는다. 다른 계정으로 자동 전환하지 않는다.
+Claude 구독 장기 토큰(`claude setup-token`, 발급 뒤 1년 만료)이다. 레인마다 따로다. 개인 `~/.claude*`를 복사하지 않는다. 봇은 스스로 다른 계정으로 바꾸지 않고, 바꾸는 것은 owner가 `homelab bot account`로만 한다(봇 DECISIONS D-14 조건 5). 만료 30일 전부터 봇 브리핑이 계정 이름과 남은 날수를 알린다.
 
-| 레인 | Infisical `/apps/homelab-bot/worker` | Secret(키는 둘 다 `CLAUDE_CODE_OAUTH_TOKEN`) | 파드 |
-|---|---|---|---|
-| 대화+리뷰 | `CLAUDE_CODE_OAUTH_TOKEN` | `sandbox/worker-credential-claude-subscription` | `worker` |
-| 작업 | `CLAUDE_CODE_OAUTH_TOKEN_TASK` | `sandbox/worker-task-credential-claude-subscription` | `worker-task` |
+토큰 값은 계정마다 Infisical `/bot-accounts/<이름>`에 두고(작업자가 읽지 않는 폴더), `homelab bot account use`가 지금 쓸 계정의 값을 작업자 키로 옮긴다. 같은 계정의 토큰 교체도 같은 절차다(`add --replace` → `use`).
 
-VM `homelab-dev`에는 실제 토큰을 넣지 않는다([bootstrap.md](bootstrap.md) 2.2 vm 1단계).
+| 레인 | 계정 폴더 `/bot-accounts/<이름>` | 작업자 키 `/apps/homelab-bot/worker` | Secret(키는 둘 다 `CLAUDE_CODE_OAUTH_TOKEN`) | 파드 |
+|---|---|---|---|---|
+| 대화+리뷰 | `CLAUDE_CODE_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` | `sandbox/worker-credential-claude-subscription` | `worker` |
+| 작업 | `CLAUDE_CODE_OAUTH_TOKEN_TASK` | `CLAUDE_CODE_OAUTH_TOKEN_TASK` | `sandbox/worker-task-credential-claude-subscription` | `worker-task` |
 
-1. drain한다. `/emergency-stop`으로 새 모델 실행을 막고 `/model-status`로 실행 중·`unknown` 작업이 0인지 본다. 지금 이 멈춤은 레인을 가리지 않는다. 작업 레인만 멈추는 게이트 `TASK_LANE_ENABLED`는 봇 쪽 구현 뒤에 쓴다. `unknown`이 있으면 정리부터 한다.
-2. 새 토큰을 발급해 Infisical UI에서 바꾼다(`secrets set`은 값이 명령행 인자라 쓰지 않는다). 옛 값은 0절대로 `<KEY>_PREVIOUS`로 옮긴다. 샌 것이 의심되면 옮기지 말고 5단계 철회를 먼저 한다.
-3. ESO를 즉시 동기화하고 Secret이 바뀐 것을 본다. 값은 해시 앞부분으로만 본다.
+VM `homelab-dev`에는 실제 토큰을 넣지 않는다([bootstrap.md](bootstrap.md) 2.2 vm 1단계). 셋 다 `--apply` 없이 먼저 돌려 계획을 본다.
 
-   ```bash
-   SECRET=worker-task-credential-claude-subscription   # 대화+리뷰면 worker-credential-claude-subscription
-   DEPLOY=worker-task                                  # 대화+리뷰면 worker
-   kubectl -n sandbox annotate externalsecret "$SECRET" force-sync="$(date +%s)" --overwrite
-   kubectl -n sandbox get externalsecret "$SECRET"     # SecretSynced, refreshTime이 교체 시각 뒤
-   kubectl -n sandbox get secret "$SECRET" -o jsonpath='{.data.CLAUDE_CODE_OAUTH_TOKEN}' | base64 -d | sha256sum | cut -c1-12
-   ```
-
-4. 볼륨 반영을 본다. subPath 없는 Secret 볼륨이라 kubelet이 파드 재시작 없이 갱신하고(보통 1분 안팎), 작업자는 실행마다 파일을 다시 읽는다. 아래 해시가 3단계와 같아질 때까지 기다린다. `worker-task`의 `kubectl exec`는 정리 sweep에 죽을 수 있어 1단계 drain 뒤에 돌린다. 그다음 파드가 Ready인지 보고 승인된 최소 호출 하나로 새 토큰을 확인한다. Ready는 토큰 모양만 보므로 Ready만으로는 새 토큰이 유효한지 모른다.
+1. drain한다(유출이 의심되거나 실행 중인 일을 옛 토큰으로 끝내면 안 될 때). `homelab bot emergency-stop --apply`로 새 모델 실행을 막고 `homelab bot status --apply`로 `executionPending=false`인지 본다. `unknown`이 있으면 `homelab bot release <작업 ID> --apply`로 정리부터 한다. 만료 전 교체만이면 drain하지 않아도 된다(이미 돌던 실행은 옛 자격으로 끝난다).
+2. 새 토큰을 등록한다. 이 기기에 Claude Code CLI(`claude`)가 있어야 한다.
 
    ```bash
-   kubectl -n sandbox exec "deploy/$DEPLOY" -c worker -- sha256sum /run/worker-credential/CLAUDE_CODE_OAUTH_TOKEN | cut -c1-12
-   kubectl -n sandbox get deploy "$DEPLOY"
+   homelab bot account add <이름> --apply            # 새 계정
+   homelab bot account add <이름> --replace --apply  # 같은 계정의 토큰 교체(만료 전·유출)
    ```
 
-5. 옛 토큰을 철회한다. 토큰 하나만 철회할 수 있는지는 [미확인]이다. 작업 레인을 켜기 전에 사람이 확인해 이 줄을 고친다. 철회하고 `_PREVIOUS`를 지운다.
-6. `/resume-model target:emergency-stop`으로 푼다. 멈춰 있던 작업은 원인을 없앤 뒤 명시적으로 재개한다.
-7. 복구 자산의 내보내기를 새로 뜬다([recovery-assets.md](recovery-assets.md)). 옛 내보내기는 철회된 토큰을 담는다.
+   레인마다 `claude setup-token`이 뜬다. 봇 계정으로 브라우저 로그인을 하고, 화면에 나온 토큰을 에코 없는 입력에 붙여 넣는다(두 번, 대화·리뷰 다음 작업). 두 값이 같으면 거부한다. 값은 Infisical 요청 본문으로만 가고 CLI 출력·argv·파일에 남지 않는다. 다만 `claude setup-token`이 토큰을 터미널에 한 번 출력하므로 붙여 넣은 뒤 터미널 스크롤을 지운다. 끝나면 봇 DB에 이름·방식·발급일이 적힌다.
+3. 바꾸고 반영을 확인한다.
 
-새 토큰이 틀리면 작업은 `auth_expired` 대기로 남는다. 자동 재개·폐기는 없으니 맞는 값으로 2단계부터 다시 한다.
+   ```bash
+   homelab bot account use <이름> --apply
+   homelab bot account list --apply                  # 지금 계정, 토큰 만료일, 멈춘 작업 수
+   ```
+
+   CLI가 두 값을 작업자 키로 옮기고(둘 다 쓴 뒤에만 다음) → 두 ExternalSecret을 즉시 동기화하고 → Secret 해시가 계정 값과 같아지는지 보고 → 작업자 두 파드의 자격 파일 지문(`sha256sum` 앞 12자)이 같아질 때까지 기다린 뒤(kubelet 볼륨 갱신, 보통 1분 안팎) → 봇의 지금 계정을 바꾸고 모델 멈춤 작업(결제 멈춤 포함)을 해제한다. 앞 단계가 실패하면 해제하지 않는다. 같은 명령을 다시 치면 된 단계는 건너뛰고 이어 간다. `worker-task`의 `kubectl exec`는 정리 sweep에 죽을 수 있어 CLI가 기한 안에서 다시 본다. 그다음 승인된 최소 호출 하나로 새 토큰을 확인한다. 파드 Ready는 토큰 모양만 보므로 Ready만으로는 새 토큰이 유효한지 모른다.
+4. 1단계에서 drain했으면 푼다: `homelab bot resume emergency-stop --apply` 뒤 `homelab bot account use <이름> --apply`를 한 번 더 친다. 비상 정지 중에는 3단계가 지금 계정만 바꾸고 멈춘 일 해제를 미뤘기 때문이다(결과 줄의 `비상 정지 중이라 해제하지 않았다`).
+5. 옛 토큰을 철회한다(Claude Settings → Claude Code의 토큰 삭제). 토큰 하나만 철회할 수 있는지는 [미확인]이다. 작업 레인을 켜기 전에 사람이 확인해 이 줄을 고친다. `--replace`가 계정 폴더의 옛 값을 덮었으므로 `_PREVIOUS` 키는 두지 않는다. 샌 것이 의심되면 2단계 전에 철회부터 한다.
+6. 복구 자산의 내보내기를 새로 뜬다([recovery-assets.md](recovery-assets.md)). 옛 내보내기는 철회된 토큰을 담는다. 계정 폴더 `/bot-accounts`는 손 Secret 지도에 없다. 재해 복구 뒤 다른 계정으로 바꾸려면 그 계정을 2단계부터 다시 등록한다.
+
+새 토큰이 틀리면 작업은 `auth_expired` 대기로 남는다. 맞는 값으로 2단계부터 다시 하면 3단계의 해제가 이어 준다. CLI 없이 손으로 할 때의 확인 명령(해시만 본다):
+
+```bash
+SECRET=worker-task-credential-claude-subscription   # 대화+리뷰면 worker-credential-claude-subscription
+DEPLOY=worker-task                                  # 대화+리뷰면 worker
+kubectl -n sandbox annotate externalsecret "$SECRET" force-sync="$(date +%s)" --overwrite
+kubectl -n sandbox get secret "$SECRET" -o jsonpath='{.data.CLAUDE_CODE_OAUTH_TOKEN}' | base64 -d | sha256sum | cut -c1-12
+kubectl -n sandbox exec "deploy/$DEPLOY" -c worker -- sha256sum /run/worker-credential/CLAUDE_CODE_OAUTH_TOKEN | cut -c1-12
+```
 
 ## 3f. R08 연결 폐기와 기기 분실 (T18)
 

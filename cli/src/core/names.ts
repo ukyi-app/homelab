@@ -48,6 +48,23 @@ export function repoPathProblem(path: string): string | null {
 }
 
 // 복원 실행 id: UTC YYYYMMDDHHMMSS + 16진 6자 = 20자. 라벨 homelab.ukyi.app/restore의 ^[a-z0-9]{1,22}$에 맞는다.
+// 봇 모델 계정(homelab bot account, 봇 COLLEAGUE_SPEC §4.8). 이름은 봇 src/model-accounts.ts ACCOUNT_NAME과 같다.
+// 이름은 Infisical 폴더 이름 조각이자 봇 지표 라벨 값(homelab_bot_model_account{account})이 된다.
+export const BOT_ACCOUNT_NAME = /[a-z]([a-z0-9-]{0,30}[a-z0-9])?/;
+// 계정별 값 폴더. 작업자 store(infisical-sandbox, /apps/homelab-bot/worker)와 앱 store(infisical-apps, /apps)의 기본 경로
+// 밖이다. Free 플랜은 경로 RBAC가 없어 secretsPath가 보안 경계는 아니다(platform/external-secrets 머리 주석). 이 폴더를 읽는
+// ExternalSecret이 없고, 생기려면 Git PR이 필요하다는 것이 경계다.
+export const botAccountFolder = (name: string) => `/bot-accounts/${name}`;
+// 작업자가 읽는 폴더와 레인별 키(rotate.md 3e 표). 계정 폴더도 같은 키 이름을 쓴다.
+export const BOT_WORKER_FOLDER = "/apps/homelab-bot/worker";
+export const BOT_LANES = [
+  { lane: "chat", label: "대화·리뷰", key: "CLAUDE_CODE_OAUTH_TOKEN", secret: "worker-credential-claude-subscription" },
+  { lane: "task", label: "작업", key: "CLAUDE_CODE_OAUTH_TOKEN_TASK", secret: "worker-task-credential-claude-subscription" },
+] as const;
+// 작업자 Secret의 ns와 키(두 레인 모두 키 이름은 CLAUDE_CODE_OAUTH_TOKEN이다).
+export const BOT_WORKER_NS = "sandbox";
+export const BOT_WORKER_SECRET_KEY = "CLAUDE_CODE_OAUTH_TOKEN";
+
 export function newRunId(now: Date = new Date()): string {
   const stamp = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
   const rand = [...crypto.getRandomValues(new Uint8Array(3))].map((b) => b.toString(16).padStart(2, "0")).join("");
