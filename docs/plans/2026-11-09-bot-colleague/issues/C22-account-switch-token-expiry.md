@@ -63,9 +63,10 @@ owner가 `homelab bot account add <이름>`으로 구독 계정을 브라우저 
 ## 결과
 
 - 봇 PR #142, 병합 `8437d95`(2026-11-11): migration 028 `model_accounts`(이름·방식·발급일·지금 계정·`switched_at`, 값 칸 없음), `src/model-accounts.ts`, 관리 진입점 `account record|use|list`(결과 이름 `recorded`·`accounts`·`switched`·`unknown_account`), 브리핑 토큰 만료 줄, `homelab_bot_model_account{account,method}`. 전체 검사(결과 `80a1325`, `FPB_TEST_TIMEOUT=2400 .fpb/test.sh wt-c22 c22-full --pg -- full`): 2,579개 중 통과 2,557, 실패 0, skip 22. `build / test` 통과.
-- homelab PR #1252(head `18a2e50`, owner 검토 대기): `homelab bot account add|use|list`, `rotate.md` 3e CLI 절차, `cli/README.md`·설계 C.7 표. `bun run test:cli` 786개 통과, `bun run ci` 30단계 통과, `ci` 통과. Codex 1차 P2 1(로그인 출력과 토큰이 결과 stdout에 섞임) 수정, 재리뷰 지적 없음.
+- homelab PR #1252, 병합 `b722fb2`(2026-11-11, 사용자 "병합해줘"): `homelab bot account add|use|list`, `rotate.md` 3e CLI 절차, `cli/README.md`·설계 C.7 표. `bun run test:cli` 786개 통과, `bun run ci` 30단계 통과, `ci` 통과. Codex 1차 P2 1(로그인 출력과 토큰이 결과 stdout에 섞임) 수정, 재리뷰 지적 없음.
 - 약관 재확인(할 일 1): 봇 `DECISIONS.md` "C22 약관 재확인". 2026-11-12 시행 이용 정책에서 다른 구독 계정으로 바꾸는 것은 금지로 확정되지 않았으나 애매하다(한도를 "제품 내 제한 사항"으로 보면 우회로 읽힐 수 있음). 같은 계정 토큰 교체와 API 크레딧 방식은 허용으로 읽었다. **owner 판단 대기.** 금지로 정하면 경보 문구(homelab `vmalert/rules/bot.yaml`)의 할 일 3과 명세 §4.7을 고치는 후속을 연다.
 - 리뷰: 봇 Codex 1차 P2 3(잠금 순서, 전환 전 실행의 한도 관측 분리, 돌아온 계정의 마지막 관측 표시) 수정. 2차 P2 1(관측 확인과 쓰기 사이의 전환 경합)은 C23 할 일 4a로 넘김.
 - 구현 선택: 계정을 바꾸면 한도 관측과 리뷰 미루기 기한을 옛 계정 행으로 옮기고 비운다. 전환보다 먼저 시작한 실행의 관측은 적지 않는다(전환 직후 잠깐 새 계정의 경고를 놓칠 수 있음). 목록에는 종류별 멈춘 작업 수만 보이고 작업 ID는 없다. 결제 멈춤은 `account use`(같은 계정도 됨)가 푼다. `--by api`는 사용법 오류 64(C23). `claude setup-token` 출력 자동 수집은 하지 않고 가려진 입력으로 받는다(토큰이 owner 터미널 스크롤에 한 번 남는다). stderr가 터미널이 아니면 로그인을 띄우지 않고 종료 1로 끝난다.
-- 남은 것: homelab #1252 owner 검토·병합, 봇 배포 확인, 약관 판단, 사람 단계(할 일 10: 실토큰 등록, 운영 전환 1회, 봇 구독 계정이 owner 개인 계정과 같은지 확인). 완료 조건의 운영 항목(`account use` 2분, 지문 확인)은 사람 단계와 C24 S5에서 본다.
+- 봇 배포 확인(2026-11-11 03:06): migration 028 적용, 새 파드 Ready, 로그 오류 0, `homelab_bot_model_account{method="none"}` 1.
+- 남은 것: 약관 판단, 사람 단계(할 일 10: 실토큰 등록, 운영 전환 1회, 봇 구독 계정이 owner 개인 계정과 같은지 확인). 완료 조건의 운영 항목(`account use` 2분, 지문 확인)은 사람 단계와 C24 S5에서 본다.
 - 남은 위험: 계정 폴더 `/bot-accounts`는 복구 자산의 손 Secret 지도에 없다(재해 뒤 재등록). 운영 RBAC로 `sandbox` 작업자 exec가 되는지는 미확인(S5).

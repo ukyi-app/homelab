@@ -1,7 +1,7 @@
 # C23 API 크레딧 방식
 
 - 단계: 5 멈춤과 계정
-- 상태: 대기 (선행: C06, C22)
+- 상태: 진행 중 (2026-11-11 09:5x 착수. C22는 코드가 모두 병합된 상태에서 사람 단계를 기다리지 않고 시작, 사용자 2026-11-11 "예")
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.8 "계정 등록"(API 크레딧)·"계정 전환"·"API 크레딧 방식"·"권장 Console 설정(사람)", §5 AC-22 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C06, C22
 - 연결 AC: AC-22
@@ -61,4 +61,11 @@ owner가 봇 계정을 API 크레딧 방식(Claude Console API 키)으로 등록
 
 ## 결과
 
-(구현 뒤 채운다)
+- 봇 PR #143, 병합 `4df0a4f`(2026-11-11): `src/credentials.ts` `MethodEnvCredential`(실행마다 방식 표시와 그 방식의 자격을 다시 읽음), `CLAUDE_AUTH`에 `api-key`(env `ANTHROPIC_API_KEY`), `classifyClaudeError`의 결제 분류, 관리 진입점 `account record|use <이름> api`, 할 일 4a(한도 관측의 확인·쓰기를 scheduler 잠금 아래에서). 전체 검사(결과 `49db1a7`, `FPB_TEST_TIMEOUT=2400 .fpb/test.sh wt-c23 c23-full --pg -- full`): 2,586개 중 통과 2,564, 실패 0, skip 22. `build / test` 통과, Codex 지적 없음.
+- 키 이름(sandbox PR과 CLI가 그대로 쓴다): Infisical `/apps/homelab-bot/worker`의 `CLAUDE_AUTH_METHOD`(`subscription`·`api`, 없으면 구독), `ANTHROPIC_API_KEY`·`ANTHROPIC_API_KEY_TASK`(안 쓰면 `unset`), `CLAUDE_CODE_OAUTH_TOKEN`·`CLAUDE_CODE_OAUTH_TOKEN_TASK`(안 쓰면 `unset`). 계정 값은 `/bot-accounts/<이름>`의 `ANTHROPIC_API_KEY`·`ANTHROPIC_API_KEY_TASK`. 두 레인 Secret의 파일 이름은 `CLAUDE_AUTH_METHOD`·`CLAUDE_CODE_OAUTH_TOKEN`·`ANTHROPIC_API_KEY`.
+- 분해 불일치(주 진행자 수용): 방식 표시가 없으면 실행을 거부하지 않고 구독으로 본다(할 일 2의 글자와 다름). 거부하면 지금 Secret + 새 작업자 조합과 손 Secret 복원에서 봇 전체가 멈춘다. 표시가 없는데 API 키만 있으면 거부한다. 비교는 봇 DECISIONS "C23 API 크레딧 방식".
+- 구현 선택(owner에 알림 2026-11-11): API 방식에서는 429도 결제 멈춤으로 닫는다(429가 월 지출 상한에도 쓰이고 API 방식에는 풀리는 시각이 없다). 진짜 분당 한도에서도 owner가 `account use`로 풀어야 한다.
+- homelab CLI PR #1256(`account add|use --by api`, `rotate.md` 3e, 설계 C.7 행, head `51cf995`, owner 검토 대기): Codex 1차 P1 1(sandbox 지원 확인 전에 구독 토큰을 `unset`으로 덮음) 수정. 이제 두 작업자 ExternalSecret의 `spec.data` 매핑을 먼저 확인해 지원하지 않는 배포에서는 쓰기 전에 거부하고, 옛 방식 자격은 새 자격의 Secret·볼륨 반영 확인 뒤에만 비운다. 재리뷰 지적 없음, `bun run test:cli` 796개 통과, `bun run ci` 30단계·`ci` 통과.
+- homelab sandbox PR #1258(할 일 6, head `083104f`, owner 병합 대기): 작업자 이미지 둘을 봇 `4df0a4f` 빌드 digest `sha256:a0ee26b9…`로(빌드 증명 `gh attestation verify` exit 0), 두 ExternalSecret `spec.data`에 레인별 API 키와 `CLAUDE_AUTH_METHOD`, `values.schema.json` 고정, `restore.md` 3.1 canary(키 18 → 22, 내보내기 경로 18 → 21), `bootstrap.md` 2.2 vm 1단계. Codex 지적 없음, `bun run ci` 30단계·`ci` 통과. **병합 전 사람 순서:** #1256 병합 → `homelab bot account add <이름>`(지금 쓰는 구독 계정) → `account use <이름> --apply`(Infisical에 방식 표시와 API 키 자리 생성) → plan으로 `same` 확인 → VM이 있으면 `homelab-dev`에도 세 키 → 병합. 키가 없으면 두 ExternalSecret이 Degraded라 root가 sandbox wave에서 멈춘다. `homelab secret set`으로는 넣을 수 없다(하위 폴더·16자 미만 값 거부).
+- 봇 배포 확인(2026-11-11 11:32): 게시 서버 새 파드 Ready, digest 일치, 로그 오류 0. 작업자 둘은 #1258 전까지 `9b067e9` 그대로.
+- 남은 것: #1256·#1258 owner 병합(위 순서), 병합 뒤 확인(두 ExternalSecret Ready, 두 작업자 새 이미지 Ready, 구독 대화 1회), 할 일 9(사람 단계: Console 키, `--by api` 전환 1회와 구독 복귀 1회). 미확인(S5, C24): API 방식 egress, 실제 `apiKeySource` 표시, 실제 크레딧 차감·소진 응답. 설계 C.8의 "모델 자격을 파드마다 하나" 문구는 이제 "Secret 하나에 두 방식 자리 + 방식 표시"로 읽어야 한다(#1258 병합 뒤 고칠지 정한다).
