@@ -1,8 +1,8 @@
 // homelab bot account add <이름> [--by subscription|api] [--separate-tokens]: 봇이 쓸 Claude 계정 등록(봇 COLLEAGUE_SPEC §4.8 "계정 등록").
 // 자리가 둘이다: 대화용(대화와 PR 리뷰)과 작업용(코드 변경 작성). 기본은 값 하나를 두 자리에 함께 쓴다(로그인 한 번, 사용자 결정
 // 2026-11-11). --separate-tokens면 자리마다 따로 받는다(한쪽만 교체·철회하거나, 샌 값으로 어느 자리인지 가르려면).
-// - 구독(기본): tty면 `claude setup-token`을 가짜 터미널로 띄워 owner는 브라우저 로그인만 하고, CLI가 화면에서 토큰 줄을 받는다.
-//   화면에는 토큰 줄을 가려 보인다. 출력 꼴이 관측과 다르면 지금처럼 토큰이 보이고 가려진 입력으로 받는다. 그래서 `claude`가
+// - 구독(기본): tty면 `claude setup-token`을 가짜 터미널로 띄워 owner는 브라우저 로그인만 하고, CLI가 화면에서 토큰을 받아 가린다.
+//   값을 확신하지 못하면 가린 채 받지 않고 가려진 입력으로 받는다(토큰 꼴이 아예 없으면 가리지 않는다). 그래서 `claude`가
 //   이 CLI를 돌리는 기기에 있어야 한다. stderr가 터미널이 아니면 로그인을 띄우지 않는다.
 // - API 크레딧(--by api): Claude Console에서 만든 API 키를 가려진 입력으로 받는다. 자식을 띄우지 않는다.
 // 파이프면 stdin 한 줄(--separate-tokens면 대화용·작업용 두 줄)이다. 값은 argv·출력·파일에 두지 않고(secret set과 같은 입력 경로)
@@ -94,7 +94,7 @@ export default defineCommand({
       steps: [values, record],
       notes: [api
         ? `API 키는 Claude Console의 봇 전용 workspace에서 만든다(자동 충전 끔, rotate.md 3e). 키는 화면에 보이지 않게 붙여 넣거나 stdin으로 넘긴다(기본 한 줄, --separate-tokens면 대화용·작업용 두 줄)`
-        : "claude setup-token은 이 기기에서 실행한다(Claude Code CLI 필요). CLI가 화면에서 토큰 줄을 받아 가린다. 출력 꼴이 달라 받지 못하면 화면에 나온 토큰을 붙여 넣고 터미널 스크롤을 지운다. stderr가 터미널이 아니면 로그인을 띄우지 않는다(그때는 토큰을 stdin으로 넘긴다)"],
+        : "claude setup-token은 이 기기에서 실행한다(Claude Code CLI 필요). CLI가 화면에서 토큰을 받아 가린다. 받지 못하면 안내대로 토큰을 가려진 입력에 붙여 넣는다. stderr가 터미널이 아니면 로그인을 띄우지 않는다(그때는 토큰을 stdin으로 넘긴다)"],
       next: (status) => (status === "done" ? `봇이 이 계정을 쓰게 하려면: homelab bot account use ${name}${api ? " --by api" : ""}` : undefined) as string | null,
       summary: {
         names: { "infisical-account": `${what} 받아 저장`, "bot-account-record": "봇 DB에 계정 기록" },

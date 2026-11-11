@@ -1,4 +1,4 @@
-// claude setup-token 화면 거르기(homelab bot account add, C35). 자식 출력을 줄 단위로 모아 토큰 줄만 가리고 나머지는 화면에 넘긴다.
+// claude setup-token 화면 거르기(homelab bot account add, C35). 자식 출력에서 토큰을 받아 가리고 나머지는 화면에 넘긴다.
 // 2026-11-11 관측(claude 2.1.322): 안내 글 → "Your OAuth token (valid for 1 year):" → 빈 줄 → sk-ant-oat01-… 한 줄 → "Store this token securely…".
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";

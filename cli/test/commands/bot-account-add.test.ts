@@ -208,16 +208,39 @@ describe("bot account add", () => {
     expect(leaks(r.screen, OAT)).toBe(false);
   }, TTY_MS);
 
-  test("터미널: 출력 꼴이 다르면 토큰을 가리지 않고(지금처럼 보임) 가려진 입력으로 받는다. 붙여 넣은 값은 되찍지 않는다", async () => {
+  test("터미널: 토큰이 다른 글과 한 줄이어도 받아 가린다", async () => {
     const odd = `Opening browser…\n${OAUTH_URL}\nYour token: ${OAT}\n`;
+    const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(ONE), claude(odd)]);
+    expect(r.code).toBe(0);
+    expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${OAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${OAT}\n`]);
+    expect(leaks(r.screen, OAT)).toBe(false);
+    expect(r.screen).toContain("Your token: [토큰을 받아 화면에서 가렸다]");
+  }, TTY_MS);
+
+  test("터미널: 토큰을 확신하지 못하면 가린 채 받지 않고, 다른 터미널에서 받은 토큰을 가려진 입력으로 받는다. 화면 어디에도 토큰이 없다", async () => {
+    const odd = ` ${OAUTH_URL}\n\n Your OAuth token (valid for 1 year):\n\n ${OAT.slice(0, 40)}\n ${OAT.slice(40)}\n\n Store this token securely.\n`;
     const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(ONE), claude(odd)], { steps: [{ wait: /화면에 보이지 않는다/, send: `${OAT}\r` }] });
     expect(r.pending).toEqual([]);
     expect(r.code).toBe(0);
     expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${OAT}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${OAT}\n`]);
+    expect(r.screen).toContain("값을 확신하지 못해 받지 않았다");
+    expect(r.screen).toContain("다른 터미널에서 claude setup-token을 실행해");
+    expect(r.screen).toContain(OAUTH_URL);
+    expect(leaks(r.screen, OAT)).toBe(false);
+  }, TTY_MS);
+
+  test("터미널: 화면에 토큰 꼴이 하나도 없으면(새 꼴) 화면을 가리지 않고, 사람이 보이는 값을 가려진 입력에 붙여 넣는다", async () => {
+    const fresh = "cc-oauth-FAKEnewformFAKEnewform0123456789";
+    const odd = `Opening browser…\n${OAUTH_URL}\nYour credential: ${fresh}\n`;
+    const both = { CLAUDE_CODE_OAUTH_TOKEN: fresh, CLAUDE_CODE_OAUTH_TOKEN_TASK: fresh };
+    const r = await runCliTty(["bot", "account", "add", "main", "--apply"], [...world(both), claude(odd)], { steps: [{ wait: /화면에 보이지 않는다/, send: `${fresh}\r` }] });
+    expect(r.pending).toEqual([]);
+    expect(r.code).toBe(0);
+    expect(sets(r)).toEqual([`CLAUDE_CODE_OAUTH_TOKEN=${fresh}\n`, `CLAUDE_CODE_OAUTH_TOKEN_TASK=${fresh}\n`]);
     const prompt = r.screen.indexOf("화면에 보이지 않는다");
-    expect(r.screen.slice(0, prompt)).toContain(`Your token: ${OAT}`);
-    expect(r.screen).toContain("화면에서 토큰 줄을 알아보지 못했다");
-    expect(leaks(r.screen.slice(prompt), OAT)).toBe(false);
+    expect(r.screen.slice(0, prompt)).toContain(`Your credential: ${fresh}`);
+    expect(r.screen).toContain("화면에서 토큰을 찾지 못했다");
+    expect(r.screen.slice(prompt)).not.toContain(fresh);
   }, TTY_MS);
 
   test("터미널 --by api: API 키를 가려진 입력 한 번으로 받아 두 자리에 쓰고, 화면에 되찍지 않는다", async () => {
