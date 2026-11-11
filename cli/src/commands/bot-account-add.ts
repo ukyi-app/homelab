@@ -87,7 +87,7 @@ export default defineCommand({
       command: "bot account add",
       steps: [values, record],
       notes: [api
-        ? "API 키는 Claude Console의 봇 전용 workspace에서 레인마다 따로 만든다(자동 충전 끔, rotate.md 3f). 키는 화면에 보이지 않게 붙여 넣거나 stdin 두 줄로 넘긴다"
+        ? "API 키는 Claude Console의 봇 전용 workspace에서 레인마다 따로 만든다(자동 충전 끔, rotate.md 3e). 키는 화면에 보이지 않게 붙여 넣거나 stdin 두 줄로 넘긴다"
         : "claude setup-token은 이 기기에서 실행한다(Claude Code CLI 필요). 토큰은 claude가 화면(stderr)에 한 번 출력하므로 붙여 넣은 뒤 터미널 스크롤을 지운다. stderr가 터미널이 아니면 로그인을 띄우지 않는다(그때는 토큰을 stdin 두 줄로 넘긴다)"],
       next: (status) => (status === "done" ? `봇이 이 계정을 쓰게 하려면: homelab bot account use ${name}${api ? " --by api" : ""}` : undefined) as string | null,
     });
