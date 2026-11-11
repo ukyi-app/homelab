@@ -1,15 +1,20 @@
 // homelab bot account use <이름> [--by subscription|api]: 봇이 쓰는 계정과 방식 바꾸기(봇 COLLEAGUE_SPEC §4.8 "계정 전환",
 // rotate.md 3e). 대화·리뷰·작업이 함께 바뀐다. 순서가 계약이다. 하나라도 실패하면 뒤 단계는 돌지 않는다(엔진). 그래서 작업자
 // 반영을 확인하기 전에는 멈춘 일을 해제하지 않는다.
-//  1. 계정 폴더에 그 방식의 두 레인 값이 있고 봇 DB에 그 계정·방식 기록이 있는지 본다(없으면 아무것도 바꾸지 않는다).
-//  2. 작업자 키(/apps/homelab-bot/worker)를 이 순서로 쓴다: 그 방식의 두 값 → 방식 표시 → 다른 방식 두 키를 자리 표시값(unset)으로.
-//     어느 순간에 멈춰도 방식 표시는 자격이 있는 방식을 가리킨다(작업자가 불일치로 실행을 거부하는 틈이 없다). 다 쓴 뒤에는 작업자
-//     키에 자격이 하나뿐이다(자격 둘을 두지 않는다, sandbox ExternalSecret 머리 주석). 멈추면 재실행이 처음부터 다시 쓴다.
+//  1. 계정 폴더에 그 방식의 두 레인 값이 있고, 두 작업자 ExternalSecret이 그 방식의 자격(API면 방식 표시도)을 Secret의 작업자
+//     파일 이름으로 옮기는지, 봇 DB에 그 계정·방식 기록이 있는지 본다. 하나라도 아니면 아무것도 쓰지 않는다. 옮기지 않는 배포에서
+//     쓰면 다음 동기화가 옛 방식 자리 표시값만 Secret에 들여 지금 돌던 작업자의 인증이 깨진다(sandbox PR 전의 --by api).
+//  2. 작업자 키(/apps/homelab-bot/worker)에 그 방식의 두 값 → 방식 표시를 쓴다. 옛 방식 자격은 아직 그대로 둔다.
 //  3. 두 ExternalSecret을 즉시 동기화하고 그 방식의 Secret 키 해시가 계정 값과 같아질 때까지 기다린다. 방식 표시도 맞아야 한다.
 //  4. 두 작업자 파드의 자격 파일 지문과 방식 표시가 맞을 때까지 기다린다(kubelet 볼륨 갱신, 보통 1분 안팎).
-//  5. 관리 진입점으로 봇 DB의 지금 계정·방식을 바꾸고 모델 멈춤 작업(결제 멈춤 포함)을 해제한다.
+//  5. 그 뒤에만 다른 방식 두 키를 자리 표시값(unset)으로 비우고, 그 키를 옮기는 ExternalSecret이면 Secret에서도 비워질 때까지 본다.
+//     다 끝나면 작업자 키에 자격이 하나뿐이다(sandbox ExternalSecret 머리 주석).
+//  6. 관리 진입점으로 봇 DB의 지금 계정·방식을 바꾸고 모델 멈춤 작업(결제 멈춤 포함)을 해제한다.
+// 2~4 사이에는 한 Secret에 두 방식 자격이 함께 보인다. 이 틈은 허용한다: 작업자(봇 src/credentials.ts MethodEnvCredential)는
+// 방식 표시가 고른 자격만 실행 env에 넣고, 다른 방식 자격은 반사·유출 검사에만 쓴다. 반대로 자격이 없는 틈(옛 자격을 먼저
+// 비움)은 허용하지 않는다. ESO 주기 동기화(1시간)가 쓰기 도중에 끼거나 새 자격이 Secret에 오지 않아도, 새 자격이 볼륨에
+// 반영된 것을 확인하기 전에는 옛 자격이 Secret에 남아 있어야 작업자가 멈추지 않는다.
 // 구독은 방식 표시 키가 없는 Secret(sandbox가 아직 옮기지 않음)에서도 된다. 작업자는 표시가 없으면 구독으로 본다.
-// API는 sandbox ExternalSecret이 API 키·방식 표시를 옮긴 뒤에만 된다(그 전에는 3에서 멈춘다).
 // 이미 돌던 실행은 옛 자격으로 끝난다. 봇은 스스로 계정을 바꾸지 않는다(D-14 조건 5). 값은 해시로만 비교하고 출력하지 않는다.
 import { defineCommand, type BotAdminCommand, type BotAdminReport, type BotMethod, type Observation, type Step, type WorkerLane } from "../core/command";
 import { BOT_ACCOUNT_NAME, BOT_LANES, BOT_METHOD_KEY, BOT_UNSET, BOT_WORKER_FILE, BOT_WORKER_FOLDER, BOT_WORKER_NS, botAccountFolder, botLaneKey, publicHash } from "../core/names";
@@ -29,6 +34,27 @@ function switchDetail(r: BotAdminReport): string {
     : s.held === "queue_full" ? " · 대기열이 차 남은 작업은 대기열이 줄어든 뒤 같은 명령을 다시" : "";
   return `${r.result} · 해제 ${s.resumed}건 · 아직 대기 ${s.waiting}건${held}`;
 }
+
+// ExternalSecret이 옮기는 Secret 키 → Infisical 키. spec.data의 remoteRef.key만 판정한다. dataFrom이나 template 데이터가 있으면
+// 그 키가 덮이거나 이름이 바뀔 수 있어 판정하지 않고 문자열(사유)을 돌려준다. 호출자는 그때 쓰지 않는 쪽으로 닫는다.
+function esMapping(es: any): Map<string, string> | string {
+  if (!es) return "ExternalSecret이 없다";
+  const spec = es.spec ?? {};
+  const tpl = spec.target?.template ?? {};
+  if ((spec.dataFrom ?? []).length || Object.keys(tpl.data ?? {}).length || (tpl.templateFrom ?? []).length)
+    return "dataFrom·template 데이터를 써서 키 매핑을 판정하지 못한다";
+  const m = new Map<string, string>();
+  for (const d of spec.data ?? []) {
+    // property가 있으면 원격 값 안의 한 필드라 그 키 값 그대로가 아니다.
+    if (typeof d?.secretKey === "string" && typeof d?.remoteRef?.key === "string" && d.remoteRef.property === undefined) m.set(d.secretKey, d.remoteRef.key);
+  }
+  return m;
+}
+type Lane = (typeof BOT_LANES)[number];
+// 이 방식으로 돌려면 ExternalSecret이 옮겨야 하는 [Secret 키, Infisical 키]. 구독은 방식 표시가 없어도 된다.
+const needs = (l: Lane, m: BotMethod): [string, string][] =>
+  [[BOT_WORKER_FILE[m], botLaneKey(l, m)], ...(m === "api" ? [[BOT_METHOD_KEY, BOT_METHOD_KEY] as [string, string]] : [])];
+const carries = (map: Map<string, string>, pairs: [string, string][]) => pairs.filter(([s, k]) => map.get(s) !== k);
 
 export default defineCommand({
   path: ["bot", "account", "use"],
@@ -68,6 +94,25 @@ export default defineCommand({
         return same(`두 레인 ${label} 자격 있음`);
       },
     };
+    // 확인 단계(apply 없음): 두 ExternalSecret이 이 방식의 자격을 옮기지 않으면 plan에서도 막고 아무것도 쓰지 않는다.
+    const mapping: Step = {
+      id: "worker-mapping",
+      target: `${BOT_WORKER_NS} ExternalSecret ${BOT_LANES.map((l) => l.secret).join("·")}의 ${label} 키 매핑`,
+      async read(c) {
+        const problems: string[] = [];
+        for (const l of BOT_LANES) {
+          const map = esMapping(c.k8s.get("externalsecret", BOT_WORKER_NS, l.secret));
+          if (typeof map === "string") { problems.push(`${l.label} 레인 ${l.secret}: ${map}`); continue; }
+          const lack = carries(map, needs(l, method));
+          if (lack.length) problems.push(`${l.label} 레인 ${l.secret}이 ${lack.map(([s, k]) => `${k}→${s}`).join("·")}를 옮기지 않는다`);
+        }
+        if (!problems.length) return same(`두 ExternalSecret이 ${label} 자격${method === "api" ? "·방식 표시" : ""}를 옮긴다`);
+        return { state: "differs", action: "none", detail: `${problems.join(", ")}. 지금 배포의 작업자는 ${label} 방식으로 돌 수 없어 아무것도 쓰지 않는다`,
+          next: method === "api"
+            ? "sandbox 작업자 ExternalSecret에 레인별 API 키와 방식 표시를 더하는 sandbox PR(C23)이 병합·동기화된 뒤 같은 명령을 다시 실행한다"
+            : "kubectl -n sandbox get externalsecrets -o yaml로 작업자 ExternalSecret을 확인한다(platform/sandbox 템플릿과 같아야 한다)" };
+      },
+    };
     const account: Step = {
       id: "account-record",
       target: `계정 ${name}(${label}) 봇 DB 기록`,
@@ -86,17 +131,15 @@ export default defineCommand({
 
     const workerKeys: Step = {
       id: "worker-keys",
-      target: `Infisical homelab/prod ${BOT_WORKER_FOLDER} ${[...keys, BOT_METHOD_KEY, ...otherKeys].join("·")}`,
+      target: `Infisical homelab/prod ${BOT_WORKER_FOLDER} ${[...keys, BOT_METHOD_KEY].join("·")}`,
       async read(c) {
         const hashes = source(c);
         const now = keys.map((k) => c.infisical.valueHash(BOT_WORKER_FOLDER, k));
         const shown = c.infisical.valueHash(BOT_WORKER_FOLDER, BOT_METHOD_KEY);
-        const cleared = otherKeys.every((k) => c.infisical.valueHash(BOT_WORKER_FOLDER, k) === unset);
-        if (hashes.every((h, i) => h !== null && h === now[i]) && shown === marker && cleared) return same(`두 레인 모두 ${name}(${label}) 값, 방식 표시 ${method}, 다른 방식 자리 비움`);
+        if (hashes.every((h, i) => h !== null && h === now[i]) && shown === marker) return same(`두 레인 모두 ${name}(${label}) 값, 방식 표시 ${method}`);
         const lanes = BOT_LANES.filter((_, i) => hashes[i] === null || hashes[i] !== now[i]).map((l) => l.label);
-        const parts = [...(lanes.length ? [`${lanes.join("·")} 레인이 다른 값`] : []), ...(shown !== marker ? [`방식 표시가 ${method}가 아니다`] : []),
-          ...(!cleared ? [`${METHOD_LABEL[other]} 자격이 남아 있다`] : [])];
-        return { state: "differs", action: "update", detail: `${parts.join(", ")} → 계정 ${name}의 두 값 → 방식 표시 ${method} → ${METHOD_LABEL[other]} 키 ${BOT_UNSET} 순서로 쓴다(해시로만 비교)` };
+        const parts = [...(lanes.length ? [`${lanes.join("·")} 레인이 다른 값`] : []), ...(shown !== marker ? [`방식 표시가 ${method}가 아니다`] : [])];
+        return { state: "differs", action: "update", detail: `${parts.join(", ")} → 계정 ${name}의 두 값 → 방식 표시 ${method} 순서로 쓴다(해시로만 비교, ${METHOD_LABEL[other]} 자격은 반영 확인 뒤에 비운다)` };
       },
       async apply(w) {
         // 두 값을 먼저 다 읽고 나서 쓴다. 하나라도 없으면 아무것도 쓰지 않는다.
@@ -104,7 +147,6 @@ export default defineCommand({
         if (values.some((v) => v === null)) throw new CliError(`계정 ${name}의 레인 ${label} 자격이 없다`, `${addHint} --replace --apply`);
         keys.forEach((k, i) => w.infisical.setValue(BOT_WORKER_FOLDER, k, values[i]!));
         w.infisical.setMarker(BOT_WORKER_FOLDER, BOT_METHOD_KEY, method);
-        for (const k of otherKeys) w.infisical.setMarker(BOT_WORKER_FOLDER, k, BOT_UNSET);
       },
     };
 
@@ -122,7 +164,6 @@ export default defineCommand({
         const hashes = source(w);
         for (const l of BOT_LANES) w.k8s.forceSync(BOT_WORKER_NS, l.secret, { waitSec: SYNC_WAIT_SEC });
         // 맞지 않으면 시간 초과로 둔다. 엔진이 다시 읽어 판단하고(재시도 없음) 다르면 여기서 멈춘다(해제하지 않는다).
-        // API인데 Secret에 키가 오지 않으면 sandbox ExternalSecret이 아직 API 키·방식 표시를 옮기지 않는 것이다(sandbox 배포 전).
         BOT_LANES.forEach((l, i) => { w.k8s.waitSecret(BOT_WORKER_NS, l.secret, file, { hash: hashes[i] as string }, SECRET_WAIT_SEC); });
       },
     };
@@ -140,6 +181,30 @@ export default defineCommand({
         if (late.length) throw new CliError(`${late.join("·")} 레인 작업자에 ${VOLUME_WAIT_SEC}초 안에 반영되지 않았다. 멈춘 일은 해제하지 않았다`,
           "kubectl -n sandbox get pods로 작업자 파드를 보고 같은 명령을 다시 실행한다(된 단계는 건너뛴다)");
         volumes = true;
+      },
+    };
+
+    // 새 자격이 두 작업자 볼륨에 들어온 것을 본 뒤에만 옛 방식 자격을 비운다(머리 주석 5).
+    const otherFile = BOT_WORKER_FILE[other];
+    // Secret에 아직 옛 방식 자격이 있는 레인. 그 키를 옮기지 않는 ExternalSecret(sandbox PR 전의 API 키)이면 Secret에 키가 없다.
+    const stale = (c: { k8s: { secretHash(ns: string, n: string, k: string): string | null } }) =>
+      BOT_LANES.filter((l) => { const h = c.k8s.secretHash(BOT_WORKER_NS, l.secret, otherFile); return h !== null && h !== unset; });
+    const clear: Step = {
+      id: "worker-old-keys",
+      target: `${METHOD_LABEL[other]} 자격 비움(Infisical ${BOT_WORKER_FOLDER} ${otherKeys.join("·")}, ${BOT_WORKER_NS} Secret의 ${otherFile})`,
+      async read(c) {
+        const left = otherKeys.filter((k) => c.infisical.valueHash(BOT_WORKER_FOLDER, k) !== unset);
+        const inSecret = stale(c);
+        if (!left.length && !inSecret.length) return same(`${METHOD_LABEL[other]} 자격 자리가 ${BOT_UNSET}이다`);
+        const parts = [...(left.length ? [`Infisical ${left.join("·")}`] : []), ...(inSecret.length ? [`${inSecret.map((l) => l.label).join("·")} 레인 Secret`] : [])];
+        return { state: "differs", action: "update", detail: `${parts.join(", ")}에 ${METHOD_LABEL[other]} 자격이 남아 있다 → ${BOT_UNSET}으로 쓰고, 그 키를 옮기는 Secret이면 비워질 때까지 본다` };
+      },
+      async apply(w) {
+        for (const k of otherKeys) w.infisical.setMarker(BOT_WORKER_FOLDER, k, BOT_UNSET);
+        const lanes = stale(w);
+        for (const l of lanes) w.k8s.forceSync(BOT_WORKER_NS, l.secret, { waitSec: SYNC_WAIT_SEC });
+        // 맞지 않으면 엔진이 다시 읽어 멈춘다. 이때도 작업자는 방식 표시대로 새 자격으로 돈다(옛 자격이 남을 뿐이다).
+        for (const l of lanes) w.k8s.waitSecret(BOT_WORKER_NS, l.secret, otherFile, { hash: unset }, SECRET_WAIT_SEC);
       },
     };
 
@@ -162,8 +227,8 @@ export default defineCommand({
 
     return ctx.engine({
       command: "bot account use",
-      steps: [tokens, account, workerKeys, secrets, mounted, release],
-      ...(method === "api" ? { notes: ["API 크레딧 방식은 sandbox 작업자 Secret이 ANTHROPIC_API_KEY·CLAUDE_AUTH_METHOD를 옮기는 배포 뒤에만 반영된다(그 전에는 Secret 단계에서 멈추고 해제하지 않는다)"] } : {}),
+      steps: [tokens, mapping, account, workerKeys, secrets, mounted, clear, release],
+      ...(method === "api" ? { notes: ["API 크레딧 방식은 sandbox 작업자 ExternalSecret이 레인별 API 키와 CLAUDE_AUTH_METHOD를 옮기는 배포 뒤에만 된다(그 전에는 아무것도 쓰지 않고 거부한다)"] } : {}),
     });
   },
 });

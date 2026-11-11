@@ -237,7 +237,7 @@ VM `homelab-dev`에는 실제 토큰을 넣지 않는다([bootstrap.md](bootstra
    homelab bot account list --apply                  # 지금 계정, 토큰 만료일, 멈춘 작업 수
    ```
 
-   CLI가 두 값을 작업자 키로 옮기고(둘 다 쓴 뒤에만 다음) → 방식 표시를 `subscription`으로 → API 키 두 자리를 `unset`으로 쓰고 → 두 ExternalSecret을 즉시 동기화하고 → Secret 해시가 계정 값과 같아지는지 보고 → 작업자 두 파드의 자격 파일 지문(`sha256sum` 앞 12자)이 같아질 때까지 기다린 뒤(kubelet 볼륨 갱신, 보통 1분 안팎) → 봇의 지금 계정을 바꾸고 모델 멈춤 작업(결제 멈춤 포함)을 해제한다. 앞 단계가 실패하면 해제하지 않는다. 같은 명령을 다시 치면 된 단계는 건너뛰고 이어 간다. `worker-task`의 `kubectl exec`는 정리 sweep에 죽을 수 있어 CLI가 기한 안에서 다시 본다. 그다음 승인된 최소 호출 하나로 새 토큰을 확인한다. 파드 Ready는 토큰 모양만 보므로 Ready만으로는 새 토큰이 유효한지 모른다.
+   CLI가 먼저 두 작업자 ExternalSecret이 구독 토큰을 옮기는지 보고(아니면 아무것도 쓰지 않는다) → 두 값을 작업자 키로 옮기고(둘 다 쓴 뒤에만 다음) → 방식 표시를 `subscription`으로 쓰고 → 두 ExternalSecret을 즉시 동기화하고 → Secret 해시가 계정 값과 같아지는지 보고 → 작업자 두 파드의 자격 파일 지문(`sha256sum` 앞 12자)이 같아질 때까지 기다린 뒤(kubelet 볼륨 갱신, 보통 1분 안팎) → API 키 두 자리를 `unset`으로 쓰고(그 키를 옮기는 Secret이면 다시 동기화해 비워졌는지 본다) → 봇의 지금 계정을 바꾸고 모델 멈춤 작업(결제 멈춤 포함)을 해제한다. 앞 단계가 실패하면 해제하지 않는다. 같은 명령을 다시 치면 된 단계는 건너뛰고 이어 간다. `worker-task`의 `kubectl exec`는 정리 sweep에 죽을 수 있어 CLI가 기한 안에서 다시 본다. 그다음 승인된 최소 호출 하나로 새 토큰을 확인한다. 파드 Ready는 토큰 모양만 보므로 Ready만으로는 새 토큰이 유효한지 모른다.
 4. 1단계에서 drain했으면 푼다: `homelab bot resume emergency-stop --apply` 뒤 `homelab bot account use <이름> --apply`를 한 번 더 친다. 비상 정지 중에는 3단계가 지금 계정만 바꾸고 멈춘 일 해제를 미뤘기 때문이다(결과 줄의 `비상 정지 중이라 해제하지 않았다`).
 5. 옛 토큰을 철회한다(Claude Settings → Claude Code의 토큰 삭제). 토큰 하나만 철회할 수 있는지는 [미확인]이다. 작업 레인을 켜기 전에 사람이 확인해 이 줄을 고친다. `--replace`가 계정 폴더의 옛 값을 덮었으므로 `_PREVIOUS` 키는 두지 않는다. 샌 것이 의심되면 2단계 전에 철회부터 한다.
 6. 복구 자산의 내보내기를 새로 뜬다([recovery-assets.md](recovery-assets.md)). 옛 내보내기는 철회된 토큰을 담는다. 계정 폴더 `/bot-accounts`는 손 Secret 지도에 없다. 재해 복구 뒤 다른 계정으로 바꾸려면 그 계정을 2단계부터 다시 등록한다.
@@ -258,7 +258,7 @@ kubectl -n sandbox exec "deploy/$DEPLOY" -c worker -- cat /run/worker-credential
 
 구독 한도에 걸렸을 때 같은 모델(Opus 5.5)을 Claude Console의 API 크레딧으로 이어 쓰는 방식이다. 봇 DECISIONS "동료 봇 전환" 8과 "C23 API 크레딧 방식"이 근거다. 크레딧 잔액은 봇·CLI가 보이지 않는다(Console에서 본다).
 
-**전제(한 번).** 작업자 Secret이 API 키와 방식 표시를 옮겨야 한다(sandbox ExternalSecret에 키 이름을 더하는 배포 PR, C23 할 일 6). 그 PR을 병합하기 전에 Infisical `/apps/homelab-bot/worker`에 `CLAUDE_AUTH_METHOD`·`ANTHROPIC_API_KEY`·`ANTHROPIC_API_KEY_TASK` 키가 있어야 한다. 없으면 ExternalSecret이 Degraded라 root가 sandbox wave에서 멈춘다. 지금 계정으로 `homelab bot account use <지금 계정> --apply`를 한 번 치면 세 키가 생긴다(방식 표시 `subscription`, API 키 두 자리 `unset`). 배포 PR 전에는 `use --by api`가 Secret 단계에서 멈추고 해제하지 않는다.
+**전제(한 번).** 작업자 Secret이 API 키와 방식 표시를 옮겨야 한다(sandbox ExternalSecret에 키 이름을 더하는 배포 PR, C23 할 일 6). 그 PR을 병합하기 전에 Infisical `/apps/homelab-bot/worker`에 `CLAUDE_AUTH_METHOD`·`ANTHROPIC_API_KEY`·`ANTHROPIC_API_KEY_TASK` 키가 있어야 한다. 없으면 ExternalSecret이 Degraded라 root가 sandbox wave에서 멈춘다. 지금 계정으로 `homelab bot account use <지금 계정> --apply`를 한 번 치면 세 키가 생긴다(방식 표시 `subscription`, API 키 두 자리 `unset`). 배포 PR 전에는 `use --by api`가 plan에서부터 "ExternalSecret이 API 키·방식 표시를 옮기지 않는다"로 실패하고 아무것도 쓰지 않는다(쓰면 다음 동기화가 구독 토큰 자리의 `unset`만 Secret에 들여 지금 작업자의 인증이 깨진다).
 
 **권장 Console 설정(사람).** 봇 전용 workspace를 만들고 그 안에서만 키를 만든다. 자동 충전(auto-reload)은 끈다. 그러면 키가 새도 피해가 그 workspace에 남은 그달 크레딧까지다. 키는 레인마다 따로 만든다(작업 파드에서 샌 키로 대화 레인까지 잃지 않게). 키 이름에는 레인을 적어 철회할 때 고르기 쉽게 한다. workspace·키 이름은 저장소에 적지 않는다(D-23).
 
@@ -276,8 +276,8 @@ kubectl -n sandbox exec "deploy/$DEPLOY" -c worker -- cat /run/worker-credential
    homelab bot account use <이름> --by api --apply
    ```
 
-   CLI가 작업자 키를 이 순서로 쓴다: API 키 둘 → 방식 표시 `api` → 구독 토큰 두 자리 `unset`. 어느 순간에 멈춰도 방식 표시는 자격이 있는 방식을 가리키고, 다 쓴 뒤에는 작업자 키에 자격이 하나뿐이다. 그 뒤는 구독과 같다: 두 ExternalSecret 즉시 동기화 → Secret의 `ANTHROPIC_API_KEY` 해시와 방식 표시 확인 → 작업자 두 파드의 `ANTHROPIC_API_KEY` 지문과 방식 표시 확인 → 봇의 지금 계정·방식을 바꾸고 모델 멈춤 작업(결제 멈춤 포함)을 해제. 구독 계정의 토큰은 계정 폴더 `/bot-accounts/<이름>`에 그대로 남는다.
-3. 구독으로 돌아간다: `homelab bot account use <이름> --apply`(방식 생략 = 구독). 순서는 거꾸로다: 구독 토큰 둘 → 방식 표시 `subscription` → API 키 두 자리 `unset`.
+   CLI는 먼저 두 작업자 ExternalSecret이 레인별 API 키와 방식 표시를 옮기는지 본다(전제의 배포 PR). 그다음 순서: API 키 둘 → 방식 표시 `api` → 두 ExternalSecret 즉시 동기화 → Secret의 `ANTHROPIC_API_KEY` 해시와 방식 표시 확인 → 작업자 두 파드의 `ANTHROPIC_API_KEY` 지문과 방식 표시 확인 → 그 뒤에만 구독 토큰 두 자리 `unset`과 다시 동기화 → 봇의 지금 계정·방식을 바꾸고 모델 멈춤 작업(결제 멈춤 포함)을 해제. 확인과 비우기 사이에는 Secret에 두 방식 자격이 함께 보이지만 작업자는 방식 표시의 자격만 쓴다. 옛 자격을 먼저 비우지 않으므로 어느 단계에서 멈춰도 작업자에 쓸 자격이 남는다. 다 끝나면 작업자 키에 자격이 하나뿐이다. 구독 계정의 토큰은 계정 폴더 `/bot-accounts/<이름>`에 그대로 남는다.
+3. 구독으로 돌아간다: `homelab bot account use <이름> --apply`(방식 생략 = 구독). 순서는 같은 꼴이다: 구독 토큰 둘 → 방식 표시 `subscription` → 동기화·Secret·파드 반영 확인 → 그 뒤에만 API 키 두 자리 `unset`.
 4. 크레딧이 떨어지면 작업자가 결제 멈춤으로 닫고 저절로 재개하지 않는다. 운영 알림(`HomelabBotModelPausedBilling`)이 온다. Console에서 크레딧을 채운 뒤 `homelab bot account use <이름> --by api --apply`로 같은 계정을 다시 고르면 해제만 다시 한다. 또는 3단계로 구독으로 돌아간다. API 방식에서는 분당 한도(429)도 결제 멈춤으로 닫는다(지출 상한과 구별하지 못해서다).
 5. 키를 철회한다. Console에서 그 workspace의 키를 끈다(Disable·Delete). 샌 것이 의심되면 먼저 철회하고, 그 키를 쓰던 중이면 1·2단계로 새 키를 넣거나 3단계로 구독으로 돌아간다. 철회한 키가 지금 키면 그동안 실행은 인증 실패로 멈춘다(`auth_expired`, 30분마다 다시 본다). `--replace`가 계정 폴더의 옛 값을 덮으므로 `_PREVIOUS` 키는 두지 않는다.
 6. 바꾼 뒤 복구 자산 내보내기를 새로 뜬다(3e 6단계와 같다). [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄을 남긴다(키 값·workspace 이름 없이).
