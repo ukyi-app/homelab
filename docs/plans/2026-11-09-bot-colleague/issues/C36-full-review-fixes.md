@@ -1,7 +1,7 @@
 # C36 전체 리뷰 수정 (스위치 켜기 전)
 
 - 단계: 7 통합
-- 상태: integrated (2026-11-11, 봇 #144~#150. 작업자 이미지 배포, 묶음 G 재검토, 알려진 한계 둘의 owner 수용 남음)
+- 상태: 진행 중 (묶음 A~G integrated 2026-11-11 봇 #144~#150. 재검토 3차 후속 묶음 H 진행 중)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.5·§4.7·§4.8·§4.9·§4.10, §5 AC-3·6·7·15·16·17·21·22·23·28·31 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01~C23, C25~C35(코드 통합 기준. C22·C23의 사람 단계는 기다리지 않는다)
 - 연결 AC: 위 AC(새 요구 없음. 통합 상태에서 어긋난 것을 맞춘다)
@@ -15,6 +15,7 @@
   - 묶음 E(묶음 B 후속): `src/discord.ts`(미전송 버튼 알림의 스위치 적용 자리), `src/proposals.ts`(읽기 결과의 공개 검사 자리), `src/memory-commands.ts`(검색 결과 본문의 출처 표기 자리)
   - 묶음 F(재검토 후속): `src/discord.ts`(제안 실행 뒤 완료·응답 자리), `src/proposal-retention.ts`, `src/proposals.ts`(필요하면), `src/store.ts`(`startedBeforeSwitch`의 멈춤 기록 쪽), `src/format.ts`·`src/change-runtime.ts`(미리보기 안내 두 줄의 쪽 나누기 자리), 시험
   - 묶음 G(재검토 2차 후속): `src/proposal-retention.ts`, `src/discord.ts`(제안 실행 뒤 완료·응답 자리), `src/proposals.ts`(동기 실행의 결과 자리), `src/memory-commands.ts`(제외 결과의 대상 표기 자리, 필요하면), 시험
+  - 묶음 H(재검토 3차 후속): `src/discord.ts`(버튼 응답 본문 자리), `src/discord-protocol.ts`(필요하면 `acknowledge`의 update 분기), `src/proposals.ts`(`publicRunResult`), 시험
   - 묶음 D(자체 고치기 경합): `src/change-runtime.ts`(작성 결과 수신 → 저장 자리), `src/change-store.ts`(`recordSnapshot`·`startSelfFix`), `src/change-guidance.ts`(`recordChangeNotes`)
   - 봇 문서: `docs/ai-bot/VERIFICATION.md`·`DECISIONS.md`·`ARCHITECTURE.md`에 묶음마다 "C36 <묶음>" 절·문단
 - 설계 계약:
@@ -66,6 +67,10 @@
 21. **RR3-N1 (AC-6·28):** `later` 없이 끝나는 실행(접수 거절 등)은 결과 글을 남기는 분기를 지나지 않아, 상태 커밋과 버튼 응답 사이에 죽으면 안내가 남지 않는다. 묶음 F의 장치(완료 기록과 같은 트랜잭션에 결과 글, 응답이 전해지면 거둠)를 동기 실행에도 적용한다.
 - 고치지 않고 알려진 한계로 적는 것(owner 수용 대기): RR3-N3(응답 실패 안내를 남긴 직후 결과 글을 거두기 전에 죽으면 안내가 두 번. 실행은 한 번), RR3-N4(결과 글 저장 뒤 응답 전에 죽고 그 사이 스위치를 끄면 버튼 승인 문장이 꺼짐 판에 나감). 둘 다 두 가지 일이 겹쳐야 난다. 봇 DECISIONS "C36 묶음 G"에 한계로 적는다.
 
+### 묶음 H: 재검토 3차 후속 (2026-11-11, 수정 diff `2a480eb..9572c92`)
+22. **RR3-N5 (AC-3, Important):** 실행 확인 버튼의 정상 응답은 `update: true`라 `type: 7`(UPDATE_MESSAGE)로 공개된 확인 글 자체를 실행 결과 문장으로 바꾼다(`src/discord-protocol.ts`의 `acknowledge`). 그 본문(`src/discord.ts` `proposalButton`의 `outcome.content`)은 공개 검사를 거치지 않는다. 공개 글을 바꾸는 응답 본문에도 결과 글과 같은 공개 검사(`publicRunResult`)를 건다. 걸리면 값 없는 고정 안내로 바꾼다. 같은 `update` 응답을 쓰는 다른 버튼(질문 고르기, 게시 승인, 키 보기 등)의 본문이 공개 글을 바꾸는지와 검사를 거치는지 함께 확인해 같은 규칙을 적용한다. 본인 전용(`flags 64`) 응답은 그대로 둔다. 봇 문서의 "버튼 응답은 본인 전용"이라는 문장(묶음 G 절 등 자기 절)을 사실에 맞게 고친다. 시험: 실행 결과가 공개 검사에 걸릴 때 정상 응답의 콜백 `type`과 `content`를 직접 본다.
+- 알려진 한계에 더하는 것(owner 수용 대기): RR3-N6(구독을 끈 스레드에서 거절 결과를 저장한 뒤 응답 전에 죽으면, 결과 글이 게시 단계의 구독 검사에 막혀 안내가 남지 않는다. 실행은 0건).
+
 ## 완료 조건
 
 - [x] F-1: 변경 자체 리뷰의 결제 멈춤은 자동 재개하지 않고, 풀리는 시각이 있는 한도는 그 시각 1분 뒤에 재개한다.
@@ -83,6 +88,7 @@
 - [x] 묶음 E: 동료 전용 글은 꺼진 뒤 어느 쪽도 게시되지 않고, 말로 한 기억 검색은 출처 ID 없이 진술을 보인다.
 - [x] 묶음 F: 실행 결과 안내가 응답 전 재시작에도 남고, 같은 밀리초의 새 계정 결제 멈춤이 보존되고, 갈린 안내 줄이 꺼짐 판에서 버튼 안내를 남기지 않고, 24시간 안내의 실제 경로 시험이 있다.
 - [x] 묶음 G: 지연 결과 글이 공개 검사를 거치고, 동기 실행의 결과도 응답 전 재시작에 남는다.
+- [ ] 묶음 H: 공개 글을 바꾸는 버튼 응답의 본문이 공개 검사를 거친다.
 - [x] 묶음마다 전체 오프라인 검사(실제 PostgreSQL 포함)가 통과한다.
 
 ## 검증
