@@ -48,7 +48,7 @@ homelab-bot을 회사에서 같이 일하는 동료처럼 바꾸는 계획의 �
 | [C33](issues/C33-verify-reject-recheck.md) | 시험 거절 뒤 다시 확인(게시 서버 둘 경합) | 1 기반 | 없음 | integrated | 에이전트 |
 | [C34](issues/C34-amendment-followups.md) | 수정 요청 후속(스위치 켜기 전) | 6 PR 수정 | C27 | integrated | 에이전트 |
 | [C35](issues/C35-account-cli-ux.md) | 계정 CLI 간소화와 보기 편한 출력 | 5 멈춤과 계정 | C22, C23 | integrated | 에이전트 + 사람(다시 해 보기) |
-| [C36](issues/C36-full-review-fixes.md) | 전체 리뷰 수정(스위치 켜기 전) | 7 통합 | C01~C23, C25~C35(코드 통합) | integrated | 에이전트 |
+| [C36](issues/C36-full-review-fixes.md) | 전체 리뷰 수정(스위치 켜기 전) | 7 통합 | C01~C23, C25~C35(코드 통합) | 진행 중 | 에이전트 |
 
 티켓 파일은 `issues/`에 있다.
 

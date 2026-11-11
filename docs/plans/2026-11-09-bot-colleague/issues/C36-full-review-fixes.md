@@ -1,7 +1,7 @@
 # C36 전체 리뷰 수정 (스위치 켜기 전)
 
 - 단계: 7 통합
-- 상태: integrated (2026-11-11, 봇 #144~#149. 작업자 이미지 배포와 묶음 F 재검토 남음)
+- 상태: 진행 중 (묶음 A~F integrated 2026-11-11 봇 #144~#149. 재검토 2차 후속 묶음 G 진행 중)
 - 명세: 봇 저장소 `docs/ai-bot/COLLEAGUE_SPEC.md` §4.5·§4.7·§4.8·§4.9·§4.10, §5 AC-3·6·7·15·16·17·21·22·23·28·31 (https://github.com/ukyi-app/homelab-bot/blob/main/docs/ai-bot/COLLEAGUE_SPEC.md)
 - Blocked by: C01~C23, C25~C35(코드 통합 기준. C22·C23의 사람 단계는 기다리지 않는다)
 - 연결 AC: 위 AC(새 요구 없음. 통합 상태에서 어긋난 것을 맞춘다)
@@ -14,6 +14,7 @@
   - 묶음 C(문구·브리핑): `src/briefing.ts`(모델 멈춤 줄), `src/chat-task-text.ts`(24시간 대기 안내), `src/claude-task-bridge.ts`(`requestOwnerConfirm` 문구 자리만), `src/discord.ts`(`CHANGE_ACK_NOTICE`·`EXTERNAL_ACK_NOTICE`와 명령 오류 답 자리만), `src/contracts.ts`(주석 한 줄)
   - 묶음 E(묶음 B 후속): `src/discord.ts`(미전송 버튼 알림의 스위치 적용 자리), `src/proposals.ts`(읽기 결과의 공개 검사 자리), `src/memory-commands.ts`(검색 결과 본문의 출처 표기 자리)
   - 묶음 F(재검토 후속): `src/discord.ts`(제안 실행 뒤 완료·응답 자리), `src/proposal-retention.ts`, `src/proposals.ts`(필요하면), `src/store.ts`(`startedBeforeSwitch`의 멈춤 기록 쪽), `src/format.ts`·`src/change-runtime.ts`(미리보기 안내 두 줄의 쪽 나누기 자리), 시험
+  - 묶음 G(재검토 2차 후속): `src/proposal-retention.ts`, `src/discord.ts`(제안 실행 뒤 완료·응답 자리), `src/proposals.ts`(동기 실행의 결과 자리), `src/memory-commands.ts`(제외 결과의 대상 표기 자리, 필요하면), 시험
   - 묶음 D(자체 고치기 경합): `src/change-runtime.ts`(작성 결과 수신 → 저장 자리), `src/change-store.ts`(`recordSnapshot`·`startSelfFix`), `src/change-guidance.ts`(`recordChangeNotes`)
   - 봇 문서: `docs/ai-bot/VERIFICATION.md`·`DECISIONS.md`·`ARCHITECTURE.md`에 묶음마다 "C36 <묶음>" 절·문단
 - 설계 계약:
@@ -60,6 +61,11 @@
 19. **F-5 시험 보강:** 24시간 대기 안내를 실제 경로로 고정한다: 풀리는 시각이 48시간 뒤인 한도로 멈춘 작업 → 24시간 뒤 `ClaudeTaskBridge`의 안내 본문(두 판)에 "저절로 재개하지 않아요"·원인·'/' 재개 명령이 없음 → 예정 시각 1분 뒤 자동 재개.
 - 기각한 것(RR2-N1): 수정 전 규칙으로 저장된 미전송 긴 미리보기가 꺼짐 전환에서 막힌다는 지적. 버튼 글은 스위치가 켜졌을 때만 저장되고 운영은 켠 적이 없으며, 스위치는 이 수정이 배포된 뒤에만 켠다.
 
+### 묶음 G: 재검토 2차 후속 (2026-11-11, 수정 diff `3ed69dd..2a480eb`)
+20. **RR3-N2 (AC-3, Important):** 묶음 F의 지연 결과 글(`proposal:<id>`, 스레드 일반 글)이 실행 결과 문장을 공개 검사 없이 싣는다. 버튼 응답은 본인 전용이었는데 이 글은 스레드에 보인다. 예: 말로 한 `memory_exclude`의 대상 `here`는 결과에서 `channel:<스레드 ID>`가 된다. 결과 글을 남기기 전에 공개 검사(`chatReplyRisk`와 같은 검사)를 걸고, 걸리면 값 없는 고정 안내로 바꾼다. `here`처럼 안전하게 적을 수 있는 대상은 ID 없이 적는다. 중단 안내(`run_interrupted`)의 문장도 같은 규칙인지 확인한다.
+21. **RR3-N1 (AC-6·28):** `later` 없이 끝나는 실행(접수 거절 등)은 결과 글을 남기는 분기를 지나지 않아, 상태 커밋과 버튼 응답 사이에 죽으면 안내가 남지 않는다. 묶음 F의 장치(완료 기록과 같은 트랜잭션에 결과 글, 응답이 전해지면 거둠)를 동기 실행에도 적용한다.
+- 고치지 않고 알려진 한계로 적는 것(owner 수용 대기): RR3-N3(응답 실패 안내를 남긴 직후 결과 글을 거두기 전에 죽으면 안내가 두 번. 실행은 한 번), RR3-N4(결과 글 저장 뒤 응답 전에 죽고 그 사이 스위치를 끄면 버튼 승인 문장이 꺼짐 판에 나감). 둘 다 두 가지 일이 겹쳐야 난다. 봇 DECISIONS "C36 묶음 G"에 한계로 적는다.
+
 ## 완료 조건
 
 - [x] F-1: 변경 자체 리뷰의 결제 멈춤은 자동 재개하지 않고, 풀리는 시각이 있는 한도는 그 시각 1분 뒤에 재개한다.
@@ -76,6 +82,7 @@
 - [x] F-8: 늦은 앞 차례 결과가 새 고치기 차례를 바꾸지 않는다.
 - [x] 묶음 E: 동료 전용 글은 꺼진 뒤 어느 쪽도 게시되지 않고, 말로 한 기억 검색은 출처 ID 없이 진술을 보인다.
 - [x] 묶음 F: 실행 결과 안내가 응답 전 재시작에도 남고, 같은 밀리초의 새 계정 결제 멈춤이 보존되고, 갈린 안내 줄이 꺼짐 판에서 버튼 안내를 남기지 않고, 24시간 안내의 실제 경로 시험이 있다.
+- [ ] 묶음 G: 지연 결과 글이 공개 검사를 거치고, 동기 실행의 결과도 응답 전 재시작에 남는다.
 - [x] 묶음마다 전체 오프라인 검사(실제 PostgreSQL 포함)가 통과한다.
 
 ## 검증
