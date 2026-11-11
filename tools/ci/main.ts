@@ -17,7 +17,9 @@ import { checkVolumes } from "./volume";
 import { RULES, checkActionFile, checkWorkflow, checkWorkflows } from "./workflow-guard";
 import { type Facts, evaluate } from "../deploy-merge/conditions";
 
-type Step = { name: string; run: () => Violation[] };
+// needsDeps: npm 패키지(node_modules)가 있어야 도는 단계. NPM_DEPS 단계가 먼저 한 번 받는다.
+type Step = { name: string; run: () => Violation[]; needsDeps?: boolean };
+const NPM_DEPS = "npm deps";
 
 function tool(rule: string, cmd: string[], env?: Record<string, string | undefined>): Violation[] {
   const r = run(cmd, { env });
@@ -258,10 +260,21 @@ const steps: Step[] = [
     run: () => tool("host-k3s", ["bash", "tools/host-k3s.test.sh"]),
   },
   {
+    name: NPM_DEPS,
+    // npm 패키지(실행 의존성 @clack/prompts, 개발 의존성 typescript·@types/bun)를 bun.lock의 무결성 해시로만 받는다.
+    // needsDeps 단계보다 먼저 한 번 돈다. --only로 그 단계만 골라도 main()이 이 단계를 붙인다. node_modules가 없는 새 체크아웃(CI)에서
+    // CLI 코드를 import하는 시험이 "Cannot find module"로 깨지기 때문이다. 루트 bunfig.toml의 preload(cli/test/setup.ts)가
+    // CLI core를 불러오므로 cli/ 밖의 bun test(deploy-merge)도 해당한다.
+    // --frozen-lockfile: package.json과 lockfile이 어긋나면 실패하고 새로 해석하지 않는다.
+    // --ignore-scripts: 패키지 설치 스크립트를 돌리지 않는다(공급망). TS 7은 플랫폼 바이너리를 optional 의존으로 받아 스크립트가 필요 없다.
+    run: () => tool("npm-deps", ["bun", "install", "--frozen-lockfile", "--ignore-scripts"]).map((v) => ({ ...v, message: `bun install --frozen-lockfile --ignore-scripts ${v.message}(bun.lock을 package.json과 같은 커밋에서 갱신한다)` })),
+  },
+  {
     name: "cli",
     // homelab CLI 시험(설계 C.4.6 CLI 행): PATH 스텁으로 plan의 쓰기 부명령 0건, 출력의 시크릿 0, 엔진의 재실행·실패 주입.
     // 0건 통과는 실패다(B.8 E7: 0건을 처리하고 성공하는 검사는 검사가 아니다).
     // 감싸개(cli/test/run.ts)가 전용 TMPDIR로 돌리고 끝나면 지운다. 시험이 남긴 임시 폴더가 /tmp에 쌓이지 않는다.
+    needsDeps: true,
     run: () => {
       const r = run(["bun", "cli/test/run.ts", "cli/"]);
       const out = (r.stdout + r.stderr).trim();
@@ -275,17 +288,14 @@ const steps: Step[] = [
   {
     name: "cli typecheck",
     // strict TypeScript(사용자 결정, 설계 C.4.6). bun test는 타입을 보지 않아 타입 계약(불투명 Secret의 메서드 없음,
-    // 읽기 문맥에 쓰기 함수 없음)은 이 단계만 지킨다. 외부 패키지는 typescript·@types/bun 둘이고 bun.lock의 무결성 해시로만 받는다.
-    // --frozen-lockfile: package.json과 lockfile이 어긋나면 실패하고 새로 해석하지 않는다.
-    // --ignore-scripts: 패키지 설치 스크립트를 돌리지 않는다(공급망). TS 7은 플랫폼 바이너리를 optional 의존으로 받아 스크립트가 필요 없다.
+    // 읽기 문맥에 쓰기 함수 없음)은 이 단계만 지킨다. typescript·@types/bun은 npm deps 단계가 받는다.
     // tsc는 bun으로 띄운다(bin/tsc의 셔뱅은 node다. node는 .tool-versions에 없다).
+    needsDeps: true,
     run: () => {
       const cfg = JSON.parse(readText("cli/tsconfig.json"));
       if (cfg.compilerOptions?.strict !== true || cfg.compilerOptions?.noEmit !== true) {
         return [{ rule: "cli-typecheck", where: "cli/tsconfig.json", message: "compilerOptions.strict·noEmit은 true로 둔다" }];
       }
-      const install = tool("cli-typecheck", ["bun", "install", "--frozen-lockfile", "--ignore-scripts"]);
-      if (install.length > 0) return install.map((v) => ({ ...v, message: `bun install --frozen-lockfile ${v.message}(bun.lock을 package.json과 같은 커밋에서 갱신한다)` }));
       return tool("cli-typecheck", ["bun", "node_modules/typescript/bin/tsc", "-p", "cli/tsconfig.json"]);
     },
   },
@@ -423,6 +433,8 @@ const steps: Step[] = [
   {
     name: "deploy-merge merge",
     // 병합 단계의 재시도·상태 확인(tools/deploy-merge/merge.ts). GitHub은 가짜라 네트워크를 쓰지 않는다. 0건 통과는 실패다(B.8 E7).
+    // 시험 파일은 CLI를 import하지 않지만 bunfig.toml preload가 CLI core를 불러와 npm 패키지가 필요하다.
+    needsDeps: true,
     run: () => {
       const r = run(["bun", "cli/test/run.ts", "tools/deploy-merge/"]);
       const out = (r.stdout + r.stderr).trim();
@@ -641,20 +653,31 @@ const steps: Step[] = [
 function main(): number {
   const only = process.argv.find((a) => a.startsWith("--only="))?.slice("--only=".length) ?? (process.argv.includes("--only") ? process.argv[process.argv.indexOf("--only") + 1] : undefined);
   const wanted = only ? new Set(only.split(",")) : undefined;
-  const selected = wanted ? steps.filter((s) => wanted.has(s.name) || wanted.has(s.name.split(/[ ,]/)[0])) : steps;
-  if (selected.length === 0) {
+  const depsAt = steps.findIndex((s) => s.name === NPM_DEPS);
+  const early = steps.filter((s, i) => s.needsDeps && i < depsAt).map((s) => s.name);
+  if (depsAt < 0 || early.length > 0) {
+    errorLine(`${NPM_DEPS} 단계가 needsDeps 단계보다 앞에 있어야 한다: ${early.join(", ") || "단계 없음"}`);
+    return 2;
+  }
+  const matched = wanted ? steps.filter((s) => wanted.has(s.name) || wanted.has(s.name.split(/[ ,]/)[0])) : steps;
+  if (matched.length === 0) {
     errorLine(`--only에 맞는 단계가 없다. 단계: ${steps.map((s) => s.name).join(" | ")}`);
     return 2;
   }
+  const needDeps = matched.some((s) => s.needsDeps);
+  const selected = steps.filter((s) => matched.includes(s) || (s.name === NPM_DEPS && needDeps));
   const failed: { step: string; v: Violation }[] = [];
+  let depsFailed = false;
   for (const s of selected) {
     group(s.name);
     let vs: Violation[];
     try {
-      vs = s.run();
+      // 받지 못한 채 돌리면 같은 원인이 "Cannot find module"로 단계마다 흩어져 보인다.
+      vs = s.needsDeps && depsFailed ? [{ rule: "npm-deps", where: s.name, message: `${NPM_DEPS} 단계 실패로 건너뛰었다` }] : s.run();
     } catch (e) {
       vs = [{ rule: "error", where: s.name, message: (e as Error).message }];
     }
+    if (s.name === NPM_DEPS && vs.length > 0) depsFailed = true;
     endGroup();
     for (const v of vs) failed.push({ step: s.name, v });
     console.log(`${vs.length === 0 ? "통과" : `실패 ${vs.length}건`}: ${s.name}`);

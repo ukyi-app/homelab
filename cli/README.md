@@ -8,18 +8,20 @@
 
 ```bash
 mise install
+bun install --frozen-lockfile --ignore-scripts   # npm 패키지(@clack/prompts 등)를 bun.lock 해시대로
 bun cli/build.ts --install        # ~/.local/bin/homelab, 이전 파일은 ~/.local/bin/homelab.prev
 homelab --version                 # homelab 0.1.0 (<git SHA 12자>)
 homelab doctor                    # 도구·로그인·kubectl context
 ```
 
 - 커밋 안 된 변경이 있으면 설치를 거부한다(`--allow-dirty`로만). 버전 끝의 `-dirty`가 그 표시다.
+- `bun cli/build.ts`는 npm 패키지를 받지 않는다(네트워크 없이 빌드한다). `node_modules`에 실행 의존성이 없거나 `package.json`과 버전이 다르면 빌드 전에 멈추고 위 `bun install` 줄을 안내한다. `bun.lock`이 바뀐 main을 받은 뒤에도 그 줄을 다시 돌린다.
 - 되돌리기: `mv ~/.local/bin/homelab.prev ~/.local/bin/homelab`. 이전 파일은 하나만 남는다.
 - `bun link`는 쓰지 않는다(설계 B.8 E7). 바이너리는 커밋하지 않는다(`cli/dist/`는 무시).
 - 옛 `bun link`(`~/.bun/bin/homelab`)가 PATH 앞에 남아 있으면 새 바이너리를 가린다. `homelab doctor`가 "PATH의 homelab" 주의로 알린다. 지우거나(`rm ~/.bun/bin/homelab`) PATH 순서를 고친다.
 - `homelab doctor`는 저장소 안에서 돌린다. 저장소 밖에서는 mise가 `.tool-versions`를 못 찾아 `infisical`·`kubectl` 버전을 고르지 못할 수 있고, 그러면 로그인돼 있어도 "로그인 안 됨"으로 보인다.
-- 개발 실행: `bun run cli -- doctor`. 시험: `bun run test:cli`(= `bun cli/test/run.ts cli/`, 필수 검사 `bun run ci`의 `cli` 단계가 같은 것을 돈다). 파일을 골라 돌릴 때는 `bun cli/test/run.ts --bail cli/test/core/static.test.ts`처럼 bun test 인자를 그대로 넘긴다. 감싸개가 전용 TMPDIR로 돌리고 끝나면 지운다. `bun test`를 바로 부르면 `--bail` 실패나 신호 종료 때 `/tmp`에 임시 폴더가 남는다.
-- 타입 검사: `bun run ci --only "cli typecheck"`(strict `tsc`, `cli/tsconfig.json`). 이 단계가 `bun install --frozen-lockfile --ignore-scripts`로 `typescript`·`@types/bun`과 실행 의존성 `@clack/prompts`(정확한 버전, `bun cli/build.ts`가 실행 파일에 묶어 설치 뒤에는 받지 않는다)를 받는다. 버전을 바꾸면 `bun install`로 `bun.lock`을 같은 커밋에서 갱신한다. `@types/bun`은 `.tool-versions`의 bun과 같은 버전이다.
+- 개발 실행: `bun run cli -- doctor`(실행 전에 `bun cli/build.ts --check-deps`로 같은 확인을 한다). 시험: `bun run test:cli`(= `bun cli/test/run.ts cli/`, 필수 검사 `bun run ci`의 `cli` 단계가 같은 것을 돈다). 파일을 골라 돌릴 때는 `bun cli/test/run.ts --bail cli/test/core/static.test.ts`처럼 bun test 인자를 그대로 넘긴다. 감싸개가 전용 TMPDIR로 돌리고 끝나면 지운다. `bun test`를 바로 부르면 `--bail` 실패나 신호 종료 때 `/tmp`에 임시 폴더가 남는다.
+- 타입 검사: `bun run ci --only "cli typecheck"`(strict `tsc`, `cli/tsconfig.json`). 이 단계와 `cli` 시험·`deploy-merge merge` 단계를 고르면 `bun run ci`가 그보다 먼저 `npm deps` 단계(`bun install --frozen-lockfile --ignore-scripts`)를 한 번 돌려 `typescript`·`@types/bun`과 실행 의존성 `@clack/prompts`(정확한 버전, `bun cli/build.ts`가 실행 파일에 묶어 설치 뒤에는 받지 않는다)를 받는다. 버전을 바꾸면 `bun install`로 `bun.lock`을 같은 커밋에서 갱신한다. `@types/bun`은 `.tool-versions`의 bun과 같은 버전이다.
 - Infisical을 쓰는 명령은 `HOMELAB_INFISICAL_PROJECT_ID`(homelab 프로젝트 ID)를 읽는다. 없으면 tty에서 한 실행에 한 번만 묻는다(답이 틀려도 다시 묻지 않는다). CLI는 값을 저장하지 않으므로 매번 묻지 않게 하려면 셸 설정에 `export HOMELAB_INFISICAL_PROJECT_ID=<ID>`를 둔다. 값은 저장소에 두지 않는다.
 - `infisical`이 로그인 만료·인증 거부로 실패하면 다음 행동이 `infisical login`이다. 정해진 문구(`[infisical login]`, `status-code=401`, `Unauthorized`)에 맞았는지만 보고 오류 원문은 계속 버린다.
 - `infisical`을 부를 때마다 `~/.infisical/secrets-backup/`을 0500으로 잠그고(남은 파일은 지운다) 호출 뒤 파일이 0개인지 본다. 권한이 듣지 않는 파일시스템(또는 root)이면 실행하지 않고 멈춘다. 잠긴 폴더를 다시 열지 않고(남은 파일은 폴더째 바꾼다), `.`·`..`가 든 HOME은 거부한다. CLI 0.44.2가 조회 값을 그 폴더에 남기기 때문이다(`tools/tf-github.sh`와 같은 방식).
