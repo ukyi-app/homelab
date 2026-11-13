@@ -41,6 +41,17 @@ tests:
             exp_annotations:
               summary: 수집 대상 vector/nuc가 5분 넘게 응답하지 않는다
 
+  - name: TargetDown은 멈춘 게시 서버의 지표 Service(bot-slot)에는 발화하지 않는다
+    interval: 1m
+    input_series:
+      - series: 'up{job="bot-slot", instance="homelab-bot-metrics", namespace="app-homelab-bot"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 15m
+        groupname: core
+        alertname: TargetDown
+        exp_alerts: []
+
   - name: NodeMemoryHigh는 MemAvailable로 본다
     interval: 1m
     input_series:
