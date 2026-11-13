@@ -97,14 +97,16 @@
 | cert-manager.io (D-35) | certificates, certificaterequests, issuers, clusterissuers |
 | acme.cert-manager.io / postgresql.cnpg.io (D-35) | orders, challenges / scheduledbackups |
 
-[추론] 아래 경로를 파싱하고 group·version·resource·scope·이름을 대조한다. 버전은 배포 때 신뢰된 discovery로 확인한다. nodes·namespaces·persistentvolumes는 클러스터 범위이고 나머지는 전 네임스페이스 list가 가능하다.
+[추론] 아래 경로를 파싱하고 group·version·resource·scope·이름을 대조한다. 버전은 배포 때 신뢰된 discovery로 확인한다. nodes·namespaces·persistentvolumes·clusterissuers는 클러스터 범위이고 나머지는 전 네임스페이스 list가 가능하다.
 
 ```text
 /api/v1/<resource>[/<name>]
 /api/v1/namespaces/<namespace>/<resource>[/<name>]
-/apis/<group>/<version>/<resource>
+/apis/<group>/<version>/<resource>[/<name>]
 /apis/<group>/<version>/namespaces/<namespace>/<resource>[/<name>]
 ```
+
+네임스페이스 없는 경로의 `[/<name>]`은 클러스터 범위 리소스에만 받는다. 네임스페이스에 속한 리소스를 네임스페이스 없이 이름으로 읽는 요청은 거절한다.
 
 - 받는 것: HTTP GET, 검증된 `labelSelector, fieldSelector, limit, continue, resourceVersion, resourceVersionMatch, timeoutSeconds`. discovery(`/api`, `/apis`, 허용 그룹·버전 경로, `/version`)는 허용 목록으로 만든 최소 정보만 준다. JSON 객체를 가린 뒤 반환하고 `kubectl get -o json`을 기본으로 한다.
 - 거절하는 것: 목록 밖 리소스, 모든 쓰기 메서드, `watch` 매개변수·경로, 모든 하위 리소스(`log, exec, attach, portforward, proxy, status, scale, token`), stream·upgrade, OpenAPI 전체·인증 API. `get --raw`도 같은 검사다.
