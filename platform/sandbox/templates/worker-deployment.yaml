@@ -15,8 +15,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   # 작업은 직렬 하나다(D-14 조건 3). RollingUpdate면 교체 중 두 파드가 함께 떠 같은 구독 자격으로 실행이 겹치고,
-  # 같은 PVC(nonce 저장소, Codex 프로필이면 auth.json)를 두 파드가 쓴다.
-  replicas: 1
+  # 같은 PVC(nonce 저장소, Codex 프로필이면 auth.json)를 두 파드가 쓴다. 값은 0 또는 1이다(values.yaml worker.replicas).
+  replicas: {{ .Values.worker.replicas }}
   strategy:
     type: Recreate
   selector:
