@@ -19,7 +19,7 @@
 
 1. 게시 대상(D-24, D-25, `spec.md` §11.1): 조직의 모든 저장소. 단 `homelab-bot`과 `olive`는 뺀다. 순서를 지킨다.
    - 관리자가 조직을 GitHub Team으로 올린다(B-13). 비공개 저장소에 규칙을 걸 수 있어야 쓰기 App을 "모든 저장소"로 넓힌다. 늦추면 그때까지 설치를 공개 저장소로만 고른다.
-   - homelab PR: `infra/github`의 `writer_repos`와 guard 3·4의 기대를 "모든 대상 저장소"로 고치고(`homelab` 자신 포함), `homelab-bot`·`olive`에 쓰기 App이 어떤 브랜치도 만들거나 바꾸지 못하게 하는 규칙을 더한다. 재구축 설계의 쓰기 App 설치 범위 결정도 같은 PR에서 고친다. 관리자 승인과 `approvals.md` 기록이 필요한 외부 변경이다.
+   - homelab PR: 출발점은 지금 선언이다. `writer_repos`는 `homelab`과 `homelab-smoke`이고(`bot/` 규칙과 guard 3·4가 여기서 나온다), 실제 App 설치는 `homelab-smoke` 하나다(`homelab`에서는 2026-11-07에 뺐다). `writer_repos`와 `writer_allowed_repos`, guard 3·4의 기대를 "모든 대상 저장소"로 넓힌다. `homelab-bot`·`olive`(D-25)와 `homelab-app-template`·`homelab-bot-ops`(B-14)에는 쓰기 App이 어떤 브랜치도 만들거나 바꾸지 못하게 하는 규칙을 더한다. O06 4-1에서 되는 것으로 나오면 대상 저장소에도 "App은 `bot/` 밖 브랜치를 못 만든다"를 건다. 재구축 설계의 쓰기 App 설치 범위 결정도 같은 PR에서 고친다. 관리자 승인과 `approvals.md` 기록이 필요한 외부 변경이다.
    - 관리자가 Terraform apply를 하고, 쓰기 App의 설치 범위를 "모든 저장소"로 바꾼다. 바꾼 직후 `homelab-bot`·`olive`에 브랜치 만들기가 거절되는지 확인한다(AC-23).
    - 현관 writer: 대상 저장소를 설정으로 받되 `homelab-bot`·`olive`는 코드에서도 거절한다. 게시마다 대상 저장소 하나와 필요한 권한만으로 좁힌 설치 토큰을 발급받는다(O06에서 되는지 확인).
    - 자기 코드의 문제: 패치를 만들지 않고 원인·근거·고칠 곳을 Discord로 알린다(O10의 변경 제안 도구가 대상 저장소를 보고 가른다).
