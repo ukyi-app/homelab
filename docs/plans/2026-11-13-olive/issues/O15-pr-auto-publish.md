@@ -9,6 +9,7 @@
 - 수행: 에이전트 + 사람(조직 Team 올리기, 쓰기 App 설치 범위 변경, Terraform apply)
 - 저장소·PR: 봇 저장소 PR(현관 writer·확인 카드), homelab PR(`infra/github`의 `writer_repos`·규칙·guard, 재구축 설계의 쓰기 App 설치 범위 절)
 - 파일 소유: 현관의 게시 정책(자동/확인 분기, 대상 저장소), `isProtectedPath`, `infra/github`의 쓰기 App 관련 선언
+- 구현 기준: `diagnosis.md`(근거 등급제, PR 본문에 넣을 것, 병합 뒤 확인, 다시 할지와 차단기의 세부)
 - 설계 계약: 보안 조사 4.2·6절, O06 결과
 
 ## 목표
