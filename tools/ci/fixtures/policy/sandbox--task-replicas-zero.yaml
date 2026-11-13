@@ -1,0 +1,62 @@
+# check: sandbox
+# expect: pass
+# replicas 0은 작업자를 멈춘 상태다. 파드가 없어 격리 조합이 깨질 일이 없다.
+apiVersion: v1
+kind: Service
+metadata: {name: egress-proxy, namespace: egress}
+spec:
+  clusterIP: 10.43.0.28
+  ports: [{name: proxy, port: 3128}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker-task, namespace: sandbox}
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: worker-task}}
+  template:
+    metadata: {labels: {app: worker-task}}
+    spec:
+      hostUsers: false
+      shareProcessNamespace: true
+      automountServiceAccountToken: false
+      securityContext: {seccompProfile: {type: RuntimeDefault}}
+      volumes:
+        - {name: firewall-run, emptyDir: {}}
+        - {name: credential, secret: {secretName: worker-task-credential-claude-subscription}}
+        - {name: worker-state, persistentVolumeClaim: {claimName: worker-task-state}}
+      initContainers:
+        - name: egress-firewall
+          image: docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70
+          command: ["/bin/sh", "-euc"]
+          args:
+            - |
+              for t in iptables ip6tables; do
+                "$t" -P OUTPUT DROP
+                "$t" -F OUTPUT
+                "$t" -A OUTPUT -o lo -j ACCEPT
+                "$t" -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+              done
+              iptables -A OUTPUT -d "$PROXY_IP/32" -p tcp --dport "$PROXY_PORT" -m conntrack --ctstate NEW -j ACCEPT
+              iptables -A OUTPUT -j REJECT
+              ip6tables -A OUTPUT -j REJECT
+              iptables -S OUTPUT
+              ip6tables -S OUTPUT
+          volumeMounts: [{name: firewall-run, mountPath: /run}]
+          env: [{name: PROXY_IP, value: "10.43.0.28"}, {name: PROXY_PORT, value: "3128"}]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL], add: [NET_ADMIN]}}
+      containers:
+        - name: worker
+          image: x
+          env: [{name: HTTPS_PROXY, value: "http://10.43.0.28:3128"}]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            procMount: Unmasked
+            seccompProfile: {type: Localhost, localhostProfile: homelab/sandbox-worker-v1.json}
+            appArmorProfile: {type: Localhost, localhostProfile: homelab-sandbox-worker-v1}

@@ -51,6 +51,15 @@ worker:
   # 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main
   # 02f5f3f, GitHub 호스트 runner).
   image: ghcr.io/ukyi-app/homelab-bot@sha256:431ee00b324e7b63bd22f6d472992306f1eaa44946a9172f0bd4316a2dbe3ccc
+  # 0이면 대화·리뷰 작업자 파드를 띄우지 않는다. 0 또는 1만 받는다(작업은 직렬 하나, templates/worker-deployment.yaml).
+  # 0인 이유: 올리브 계획(D-17) 동안 요청을 보낼 게시 서버가 멈춰 있어(apps/homelab-bot suspended) 할 일이 없는데 모델 자격
+  # Secret을 붙인 채 떠 있게 된다. Secret·ExternalSecret·PVC·Service·NetworkPolicy와 egress 프록시는 그대로 남는다.
+  # 다시 켤 때 함께 볼 것:
+  #   1. 요청을 보낼 쪽(게시 서버나 올리브)이 먼저 있어야 한다. 그 쪽의 서명 키와 controlPublicKey가 짝인지 본다.
+  #   2. 멈춘 동안 image를 올렸으면 요청 계약 판이 보내는 쪽과 맞는지 본다(위 image 주석의 되돌릴 때 순서).
+  #   3. Infisical 자격(방식 표시·토큰·API 키 자리)이 아직 유효한지 본다. 틀리면 기동이 종료 1 → root가 wave -2에서 멈춘다.
+  #   4. 작업자 파드 수를 보는 경보는 없다(sandbox는 수집 job이 없고 KubePodNotReady는 있는 파드만 본다). 켠 뒤 Ready를 직접 본다.
+  replicas: 0
   # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
   # WORKER_CONTROL_PRIVATE_KEY다. 둘이 어긋나면 작업자가 모든 실행 요청을 403으로 거부하니 회전은 두 값을 함께 바꾼다.
   # 모양이 틀리면 작업자가 기동하지 못해(종료 1) sandbox가 Degraded가 되므로 values.schema.json이 Ed25519 공개 키 모양만 받는다.
@@ -125,6 +134,10 @@ task:
   # 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main
   # 36c96b6, GitHub 호스트 runner).
   image: ghcr.io/ukyi-app/homelab-bot@sha256:37e91af6113545aa9c6989606db6c6117b2824af6997828e7a75d7e134c49723
+  # 0이면 작업 레인 작업자 파드를 띄우지 않는다. 0 또는 1만 받는다. 이유와 다시 켤 때 볼 것은 worker.replicas와 같다.
+  # enabled: false와 다르다: 그쪽은 Secret·PVC까지 내리고 restore.md 개수가 바뀐다. 이 값은 파드만 내리고 작업 상태 PVC는 남긴다.
+  # 함정: 멈출 때 진행 중이던 턴은 끝나지 못한다. 다시 켜면 PVC에 남은 작업 상태를 그대로 읽는다.
+  replicas: 0
   # Infisical 키 이름. Secret 키와 파일 이름은 worker.profile.credentialKey·methods.apiKey 그대로다(봇 프로필 표가 그 이름을 읽는다).
   # 키를 레인마다 나눠 한 레인의 토큰·API 키만 교체·철회한다. 두 레인의 자격을 한 Secret에 모으지 않는다.
   # 방식 표시는 레인마다 나누지 않는다(두 레인이 methods.marker 하나를 읽는다. 계정 전환은 두 레인을 함께 바꾼다).
