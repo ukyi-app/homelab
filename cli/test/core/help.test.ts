@@ -317,7 +317,7 @@ describe("봇 동작 오타", () => {
 
 describe("되돌릴 수 없는 명령의 예", () => {
   // 되돌릴 수 없는 일을 하는 명령. 표시(help.destructive)를 지우면 이 목록과 어긋나 실패한다.
-  const DESTRUCTIVE = ["app remove", "data purge", "db restore", "cache restore", "db rotate", "cache rotate", "secret set", "bot account add", "github apply"];
+  const DESTRUCTIVE = ["app remove", "data purge", "db restore", "cache restore", "db rotate", "cache rotate", "cache add", "secret set", "bot account add", "github apply"];
   test("표시가 있는 명령은 정해진 목록과 같다", () => {
     expect(REGISTRY.filter((c) => c.help.destructive).map((c) => c.path.join(" ")).sort()).toEqual([...DESTRUCTIVE].sort());
   });
@@ -366,5 +366,11 @@ describe("설명이 실제 동작과 맞다", () => {
   });
   test("cache rotate: 비워지는 것은 일반 캐시뿐이다", () => {
     expect(about("cache rotate").help.about).toContain("일반 캐시");
+  });
+  test("db restore-check: 이어 가기는 내용 확인이 끝난 뒤뿐이고 그 전은 --abort 뒤 새로 시작한다", () => {
+    const text = about("db restore-check").help.about;
+    expect(text).toContain("내용 확인까지 끝난 뒤");
+    expect(text).toContain("--abort");
+    expect(text).toContain("새로 시작");
   });
 });
