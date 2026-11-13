@@ -30,9 +30,12 @@ worker:
   # main 빌드(app-build)가 GHCR에 올린 digest만 쓴다. 로컬 빌드 digest는 CI 빌드와 다르다.
   # 사람 PR로만 바꾼다(D2). 게시 서버는 apps/homelab-bot/image.yaml 자동 병합으로 따라가지만, 모델 자격을 든 sandbox까지
   # 자동 경로를 넓히지 않는다(설계 C.4.4·C.4.7). 작업자 요청 계약(version)을 바꾸는 봇 PR은 이 값을 바꾸는 PR과 짝으로 낸다.
-  # 지금 값: 봇 main 36c96b6 빌드(게시 서버 apps/homelab-bot/image.yaml과 같은 digest). 대화·리뷰 요청 계약 v1·v2를 받고(동료 봇 C02)
+  # 지금 값: 봇 main 02f5f3f 빌드(게시 서버 apps/homelab-bot/image.yaml과 같은 digest). 대화·리뷰 요청 계약 v1·v2를 받고(동료 봇 C02)
   # 응답에 한도 정보 칸을 싣는다(C03). 작업자 출력의 제안 동작 ID에 review_request(C30)·change_amend(C27)가 있고, 대화 지시문에
   # 답장 대상 글·세션 연결 설명(C18 3a·3b)과 "할 수 있는 일"의 변경 PR 수정(확인 버튼을 거치는 실행, C36 F-10)이 있다.
+  # 대화 신뢰 문맥은 namespace·deployment를 싣지 않고, 서비스·명령 목록을 답에 옮기지 않고 owner를 "관리자"로 부르라는 답 규칙이
+  # 있다(봇 #156). 방식 선택이 실린 새 판 요청(대화 v3, 리뷰 v2, 변경 자체 리뷰 v2)과 GET /v1/contracts도 받지만(C39) 게시 서버가
+  # 아직 새 판을 보내지 않아 지금 요청은 옛 판 그대로 돈다. 이 값은 task.image보다 앞선 digest다(작업 레인은 36c96b6 그대로).
   # 자격은 실행마다 방식 표시가 고른다(C23, 아래 profile.methods).
   # 미게시 변경 리뷰 경로 /v1/change-review는 요청 머리 x-change-review-rate-limit: 1이 있을 때만 응답에 한도 정보 칸을 싣는다
   # (C36 F-1. 게시 서버가 결제 멈춤·풀리는 시각을 기록한다). 머리가 없는 옛 게시 서버에는 칸을 빼서 strict 스키마와 엇갈리지 않는다.
@@ -46,8 +49,8 @@ worker:
   #   3. 4df0a4f보다 앞(방식 표시 전) 이미지로 갈 때만: 방식 표시가 api면 먼저 homelab bot account use <구독 계정> --apply로 구독에
   #      돌린다. 그 작업자는 구독 토큰 파일만 읽는데 api 방식이면 그 자리가 unset이라 기동하지 못한다(종료 1 → root가 wave -2에서 멈춤).
   # 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main
-  # 36c96b6, GitHub 호스트 runner).
-  image: ghcr.io/ukyi-app/homelab-bot@sha256:37e91af6113545aa9c6989606db6c6117b2824af6997828e7a75d7e134c49723
+  # 02f5f3f, GitHub 호스트 runner).
+  image: ghcr.io/ukyi-app/homelab-bot@sha256:431ee00b324e7b63bd22f6d472992306f1eaa44946a9172f0bd4316a2dbe3ccc
   # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
   # WORKER_CONTROL_PRIVATE_KEY다. 둘이 어긋나면 작업자가 모든 실행 요청을 403으로 거부하니 회전은 두 값을 함께 바꾼다.
   # 모양이 틀리면 작업자가 기동하지 못해(종료 1) sandbox가 Degraded가 되므로 values.schema.json이 Ed25519 공개 키 모양만 받는다.
@@ -108,12 +111,12 @@ task:
   enabled: true
   # 작업 레인 코드가 든 main 빌드 digest. 사람 PR로만 바꾼다(worker.image와 같은 이유). 이 줄 하나만 바꾸면 worker를 건드리지 않고
   # 작업 레인 이미지를 올린다. 작업 레인 코드가 없는 이미지는 WORKER_LANES를 읽지 않아 대화·리뷰 작업자로 뜬다.
-  # 지금 값: 봇 main 36c96b6 빌드(worker.image와 같은 digest). 630c48d의 v2 작업 계약·무자격 검증 실행기·시작 표식, 응답 한도
+  # 지금 값: 봇 main 36c96b6 빌드. 630c48d의 v2 작업 계약·무자격 검증 실행기·시작 표식, 응답 한도
   # 정보 칸(동료 봇 C03), 변경 작성 지시문 change-v2(확인할 것·선택지 질문·수정 차례 입력, C25)에 더해, 턴 번호 상한을 프로토콜
   # 한계로 넓혔고(C19: 한도·인증 대기 턴은 게시 서버가 턴 예산에서 뺀다) amendment.pullNumber null인 게시 전 고치기 입력(C31)을 받는다.
   # intake가 알리는 판 목록은 task-v1, change-v2다. 자격은 worker와 같이 실행마다 방식 표시가 고른다(C23).
   # 작업 레인 코드(task-worker·executor-claude-task)는 4df0a4f 빌드와 같다. C36의 작업자 쪽 변화(대화 지시문, 변경 자체 리뷰)는
-  # 대화·리뷰 작업자(worker)에서만 돈다. 두 레인을 한 digest로 맞춰 둔다.
+  # 대화·리뷰 작업자(worker)에서만 돈다. worker.image는 02f5f3f로 앞서 있어 두 레인의 digest가 다르다.
   # 되돌릴 때는 worker.image와 같은 순서다(게시 서버보다 먼저, 4df0a4f보다 앞이면 방식 표시가 api일 때 구독으로 먼저). 9b067e9 이하
   # 이미지는 턴 번호 17 이상인 작업(한도·인증 대기를 거친 작업)과 pullNumber null 고치기 입력을 거부한다. 새 판을 쓰기 시작한 뒤 이
   # 값만 되돌리면 저장된 새 판 결과를 읽지 못하므로 진행 중 변경 턴을 끝낸 뒤 되돌린다. CLI 버전(package.json·lock·Dockerfile)과 작업
