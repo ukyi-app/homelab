@@ -5,7 +5,7 @@
 - 명세: `spec.md` §7(관측 중계·진단 작업자 줄), §6 불변 조건 1·9, §5.1 D-20
 - Blocked by: O09
 - 연결 AC: AC-10, AC-11(로그 속 지시문), AC-27(등급 판정)
-- 결정(관리자): D-04 "1번으로 진행"(넓은 읽기 자격과 셸은 진단 작업자가 쥔다), D-05 "1번으로"(읽기 범위), D-20 "1번으로 하자"(토큰은 거르는 관측 중계가 쥐고 진단 작업자는 토큰 없이 중계를 거친다. D-04의 "읽기 자격"은 중계를 거친 읽기 권한을 뜻하게 된다)
+- 결정(관리자): D-04 "1번으로 진행"(넓은 읽기 자격과 셸은 진단 작업자가 쥔다), D-05 "1번으로"(읽기 범위), D-35 "1"(읽기 목록에 인증서와 백업 예약을 더한다), D-20 "1번으로 하자"(토큰은 거르는 관측 중계가 쥐고 진단 작업자는 토큰 없이 중계를 거친다. D-04의 "읽기 자격"은 중계를 거친 읽기 권한을 뜻하게 된다)
 - 수행: 에이전트 + 사람(RBAC·네트워크 배포 PR 검토·병합)
 - 저장소·PR: homelab 배포 PR(전용 SA·RoleBinding·중계 배포·네트워크 정책), `olive` 저장소 PR(관측 중계, 역할 프로필)
 - 파일 소유: 관측 중계 코드와 가림 규칙, 진단 역할 프로필, 전용 SA·바인딩 매니페스트
@@ -19,7 +19,7 @@
 
 | 대상 | 범위 | 방법 |
 |---|---|---|
-| 상태 | 전 네임스페이스의 파드·이벤트·워크로드·CNPG·ExternalSecret·Argo Application | 리소스 목록은 지금 `homelab-readonly` 그대로. 동작은 get·list만(중계가 `watch`를 받지 않는다. 끝없는 스트림에는 크기 상한을 걸 수 없다) |
+| 상태 | 전 네임스페이스의 파드·이벤트·워크로드·CNPG·ExternalSecret·Argo Application. D-35로 더한 것: cert-manager의 Certificate·CertificateRequest·Order·Challenge·Issuer·ClusterIssuer, CNPG의 ScheduledBackup | 리소스 목록은 지금 `homelab-readonly` 그대로. 동작은 get·list만(중계가 `watch`를 받지 않는다. 끝없는 스트림에는 크기 상한을 걸 수 없다) |
 | 로그 | VictoriaLogs | 질의마다 시간 범위·크기 상한 |
 | 지표 | vmsingle | 질의마다 시간 범위·크기 상한 |
 | 설정 내용 | Git 저장소 | 읽기 |
@@ -28,7 +28,8 @@
 ## 할 일
 
 1. 관측 중계를 만든다(D-20). 모델이 아닌 별도 프로세스이고 진단 작업자와 다른 파드(또는 다른 UID)에서 돈다.
-   - 토큰: 진단 전용 SA(옛 `bot-reader`를 복사하지 않고 같은 리소스 목록으로 새로)의 projected 토큰을 중계만 마운트한다.
+   - 토큰: 진단 전용 SA(옛 `bot-reader`를 복사하지 않고 새로)의 projected 토큰을 중계만 마운트한다. ClusterRole은 `homelab-readonly`의 리소스 목록에 D-35의 인증서·백업 예약을 더한 것이고, `homelab-readonly` 자체는 고치지 않는다. CI의 읽기 전용 RBAC 정책(`tools/ci/policy.ts`, 시험 자료 `readonly-rbac--*`)이 새 ClusterRole을 받는지 확인하고, 정책을 고쳐야 하면 관리자의 개발 세션이 한다(보호 경로, B-12).
+   - 가림(D-35): Challenge의 `spec.key`와 `spec.token`은 통째로 가린다.
    - Kubernetes: 진단 작업자는 `kubectl --server=<중계 주소>`로 평소처럼 쓴다. 중계는 GET(get·list)만 받고, 허용 리소스 목록 밖의 경로·`watch`·`proxy`·`exec`·`log` 하위 리소스는 403으로 돌려준다. RBAC이 한 번 더 막는다.
    - 가림: 응답에서 컨테이너 `env[].value`, `annotations`의 값, `command`·`args`에 든 자격 모양 문자열, 이벤트 메시지의 자격 모양 문자열을 가린다. 가림 목록은 코드와 시험 자료로 두고, 모르는 칸은 통과시키되 비밀 검사를 건다.
    - 로그·지표: VictoriaLogs·vmsingle 질의를 중계가 받아 시간 범위·행 수·바이트 상한을 강제한다.
