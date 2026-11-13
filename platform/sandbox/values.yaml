@@ -54,10 +54,14 @@ worker:
   # 0이면 대화·리뷰 작업자 파드를 띄우지 않는다. 0 또는 1만 받는다(작업은 직렬 하나, templates/worker-deployment.yaml).
   # 0인 이유: 올리브 계획(D-17) 동안 요청을 보낼 게시 서버가 멈춰 있어(apps/homelab-bot suspended) 할 일이 없는데 모델 자격
   # Secret을 붙인 채 떠 있게 된다. Secret·ExternalSecret·PVC·Service·NetworkPolicy와 egress 프록시는 그대로 남는다.
+  # 함정: 빈 클러스터에서 0이면 codex-home PVC가 쓸 파드 없이 Pending이다. templates/worker-pvc.yaml이 그때만 그 health를
+  # Application 합산에서 빼 root가 sandbox에서 멈추지 않게 한다.
   # 다시 켤 때 함께 볼 것:
   #   1. 요청을 보낼 쪽(게시 서버나 올리브)이 먼저 있어야 한다. 그 쪽의 서명 키와 controlPublicKey가 짝인지 본다.
   #   2. 멈춘 동안 image를 올렸으면 요청 계약 판이 보내는 쪽과 맞는지 본다(위 image 주석의 되돌릴 때 순서).
-  #   3. Infisical 자격(방식 표시·토큰·API 키 자리)이 아직 유효한지 본다. 틀리면 기동이 종료 1 → root가 wave -2에서 멈춘다.
+  #   3. Infisical 자격(방식 표시·토큰·API 키 자리)을 본다. 기동 검사와 /readyz는 자격의 모양·방식만 보고 모델을 부르지 않는다
+  #      (templates/worker-deployment.yaml, rotate.md). 모양·방식이 틀리면 기동이 종료 1 → root가 wave -2에서 멈춘다. 멈춘 동안
+  #      만료·철회된 토큰은 모양이 맞으면 Ready가 되어 Ready로는 알 수 없으니, 켠 뒤 실제 요청 하나로 확인한다.
   #   4. 작업자 파드 수를 보는 경보는 없다(sandbox는 수집 job이 없고 KubePodNotReady는 있는 파드만 본다). 켠 뒤 Ready를 직접 본다.
   replicas: 0
   # 게시 서버의 실행 요청 서명을 확인하는 Ed25519 공개 키(SPKI PEM). 비밀이 아니다(D3). 짝 개인 키는 Infisical의 게시 서버 키
