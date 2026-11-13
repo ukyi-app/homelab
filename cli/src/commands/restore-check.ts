@@ -243,10 +243,17 @@ const abortSteps: Step[] = [
 
 export default defineCommand({
   path: ["db", "restore-check"],
-  summary: "최신 백업 복원 시험(임시 Cluster, 앱 영향 없음). 멈춘 시험은 --abort",
+  summary: "백업 복원 시험 (앱 영향 없음)",
+  help: {
+    about:
+      "R2의 백업을 임시 DB 클러스터에 10분 전 시각까지 복원해 백업이 실제로 쓸 만한지 확인하고 결과를 기록합니다. 앱에는 영향이 없습니다. 내용 확인까지 끝난 뒤 멈췄으면 같은 명령으로 정리를 이어 갑니다. 그 전에 멈췄으면 --abort로 임시 클러스터와 기록을 치운 뒤 새로 시작합니다.",
+    examples: ["homelab db restore-check --apply", "homelab db restore-check --abort --apply"],
+    related: ["db restore"],
+    doc: "docs/runbooks-public/restore.md 2.2절",
+  },
   kind: "change",
   args: [],
-  flags: [{ name: "abort", kind: "bool", help: "멈춘 시험의 임시 Cluster·기록을 지운다" }],
+  flags: [{ name: "abort", kind: "bool", help: "멈춘 시험의 임시 클러스터·기록 치우기" }],
   async run(ctx, input) {
     if (input.flags.abort === true) return ctx.engine({ command: "db restore-check", steps: abortSteps });
     return ctx.engine({

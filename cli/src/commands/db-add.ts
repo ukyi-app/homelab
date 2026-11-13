@@ -65,7 +65,12 @@ function latestData(ctx: ReadCtx): string {
 
 export default defineCommand({
   path: ["db", "add"],
-  summary: "PostgreSQL 연결(Infisical 비밀번호, data·apps PR)",
+  summary: "PostgreSQL 붙이기 (PR)",
+  help: {
+    about: "앱에 PostgreSQL DB를 붙입니다. 비밀번호를 Infisical에 만들고(없을 때만) 데이터 설정(data/<app>/)과 앱 설정을 바꾸는 PR을 엽니다.",
+    examples: ["homelab db add smoke", "homelab db add smoke --apply"],
+    related: ["app add", "db rotate", "status"],
+  },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],
   flags: [],

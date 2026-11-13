@@ -16,15 +16,23 @@ const same = (detail: string, warn?: string): Observation => ({ state: "same", a
 
 export default defineCommand({
   path: ["bot", "account", "add"],
-  summary: "봇 계정 등록(구독: claude setup-token 로그인 한 번, API 크레딧: Console API 키. 대화용·작업용에 함께 쓴다, 값은 stdin·tty)",
+  summary: "봇 모델 계정 등록하기",
+  help: {
+    about:
+      "Claude 계정의 자격을 Infisical에 두고 봇 기록에 이름·방식을 적습니다. 구독(기본)은 이 컴퓨터에서 claude setup-token 로그인을 한 번 띄우고 받은 토큰을 화면에서 가립니다. --by api는 Console API 키를 가려진 입력으로 받습니다. 파이프면 값을 stdin에서 읽습니다. 기본은 값 하나를 대화용과 작업용에 함께 씁니다. 봇이 지금 쓰는 계정은 바꾸지 않습니다(바꾸기는 bot account use).",
+    examples: ["homelab bot account add work", "homelab bot account add work --by api"],
+    related: ["bot account use", "bot account list"],
+    doc: "docs/runbooks-public/rotate.md 3e절",
+    destructive: "--replace는 등록한 계정의 지금 값을 새 값으로 덮어씁니다.",
+  },
   kind: "change",
   terminalSummary: true,
   args: [{ name: "name", required: true, help: "계정 이름(소문자·숫자·하이픈, 32자 이하)", pattern: BOT_ACCOUNT_NAME }],
   flags: [
     { name: "by", kind: "value", valueName: "방식", help: "subscription(기본, 구독 장기 토큰) 또는 api(API 크레딧, Console API 키)", values: ["subscription", "api"] },
-    { name: "replace", kind: "bool", help: "이미 등록한 계정의 값을 새로 받는다(만료 전 교체·키 교체)" },
-    { name: "separate-tokens", kind: "bool", help: "대화용·작업용에 토큰(API 키)을 따로 받는다(기본은 하나를 함께 쓴다)" },
-    { name: "verbose", kind: "bool", help: "터미널에서도 단계 표 전체를 보인다" },
+    { name: "replace", kind: "bool", help: "이미 등록한 계정의 값을 새로 받기(만료 전 교체·키 교체)" },
+    { name: "separate-tokens", kind: "bool", help: "대화용·작업용 값을 따로 받기(기본은 하나를 함께 씀)" },
+    { name: "verbose", kind: "bool", help: "터미널에서도 단계 표 전체 보기" },
   ],
   async run(ctx, input) {
     const name = input.args.name as string;
