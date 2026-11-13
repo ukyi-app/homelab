@@ -133,10 +133,18 @@ export function renderOverview(sections: HelpSection[], st: HelpStyle): string {
   return lines.join("\n") + "\n";
 }
 
-export function renderGroup(prefix: string[], cmds: CommandSpec[], st: HelpStyle): string {
+// 묶음(경로 접두사) 아래 명령을 맨 위 도움말과 같은 분류 제목으로 나눠 보인다(db는 데이터·시크릿·복원에 걸친다).
+export function renderGroup(prefix: string[], sections: HelpSection[], st: HelpStyle): string {
   const name = ["homelab", ...prefix].join(" ");
-  const lines = [...title(name, `명령 ${cmds.length}개`, st), "", `${heading(st, "사용법")}  ${name} <명령> [인자] [플래그]`, ""];
-  lines.push(...table(commandRows(cmds), st, NAME_CAP, paint(st, "36")));
+  const inGroup = (c: CommandSpec) => c.path.length > prefix.length && prefix.every((w, i) => c.path[i] === w);
+  const parts = sections.map((s) => ({ title: s.title, commands: s.commands.filter(inGroup) })).filter((s) => s.commands.length);
+  const count = parts.reduce((n, s) => n + s.commands.length, 0);
+  const lines = [...title(name, `명령 ${count}개`, st), "", `${heading(st, "사용법")}  ${name} <명령> [인자] [플래그]`];
+  const cap = Math.min(NAME_CAP, Math.max(...parts.flatMap((s) => commandRows(s.commands).map((r) => width(r.left)))));
+  for (const s of parts) {
+    lines.push("", heading(st, s.title));
+    lines.push(...table(commandRows(s.commands).map((r) => ({ ...r, left: pad(r.left, cap) })), st, cap, paint(st, "36")));
+  }
   lines.push("", ...para(`자세히: ${name} <명령> -h`, 0, st));
   return lines.join("\n") + "\n";
 }
@@ -165,7 +173,7 @@ export function renderCommand(c: CommandSpec, subs: CommandSpec[], st: HelpStyle
   lines.push("", heading(st, "예"));
   for (const e of c.help.examples) lines.push(...para(e, 2, st));
   const tail: string[] = [];
-  if (c.kind === "change") tail.push(...para("계획과 실행: 이 명령은 먼저 계획(plan)만 보여 주고, --apply를 붙여야 실제로 바꿉니다.", 0, st, dim));
+  if (c.kind === "change") tail.push(...para("계획과 실행: 먼저 계획(plan)만 보여 주고, --apply를 붙여야 실제로 바꿉니다.", 0, st, dim));
   if (c.help.doc) tail.push(...para(`자세히: ${c.help.doc}`, 0, st));
   if (c.help.related?.length) tail.push(...para(`관련: ${c.help.related.map((r) => `homelab ${r}`).join(" · ")}`, 0, st));
   if (tail.length) lines.push("", ...tail);

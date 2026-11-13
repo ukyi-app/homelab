@@ -53,7 +53,7 @@ function unknownText(argv: string[], group: string[]): string {
   const where = group.length ? `homelab ${group.join(" ")}에 없는 명령입니다` : "모르는 명령입니다";
   const lines = [`사용법 오류: ${where}`];
   if (hit) lines.push(`혹시: homelab ${[...group, hit].join(" ")}`);
-  if (group.length) return `${lines.join("\n")}\n\n${renderGroup(group, under(group), helpStyle(process.env, "stderr"))}`;
+  if (group.length) return `${lines.join("\n")}\n\n${renderGroup(group, SECTIONS, helpStyle(process.env, "stderr"))}`;
   lines.push("명령 목록: homelab -h");
   return `${lines.join("\n")}\n`;
 }
@@ -120,12 +120,12 @@ async function main(argv: string[]): Promise<number> {
   if (!cmd) {
     if (group.length > 0 && leadingWords(argv).length === group.length) {
       if (wantsHelp) {
-        writeStdout(json ? groupJson(SECTIONS, group, under(group)) : renderGroup(group, under(group), out()));
+        writeStdout(json ? groupJson(SECTIONS, group, under(group)) : renderGroup(group, SECTIONS, out()));
         return 0;
       }
       // 묶음만 쳤다: 사용법 오류(64)지만 무엇을 칠 수 있는지 보인다.
       if (!json) {
-        writeStdout(renderGroup(group, under(group), out()));
+        writeStdout(renderGroup(group, SECTIONS, out()));
         return EXIT.usage;
       }
     }
