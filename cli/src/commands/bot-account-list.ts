@@ -32,11 +32,17 @@ export function accountListBody(accounts: BotAccount[], paused: BotPaused): stri
 
 export default defineCommand({
   path: ["bot", "account", "list"],
-  summary: "봇 모델 계정 목록(이름·방식·지금 계정·만료일·마지막 사용률, 값 없음)",
+  summary: "봇 모델 계정 목록 보기",
+  help: {
+    about:
+      "등록한 계정의 이름·방식·지금 쓰는 계정·토큰 만료일·마지막 사용률과 모델 문제로 멈춘 작업 수를 봅니다. 값과 크레딧 잔액은 보이지 않습니다. 봇 파드 안에서 실행하므로 --apply가 있어야 실행합니다.",
+    examples: ["homelab bot account list --apply"],
+    related: ["bot account add", "bot account use"],
+  },
   kind: "change",
   terminalSummary: true,
   args: [],
-  flags: [{ name: "verbose", kind: "bool", help: "터미널에서도 단계 표 전체를 보인다" }],
+  flags: [{ name: "verbose", kind: "bool", help: "터미널에서도 단계 표 전체 보기" }],
   async run(ctx) {
     const cmd: BotAdminCommand = { name: "account", action: "list" };
     let done: BotAdminReport | null = null;

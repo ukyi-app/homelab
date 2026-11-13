@@ -661,15 +661,22 @@ function abortSteps(n: Names): Step[] {
 
 export default defineCommand({
   path: ["cache", "restore"],
-  summary: "영속 Valkey 복원(restore.md 1절). 끝나면 --finish",
+  summary: "영속 Valkey를 백업으로 되돌리기",
+  help: {
+    about:
+      "영속 Valkey 하나를 R2 백업으로 복원합니다. 중간에 PR 셋을 열고 병합을 기다릴 때마다 종료 코드 3으로 멈추며, 병합 뒤 같은 명령을 다시 실행하면 이어 갑니다. 끝나도 실행 기록은 남고 --finish가 지웁니다. 복원 Job 전이면 --abort로 그만둘 수 있습니다.",
+    examples: ["homelab cache restore smoke --backup-first", "homelab cache restore smoke --finish --apply"],
+    related: ["cache rotate", "status"],
+    doc: "docs/runbooks-public/restore.md 1절",
+  },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],
   flags: [
-    { name: "object", kind: "value", valueName: "dump-<UTC>.rdb|latest", pattern: OBJECT, help: "R2 valkey/<app>/의 객체(기본 latest)" },
-    { name: "backup-first", kind: "bool", help: "복원 전에 지금 상태를 수동 백업한다(0단계)" },
-    { name: "accept-empty", kind: "bool", help: "앞 실행이 키 0개를 보고 멈춘 뒤, 비어 있는 것이 정상임을 확인했을 때만" },
-    { name: "finish", kind: "bool", help: "끝난 복원의 실행 기록을 지운다" },
-    { name: "abort", kind: "bool", help: "복원 Job 전이면 그만두고 서버를 다시 올린다" },
+    { name: "object", kind: "value", valueName: "dump-<UTC>.rdb|latest", pattern: OBJECT, help: "R2 valkey/<app>/의 백업 파일(기본 latest)" },
+    { name: "backup-first", kind: "bool", help: "복원 전에 지금 상태를 백업해 두기" },
+    { name: "accept-empty", kind: "bool", help: "키 0개로 멈춘 뒤, 비어 있는 것이 정상이라고 확인했을 때만" },
+    { name: "finish", kind: "bool", help: "끝난 복원의 실행 기록 지우기" },
+    { name: "abort", kind: "bool", help: "복원 Job 전이면 그만두고 서버 다시 올리기" },
   ],
   async run(ctx, input) {
     const app = input.args.app as string;

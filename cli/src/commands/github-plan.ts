@@ -7,11 +7,18 @@ const GUARD_NEXT = "메시지의 guard 번호를 설계 C.3.9에서 찾아 고�
 
 export default defineCommand({
   path: ["github", "plan"],
-  summary: "GitHub 보호 설정 plan(tools/tf-github.sh plan)",
+  summary: "GitHub 보호 설정 차이 보기",
+  help: {
+    about:
+      "infra/github에 선언한 GitHub 설정(ruleset, environment 등)과 실제의 차이를 Terraform plan으로 봅니다. main을 새로 받은 사본에서 실행하고 잠금을 걸지 않습니다. 지우는 변경이 있으면 --allow-destroy 없이는 멈춥니다. 종료 코드: 0 같음, 2 차이 있음, 1 검사 실패.",
+    examples: ["homelab github plan"],
+    related: ["github apply", "github verify"],
+    doc: "docs/runbooks-public/github.md",
+  },
   kind: "delegate",
   delegateMode: "read",
   args: [],
-  flags: [{ name: "allow-destroy", kind: "bool", help: "delete가 있어도 진행" }],
+  flags: [{ name: "allow-destroy", kind: "bool", help: "지우는 변경이 있어도 계속하기" }],
   async run(ctx, input) {
     const allowDestroy = input.flags["allow-destroy"] === true;
     const code = ctx.github!.run("plan", { allowDestroy });

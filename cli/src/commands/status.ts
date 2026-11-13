@@ -303,10 +303,15 @@ function platformSteps(causes: Cause[]): Step[] {
 
 export default defineCommand({
   path: ["status"],
-  summary: "빌드·배포 PR·Argo CD·DB·시크릿 준비 상태와 다음 행동",
+  summary: "앱·플랫폼 상태와 다음에 할 일",
+  help: {
+    about: "빌드, 배포 PR, Argo CD, DB, 시크릿, 마이그레이션이 준비됐는지 보고 다음에 할 일을 알려 줍니다. 준비 안 된 것이 하나라도 있으면 종료 코드 1입니다. 앱을 주지 않으면 모든 앱의 Argo CD 상태를 한 줄씩 봅니다.",
+    examples: ["homelab status smoke", "homelab status --platform"],
+    related: ["logs", "doctor"],
+  },
   kind: "read",
-  args: [{ name: "app", required: false, help: "앱 이름", pattern: APP_NAME }],
-  flags: [{ name: "platform", kind: "bool", help: "플랫폼 구성 요소 상태" }],
+  args: [{ name: "app", required: false, help: "앱 이름(없으면 모든 앱)", pattern: APP_NAME }],
+  flags: [{ name: "platform", kind: "bool", help: "플랫폼 구성 요소 상태도 보기" }],
   async run(ctx, input) {
     const app = input.args.app;
     const main = ctx.repo.mainSha();

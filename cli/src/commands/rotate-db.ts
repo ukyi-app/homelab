@@ -228,10 +228,17 @@ function finishSteps(n: Names, app: string): Step[] {
 
 export default defineCommand({
   path: ["db", "rotate"],
-  summary: "DB 비밀번호 회전(C.6.5). --finish로 옛 값 정리",
+  summary: "DB 비밀번호 바꾸기",
+  help: {
+    about:
+      "새 비밀번호를 만들어 DB와 앱에 적용하고, 앱이 새 값으로 접속하고 옛 값은 거부되는지 확인합니다. 옛 값은 PASSWORD_PREVIOUS로 남겨 두고, --finish가 한 번 더 확인한 뒤 지웁니다. 적용하는 동안 수십 초는 새 접속이 실패할 수 있습니다.",
+    examples: ["homelab db rotate smoke --apply", "homelab db rotate smoke --finish --apply"],
+    related: ["cache rotate", "status"],
+    doc: "docs/runbooks-public/rotate.md 3c절",
+  },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],
-  flags: [{ name: "finish", kind: "bool", help: "회전을 끝낸다: 다시 확인한 뒤 PASSWORD_PREVIOUS를 지운다" }],
+  flags: [{ name: "finish", kind: "bool", help: "회전 끝내기: 다시 확인하고 옛 비밀번호 지우기" }],
   async run(ctx, input) {
     const app = input.args.app as string;
     const n = namesOf(app);

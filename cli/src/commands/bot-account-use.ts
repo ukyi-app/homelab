@@ -58,13 +58,20 @@ const carries = (map: Map<string, string>, pairs: [string, string][]) => pairs.f
 
 export default defineCommand({
   path: ["bot", "account", "use"],
-  summary: "봇이 쓰는 계정·방식 바꾸기(대화용·작업용 자격·방식 표시 → 작업자 반영 확인 → 멈춘 일 해제)",
+  summary: "봇이 쓸 계정 바꾸기",
+  help: {
+    about:
+      "작업자가 쓸 계정과 방식을 바꿉니다. 새 자격이 두 작업자 파드에 반영된 것을 확인한 뒤에만 다른 방식의 자격을 비우고, 모델 문제로 멈춘 작업을 풉니다. 중간에 실패하면 같은 명령으로 이어 갑니다.",
+    examples: ["homelab bot account use work --apply", "homelab bot account use work --by api --apply"],
+    related: ["bot account add", "bot account list"],
+    doc: "docs/runbooks-public/rotate.md 3e절",
+  },
   kind: "change",
   terminalSummary: true,
-  args: [{ name: "name", required: true, help: "계정 이름(homelab bot account add로 등록한 것)", pattern: BOT_ACCOUNT_NAME }],
+  args: [{ name: "name", required: true, help: "계정 이름(bot account add로 등록한 것)", pattern: BOT_ACCOUNT_NAME }],
   flags: [
     { name: "by", kind: "value", valueName: "방식", help: "subscription(기본, 구독) 또는 api(API 크레딧)", values: ["subscription", "api"] },
-    { name: "verbose", kind: "bool", help: "터미널에서도 단계 표 전체를 보인다" },
+    { name: "verbose", kind: "bool", help: "터미널에서도 단계 표 전체 보기" },
   ],
   async run(ctx, input) {
     const name = input.args.name as string;

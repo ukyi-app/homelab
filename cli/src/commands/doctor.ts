@@ -30,7 +30,12 @@ function toolStep(tool: ToolName, parse: (out: string) => string | null, expecte
 
 export default defineCommand({
   path: ["doctor"],
-  summary: "로컬 도구·로그인·kubectl context 점검",
+  summary: "내 컴퓨터의 도구·로그인 점검",
+  help: {
+    about: "kubectl·infisical·gh 같은 도구의 버전과 로그인, kubectl이 가리키는 클러스터를 확인합니다. 저장소 안에서 실행해야 mise가 맞는 도구 버전을 고릅니다.",
+    examples: ["homelab doctor"],
+    related: ["status"],
+  },
   kind: "read",
   args: [],
   flags: [],

@@ -9,13 +9,19 @@ const same = (detail: string): Observation => ({ state: "same", action: "none", 
 
 export default defineCommand({
   path: ["secret", "set"],
-  summary: "앱 시크릿 등록(값은 stdin)",
+  summary: "앱 시크릿 넣기 (값은 stdin)",
+  help: {
+    about:
+      "Infisical에 앱 시크릿 하나를 넣습니다. 값은 인자로 받지 않습니다: 터미널이면 가려진 입력으로 묻고, 파이프면 표준 입력(stdin) 한 줄을 읽습니다. 16자 이상이어야 합니다. 앱에 반영하려면 secret sync를 실행합니다.",
+    examples: ["homelab secret set smoke API_TOKEN --apply", "homelab secret set smoke API_TOKEN --replace --apply"],
+    related: ["secret sync"],
+  },
   kind: "change",
   args: [
     { name: "app", required: true, help: "앱 이름", pattern: APP_NAME },
-    { name: "KEY", required: true, help: "키 이름", pattern: SECRET_KEY },
+    { name: "KEY", required: true, help: "키 이름(대문자·숫자·_)", pattern: SECRET_KEY },
   ],
-  flags: [{ name: "replace", kind: "bool", help: "이미 있는 키를 바꾼다" }],
+  flags: [{ name: "replace", kind: "bool", help: "이미 있는 키를 새 값으로 바꾸기" }],
   async run(ctx, input) {
     const app = input.args.app as string;
     const key = input.args.KEY as string;

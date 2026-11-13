@@ -117,14 +117,20 @@ export function passwordStep(app: string, kind: "postgres" | "valkey"): Step {
 
 export default defineCommand({
   path: ["app", "add"],
-  summary: "최초 등록(앱 values·image.yaml, 필요하면 DB·캐시) PR",
+  summary: "앱 처음 등록하기 (PR)",
+  help: {
+    about:
+      "앱 설정(apps/<app>/values.yaml·image.yaml)을 만드는 PR을 엽니다. 고르면 DB·캐시 연결도 같은 PR에 넣습니다. 앱 저장소와 이미지가 public이어야 하고, 첫 이미지는 앱 main의 최신 빌드입니다.",
+    examples: ["homelab app add smoke --public smoke.ukyi.app", "homelab app add smoke --postgres --cache --apply"],
+    related: ["app new", "db add", "cache add", "status"],
+  },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],
   flags: [
-    { name: "public", kind: "value", valueName: "host", pattern: PUBLIC_HOST, help: "공개 host(<이름>.ukyi.app)" },
-    { name: "internal", kind: "value", valueName: "name", pattern: INTERNAL_NAME, help: "tailnet 안 이름" },
-    { name: "postgres", kind: "bool", help: "PostgreSQL 연결" },
-    { name: "cache", kind: "optional-value", values: ["persistent"], help: "Valkey 연결(=persistent면 영속)" },
+    { name: "public", kind: "value", valueName: "host", pattern: PUBLIC_HOST, help: "인터넷에 여는 주소(<이름>.ukyi.app)" },
+    { name: "internal", kind: "value", valueName: "name", pattern: INTERNAL_NAME, help: "tailnet 안에서 쓸 이름" },
+    { name: "postgres", kind: "bool", help: "PostgreSQL 붙이기" },
+    { name: "cache", kind: "optional-value", values: ["persistent"], help: "Valkey 캐시 붙이기(=persistent면 백업하는 영속 Valkey)" },
   ],
   async run(ctx, input) {
     const app = input.args.app as string;

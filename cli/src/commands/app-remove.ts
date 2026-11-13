@@ -14,7 +14,13 @@ const botTarget = (text: string | null) => (text === null ? undefined : (parseYa
 
 export default defineCommand({
   path: ["app", "remove"],
-  summary: "앱 삭제(데이터 보존) PR",
+  summary: "앱 내리기, 데이터는 남김 (PR)",
+  help: {
+    about:
+      "앱 배포 설정(apps/<app>/)을 지우는 PR을 엽니다. DB·Valkey 데이터는 그대로 남습니다. 데이터까지 지우려면 이 PR을 병합한 뒤 data purge를 씁니다. 다시 등록하면 values.yaml을 기본값으로 새로 쓰므로 사람이 더한 키는 이 PR에서 지운 내용을 보고 되살립니다.",
+    examples: ["homelab app remove smoke"],
+    related: ["data list", "data purge", "app add"],
+  },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],
   flags: [],

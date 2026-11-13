@@ -7,13 +7,18 @@ import { APP_NAME } from "../core/names";
 
 export default defineCommand({
   path: ["logs"],
-  summary: "로그(지금 파드, 과거는 Grafana)",
+  summary: "앱 로그 보기",
+  help: {
+    about: "지금 떠 있는 앱 파드의 로그를 보여 줍니다. 파드가 바뀌기 전의 지난 로그는 Grafana에서 봅니다.",
+    examples: ["homelab logs smoke --since 30m", "homelab logs smoke --job migrate"],
+    related: ["status"],
+  },
   kind: "read",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],
   flags: [
-    { name: "since", kind: "value", valueName: "기간", pattern: /[1-9][0-9]{0,5}[smhd]/, help: "예 30m, 2h, 7d" },
+    { name: "since", kind: "value", valueName: "기간", pattern: /[1-9][0-9]{0,5}[smhd]/, help: "이만큼 전부터(예 30m, 2h, 7d)" },
     { name: "job", kind: "value", valueName: "이름", values: ["migrate"], help: "마이그레이션 Job(<app>-migrate)의 로그" },
-    { name: "previous", kind: "bool", help: "직전 컨테이너(재시작 전)의 로그" },
+    { name: "previous", kind: "bool", help: "재시작 전 컨테이너의 로그" },
   ],
   async run(ctx, input) {
     const app = input.args.app as string;

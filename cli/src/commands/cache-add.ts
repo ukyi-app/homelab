@@ -141,10 +141,16 @@ export function cacheGoneStep(app: string): Step {
 
 export default defineCommand({
   path: ["cache", "add"],
-  summary: "Valkey 연결(캐시, --persistent면 영속)",
+  summary: "Valkey 붙이기 (PR)",
+  help: {
+    about:
+      "앱에 Valkey를 붙이는 PR을 엽니다. 기본은 비워져도 되는 캐시이고, --persistent면 백업하는 영속 Valkey입니다. 캐시를 쓰던 앱을 영속으로 바꾸면 PR이 둘입니다: 캐시를 끄는 PR을 병합한 뒤 같은 명령을 다시 실행하면 영속 PR을 엽니다.",
+    examples: ["homelab cache add smoke", "homelab cache add smoke --persistent --apply"],
+    related: ["app add", "cache rotate", "status"],
+  },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],
-  flags: [{ name: "persistent", kind: "bool", help: "영속 Valkey(데이터 차트, 백업)" }],
+  flags: [{ name: "persistent", kind: "bool", help: "백업하는 영속 Valkey로" }],
   async run(ctx, input) {
     const app = input.args.app as string;
     const persistent = input.flags.persistent === true;
