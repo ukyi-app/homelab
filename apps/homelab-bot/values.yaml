@@ -2,6 +2,12 @@
 chartVersion: 1.3.0
 kind: web
 port: 8080
+# 게시 서버를 멈춰 둔다(replicas 0, 마이그레이션 Job 없음). 올리브 계획(docs/plans/2026-11-13-olive, O01) 동안이다.
+# 멈춘 동안 함께 멈추는 것: Discord 수신·답, 원문 7일 정리(게시 서버 안에서 돈다), 경보의 Discord 전달(Telegram 경로는 그대로),
+# GitHub webhook 수신(hooks.ukyi.app/github), Healthchecks ping. DB·Secret·Service·삭제 원장 볼륨은 남는다.
+# 함정: 지표 Service가 남아 up{job="bot-slot"}이 0이다. TargetDown이 이 job을 빼고 본다(vmalert/rules/core.yaml).
+# 다시 켤 때는 이 줄과 core.yaml의 그 제외를 같은 PR에서 지운다.
+suspended: true
 # 실측 전 값이다(Node 24 게시 서버, pg Pool·Gateway WebSocket). memory는 limit도 같다. 첫 배포 뒤 사용량을 보고 줄인다.
 resources: { cpu: "100m", memory: "256Mi" }
 # GITHUB_REVIEW_APP_ID·_PRIVATE_KEY: 리뷰 App ukyi-review. 둘 다 있어야 하고 하나만 있으면 봇이 기동하지 않는다.
