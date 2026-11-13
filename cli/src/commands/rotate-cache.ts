@@ -225,10 +225,11 @@ export default defineCommand({
   summary: "Valkey 비밀번호 바꾸기",
   help: {
     about:
-      "새 비밀번호를 만들어 Valkey와 앱에 적용하고, 새 값으로 접속되고 옛 값은 거부되는지 확인합니다. 서버를 다시 띄우는 몇 초 동안 앱은 Valkey 오류를 내고, 캐시는 비워집니다. 옛 값은 PASSWORD_PREVIOUS로 남겨 두고 --finish가 한 번 더 확인한 뒤 지웁니다.",
-    examples: ["homelab cache rotate smoke --apply", "homelab cache rotate smoke --finish --apply"],
+      "새 비밀번호를 만들어 Valkey와 앱에 적용하고, 새 값으로 접속되고 옛 값은 거부되는지 확인합니다. 서버를 다시 띄우는 몇 초 동안 앱은 Valkey 오류를 냅니다. 이때 일반 캐시는 비워지고, 영속 Valkey는 마지막 약 1초의 쓰기를 잃을 수 있습니다. 옛 값은 PASSWORD_PREVIOUS로 남겨 두고 --finish가 한 번 더 확인한 뒤 지웁니다.",
+    examples: ["homelab cache rotate smoke", "homelab cache rotate smoke --finish"],
     related: ["db rotate", "status"],
     doc: "docs/runbooks-public/rotate.md 3d절",
+    destructive: "서버를 다시 띄울 때 일반 캐시는 비워지고, --finish는 옛 비밀번호(PASSWORD_PREVIOUS)를 지웁니다.",
   },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],

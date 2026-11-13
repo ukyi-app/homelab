@@ -12,9 +12,10 @@ export default defineCommand({
   summary: "앱 시크릿 넣기 (값은 stdin)",
   help: {
     about:
-      "Infisical에 앱 시크릿 하나를 넣습니다. 값은 인자로 받지 않습니다: 터미널이면 가려진 입력으로 묻고, 파이프면 표준 입력(stdin) 한 줄을 읽습니다. 16자 이상이어야 합니다. 앱에 반영하려면 secret sync를 실행합니다.",
-    examples: ["homelab secret set smoke API_TOKEN --apply", "homelab secret set smoke API_TOKEN --replace --apply"],
-    related: ["secret sync"],
+      "Infisical에 앱 시크릿 하나를 넣습니다. 값은 인자로 받지 않습니다: 터미널이면 가려진 입력으로 묻고, 파이프면 표준 입력(stdin) 한 줄을 읽습니다. 16자 이상이어야 합니다. 앱 설정(values.yaml secrets)에 이미 있는 키를 바꿨으면 바로 secret sync로 반영합니다. 새 키는 app add를 다시 실행해 키를 앱 설정에 더하는 PR을 병합하고 반영된 뒤 secret sync를 실행합니다.",
+    examples: ["homelab secret set smoke API_TOKEN", "homelab secret set smoke API_TOKEN --replace"],
+    related: ["secret sync", "app add"],
+    destructive: "--replace는 지금 값을 새 값으로 덮어씁니다.",
   },
   kind: "change",
   args: [

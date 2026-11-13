@@ -424,6 +424,8 @@ export type CommandHelp = {
   doc?: string;
   // 첫 인자가 동작 이름인 명령(bot)의 동작 목록. target은 둘째 인자 자리 표시.
   actions?: { name: string; target?: string; about: string }[];
+  // 되돌릴 수 없는 일을 하면 무엇이 사라지는지 한 문장. 있으면 examples에 --apply·--allow-destroy를 싣지 않는다(시험이 잡는다).
+  destructive?: string;
 };
 
 export type CommandSpec = {

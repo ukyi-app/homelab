@@ -567,9 +567,10 @@ export default defineCommand({
   summary: "남은 데이터 완전히 지우기",
   help: {
     about:
-      "앱을 내린 뒤 남은 데이터를 되돌릴 수 없게 지웁니다. --apply와 --confirm <app>이 둘 다 있어야 실행합니다. 지우기 전에 마지막 백업이 있는지 보므로 첫 실행은 기록만 남기고 멈출 수 있습니다. 백업이 생긴 뒤(정기 백업 PostgreSQL 03:00, Valkey 03:30 KST) 같은 명령을 다시 실행합니다. PR 병합을 기다리는 동안은 종료 코드 3으로 멈춥니다.",
-    examples: ["homelab data purge smoke", "homelab data purge smoke --confirm smoke --apply"],
+      "앱을 내린 뒤 남은 데이터(DB, 영속 Valkey와 그 저장소, Infisical 키)를 되돌릴 수 없게 지웁니다. --apply와 --confirm <app>이 둘 다 있어야 실행합니다. 지우기 전에 앱을 내린 뒤의 백업이 있는지 보므로 첫 실행은 기록만 남기고 멈출 수 있습니다. 백업이 생긴 뒤(정기 백업 PostgreSQL 03:00, Valkey 03:30 KST) 같은 명령을 다시 실행합니다. PR 두 개의 병합을 기다리는 동안은 종료 코드 3으로 멈춥니다. 마지막에 Infisical 키를 지울 때는 터미널에서 앱 이름을 한 번 더 칩니다. 지운 뒤에도 DB는 base backup 안에 14일 남습니다.",
+    examples: ["homelab data purge smoke", "homelab data purge smoke --confirm smoke"],
     related: ["data list", "app remove"],
+    destructive: "남은 DB, 영속 Valkey 데이터와 저장소, Infisical 키를 지웁니다.",
   },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],

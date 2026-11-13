@@ -120,7 +120,7 @@ export default defineCommand({
   summary: "앱 처음 등록하기 (PR)",
   help: {
     about:
-      "앱 설정(apps/<app>/values.yaml·image.yaml)을 만드는 PR을 엽니다. 고르면 DB·캐시 연결도 같은 PR에 넣습니다. 앱 저장소와 이미지가 public이어야 하고, 첫 이미지는 앱 main의 최신 빌드입니다.",
+      "앱 설정(apps/<app>/values.yaml·image.yaml)을 만드는 PR을 엽니다. 고르면 DB·캐시 연결도 같은 PR에 넣습니다. 앱 저장소와 이미지가 public이어야 하고, 첫 이미지는 앱 main의 최신 빌드입니다. secret set으로 넣어 둔 앱 시크릿 키도 앱 설정에 넣습니다. 다시 실행하면 새로 준 플래그와 새 시크릿 키만 더합니다(빼지는 않습니다).",
     examples: ["homelab app add smoke --public smoke.ukyi.app", "homelab app add smoke --postgres --cache --apply"],
     related: ["app new", "db add", "cache add", "status"],
   },

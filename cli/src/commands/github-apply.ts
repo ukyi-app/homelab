@@ -13,11 +13,12 @@ export default defineCommand({
     examples: ["homelab github apply"],
     related: ["github plan", "github verify"],
     doc: "docs/runbooks-public/github.md",
+    destructive: "지우는 변경은 --allow-destroy가 있어야 적용합니다. 먼저 homelab github plan --allow-destroy로 지울 항목을 확인한 뒤에만 붙입니다.",
   },
   kind: "delegate",
   delegateMode: "apply",
   args: [],
-  flags: [{ name: "allow-destroy", kind: "bool", help: "지우는 변경이 있어도 계속하기" }],
+  flags: [{ name: "allow-destroy", kind: "bool", help: "지우는 변경도 적용하기(먼저 github plan으로 확인)" }],
   async run(ctx, input) {
     const code = ctx.github!.run("apply", { allowDestroy: input.flags["allow-destroy"] === true });
     const r: Result = { command: "github apply", mode: ctx.mode, status: "done", steps: [], notes: [], next: null, exitCode: code };

@@ -232,9 +232,10 @@ export default defineCommand({
   help: {
     about:
       "새 비밀번호를 만들어 DB와 앱에 적용하고, 앱이 새 값으로 접속하고 옛 값은 거부되는지 확인합니다. 옛 값은 PASSWORD_PREVIOUS로 남겨 두고, --finish가 한 번 더 확인한 뒤 지웁니다. 적용하는 동안 수십 초는 새 접속이 실패할 수 있습니다.",
-    examples: ["homelab db rotate smoke --apply", "homelab db rotate smoke --finish --apply"],
+    examples: ["homelab db rotate smoke", "homelab db rotate smoke --finish"],
     related: ["cache rotate", "status"],
     doc: "docs/runbooks-public/rotate.md 3c절",
+    destructive: "--finish는 옛 비밀번호(PASSWORD_PREVIOUS)를 지워, 그 뒤에는 옛 값으로 되돌릴 수 없습니다.",
   },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],

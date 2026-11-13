@@ -25,7 +25,7 @@ export default defineCommand({
   summary: "시크릿 바로 반영하고 앱 재시작",
   help: {
     about:
-      "Infisical의 앱 시크릿을 지금 클러스터로 가져오고 앱을 재시작합니다. 값이 그대로면 재시작하지 않습니다. DB·Valkey 비밀번호는 순서가 있어 db rotate·cache rotate로 바꿉니다.",
+      "앱 설정(values.yaml secrets)에 선언된 앱 시크릿을 Infisical에서 지금 클러스터로 가져오고 앱을 재시작합니다. 선언되지 않은 새 키는 가져오지 않습니다(먼저 app add). 값이 그대로면 재시작하지 않습니다. DB·Valkey 비밀번호는 순서가 있어 db rotate·cache rotate로 바꿉니다.",
     examples: ["homelab secret sync smoke", "homelab secret sync smoke --apply"],
     related: ["secret set", "status"],
   },

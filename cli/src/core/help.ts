@@ -13,6 +13,8 @@ export const HELP_SCHEMA = "homelab-cli-help/v1";
 const PLAN_LINE = "바꾸는 명령은 먼저 계획(plan)만 보여 주고, --apply를 붙여야 실제로 바꿉니다.";
 const EXIT_LINE = "종료 코드: 0 끝남·계획, 1 실패, 3 PR 병합·동기화 기다림, 64 사용법 오류";
 const EXIT_GITHUB = "github 명령의 종료 코드는 그 명령의 도움말을 봅니다.";
+// 되돌릴 수 없는 명령의 예는 계획 단계만 싣는다(복사해 붙인 줄이 바로 지우지 않게). 실행은 이 글로만 알린다.
+const DESTRUCTIVE_RUN = "계획과 실행: 예는 계획(plan) 단계만 싣습니다. 계획을 확인한 뒤 --apply를 붙여 실행합니다.";
 // 열이 이보다 좁으면 설명을 이름 아래 줄로 내린다(옆에 두면 한두 글자씩 접혀 읽을 수 없다).
 const MIN_TEXT = 24;
 
@@ -108,10 +110,16 @@ export function shortUsage(c: CommandSpec): string {
 function title(name: string, summary: string, st: HelpStyle): string[] {
   const b = paint(st, "1");
   if (width(name) + 2 + width(summary) <= st.cols) return [`${b(name)}  ${summary}`];
-  return [b(name), ...para(summary, 0, st)];
+  return [...wrap(name, st.cols).map(b), ...para(summary, 0, st)];
 }
 
 const heading = (st: HelpStyle, s: string) => paint(st, "1")(s);
+
+// "사용법  homelab …" 한 줄. 폭이 모자라면 제목을 따로 두고 사용법을 들여 접는다.
+function usageBlock(usage: string, st: HelpStyle): string[] {
+  if (width("사용법") + 2 + width(usage) <= st.cols) return [`${heading(st, "사용법")}  ${usage}`];
+  return [heading(st, "사용법"), ...para(usage, 2, st)];
+}
 const NAME_CAP = 20;
 
 function commandRows(cmds: CommandSpec[]) {
@@ -121,7 +129,7 @@ function commandRows(cmds: CommandSpec[]) {
 export function renderOverview(sections: HelpSection[], st: HelpStyle): string {
   const cyan = paint(st, "36");
   const dim = paint(st, "2");
-  const lines = [...title("homelab", "홈랩 운영 도구", st), "", `${heading(st, "사용법")}  homelab <명령> [인자] [플래그]`];
+  const lines = [...title("homelab", "홈랩 운영 도구", st), "", ...usageBlock("homelab <명령> [인자] [플래그]", st)];
   // 분류마다 이름 칸을 따로 재면 묶음끼리 설명 칸이 어긋난다. 전체에서 한 번 잰다.
   const all = commandRows(sections.flatMap((s) => s.commands));
   const cap = Math.min(NAME_CAP, Math.max(...all.map((r) => width(r.left))));
@@ -139,7 +147,7 @@ export function renderGroup(prefix: string[], sections: HelpSection[], st: HelpS
   const inGroup = (c: CommandSpec) => c.path.length > prefix.length && prefix.every((w, i) => c.path[i] === w);
   const parts = sections.map((s) => ({ title: s.title, commands: s.commands.filter(inGroup) })).filter((s) => s.commands.length);
   const count = parts.reduce((n, s) => n + s.commands.length, 0);
-  const lines = [...title(name, `명령 ${count}개`, st), "", `${heading(st, "사용법")}  ${name} <명령> [인자] [플래그]`];
+  const lines = [...title(name, `명령 ${count}개`, st), "", ...usageBlock(`${name} <명령> [인자] [플래그]`, st)];
   const cap = Math.min(NAME_CAP, Math.max(...parts.flatMap((s) => commandRows(s.commands).map((r) => width(r.left)))));
   for (const s of parts) {
     lines.push("", heading(st, s.title));
@@ -173,7 +181,9 @@ export function renderCommand(c: CommandSpec, subs: CommandSpec[], st: HelpStyle
   lines.push("", heading(st, "예"));
   for (const e of c.help.examples) lines.push(...para(e, 2, st));
   const tail: string[] = [];
-  if (c.kind === "change") tail.push(...para("계획과 실행: 먼저 계획(plan)만 보여 주고, --apply를 붙여야 실제로 바꿉니다.", 0, st, dim));
+  if (c.help.destructive) tail.push(...para(`주의: ${c.help.destructive}`, 0, st, paint(st, "1;33")));
+  if (c.kind === "change" && c.help.destructive) tail.push(...para(DESTRUCTIVE_RUN, 0, st, dim));
+  else if (c.kind === "change") tail.push(...para("계획과 실행: 먼저 계획(plan)만 보여 주고, --apply를 붙여야 실제로 바꿉니다.", 0, st, dim));
   if (c.help.doc) tail.push(...para(`자세히: ${c.help.doc}`, 0, st));
   if (c.help.related?.length) tail.push(...para(`관련: ${c.help.related.map((r) => `homelab ${r}`).join(" · ")}`, 0, st));
   if (tail.length) lines.push("", ...tail);
@@ -191,6 +201,7 @@ function commandDoc(c: CommandSpec, section: string | undefined) {
     args: c.args.map((a) => ({ name: a.name, required: a.required, help: a.help })),
     flags: allFlags(c).map((f) => ({ name: f.name, kind: f.kind, ...(f.kind !== "bool" ? { value: f.valueName ?? f.values?.join("|") ?? "값" } : {}), ...(f.values ? { values: f.values } : {}), help: f.help })),
     ...(c.help.actions ? { actions: c.help.actions } : {}),
+    ...(c.help.destructive ? { destructive: c.help.destructive } : {}),
     examples: c.help.examples,
     related: (c.help.related ?? []).map((r) => `homelab ${r}`),
     ...(c.help.doc ? { doc: c.help.doc } : {}),

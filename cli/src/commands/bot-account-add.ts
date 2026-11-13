@@ -19,10 +19,11 @@ export default defineCommand({
   summary: "봇 모델 계정 등록하기",
   help: {
     about:
-      "Claude 계정의 자격을 Infisical에 두고 봇 기록에 이름·방식을 적습니다. 구독(기본)은 이 컴퓨터에서 claude setup-token 로그인을 한 번 띄우고 받은 토큰을 화면에서 가립니다. --by api는 Console API 키를 가려진 입력으로 받습니다. 파이프면 값을 stdin에서 읽습니다. 기본은 값 하나를 대화용과 작업용에 함께 씁니다.",
-    examples: ["homelab bot account add work --apply", "homelab bot account add work --by api --apply"],
+      "Claude 계정의 자격을 Infisical에 두고 봇 기록에 이름·방식을 적습니다. 구독(기본)은 이 컴퓨터에서 claude setup-token 로그인을 한 번 띄우고 받은 토큰을 화면에서 가립니다. --by api는 Console API 키를 가려진 입력으로 받습니다. 파이프면 값을 stdin에서 읽습니다. 기본은 값 하나를 대화용과 작업용에 함께 씁니다. 봇이 지금 쓰는 계정은 바꾸지 않습니다(바꾸기는 bot account use).",
+    examples: ["homelab bot account add work", "homelab bot account add work --by api"],
     related: ["bot account use", "bot account list"],
     doc: "docs/runbooks-public/rotate.md 3e절",
+    destructive: "--replace는 등록한 계정의 지금 값을 새 값으로 덮어씁니다.",
   },
   kind: "change",
   terminalSummary: true,

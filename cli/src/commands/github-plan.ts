@@ -18,7 +18,7 @@ export default defineCommand({
   kind: "delegate",
   delegateMode: "read",
   args: [],
-  flags: [{ name: "allow-destroy", kind: "bool", help: "지우는 변경이 있어도 계속하기" }],
+  flags: [{ name: "allow-destroy", kind: "bool", help: "지우는 변경이 있어도 멈추지 않고 차이 보기" }],
   async run(ctx, input) {
     const allowDestroy = input.flags["allow-destroy"] === true;
     const code = ctx.github!.run("plan", { allowDestroy });

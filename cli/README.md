@@ -28,9 +28,9 @@ homelab doctor                    # 도구·로그인·kubectl context
 
 ## 동작 규칙
 
-- 명령 목록은 `homelab -h`(= `homelab --help`, `homelab help`)다. 분류별로 이름과 한 줄 설명만 보인다. 묶음(`homelab app -h`, `homelab bot account -h`)은 그 아래 명령을, 명령(`homelab <명령> -h`, `homelab help <명령>`)은 설명·사용법·인자·플래그·예·관련 명령을 보인다. `homelab bot -h`는 동작 목록(대상 포함)과 `bot account` 하위 명령도 보인다. 도움말을 청하면 0이다. 인자 없는 `homelab`, 묶음만(`homelab app`), 필수 인자가 있는 명령의 이름만(`homelab bot`, `homelab app add`) 치면 같은 도움말을 stdout에 보이고 64(사용법 오류)로 끝난다. 명령을 빠뜨린 스크립트가 성공으로 끝나지 않게 지금 코드를 유지했다. 이때 `--json`이면 도움말 대신 지금의 사용법 결과 문서(`status: usage`)다.
-- 도움말은 결과가 터미널로 갈 때만 색·굵기를 넣고 터미널 폭(100칸까지)에 맞춰 접는다. 파이프·파일은 80칸 글자만, `NO_COLOR`(값이 있으면)·`TERM=dumb`면 색이 없다. `-h --json`은 도움말을 `schema: homelab-cli-help/v1` 문서로 낸다(분류·명령·인자·플래그·동작·예. 결과 문서 `homelab-cli/v1`과 다른 schema다).
-- 모르는 명령이면 가까운 등록 이름 하나를 `혹시: homelab …`로 권한다(친 말은 되찍지 않는다). 사람용 사용법 오류는 짧은 사용법과 `자세히: homelab <명령> -h`를 보인다. `--json` 사용법 오류 문서의 `next`는 지금처럼 전체 사용법 한 줄이다.
+- 명령 목록은 `homelab -h`(= `homelab --help`, `homelab help`)다. 분류별로 이름과 한 줄 설명만 보인다. 묶음(`homelab app -h`, `homelab bot account -h`)은 그 아래 명령을, 명령(`homelab <명령> -h`, `homelab help <명령>`)은 설명·사용법·인자·플래그·예·관련 명령을 보인다. `homelab bot -h`는 동작 목록(대상 포함)과 `bot account` 하위 명령도 보인다. 도움말을 청하면 0이다. 묶음 도움말도 명령과 같은 파서로 전역 플래그(`--json`·`--help`)만 받아, 모르는·중복 플래그나 `--` 뒤의 `-h`는 64다. 인자 없는 `homelab`, 묶음만(`homelab app`), 필수 인자가 있는 명령의 이름만(`homelab bot`, `homelab app add`) 치면 같은 도움말을 stdout에 보이고 64(사용법 오류)로 끝난다. 명령을 빠뜨린 스크립트가 성공으로 끝나지 않게 지금 코드를 유지했다. 이때 `--json`이면 도움말 대신 지금의 사용법 결과 문서(`status: usage`)다.
+- 도움말은 결과가 터미널로 갈 때만 색·굵기를 넣고 터미널 폭(100칸까지)에 맞춰 접는다. 파이프·파일은 80칸 글자만, `NO_COLOR`(값이 있으면)·`TERM=dumb`면 색이 없다(폭은 그대로 터미널 폭이다). `-h --json`은 도움말을 `schema: homelab-cli-help/v1` 문서로 낸다(분류·명령·인자·플래그·동작·예. 결과 문서 `homelab-cli/v1`과 다른 schema다).
+- 모르는 명령이면 가까운 등록 이름 하나를 `혹시: homelab …`로 권한다(친 말은 되찍지 않는다). `homelab bot`의 동작 이름을 잘못 쳐도 동작 목록에서 같은 방식으로 권한다(64 그대로). 사람용 사용법 오류는 짧은 사용법과 `자세히: homelab <명령> -h`를 보인다. `--json` 사용법 오류 문서의 `next`는 지금처럼 전체 사용법 한 줄이다.
 - 바꾸는 명령은 기본이 plan(아무것도 바꾸지 않음)이고 `--apply`로 실행한다. 읽기 명령에 `--apply`를 주면 사용법 오류다.
 - `homelab bot`(봇 관리 기능)은 봇 게시 서버 파드 안의 관리 진입점을 `kubectl exec`로 부른다. exec는 쓰기로 판정하므로 **상태 보기(`homelab bot status`)도 plan에서는 대상 파드와 argv만 보이고 `--apply`에서만 실행한다.** 읽기로 허용하는 exec 종류는 두지 않는다(설계 C.7 표). 파드는 ns `app-homelab-bot`에서 라벨로 찾고 Running·Ready인 Deployment 파드가 정확히 하나가 아니면 실행 전에 멈춘다. 결과는 봇이 낸 결과 이름과 상태 값 한 줄(notes)이다.
 - `homelab bot account add|use|list`(봇 모델 계정, 봇 C22·C23)도 같은 규칙으로 `--apply`에서만 봇 진입점을 실행한다. `add`·`use`의 `--by`는 `subscription`(기본, 구독 장기 토큰)과 `api`(API 크레딧, Claude Console API 키)다.
@@ -57,7 +57,8 @@ homelab doctor                    # 도구·로그인·kubectl context
 - `summary`: 목록에 보이는 한 줄. 명사형으로 짧게(22자 안팎, 플래그·내부 번호 없이). 예 `봇이 쓸 계정 바꾸기`.
 - `help.about`: 무엇을 하는지 한두 문장, 합니다체. `help.examples`: `homelab <명령> …` 꼴 argv 한두 개(합성 값, 셸 문법 없이). `help.related`: 함께 쓰는 명령 경로. `help.doc`: 자세한 절차 문서 경로와 절. 첫 인자가 동작인 명령은 `help.actions`.
 - 플래그·인자 설명은 `FlagSpec.help`·`ArgSpec.help` 하나뿐이다(파서와 같은 자리). 명사형 한 줄.
-- 내부 번호(설계 절, 티켓 번호)·스크립트 이름은 쓰지 않는다. 시험(`test/core/help.test.ts`)이 분류 누락, 자료 누락, 예가 실제 파서에서 64가 나는 것, 도움말 플래그와 파서의 차이, 80칸 넘는 줄, 내부 번호를 잡는다.
+- 되돌릴 수 없는 일(데이터 폐기, 복원, 앱 삭제, 회전 정리, 값 덮어쓰기, 지우는 GitHub 변경)을 하는 명령은 `help.destructive`에 무엇이 사라지는지 한 문장을 적고, `help.examples`에는 계획 단계만 싣는다(`--apply`·`--allow-destroy` 없이). 실행은 도움말이 "계획을 확인한 뒤 `--apply`를 붙여 실행합니다"로 알린다. 복사해 붙인 예가 바로 지우지 않게 하려는 것이다.
+- 내부 번호(설계 절, 티켓 번호)·스크립트 이름은 쓰지 않는다. 시험(`test/core/help.test.ts`)이 분류 누락, 자료 누락, 예가 실제 파서에서 64가 나는 것, 도움말 플래그와 파서의 차이, 30·40·80칸 넘는 줄, 내부 번호, 되돌릴 수 없는 명령 목록과 그 예의 실행 플래그를 잡는다.
 
 **구조(안전의 근거):** 명령은 외부 명령을 직접 실행할 수 없다. 받는 것은 타입 있는 어댑터뿐이고 어댑터마다 argv 모양이 고정이다.
 

@@ -32,7 +32,7 @@ export default defineCommand({
   path: ["doctor"],
   summary: "내 컴퓨터의 도구·로그인 점검",
   help: {
-    about: "kubectl·infisical·gh 같은 도구의 버전과 로그인, kubectl이 가리키는 클러스터를 확인합니다. 저장소 안에서 실행해야 mise가 맞는 도구 버전을 고릅니다.",
+    about: "kubectl·infisical·gh 같은 도구의 버전, gh·infisical 로그인, Infisical 프로젝트 환경변수, PATH의 homelab, kubectl이 가리키는 클러스터를 확인합니다. 저장소 안에서 실행해야 mise가 맞는 도구 버전을 고릅니다.",
     examples: ["homelab doctor"],
     related: ["status"],
   },

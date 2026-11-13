@@ -2,7 +2,7 @@
 // 첫 import는 intrinsics다(명령 모듈이 평가되기 전에 내장 함수를 잡는다, 정적 시험).
 import "./core/intrinsics";
 import { readSync } from "node:fs";
-import { parseInput, usageLine } from "./core/args";
+import { GLOBAL_FLAGS, parseInput, usageLine } from "./core/args";
 import type { CommandSpec } from "./core/command";
 import { allFlags, closest, commandJson, groupJson, overviewJson, renderCommand, renderGroup, renderOverview, shortUsage } from "./core/help";
 import { helpStyle, OutputBlocked, render, stdoutIsTerminal, stepLine, writeStderr, writeStdout } from "./core/output";
@@ -41,8 +41,18 @@ function quote(t: string): string {
 }
 
 // 사람용 사용법 오류. 긴 사용법 한 줄 대신 짧은 꼴과 도움말 위치를 보인다(--json 결과는 지금 꼴 그대로).
-function usageText(cmd: CommandSpec, message: string): string {
-  return `사용법 오류: ${message}\n사용법: ${shortUsage(cmd)}\n자세히: homelab ${cmd.path.join(" ")} -h\n`;
+function usageText(cmd: CommandSpec, message: string, tokens: string[]): string {
+  const hint = actionHint(cmd, tokens);
+  return `사용법 오류: ${message}\n${hint ? `혹시: homelab ${[...cmd.path, hint].join(" ")}\n` : ""}사용법: ${shortUsage(cmd)}\n자세히: homelab ${cmd.path.join(" ")} -h\n`;
+}
+
+// 첫 인자가 동작 이름인 명령(bot)에서 동작 이름을 잘못 쳤으면 가까운 동작 하나. 돌려주는 것은 동작 목록의 이름뿐이다.
+function actionHint(cmd: CommandSpec, tokens: string[]): string | null {
+  const names = (cmd.help.actions ?? []).map((a) => a.name);
+  if (!names.length) return null;
+  const dash = tokens.indexOf("--");
+  const typed = dash === -1 ? tokens.find((t) => !t.startsWith("-")) : (tokens.slice(0, dash).find((t) => !t.startsWith("-")) ?? tokens[dash + 1]);
+  return typed === undefined || names.includes(typed) ? null : closest(typed, names);
 }
 
 // 모르는 명령. 친 말은 되찍지 않고 등록 표의 이름만 권한다(값을 명령 자리에 잘못 넣은 경우 출력에 실린다).
@@ -120,6 +130,16 @@ async function main(argv: string[]): Promise<number> {
   if (!cmd) {
     if (group.length > 0 && leadingWords(argv).length === group.length) {
       if (wantsHelp) {
+        // 명령 -h와 같은 파서로 전역 플래그만 받는다: 모르는·중복 플래그는 64, -- 뒤의 -h는 플래그가 아니다.
+        try {
+          parseInput(GLOBAL_FLAGS, [], argv.slice(group.length));
+        } catch (e) {
+          if (!(e instanceof UsageError)) throw e;
+          const where = `homelab ${group.join(" ")}`;
+          if (json) emit(usageResult(group.join(" "), e.message, `${where} --help`), true);
+          else writeStderr(`사용법 오류: ${e.message}\n사용법: ${where} <명령> [인자] [플래그]\n자세히: ${where} -h\n`);
+          return EXIT.usage;
+        }
         writeStdout(json ? groupJson(SECTIONS, group, under(group)) : renderGroup(group, SECTIONS, out()));
         return 0;
       }
@@ -151,7 +171,7 @@ async function main(argv: string[]): Promise<number> {
   } catch (e) {
     if (!(e instanceof UsageError)) throw e;
     if (json) emit(usageResult(command, e.message, usage), true);
-    else writeStderr(usageText(cmd, e.message));
+    else writeStderr(usageText(cmd, e.message, argv.slice(cmd.path.length)));
     return EXIT.usage;
   }
   if (input.help) {
@@ -172,7 +192,7 @@ async function main(argv: string[]): Promise<number> {
   } catch (e) {
     if (e instanceof UsageError) {
       if (json) emit(usageResult(command, e.message, usage), true);
-      else writeStderr(usageText(cmd, e.message));
+      else writeStderr(usageText(cmd, e.message, argv.slice(cmd.path.length)));
       return EXIT.usage;
     }
     const next = e instanceof CliError ? e.next : `원인을 고친 뒤 다시: ${line}`;

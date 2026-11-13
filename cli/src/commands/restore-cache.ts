@@ -664,10 +664,11 @@ export default defineCommand({
   summary: "영속 Valkey를 백업으로 되돌리기",
   help: {
     about:
-      "영속 Valkey 하나를 R2 백업으로 복원합니다. 중간에 PR 셋을 열고 병합을 기다릴 때마다 종료 코드 3으로 멈추며, 병합 뒤 같은 명령을 다시 실행하면 이어 갑니다. 끝나도 실행 기록은 남고 --finish가 지웁니다. 복원 Job 전이면 --abort로 그만둘 수 있습니다.",
-    examples: ["homelab cache restore smoke --backup-first", "homelab cache restore smoke --finish --apply"],
+      "영속 Valkey 하나를 R2 백업으로 복원합니다. 서버를 내린 동안 앱은 Valkey 오류를 내고, 백업 시각 뒤에 쓴 키는 사라집니다. 중간에 PR 셋을 열고 병합을 기다릴 때마다 종료 코드 3으로 멈추며, 병합 뒤 같은 명령을 다시 실행하면 이어 갑니다. 끝나도 실행 기록은 남고 --finish가 지웁니다. 복원 Job 전이면 --abort로 그만둘 수 있습니다.",
+    examples: ["homelab cache restore smoke --backup-first", "homelab cache restore smoke --finish"],
     related: ["cache rotate", "status"],
     doc: "docs/runbooks-public/restore.md 1절",
+    destructive: "지금 Valkey 데이터를 백업 파일 내용으로 덮어씁니다(--backup-first면 먼저 지금 상태를 백업합니다).",
   },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],

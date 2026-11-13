@@ -717,10 +717,11 @@ export default defineCommand({
   summary: "DB를 지난 시각으로 되돌리기",
   help: {
     about:
-      "앱 하나의 PostgreSQL을 --to 시각으로 복원합니다. 그동안 앱을 멈추고, 단계마다 기록을 남겨 중간에 멈춰도 같은 명령으로 이어 갑니다. 그 시각 앞뒤에 끝난 백업이 있어야 하며, 마지막 백업 뒤의 시각이면 먼저 백업을 하나 만듭니다. 끝나면 --finish로 잠금을 지우고, DB를 지우기 전이면 --abort로 그만둘 수 있습니다.",
-    examples: ["homelab db restore smoke --to 2026-11-02T10:00:00+09:00", "homelab db restore smoke --finish --apply"],
+      "앱 하나의 PostgreSQL을 --to 시각으로 복원합니다. 앱을 멈추고 다시 켜는 PR마다 병합을 기다리며 종료 코드 3으로 멈추고, 단계마다 기록을 남겨 같은 명령으로 이어 갑니다. 그 시각 앞뒤에 끝난 백업이 있어야 합니다. 마지막 백업 뒤의 시각이면 CLI는 백업을 만들지 않고 멈춥니다. 사람이 수동 백업을 만들어 끝난(completed) 뒤 다시 실행합니다. 끝나면 --finish로 잠금을 지우고, DB를 지우기 전이면 --abort로 그만둘 수 있습니다.",
+    examples: ["homelab db restore smoke --to 2026-11-02T10:00:00+09:00", "homelab db restore smoke --finish"],
     related: ["db restore-check", "status"],
     doc: "docs/runbooks-public/restore.md 2절",
+    destructive: "지금 DB를 지우고 그 시각의 내용으로 다시 만듭니다(지우기 전 사본은 R2에 둡니다).",
   },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],
