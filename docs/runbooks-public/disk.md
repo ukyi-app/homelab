@@ -80,7 +80,7 @@ ALERTS{alertname="NodeFilesystemAlmostFull",alertstate="firing"}
 
 ### 시스템 경로: 관리자가 sudo로 한 번 나눠 재기
 
-아래 블록은 전부 **[미확인: 돌려 보지 않음]**, 읽기 전용이다. `du` 옵션은 로컬 도움말, 경로는 아래 저장소 근거와 PV 조회가 근거다.
+아래 블록은 읽기 전용이다. 이 문서를 쓴 환경에서는 돌리지 않았고, 2026-11-14에 관리자가 sudo로 돌린 결과가 위 "관리자 sudo 측정"이다. `du` 옵션은 로컬 도움말, 경로는 아래 저장소 근거와 PV 조회가 근거다.
 한 번에 큰 재귀 조회를 여러 개 겹치지 않고 순서대로 실행한다. 첫 줄에서 큰 경로를 찾은 뒤 관련 줄만 이어서 재도 된다.
 
 ```sh
@@ -99,7 +99,7 @@ sudo journalctl --disk-usage
 
 **k3s containerd 이미지·스냅샷.** [확인] k3s와 containerd의 고정 버전 짝은 [host/versions.env:11](../../host/versions.env#L11), 상태 기본 경로를 바꾸지 않는 설정은 [host/k3s-config.yaml:14](../../host/k3s-config.yaml#L14)다.
 기본 이미지 저장소는 `/var/lib/rancher/k3s/agent/containerd` 아래다([K3s 저장 배치](https://docs.k3s.io/reference/resource-profiling), [K3s agent 기본 경로](https://docs.k3s.io/cli/agent)).
-위 `du`에서 content·snapshotter 하위 경로를 구분한다. **스냅샷에는 실행 중 컨테이너의 쓰기 계층도 있으므로 디렉터리를 지우지 않는다.** 이 작성 환경에서는 agent 아래 크기를 읽지 못했다.
+위 `du`에서 content·snapshotter 하위 경로를 구분한다. **스냅샷에는 실행 중 컨테이너의 쓰기 계층도 있으므로 디렉터리를 지우지 않는다.** 이 작성 환경에서는 agent 아래 크기를 읽지 못했고, 관리자 sudo 측정에서는 160GiB였다(스냅샷 114GiB, content 46GiB, 1절).
 
 **파드 임시 저장소·로그.** [확인] kubelet 경로는 [host/lib.sh:47](../../host/lib.sh#L47), 로그는 `/var/log/pods`, Vector 체크포인트는 `/var/lib/vector`다([platform/observability/stack/vector.yaml:83](../../platform/observability/stack/vector.yaml#L83)).
 디스크 `emptyDir`는 앱 64MiB, 두 작업자 각각 256MiB이고, 작업자의 `firewall-run` 1MiB는 메모리다([platform/charts/app/templates/deployment.yaml:85](../../platform/charts/app/templates/deployment.yaml#L85), [platform/sandbox/templates/worker-deployment.yaml:135](../../platform/sandbox/templates/worker-deployment.yaml#L135), [platform/sandbox/templates/task-worker-deployment.yaml:133](../../platform/sandbox/templates/task-worker-deployment.yaml#L133)).
