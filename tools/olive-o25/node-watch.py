@@ -12,15 +12,18 @@
 시각의 뜻:
   last_alive  대상 하나라도 살아 있음을 본 검사의 시작 시각. 그때 이후에 죽었다(하한).
   gone        모든 대상이 없음을 본 첫 검사의 끝 시각. 그 전에 죽었다(상한).
-  둘 다 부팅 기준 시계(CLOCK_BOOTTIME, _b)와 실시간 시계(CLOCK_REALTIME, _r)로 따로 읽는다. 새 프로세스의 커널 시작
-  시각(/proc/<pid>/stat의 starttime)은 부팅 기준 tick이라 _b와 바로 견준다(시계 변환 없음). 제어 쪽 장부는 실시간이라 _r과 견준다.
+  둘 다 부팅 기준 시계(CLOCK_BOOTTIME, _b)로 견준다. 새 프로세스의 커널 시작 시각(/proc/<pid>/stat의 starttime)은 부팅
+  기준 tick이라 _b와 바로 견준다(시계 변환 없음). 제어 쪽 장부는 실시간이라, 관측 내내 잰 "실시간 - 부팅" 차이 구간
+  [off_lo, off_hi]를 거쳐 부팅 시계로 옮겨 견준다. 구간이 조금이라도 어긋나면(관측 중 실시간 시계가 움직임) 장부와 견주지 않는다.
   새 세대의 시작 = 첫 init(fetch-hc) 컨테이너의 커널 시작 시각. 장부의 init 시각(gen.sh가 세대를 만든 뒤)보다 앞이다.
 
-  됨          gone < 첫 init 시작, gone < 장부 init (init 줄) / gone < 자격 제공 (자격 줄)
-  안 됨       새 세대 컨테이너의 시작이 last_alive보다 앞, 또는 last_alive >= 장부 시각 (겹침의 증거)
-  판단 필요   그 사이에 낌, 첫 init을 보지 못함, 첫 init보다 앞선 정체 모를 새 컨테이너, 관측 중 실시간 시계의 불연속,
-              입력이 기록과 맞지 않음(다른 파드·세대·회차), watch가 재시작 뒤에 시작됨, 기록 없음
-제어 컨테이너만 혼자 다시 뜬 것(ctl-crash의 같은 세대 실행기, 첫 init보다 앞)은 새 세대가 아니라 따로 적고 견주지 않는다.
+  init 줄    안 됨: 옛 대상 생존 중 시작한 fetch·gen·body 컨테이너가 있다, 또는 장부 init 때 옛 대상이 살아 있었다
+             됨: 새 컨테이너가 모두 소멸 확인 뒤에 시작했고(첫 init 포함) 소멸 확인 + off_hi < 장부 init
+             판단 필요: 그 밖 모두. 생존 중 시작한 control·정체 모를(unknown·mixed) 컨테이너, 소멸 구간에 걸친 시작 포함
+  자격 줄    안 됨: 장부 자격 제공 때 옛 대상이 살아 있었다 / 됨: 소멸 확인 + off_hi < 장부 자격 제공 / 판단 필요: 그 밖
+  두 줄 공통 판단 필요: 첫 init을 보지 못함, 관측 중 실시간 시계 변화, 입력이 기록과 맞지 않음(다른 파드·세대·회차),
+             watch가 재시작 뒤에 시작됨, 기록 없음
+ctl-crash 회차의 실행기 단독 재시작(옛 본체 생존 중 control)도 새 세대 control과 노드에서 가를 독립 증거가 없어 init 줄은 판단 필요다.
 첩자가 멈춰 있거나(SIGSTOP) 기록 전에 죽는 것과 무관하다. 프로세스와 컨테이너 cgroup의 존재만 본다.
 파드 안 프로세스의 명령줄은 믿지 않는 입력이다. 출력은 부르는 쪽(node-cgroup.sh)이 sanitize.py에 통과시킨다.
 """
@@ -34,9 +37,6 @@ PROC = "/proc"
 ROLES = ("setsid", "nohup", "daemon", "stubborn", "spy")
 TICK_NS = 10**9 // os.sysconf("SC_CLK_TCK")
 POLL_S = 0.005
-# 관측 동안 실시간-부팅 시계 차이가 이만큼 넘게 움직이면 실시간 시계가 건너뛴 것(settimeofday, NTP step)으로 본다.
-# NTP의 느린 보정은 두 시계의 빠르기를 함께 바꿔 차이를 움직이지 않는다. 장부(실시간)와의 비교를 믿을 수 없게 되는 쪽이라 느슨하게 하지 않는다.
-CLOCK_TOL_NS = 2_000_000
 # 역할 → 컨테이너. 한 컨테이너 cgroup에서 본 역할이 한 컨테이너로 모이지 않으면 정체를 모르는 것으로 둔다.
 KIND = {
     "fetch": "fetch", "gen": "gen",
@@ -179,7 +179,9 @@ class Offset:
     """실시간 - 부팅 시계 차이의 구간. 앞뒤로 읽어 두 읽기 사이의 지연이 구간을 넓히기만 하게 한다.
 
     부팅 시계를 먼저 읽고 실시간을 읽으면 그 차이는 참값 이상, 실시간을 먼저 읽고 부팅 시계를 읽으면 참값 이하다.
-    시계가 고정이면 모든 구간이 겹친다. 겹치지 않으면(CLOCK_TOL_NS 넘게) 관측 중 실시간 시계가 움직였다.
+    차이가 고정이면 모든 구간이 참값을 품어 lo <= hi다. NTP의 느린 보정은 두 시계의 빠르기를 함께 바꿔 차이를 움직이지 않는다.
+    lo > hi면 크기와 상관없이 관측 중 실시간 시계가 건너뛴 것(settimeofday, NTP step)이다. 허용 폭을 두면 그 폭 안의 이동이
+    장부 비교의 오차로 들어가지 않으므로 두지 않는다.
     """
 
     def __init__(self):
@@ -390,25 +392,27 @@ def cmd_judge(path, pod, gen, init_ns, cred_ns):
     conts = containers(rec)
     fetches = [c for c in conts if c["kind"] == "fetch"]
     first = fetches[0] if fetches else None
-    # 전체 재시작에서 kubelet은 모든 컨테이너를 끝낸 뒤 첫 init부터 띄운다. 그래서 첫 init보다 먼저 뜬 새 컨테이너는 새 세대가
-    # 아니라 옛 세대 안의 단독 재시작이다(ctl-crash: 실행기만 혼자 다시 떠 쓴 허가를 보고 곧 전체 재시작을 요청한다). 짧게 끝나
-    # 역할을 못 붙였을 수 있어 종류로 가리지 않는다. 대신 첫 init이 시작한 뒤에도 살아 있으면 그 전제가 깨진 것이라 판단 필요다.
-    # 첫 init을 못 봤으면 가를 기준이 없다. 그때는 control만 단독 재시작으로 보고, 판정은 아래에서 판단 필요로 끝난다.
-    if first is not None:
-        solo = [c for c in conts if c is not first and c["start"] < first["start"]]
-    else:
-        solo = [c for c in conts if c["kind"] == "control"]
-    newgen = [c for c in conts if c not in solo]
-    solo_late = [c for c in solo if first is not None and c["last_b"] >= first["start"] * T]
-    # 겹침의 증거로는 정체를 아는 새 세대 컨테이너만 쓴다.
-    overlap = [c for c in newgen if c["kind"] in ("fetch", "gen", "control", "body")
-               and la_b is not None and (c["start"] + 1) * T <= la_b]
+
+    # 커널 시작은 tick 구간 [s*T, (s+1)*T) 어딘가다. 그 구간 전체가 마지막 생존 관측 앞이면 생존 중 시작, 소멸 확인 뒤면 소멸 뒤 시작.
+    def when(c):
+        if la_b is not None and (c["start"] + 1) * T <= la_b:
+            return "alive"
+        if gone_b is not None and gone_b < c["start"] * T:
+            return "after"
+        return "edge"
+
+    # 생존 중 시작한 init·본체는 새 세대뿐이라 겹침의 증거다. control은 ctl-crash의 실행기 단독 재시작(옛 세대)일 수 있고,
+    # 정체 모를 것은 역할을 못 붙인 첫 init 시도일 수 있다. 노드에서 둘을 가를 독립 증거가 없어 예외로 빼지 않고 판단 필요로 둔다.
+    # 나중에 뜬 fetch를 첫 init으로 삼아 그 앞의 것을 통과시키면 실패한 첫 시도의 겹침을 놓친다.
+    overlap = [c for c in conts if c["kind"] in ("fetch", "gen", "body") and when(c) == "alive"]
+    unsure = [c for c in conts if c not in overlap and when(c) != "after"]
     fact(f"watch 고정 {armed}, 마지막 살아 있음 {la_r}, 모두 없음 {gone_r}, 장부 init {init_ns}, 장부 자격 제공 {cred_ns}")
+    tags = {"alive": " (옛 대상 생존 중 시작)", "edge": " (시작이 마지막 생존 관측~소멸 확인 구간에 걸침)", "after": ""}
     for c in conts:
-        tag = " (첫 init보다 앞: 옛 세대 안의 단독 재시작, 견주지 않음)" if c in solo else (" (첫 init)" if c is first else "")
+        tag = tags[when(c)] + (" (첫 init)" if c is first else "")
         fact(f"새 컨테이너 {c['kind']}{tag}: 시작 ≥{c['start'] * T + off_lo} (부팅 tick {c['start']}), 프로세스 {c['n']}개")
-    if jump > CLOCK_TOL_NS:
-        fact(f"관측 중 실시간 시계가 {jump // 1000}us 넘게 움직였다(실시간-부팅 시계 차이 구간이 겹치지 않음)")
+    if jump > 0:
+        fact(f"관측 중 실시간 시계가 움직였다(실시간-부팅 시계 차이 구간이 {jump}ns 어긋남)")
     # 장부 시각이 이 회차의 것인가: 첫 init이 시작한 뒤, 관측이 끝나기 전.
     inconsistent = None
     if init_ns is not None and first is not None and init_ns < first["start"] * T + off_lo:
@@ -418,6 +422,7 @@ def cmd_judge(path, pod, gen, init_ns, cred_ns):
     elif init_ns is not None and cred_ns is not None and cred_ns <= init_ns:
         inconsistent = "장부 자격 제공 시각이 init 시각보다 앞이다"
     for k, t in zip(keys, (init_ns, cred_ns)):
+        # 장부 시각 t의 부팅 시각은 [t - off_hi, t - off_lo] 안이다(차이가 고정일 때). 됨은 그 앞끝, 안 됨은 그 뒤끝과 견준다.
         if t is None:
             verdict(k, "판단 필요", "견줄 새 시각이 없다(제어 쪽 장부에 기록이 없다)")
         elif t <= armed:
@@ -426,21 +431,22 @@ def cmd_judge(path, pod, gen, init_ns, cred_ns):
             c = overlap[0]
             verdict(k, "안 됨", f"새 {c['kind']} 컨테이너의 커널 시작이 옛 대상의 마지막 생존 관측보다 "
                     f"{(la_b - (c['start'] + 1) * T) // 1000000}ms 이상 앞이다(부팅 기준 시계)")
-        elif jump > CLOCK_TOL_NS:
+        elif jump > 0:
             verdict(k, "판단 필요", "관측 중 실시간 시계가 움직여 장부(실시간)와 견줄 수 없다")
-        elif la_r is not None and la_r >= t:
-            verdict(k, "안 됨", f"옛 대상이 장부 시각보다 {(la_r - t) // 1000000}ms 뒤에도 살아 있었다")
+        elif la_b is not None and la_b + off_lo >= t:
+            verdict(k, "안 됨", f"옛 대상이 장부 시각보다 {(la_b + off_lo - t) // 1000000}ms 이상 뒤에도 살아 있었다")
         elif first is None:
             verdict(k, "판단 필요", "노드가 첫 init(fetch-hc)의 시작을 보지 못했다(새 세대의 시작을 확인하지 못함)")
-        elif solo_late:
-            verdict(k, "판단 필요", f"첫 init보다 먼저 뜬 새 컨테이너({' '.join(c['kind'] for c in solo_late)})가 첫 init 시작 뒤에도 살아 있었다")
+        elif k == keys[0] and unsure:
+            verdict(k, "판단 필요", "소멸 확인 뒤에 시작했다고 증명하지 못한 새 컨테이너가 있다: "
+                    + " ".join(f"{c['kind']}({'생존 중 시작' if when(c) == 'alive' else '소멸 구간에 걸침'})" for c in unsure))
         elif inconsistent:
             verdict(k, "판단 필요", inconsistent)
-        elif k == keys[0] and gone_b is not None and gone_b < first["start"] * T and gone_r < t:
+        elif k == keys[0] and gone_b is not None and gone_b < first["start"] * T and gone_b + off_hi < t:
             lead = (first["start"] * T - gone_b) // 1000000
-            verdict(k, "됨", f"옛 본체 소멸 확인이 첫 init 시작보다 {lead}ms 이상, 장부 init보다 {(t - gone_r) // 1000000}ms 앞이다")
-        elif k == keys[1] and gone_r is not None and gone_r < t:
-            verdict(k, "됨", f"옛 본체 소멸 확인이 장부 자격 제공보다 {(t - gone_r) // 1000000}ms 앞이다")
+            verdict(k, "됨", f"옛 본체 소멸 확인이 첫 init 시작보다 {lead}ms 이상, 장부 init보다 {(t - gone_b - off_hi) // 1000000}ms 이상 앞이다")
+        elif k == keys[1] and gone_b is not None and gone_b + off_hi < t:
+            verdict(k, "됨", f"옛 본체 소멸 확인이 장부 자격 제공보다 {(t - gone_b - off_hi) // 1000000}ms 이상 앞이다")
         else:
             verdict(k, "판단 필요", "옛 본체가 사라진 구간(살아 있음과 소멸 확인 사이)에 첫 init 시작이나 장부 시각이 낀다")
     return 0
