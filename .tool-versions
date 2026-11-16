@@ -20,7 +20,7 @@ kubeconform 0.8.0
 shellcheck 0.11.0
 # uv: 로그인 비밀번호의 bcrypt 해시(docs/runbooks-public/rotate.md 2절, bcrypt는 실행 때 정확한 버전으로 받는다).
 # CI는 받지 않으므로 ci.yaml에 sha256이 없다.
-uv 0.13.3
+uv 0.13.8
 # vmutils의 vmalert-tool-prod: 경보 룰 단위 시험(U11, tools/ci/alerting.ts). 배포 vmalert와 같은 버전으로 올린다.
 # 자산 이름에 버전을 직접 적는다. v*.tar.gz로 두면 enterprise 자산이 먼저 잡힌다(실측). 버전을 바꾸면 두 곳을 함께 바꾼다.
 github:VictoriaMetrics/VictoriaMetrics[asset_pattern=vmutils-linux-amd64-v1.154.1.tar.gz,bin=vmalert-tool-prod] 1.154.1
