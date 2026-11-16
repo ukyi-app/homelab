@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["hc", "session"],
+  "properties": {
+    "hc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "url", "sha256"],
+      "properties": {
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "url": {
+          "type": "string",
+          "pattern": "^https://releases\\.herdr\\.dev/core/[0-9]+\\.[0-9]+\\.[0-9]+/herdr-core-linux-x86_64\\.tar\\.gz$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpuLimit", "memoryLimit"],
+      "properties": {
+        "cpuLimit": { "type": "string", "pattern": "^[0-9]+m$" },
+        "memoryLimit": { "type": "string", "pattern": "^[0-9]+Mi$" }
+      }
+    }
+  }
+}

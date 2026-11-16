@@ -1,0 +1,43 @@
+{{- /*
+olive-o02: 올리브 계획 O02의 임시 시험 파드(세션 파드 안 hc와 실행기 경계). 원본 platform/olive-o02, ns olive-o02-test.
+켜기: values.yaml의 components.oliveO02.enabled(기본 false). 꺼져 있으면 아무것도 렌더하지 않는다. 클러스터 값은 받지 않는다.
+모델 자격·시크릿·SA 토큰이 없다. ExternalSecret이 없어 복구 스위치도 받지 않는다.
+
+wave 1: 맨 뒤 wave(봇 자리·go와 같다). root sync는 마지막 wave의 health를 기다리지 않으므로 시험 파드가 뜨지 못해도
+(hc 내려받기 실패 등) 다른 구성 요소를 막지 않는다(설계 C.3.1). 봇 자리보다 뒤 wave에 두면 ci가 막는다(checkBotSlotLastWave).
+
+다른 자식 Application과 달리 resources-finalizer를 붙인다(_helpers.tpl의 기본은 붙이지 않음).
+이유: 임시 시험이라 끌 때 리소스가 남으면 안 된다. finalizer가 없으면 enabled를 false로 되돌려도 Application만 지워지고
+시험 ns와 파드가 클러스터에 남는다(values.yaml components 머리 주석). 붙이면 Application 삭제가 그 Application이 만든 것
+(ns olive-o02-test와 안의 것)의 삭제로 번진다. 이 Application이 만든 것은 그 ns와 안의 리소스뿐이다.
+함정: ns 삭제가 끝나지 않으면 Application이 Terminating으로 남고 root의 prune이 기다린다. 그때는 ns에 무엇이 남았는지
+본다(kubectl get all -n olive-o02-test). 끈 뒤에도 ns가 남으면 사람이 kubectl delete namespace olive-o02-test로 지운다.
+이 클러스터에서 cascade 삭제를 돌려 본 적은 없다(시험 절차의 끄는 단계에서 처음 확인한다).
+
+VM: components는 운영과 VM이 함께 쓴다. VM 클러스터가 떠 있을 때 켜면 VM에도 같은 파드가 뜬다.
+*/}}
+{{- if .Values.components.oliveO02.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: olive-o02
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/olive-o02
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}

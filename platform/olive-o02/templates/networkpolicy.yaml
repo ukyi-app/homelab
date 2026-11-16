@@ -1,0 +1,62 @@
+{{- /*
+시험 ns 기본 거부와, 세션 파드가 hc 릴리스 파일을 받는 길 하나.
+
+NetworkPolicy는 파드 단위라 init 컨테이너만 따로 열 수 없다. 그래서 세션 파드는 떠 있는 동안 DNS와 인터넷 443이 열려 있다.
+공유 앱 차트가 모든 앱에 여는 것과 같은 범위다(platform/charts/app/templates/networkpolicy.yaml). 사설 대역·tailnet·link-local·
+loopback은 뺀다(platform/sandbox/templates/proxy-networkpolicy.yaml과 같은 목록). IPv6 허용 줄은 두지 않는다.
+이 파드에는 모델 자격도 SA 토큰도 없고 표식은 가짜다. 실제 세션 파드는 hc를 이미지에 넣고 역할별 프록시로만 나간다(O10이 정한다).
+이 시험은 egress 경계를 재지 않는다.
+대조 파드(o02-peer)는 어디로도 나가지 못하고 아무것도 받지 않는다.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: {{ include "o02.namespace" . }}
+  labels:
+    {{- include "o02.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: session-fetch-hc
+  namespace: {{ include "o02.namespace" . }}
+  labels:
+    {{- include "o02.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: o02-session
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
