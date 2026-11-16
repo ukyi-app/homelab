@@ -8,7 +8,7 @@ import { Secret } from "../../src/core/secret";
 import { FAKE_PROJECT, FAKE_SECRETS, applyWith, expectNoSecrets, infisicalList, infisicalSet, kubectlRule, rule, runCli, testCtx, type Resp } from "../harness";
 import { folders, homelab } from "../fixtures/app-add-world/world";
 
-// 0.44.2 바이너리의 문구(infisical.ts 주석). 원문이 새면 잡히도록 가짜 시크릿을 함께 싣는다.
+// 0.45.8 바이너리의 문구(infisical.ts 주석). 원문이 새면 잡히도록 가짜 시크릿을 함께 싣는다.
 const PHRASES = [
   "Your login session has expired. Please run [infisical login]",
   "You must be logged in to run this command. To login, run [infisical login]",

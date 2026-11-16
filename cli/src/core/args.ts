@@ -27,10 +27,10 @@ export type Input = {
 };
 
 export const GLOBAL_FLAGS: FlagSpec[] = [
-  { name: "json", kind: "bool", help: "결과를 JSON(schema homelab-cli/v1)으로" },
-  { name: "help", kind: "bool", help: "사용법" },
+  { name: "json", kind: "bool", help: "결과를 JSON으로 내기(도움말이면 도움말 JSON)" },
+  { name: "help", kind: "bool", help: "이 도움말 보기" },
 ];
-export const APPLY_FLAG: FlagSpec = { name: "apply", kind: "bool", help: "계획대로 실행(없으면 plan만)" };
+export const APPLY_FLAG: FlagSpec = { name: "apply", kind: "bool", help: "실제로 바꾸기(없으면 계획만 보여 줌)" };
 
 function checkValue(what: string, value: string, spec: { values?: string[]; pattern?: RegExp }): void {
   if (value === "") throw new UsageError(`${what}: 값이 비었다`);

@@ -85,12 +85,19 @@ function releaseHints(ctx: ReadCtx, app: string, path: string, current: Image): 
 
 export default defineCommand({
   path: ["rollback"],
-  summary: "이미지 롤백·해제 PR",
+  summary: "이미지 되돌리기·고정 풀기 (PR)",
+  help: {
+    about:
+      "앱 이미지를 예전 커밋이나 digest로 되돌리고 그 이미지에 고정하는 PR을 엽니다. --to와 --release 중 하나만 줍니다. --release는 고정만 풀고 이미지는 그대로 두어, 다음 빌드의 배포 PR이 이미지를 바꿉니다. 기다리지 않고 최신으로 돌아가려면 --to <최신 커밋> 뒤 --release입니다.",
+    examples: ["homelab rollback smoke --to 1a2b3c4", "homelab rollback smoke --release --apply"],
+    related: ["status", "logs"],
+    doc: "docs/runbooks-public/apps.md",
+  },
   kind: "change",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],
   flags: [
-    { name: "to", kind: "value", valueName: "rev|digest", pattern: /[0-9a-f]{7,40}|sha256:[0-9a-f]{64}/, help: "되돌릴 revision(7자 이상) 또는 digest" },
-    { name: "release", kind: "bool", help: "롤백 고정을 푼다" },
+    { name: "to", kind: "value", valueName: "rev|digest", pattern: /[0-9a-f]{7,40}|sha256:[0-9a-f]{64}/, help: "되돌릴 커밋(7자 이상) 또는 이미지 digest" },
+    { name: "release", kind: "bool", help: "이미지 고정 풀기" },
   ],
   async run(ctx, input) {
     const app = input.args.app as string;

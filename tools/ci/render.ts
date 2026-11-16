@@ -630,11 +630,13 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
 
 // 렌더 결과를 파일로 써서 kubeconform에 넘긴다. 스키마는 커밋 SHA로 고정한 주소에서 받는다(태그·브랜치는 움직인다).
 // CRD 스키마가 없는 kind는 실패로 둔다. 빠뜨리면 CRD 오타가 초록으로 지나간다. 건너뛰는 kind는 없다.
+// 이 커밋에 .tool-versions kubectl 판의 디렉터리(v<판>-standalone-strict)가 있어야 한다. 없으면 모든 리소스가
+// 스키마를 못 찾아 실패한다. kubectl을 올릴 때 이 저장소에 그 판이 생긴 뒤의 커밋으로 함께 옮긴다.
 const K8S_SCHEMAS =
-  "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/93153a1458e24e93f386c50f9980d584fcba574b/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json";
+  "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json";
 // standalone 묶음에 없는 kind(CustomResourceDefinition)만 $ref를 쓰는 묶음에서 찾는다. 같은 커밋이다.
 const K8S_SCHEMAS_REFS =
-  "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/93153a1458e24e93f386c50f9980d584fcba574b/{{.NormalizedKubernetesVersion}}/{{.ResourceKind}}{{.KindSuffix}}.json";
+  "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/{{.NormalizedKubernetesVersion}}/{{.ResourceKind}}{{.KindSuffix}}.json";
 const CRD_SCHEMAS =
   "https://raw.githubusercontent.com/datreeio/CRDs-catalog/501527ab9c40c827144c8f45945b25a023e344ce/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json";
 

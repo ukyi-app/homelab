@@ -8,13 +8,16 @@
 // 3. 끈 경우가 apps·data 모두 있고, 복구 멈춤과 함께 쓰는 경우(suspendedApps, valkey stopped·restoreMode)도 있다.
 //    ApplicationSet 차트 시험 values(platform/appsets/*/ci)가 빠지면 조용히 덜 보지 않게 실패로 둔다.
 //
-// 실행기는 Helm tpl(임시 차트)이다. Argo CD v3.5.5는 templatePatch를 text/template + sprig v3.3.0으로 실행해 그 YAML을
+// 실행기는 Helm tpl(임시 차트)이다. Argo CD v3.6.1은 templatePatch를 text/template + sprig v3.3.0으로 실행해 그 YAML을
 // Application에 strategic merge patch한다(applicationset/controllers/template/template.go renderTemplatePatch,
-// patch.go applyTemplatePatch). Helm 4.2.1도 sprig v3.3.0이다. 차이와 대응:
+// patch.go applyTemplatePatch). Helm 4.3.1도 sprig v3.3.0이다. 차이와 대응:
 // - 함수: Argo CD는 sprig GenericFuncMap에서 env·expandenv·getHostByName을 빼고 normalize·slugify·toYaml·fromYaml·
-//   fromYamlArray를 더한다(applicationset/utils/utils.go init). Helm은 env·expandenv만 빼고 include·tpl·required·lookup·
-//   toToml 등을 더한다(pkg/engine/funcs.go, engine.go). Helm에만 있는 함수는 여기서 돌고 Argo CD에서는 생성 오류로 모든 앱
-//   갱신을 멈추므로 HELM_ONLY로 막는다. Argo CD에만 있는 normalize·slugify는 여기서 실패한다(CI가 빨개지는 안전한 쪽).
+//   fromYamlArray·tpl을 더한다(applicationset/utils/utils.go init·Replace, template_functions.go). Helm은 env·expandenv만
+//   빼고 include·tpl·required·lookup·toToml·duration* 등을 더한다(pkg/engine/funcs.go, engine.go). Helm에만 있는 함수는
+//   여기서 돌고 Argo CD에서는 생성 오류로 모든 앱 갱신을 멈추므로 HELM_ONLY로 막는다. Argo CD에만 있는 normalize·slugify는
+//   여기서 실패한다(CI가 빨개지는 안전한 쪽).
+// - tpl: 양쪽에 있지만 막는다. 아래 검사는 문자열 안을 보지 않아 tpl에 넘긴 문자열 속 include 같은 Helm 전용 함수를 못 잡고,
+//   그 문자열은 Helm tpl에서는 돌고 Argo CD tpl에서는 실패한다. 결과의 "<no value>" 처리도 다르다(Argo CD tpl은 지운다).
 // - toYaml: 둘 다 sigs.k8s.io/yaml Marshal 뒤 끝 줄바꿈을 뗀다. 직렬화 오류 때 Argo CD는 실패, Helm은 빈 문자열이다.
 // - 없는 키: Argo CD는 goTemplateOptions가 없으면 "<no value>"를 그대로 내고, Helm tpl은 missingkey=zero에 빈 문자열이다.
 //   견본 입력은 patch가 읽는 키(.values.app)를 갖는다. 새 patch가 다른 키를 읽으면 견본에도 넣는다.
@@ -34,8 +37,12 @@ const SAMPLE: Record<Kind, { chart: string; values: string; dir: string }> = {
 };
 // 복구 목록에 없는 앱 이름. 복구 스위치는 목록과 상관없이 모든 앱에 들어가야 한다.
 const OTHER = "patch-probe";
-// Helm 4.2.1 tpl에는 있고 Argo CD v3.5.5 ApplicationSet에는 없는 함수(위 머리 주석).
-const HELM_ONLY = new Set(["include", "tpl", "required", "lookup", "toToml", "mustToToml", "fromToml", "mustToYaml", "toYamlPretty", "fromJsonArray", "getHostByName"]);
+// Helm 4.3.1 tpl에는 있고 Argo CD v3.6.1 ApplicationSet에는 없는 함수, 그리고 tpl(위 머리 주석).
+const HELM_ONLY = new Set([
+  ...["include", "tpl", "required", "lookup", "toToml", "mustToToml", "fromToml", "mustToYaml", "toYamlPretty", "fromJsonArray", "getHostByName"],
+  ...["mustToDuration", "durationSeconds", "durationMilliseconds", "durationMicroseconds", "durationNanoseconds", "durationMinutes"],
+  ...["durationHours", "durationDays", "durationWeeks", "durationRoundTo", "durationTruncateTo"],
+]);
 
 // 렌더 한 벌과 그 렌더에 얹은 값(tools/ci/switch.ts의 기본·켬·끔).
 export type PatchRender = { label: string; docs: Doc[]; rootOverlay?: RootOverlay; chartOverlay?: Record<string, unknown> };

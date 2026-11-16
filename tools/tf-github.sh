@@ -151,7 +151,7 @@ EOF
 #    infisical run은 그 경로의 모든 키를 환경으로 넣어, 거기에 LD_PRELOAD·BASH_ENV·PATH 같은 이름이 실수나 변조로
 #    들어가면 자식 프로세스가 뜨는 순간(동적 링커, 셸 시작) GITHUB_TOKEN을 읽을 수 있다. 이름 조회는 그 길이 없다.
 #    값은 파일·argv·로그에 남기지 않는다(명령 치환으로 받고, terraform에는 export 뒤 exec로 넘긴다).
-#    로그인 사용자의 CLI 0.44.2 조회는 값을 ~/.infisical/secrets-backup/에 남길 수 있다(infra/README.md 2절).
+#    로그인 사용자의 CLI 0.45.8 조회는 값을 ~/.infisical/secrets-backup/에 남길 수 있다(infra/README.md 2절).
 #    폴더를 쓰기 불가로 두고, 조회마다 백업 파일이 0개인지 본다.
 mkdir -p ~/.infisical
 if [[ -d ~/.infisical/secrets-backup ]]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi

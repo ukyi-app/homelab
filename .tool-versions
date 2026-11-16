@@ -5,16 +5,16 @@
 # 안 바꾸면 ci의 설치 단계가 sha256 불일치로 실패한다.
 actionlint 1.7.12
 # amtool: Alertmanager 설정 검사(tools/ci/alerting.ts). 배포 이미지(platform/observability/stack/alertmanager.yaml)와 같은 버전.
-aqua:prometheus/alertmanager 0.34.1
+aqua:prometheus/alertmanager 0.35.0
 # bun: ci 검사 실행기(bun run ci, tools/ci/). 외부 패키지 없이 내장 YAML 파서만 쓴다. homelab CLI도 같은 bun을 쓴다.
 bun 1.4.4
 gitleaks 8.30.1
-# helm·kustomize는 Argo CD v3.5.5에 들어 있는 버전과 맞춘다(argo-cd hack/tool-versions.sh).
+# helm·kustomize는 Argo CD v3.6.1에 들어 있는 버전과 맞춘다(argo-cd hack/tool-versions.sh).
 # 로컬·CI 렌더가 Argo CD 렌더와 같아야 하므로 Argo CD를 올릴 때 함께 옮긴다.
-helm 4.2.1
-kustomize 5.8.1
+helm 4.3.1
+kustomize 5.8.3
 # k3s(host/versions.env)와 같은 minor. kubectl은 서버와 한 minor 차이까지만 지원한다.
-kubectl 1.36.5
+kubectl 1.36.6
 # kubeconform: 렌더 결과 스키마 검사. 대상 Kubernetes 버전은 위 kubectl 값을 쓴다(tools/ci/render.ts).
 kubeconform 0.8.0
 shellcheck 0.11.0
@@ -23,13 +23,14 @@ shellcheck 0.11.0
 uv 0.13.8
 # vmutils의 vmalert-tool-prod: 경보 룰 단위 시험(U11, tools/ci/alerting.ts). 배포 vmalert와 같은 버전으로 올린다.
 # 자산 이름에 버전을 직접 적는다. v*.tar.gz로 두면 enterprise 자산이 먼저 잡힌다(실측). 버전을 바꾸면 두 곳을 함께 바꾼다.
-github:VictoriaMetrics/VictoriaMetrics[asset_pattern=vmutils-linux-amd64-v1.154.1.tar.gz,bin=vmalert-tool-prod] 1.154.1
+github:VictoriaMetrics/VictoriaMetrics[asset_pattern=vmutils-linux-amd64-v1.156.0.tar.gz,bin=vmalert-tool-prod] 1.156.0
 # Terraform: apply·plan은 owner 로컬에서만. CI는 자격 없이 fmt·validate·test만 한다(설계 C.3.9).
-terraform 1.16.6
+terraform 1.17.2
 # age: Infisical 암호화 내보내기의 암호화·복호화(age 암호문구, docs/runbooks-public/restore.md 3.1, recovery-assets.md).
 # U40에서 실측한 버전이다. CI는 받지 않아 ci.yaml sha256 대상이 아니다.
 age 1.3.2
-# Infisical CLI: Terraform 자격을 infisical run으로 환경변수에만 넣는다(infra/README.md). mise minimum_release_age가
-# 갓 나온 릴리스(0.44.3)를 숨겨 이 버전에 둔다. CI는 받지 않아 ci.yaml sha256 대상이 아니다.
-infisical 0.44.2
+# Infisical CLI: Terraform 자격을 infisical run으로 환경변수에만 넣는다(infra/README.md). CI는 받지 않아 ci.yaml sha256 대상이 아니다.
+# homelab CLI(cli/src/core/infisical.ts·infisical-backup.ts)와 래퍼·런북은 이 버전의 출력 모양·오류 문구·secrets-backup 동작에
+# 맞춰져 있다. 올릴 때는 그 주석의 실측 항목을 새 버전으로 다시 잰다.
+infisical 0.45.8
 yq 4.54.3

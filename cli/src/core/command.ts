@@ -410,9 +410,29 @@ export type PlanSummary = {
 // change: 기본 plan, --apply로 실행. read: 상태를 안 바꾼다(--apply는 64). delegate: github 래퍼, 종료 코드 위임.
 export type Kind = "change" | "read" | "delegate";
 
+// 명령별 도움말(homelab <명령> -h) 자료. 플래그·인자 설명은 여기 두지 않고 FlagSpec·ArgSpec의 help를 쓴다(파서와 한 곳).
+// 글 규칙(cli/README.md "명령 더하기"): 설명 문장은 합니다체, 목록 한 줄(summary·플래그·인자·동작)은 명사형.
+// 내부 번호(C.x, Tnn)·스크립트 이름은 쓰지 않고 자세한 절차는 doc의 문서 경로로 돌린다.
+export type CommandHelp = {
+  // 무엇을 하는지 한두 문장.
+  about: string;
+  // 한두 개. "homelab <명령> …" 꼴의 argv만(셸 문법 없이, 합성 값). 시험이 실제 파서로 돌려 본다.
+  examples: string[];
+  // 함께 쓰는 명령 경로("app remove").
+  related?: string[];
+  // 자세한 절차가 있는 문서(저장소 안 경로와 절).
+  doc?: string;
+  // 첫 인자가 동작 이름인 명령(bot)의 동작 목록. target은 둘째 인자 자리 표시.
+  actions?: { name: string; target?: string; about: string }[];
+  // 되돌릴 수 없는 일을 하면 무엇이 사라지는지 한 문장. 있으면 examples에 --apply·--allow-destroy를 싣지 않는다(시험이 잡는다).
+  destructive?: string;
+};
+
 export type CommandSpec = {
   path: string[];
+  // 목록(homelab -h, 묶음 도움말)에 보이는 한 줄. 플래그는 싣지 않는다.
   summary: string;
+  help: CommandHelp;
   kind: Kind;
   // delegate만: 래퍼가 상태를 바꾸는지(github apply).
   delegateMode?: "read" | "apply";

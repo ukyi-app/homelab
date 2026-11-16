@@ -6,11 +6,19 @@ import type { Result } from "../core/result";
 
 export default defineCommand({
   path: ["github", "apply"],
-  summary: "GitHub 보호 설정 apply(tools/tf-github.sh apply)",
+  summary: "GitHub 보호 설정 적용하기",
+  help: {
+    about:
+      "github plan이 보인 차이를 실제 GitHub에 적용합니다. 이 명령은 --apply 없이 바로 실행하고, 필요한 값과 마지막 확인(yes)은 화면에서 직접 답합니다. 적용 전에 상태를 백업하고, 적용 뒤 다시 확인합니다. 종료 코드: 0 적용 뒤 같음, 2 차이가 남음, 1 실패.",
+    examples: ["homelab github apply"],
+    related: ["github plan", "github verify"],
+    doc: "docs/runbooks-public/github.md",
+    destructive: "지우는 변경은 --allow-destroy가 있어야 적용합니다. 먼저 homelab github plan --allow-destroy로 지울 항목을 확인한 뒤에만 붙입니다.",
+  },
   kind: "delegate",
   delegateMode: "apply",
   args: [],
-  flags: [{ name: "allow-destroy", kind: "bool", help: "delete가 있어도 진행" }],
+  flags: [{ name: "allow-destroy", kind: "bool", help: "지우는 변경도 적용하기(먼저 github plan으로 확인)" }],
   async run(ctx, input) {
     const code = ctx.github!.run("apply", { allowDestroy: input.flags["allow-destroy"] === true });
     const r: Result = { command: "github apply", mode: ctx.mode, status: "done", steps: [], notes: [], next: null, exitCode: code };

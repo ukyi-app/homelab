@@ -188,6 +188,14 @@ export function stdoutIsTerminal(): boolean {
   return Boolean(process.stdout.isTTY);
 }
 
+// 도움말 화면의 색·폭. 그 글이 가는 곳(stdout·stderr)이 사람 터미널일 때만 색을 넣고 그 폭에 맞춘다(100칸에서 멈춘다:
+// 넓은 창에서 한 줄이 너무 길면 읽기 어렵다). 파이프·파일은 80칸 글자만. NO_COLOR(값이 있으면)·TERM=dumb면 색을 뺀다.
+export function helpStyle(env: Record<string, string | undefined>, to: "stdout" | "stderr"): { color: boolean; cols: number } {
+  const s = to === "stdout" ? process.stdout : process.stderr;
+  const tty = Boolean(s.isTTY);
+  return { color: tty && !env.NO_COLOR && env.TERM !== "dumb", cols: tty && s.columns ? Math.min(s.columns, 100) : 80 };
+}
+
 // 사람 터미널(stderr) 크기. 가짜 터미널 로그인이 자식 화면 크기를 정할 때 쓴다.
 export function screenSize(): { cols: number; rows: number } {
   return { cols: process.stderr.columns ?? 80, rows: process.stderr.rows ?? 24 };

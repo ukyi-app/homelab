@@ -7,7 +7,14 @@ const GUARD_NEXT = "메시지의 guard 번호를 설계 C.3.9에서 찾아 고�
 
 export default defineCommand({
   path: ["github", "verify"],
-  summary: "GitHub 보호 설정 대조(tools/tf-github.sh verify)",
+  summary: "GitHub 보호 설정이 선언과 같은지 확인",
+  help: {
+    about:
+      "실제 GitHub 설정(ruleset, environment, Actions 권한)이 infra/github의 선언과 같고 보호 검사가 모두 통과하는지 봅니다. 아무것도 바꾸지 않습니다. 종료 코드: 0 같음, 2 차이 있음, 1 검사 실패.",
+    examples: ["homelab github verify"],
+    related: ["github plan", "github apply"],
+    doc: "docs/runbooks-public/github.md",
+  },
   kind: "delegate",
   delegateMode: "read",
   args: [],
