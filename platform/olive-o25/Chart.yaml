@@ -1,0 +1,9 @@
+# 올리브 계획 O25의 시험 구성 요소: 본체를 같은 세션 파드의 다른 uid·다른 컨테이너로 떼는 구조(D-47)를 k3s에서 재는 임시 파드다.
+# 모델 자격도 실제 비밀도 없다. 가짜 표식과 고정 프로그램만 돈다. 검증이 끝나면 이 디렉터리째 지운다(values.yaml 머리 주석).
+# 차트인 이유: files/의 스크립트를 ConfigMap에 싣고, 고정한 hc 버전·주소·sha256과 재시작 규칙의 종료 코드를 schema로 묶는다.
+apiVersion: v2
+name: olive-o25
+description: Temporary test pod for olive ticket O25 (body in a separate uid container)
+type: application
+version: 0.1.0
+appVersion: "0.1.21"

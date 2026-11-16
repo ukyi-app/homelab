@@ -1,0 +1,58 @@
+{{- /*
+시험 ns 기본 거부와, 세션 파드의 init이 hc 릴리스 파일을 받는 길 하나. O02와 같은 범위다(platform/olive-o02/templates/networkpolicy.yaml
+머리 주석: 파드 단위라 init만 따로 열 수 없다, 사설 대역·tailnet·link-local·loopback 제외, 노드 IP의 6443·10250은 닫히지 않는다).
+NetworkPolicy는 파드 단위라 제어 컨테이너와 본체 컨테이너의 출구를 나누지 못한다. 이 시험은 egress 경계를 재지 않는다.
+hc 파일은 처음 한 번만 받고, 전체 재시작 뒤에는 남은 파일의 sha256만 다시 대조한다(templates/session.yaml fetch-hc).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: {{ include "o25.namespace" . }}
+  labels:
+    {{- include "o25.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: session-fetch-hc
+  namespace: {{ include "o25.namespace" . }}
+  labels:
+    {{- include "o25.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: o25-session
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443

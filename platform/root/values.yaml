@@ -68,3 +68,10 @@ components:
   # 켜기 전에 Infisical /platform/go/TAILNET_DOMAIN이 있어야 한다. 없으면 go만 Degraded다(맨 뒤 wave라 다른 구성 요소는 막지 않는다).
   go:
     enabled: true
+
+  # olive-o25(올리브 계획 O25의 임시 시험 파드: 본체를 다른 uid 컨테이너로 떼는 구조, D-47), wave 1
+  # 평소 false다. 켜는 것은 관리자 승인 뒤 이 한 줄만 바꾸는 PR로 한다. 시험이 끝나면 false로 되돌린다.
+  # 끄면 시험 ns와 안의 것이 함께 지워진다(templates/olive-o25.yaml의 resources-finalizer).
+  # 켜고 끄는 순서와 치우는 PR은 platform/olive-o25/values.yaml 머리 주석.
+  oliveO25:
+    enabled: false

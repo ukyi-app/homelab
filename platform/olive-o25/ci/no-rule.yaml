@@ -1,0 +1,16 @@
+# 규칙 누락 변형(restartRule.enabled: false)도 정책·kubeconform 검사를 받게 한다. 시험 절차의 "규칙 누락" 단계에서 켜는 값이다.
+hc:
+  version: "0.1.21"
+  url: https://releases.herdr.dev/core/0.1.21/herdr-core-linux-x86_64.tar.gz
+  sha256: 78424755c10a40dde38a0bdb55c20ac19706e9ae05ed68fc2acf1fcff0d941c1
+restartRule:
+  enabled: false
+  exitCode: 86
+body:
+  command: ["/bin/bash", "-i"]
+control:
+  cpuLimit: 500m
+  memoryLimit: 256Mi
+bodyLimits:
+  cpuLimit: 500m
+  memoryLimit: 256Mi
