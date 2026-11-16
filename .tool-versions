@@ -14,7 +14,7 @@ gitleaks 8.30.1
 helm 4.2.1
 kustomize 5.8.1
 # k3s(host/versions.env)와 같은 minor. kubectl은 서버와 한 minor 차이까지만 지원한다.
-kubectl 1.36.5
+kubectl 1.36.6
 # kubeconform: 렌더 결과 스키마 검사. 대상 Kubernetes 버전은 위 kubectl 값을 쓴다(tools/ci/render.ts).
 kubeconform 0.8.0
 shellcheck 0.11.0
