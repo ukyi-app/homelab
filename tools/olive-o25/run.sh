@@ -11,6 +11,8 @@
 #   run.sh result <요청 ID> [초]    읽기(kubectl logs): 그 파드·컨테이너 로그에서 요청 결과 묶음을 회수한다(exec 없음)
 #   run.sh show-req <요청 ID>       쓰기(kubectl exec -c control): 제어 쪽 요청의 근거 글 전체(검사가 끝난 뒤에만)
 #   run.sh body-only-check         읽기(kubectl get): step body-term 전에 남긴 상태와 지금을 견줘 본체만 다시 떴는지 본다
+#   run.sh claude-judge            쓰기(kubectl exec -c control ctl.sh show claude-ui)+읽기(logs -c body): claude 변형 (4) 판정
+#   (step은 배포된 본체 변형을 먼저 읽는다. claude 변형에 셸 단계(relay·false-exit·plant·body-term)를, 셸 변형에 claude-ui를 넘기지 않는다)
 #
 # kubectl exec는 클러스터 쓰기다. 관리자 승인 범위 안에서만 돌린다. 한 번에 하나만 돌린다. 검사 요청을 낸 뒤 결과를 회수할 때까지
 # 그 컨테이너에 다른 exec를 넣지 않는다(검사 순간 살아 있는 exec 프로세스는 읽지 못한 대상이 되어 판단 필요가 된다).
@@ -23,7 +25,7 @@ LOG_DIR=${O25_LOG_DIR:-$HOME/olive-verify/O25/run}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
-  sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 }
 
@@ -43,6 +45,16 @@ pod_snap() {
     name=$n
   fi
   kubectl -n "$NS" get pod "$name" -o jsonpath='{.metadata.name}{" "}{.metadata.uid}{range .status.initContainerStatuses[*]}{" init-"}{.name}{"="}{.containerID}{":"}{.restartCount}{end}{range .status.containerStatuses[*]}{" "}{.name}{"="}{.containerID}{":"}{.restartCount}{end}'
+}
+# body_variant: 배포된 Deployment의 제어 컨테이너 환경 O25_BODY_VARIANT(shell|claude). 못 읽거나 모르는 값이면 실패한다.
+body_variant() {
+  local v
+  v=$(kubectl -n "$NS" get deploy o25-session -o jsonpath='{.spec.template.spec.containers[?(@.name=="control")].env[?(@.name=="O25_BODY_VARIANT")].value}') || return 1
+  case "$v" in shell | claude) printf '%s' "$v" ;; *) return 1 ;; esac
+}
+# body_env <이름>: 배포된 본체 컨테이너 환경값(핀 대조용).
+body_env() {
+  kubectl -n "$NS" get deploy o25-session -o jsonpath="{.spec.template.spec.containers[?(@.name==\"body\")].env[?(@.name==\"$1\")].value}"
 }
 # snap_get <스냅샷 줄> <키>: "키=ID:횟수"의 값.
 snap_get() { printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -n 1; }
@@ -71,6 +83,12 @@ case "$cmd" in
           if [ "$c" = fetch-hc ]; then
             # 전체 재시작 뒤에는 "reuse verified archive"(받아 둔 묶음을 다시 대조만 함)가 예상이다. 첫 기동은 내려받기 뒤 fetched 줄뿐이다.
             printf '%s\n' "$lines" | awk '/^reuse verified archive$/ { r++ } /^fetched: / { f++ } END { printf "검증한 파일 재사용 줄 %d, fetched 줄 %d\n", r, f }'
+            # claude 변형: 같은 init의 Claude 줄. 실패 줄(크기·sha)이 1 이상이면 init이 멈춘 이유다.
+            printf '%s\n' "$lines" | awk '/^claude: reuse verified file$/ { r++ } /^claude: fetched / { f++ } /^claude: size mismatch$|FAILED/ { b++ } END { printf "claude 재사용 줄 %d, claude fetched 줄 %d, 크기·sha 실패 줄 %d\n", r, f, b }'
+          fi
+          if [ "$c" = body ]; then
+            # claude 변형: 본체 PID 1의 실행 증거 줄(o25c). 판정은 run.sh claude-judge.
+            printf '%s\n' "$lines" | awk '/^o25c / { print "  " $4, $5 }' | strip_ctrl
           fi
         else
           echo "로그를 읽지 못했다(kubectl logs 실패). 표식이 없다는 증거가 아니다"
@@ -87,6 +105,17 @@ case "$cmd" in
     step=${2:-}
     limit=${3:-240}
     [[ $step =~ ^[a-z0-9-]+$ && $limit =~ ^[0-9]+$ ]] || usage
+    # 실행기도 같은 거절을 하지만(files/lib.sh step_fn), 여기서 먼저 막아 exec 자체를 하지 않는다.
+    v=$(body_variant) || {
+      echo "배포된 본체 변형(O25_BODY_VARIANT)을 읽지 못했다. 단계를 넘기지 않는다" >&2
+      exit 5
+    }
+    case "$v $step" in
+      "claude relay" | "claude false-exit" | "claude plant" | "claude body-term" | "shell claude-ui")
+        echo "거절: '$step'은 본체 변형 '$v'에서 돌리지 않는다(시험 절차서 Claude 변형 절)" >&2
+        exit 5
+        ;;
+    esac
     if [ "$step" = body-term ]; then
       # body-only-check가 견줄 "전" 상태. 이것을 못 남기면 단계를 넘기지 않는다.
       mkdir -p "$LOG_DIR"
@@ -211,6 +240,26 @@ case "$cmd" in
         fi
       fi
     } 2>&1 | keep body-only-check
+    ;;
+  claude-judge)
+    [ "$(body_variant || true)" = claude ] || {
+      echo "claude 변형이 아니다(또는 변형을 읽지 못했다)" >&2
+      exit 5
+    }
+    snap=$(pod_snap) || {
+      echo "세션 파드가 정확히 하나가 아니다" >&2
+      exit 3
+    }
+    name=${snap%% *} uid=$(printf '%s' "$snap" | cut -d' ' -f2)
+    sha=$(body_env O25_PROG_SHA256) ver=$(body_env O25_PROG_VERSION)
+    mkdir -p "$LOG_DIR"
+    t=$(date -u +%Y%m%dT%H%M%SZ)
+    kubectl -n "$NS" exec "$name" -c control -- bash /opt/o25/ctl.sh show claude-ui 2>&1 | strip_ctrl >"$LOG_DIR/$t-claude-ui.txt" || true
+    kubectl -n "$NS" logs "$name" -c body --tail=-1 2>&1 | strip_ctrl >"$LOG_DIR/$t-body-log.txt" || true
+    gen=$(sed -n 's/^시작 [^ ]* 세대 \([0-9a-f]\{12\}\) .*/\1/p' "$LOG_DIR/$t-claude-ui.txt" | head -n 1)
+    echo "파드 $name uid $uid 세대 ${gen:-?} 핀 $ver ${sha:0:16}"
+    python3 -I "$HERE/claude-judge.py" "$uid" "${gen:-unknown}" "$sha" "$ver" "$LOG_DIR/$t-claude-ui.txt" "$LOG_DIR/$t-body-log.txt" 2>&1 |
+      keep claude-judge
     ;;
   *) usage ;;
 esac

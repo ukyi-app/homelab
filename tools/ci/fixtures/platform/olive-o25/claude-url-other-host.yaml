@@ -1,0 +1,12 @@
+# expect: fail
+# match: does not match pattern
+# Claude Code는 공식 배포처의 버전별 musl 배포본 주소에서만 받는다. 다른 호스트의 파일은 sha256이 맞아도 받지 않는다(받는 자리를 values 한 줄로 바꾸지 못하게).
+body:
+  variant: claude
+  command: ["/bin/bash", "-i"]
+claude:
+  version: "2.1.325"
+  url: https://example.com/claude-code-releases/2.1.325/linux-x64-musl/claude
+  sha256: a5e3bd36dce97db0429705aa5c3573eea346a77938a89104b9c28fce409b20cd
+  size: 352201992
+  memoryLimit: 512Mi

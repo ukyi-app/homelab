@@ -248,6 +248,91 @@ class BodyState:
         os.replace(tmp, self.path)
 
 
+# ---- 본체 자리 프로그램의 실행 증거(claude 변형). 본체 PID 1이 자기 표준 출력(본체 컨테이너 로그)에 "o25c" 줄로 낸다.
+# 판정은 밖의 tools/olive-o25/claude-judge.py가 제어 쪽 claude-ui 단계 결과와 묶어서 한다. 줄에는 고정 키와 숫자·해시·고정 낱말만 싣는다.
+
+PROG_VER_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def prog_check(path, want_sha, want_ver, env, runner=subprocess.run, sha=file_sha256):
+    """자격을 받기 전: 고정 파일의 sha256과 --version 첫 낱말을 핀과 대조한다. (check 낱말, 필드 사전).
+
+    check는 ok, sha-mismatch, version-mismatch, error-<무엇> 중 하나다. 판정 근거는 sha이고 --version은 보조다
+    (따로 띄운 --version은 pty 자식이 같은 파일이라는 증거가 아니다. 그것은 exe_check가 본다).
+    """
+    f = {"sha": "-", "version": "-", "ino": "-"}
+    try:
+        st = os.stat(path)
+        f["ino"] = f"{st.st_dev}:{st.st_ino}"
+        f["sha"] = sha(path)
+    except OSError as e:
+        return f"error-{errname(e.errno).lower()}", f
+    if f["sha"] != want_sha:
+        return "sha-mismatch", f
+    try:
+        out = runner([path, "--version"], env=env, cwd=env.get("HOME", "/"), stdin=subprocess.DEVNULL,
+                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60, close_fds=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return "error-version-run", f
+    first = out.decode("ascii", errors="replace").split()[:1]
+    f["version"] = first[0] if first and PROG_VER_RE.fullmatch(first[0]) else "unparsed"
+    if f["version"] != want_ver:
+        return "version-mismatch", f
+    return "ok", f
+
+
+def exe_check(pid, path, limit_s=5.0, stat=os.stat, clock=time.monotonic, sleep=time.sleep):
+    """pty 자식의 /proc/<pid>/exe가 고정 파일(같은 장치·inode)인지. match, mismatch, gone, unreadable-<errno>.
+
+    exec 전에는 exe가 python이므로 limit_s 동안 다시 본다. 읽지 못하면 판정하지 않는다(밖에서 판단 필요).
+    """
+    try:
+        want = stat(path)
+    except OSError as e:
+        return f"unreadable-{errname(e.errno).lower()}"
+    end = clock() + limit_s
+    while True:
+        try:
+            st = stat(f"/proc/{pid}/exe")
+        except OSError as e:
+            if e.errno in (errno.ENOENT, errno.ESRCH):
+                return "gone"
+            return f"unreadable-{errname(e.errno).lower()}"
+        if (st.st_dev, st.st_ino) == (want.st_dev, want.st_ino):
+            return "match"
+        if clock() >= end:
+            return "mismatch"
+        sleep(0.05)
+
+
+def exit_word(status):
+    if status is None:
+        return "unknown"
+    if os.WIFEXITED(status):
+        return f"exit:{os.WEXITSTATUS(status)}"
+    if os.WIFSIGNALED(status):
+        return f"signal:{os.WTERMSIG(status)}"
+    return "unknown"
+
+
+def prog_line(pod, gen, kind, **kw):
+    """o25c 줄. 값은 [A-Za-z0-9._:-]만 남긴다(본체가 고를 수 있는 글이 섞여도 줄 모양이 안 바뀌게)."""
+    vals = " ".join(f"{k}={re.sub(r'[^A-Za-z0-9._:-]', '?', str(v))[:80]}" for k, v in kw.items())
+    return f"o25c {pod} {gen} {kind} {vals}"
+
+
+# reap()이 먼저 거둔 자식의 종료 상태. 본체 자리 프로그램의 종료 상태를 잃지 않게 한다.
+REAPED = {}
+
+
 def cmd_body_init(args):
     if "--" not in args or args.index("--") == len(args) - 1:
         print("body-init: -- 뒤에 본체 자리 명령이 없다", file=sys.stderr)
@@ -270,6 +355,27 @@ def cmd_body_init(args):
     append("/b/boots", f"{gen} {now_ns()}")
     reqs = ReqServer.open_fifo(BODY_JOBS, gen)
     gdir = f"/relay/{gen}"
+    pod = os.environ.get("O25_POD_UID", "?")
+    home, tmp = f"/b/{gen}/home", f"/b/{gen}/tmp"
+    want_sha = os.environ.get("O25_PROG_SHA256", "")
+    prog_env = {}
+    if want_sha:
+        # claude 변형: 자격을 받기 전에 고정 파일을 대조한다. --version도 프로그램 환경과 같은 세대 HOME·TMPDIR로 띄운다
+        # (읽기 전용 root에서 쓰기 자리가 없으면 끝나 버린다). 다르면 자격을 받지 않고 요청만 받으며 머문다.
+        for d in (home, tmp):
+            os.makedirs(d, mode=0o700, exist_ok=True)
+        prog_env = {"DISABLE_AUTOUPDATER": "1", "LINES": str(ROWS), "COLUMNS": str(COLS)}
+        venv = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME": home, "TMPDIR": tmp,
+                "TERM": "xterm-256color", **prog_env}
+        check, f = prog_check(command[0], want_sha, os.environ.get("O25_PROG_VERSION", ""), venv)
+        st.set(prog_check=check, prog_sha=f["sha"], prog_version=f["version"], prog_ino=f["ino"])
+        emit(prog_line(pod, gen, "prog-check", check=check, sha=f["sha"], version=f["version"], ino=f["ino"],
+                       t_ns=now_ns()))
+        if check != "ok":
+            st.set(phase="prog-refused")
+            while True:
+                reqs.service(1.0)
+                reap()
     cred = b""
     while not stop["now"]:
         reqs.service(0)
@@ -300,7 +406,6 @@ def cmd_body_init(args):
         except OSError as e:
             st.set(relay_error=type(e).__name__)
             time.sleep(1)
-    home, tmp = f"/b/{gen}/home", f"/b/{gen}/tmp"
     for d in (home, tmp):
         os.makedirs(d, mode=0o700, exist_ok=True)
     env = {
@@ -310,19 +415,38 @@ def cmd_body_init(args):
         "TERM": "xterm-256color",
         "O25_GEN": gen,
         "O25_POD_UID": os.environ.get("O25_POD_UID", "?"),
+        **prog_env,
     }
     if cred:
         env["O25_FAKE_CRED"] = cred.decode("utf-8", errors="replace")
-    pid, master = pty.fork()
-    if pid == 0:
-        os.chdir(home)
-        os.execvpe(command[0], command, env)
-    del cred, env
     import fcntl
     import termios
 
+    # 자식은 부모가 화면 크기를 정할 때까지 exec하지 않는다. 그래야 프로그램이 처음 읽는 크기가 고정 50×200이다.
+    sync_r, sync_w = os.pipe()
+    pid, master = pty.fork()
+    if pid == 0:
+        os.close(sync_w)
+        os.read(sync_r, 1)
+        os.close(sync_r)
+        os.chdir(home)
+        os.execvpe(command[0], command, env)
+    del cred, env
+    os.close(sync_r)
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
-    st.set(phase="running", relay="open", program=f"pid={pid}", relay_open_ns=now_ns())
+    rows, cols = struct.unpack("HHHH", fcntl.ioctl(master, termios.TIOCGWINSZ, b"\0" * 8))[:2]
+    os.write(sync_w, b"g")
+    os.close(sync_w)
+    st.set(phase="running", relay="open", program=f"pid={pid}", relay_open_ns=now_ns(), pty_size=f"{rows}x{cols}")
+    if want_sha:
+        exe = exe_check(pid, command[0])
+        try:
+            p = stat_start(read_stat(pid))
+        except OSError:
+            p = None
+        st.set(prog_exe=exe)
+        emit(prog_line(pod, gen, "prog-launch", pid=pid, start=p[1] if p else "-", exe=exe, rows=rows, cols=cols,
+                       sync="before-exec", t_ns=now_ns()))
     child = {"alive": True}
 
     def on_relay_eof():
@@ -336,6 +460,9 @@ def cmd_body_init(args):
         except OSError:
             pass
         break
+    if want_sha:
+        emit(prog_line(pod, gen, "prog-exit", pid=pid, status=child.get("status", "unknown"),
+                       t_ns=child.get("exit_ns", now_ns())))
     # 프로그램이 끝난 뒤에도 PID 1은 남는다(컨테이너가 혼자 다시 떠서 새 자격을 기다리는 일을 만들지 않는다).
     while True:
         reqs.service(1.0)
@@ -345,11 +472,12 @@ def cmd_body_init(args):
 def reap():
     while True:
         try:
-            p, _ = os.waitpid(-1, os.WNOHANG)
+            p, status = os.waitpid(-1, os.WNOHANG)
         except ChildProcessError:
             return
         if p == 0:
             return
+        REAPED[p] = status
 
 
 def pump_child(master, sock, on_relay_eof, child, pid, st, reqs):
@@ -387,12 +515,25 @@ def pump_child(master, sock, on_relay_eof, child, pid, st, reqs):
         try:
             p, status = os.waitpid(pid, os.WNOHANG)
         except ChildProcessError:
-            p, status = pid, 0
+            p, status = pid, REAPED.pop(pid, None)
         if p == pid:
+            child["status"] = exit_word(status)
             break
         reap()
+    if "status" not in child:
+        # pty가 먼저 닫혔다(EOF). 프로그램이 곧 끝나는 것을 잠깐 기다려 종료 상태를 남긴다. 못 받으면 unknown이다.
+        for _ in range(50):
+            try:
+                p, status = os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                p, status = pid, REAPED.pop(pid, None)
+            if p == pid:
+                child["status"] = exit_word(status)
+                break
+            time.sleep(0.1)
     child["alive"] = False
-    st.set(program=f"exited pid={pid}", program_exit_ns=now_ns())
+    child["exit_ns"] = now_ns()
+    st.set(program=f"exited pid={pid}", program_exit_ns=child["exit_ns"], program_exit=child.get("status", "unknown"))
     if relay_open:
         sock.close()
         st.set(relay="closed-by-body", relay_closed_ns=now_ns())

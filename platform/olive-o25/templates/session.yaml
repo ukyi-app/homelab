@@ -5,7 +5,8 @@
   init gen(uid 10001)       새 부팅 세대와 일회용 시작 허가(files/gen.sh). 일반 init이라 전체 재시작마다 다시 돈다.
   control(uid·gid 10001)    PID 1 = 실행기 자리(files/control.sh) → hc core → holder → 중계(o25.py relay-serve)
                             hc 소켓·상태·설정·허가는 /c(제어 전용)에만 있다.
-  body(uid·gid 10002)       PID 1 = 고정 시작부(o25.py body-init) → pty → 본체 자리 명령(values body.command)
+  body(uid·gid 10002)       PID 1 = 고정 시작부(o25.py body-init) → pty → 본체 자리 명령(values body.command,
+                            claude 변형이면 fetch-hc가 받아 둔 /opt/claude/claude. 읽기 전용 볼륨 claude-bin)
 
 둘 사이는 /relay 하나다. 제어 쪽이 소유하고 쓰며 소켓을 만든다(듣는 쪽). 본체에는 읽기 전용으로 붙어 연결만 한다.
 그래서 본체는 그 자리에 자기 소켓을 두거나 이름을 바꿔치기하지 못한다(Podman 실측에서 본체가 쓸 수 있는 폴더에 소켓을 두자 됐다).
@@ -80,6 +81,27 @@ spec:
                 exit 1
               fi
               echo "fetched: $got"
+              {{- if eq .Values.body.variant "claude" }}
+              # claude 변형: 같은 init이 Claude Code 고정 파일도 받는다(첫 init의 이름·argv 끝말을 노드 관측기가 쓴다).
+              # 검증한 파일만 /cl/claude 이름을 갖는다. 받는 중인 파일은 claude.part이고, 크기·sha256이 맞아야 이름을 바꾼다.
+              # 전체 재시작마다 남은 파일의 크기·sha256을 다시 대조한다(약 336MiB라 CPU 상한에서 수 초 걸린다). 다르면 지우고 다시 받는다.
+              # 이 init은 이 파일을 실행하지 않는다. --version 기록과 실행 파일 대조는 본체 PID 1이 자격 전에 한다(files/o25.py).
+              if [ -f /cl/claude ] && [ "$(stat -c %s /cl/claude)" = "$CLAUDE_SIZE" ] && echo "$CLAUDE_SHA256  /cl/claude" | sha256sum -c - >/dev/null 2>&1; then
+                echo "claude: reuse verified file"
+              else
+                rm -f /cl/claude /cl/claude.part
+                curl -fsS --proto '=https' --tlsv1.2 --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 15 --max-time 600 --max-filesize "$CLAUDE_SIZE" -o /cl/claude.part "$CLAUDE_URL"
+                if [ "$(stat -c %s /cl/claude.part)" != "$CLAUDE_SIZE" ]; then
+                  echo "claude: size mismatch" >&2
+                  rm -f /cl/claude.part
+                  exit 1
+                fi
+                echo "$CLAUDE_SHA256  /cl/claude.part" | sha256sum -c - || { rm -f /cl/claude.part; exit 1; }
+                chmod 0555 /cl/claude.part
+                mv /cl/claude.part /cl/claude
+                echo "claude: fetched $CLAUDE_VERSION"
+              fi
+              {{- end }}
             # 셸의 $0. 노드 관측기(tools/olive-o25/node-watch.py)가 이 낱말로 첫 init을 알아보고 새 세대의 시작으로 삼는다.
             - o25-fetch-hc
           env:
@@ -91,6 +113,17 @@ spec:
               value: {{ .Values.hc.sha256 | quote }}
             - name: HOME
               value: /hc
+            {{- if eq .Values.body.variant "claude" }}
+            - name: CLAUDE_VERSION
+              value: {{ .Values.claude.version | quote }}
+            - name: CLAUDE_URL
+              value: {{ .Values.claude.url | quote }}
+            - name: CLAUDE_SHA256
+              value: {{ .Values.claude.sha256 | quote }}
+            - name: CLAUDE_SIZE
+              # int64: 큰 정수가 지수 표기(3.52e+08)로 렌더되지 않게.
+              value: {{ .Values.claude.size | int64 | quote }}
+            {{- end }}
           securityContext:
             {{- include "o25.containerSecurity" . | nindent 12 }}
             runAsUser: 10001
@@ -98,6 +131,10 @@ spec:
           volumeMounts:
             - name: hc-bin
               mountPath: /hc
+            {{- if eq .Values.body.variant "claude" }}
+            - name: claude-bin
+              mountPath: /cl
+            {{- end }}
           resources:
             requests:
               cpu: 10m
@@ -150,6 +187,9 @@ spec:
               value: {{ .Values.hc.version | quote }}
             - name: O25_RESTART_CODE
               value: {{ .Values.restartRule.exitCode | quote }}
+            # 실행기가 변형에 맞지 않는 단계를 거절한다(files/lib.sh step_fn).
+            - name: O25_BODY_VARIANT
+              value: {{ .Values.body.variant | quote }}
             # 노드 판정(node-cgroup.sh judge)에 넘길 파드 UID를 결과에 찍으려고 받는다. 비밀이 아니다.
             - name: O25_POD_UID
               valueFrom:
@@ -187,13 +227,26 @@ spec:
             - /opt/o25/o25.py
             - body-init
             - "--"
+            {{- if eq .Values.body.variant "claude" }}
+            # 고정 절대 경로. PATH나 HOME의 링크로 찾지 않는다(본체가 HOME에 쓴 파일이 실행되지 않게).
+            - /opt/claude/claude
+            {{- else }}
             {{- range .Values.body.command }}
             - {{ . | quote }}
+            {{- end }}
             {{- end }}
           workingDir: /b
           env:
             - name: HOME
               value: /b
+            {{- if eq .Values.body.variant "claude" }}
+            # 본체 PID 1이 자격을 받기 전에 /opt/claude/claude의 sha256·--version을 이 값과 대조하고 기록한다(다르면 자격을 받지 않는다).
+            # 본체 자리 프로그램의 환경에는 넘기지 않는다(body-init은 고정 사전으로 환경을 새로 만든다).
+            - name: O25_PROG_SHA256
+              value: {{ .Values.claude.sha256 | quote }}
+            - name: O25_PROG_VERSION
+              value: {{ .Values.claude.version | quote }}
+            {{- end }}
             # 심기 영수증에 파드 UID를 적는다(앞 회차·다른 파드의 기록과 섞이지 않게).
             - name: O25_POD_UID
               valueFrom:
@@ -217,17 +270,34 @@ spec:
               readOnly: true
             - name: body
               mountPath: /b
+            {{- if eq .Values.body.variant "claude" }}
+            # 읽기 전용. 본체는 이 파일을 바꾸거나 옆에 다른 파일을 두지 못한다.
+            - name: claude-bin
+              mountPath: /opt/claude
+              readOnly: true
+            {{- end }}
           resources:
             requests:
               cpu: 50m
               memory: 64Mi
             limits:
               cpu: {{ .Values.bodyLimits.cpuLimit | quote }}
+              {{- if eq .Values.body.variant "claude" }}
+              memory: {{ .Values.claude.memoryLimit | quote }}
+              {{- else }}
               memory: {{ .Values.bodyLimits.memoryLimit | quote }}
+              {{- end }}
       volumes:
         - name: hc-bin
           emptyDir:
             sizeLimit: 128Mi
+        {{- if eq .Values.body.variant "claude" }}
+        # Claude Code 고정 파일 하나(352,201,992바이트 = 약 336MiB)만 둔다. 다시 받을 때는 옛 파일과 받다 만 파일을 먼저 지운다.
+        # 디스크 매체다. Memory 매체면 파드 메모리 상한을 먹는다.
+        - name: claude-bin
+          emptyDir:
+            sizeLimit: 384Mi
+        {{- end }}
         # 제어 전용: 세대 허가·장부·세대별 hc 상태·실행기 FIFO·시험 결과. 본체 컨테이너에는 붙이지 않는다.
         - name: ctl
           emptyDir:

@@ -209,7 +209,7 @@ while :; do
   printf '%s\n' "$step" >"$O25_CTL/busy"
   {
     printf '단계 %s\n시작 %s 세대 %s 실행기 pid %s\n' "$step" "$(date -u +%FT%TZ)" "$O25_GEN" "$$"
-    "step_${step//-/_}"
+    "$(step_fn "$step")"
     printf '끝 %s\n' "$(date -u +%FT%TZ)"
   } >"$O25_OUT/$step.txt" 2>&1
   rm -f "$O25_CTL/busy"

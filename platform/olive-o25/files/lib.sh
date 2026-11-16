@@ -7,7 +7,25 @@
 # 실행기가 받는 단계 이름 전부. 이 목록에 없는 이름은 거절한다.
 # 자격 검사(cred)는 여기 없다. ctl.sh로 부르면 기다리는 exec 셸이 검사 대상으로 남아 읽지 못한다. 요청 통로로만 받는다
 # (o25.py submit cred → control.sh serve_req).
-O25_STEPS="preflight boot relay hide-control relay-kill false-exit plant restart ctl-crash after-restart shm body-term body-after summary"
+O25_STEPS="preflight boot relay hide-control relay-kill false-exit plant restart ctl-crash after-restart shm body-term body-after summary claude-ui"
+# 본체 자리 변형(차트 body.variant, 환경변수 O25_BODY_VARIANT). 중계로 셸 명령을 보내는 단계는 셸 변형에서만,
+# claude-ui는 claude 변형에서만 돈다. Claude 입력란에 셸 명령이 들어가지 않게 실행기가 거절한다(run.sh도 앞에서 막는다).
+O25_VARIANT=${O25_BODY_VARIANT:-shell}
+O25_SHELL_STEPS="relay false-exit plant body-term"
+O25_CLAUDE_STEPS="claude-ui"
+# step_fn <단계>: 실행할 함수 이름. 변형에 맞지 않으면 step_refused(거절 글만 남기고 아무것도 보내지 않는다).
+step_fn() {
+  case "$O25_VARIANT $1" in
+    "claude relay" | "claude false-exit" | "claude plant" | "claude body-term") echo step_refused ;;
+    "shell claude-ui") echo step_refused ;;
+    "shell "* | "claude "*) echo "step_${1//-/_}" ;;
+    *) echo step_refused ;;
+  esac
+}
+step_refused() {
+  echo "거절: 이 단계는 본체 자리 변형 '$O25_VARIANT'에서 돌지 않는다(셸 단계: $O25_SHELL_STEPS / claude 단계: $O25_CLAUDE_STEPS)"
+  fact "step-refused variant=$O25_VARIANT"
+}
 # 자격 검사 요청이 꼭 내야 하는 판정 키(o25.py JOB_KEYS["cred"]와 같다).
 O25_CRED_KEYS="6.hc-상태-없음 6.제어-argv-environ-없음 6.제어-로그-장부-없음 6.중계-폴더-없음 6.hc-화면-없음"
 

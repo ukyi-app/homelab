@@ -6,6 +6,8 @@
 # 본체 컨테이너 안에서 봐야 하는 것(남은 프로세스, 첩자, 본체가 받은 자격)은 bctl.sh가 본다(run.sh body <단계>).
 # shellcheck source=lib.sh
 . /opt/o25/lib.sh
+# shellcheck source=claude.sh
+. /opt/o25/claude.sh
 
 # send_body <글>: 본체 자리 셸에 한 줄을 보낸다. 중계를 지나 본체 pty에 들어간다. hc send의 종료 코드를 그대로 돌려준다.
 send_body() { hcq send body "$1" >/dev/null 2>&1; }
