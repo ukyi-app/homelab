@@ -27,7 +27,7 @@ wait_file() {
 }
 
 ppid_of() { ps_dump | awk -v p="$1" '$1 == p { print $2 }'; }
-cmd_of() { tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null | cut -c1-80 | clean; }
+cmd_of() { tr '\0' ' ' 2>/dev/null <"/proc/$1/cmdline" | cut -c1-80 | clean; }
 one_line() { tr '\n' ' '; }
 
 # run_bg <이름> <프로그램...>: hc 터미널에서 프로그램을 띄운다. hc가 실패하면 그 종료 코드를 돌려준다.
@@ -492,7 +492,7 @@ step_hide() {
       clean <"$O02_OUT/probe-$role.txt"
     else
       echo "탐침이 90초 안에 끝나지 않았다. 지금까지:"
-      clean <"$O02_OUT/probe-$role.txt" 2>/dev/null
+      clean 2>/dev/null <"$O02_OUT/probe-$role.txt"
       verdict "5.$role" "판단 필요" "탐침이 끝나지 않았다"
     fi
   done
@@ -628,7 +628,7 @@ step_cred_override() {
   rc=$?
   wait_file "$O02_OUT/env-d1.txt" 15
   sleep 1
-  clean <"$O02_OUT/env-d1.txt" 2>/dev/null
+  clean 2>/dev/null <"$O02_OUT/env-d1.txt"
   gotd=$(got_override d1)
   fact "env override로 프로그램이 받은 값: ${gotd:-출력 없음(보지 못했다)}, API 호출 exit $rc"
   echo "== argv에 표식 E를 넣어 띄운다"

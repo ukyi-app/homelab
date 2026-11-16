@@ -57,7 +57,8 @@ ps_dump() {
     rest=${stat##*\) }
     read -r st ppid pgid sid _ <<<"$rest"
     uid=$(awk '/^Uid:/ {print $2; exit}' "$d/status" 2>/dev/null)
-    cmd=$(tr '\0' ' ' <"$d/cmdline" 2>/dev/null)
+    # 2>/dev/null을 < 앞에 둔다. 리다이렉션은 왼쪽부터 처리되어, 뒤에 두면 그새 끝난 프로세스의 파일을 못 연 셸 오류가 결과에 찍힌다.
+    cmd=$(tr '\0' ' ' 2>/dev/null <"$d/cmdline")
     printf '%-7s %-7s %-7s %-7s %-2s %-6s %s\n' "$pid" "$ppid" "$pgid" "$sid" "$st" "${uid:-?}" "${cmd:-[$comm]}"
   done
 }

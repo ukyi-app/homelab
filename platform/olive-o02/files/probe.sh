@@ -55,7 +55,8 @@ probe() {
 
   echo "== 1. 네트워크 네임스페이스의 Unix 소켓 이름(/proc/net/unix). 같은 파드의 컨테이너는 이 목록을 함께 본다"
   awk 'NR > 1 && NF >= 8 { print $8 }' /proc/net/unix 2>/dev/null | sort -u | head -n 40 | clean
-  listed=$(awk 'NR > 1 && NF >= 8 && $8 ~ /herdr-core\/.*\.sock/ { n++ } END { print n + 0 }' /proc/net/unix 2>/dev/null)
+  # 듣는 소켓과 연결된 소켓이 같은 이름으로 여러 줄 나온다. 이름 단위로 센다.
+  listed=$(awk 'NR > 1 && NF >= 8 && $8 ~ /herdr-core\/.*\.sock/ && !seen[$8]++ { n++ } END { print n + 0 }' /proc/net/unix 2>/dev/null)
   listed=${listed:-0}
   echo "이 목록의 hc 소켓 이름 ${listed}개(0개면 이 네임스페이스에 떠 있는 core가 없다)"
   if [ ! -r /proc/net/unix ]; then
@@ -123,15 +124,24 @@ probe() {
   fi
 
   echo "== 4. 상태·설정 경로"
+  # 없는 파일을 "안 읽힘"으로 적으면 권한으로 가려진 것처럼 읽힌다. 위 폴더에 못 들어가도 -e가 거짓이라 둘은 구분하지 못한다.
   for p in "$STATE/terminals.json" "$STATE/core.json" "$STATE/restart-env.json" "$STATE/core.log" "$CONF/config.toml"; do
     if [ -r "$p" ]; then
-      printf '  읽힘 %s (%s바이트)\n' "$p" "$(wc -c <"$p" 2>/dev/null)"
-    else
+      printf '  읽힘 %s (%s바이트)\n' "$p" "$(wc -c 2>/dev/null <"$p")"
+    elif [ -e "$p" ]; then
       printf '  안 읽힘 %s\n' "$p"
+    else
+      printf '  없음(또는 위 폴더에 못 들어감) %s\n' "$p"
     fi
   done
   for p in "$STATE" "$CONF" /s/cf /s/st; do
-    if [ -w "$p" ]; then printf '  쓸 수 있음 %s\n' "$p"; else printf '  쓸 수 없음 %s\n' "$p"; fi
+    if [ -w "$p" ]; then
+      printf '  쓸 수 있음 %s\n' "$p"
+    elif [ -e "$p" ]; then
+      printf '  쓸 수 없음 %s\n' "$p"
+    else
+      printf '  없음(또는 위 폴더에 못 들어감) %s\n' "$p"
+    fi
   done
   if [ -r "$STATE/terminals.json" ] || [ -w "$CONF" ] || [ -w /s/cf ]; then
     verdict state-config "안 됨" "상태를 읽거나 설정 자리에 쓸 수 있다(위 목록)"
@@ -148,11 +158,12 @@ probe() {
   for p in /proc/[0-9]*; do
     [ "${p#/proc/}" = "$$" ] && continue
     seen=$((seen + 1))
-    if [ -r "$p/environ" ] && tr '\0' '\n' <"$p/environ" >/dev/null 2>&1; then
+    # 2>/dev/null을 < 앞에 둔다. 뒤에 두면 그새 끝난 프로세스의 파일을 못 연 셸 오류가 결과에 찍힌다.
+    if [ -r "$p/environ" ] && tr '\0' '\n' >/dev/null 2>&1 <"$p/environ"; then
       env_readable=$((env_readable + 1))
-      if tr '\0' '\n' <"$p/environ" 2>/dev/null | grep -q '^O02_FAKE_CRED='; then
+      if tr '\0' '\n' 2>/dev/null <"$p/environ" | grep -q '^O02_FAKE_CRED='; then
         cred_visible=$((cred_visible + 1))
-        printf '  가짜 자격 표식이 읽힘: pid %s (%s)\n' "${p#/proc/}" "$(tr '\0' ' ' <"$p/cmdline" 2>/dev/null | cut -c1-60 | clean)"
+        printf '  가짜 자격 표식이 읽힘: pid %s (%s)\n' "${p#/proc/}" "$(tr '\0' ' ' 2>/dev/null <"$p/cmdline" | cut -c1-60 | clean)"
       fi
     fi
     if ls "$p/root/s/rt/herdr-core" >/dev/null 2>&1; then root_reach=$((root_reach + 1)); fi

@@ -43,7 +43,8 @@ show() { # <파일>: 값을 한 줄로
   if [ -r "$1" ]; then tr '\n' ' ' <"$1"; else printf '(못 읽음)'; fi
 }
 # 명령줄을 한 줄로: NUL·줄바꿈·CR·탭을 공백으로.
-cmd_line() { tr '\0\n\r\t' '    ' <"$1" 2>/dev/null | cut -c1-90; }
+# 2>/dev/null을 < 앞에 둔다. 뒤에 두면 그새 끝난 프로세스의 파일을 못 연 셸 오류가 출력에 찍힌다.
+cmd_line() { tr '\0\n\r\t' '    ' 2>/dev/null <"$1" | cut -c1-90; }
 
 # classify <cmdline 파일>: 그 프로세스의 역할을 낸다. 글자가 어딘가에 들었는지가 아니라 argv의 자리로 가른다.
 #   core, holder  hc가 띄운 것(argv[0]이 /opt/hc/ 아래, 인자에 serve·hold)
@@ -144,7 +145,7 @@ main() {
   echo "== 노드의 모든 프로세스에서 시험 프로세스 찾기"
   # 다른 사용자의 프로세스가 보이지 않으면(hidepid 등) "0개"는 증거가 아니다. pid 1의 명령줄이 읽히는지로 가린다.
   # /proc의 파일은 크기가 0으로 보이므로 크기가 아니라 읽은 내용으로 본다.
-  if [ -z "$(tr -d '\0' <"$PROC/1/cmdline" 2>/dev/null)" ]; then
+  if [ -z "$(tr -d '\0' 2>/dev/null <"$PROC/1/cmdline")" ]; then
     can_see=no
     echo "pid 1의 명령줄을 읽지 못했다. 이 사용자는 다른 프로세스를 보지 못할 수 있다"
   fi
