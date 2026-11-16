@@ -157,8 +157,17 @@ fact_proc_root=$(readlink /proc/1/root 2>&1 | clean)
 echo "  /proc/1/root -> $fact_proc_root, /proc/1/cmdline: $(tr '\0' ' ' 2>/dev/null </proc/1/cmdline | cut -c1-80 | clean)"
 
 echo "== 5. 공유 netns: abstract 소켓과 TCP 듣는 곳(파드의 컨테이너가 함께 본다). 모두 본다(개수를 자르지 않는다)"
-abs=$(awk 'NR > 1 && NF >= 8 && $8 ~ /^@/ { print $8 }' /proc/net/unix 2>/dev/null | sort -u)
+# 목록을 못 만든 것(awk·sort 실패, 읽기 오류)과 정상적으로 읽은 빈 목록은 둘 다 빈 문자열이다. 종료 상태로 가른다.
+abs=$(
+  set -o pipefail
+  awk 'NR > 1 && NF >= 8 && $8 ~ /^@/ { print $8 }' /proc/net/unix 2>/dev/null | sort -u
+)
+abs_rc=$?
 n_open=0 n_unk=0
+if [ "$abs_rc" -ne 0 ]; then
+  n_unk=$((n_unk + 1))
+  echo "  abstract 소켓 목록을 만들지 못했다(exit $abs_rc)"
+fi
 for a in $abs; do
   r=$(one connect "$a")
   printf '  abstract %s -> %s\n' "$(printf '%s' "$a" | clean)" "$r"
@@ -183,7 +192,7 @@ echo "  abstract $(printf '%s' "$abs" | grep -c .)개, TCP LISTEN ${t_listen:-?}
 if [ "$n_open" -gt 0 ]; then
   judge netns yes "공유 netns에서 $n_open곳에 연결됐다(어느 프로세스의 것인지 위 이름으로 본다)"
 elif [ "$n_unk" -gt 0 ]; then
-  judge netns unknown "수신점 ${n_unk}곳은 검사 결과가 거절이 아니다(시간 초과·도우미 실패). 다 보지 못해 '없다'로 읽지 않는다"
+  judge netns unknown "검사 불능 ${n_unk}건(거절이 아닌 결과: 시간 초과·도우미 실패, 또는 목록 작성 실패). 다 보지 못해 '없다'로 읽지 않는다"
 else
   judge netns no "공유 netns의 abstract·TCP 수신점이 모두 그 실제 주소에서 거절됐거나 없다(hc core는 열지 않는다. 앞으로 제어 쪽에 서버를 더하면 다시 본다)"
 fi

@@ -553,8 +553,15 @@ def cmd_scan(args):
         return 2
     me = os.getpid()
     n_files = n_procs = n_gone = n_unread = 0
+    # os.walk는 열지 못한 폴더(뿌리 포함: 없음, EACCES)를 onerror로 알리고 건너뛴다. 세지 않으면 그 안의 파일이 '없음'으로 통과한다.
+    dir_errs = []
+
+    def dir_err(e):
+        dir_errs.append(e)
+        print(f"unreadable dir {e.filename} {errno.errorcode.get(e.errno, e.errno)}")
+
     for root in args:
-        for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: print(f"unreadable dir {e.filename} {errno.errorcode.get(e.errno, e.errno)}")):
+        for dirpath, dirnames, filenames in os.walk(root, onerror=dir_err):
             for name in filenames:
                 p = os.path.join(dirpath, name)
                 try:
@@ -596,6 +603,7 @@ def cmd_scan(args):
                 continue
             if mark in data:
                 print(f"{'argv' if what == 'cmdline' else 'environ'} {d} {label}")
+    n_unread += len(dir_errs)
     print(f"summary files={n_files} procs={n_procs} gone={n_gone} unreadable={n_unread} self={me}")
     return 0
 

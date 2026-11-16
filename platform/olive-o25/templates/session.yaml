@@ -80,6 +80,8 @@ spec:
                 exit 1
               fi
               echo "fetched: $got"
+            # 셸의 $0. 노드 관측기(tools/olive-o25/node-watch.py)가 이 낱말로 첫 init을 알아보고 새 세대의 시작으로 삼는다.
+            - o25-fetch-hc
           env:
             - name: HC_VERSION
               value: {{ .Values.hc.version | quote }}

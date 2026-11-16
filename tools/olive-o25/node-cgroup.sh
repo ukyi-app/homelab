@@ -9,6 +9,7 @@
 #       컨테이너 cgroup으로 고정하고(3.node.준비-대상-고정), "armed"를 찍은 뒤 모두 사라질 때까지 5ms 간격으로 본다
 #   node-cgroup.sh judge <파드 UID> <세대 ID> <새 init ns> <새 자격 제공 ns>
 #       watch 기록과 제어 쪽 after-restart의 "노드 판정 입력" 줄을 견준다. 순서의 최종 판정이다
+#       입력은 같은 회차의 after-restart 줄을 그대로 쓴다. 종료 코드 0은 통과가 아니다. 필수 "결과" 줄이 모두 됨이어야 한다
 #   node-cgroup.sh after <파드 UID> <옛 세대 ID>
 #       전체 재시작 뒤: 옛 세대에 심은 것(plant.sh의 p-<세대>-*, 첩자)이 노드 어디에도 없는지, 본체 PID 1이 새로 떴는지
 #       그 세대의 watch 고정 기록이 있어야 한다(없는 세대 인자로 "0개"가 통과하지 않게)
@@ -27,7 +28,7 @@ mode=${1:-}
 uid=${2:-}
 gen=${3:-}
 usage() {
-  sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 }
 [[ $mode =~ ^(live|after|watch|judge)$ && $uid =~ ^([0-9a-f-]{36}|[0-9a-f]{64})$ ]] || usage
@@ -44,12 +45,14 @@ case "$mode" in
       exit 3
     fi
     python3 -I "$HERE/node-watch.py" watch "$uid" "$gen" "$watch_rec" "$limit" 2>&1 | python3 -I "$HERE/sanitize.py" | tee "$LOG_DIR/node-watch-$uid-$gen.txt"
-    exit 0
+    # 종료 코드는 관측기가 끝까지 돌았는지만 말한다. 판정은 "결과" 줄로 본다(0이어도 판단 필요·안 됨일 수 있다).
+    exit "${PIPESTATUS[0]}"
     ;;
   judge)
     [[ ${4:-} =~ ^([0-9]{19}|-)$ && ${5:-} =~ ^([0-9]{19}|-)$ ]] || usage
-    python3 -I "$HERE/node-watch.py" judge "$watch_rec" "$4" "$5" 2>&1 | python3 -I "$HERE/sanitize.py" | tee "$LOG_DIR/node-judge-$uid-$gen-$(date -u +%Y%m%dT%H%M%SZ).txt"
-    exit 0
+    # 기록 안의 파드·세대가 인자와 다르면 judge가 판단 필요를 낸다(파일 이름만 맞춘 다른 회차의 기록).
+    python3 -I "$HERE/node-watch.py" judge "$watch_rec" "$uid" "$gen" "$4" "$5" 2>&1 | python3 -I "$HERE/sanitize.py" | tee "$LOG_DIR/node-judge-$uid-$gen-$(date -u +%Y%m%dT%H%M%SZ).txt"
+    exit "${PIPESTATUS[0]}"
     ;;
 esac
 # systemd cgroup 드라이버는 UID의 - 를 _ 로 바꿔 쓴다.
