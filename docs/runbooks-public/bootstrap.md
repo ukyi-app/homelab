@@ -403,7 +403,7 @@ NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있�
    # 이 bash의 stdin은 스크립트 자체라 터미널에서 읽는다. ID는 저장소에 두지 않는다
    [ -n "${HOMELAB_DEV_PROJECT_ID:-}" ] || read -r -p 'Infisical homelab-dev project ID: ' HOMELAB_DEV_PROJECT_ID </dev/tty
    [[ "$HOMELAB_DEV_PROJECT_ID" =~ ^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$ ]] || { echo "project ID가 UUID 형식이 아니다"; exit 1; }
-   # infra/README.md 2절과 같은 잠금. 로그인 사용자의 CLI 0.44.2는 조회한 값을 ~/.infisical/secrets-backup/에 남긴다
+   # infra/README.md 2절과 같은 잠금. 로그인 사용자의 CLI 0.45.8은 조회한 값을 ~/.infisical/secrets-backup/에 남긴다
    mkdir -p ~/.infisical
    if [ -d ~/.infisical/secrets-backup ]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi
    mkdir -p ~/.infisical/secrets-backup && chmod 0500 ~/.infisical/secrets-backup

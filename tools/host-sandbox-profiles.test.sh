@@ -19,8 +19,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 ME="$(id -u):$(id -g)"
 PROFILES="$ROOT/host/sandbox-profiles"
-SECCOMP_NAME=sandbox-worker-v1.json
-APPARMOR_NAME=homelab-sandbox-worker-v1
+SECCOMP_NAME=sandbox-worker-v2.json
+APPARMOR_NAME=homelab-sandbox-worker-v2
 
 # ------------------------------------------------------------------------------ 저장소 값
 

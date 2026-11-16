@@ -14,6 +14,16 @@ metadata:
   namespace: sandbox
   annotations:
     argocd.argoproj.io/sync-wave: "2"
+    # worker.replicas가 0이면 이 PVC를 쓸 파드가 없어, 빈 클러스터(재구축·새 VM)에서는 Pending(Progressing)으로 남는다. 그 health가
+    # sandbox Application health에 합쳐지면 root가 sandbox wave(-2)에서 멈춘다. ignore-healthcheck는 이 리소스의 health만
+    # Application 합산에서 뺀다(Argo CD v3.5.5 controller/health.go). 1이면 붙이지 않아 평소 판정(Pending이면 Progressing)을 둔다.
+    # 이미 Bound인 클러스터에서는 Healthy라 붙어도 결과가 같다.
+    # 함정: sandbox 자체 sync가 Pending PVC를 기다리지 않는 것은 이 PVC가 마지막 wave(2)라서다. gitops-engine은 마지막 wave를
+    # 적용하면 health를 기다리지 않고 sync를 끝내고(v3.5.5 gitops-engine/pkg/sync/sync_context.go), 이 주석은 sync 대기에는
+    # 쓰이지 않는다. 더 뒤 wave를 더하면 replicas 0인 빈 클러스터에서 sync가 이 PVC에서 멈춘다.
+    {{- if eq (int .Values.worker.replicas) 0 }}
+    argocd.argoproj.io/ignore-healthcheck: "true"
+    {{- end }}
 spec:
   accessModes: ["ReadWriteOnce"]
   storageClassName: local-retain

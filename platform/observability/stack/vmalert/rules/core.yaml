@@ -16,8 +16,10 @@ groups:
         annotations:
           summary: 경보 경로 생존 신호(늘 발화)
 
+      # bot-slot은 뺀다: 게시 서버가 suspended인 동안 지표 Service만 남아 up이 0이다(apps/homelab-bot/values.yaml).
+      # 게시 서버를 다시 켜는 PR에서 이 제외를 지운다. 안 지우면 봇 지표 수집이 끊겨도 조용하다.
       - alert: TargetDown
-        expr: up == 0
+        expr: up{job!="bot-slot"} == 0
         for: 5m
         labels:
           severity: warning

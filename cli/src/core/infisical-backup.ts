@@ -1,5 +1,5 @@
 // Infisical CLI 로컬 백업 막기(사용자 결정). tools/tf-github.sh·infra/README.md 2절과 같은 목적이다.
-// 함정: 로그인 사용자의 CLI 0.44.2가 조회한 값을 $HOME/.infisical/secrets-backup/에 파일로 남긴다(packages/util/secrets.go
+// 함정: 로그인 사용자의 CLI 0.45.8이 조회한 값을 $HOME/.infisical/secrets-backup/에 파일로 남긴다(packages/util/secrets.go
 // WriteBackupSecrets, 폴더는 os.UserHomeDir() 기준이라 자식의 HOME). 호출부가 그 쓰기 오류를 무시하므로 폴더를 쓰기 불가로
 // 두어 파일을 못 만들게 하고, 실제로 쓰기 불가인지 확인하고, 호출마다 파일이 0개인지 본다. 하나라도 어긋나면 실패한다.
 // plan에서도 돈다. 바꾸는 것은 이 로컬 폴더의 권한과 남은 백업 파일뿐이다(Git·Infisical·클러스터는 그대로).

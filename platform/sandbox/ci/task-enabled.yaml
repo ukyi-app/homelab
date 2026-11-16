@@ -2,6 +2,10 @@
 infisical:
   projectSlug: ci-project
   environmentSlug: ci
+# 작업자 둘을 켠(replicas 1) 렌더도 이 파일이 맡는다. root 렌더는 values.yaml의 replicas를 따른다.
+worker:
+  replicas: 1
 task:
   enabled: true
+  replicas: 1
   nodeName: ci-node

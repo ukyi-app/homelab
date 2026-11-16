@@ -18,7 +18,8 @@ metadata:
 spec:
   # 작업은 직렬 하나다. 작업 전용 파드라는 전제 위에 정리 판정이 선다: 끝난 작업의 프로세스를 파드 PID 공간 기준으로 끝내고
   # 기준 상태(작업자 자신만)로 돌아와야 stopped:true다(설계 C.8). 두 파드가 겹치면 같은 PVC를 함께 쓴다.
-  replicas: 1
+  # 값은 0 또는 1이다(values.yaml task.replicas).
+  replicas: {{ .Values.task.replicas }}
   strategy:
     type: Recreate
   selector:

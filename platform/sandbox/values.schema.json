@@ -29,10 +29,11 @@
     "task": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "image", "remoteCredentialKey", "remoteApiKey", "nodeName"],
+      "required": ["enabled", "image", "replicas", "remoteCredentialKey", "remoteApiKey", "nodeName"],
       "properties": {
         "enabled": { "type": "boolean" },
         "image": { "type": "string", "pattern": "^ghcr\\.io/ukyi-app/homelab-bot@sha256:[0-9a-f]{64}$" },
+        "replicas": { "type": "integer", "enum": [0, 1] },
         "remoteCredentialKey": { "const": "CLAUDE_CODE_OAUTH_TOKEN_TASK" },
         "remoteApiKey": { "const": "ANTHROPIC_API_KEY_TASK" },
         "nodeName": { "type": "string", "pattern": "^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$" }
@@ -41,9 +42,10 @@
     "worker": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["image", "controlPublicKey", "profile"],
+      "required": ["image", "replicas", "controlPublicKey", "profile"],
       "properties": {
         "image": { "type": "string", "pattern": "^ghcr\\.io/ukyi-app/homelab-bot@sha256:[0-9a-f]{64}$" },
+        "replicas": { "type": "integer", "enum": [0, 1] },
         "controlPublicKey": {
           "type": "string",
           "pattern": "^-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA[A-Za-z0-9+/]{43}=\\n-----END PUBLIC KEY-----\\n?$"
