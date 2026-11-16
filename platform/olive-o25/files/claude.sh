@@ -125,3 +125,18 @@ step_claude_ui() {
   fi
   fact "판정은 run.sh claude-judge(본체 로그의 o25c 줄과 이 결과를 묶는다). 끝내기 뒤 프로그램은 다시 띄우지 않는다(새 판은 전체 재시작)"
 }
+
+# 종료 요청(run.sh submit prog-term) 뒤에 돈다. 본체 PID 1은 프로그램을 거둔 직후 중계 연결을 닫고, 이쪽 relay-serve가 그 시각을
+# 자기 로그(제어 uid만 쓰는 /c/out)에 "body closed"로 남긴다. 그 시각을 제어 쪽 사실로 낸다(판정은 claude-judge).
+# 기다림 10초: 판정기의 종료 상한 5초와 본체 종료·중계 닫힘 사이 허용 2초를 넘게 둔다.
+step_claude_term() {
+  local f=$O25_OUT/relay-$O25_GEN.log n=0 t_c
+  for _ in $(seq 20); do
+    n=$(grep -c '^[0-9]* body closed$' "$f" 2>/dev/null)
+    [ "${n:-0}" -ge 1 ] && break
+    sleep 0.5
+  done
+  t_c=$(sed -n 's/^\([0-9]*\) body closed$/\1/p' "$f" 2>/dev/null | head -n 1)
+  printf 'claude-term t_ns=%s relay_closed_ns=%s closed_n=%s\n' "$(ui_now)" "${t_c:-0}" "${n:-0}"
+  fact "판정은 run.sh claude-judge(본체 로그의 prog-term·prog-exit 줄과 이 줄을 묶는다)"
+}

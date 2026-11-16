@@ -8,11 +8,13 @@
 #   run.sh gate                    쓰기(kubectl exec -c control): 세대 기록과 장부 끝(제어 컨테이너가 떠 있을 때만. 멈춰 있으면 logs)
 #   run.sh body <단계>              쓰기(kubectl exec -c body): status, hide, after-restart, after-body-term, shm
 #   run.sh submit <작업>            쓰기(kubectl exec): 검사 요청 하나를 낸다. cred(제어), body-cred·body-hide(본체). 요청 ID를 찍는다
+#                                  prog-term(claude 변형만): 본체 PID 1이 자기가 띄운 프로그램에 SIGTERM 하나(claude-ui 뒤)
 #   run.sh result <요청 ID> [초]    읽기(kubectl logs): 그 파드·컨테이너 로그에서 요청 결과 묶음을 회수한다(exec 없음)
 #   run.sh show-req <요청 ID>       쓰기(kubectl exec -c control): 제어 쪽 요청의 근거 글 전체(검사가 끝난 뒤에만)
 #   run.sh body-only-check         읽기(kubectl get): step body-term 전에 남긴 상태와 지금을 견줘 본체만 다시 떴는지 본다
-#   run.sh claude-judge            쓰기(kubectl exec -c control ctl.sh show claude-ui)+읽기(logs -c body): claude 변형 (4) 판정
-#   (step은 배포된 본체 변형을 먼저 읽는다. claude 변형에 셸 단계(relay·false-exit·plant·body-term)를, 셸 변형에 claude-ui를 넘기지 않는다)
+#   run.sh claude-judge            쓰기(kubectl exec -c control ctl.sh show claude-ui·claude-term)+읽기(logs -c body): claude 변형 (4) 판정
+#   (step은 배포된 본체 변형을 먼저 읽는다. claude 변형에 셸 단계(relay·false-exit·plant·body-term)를, 셸 변형에 claude-ui·claude-term을
+#    넘기지 않는다)
 #
 # kubectl exec는 클러스터 쓰기다. 관리자 승인 범위 안에서만 돌린다. 한 번에 하나만 돌린다. 검사 요청을 낸 뒤 결과를 회수할 때까지
 # 그 컨테이너에 다른 exec를 넣지 않는다(검사 순간 살아 있는 exec 프로세스는 읽지 못한 대상이 되어 판단 필요가 된다).
@@ -25,7 +27,7 @@ LOG_DIR=${O25_LOG_DIR:-$HOME/olive-verify/O25/run}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 }
 
@@ -111,7 +113,7 @@ case "$cmd" in
       exit 5
     }
     case "$v $step" in
-      "claude relay" | "claude false-exit" | "claude plant" | "claude body-term" | "shell claude-ui")
+      "claude relay" | "claude false-exit" | "claude plant" | "claude body-term" | "shell claude-ui" | "shell claude-term")
         echo "거절: '$step'은 본체 변형 '$v'에서 돌리지 않는다(시험 절차서 Claude 변형 절)" >&2
         exit 5
         ;;
@@ -155,6 +157,14 @@ case "$cmd" in
     case "$job" in
       cred) c=control ;;
       body-cred | body-hide) c=body ;;
+      prog-term)
+        c=body
+        # 셸 변형의 본체 PID 1은 이 작업을 받지 않는다(bad-job). 여기서 먼저 막아 exec 자체를 하지 않는다.
+        [ "$(body_variant || true)" = claude ] || {
+          echo "거절: prog-term은 claude 변형에서만 낸다" >&2
+          exit 5
+        }
+        ;;
       *) usage ;;
     esac
     # 파드 이름·UID·컨테이너 ID를 먼저 고정하고 그 파드에만 낸다. 회수도 같은 파드·컨테이너에서만 한다.
@@ -173,7 +183,11 @@ case "$cmd" in
     req=${sub% *}
     printf 'name=%s\nuid=%s\ncontainer=%s\ncid=%s\ngen=%s\njob=%s\n' "$name" "$(printf '%s' "$snap" | cut -d' ' -f2)" "$c" \
       "$(snap_get "$snap" "$c")" "${sub#* }" "$job" >"$LOG_DIR/req-$req.env"
-    echo "요청 $req 기록: $LOG_DIR/req-$req.env. 회수: run.sh result $req"
+    if [ "$job" = prog-term ]; then
+      echo "요청 $req 기록: $LOG_DIR/req-$req.env. 다음: run.sh step claude-term 뒤 run.sh claude-judge(run.sh result는 쓰지 않는다)"
+    else
+      echo "요청 $req 기록: $LOG_DIR/req-$req.env. 회수: run.sh result $req"
+    fi
     ;;
   result)
     req=${2:-}
@@ -269,6 +283,8 @@ case "$cmd" in
     mkdir -p "$LOG_DIR"
     t=$(date -u +%Y%m%dT%H%M%SZ)
     kubectl -n "$NS" exec "$name" -c control -- bash /opt/o25/ctl.sh show claude-ui 2>&1 | strip_ctrl >"$LOG_DIR/$t-claude-ui.txt" || true
+    # 종료 요청 뒤 제어 쪽 확인. 아직 돌지 않았으면 판정기가 종료-요청을 판단 필요로 닫는다.
+    kubectl -n "$NS" exec "$name" -c control -- bash /opt/o25/ctl.sh show claude-term 2>&1 | strip_ctrl >>"$LOG_DIR/$t-claude-ui.txt" || true
     kubectl -n "$NS" logs "$name" -c body --tail=-1 2>&1 | strip_ctrl >"$LOG_DIR/$t-body-log.txt" || true
     gen=$(sed -n 's/^시작 [^ ]* 세대 \([0-9a-f]\{12\}\) .*/\1/p' "$LOG_DIR/$t-claude-ui.txt" | head -n 1)
     echo "파드 $name uid $uid 세대 ${gen:-?} 핀 $ver ${sha:0:16}"

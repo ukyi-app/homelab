@@ -289,10 +289,11 @@ def prog_check(path, want_sha, want_ver, env, runner=subprocess.run, sha=file_sh
     return "ok", f
 
 
-def exe_check(pid, path, limit_s=5.0, stat=os.stat, clock=time.monotonic, sleep=time.sleep):
-    """pty 자식의 /proc/<pid>/exe가 고정 파일(같은 장치·inode)인지. match, mismatch, gone, unreadable-<errno>.
+def exe_check(pid, path, limit_s=5.0, stat=os.stat, clock=time.monotonic, sleep=time.sleep, pre=sys.executable):
+    """pty 자식의 /proc/<pid>/exe가 고정 파일(같은 장치·inode)인지. match, mismatch, not-yet, gone, unreadable-<errno>.
 
-    exec 전에는 exe가 python이므로 limit_s 동안 다시 본다. 읽지 못하면 판정하지 않는다(밖에서 판단 필요).
+    exec 전에는 exe가 python(pre)이므로 limit_s 동안 다시 본다. 기한까지 python 그대로면 not-yet(아직 exec를 못 봄)이고,
+    다른 파일이면 mismatch다. 읽지 못하면 판정하지 않는다(밖에서 판단 필요).
     """
     try:
         want = stat(path)
@@ -309,7 +310,11 @@ def exe_check(pid, path, limit_s=5.0, stat=os.stat, clock=time.monotonic, sleep=
         if (st.st_dev, st.st_ino) == (want.st_dev, want.st_ino):
             return "match"
         if clock() >= end:
-            return "mismatch"
+            try:
+                py = stat(pre)
+            except OSError:
+                return "mismatch"
+            return "not-yet" if (st.st_dev, st.st_ino) == (py.st_dev, py.st_ino) else "mismatch"
         sleep(0.05)
 
 
@@ -332,6 +337,44 @@ def prog_line(pod, gen, kind, **kw):
 # reap()이 먼저 거둔 자식의 종료 상태. 본체 자리 프로그램의 종료 상태를 잃지 않게 한다.
 REAPED = {}
 
+# 본체 PID 1이 자기 안에서 처리하는 고정 요청(claude 변형만). 새 작업 프로세스를 띄우지 않는다.
+PROG_TERM_JOB = "prog-term"
+
+
+def prog_term(child, reaped=REAPED, kill=os.kill):
+    """PID 1이 띄운 프로그램 하나에 SIGTERM 하나를 보낸다. sent, no-program, already-exited, kill-<errno>.
+
+    대상 pid는 PID 1이 fork한 자식이고 아직 거두지 않았을 때만 신호를 보낸다(거둔 뒤에는 pid가 재사용될 수 있다).
+    이 함수와 reap()은 같은 스레드에서 돌아(SIGCHLD 핸들러 없음) 확인과 신호 사이에 거두는 일이 없다.
+    """
+    pid = child.get("pid")
+    if pid is None:
+        return "no-program"
+    if not child.get("alive") or pid in reaped:
+        return "already-exited"
+    try:
+        kill(pid, signal.SIGTERM)
+    except OSError as e:
+        return f"kill-{errname(e.errno).lower()}"
+    return "sent"
+
+
+def term_handler(child, pod, gen, ackdir, out=None, kill=os.kill, reaped=REAPED):
+    """요청 통로의 prog-term 처리. 요청 줄의 pid(제출자)는 쓰지 않는다. 결과는 o25c prog-term 줄 하나이고,
+    종료 상태와 시각은 프로그램을 거둘 때의 prog-exit 줄이다. 제출자를 기다리지 않는다(검사가 아니라 신호 하나다)."""
+    def handle(rec):
+        try:
+            fd = os.open(os.path.join(ackdir, rec["req"]), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            os.close(fd)
+        except OSError:
+            pass
+        t = now_ns()
+        state = prog_term(child, reaped, kill)
+        (out or emit)(prog_line(pod, gen, "prog-term", req=rec["req"], pid=child.get("pid", "-"), sig=int(signal.SIGTERM),
+                                state=state, t_ns=t))
+        return "ok"
+    return handle
+
 
 def cmd_body_init(args):
     if "--" not in args or args.index("--") == len(args) - 1:
@@ -353,11 +396,14 @@ def cmd_body_init(args):
     st.set(gen=gen, gen_init_ns=init_ns, phase="wait-cred")
     # 본체 컨테이너가 뜬 세대의 차례. bctl.sh after-restart가 "바로 앞 세대"(이번 재시작으로 끝났어야 할 세대)를 여기서 읽는다.
     append("/b/boots", f"{gen} {now_ns()}")
-    reqs = ReqServer.open_fifo(BODY_JOBS, gen)
     gdir = f"/relay/{gen}"
     pod = os.environ.get("O25_POD_UID", "?")
     home, tmp = f"/b/{gen}/home", f"/b/{gen}/tmp"
     want_sha = os.environ.get("O25_PROG_SHA256", "")
+    # 본체 자리 프로그램. pid는 fork 뒤에 채우고, alive는 pump_child가 거둘 때 내린다. 종료 요청(claude 변형만)이 이것을 본다.
+    child = {"alive": False}
+    local = {PROG_TERM_JOB: term_handler(child, pod, gen, "/b/ack")} if want_sha else {}
+    reqs = ReqServer.open_fifo(BODY_JOBS, gen, local=local)
     prog_env = {}
     if want_sha:
         # claude 변형: 자격을 받기 전에 고정 파일을 대조한다. --version도 프로그램 환경과 같은 세대 HOME·TMPDIR로 띄운다
@@ -432,6 +478,7 @@ def cmd_body_init(args):
         os.chdir(home)
         os.execvpe(command[0], command, env)
     del cred, env
+    child.update(pid=pid, alive=True)
     os.close(sync_r)
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     rows, cols = struct.unpack("HHHH", fcntl.ioctl(master, termios.TIOCGWINSZ, b"\0" * 8))[:2]
@@ -447,7 +494,6 @@ def cmd_body_init(args):
         st.set(prog_exe=exe)
         emit(prog_line(pod, gen, "prog-launch", pid=pid, start=p[1] if p else "-", exe=exe, rows=rows, cols=cols,
                        sync="before-exec", t_ns=now_ns()))
-    child = {"alive": True}
 
     def on_relay_eof():
         st.set(relay="closed", relay_closed_ns=now_ns())
@@ -1033,12 +1079,15 @@ class ReqServer:
     (중계 입출력을 막지 않는다).
     """
 
-    def __init__(self, jobs, gen, spawn, emit=emit, fd=None):
-        self.jobs, self.gen, self.spawn, self.emit, self.fd = jobs, gen, spawn, emit, fd
+    def __init__(self, jobs, gen, spawn, emit=emit, fd=None, local=None):
+        # local: PID 1 안에서 처리하는 고정 작업 {작업: 처리 함수}. 받을 수 있는 작업 코드는 jobs와 local의 키뿐이다.
+        self.local = dict(local or {})
+        self.jobs = tuple(jobs) + tuple(self.local)
+        self.gen, self.spawn, self.emit, self.fd = gen, spawn, emit, fd
         self.seen, self.job, self.buf = set(), None, b""
 
     @classmethod
-    def open_fifo(cls, jobs, gen, path="/b/req", ackdir="/b/ack"):
+    def open_fifo(cls, jobs, gen, path="/b/req", ackdir="/b/ack", local=None):
         fd = None
         try:
             os.makedirs(ackdir, mode=0o700, exist_ok=True)
@@ -1054,7 +1103,7 @@ class ReqServer:
                 emit(f"o25r {os.environ.get('O25_POD_UID', '?')} {gen} - reqfifo refused")
         except OSError as e:
             emit(f"o25r {os.environ.get('O25_POD_UID', '?')} {gen} - reqfifo {errname(e.errno)}")
-        return cls(jobs, gen, spawn_body_job, emit, fd)
+        return cls(jobs, gen, spawn_body_job, emit, fd, local)
 
     def fds(self):
         return [self.fd] if self.fd is not None else []
@@ -1079,6 +1128,8 @@ class ReqServer:
         rec, code = accept_req(line, self.jobs, self.gen, self.seen)
         if code != "ok":
             return self.reject(rec["req"], code)
+        if rec["job"] in self.local:
+            return self.local[rec["job"]](rec)
         self.job = self.spawn(rec)
         return "ok"
 
@@ -1199,7 +1250,7 @@ def cmd_submit(args):
     if job in CONTROL_JOBS:
         fifo, ackdir = "/c/ctl/in", "/c/ctl/ack"
         gen_src = "/c/boot/current"
-    elif job in BODY_JOBS:
+    elif job in BODY_JOBS or job == PROG_TERM_JOB:
         fifo, ackdir = "/b/req", "/b/ack"
         gen_src = "/relay/current"
     else:
@@ -1243,7 +1294,10 @@ def cmd_submit(args):
     t0 = time.monotonic()
     while time.monotonic() - t0 < ACK_WAIT_S:
         if os.path.exists(os.path.join(ackdir, req)):
-            print("인수 확인. 이 제출자가 끝난 뒤 검사가 돈다. 결과는 run.sh result로 회수한다")
+            if job == PROG_TERM_JOB:
+                print("인수 확인. 결과는 본체 로그의 o25c prog-term·prog-exit 줄이다(run.sh step claude-term 뒤 run.sh claude-judge)")
+            else:
+                print("인수 확인. 이 제출자가 끝난 뒤 검사가 돈다. 결과는 run.sh result로 회수한다")
             return 0
         time.sleep(0.05)
     print("인수 확인 없음(거절·중복·바쁨일 수 있다. 컨테이너 로그의 reject 줄을 본다)")
