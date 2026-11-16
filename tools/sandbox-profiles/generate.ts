@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-const VERSION = "v1";
+const VERSION = "v2";
 const SECCOMP_FILE = `sandbox-worker-${VERSION}.json`;
 const APPARMOR_NAME = `homelab-sandbox-worker-${VERSION}`;
 // worker와 따로 올린다. 한쪽 규칙이 바뀌어도 다른 쪽 파드가 참조하는 이름은 그대로다.
