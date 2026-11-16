@@ -27,7 +27,7 @@ restartRule:
 #   variant: claude  아래 claude 핀의 고정 파일 /opt/claude/claude를 인자 없이 띄운다(command는 쓰지 않는다). 셸 단계는 거절되고
 #                    claude-ui 단계만 돈다. 두 변형은 Recreate로 서로 다른 파드다(새 파드 UID·새 볼륨·새 장부).
 body:
-  variant: shell
+  variant: claude
   command: ["/bin/bash", "-i"]
 
 # claude 변형의 Claude Code. 공식 배포처의 버전별 고정 파일이다(GPG 서명된 manifest.json의 platforms.linux-x64-musl).
