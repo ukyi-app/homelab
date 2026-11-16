@@ -22,10 +22,24 @@ restartRule:
   enabled: true
   exitCode: 86
 
-# 본체 자리 명령. 본체 PID 1(o25.py body-init)이 자격을 받고 중계에 붙은 뒤 pty에서 띄운다. 이 시험에서는 대화형 셸이다.
-# 실제 Claude Code는 이 이미지(netshoot, musl)에서 돌지 않는다(glibc 필요). 이미지와 명령을 함께 바꾸는 것은 뒤 작업이다.
+# 본체 자리 프로그램. 본체 PID 1(o25.py body-init)이 자격을 받고 중계에 붙은 뒤 pty에서 띄운다.
+#   variant: shell   command의 대화형 셸. 중계로 셸 명령을 보내는 단계(relay·false-exit·plant·body-term)는 이 변형에서만 돈다.
+#   variant: claude  아래 claude 핀의 고정 파일 /opt/claude/claude를 인자 없이 띄운다(command는 쓰지 않는다). 셸 단계는 거절되고
+#                    claude-ui 단계만 돈다. 두 변형은 Recreate로 서로 다른 파드다(새 파드 UID·새 볼륨·새 장부).
 body:
+  variant: shell
   command: ["/bin/bash", "-i"]
+
+# claude 변형의 Claude Code. 공식 배포처의 버전별 고정 파일이다(GPG 서명된 manifest.json의 platforms.linux-x64-musl).
+# 지금 본체 이미지(netshoot, Alpine·musl)에서 도는 musl 배포본이다. glibc 배포본(linux-x64)은 이 이미지에서 돌지 않는다.
+# version·url·sha256·size는 함께 바꾼다. 받는 쪽은 fetch-hc init(templates/session.yaml), 실행 전 대조는 본체 PID 1이다.
+# memoryLimit은 claude 변형의 본체 상한이다(bodyLimits.memoryLimit 대신 쓴다. 첫 화면 리허설을 512Mi에서 했다).
+claude:
+  version: "2.1.325"
+  url: https://downloads.claude.ai/claude-code-releases/2.1.325/linux-x64-musl/claude
+  sha256: a5e3bd36dce97db0429705aa5c3573eea346a77938a89104b9c28fce409b20cd
+  size: 352201992
+  memoryLimit: 512Mi
 
 # 컨테이너 상한. 본체에 따로 상한을 두어 본체의 메모리 초과가 제어 쪽을 죽이지 않게 한다(반박 검토 §2.4).
 control:

@@ -7,7 +7,14 @@ restartRule:
   enabled: false
   exitCode: 86
 body:
+  variant: shell
   command: ["/bin/bash", "-i"]
+claude:
+  version: "2.1.325"
+  url: https://downloads.claude.ai/claude-code-releases/2.1.325/linux-x64-musl/claude
+  sha256: a5e3bd36dce97db0429705aa5c3573eea346a77938a89104b9c28fce409b20cd
+  size: 352201992
+  memoryLimit: 512Mi
 control:
   cpuLimit: 500m
   memoryLimit: 256Mi

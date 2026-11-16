@@ -1,0 +1,12 @@
+# expect: fail
+# match: does not match pattern
+# Claude 변형의 sha256이 비면 본체 PID 1이 고정 파일 대조 없이 프로그램을 띄우는 길(O25_PROG_SHA256 빈 값)이 생긴다. 스키마가 막는다.
+body:
+  variant: claude
+  command: ["/bin/bash", "-i"]
+claude:
+  version: "2.1.325"
+  url: https://downloads.claude.ai/claude-code-releases/2.1.325/linux-x64-musl/claude
+  sha256: ""
+  size: 352201992
+  memoryLimit: 512Mi

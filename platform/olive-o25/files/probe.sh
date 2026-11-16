@@ -18,7 +18,8 @@ clean() { LC_ALL=C tr '\000-\010\013-\037\177' '?'; }
 # one <이름> [인자...]: "<종료 코드> <첫 줄>"을 낸다.
 one() {
   local out rc
-  out=$(python3 "$PY" "$@" 2>&1 </dev/null)
+  # -I: 본체가 쓸 수 있는 사용자 site(.pth)·현재 폴더·PYTHON* 환경에서 코드를 읽지 않는다.
+  out=$(python3 -I "$PY" "$@" 2>&1 </dev/null)
   rc=$?
   printf '%s %s' "$rc" "$(printf '%s\n' "$out" | head -n 1 | clean)"
 }
@@ -36,8 +37,11 @@ reach() {
   done
   echo unknown
 }
-SOCK_BLOCKED=(ENOENT ECONNREFUSED EACCES EPERM)
-FS_BLOCKED=(EROFS EACCES EPERM)
+# 차단으로 세는 errno는 경로가 없음·읽기 전용·듣는 쪽 없음뿐이다. EACCES·EPERM은 세지 않는다(판단 필요): 이 노드에서 exec로
+# 들어온 탐침은 AppArmor 라벨이 겹쳐져(…//&unconfined) 원래 본체라면 닿았을 곳에서도 거부될 수 있다. 그 거부를 "가려졌다"로 읽지 않는다.
+# 본체 PID 1 계통(o25.py body-job body-hide)에서 돈 탐침도 같은 목록을 쓴다.
+SOCK_BLOCKED=(ENOENT ECONNREFUSED)
+FS_BLOCKED=(EROFS)
 # judge <키> <닿음 여부 yes|no|unknown> <근거>
 judge() {
   local k="5.$role.$1"
@@ -55,6 +59,7 @@ judge() {
 read -r gen _ </relay/current 2>/dev/null
 G=/c/g/$gen
 printf '탐침 역할=%s uid=%s groups=%s 세대=%s\n' "$role" "$(id -u)" "$(id -G)" "${gen:-?}"
+printf '사실 AppArmor 라벨(이 탐침) %s\n' "$(clean 2>&1 </proc/self/attr/current)"
 if [ -z "$gen" ]; then
   echo "세대를 읽지 못했다(/relay/current)"
   exit 1
@@ -103,7 +108,7 @@ printf '%s\n' "$out" | sed 's/^/  /'
 echo "  -> exit $rc"
 if printf '%s' "$out" | grep -qw body; then
   judge hc-ls yes "제어 쪽 터미널 body가 목록에 보였다"
-elif [ "$n_names" -gt 0 ] && [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qE 'Read-only file system|Permission denied'; then
+elif [ "$n_names" -gt 0 ] && [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'Read-only file system'; then
   judge hc-ls no "core가 떠 있는데(이름 ${n_names}개) hc ls가 쓰기 차단 오류로 끝났다(exit $rc)"
 else
   judge hc-ls unknown "hc ls가 기대한 차단 오류로 끝나지 않았다(exit $rc, 위 출력)"
@@ -176,7 +181,7 @@ for a in $abs; do
     unknown) n_unk=$((n_unk + 1)) ;;
   esac
 done
-tcp_out=$(python3 "$PY" tcpscan 2>&1 </dev/null)
+tcp_out=$(python3 -I "$PY" tcpscan 2>&1 </dev/null)
 tcp_rc=$?
 printf '%s\n' "$tcp_out" | clean | sed 's/^/  /'
 sum=$(printf '%s\n' "$tcp_out" | sed -n 's/^summary listen=\([0-9]*\) connected=\([0-9]*\) blocked=\([0-9]*\) unknown=\([0-9]*\)$/\1 \2 \3 \4/p')
@@ -215,7 +220,7 @@ if [ "$role" = body ]; then
   if [ "$n_yes" -gt 0 ]; then
     judge relay-dir yes "중계 폴더에 ${n_yes}가지 조작이 됐다"
   elif [ "$n_no" -eq 4 ] && [ -d "/relay/$gen" ]; then
-    judge relay-dir no "네 시도 모두 기대한 차단 오류(EROFS·EACCES·EPERM)로 실패했다"
+    judge relay-dir no "네 시도 모두 기대한 차단 오류(EROFS·EADDRINUSE)로 실패했다"
   else
     judge relay-dir unknown "네 시도 중 차단 오류로 확인된 것 ${n_no}개(나머지는 도우미 실패·다른 오류)"
   fi

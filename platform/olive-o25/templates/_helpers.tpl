@@ -9,7 +9,7 @@ app.kubernetes.io/part-of: olive-o25
 
 {{/*
 시험 이미지. O02와 같은 netshoot digest다(platform/olive-o02/templates/_helpers.tpl). 노드에 이미 받아져 있고
-bash, python3, curl, util-linux(setsid)가 있다. 실제 Claude Code는 이 이미지(musl)에서 돌지 않는다(values.yaml body).
+bash, python3, curl, util-linux(setsid)가 있다. Alpine(musl)이라 Claude Code는 musl 배포본만 돈다(values.yaml claude).
 */}}
 {{- define "o25.image" -}}
 docker.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70
