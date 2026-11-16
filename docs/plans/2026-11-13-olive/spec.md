@@ -519,7 +519,7 @@ flowchart TD
 | ID | 제목 | 단계 | Blocked by | 상태 | 수행 |
 |---|---|---|---|---|---|
 | [O01](issues/O01-retire-old-bot.md) | 옛 봇 끄기 | 0 끄기와 검증 | 없음 | 끄기 완료(게시 서버 #1281, 작업자 둘 #1282). 남은 일: Healthchecks 확인 일시 중지(관리자) | 에이전트 + 사람(배포 PR 병합) |
-| [O02](issues/O02-verify-hc-in-pod.md) | 검증: 세션 파드 안 hc와 실행기 경계 | 0 끄기와 검증 | 없음 | 대기 | 에이전트 + 사람(배포 PR) |
+| [O02](issues/O02-verify-hc-in-pod.md) | 검증: 세션 파드 안 hc와 실행기 경계 | 0 끄기와 검증 | 없음 | 시험 구성 요소 병합(2026-11-16, homelab #1287, 기본 꺼짐). 켜는 PR과 시험 실행은 관리자 승인 대기 | 에이전트 + 사람(배포 PR) |
 | [O03](issues/O03-verify-cross-account-resume.md) | 검증: 계정·방식을 바꾼 뒤 세션 이어 열기 | 0 끄기와 검증 | 없음 | 돌려 본 다섯 경우 완료(2026-11-16, 구독 ↔ 구독은 조건부 됨). `claude-work` → `claude-sub` 쌍과 장기 토큰은 대기 | 에이전트 + 사람(계정 준비) |
 | [O04](issues/O04-verify-limit-signals.md) | 검증: 실제 한도·API 소진 때의 신호 모양 | 0 끄기와 검증 | 없음 | 구독 한도 표본 완료(2026-11-16). API 표본(지출 한도, 크레딧 소진, OpenCode의 한도 신호)은 대기 | 에이전트 + 사람(한도 상태 관측) |
 | [O05](issues/O05-verify-included-credit-billing.md) | 검증: 포함 API 크레딧 실제 차감 | 0 끄기와 검증 | 없음 | 대기 | 사람 + 에이전트 |
