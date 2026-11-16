@@ -1,0 +1,13 @@
+{{- /*
+파드 안에서 도는 고정 프로그램과 시험 스크립트(files/). 비밀이 아니다. 가짜 표식은 실행 때 만들고 여기 적지 않는다.
+모든 컨테이너가 읽기 전용으로 붙인다. 내용이 바뀌면 Deployment의 checksum 주석이 바뀌어 파드가 다시 뜬다(주석 한 줄도).
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: o02-scripts
+  namespace: {{ include "o02.namespace" . }}
+  labels:
+    {{- include "o02.labels" . | nindent 4 }}
+data:
+  {{- (.Files.Glob "files/*").AsConfig | nindent 2 }}

@@ -1,0 +1,248 @@
+{{- /*
+세션 파드. 티켓 할 일 1의 조건으로 뜬다: 비root, SA 토큰 없음, 서비스 환경변수 없음, 읽기 전용 root, drop ALL, 권한 상승 금지,
+hostPath·hostPID·hostNetwork 없음, CPU·메모리 limits.
+
+컨테이너 셋:
+- session(uid 10001): PID 1은 고아를 거두는 init.sh, 그 자식이 실행기 역할의 고정 프로그램 executor.sh다. 실행기만 hc를 쥔다.
+  실행기는 정해진 단계 이름만 받는다(files/executor.sh). 명령·경로를 밖에서 받지 않는다.
+- sibling-nomount(uid 10002): 같은 파드의 다른 컨테이너, 세션 폴더를 붙이지 않는다. 소켓이 보이는지 재는 대조군.
+- sibling-ro(uid 10002): 세션 폴더를 읽기 전용으로 붙인다. 폴더 권한만으로 가려지는지 재는 대조군.
+
+fsGroup을 쓰지 않는다. 쓰면 파드의 모든 컨테이너가 그 그룹에 들어 대조군이 세션 폴더의 그룹 권한을 얻는다.
+shareProcessNamespace도 쓰지 않는다(CI가 worker-task 밖에서 막는다). 컨테이너끼리 /proc이 보이지 않는 것이 시험 전제다.
+PID 상한은 여기 limits가 아니라 kubelet 설정이다(supervisor.md 1.1).
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: o02-session
+  namespace: {{ include "o02.namespace" . }}
+  labels:
+    {{- include "o02.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # 두 세션 파드가 겹쳐 뜨지 않게 한다. 파드 종료 시험(cgroup이 비는지)이 파드 UID 하나를 본다.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: o02-session
+  template:
+    metadata:
+      labels:
+        app: o02-session
+      annotations:
+        checksum/scripts: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # init.sh는 TERM에 바로 끝난다. PID 1이 끝나면 커널이 그 PID 공간의 나머지를 KILL한다. 남는 것은 유예 뒤 kubelet이 끝낸다.
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # 고정 버전 hc를 받아 sha256을 대조하고 emptyDir에 둔다. 본 컨테이너는 그 볼륨을 읽기 전용으로 붙인다.
+        # curl에 -L을 주지 않는다. 릴리스 주소는 리다이렉트 없이 200을 준다(2026-11-16 확인). 리다이렉트가 생기면 실패로 드러난다.
+        # --retry-all-errors: 이름 풀이·연결 실패 같은 잠깐의 장애도 다시 시도한다(기본 retry는 일부 오류만 다시 한다).
+        # tar는 herdr-core 한 파일만 푼다. 대조에 실패하면 init이 실패해 파드가 뜨지 않는다.
+        - name: fetch-hc
+          image: {{ include "o02.image" . }}
+          command: ["/bin/sh", "-euc"]
+          workingDir: /hc
+          args:
+            - |
+              umask 022
+              rm -f /hc/hc /hc/herdr-core /hc/hc.tar.gz
+              curl -fsS --proto '=https' --tlsv1.2 --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 15 --max-time 180 -o /hc/hc.tar.gz "$HC_URL"
+              echo "$HC_SHA256  /hc/hc.tar.gz" | sha256sum -c -
+              tar -xzf /hc/hc.tar.gz -C /hc herdr-core
+              rm -f /hc/hc.tar.gz
+              chmod 0555 /hc/herdr-core
+              ln -s herdr-core /hc/hc
+              got=$(/hc/herdr-core --version)
+              if [ "$got" != "hc $HC_VERSION" ]; then
+                echo "version mismatch: want hc $HC_VERSION, got $got" >&2
+                exit 1
+              fi
+              echo "fetched: $got"
+          env:
+            - name: HC_VERSION
+              value: {{ .Values.hc.version | quote }}
+            - name: HC_URL
+              value: {{ .Values.hc.url | quote }}
+            - name: HC_SHA256
+              value: {{ .Values.hc.sha256 | quote }}
+            # 읽기 전용 root라 홈을 쓸 수 있는 볼륨으로 돌린다.
+            - name: HOME
+              value: /hc
+          securityContext:
+            {{- include "o02.containerSecurity" . | nindent 12 }}
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: hc-bin
+              mountPath: /hc
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      containers:
+        - name: session
+          image: {{ include "o02.image" . }}
+          command: ["/bin/bash", "/opt/o02/init.sh"]
+          # 이미지의 기본 작업 폴더(/root)는 uid 10001이 들어가지 못한다. kubectl exec도 이 값을 물려받는다.
+          workingDir: /s
+          env:
+            - name: O02_HC_VERSION
+              value: {{ .Values.hc.version | quote }}
+            # hc의 XDG 경로는 여기 두지 않는다. 실행기가 스스로 정한다(files/lib.sh). 컨테이너 env에 두면 모든 프로세스가 물려받아
+            # "경로를 모르는 도구 역할" 시험이 성립하지 않는다.
+            - name: HOME
+              value: /s/h
+            # 노드 API 경로(노드 IP의 6443·10250)에 닿는지 재는 탐침이 쓴다. 저장소에 노드 주소를 적지 않으려고 실행 때 받는다.
+            - name: O02_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          securityContext:
+            {{- include "o02.containerSecurity" . | nindent 12 }}
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: hc-bin
+              mountPath: /opt/hc
+              readOnly: true
+            - name: scripts
+              mountPath: /opt/o02
+              readOnly: true
+            - name: session
+              mountPath: /s
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: {{ .Values.session.cpuLimit | quote }}
+              memory: {{ .Values.session.memoryLimit | quote }}
+        - name: sibling-nomount
+          image: {{ include "o02.image" . }}
+          {{- include "o02.idleCommand" . | nindent 10 }}
+          securityContext:
+            {{- include "o02.containerSecurity" . | nindent 12 }}
+            runAsUser: 10002
+            runAsGroup: 10002
+          volumeMounts:
+            - name: hc-bin
+              mountPath: /opt/hc
+              readOnly: true
+            - name: scripts
+              mountPath: /opt/o02
+              readOnly: true
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        - name: sibling-ro
+          image: {{ include "o02.image" . }}
+          {{- include "o02.idleCommand" . | nindent 10 }}
+          securityContext:
+            {{- include "o02.containerSecurity" . | nindent 12 }}
+            runAsUser: 10002
+            runAsGroup: 10002
+          volumeMounts:
+            - name: hc-bin
+              mountPath: /opt/hc
+              readOnly: true
+            - name: scripts
+              mountPath: /opt/o02
+              readOnly: true
+            - name: session
+              mountPath: /s
+              readOnly: true
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: hc-bin
+          emptyDir:
+            sizeLimit: 64Mi
+        # 세션 폴더: hc의 상태·설정·소켓, 실행기의 제어 FIFO, 시험 결과가 모두 이 안에 있다. 파드와 함께 사라진다.
+        - name: session
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: scripts
+          configMap:
+            name: o02-scripts
+            defaultMode: 0444
+---
+# 대조 파드: 같은 ns의 다른 파드. 세션 파드의 소켓·프로세스·세션 폴더가 보이지 않아야 한다.
+# 네트워크 허용 규칙은 없지만 무출구는 아니다. 노드 IP의 6443·10250 경로가 남는다(templates/networkpolicy.yaml 머리 주석).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: o02-peer
+  namespace: {{ include "o02.namespace" . }}
+  labels:
+    {{- include "o02.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: o02-peer
+  template:
+    metadata:
+      labels:
+        app: o02-peer
+      annotations:
+        checksum/scripts: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: peer
+          image: {{ include "o02.image" . }}
+          {{- include "o02.idleCommand" . | nindent 10 }}
+          env:
+            # 세션 컨테이너와 같은 값. 탐침(probe.sh 7번)이 이 파드에서도 노드 API 경로를 잰다.
+            - name: O02_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          securityContext:
+            {{- include "o02.containerSecurity" . | nindent 12 }}
+            # 세션 컨테이너와 같은 uid다. uid가 같아도 다른 파드에서는 닿지 않는지 본다.
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/o02
+              readOnly: true
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: scripts
+          configMap:
+            name: o02-scripts
+            defaultMode: 0444
