@@ -1,0 +1,17 @@
+# 꺼진 구성 요소라 root 렌더에 나오지 않는다. 이 파일이 있어야 CI가 차트를 렌더해 정책·kubeconform 검사를 한다(tools/ci/render.ts 4번).
+# 값은 values.yaml 그대로다(재시작 규칙 켜짐). 켠 뒤에는 root 렌더도 같은 검사를 받는다.
+hc:
+  version: "0.1.21"
+  url: https://releases.herdr.dev/core/0.1.21/herdr-core-linux-x86_64.tar.gz
+  sha256: 78424755c10a40dde38a0bdb55c20ac19706e9ae05ed68fc2acf1fcff0d941c1
+restartRule:
+  enabled: true
+  exitCode: 86
+body:
+  command: ["/bin/bash", "-i"]
+control:
+  cpuLimit: 500m
+  memoryLimit: 256Mi
+bodyLimits:
+  cpuLimit: 500m
+  memoryLimit: 256Mi

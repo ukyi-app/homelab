@@ -1,0 +1,18 @@
+# expect: fail
+# match: does not match pattern
+# hc는 공식 릴리스 서비스의 고정 버전 주소에서만 받는다. 다른 호스트의 파일은 sha256이 맞아도 받지 않는다(받는 자리를 values 한 줄로 바꾸지 못하게).
+hc:
+  version: "0.1.21"
+  url: https://example.com/core/0.1.21/herdr-core-linux-x86_64.tar.gz
+  sha256: 78424755c10a40dde38a0bdb55c20ac19706e9ae05ed68fc2acf1fcff0d941c1
+restartRule:
+  enabled: true
+  exitCode: 86
+body:
+  command: ["/bin/bash", "-i"]
+control:
+  cpuLimit: 500m
+  memoryLimit: 256Mi
+bodyLimits:
+  cpuLimit: 500m
+  memoryLimit: 256Mi

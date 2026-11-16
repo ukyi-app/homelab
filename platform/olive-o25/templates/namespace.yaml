@@ -1,0 +1,16 @@
+{{- /*
+시험 ns. platform/namespaces가 아니라 이 Application이 직접 만든다(O02의 olive-o02-test와 같은 방식). 끄면 ns째 지워져야 한다.
+restricted를 강제한다. 두 컨테이너와 init이 비root·drop ALL·권한 상승 금지·seccomp를 못 지키면 뜨지 않는다.
+*/}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "o25.namespace" . }}
+  labels:
+    {{- include "o25.labels" . | nindent 4 }}
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    # 같은 Application 안의 ns 리소스보다 먼저.
+    argocd.argoproj.io/sync-wave: "-1"

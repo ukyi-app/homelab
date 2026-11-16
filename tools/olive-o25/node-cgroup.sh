@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# 올리브 계획 O25: 노드(NUC)에서 본 세션 파드 cgroup. sudo 없이 노드를 읽기만 한다(O02의 tools/olive-o02/node-cgroup.sh와 같은 방법).
+#
+#   node-cgroup.sh live <파드 UID>
+#       두 컨테이너의 프로세스가 모두 이 파드 cgroup 안인지, 어느 컨테이너 cgroup에 어느 uid로 있는지, 밖에 시험 프로세스가 없는지
+#       기대 역할: core, holder, relay(제어 쪽) + bodyinit(본체 PID 1). 하나라도 없으면 "판단 필요"다
+#   node-cgroup.sh after <파드 UID> <옛 세대 ID>
+#       전체 재시작 뒤: 옛 세대에 심은 것(plant.sh의 p-<세대>-*, 첩자)이 노드 어디에도 없는지, 본체 PID 1이 새로 떴는지
+#       세대 ID는 run.sh step plant의 결과(planted p-<세대>) 또는 after-restart의 "요청한 세대"에서 읽는다
+#
+# 파드 UID는 run.sh status가 찍는다. 전체 재시작(RestartAllContainers)은 파드 UID를 바꾸지 않는다. 출력은 O25_LOG_DIR에도 남긴다.
+# 파드 안 프로세스의 명령줄은 믿지 않는 입력이다. 한 줄로 만들고 모든 출력을 sanitize.py에 통과시킨 뒤에 찍는다.
+set -uo pipefail
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+LOG_DIR=${O25_LOG_DIR:-$HOME/olive-verify/O25/run}
+PROC=/proc
+CG=/sys/fs/cgroup
+
+mode=${1:-}
+uid=${2:-}
+gen=${3:-}
+if [[ ! $mode =~ ^(live|after)$ || ! $uid =~ ^[0-9a-f-]{36}$ ]] || { [ "$mode" = after ] && [[ ! $gen =~ ^[0-9a-f]{12}$ ]]; }; then
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+fi
+# systemd cgroup 드라이버는 UID의 - 를 _ 로 바꿔 쓴다.
+uid_us=${uid//-/_}
+
+verdict() { printf '결과 %s %s — %s\n' "$1" "$2" "$3"; }
+# 2>/dev/null을 < 앞에 둔다. 뒤에 두면 그새 끝난 프로세스의 파일을 못 연 셸 오류가 찍힌다.
+cmd_line() { tr '\0\n\r\t' '    ' 2>/dev/null <"$1" | cut -c1-90; }
+
+# classify <cmdline 파일>: argv의 자리로 역할을 가른다.
+classify() {
+  local -a a=()
+  local a0
+  { mapfile -d '' -t a <"$1"; } 2>/dev/null || {
+    echo none
+    return
+  }
+  # 커널 스레드는 argv가 비어 있다. set -u에서 ${a[0]}을 바로 쓰면 이 함수가 아무것도 내지 않고 끝난다.
+  [ "${#a[@]}" -gt 0 ] || {
+    echo none
+    return
+  }
+  a0=${a[0]}
+  case "$a0" in
+    /opt/hc/*)
+      case " ${a[*]:1} " in
+        *" serve "*) echo core ;;
+        *" hold "*) echo holder ;;
+        *) echo client ;;
+      esac
+      return
+      ;;
+  esac
+  case "${a0##*/} ${a[1]:-} ${a[2]:-}" in
+    "python3 /opt/o25/o25.py relay-serve") echo relay ;;
+    "python3 /opt/o25/o25.py cred-serve") echo credsrv ;;
+    "python3 /opt/o25/o25.py body-init") echo bodyinit ;;
+    "python3 /opt/o25/o25.py spy") echo "spy:${a[3]:-}" ;;
+    "bash /opt/o25/plant.sh sleeper" | "bash /opt/o25/plant.sh stubborn") echo "plant:${a[3]:-}" ;;
+    "bash /opt/o25/control.sh"*) echo control ;;
+    *)
+      case "${a[*]}" in
+        *"/opt/o25/"* | *"/opt/hc/"*) echo other ;;
+        *) echo none ;;
+      esac
+      ;;
+  esac
+}
+
+uid_of() { awk '/^Uid:/ { print $2; exit }' 2>/dev/null <"$1/status"; }
+start_of() {
+  local stat f
+  { read -r stat <"$1/stat"; } 2>/dev/null || return
+  read -ra f <<<"${stat##*) }"
+  printf '%s' "${f[19]:-}"
+}
+
+main() {
+  local pod_dir d role cg u inside=0 outside=0 can_see=yes lack="" old_alive=0 bodyinit=0 k
+  local -A count=()
+  pod_dir=$(find "$CG" -maxdepth 4 -type d \( -name "*pod${uid_us}*" -o -name "*pod${uid}*" \) 2>/dev/null | head -n 1)
+  if [ -n "$pod_dir" ]; then
+    echo "== 파드 cgroup: $pod_dir"
+    for c in "$pod_dir"/*/; do
+      [ -d "$c" ] || continue
+      printf -- '-- 하위 cgroup %s: populated=%s pids=%s memory.max=%s\n' "$(basename "$c")" \
+        "$(awk '$1 == "populated" { print $2 }' 2>/dev/null <"${c}cgroup.events")" "$(cat 2>/dev/null <"${c}pids.current")" "$(cat 2>/dev/null <"${c}memory.max")"
+      while read -r pid; do
+        [[ $pid =~ ^[0-9]+$ ]] || continue
+        printf '   pid %s uid %s 시작 %s 역할 %s :: %s\n' "$pid" "$(uid_of "$PROC/$pid")" "$(start_of "$PROC/$pid")" "$(classify "$PROC/$pid/cmdline")" "$(cmd_line "$PROC/$pid/cmdline")"
+      done 2>/dev/null <"${c}cgroup.procs"
+    done
+  else
+    echo "== 파드 cgroup 폴더가 없다(UID $uid)"
+  fi
+
+  echo "== 노드의 모든 프로세스에서 시험 프로세스 찾기"
+  if [ -z "$(tr -d '\0' 2>/dev/null <"$PROC/1/cmdline")" ]; then
+    can_see=no
+    echo "pid 1의 명령줄을 읽지 못했다. 다른 프로세스를 보지 못할 수 있다"
+  fi
+  for d in "$PROC"/[0-9]*; do
+    role=$(classify "$d/cmdline")
+    [ "$role" = none ] && continue
+    cg=$(sed -n 's/^0:://p' 2>/dev/null <"$d/cgroup" | tr -d '\n')
+    u=$(uid_of "$d")
+    case "$role" in
+      spy:p-"$gen"-* | plant:p-"$gen"-*)
+        [ "$mode" = after ] && {
+          old_alive=$((old_alive + 1))
+          printf '옛 세대의 심은 것: pid %s uid %s 역할 %s cgroup %s\n' "${d##*/}" "$u" "$role" "$cg"
+        }
+        ;;
+    esac
+    [ "$role" = bodyinit ] && [[ $cg == *"$uid_us"* || $cg == *"$uid"* ]] && bodyinit=$((bodyinit + 1))
+    case "$cg" in
+      *"$uid_us"* | *"$uid"*)
+        inside=$((inside + 1))
+        count[${role%%:*}]=$((${count[${role%%:*}]:-0} + 1))
+        ;;
+      *)
+        outside=$((outside + 1))
+        printf '파드 cgroup 밖: pid %s uid %s 역할 %s %s :: %s\n' "${d##*/}" "$u" "$role" "${cg:-(못 읽음)}" "$(cmd_line "$d/cmdline")"
+        ;;
+    esac
+  done
+  printf '이 파드 cgroup 안 %s개(' "$inside"
+  for k in "${!count[@]}"; do printf '%s=%s ' "$k" "${count[$k]}"; done
+  printf '), 밖 %s개\n' "$outside"
+
+  if [ "$mode" = live ]; then
+    for k in core holder relay bodyinit; do [ "${count[$k]:-0}" -gt 0 ] || lack="$lack $k"; done
+    k="1.node.두-컨테이너-모두-파드-cgroup-안"
+    if [ -z "$pod_dir" ]; then
+      verdict "$k" "판단 필요" "파드 cgroup 폴더를 찾지 못했다"
+    elif [ "$outside" -gt 0 ]; then
+      verdict "$k" "안 됨" "파드 cgroup 밖에 ${outside}개(위 줄. 이 명령을 돌린 쪽의 검색 명령이면 시험 프로세스가 아니다)"
+    elif [ "$can_see" = no ] || [ -n "$lack" ]; then
+      verdict "$k" "판단 필요" "다른 프로세스를 못 보거나 기대 역할이 없다:${lack:- 없음}"
+    else
+      verdict "$k" "됨" "제어 쪽(core·holder·relay)과 본체 PID 1이 모두 이 파드 cgroup 안이고 밖에 0개다. 하위 cgroup별 uid는 위 줄"
+    fi
+  else
+    k="3.node.옛-세대-심은-것-0"
+    if [ "$can_see" = no ]; then
+      verdict "$k" "판단 필요" "다른 프로세스를 보지 못해 '0개'를 믿을 수 없다"
+    elif [ "$old_alive" -gt 0 ]; then
+      verdict "$k" "안 됨" "옛 세대 $gen 에 심은 것 ${old_alive}개가 노드에 남았다"
+    elif [ "$bodyinit" -ge 1 ]; then
+      verdict "$k" "됨" "옛 세대 $gen 에 심은 분리 후손·첩자가 노드 어디에도 없고, 이 파드 cgroup에 본체 PID 1이 있다(새 컨테이너인지는 run.sh status의 startedAt으로 본다)"
+    else
+      verdict "$k" "판단 필요" "옛 세대 것은 0개지만 본체 PID 1도 보이지 않는다(파드가 떠 있는지 본다)"
+    fi
+  fi
+}
+
+mkdir -p "$LOG_DIR"
+main 2>&1 | python3 -I "$HERE/sanitize.py" | tee "$LOG_DIR/node-$mode-$uid-$(date -u +%Y%m%dT%H%M%SZ).txt"

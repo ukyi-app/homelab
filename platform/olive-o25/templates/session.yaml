@@ -1,0 +1,233 @@
+{{- /*
+세션 파드(D-47 구조의 시험판). 본체 전체를 같은 파드의 다른 uid·다른 컨테이너에 둔다.
+
+  init fetch-hc(uid 10001)  고정 hc를 받아 sha256 대조. 전체 재시작 때는 남은 파일을 다시 대조만 한다.
+  init gen(uid 10001)       새 부팅 세대와 일회용 시작 허가(files/gen.sh). 일반 init이라 전체 재시작마다 다시 돈다.
+  control(uid·gid 10001)    PID 1 = 실행기 자리(files/control.sh) → hc core → holder → 중계(o25.py relay-serve)
+                            hc 소켓·상태·설정·허가는 /c(제어 전용)에만 있다.
+  body(uid·gid 10002)       PID 1 = 고정 시작부(o25.py body-init) → pty → 본체 자리 명령(values body.command)
+
+둘 사이는 /relay 하나다. 제어 쪽이 소유하고 쓰며 소켓을 만든다(듣는 쪽). 본체에는 읽기 전용으로 붙어 연결만 한다.
+그래서 본체는 그 자리에 자기 소켓을 두거나 이름을 바꿔치기하지 못한다(Podman 실측에서 본체가 쓸 수 있는 폴더에 소켓을 두자 됐다).
+연결 권한은 파일 권한이 아니라 SO_PEERCRED uid로 가린다.
+
+fsGroup·supplementalGroups를 쓰지 않는다. 파드 수준 값이라 두 컨테이너가 같은 그룹을 얻고, fsGroup은 /c까지 그룹 쓰기를 준다.
+shareProcessNamespace를 쓰지 않는다(기본 false). 본체 컨테이너의 PID 1이 끝나면 커널이 그 컨테이너의 나머지를 모두 끝낸다.
+hostUsers·procMount·Localhost 프로필을 쓰지 않는다. 본체 때문에 여는 예외가 없는 것이 이 구조의 요점이다(D-47).
+SA 토큰 없음, 서비스 환경변수 없음, 읽기 전용 root, drop ALL, 권한 상승 금지, 컨테이너마다 limits.
+
+전체 재시작: control의 restartPolicyRules가 고정 종료 코드에 RestartAllContainers를 건다(Kubernetes 1.36 beta, 기본 켜짐,
+기능 게이트 ContainerRestartRules·RestartAllContainersOnContainerExits). kubelet이 모든 컨테이너를 끝내고 init부터 다시 띄운다.
+파드 UID·IP·볼륨은 그대로이고 terminationGracePeriodSeconds와 preStop을 따르지 않는다. 그래서 emptyDir의 옛 세대 파일이 남고,
+세대마다 새 경로를 쓴다. 규칙을 쓰면 컨테이너 수준 restartPolicy를 꼭 적어야 한다(API 검증). 규칙에 맞지 않는 종료는 그 값을 따른다.
+기능 게이트가 꺼진 API 서버는 이 필드를 말없이 떨어뜨린다. 실행기가 첫 세대에서 그것을 스스로 확인한다(files/control.sh).
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: o25-session
+  namespace: {{ include "o25.namespace" . }}
+  labels:
+    {{- include "o25.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # 두 세션 파드가 겹쳐 뜨지 않게 한다. 세대 장부와 노드 cgroup 확인이 파드 UID 하나를 본다.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: o25-session
+  template:
+    metadata:
+      labels:
+        app: o25-session
+      annotations:
+        checksum/scripts: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # 고정 버전 hc를 받아 sha256을 대조한다. 받은 묶음을 볼륨에 남겨, 전체 재시작 뒤에는 대조만 하고 다시 받지 않는다
+        # (재시작마다 인터넷에 기대지 않게). 대조에 실패하면 지우고 다시 받는다. 묶음도 실행 파일도 이 init만 쓴다.
+        - name: fetch-hc
+          image: {{ include "o25.image" . }}
+          command: ["/bin/sh", "-euc"]
+          workingDir: /hc
+          args:
+            - |
+              umask 022
+              if [ -f /hc/hc.tar.gz ] && echo "$HC_SHA256  /hc/hc.tar.gz" | sha256sum -c - >/dev/null 2>&1; then
+                echo "reuse verified archive"
+              else
+                rm -f /hc/hc.tar.gz
+                curl -fsS --proto '=https' --tlsv1.2 --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 15 --max-time 180 -o /hc/hc.tar.gz "$HC_URL"
+                echo "$HC_SHA256  /hc/hc.tar.gz" | sha256sum -c -
+              fi
+              rm -f /hc/hc /hc/herdr-core
+              tar -xzf /hc/hc.tar.gz -C /hc herdr-core
+              chmod 0555 /hc/herdr-core
+              ln -s herdr-core /hc/hc
+              got=$(/hc/herdr-core --version)
+              if [ "$got" != "hc $HC_VERSION" ]; then
+                echo "version mismatch: want hc $HC_VERSION, got $got" >&2
+                exit 1
+              fi
+              echo "fetched: $got"
+          env:
+            - name: HC_VERSION
+              value: {{ .Values.hc.version | quote }}
+            - name: HC_URL
+              value: {{ .Values.hc.url | quote }}
+            - name: HC_SHA256
+              value: {{ .Values.hc.sha256 | quote }}
+            - name: HOME
+              value: /hc
+          securityContext:
+            {{- include "o25.containerSecurity" . | nindent 12 }}
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: hc-bin
+              mountPath: /hc
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+        # 새 부팅 세대와 일회용 시작 허가. restartable sidecar(restartPolicy: Always)로 바꾸지 않는다: 그러면 본 컨테이너와
+        # 함께 살아 "init이 다시 돌았다 = 모두 새로 떴다"가 성립하지 않는다.
+        - name: gen
+          image: {{ include "o25.image" . }}
+          command: ["/bin/bash", "/opt/o25/gen.sh"]
+          workingDir: /c
+          securityContext:
+            {{- include "o25.containerSecurity" . | nindent 12 }}
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/o25
+              readOnly: true
+            - name: ctl
+              mountPath: /c
+            - name: relay
+              mountPath: /relay
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: control
+          image: {{ include "o25.image" . }}
+          command: ["/bin/bash", "/opt/o25/control.sh"]
+          workingDir: /c
+          {{- if .Values.restartRule.enabled }}
+          # 규칙을 쓰면 컨테이너 수준 restartPolicy를 꼭 적는다(파드 값과 같아도). 규칙 밖의 종료(ctl-crash 시험의 3 등)는 이 값대로
+          # 제어 컨테이너만 다시 뜬다. 그때 실행기는 이미 쓴 허가를 보고 이 종료 코드로 끝나 전체 재시작을 부른다.
+          restartPolicy: Always
+          restartPolicyRules:
+            - action: RestartAllContainers
+              exitCodes:
+                operator: In
+                values: [{{ .Values.restartRule.exitCode }}]
+          {{- end }}
+          env:
+            - name: O25_HC_VERSION
+              value: {{ .Values.hc.version | quote }}
+            - name: O25_RESTART_CODE
+              value: {{ .Values.restartRule.exitCode | quote }}
+            # hc의 XDG 경로는 여기 두지 않는다. 실행기가 세대마다 정한다(files/lib.sh hc_env).
+            - name: HOME
+              value: /c
+          securityContext:
+            {{- include "o25.containerSecurity" . | nindent 12 }}
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: hc-bin
+              mountPath: /opt/hc
+              readOnly: true
+            - name: scripts
+              mountPath: /opt/o25
+              readOnly: true
+            - name: ctl
+              mountPath: /c
+            - name: relay
+              mountPath: /relay
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: {{ .Values.control.cpuLimit | quote }}
+              memory: {{ .Values.control.memoryLimit | quote }}
+        - name: body
+          image: {{ include "o25.image" . }}
+          command:
+            - python3
+            - /opt/o25/o25.py
+            - body-init
+            - "--"
+            {{- range .Values.body.command }}
+            - {{ . | quote }}
+            {{- end }}
+          workingDir: /b
+          env:
+            - name: HOME
+              value: /b
+          securityContext:
+            {{- include "o25.containerSecurity" . | nindent 12 }}
+            runAsUser: 10002
+            runAsGroup: 10002
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/o25
+              readOnly: true
+            # 본체에는 hc가 필요 없다. 가림 탐침(probe.sh body)이 정확한 경로로 hc ls를 해 보려고만 붙인다(공개 실행 파일이다).
+            - name: hc-bin
+              mountPath: /opt/hc
+              readOnly: true
+            # 연결만 한다. 읽기 전용이라 소켓을 만들거나 지우거나 이름을 바꾸지 못한다.
+            - name: relay
+              mountPath: /relay
+              readOnly: true
+            - name: body
+              mountPath: /b
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: {{ .Values.bodyLimits.cpuLimit | quote }}
+              memory: {{ .Values.bodyLimits.memoryLimit | quote }}
+      volumes:
+        - name: hc-bin
+          emptyDir:
+            sizeLimit: 128Mi
+        # 제어 전용: 세대 허가·장부·세대별 hc 상태·실행기 FIFO·시험 결과. 본체 컨테이너에는 붙이지 않는다.
+        - name: ctl
+          emptyDir:
+            sizeLimit: 128Mi
+        # 공유: 세대별 중계 폴더와 지금 세대 ID. 소켓만 둔다.
+        - name: relay
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # 본체 전용: 세대별 HOME·TMPDIR, PID 1 상태, 첩자 기록.
+        - name: body
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: scripts
+          configMap:
+            name: o25-scripts
+            defaultMode: 0444
