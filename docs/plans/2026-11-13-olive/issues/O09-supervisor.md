@@ -5,7 +5,7 @@
 - 명세: `spec.md` §4 2번, §6 불변 조건 3·7·8·9, §7(감독·실행기 줄), §5.2 B-02·B-07·B-09·B-10·B-16, `supervisor.md` 전체
 - Blocked by: O02, O07
 - 연결 AC: AC-08, AC-09, AC-29, AC-30
-- 결정(관리자): D-04(오케스트레이터는 지휘만), D-09·D-21(관리 기능과 비상 정지는 `homelab` CLI 전용), D-37(감독에는 hc가 없고 작업자는 역할별 파드의 실행기가 직접 띄운다), D-38(켜고 끄는 값과 정지 자물쇠), D-39(정지 완료의 증거는 CLI가 단계별로), D-44 "1"(새 코드 저장소의 이름은 `ukyi-app/olive`)
+- 결정(관리자): D-04(오케스트레이터는 지휘만), D-09·D-21(관리 기능과 비상 정지는 `homelab` CLI 전용), D-37(감독에는 hc가 없고 작업자는 역할별 파드의 실행기가 직접 띄운다), D-38(켜고 끄는 값과 정지 자물쇠), D-39(정지 완료의 증거는 CLI가 단계별로), D-44 "1"(새 코드 저장소의 이름은 `ukyi-app/olive`), D-46 "1"(코드 작성 작업자 코드는 이 티켓에서 계약을 나누고 O13에서 `olive`로 옮긴다. 이 티켓의 몫은 O07 결과 5절의 인수 순서 1번이다)
 - 수행: 에이전트 + 사람(배포 PR 검토·병합)
 - 저장소·PR: `ukyi-app/olive` 저장소(D-18, D-44) PR, homelab 배포 PR(새 `platform/` 구성 요소, 이름은 이 티켓이 정한다), homelab CI 정책 PR(보호 경로)
 - 파일 소유: 감독 코드, 작업자 실행기와 감독·실행기 계약, 배포 매니페스트, `homelab` CLI의 올리브 관리 명령(상태, 켜기, 비상 정지 걸기·확인·풀기)
@@ -23,7 +23,7 @@
 2. 역할 표: 진단, 격리 읽기, 코드 작성, PR 리뷰, 기억 정리. 역할마다 고정 프로필(실행 도구, 모델, 자격, 네트워크, 필수 스킬, 시간·토큰 상한). 임의 명령·이미지·볼륨을 받는 API는 만들지 않는다.
 3. 작업자 띄우기 API(오케스트레이터용): `start_worker(role, task)`, `worker_status`, `worker_result`, `cancel_worker`. 결과는 모양·크기 검사(1~2천 토큰 목표) 뒤 돌려준다. 원문 로그·사고 과정은 넘기지 않는다.
 4. 상한(B-07): 오케스트레이터 1, 작업자 1(나머지는 대기열), 올리브 전체 CPU 4개·메모리 8GB·PID 상한. 시험·빌드는 머신 전체 잠금(같은 inode)을 쓰고 잠금 획득 뒤 전체 시간 제한을 건다.
-5. 유휴 호출 끄기(B-09): 관리 설정으로 prompt suggestions·away summary·idle compaction·goal check-in을 끄고 `autoContinueAtUsageLimit=false`. 환경변수 override도 막는다.
+5. 유휴 호출 끄기(B-09): 관리 설정으로 prompt suggestions·away summary·idle compaction·goal check-in을 끄고 `autoContinueAtUsageLimit=false`. 환경변수 override도 막는다. O04 결과(2026-11-16): 이 값이 false여도 대화형의 한도 메뉴에는 "기다렸다 자동으로 이어가기" 선택지가 남고, 메뉴가 열린 동안 들어온 글자는 메뉴 조작이 된다. 그래서 설정에만 기대지 않고, `StopFailure`를 받은 세션에는 아무것도 넣지 않고 끝낸다. 훅과 턴은 `prompt_id`로 잇는다(`accounts.md` §2.1).
 6. 켜고 끄기와 비상 정지(D-21, D-38, D-39, `supervisor.md` §7). 걸기·풀기는 `homelab` CLI 전용이다. Discord 문구로 거는 길은 만들지 않는다.
    - 켜고 끄는 값: 실행 Deployment(감독, 세션, 진단, 읽기·리뷰, 작성)의 Git replicas는 0이고 그 칸만 Argo CD 예외(`ignoreDifferences` + `RespectIgnoreDifferences=true`)로 둔다. 켜고 끄기는 CLI가 한다. 이 예외는 Argo CD가 읽은 라이브 값을 다시 쓰는 것이라 [확인] CLI만 쓰는 칸이 아니다.
    - 순서: CLI가 현관에 정지를 접수(새 입력·게시·승인 닫음) → 실행 네임스페이스마다 자물쇠("파드 0개" ResourceQuota, Git 밖)를 먼저 건다 → 현관과 감독이 권한을 폐기 → 감독이 실행기에 종료를 지시(감독이 죽어 있으면 건너뜀) → CLI가 실행 Deployment를 0으로(강제 삭제 없음) → 자물쇠를 건 채 replicas를 지켜보며 1로 돌아오면 바로 다시 내리고, 진행 중인 동기화가 끝나거나 정한 상한이 지나면 0을 마지막으로 확인(상한을 넘기면 "차단됨, replicas 미확정"으로 보고, 상한 값은 이 티켓이 정한다) → 소멸 확인 → 접수·차단·실제 소멸을 따로 보고.
