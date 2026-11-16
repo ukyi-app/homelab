@@ -74,4 +74,4 @@ components:
   # 다른 구성 요소와 달리 끄면 시험 ns와 안의 것이 함께 지워진다(templates/olive-o02.yaml의 resources-finalizer).
   # 켜고 끄는 순서와 치우는 PR은 platform/olive-o02/values.yaml 머리 주석.
   oliveO02:
-    enabled: false
+    enabled: true
