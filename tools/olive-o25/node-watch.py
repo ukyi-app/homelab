@@ -13,16 +13,20 @@
   last_alive  대상 하나라도 살아 있음을 본 검사의 시작 시각. 그때 이후에 죽었다(하한).
   gone        모든 대상이 없음을 본 첫 검사의 끝 시각. 그 전에 죽었다(상한).
   둘 다 부팅 기준 시계(CLOCK_BOOTTIME, _b)로 견준다. 새 프로세스의 커널 시작 시각(/proc/<pid>/stat의 starttime)은 부팅
-  기준 tick이라 _b와 바로 견준다(시계 변환 없음). 제어 쪽 장부는 실시간이라, 관측 내내 잰 "실시간 - 부팅" 차이 구간
-  [off_lo, off_hi]를 거쳐 부팅 시계로 옮겨 견준다. 구간이 조금이라도 어긋나면(관측 중 실시간 시계가 움직임) 장부와 견주지 않는다.
+  기준 tick이라 _b와 바로 견준다(시계 변환 없음). 제어 쪽 장부는 실시간이라, 관측 내내 잰 "실시간 - 부팅" 차이로 옮겨 견준다.
+  측정 구간들의 교집합 [off_lo, off_hi]는 불연속을 찾는 데만 쓴다: 비면(관측 중 실시간 시계가 움직임) 장부와 견주지 않는다.
+  장부와 견줄 때는 모든 측정 구간을 품는 바깥 경계 [off_min_lo, off_max_hi]를 쓴다. 교집합이 비지 않아도 넓은 측정 안에서
+  시계가 움직였을 수 있어, 교집합은 사건 당시의 차이를 품는다는 보장이 없다.
+  한계: 바깥 경계는 사건 당시의 차이가 어느 측정에서 잰 값과 같을 때만 그것을 품는다. 두 측정 사이에 시계가 두 번 이상
+  움직였거나(움직였다 돌아옴 포함) 관측 밖(고정 전·관측 끝 뒤)의 장부 시각이면 보장하지 않는다.
   새 세대의 시작 = 첫 init(fetch-hc) 컨테이너의 커널 시작 시각. 장부의 init 시각(gen.sh가 세대를 만든 뒤)보다 앞이다.
 
   init 줄    안 됨: 옛 대상 생존 중 시작한 fetch·gen·body 컨테이너가 있다, 또는 장부 init 때 옛 대상이 살아 있었다
-             됨: 새 컨테이너가 모두 소멸 확인 뒤에 시작했고(첫 init 포함) 소멸 확인 + off_hi < 장부 init
+             됨: 새 컨테이너가 모두 소멸 확인 뒤에 시작했고(첫 init 포함) 소멸 확인 + off_max_hi < 장부 init
              판단 필요: 그 밖 모두. 생존 중 시작한 control·정체 모를(unknown·mixed) 컨테이너, 소멸 구간에 걸친 시작 포함
-  자격 줄    안 됨: 장부 자격 제공 때 옛 대상이 살아 있었다 / 됨: 소멸 확인 + off_hi < 장부 자격 제공 / 판단 필요: 그 밖
-  두 줄 공통 판단 필요: 첫 init을 보지 못함, 관측 중 실시간 시계 변화, 입력이 기록과 맞지 않음(다른 파드·세대·회차),
-             watch가 재시작 뒤에 시작됨, 기록 없음
+  자격 줄    안 됨: 마지막 생존 + off_min_lo >= 장부 자격 제공 / 됨: 소멸 확인 + off_max_hi < 장부 자격 제공 / 판단 필요: 그 밖
+  두 줄 공통 판단 필요: 첫 init을 보지 못함, 관측 중 실시간 시계 변화(교집합이 빔), 입력이 기록과 맞지 않음(다른 파드·세대·회차),
+             watch가 재시작 뒤에 시작됨, 기록 없음, 바깥 경계가 없거나 교집합을 품지 않는 기록
 ctl-crash 회차의 실행기 단독 재시작(옛 본체 생존 중 control)도 새 세대 control과 노드에서 가를 독립 증거가 없어 init 줄은 판단 필요다.
 첩자가 멈춰 있거나(SIGSTOP) 기록 전에 죽는 것과 무관하다. 프로세스와 컨테이너 cgroup의 존재만 본다.
 파드 안 프로세스의 명령줄은 믿지 않는 입력이다. 출력은 부르는 쪽(node-cgroup.sh)이 sanitize.py에 통과시킨다.
@@ -179,18 +183,22 @@ class Offset:
     """실시간 - 부팅 시계 차이의 구간. 앞뒤로 읽어 두 읽기 사이의 지연이 구간을 넓히기만 하게 한다.
 
     부팅 시계를 먼저 읽고 실시간을 읽으면 그 차이는 참값 이상, 실시간을 먼저 읽고 부팅 시계를 읽으면 참값 이하다.
-    차이가 고정이면 모든 구간이 참값을 품어 lo <= hi다. NTP의 느린 보정은 두 시계의 빠르기를 함께 바꿔 차이를 움직이지 않는다.
-    lo > hi면 크기와 상관없이 관측 중 실시간 시계가 건너뛴 것(settimeofday, NTP step)이다. 허용 폭을 두면 그 폭 안의 이동이
-    장부 비교의 오차로 들어가지 않으므로 두지 않는다.
+    차이가 고정이면 모든 구간이 참값을 품어 교집합(lo, hi)이 비지 않는다. NTP의 느린 보정은 두 시계의 빠르기를 함께 바꿔
+    차이를 움직이지 않는다. lo > hi면 크기와 상관없이 관측 중 실시간 시계가 건너뛴 것(settimeofday, NTP step)이다.
+    교집합이 비지 않는다고 시계가 고정이었다는 증명은 아니다. 한쪽 읽기가 밀려 넓어진 구간 안에서 시계가 움직이면 교집합은
+    남지만 움직이기 전의 참값을 뺄 수 있다. 그래서 장부 비교에는 모든 구간을 품는 바깥 경계(min_lo, max_hi)를 쓴다.
     """
 
     def __init__(self):
         self.lo, self.hi = None, None
+        self.min_lo, self.max_hi = None, None
 
     def add(self, r_after_b, b_before_r, r_before_b, b_after_r):
         hi, lo = r_after_b - b_before_r, r_before_b - b_after_r
         self.hi = hi if self.hi is None else min(self.hi, hi)
         self.lo = lo if self.lo is None else max(self.lo, lo)
+        self.max_hi = hi if self.max_hi is None else max(self.max_hi, hi)
+        self.min_lo = lo if self.min_lo is None else min(self.min_lo, lo)
 
     def sample(self):
         b0 = boot_ns()
@@ -309,11 +317,11 @@ def cmd_watch(pod, gen, out_path, limit_s):
         time.sleep(POLL_S)
     off.sample()
     rec.update(last_alive_ns=la_r, last_alive_b=la_b, gone_ns=gone_r, gone_b=gone_b, polls=polls, max_gap_ns=max_gap,
-               off_lo=off.lo, off_hi=off.hi, tick_ns=TICK_NS,
+               off_lo=off.lo, off_hi=off.hi, off_min_lo=off.min_lo, off_max_hi=off.max_hi, tick_ns=TICK_NS,
                new=[dict(pid=k[0], **v) for k, v in sorted(new.items())], ended_ns=time.time_ns(), ended_b=boot_ns())
     json.dump(rec, open(out_path, "w"))
     fact(f"검사 {polls}회, 검사 사이 최대 {max_gap // 1000000}ms, 마지막 살아 있음 {la_r}, 모두 없음 {gone_r}, "
-         f"실시간-부팅 시계 차이 구간 {off.hi - off.lo}ns")
+         f"실시간-부팅 시계 차이 교집합 폭 {off.hi - off.lo}ns, 바깥 경계 폭 {off.max_hi - off.min_lo}ns")
     if gone_b is None:
         verdict("3.node.옛-본체-소멸-관측", "안 됨", f"{limit_s}초 동안 옛 대상이 남았다: {' '.join(rec.get('alive_roles', []))}")
     else:
@@ -353,8 +361,11 @@ def containers(rec):
 
 
 def valid_rec(rec):
-    ints = ("armed_ns", "armed_b", "ended_ns", "ended_b", "off_lo", "off_hi", "tick_ns")
+    ints = ("armed_ns", "armed_b", "ended_ns", "ended_b", "off_lo", "off_hi", "off_min_lo", "off_max_hi", "tick_ns")
     if not all(isinstance(rec.get(k), int) for k in ints):
+        return False
+    # 바깥 경계는 같은 측정들에서 나와 교집합의 두 끝을 늘 품는다. 아니면 손댔거나 다른 판이 쓴 기록이다.
+    if rec["off_min_lo"] > rec["off_lo"] or rec["off_max_hi"] < rec["off_hi"]:
         return False
     for k in ("last_alive_ns", "last_alive_b", "gone_ns", "gone_b"):
         if rec.get(k) is not None and not isinstance(rec[k], int):
@@ -388,6 +399,7 @@ def cmd_judge(path, pod, gen, init_ns, cred_ns):
     la_r, la_b, gone_r, gone_b = rec["last_alive_ns"], rec["last_alive_b"], rec["gone_ns"], rec["gone_b"]
     armed, ended = rec["armed_ns"], rec["ended_ns"]
     off_lo, off_hi = rec["off_lo"], rec["off_hi"]
+    out_lo, out_hi = rec["off_min_lo"], rec["off_max_hi"]
     jump = off_lo - off_hi
     conts = containers(rec)
     fetches = [c for c in conts if c["kind"] == "fetch"]
@@ -407,10 +419,11 @@ def cmd_judge(path, pod, gen, init_ns, cred_ns):
     overlap = [c for c in conts if c["kind"] in ("fetch", "gen", "body") and when(c) == "alive"]
     unsure = [c for c in conts if c not in overlap and when(c) != "after"]
     fact(f"watch 고정 {armed}, 마지막 살아 있음 {la_r}, 모두 없음 {gone_r}, 장부 init {init_ns}, 장부 자격 제공 {cred_ns}")
+    fact(f"실시간-부팅 시계 차이: 교집합 폭 {off_hi - off_lo}ns, 바깥 경계 폭 {out_hi - out_lo}ns(장부 비교의 오차)")
     tags = {"alive": " (옛 대상 생존 중 시작)", "edge": " (시작이 마지막 생존 관측~소멸 확인 구간에 걸침)", "after": ""}
     for c in conts:
         tag = tags[when(c)] + (" (첫 init)" if c is first else "")
-        fact(f"새 컨테이너 {c['kind']}{tag}: 시작 ≥{c['start'] * T + off_lo} (부팅 tick {c['start']}), 프로세스 {c['n']}개")
+        fact(f"새 컨테이너 {c['kind']}{tag}: 시작 ≥{c['start'] * T + out_lo} (부팅 tick {c['start']}), 프로세스 {c['n']}개")
     if jump > 0:
         fact(f"관측 중 실시간 시계가 움직였다(실시간-부팅 시계 차이 구간이 {jump}ns 어긋남)")
     # 장부 시각이 이 회차의 것인가: 첫 init이 시작한 뒤, 관측이 끝나기 전.
@@ -422,7 +435,8 @@ def cmd_judge(path, pod, gen, init_ns, cred_ns):
     elif init_ns is not None and cred_ns is not None and cred_ns <= init_ns:
         inconsistent = "장부 자격 제공 시각이 init 시각보다 앞이다"
     for k, t in zip(keys, (init_ns, cred_ns)):
-        # 장부 시각 t의 부팅 시각은 [t - off_hi, t - off_lo] 안이다(차이가 고정일 때). 됨은 그 앞끝, 안 됨은 그 뒤끝과 견준다.
+        # 장부 시각 t의 부팅 시각은 [t - out_hi, t - out_lo] 안이다(사건 당시 차이가 바깥 경계 안일 때). 됨은 그 앞끝,
+        # 안 됨은 그 뒤끝과 견준다. 교집합(off_*)으로 좁히면 넓은 측정 안에서 움직인 시계의 이동 전 값을 뺄 수 있다.
         if t is None:
             verdict(k, "판단 필요", "견줄 새 시각이 없다(제어 쪽 장부에 기록이 없다)")
         elif t <= armed:
@@ -433,8 +447,8 @@ def cmd_judge(path, pod, gen, init_ns, cred_ns):
                     f"{(la_b - (c['start'] + 1) * T) // 1000000}ms 이상 앞이다(부팅 기준 시계)")
         elif jump > 0:
             verdict(k, "판단 필요", "관측 중 실시간 시계가 움직여 장부(실시간)와 견줄 수 없다")
-        elif la_b is not None and la_b + off_lo >= t:
-            verdict(k, "안 됨", f"옛 대상이 장부 시각보다 {(la_b + off_lo - t) // 1000000}ms 이상 뒤에도 살아 있었다")
+        elif la_b is not None and la_b + out_lo >= t:
+            verdict(k, "안 됨", f"옛 대상이 장부 시각보다 {(la_b + out_lo - t) // 1000000}ms 이상 뒤에도 살아 있었다")
         elif first is None:
             verdict(k, "판단 필요", "노드가 첫 init(fetch-hc)의 시작을 보지 못했다(새 세대의 시작을 확인하지 못함)")
         elif k == keys[0] and unsure:
@@ -442,11 +456,11 @@ def cmd_judge(path, pod, gen, init_ns, cred_ns):
                     + " ".join(f"{c['kind']}({'생존 중 시작' if when(c) == 'alive' else '소멸 구간에 걸침'})" for c in unsure))
         elif inconsistent:
             verdict(k, "판단 필요", inconsistent)
-        elif k == keys[0] and gone_b is not None and gone_b < first["start"] * T and gone_b + off_hi < t:
+        elif k == keys[0] and gone_b is not None and gone_b < first["start"] * T and gone_b + out_hi < t:
             lead = (first["start"] * T - gone_b) // 1000000
-            verdict(k, "됨", f"옛 본체 소멸 확인이 첫 init 시작보다 {lead}ms 이상, 장부 init보다 {(t - gone_b - off_hi) // 1000000}ms 이상 앞이다")
-        elif k == keys[1] and gone_b is not None and gone_b + off_hi < t:
-            verdict(k, "됨", f"옛 본체 소멸 확인이 장부 자격 제공보다 {(t - gone_b - off_hi) // 1000000}ms 이상 앞이다")
+            verdict(k, "됨", f"옛 본체 소멸 확인이 첫 init 시작보다 {lead}ms 이상, 장부 init보다 {(t - gone_b - out_hi) // 1000000}ms 이상 앞이다")
+        elif k == keys[1] and gone_b is not None and gone_b + out_hi < t:
+            verdict(k, "됨", f"옛 본체 소멸 확인이 장부 자격 제공보다 {(t - gone_b - out_hi) // 1000000}ms 이상 앞이다")
         else:
             verdict(k, "판단 필요", "옛 본체가 사라진 구간(살아 있음과 소멸 확인 사이)에 첫 init 시작이나 장부 시각이 낀다")
     return 0
