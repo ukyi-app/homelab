@@ -319,6 +319,7 @@ kubectl -n sandbox exec "deploy/$DEPLOY" -c worker -- cat /run/worker-credential
 
 - Cloudflare에서 회전하면 옛 토큰은 새 연결에 쓸 수 없고, 이미 붙은 커넥터는 유지된다([Tunnel tokens](https://developers.cloudflare.com/tunnel/reference/tunnel-tokens/)). 그래서 다른 절과 달리 "새 값을 확인한 뒤 옛 값을 철회"하는 순서가 아니다. `_PREVIOUS`에 둔 옛 값은 되돌릴 수단이 못 된다.
 - Deployment는 파드 하나에 `maxSurge: 1`, `maxUnavailable: 0`이고 준비 확인이 에지 연결을 본다. 새 파드가 붙은 뒤에 옛 파드가 내려간다. 새 토큰이 틀리면 새 파드가 준비되지 못해 옛 파드가 남는다. 2단계와 4단계 사이에 옛 파드가 재시작하면 새 토큰이 들어갈 때까지 공개 경로가 끊긴다. 그 사이를 짧게 한다.
+- 3단계의 `infisical run`은 [infra/README.md](../../infra/README.md) 2절의 백업 폴더 준비(쓰기 불가 확인)를 한 셸에서 한다. 로그인 사용자로 돌리면 CLI가 가져온 값을 `~/.infisical/secrets-backup/`에 파일로 남기기 때문이다. 끝난 뒤 그 절의 `backup_files`가 0인지 본다.
 - cloudflared를 다시 띄우면 다시 붙는 몇 초 동안 공개 URL이 끊긴다([bootstrap.md](bootstrap.md)의 "적용 뒤 확인"). 공식 절차는 커넥터를 둘 이상 두고 하나씩 바꾸며 10분을 기다리는데, 이 배포는 파드가 하나라 그 조건이 없다.
 
 ```bash
@@ -337,6 +338,7 @@ h cloudflared cloudflared-tunnel token                         # 전
    kubectl -n cloudflared get externalsecret cloudflared-tunnel      # SecretSynced
    h cloudflared cloudflared-tunnel token                             # 전과 다름
    # 원본의 해시 앞부분. 위와 같아야 한다. HOMELAB_PROJECT_ID는 homelab 프로젝트의 ID다(저장소 밖). 돌려 보지 않은 명령이다
+   # 먼저 infra/README.md 2절의 백업 폴더 준비를 이 셸에서 한다(위 "알아 둘 것")
    infisical run --silent --log-level=error --projectId="$HOMELAB_PROJECT_ID" --env=prod --path=/platform/cloudflared -- \
      bash -c 'printf %s "$TUNNEL_TOKEN" | sha256sum | cut -c1-12'
    ```
@@ -367,7 +369,7 @@ h cloudflared cloudflared-tunnel token                         # 전
 2. Cloudflare에서 새 R2 토큰을 만든다. 옛 토큰은 그대로 둔다.
 3. Infisical의 키 쌍을 새 값으로 바꾸고 동기화한 뒤 해시를 견준다.
 4. 새 키로 백업 하나와 WAL 아카이브가 성공하는지 본다.
-5. 옛 토큰을 철회하고, 그 뒤에도 백업과 WAL이 성공하는지 본다.
+5. 옛 토큰을 철회하고, 그 뒤에도 백업과 WAL이 성공하는지와 옛 키가 거절되는지 본다.
 
 5단계 전까지는 옛 키 쌍으로 되돌릴 수 있다.
 
@@ -375,10 +377,11 @@ h cloudflared cloudflared-tunnel token                         # 전
 
 **알아 둘 것**
 
-- 키 쌍만 바꾸면 PostgreSQL을 다시 띄우지 않아도 된다는 것이 소스를 읽은 판단이다. Plugin v0.15.1은 WAL 작업과 base backup마다 Secret에서 자격을 읽고 10초 동안만 기억한다([wal.go](https://github.com/cloudnative-pg/plugin-barman-cloud/blob/v0.15.1/internal/cnpgi/common/wal.go#L126), [client.go](https://github.com/cloudnative-pg/plugin-barman-cloud/blob/v0.15.1/internal/cnpgi/instance/internal/client/client.go#L36)). 공식 문서에는 회전 때 재시작이 필요한지가 적혀 있지 않다. 다른 plugin 버전에는 이 판단을 옮기지 않는다.
+- 키 쌍만 바꾸면 PostgreSQL을 다시 띄우지 않아도 된다는 것이 소스를 읽은 판단이다. Plugin v0.15.1은 WAL 작업과 base backup마다 Secret에서 자격을 읽고 약 10초 기억한다. 초 단위로 견줘서 11초까지 옛 값이 남을 수 있다([wal.go](https://github.com/cloudnative-pg/plugin-barman-cloud/blob/v0.15.1/internal/cnpgi/common/wal.go#L126), [client.go](https://github.com/cloudnative-pg/plugin-barman-cloud/blob/v0.15.1/internal/cnpgi/instance/internal/client/client.go#L36)). 공식 문서에는 회전 때 재시작이 필요한지가 적혀 있지 않다. 다른 plugin 버전에는 이 판단을 옮기지 않는다.
 - `R2_ENDPOINT`는 바꾸지 않는다. endpoint는 환경변수로 들어가서 바꾸면 파드를 다시 만들어야 하고, Cluster `pg`는 인스턴스가 하나라 DB가 끊긴다. endpoint나 버킷을 바꾸는 일은 따로 한다.
 - 두 키의 저장과 ESO 동기화는 한 번에 일어나지 않는다. 한 키만 바뀐 채 동기화되면 백업과 WAL이 잠깐 실패한다. 두 키를 연달아 저장하고 곧바로 동기화한다.
-- 이미 시작한 백업과 Job은 옛 키로 끝까지 간다. 그래서 확인하는 때와 철회하는 때를 나눈다.
+- 이미 시작한 백업과 Job은 시작할 때 읽은 키로 끝까지 간다. 그래서 확인하는 때와 철회하는 때를 나눈다.
+- 3단계의 `infisical run`은 [infra/README.md](../../infra/README.md) 2절의 백업 폴더 준비(쓰기 불가 확인)를 한 셸에서 한다. 로그인 사용자로 돌리면 CLI가 가져온 값을 `~/.infisical/secrets-backup/`에 파일로 남기기 때문이다. 끝난 뒤 그 절의 `backup_files`가 0인지 본다.
 
 ```bash
 export KUBECONFIG=~/.kube/homelab.yaml
@@ -399,12 +402,13 @@ h database r2-backup ACCESS_KEY_ID; h database r2-backup SECRET_ACCESS_KEY     #
    kubectl -n database get externalsecret r2-backup                              # SecretSynced
    h database r2-backup ACCESS_KEY_ID; h database r2-backup SECRET_ACCESS_KEY     # 둘 다 전과 다름
    # 원본의 해시 앞부분. 위 두 값과 차례로 같아야 한다. 돌려 보지 않은 명령이다
+   # 먼저 infra/README.md 2절의 백업 폴더 준비를 이 셸에서 한다(위 "알아 둘 것")
    infisical run --silent --log-level=error --projectId="$HOMELAB_PROJECT_ID" --env=prod --path=/platform/backup -- \
      bash -c 'printf %s "$R2_ACCESS_KEY_ID" | sha256sum | cut -c1-12; printf %s "$R2_SECRET_ACCESS_KEY" | sha256sum | cut -c1-12'
    ```
 
    1단계에서 찾은 다른 ExternalSecret도 같은 방법으로 동기화하고 견준다. 해시가 같아도 키 쌍이 맞는지는 다음 단계가 말해 준다.
-4. **새 키로 백업과 WAL.** Secret이 바뀌고 10초가 지난 뒤에 새 백업을 만든다([restore.md](restore.md) 2절의 온디맨드 Backup과 같은 모양이다).
+4. **새 키로 백업과 WAL.** 3단계에서 두 해시가 원본과 같아진 것을 본 뒤 15초 넘게 기다렸다가 새 백업을 만든다. 그보다 일찍 시작한 백업은 옛 키를 읽었을 수 있다([restore.md](restore.md) 2절의 온디맨드 Backup과 같은 모양이다).
 
    ```bash
    B=rotate-$(date -u +%Y%m%d%H%M%S)
@@ -417,10 +421,10 @@ h database r2-backup ACCESS_KEY_ID; h database r2-backup SECRET_ACCESS_KEY     #
    kubectl -n database get backup "$B" -o custom-columns='PHASE:.status.phase,STARTED:.status.startedAt,STOPPED:.status.stoppedAt'   # completed
    ```
 
-   이 백업이 `completed`면 base backup과 그 끝의 WAL이 새 키로 올라간 것이다(`pg_backup_stop`은 끝 WAL이 아카이브될 때까지 기다린다. restore.md 2절). 지표로도 본다: `barman_cloud_cloudnative_pg_io_last_available_backup_timestamp`가 앞으로 가고, `cnpg_pg_stat_archiver_last_archived_time`이 `cnpg_pg_stat_archiver_last_failed_time`보다 뒤다. 3단계 전에 시작한 백업이 끝난 것은 새 키의 확인이 아니다. Valkey 쪽이 있으면 새로 시작한 백업 Job의 성공을 본다.
+   그렇게 기다린 뒤 시작한 이 백업이 `completed`면 base backup과 그 끝의 WAL이 새 키로 올라간 것이다(백업은 시작할 때 읽은 자격을 끝까지 쓰고, `pg_backup_stop`은 끝 WAL이 아카이브될 때까지 기다린다. restore.md 2절). 지표로도 본다: `barman_cloud_cloudnative_pg_io_last_available_backup_timestamp`가 앞으로 가고, `cnpg_pg_stat_archiver_last_archived_time`이 `cnpg_pg_stat_archiver_last_failed_time`보다 뒤다. 3단계 전에 시작한 백업이 끝난 것은 새 키의 확인이 아니다. Valkey 쪽이 있으면 새로 시작한 백업 Job의 성공을 본다.
 
    실패하면 5단계로 가지 않는다. 옛 쌍(`_PREVIOUS`)을 두 키에 함께 되돌리고 동기화한 뒤 백업 하나로 복구를 확인한다. 한 키만 되돌리지 않는다.
-5. **옛 토큰 철회.** 4단계가 끝나고, 옛 키로 시작한 작업이 남지 않았을 때 Cloudflare에서 옛 토큰을 지운다. **[미확인] 지금 화면에서 토큰을 지우는 자리는 관리자가 본다.** 버킷이나 객체를 지우는 일이 아니다. 지운 뒤 4단계의 백업을 한 번 더 만들어 `completed`를 보고, `PGBackupStale`과 `WALArchiveFailing`이 울리지 않는지 본다. `_PREVIOUS` 두 키를 지우고, 복구 자산 내보내기를 갱신하고, [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄을 남긴다.
+5. **옛 토큰 철회.** 4단계가 끝나고, 옛 키로 시작한 작업이 남지 않았을 때 Cloudflare에서 옛 토큰을 지운다. **[미확인] 지금 화면에서 토큰을 지우는 자리는 관리자가 본다.** 버킷이나 객체를 지우는 일이 아니다. 지운 뒤 두 가지를 본다. 첫째, 4단계의 백업을 한 번 더 만들어 `completed`를 보고 `PGBackupStale`과 `WALArchiveFailing`이 울리지 않는지 본다. 둘째, 옛 키가 정말 거절되는지 본다. 새 키가 되는 것은 옛 키가 죽었다는 증거가 아니다. 옛 키 쌍(`_PREVIOUS`)으로 백업 버킷에 읽기 요청 하나를 보내 인증 거부(HTTP 401이나 403, `InvalidAccessKeyId`·`AccessDenied` 같은 응답)가 오는지 본다. 객체 없음(404)이나 연결 실패는 거부가 아니다. **[미확인] 값을 화면에 내지 않고 이 요청을 보낼 도구는 관리자가 정한다**(이 저장소가 고정한 S3 도구는 없다). 거부를 확인하지 못했으면 `_PREVIOUS`를 지우지 않고 "철회 확인 미완료"로 적는다. 거부를 확인한 뒤에 `_PREVIOUS` 두 키를 지우고, 복구 자산 내보내기를 갱신하고, [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄을 남긴다.
 
 **도중에 실패하면.** 철회 전이면 옛 쌍을 되돌린다(4단계 끝의 방법). 철회한 뒤에는 옛 키를 되살릴 수 없으니 새 토큰을 다시 만들어 3단계부터 한다. 키가 틀린 채로 두면 WAL이 아카이브되지 못하고 쌓여 루트 디스크를 채운다. 백업을 거듭 만들어 밀어붙이지 말고 맞는 키부터 되돌린다.
 
