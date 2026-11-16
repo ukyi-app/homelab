@@ -20,9 +20,9 @@ const UPSTREAM_ARGOCD_WORKLOADS: Record<string, { init: string[]; containers: st
   "StatefulSet/argocd-application-controller": { init: [], containers: ["argocd-application-controller"] },
 };
 const UPSTREAM_ARGOCD_IMAGES = new Set([
-  "quay.io/argoproj/argocd:v3.5.5",
-  "ghcr.io/dexidp/dex:v2.45.1",
-  "public.ecr.aws/docker/library/redis:8.2.3-alpine",
+  "quay.io/argoproj/argocd:v3.6.1",
+  "ghcr.io/dexidp/dex:v2.46.0",
+  "public.ecr.aws/docker/library/redis:8.10.1-alpine",
 ]);
 const UPSTREAM_ARGOCD_SECRETS = new Set(["argocd-secret", "argocd-notifications-secret"]);
 

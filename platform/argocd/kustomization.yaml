@@ -23,7 +23,7 @@ namespace: argocd
 resources:
   # 공식 매니페스트의 NetworkPolicy 7개(구성 요소별 ingress 제한)를 그대로 둔다. repo-server에
   # 정책이 없으면 다른 ns의 파드가 렌더를 요청할 수 있다(설계 B.8 E2).
-  - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.5/manifests/install.yaml
+  - https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.1/manifests/install.yaml
 patches:
   - path: argocd-cm.yaml
   - path: argocd-rbac-cm.yaml
