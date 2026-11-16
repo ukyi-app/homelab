@@ -19,7 +19,7 @@
   ```
 
 - 자동 재시작 컨트롤러는 두지 않는다. 재시작은 순서의 한 단계로 명시한다.
-- 필수 키가 빠지면 ExternalSecret이 `SecretSyncedError`로 멈추고 Secret은 바뀌지 않는다. 잘못된 값이 적용되지 않는다(시나리오 6).
+- 필수 키가 빠지면 ExternalSecret이 `SecretSyncedError`로 멈추고 Secret은 바뀌지 않는다. 잘못된 값이 적용되지 않는다(시나리오 6). 키는 있는데 값이 틀린 경우는 다르다. ESO는 그 값을 그대로 옮기고 `SecretSynced`가 된다. 그래서 절마다 새 값을 실제로 쓰는지를 따로 확인한다.
 
 ## 1. ESO 부트스트랩 자격 (연 1회)
 
@@ -301,11 +301,140 @@ kubectl -n sandbox exec "deploy/$DEPLOY" -c worker -- cat /run/worker-credential
 
 봇 DB를 복원하면 복원 시점 뒤의 해제가 되돌아간다. 봇은 복원을 감지하면 활성 연결을 모두 닫는데, 한 앱 복원(pg_dump)은 `EXTERNAL_TASK_RESTORE_EPOCH`가 바뀌어야 감지한다. `homelab db restore`의 재개 PR이 이 값을 함께 올리고, CLI 없이 복원하면 직접 올린다([restore.md](restore.md) 2.1 "R08 복원 세대"). 그 복원 뒤에는 활성 연결이 모두 닫혀 있으니 기기마다 다시 연결한다.
 
+## 3g. Cloudflare Tunnel 토큰
+
+**이 절은 아직 운영에서 돌려 보지 않았다.** 2026-11-14에 공식 문서와 저장소 선언을 읽고 쓴 순서다. 처음 회전할 때 다르게 한 것이 있으면 이 절을 먼저 고친다. 두 절(3g, 3h)을 처음 해 본다면 되돌릴 수 있는 3h를 먼저 한다.
+
+**순서 요약**
+
+1. 지금 상태를 적어 둔다(파드, 연결 수, Secret 해시).
+2. Cloudflare에서 토큰을 회전한다. **이 순간 옛 토큰으로는 새 연결을 만들 수 없다. 되돌릴 수 없다.**
+3. Infisical의 `TUNNEL_TOKEN`을 새 값으로 바꾸고 동기화한 뒤 해시를 견준다.
+4. cloudflared를 다시 띄우고 새 파드의 에지 연결을 확인한다.
+5. 공개 경로를 확인하고 `_PREVIOUS`를 지운다.
+
+**자격이 가는 길.** 원본은 Infisical `homelab`/`prod`의 `/platform/cloudflared/TUNNEL_TOKEN`이다. ExternalSecret `cloudflared/cloudflared-tunnel`이 Secret `cloudflared-tunnel`의 `token`으로 옮기고, Deployment `cloudflared`가 환경변수 `TUNNEL_TOKEN`으로 받는다(`platform/cloudflared/templates/`). 환경변수라 파드를 다시 띄워야 바뀐다. Terraform(`infra/cloudflare`)은 터널을 만들고 토큰을 읽기만 한다. 이 회전은 터널을 다시 만드는 일도, Terraform의 Cloudflare API 토큰을 바꾸는 일도 아니다.
+
+**알아 둘 것**
+
+- Cloudflare에서 회전하면 옛 토큰은 새 연결에 쓸 수 없고, 이미 붙은 커넥터는 유지된다([Tunnel tokens](https://developers.cloudflare.com/tunnel/reference/tunnel-tokens/)). 그래서 다른 절과 달리 "새 값을 확인한 뒤 옛 값을 철회"하는 순서가 아니다. `_PREVIOUS`에 둔 옛 값은 되돌릴 수단이 못 된다.
+- Deployment는 파드 하나에 `maxSurge: 1`, `maxUnavailable: 0`이고 준비 확인이 에지 연결을 본다. 새 파드가 붙은 뒤에 옛 파드가 내려간다. 새 토큰이 틀리면 새 파드가 준비되지 못해 옛 파드가 남는다. 2단계와 4단계 사이에 옛 파드가 재시작하면 새 토큰이 들어갈 때까지 공개 경로가 끊긴다. 그 사이를 짧게 한다.
+- 3단계의 `infisical run`은 [infra/README.md](../../infra/README.md) 2절의 백업 폴더 준비(쓰기 불가 확인)를 한 셸에서 한다. 로그인 사용자로 돌리면 CLI가 가져온 값을 `~/.infisical/secrets-backup/`에 파일로 남기기 때문이다. 끝난 뒤 그 절의 `backup_files`가 0인지 본다.
+- cloudflared를 다시 띄우면 다시 붙는 몇 초 동안 공개 URL이 끊긴다([bootstrap.md](bootstrap.md)의 "적용 뒤 확인"). 공식 절차는 커넥터를 둘 이상 두고 하나씩 바꾸며 10분을 기다리는데, 이 배포는 파드가 하나라 그 조건이 없다.
+
+```bash
+export KUBECONFIG=~/.kube/homelab.yaml
+h() { kubectl -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64 -d | sha256sum | cut -c1-12; }   # 값 대신 해시 앞부분
+kubectl -n cloudflared get pods -l app=cloudflared -o wide    # 전: 파드 이름과 시작 시각
+h cloudflared cloudflared-tunnel token                         # 전
+```
+
+1. **준비.** kubeconfig, Cloudflare의 터널, Infisical 프로젝트가 같은 클러스터(운영)를 가리키는지 본다. 운영 토큰을 VM에 넣지 않는다. Infisical에서 지금 값을 `TUNNEL_TOKEN_PREVIOUS`로 옮겨 둔다(유출 조사용 기록이다. 회전 뒤에는 쓸 수 없다).
+2. **회전.** Cloudflare 대시보드의 터널 화면에서 토큰을 회전하고 새 토큰을 받는다. 공식 문서가 메뉴 이름을 두 가지로 적는다(Networking → Tunnels → 터널 → **Rotate token**, 또는 터널 Overview의 **Refresh token**). **[미확인] 지금 화면의 이름은 관리자가 본다.** 화면이 보여 주는 설치 명령은 실행하지 않고 토큰만 가져온다. 클립보드와 마스킹 입력은 [infra/README.md](../../infra/README.md) 5절을 따른다. 회전 직후의 `tf cloudflare output -raw tunnel_token`은 state에 남은 옛 값일 수 있으니 새 토큰의 출처로 쓰지 않는다(state의 출력은 다음 apply나 refresh 때 바뀐다. Terraform의 일반 동작이고 여기서 돌려 보지는 않았다).
+3. **Infisical과 동기화.** Infisical UI에서 `/platform/cloudflared/TUNNEL_TOKEN`을 새 값으로 바꾼다. CLI의 `secrets set KEY=VALUE`는 값이 명령행 인자라 쓰지 않는다.
+
+   ```bash
+   kubectl -n cloudflared annotate externalsecret cloudflared-tunnel force-sync="$(date +%s)" --overwrite
+   kubectl -n cloudflared get externalsecret cloudflared-tunnel      # SecretSynced
+   h cloudflared cloudflared-tunnel token                             # 전과 다름
+   # 원본의 해시 앞부분. 위와 같아야 한다. HOMELAB_PROJECT_ID는 homelab 프로젝트의 ID다(저장소 밖). 돌려 보지 않은 명령이다
+   # 먼저 infra/README.md 2절의 백업 폴더 준비를 이 셸에서 한다(위 "알아 둘 것")
+   infisical run --silent --log-level=error --projectId="$HOMELAB_PROJECT_ID" --env=prod --path=/platform/cloudflared -- \
+     bash -c 'printf %s "$TUNNEL_TOKEN" | sha256sum | cut -c1-12'
+   ```
+
+   동기화가 실패하면 여기서 멈춘다. 옛 파드를 건드리지 않고 Infisical 값과 ESO 경로를 고친다. 해시가 같아도 토큰 자체가 맞는지는 다음 단계의 연결이 말해 준다.
+4. **다시 띄우기.**
+
+   ```bash
+   kubectl -n cloudflared rollout restart deployment/cloudflared
+   kubectl -n cloudflared rollout status deployment/cloudflared --timeout=180s
+   kubectl -n cloudflared get pods -l app=cloudflared -o wide     # 새 파드 하나만, Ready
+   ```
+
+   새 파드의 로그에 `Registered tunnel connection`이 있는지, 지표 `cloudflared_tunnel_ha_connections`가 1 이상이고 `up{job="cloudflared"}`가 1인지 본다. 시간 초과는 성공이 아니다. 새 파드가 준비되지 못하면 옛 파드가 남아 서비스는 이어진다. 그 상태에서 3단계의 값을 다시 본다. `rollout undo`는 Secret을 되돌리지 않고 옛 토큰을 되살리지도 않는다.
+5. **확인과 정리.** 공개 경로 하나의 응답이 회전 전과 같은지 본다([bootstrap.md](bootstrap.md)의 공개 URL 줄. 봇이 꺼져 있는 동안에는 그 줄의 기대 응답이 나오지 않으니, 회전 전에 같은 요청의 응답을 적어 두고 견준다). `CloudflaredTunnelDown`이 울리지 않는지 본다. Cloudflare의 터널 화면에 옛 커넥터가 남지 않았는지 본다. `TUNNEL_TOKEN_PREVIOUS`를 지우고, 복구 자산 내보내기를 갱신하고([recovery-assets.md](recovery-assets.md)), [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄을 남긴다.
+
+**도중에 실패하면.** 2단계 전에는 그냥 멈추면 된다. 2단계 뒤에는 옛 토큰을 되살릴 수 없다. 살아 있는 옛 파드를 그대로 두고 3~4단계를 바로잡는다. 토큰을 다시 회전하면 방금 받은 새 토큰도 무효가 되므로, 다시 회전하는 것으로 복구하려 하지 않는다. 옛 연결까지 끊겼다면 새 토큰이 붙을 때까지 터널을 거치는 공개 서비스가 멈춘다. 터널을 거치지 않는 tailnet 경로는 이 토큰을 쓰지 않는다.
+
+**유출이 의심되면.** 순서가 다르다. 바로 회전하고, 이미 붙은 연결을 모두 끊는다(공식 문서의 터널 연결 삭제 API. 관리자가 실행하는 파괴 작업이다). 새 토큰이 붙을 때까지 끊긴다. 연결을 끊지 않으면 훔친 토큰으로 붙어 있는 커넥터가 남는다([유출 대응](https://developers.cloudflare.com/tunnel/reference/tunnel-tokens/#rotate-a-token)).
+
+## 3h. R2 백업 키
+
+**이 절은 아직 운영에서 돌려 보지 않았다.** 2026-11-14에 공식 문서, 저장소 선언, Barman Cloud Plugin v0.15.1의 소스를 읽고 쓴 순서다. 처음 회전할 때 다르게 한 것이 있으면 이 절을 먼저 고친다.
+
+**순서 요약**
+
+1. 이 키를 쓰는 곳을 모두 찾고, 진행 중인 백업이 없는 때를 고른다.
+2. Cloudflare에서 새 R2 토큰을 만든다. 옛 토큰은 그대로 둔다.
+3. Infisical의 키 쌍을 새 값으로 바꾸고 동기화한 뒤 해시를 견준다.
+4. 새 키로 백업 하나와 WAL 아카이브가 성공하는지 본다.
+5. 옛 토큰을 철회하고, 그 뒤에도 백업과 WAL이 성공하는지와 옛 키가 거절되는지 본다.
+
+5단계 전까지는 옛 키 쌍으로 되돌릴 수 있다.
+
+**자격이 가는 길.** 원본은 Infisical `homelab`/`prod`의 `/platform/backup`에 있는 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`다. ExternalSecret `database/r2-backup`이 Secret `r2-backup`의 `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ENDPOINT_URL`로 옮긴다(`platform/cnpg/cluster/templates/externalsecret.yaml`). 영속 Valkey를 쓰는 앱이 있으면 `<앱>-valkey-backup-r2`도 같은 원본을 읽는다(`platform/charts/app-data/templates/valkey.yaml`). Terraform은 버킷만 선언하고 이 토큰은 만들지 않는다. Terraform state 버킷의 키(`/terraform/state`)와 Cloudflare API 토큰(`/terraform/cloudflare`)은 다른 자격이다. 이 절에서 건드리지 않는다.
+
+**알아 둘 것**
+
+- 키 쌍만 바꾸면 PostgreSQL을 다시 띄우지 않아도 된다는 것이 소스를 읽은 판단이다. Plugin v0.15.1은 WAL 작업과 base backup마다 Secret에서 자격을 읽고 약 10초 기억한다. 초 단위로 견줘서 11초까지 옛 값이 남을 수 있다([wal.go](https://github.com/cloudnative-pg/plugin-barman-cloud/blob/v0.15.1/internal/cnpgi/common/wal.go#L126), [client.go](https://github.com/cloudnative-pg/plugin-barman-cloud/blob/v0.15.1/internal/cnpgi/instance/internal/client/client.go#L36)). 공식 문서에는 회전 때 재시작이 필요한지가 적혀 있지 않다. 다른 plugin 버전에는 이 판단을 옮기지 않는다.
+- `R2_ENDPOINT`는 바꾸지 않는다. endpoint는 환경변수로 들어가서 바꾸면 파드를 다시 만들어야 하고, Cluster `pg`는 인스턴스가 하나라 DB가 끊긴다. endpoint나 버킷을 바꾸는 일은 따로 한다.
+- 두 키의 저장과 ESO 동기화는 한 번에 일어나지 않는다. 한 키만 바뀐 채 동기화되면 백업과 WAL이 잠깐 실패한다. 두 키를 연달아 저장하고 곧바로 동기화한다.
+- 이미 시작한 백업과 Job은 시작할 때 읽은 키로 끝까지 간다. 그래서 확인하는 때와 철회하는 때를 나눈다.
+- 3단계의 `infisical run`은 [infra/README.md](../../infra/README.md) 2절의 백업 폴더 준비(쓰기 불가 확인)를 한 셸에서 한다. 로그인 사용자로 돌리면 CLI가 가져온 값을 `~/.infisical/secrets-backup/`에 파일로 남기기 때문이다. 끝난 뒤 그 절의 `backup_files`가 0인지 본다.
+
+```bash
+export KUBECONFIG=~/.kube/homelab.yaml
+h() { kubectl -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64 -d | sha256sum | cut -c1-12; }   # 값 대신 해시 앞부분
+# 이 키를 읽는 ExternalSecret 전부. database/r2-backup 말고 더 있으면 4단계와 5단계에서 함께 본다
+kubectl get externalsecret -A -o json \
+  | jq -r '.items[] | select([.spec.data[]?.remoteRef.key] | any(test("R2_ACCESS_KEY_ID"))) | "\(.metadata.namespace)/\(.metadata.name)"'
+kubectl -n database get backups     # 진행 중인 백업이 없어야 한다. 정기 base backup은 매일 03:00 KST다
+h database r2-backup ACCESS_KEY_ID; h database r2-backup SECRET_ACCESS_KEY     # 전
+```
+
+1. **쓰는 곳과 때.** 위 조회로 쓰는 곳을 적는다. 진행 중인 base backup, Valkey 백업 Job, 복원 작업이 있으면 끝난 뒤에 한다. 클러스터 밖에서 같은 키를 쓰는 곳(복원 시험 등)이 있는지는 관리자가 안다.
+2. **새 토큰.** Cloudflare 대시보드의 R2 → API Tokens에서 새 토큰을 만든다. 권한은 **Object Read & Write**, 대상은 백업 버킷 하나다. 계정 전체 권한으로 넓히지 않는다. Access Key ID와 Secret Access Key를 한 쌍으로 받는다. Secret Access Key는 다시 볼 수 없다([R2 API tokens](https://developers.cloudflare.com/r2/api/tokens/)). 옛 토큰은 아직 철회하지 않는다.
+3. **Infisical과 동기화.** 같은 폴더에 `R2_ACCESS_KEY_ID_PREVIOUS`, `R2_SECRET_ACCESS_KEY_PREVIOUS`로 옛 쌍을 옮겨 두고, 두 키를 연달아 새 값으로 바꾼다. `R2_ENDPOINT`는 그대로 둔다. 그리고 바로 동기화한다.
+
+   ```bash
+   kubectl -n database annotate externalsecret r2-backup force-sync="$(date +%s)" --overwrite
+   kubectl -n database get externalsecret r2-backup                              # SecretSynced
+   h database r2-backup ACCESS_KEY_ID; h database r2-backup SECRET_ACCESS_KEY     # 둘 다 전과 다름
+   # 원본의 해시 앞부분. 위 두 값과 차례로 같아야 한다. 돌려 보지 않은 명령이다
+   # 먼저 infra/README.md 2절의 백업 폴더 준비를 이 셸에서 한다(위 "알아 둘 것")
+   infisical run --silent --log-level=error --projectId="$HOMELAB_PROJECT_ID" --env=prod --path=/platform/backup -- \
+     bash -c 'printf %s "$R2_ACCESS_KEY_ID" | sha256sum | cut -c1-12; printf %s "$R2_SECRET_ACCESS_KEY" | sha256sum | cut -c1-12'
+   ```
+
+   1단계에서 찾은 다른 ExternalSecret도 같은 방법으로 동기화하고 견준다. 해시가 같아도 키 쌍이 맞는지는 다음 단계가 말해 준다.
+4. **새 키로 백업과 WAL.** 3단계에서 두 해시가 원본과 같아진 것을 본 뒤 15초 넘게 기다렸다가 새 백업을 만든다. 그보다 일찍 시작한 백업은 옛 키를 읽었을 수 있다([restore.md](restore.md) 2절의 온디맨드 Backup과 같은 모양이다).
+
+   ```bash
+   B=rotate-$(date -u +%Y%m%d%H%M%S)
+   kubectl -n database create -f - <<EOF
+   apiVersion: postgresql.cnpg.io/v1
+   kind: Backup
+   metadata: { name: $B, namespace: database }
+   spec: { cluster: { name: pg }, method: plugin, pluginConfiguration: { name: barman-cloud.cloudnative-pg.io } }
+   EOF
+   kubectl -n database get backup "$B" -o custom-columns='PHASE:.status.phase,STARTED:.status.startedAt,STOPPED:.status.stoppedAt'   # completed
+   ```
+
+   그렇게 기다린 뒤 시작한 이 백업이 `completed`면 base backup과 그 끝의 WAL이 새 키로 올라간 것이다(백업은 시작할 때 읽은 자격을 끝까지 쓰고, `pg_backup_stop`은 끝 WAL이 아카이브될 때까지 기다린다. restore.md 2절). 지표로도 본다: `barman_cloud_cloudnative_pg_io_last_available_backup_timestamp`가 앞으로 가고, `cnpg_pg_stat_archiver_last_archived_time`이 `cnpg_pg_stat_archiver_last_failed_time`보다 뒤다. 3단계 전에 시작한 백업이 끝난 것은 새 키의 확인이 아니다. Valkey 쪽이 있으면 새로 시작한 백업 Job의 성공을 본다.
+
+   실패하면 5단계로 가지 않는다. 옛 쌍(`_PREVIOUS`)을 두 키에 함께 되돌리고 동기화한 뒤 백업 하나로 복구를 확인한다. 한 키만 되돌리지 않는다.
+5. **옛 토큰 철회.** 4단계가 끝나고, 옛 키로 시작한 작업이 남지 않았을 때 Cloudflare에서 옛 토큰을 지운다. **[미확인] 지금 화면에서 토큰을 지우는 자리는 관리자가 본다.** 버킷이나 객체를 지우는 일이 아니다. 지운 뒤 두 가지를 본다. 첫째, 4단계의 백업을 한 번 더 만들어 `completed`를 보고 `PGBackupStale`과 `WALArchiveFailing`이 울리지 않는지 본다. 둘째, 옛 키가 정말 거절되는지 본다. 새 키가 되는 것은 옛 키가 죽었다는 증거가 아니다. 옛 키 쌍(`_PREVIOUS`)으로 백업 버킷에 읽기 요청 하나를 보내 인증 거부(HTTP 401이나 403, `InvalidAccessKeyId`·`AccessDenied` 같은 응답)가 오는지 본다. 객체 없음(404)이나 연결 실패는 거부가 아니다. **[미확인] 값을 화면에 내지 않고 이 요청을 보낼 도구는 관리자가 정한다**(이 저장소가 고정한 S3 도구는 없다). 거부를 확인하지 못했으면 `_PREVIOUS`를 지우지 않고 "철회 확인 미완료"로 적는다. 거부를 확인한 뒤에 `_PREVIOUS` 두 키를 지우고, 복구 자산 내보내기를 갱신하고, [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄을 남긴다.
+
+**도중에 실패하면.** 철회 전이면 옛 쌍을 되돌린다(4단계 끝의 방법). 철회한 뒤에는 옛 키를 되살릴 수 없으니 새 토큰을 다시 만들어 3단계부터 한다. 키가 틀린 채로 두면 WAL이 아카이브되지 못하고 쌓여 루트 디스크를 채운다. 백업을 거듭 만들어 밀어붙이지 말고 맞는 키부터 되돌린다.
+
+**유출이 의심되면.** 옛 토큰을 먼저 철회하고 새 키를 넣는다. 새 키가 들어갈 때까지 백업과 WAL 아카이브가 멈춘다. 유출된 키는 되돌릴 값으로 쓰지 않는다.
+
 ## 4. 아직 채우지 않은 절
 
 설계 C.6.5 표의 순서를 따른다. 자격을 만드는 티켓이 이 문서에 절을 더한다.
 
 | 자격 | 채우는 티켓 |
 |---|---|
-| 플랫폼 토큰(터널, Tailscale operator OAuth, Telegram 봇, healthchecks ping URL), Grafana·AdGuard 관리자 | T08a, T08b |
+| 플랫폼 토큰(Tailscale operator OAuth, Telegram 봇, healthchecks ping URL), Grafana·AdGuard 관리자 | T08a, T08b |
 | Terraform 자격(`homelab-admin`의 R2 state 키, Cloudflare 토큰, Tailscale OAuth) | T08a |
