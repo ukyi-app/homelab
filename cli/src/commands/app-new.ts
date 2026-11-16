@@ -244,7 +244,13 @@ function appMainStep(app: string): Step {
 
 export default defineCommand({
   path: ["app", "new"],
-  summary: "템플릿으로 public 앱 저장소 만들기(목록 PR → 병합 뒤 생성·보안 설정·app-main)",
+  summary: "새 앱 저장소 만들기",
+  help: {
+    about:
+      "템플릿으로 public 앱 저장소를 만듭니다. 처음 실행하면 앱 목록에 더하는 PR을 엽니다. 그 PR을 병합한 뒤 같은 명령을 다시 실행하면 저장소를 만들고 보안 설정과 main 보호 규칙(ruleset)을 겁니다.",
+    examples: ["homelab app new smoke", "homelab app new smoke --apply"],
+    related: ["app add"],
+  },
   kind: "change",
   wrapper: "plan-json",
   args: [{ name: "app", required: true, help: "앱 이름", pattern: APP_NAME }],

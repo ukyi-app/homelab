@@ -6,7 +6,16 @@
 import { defineCommand, type BotAdminCommand, type BotAdminReport, type Observation, type Step } from "../core/command";
 import { CliError, UsageError } from "../core/result";
 
-const ACTIONS = ["emergency-stop", "resume", "status", "block", "release"];
+// 도움말의 동작 목록이 받는 동작 이름의 출처다(시험이 commandOf와 맞는지 실제로 돌려 본다).
+const ACTION_HELP = [
+  { name: "status", about: "봇 상태 보기(비상 정지·멈춤·대기 작업)" },
+  { name: "emergency-stop", about: "봇 비상 정지" },
+  { name: "resume", target: "emergency-stop", about: "비상 정지 풀기" },
+  { name: "resume", target: "<작업 ID>", about: "모델 한도·인증 문제로 멈춘 작업 다시 시작" },
+  { name: "release", target: "<작업 ID>", about: "결과를 알 수 없어(unknown) 막힌 작업 풀기" },
+  { name: "block", target: "<Discord 사용자 ID>", about: "사용자를 거부 목록에 더하기(해제는 이 명령에 없음)" },
+];
+const ACTIONS = [...new Set(ACTION_HELP.map((a) => a.name))];
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
 const SNOWFLAKE = /[1-9][0-9]{16,19}/;
 const TARGET = new RegExp(`emergency-stop|${UUID.source}|${SNOWFLAKE.source}`);
@@ -41,11 +50,18 @@ const NEXT: Record<string, string> = {
 
 export default defineCommand({
   path: ["bot"],
-  summary: "봇 관리 기능(비상 정지·해제·차단·상태 보기·unknown 해제)",
+  summary: "봇 비상 정지·재개·차단·상태 보기",
+  help: {
+    about:
+      "봇 게시 서버 안의 관리 기능을 부릅니다. 상태 보기까지 모든 동작이 --apply가 있어야 실행되고, 없으면 실행할 대상 파드와 명령만 보여 줍니다. 차단 해제는 이 명령에 없고 Infisical 절차로 합니다.",
+    examples: ["homelab bot status --apply", "homelab bot emergency-stop --apply"],
+    related: ["bot account list"],
+    actions: ACTION_HELP,
+  },
   kind: "change",
   args: [
-    { name: "action", required: true, help: ACTIONS.join(" | "), pattern: new RegExp(ACTIONS.join("|")) },
-    { name: "target", required: false, help: "emergency-stop | 작업 ID | Discord 사용자 ID", pattern: TARGET },
+    { name: "action", required: true, help: "동작(아래 동작 목록)", pattern: new RegExp(ACTIONS.join("|")) },
+    { name: "target", required: false, help: "동작의 대상(emergency-stop, 작업 ID, Discord 사용자 ID)", pattern: TARGET },
   ],
   flags: [],
   async run(ctx, input) {

@@ -16,7 +16,12 @@ const nameOf = (o: any) => `${o?.metadata?.namespace ? `${o.metadata.namespace}/
 
 export default defineCommand({
   path: ["data", "list"],
-  summary: "주인 없는 보존 데이터",
+  summary: "주인 없이 남은 데이터 보기",
+  help: {
+    about: "앱은 지웠는데 남아 있는 DB·Valkey·저장소(PV) 데이터를 보여 줍니다. 지우려면 data purge를 씁니다.",
+    examples: ["homelab data list"],
+    related: ["data purge", "app remove"],
+  },
   kind: "read",
   args: [],
   flags: [],
