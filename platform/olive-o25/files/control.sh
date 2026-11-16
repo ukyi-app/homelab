@@ -9,6 +9,10 @@
 #      규칙이 없으면 실행기만 다시 떠 1에서 막히고 같은 종료를 되풀이한다(CrashLoopBackOff). 자격은 한 번도 나가지 않는다.
 #   3. 둘 다 통과하면 새 세대의 hc core, 중계, 자격 전달을 차례로 띄운다. 자격은 세대마다 한 번만 준다.
 # 실행기는 밖에서 명령·인자·경로를 받지 않는다. 제어 FIFO로 단계 이름 한 줄만 받는다.
+#
+# 계획된 전체 재시작(첫 세대의 규칙 확인, 시험 단계 restart·ctl-crash)과 기동 실패를 가른다. 전체 재시작은 종료 기록을 지워
+# kubelet의 재시작 지연(CrashLoopBackOff)이 걸리지 않는다. 그래서 기동 실패는 세대를 넘어 남는 횟수(/c/fail-count)로 세고,
+# 실패마다 스스로 기다린 뒤 끝나며, 한도에 닿으면 자격을 주지 않고 멈춘 채로 남는다(hold). 장부·횟수 기록에 실패해도 hold다.
 # shellcheck source=lib.sh
 . /opt/o25/lib.sh
 # shellcheck source=steps.sh
@@ -18,6 +22,9 @@ trap 'exit 0' TERM INT
 umask 077
 cd /c || exit 1
 
+O25_FAIL=/c/fail-count
+O25_FAIL_LIMIT=${O25_FAIL_LIMIT:-3}
+
 # exit_restart <이유>: 장부에 남기고 전체 재시작 종료 코드로 끝난다. 로그(표준 출력)에는 세대와 이유만 적는다.
 exit_restart() {
   ledger "exit-request gen=$O25_GEN reason=$1"
@@ -25,25 +32,63 @@ exit_restart() {
   exit "$O25_RC"
 }
 
+# hold <이유>: 자격을 주지 않고, 끝나지도 않는다(끝나면 전체 재시작이 되풀이된다). 관리자가 로그·gate로 보고 파드를 끈다.
+hold() {
+  ledger "hold gen=$O25_GEN reason=$1"
+  echo "o25 hold: gen=$O25_GEN $1 (자격 없음, 다시 시작을 요청하지 않는다)"
+  while :; do
+    sleep 60 &
+    wait "$!"
+  done
+}
+
+# fail_restart <이유>: 기동 실패. 세대를 넘어 남는 횟수를 올리고, 한도면 hold, 아니면 5·10·20…(최대 60)초 기다린 뒤 전체 재시작.
+fail_restart() {
+  local n
+  n=$(head -c 16 "$O25_FAIL" 2>/dev/null | tr -cd '0-9')
+  n=$((${n:-0} + 1))
+  if ! printf '%s\n' "$n" >"$O25_FAIL.tmp" 2>/dev/null || ! mv -f "$O25_FAIL.tmp" "$O25_FAIL" 2>/dev/null; then
+    hold "fail-count-write reason=$1"
+  fi
+  ledger "start-fail gen=$O25_GEN n=$n reason=$1" || hold "ledger-write reason=$1"
+  if [ "$n" -ge "$O25_FAIL_LIMIT" ]; then
+    hold "start-failures n=$n limit=$O25_FAIL_LIMIT reason=$1"
+  fi
+  local wait_s=$((5 << (n - 1)))
+  [ "$wait_s" -gt 60 ] && wait_s=60
+  echo "o25 gate: gen=$O25_GEN 기동 실패 $n회($1), ${wait_s}초 뒤 끝난다"
+  sleep "$wait_s" &
+  wait "$!"
+  exit_restart "$1"
+}
+
 gate() {
   local relay_gen
   if [ -z "$O25_GEN" ] || [ ! -d "/c/boot/$O25_GEN" ]; then
-    exit_restart no-generation
+    fail_restart no-generation
   fi
   relay_gen=$(cut -d' ' -f1 /relay/current 2>/dev/null)
   if [ "$relay_gen" != "$O25_GEN" ]; then
-    exit_restart relay-generation-mismatch
+    fail_restart relay-generation-mismatch
   fi
   if ! mv "/c/boot/$O25_GEN/permit" "/c/boot/$O25_GEN/used" 2>/dev/null; then
-    if [ -e "/c/boot/$O25_GEN/used" ]; then exit_restart used-permit; fi
-    exit_restart no-permit
+    if [ ! -e "/c/boot/$O25_GEN/used" ]; then fail_restart no-permit; fi
+    # 실행기만 혼자 다시 떴다. ctl-crash 단계가 시킨 것이면 계획된 재시작이다.
+    # 규칙이 아직 확인되지 않은 파드(규칙 누락 변형)는 이 종료가 컨테이너 하나의 재시작이라 kubelet의 지연이 걸린다.
+    # 규칙이 확인된 파드에서 시키지 않은 단독 재시작(제어 쪽 OOM 등)은 전체 재시작을 되풀이하므로 기동 실패로 센다.
+    if grep -q " crash-request gen=$O25_GEN " "$O25_LEDGER" 2>/dev/null || ! grep -q ' rule-verified ' "$O25_LEDGER" 2>/dev/null; then
+      exit_restart used-permit
+    fi
+    fail_restart used-permit-unplanned
   fi
-  ledger "permit-used gen=$O25_GEN"
+  ledger "permit-used gen=$O25_GEN" || hold ledger-write-permit
   # 앞 세대에서 전체 재시작을 요청한 기록이 있고 지금 새 세대에 와 있다 = 규칙이 동작했다.
   if ! grep -E ' exit-request gen=[0-9a-f]+ ' "$O25_LEDGER" | grep -vq " gen=$O25_GEN "; then
+    # 규칙 확인은 파드마다 한 번이다. 앞 세대의 요청이 장부에 없는데 확인을 이미 요청한 적이 있으면 장부가 이상한 것이다.
+    if grep -q ' reason=canary$' "$O25_LEDGER" 2>/dev/null; then fail_restart canary-repeat; fi
     exit_restart canary
   fi
-  ledger "rule-verified gen=$O25_GEN"
+  ledger "rule-verified gen=$O25_GEN" || hold ledger-write-rule
 }
 
 start_session() {
@@ -73,18 +118,23 @@ deliver_cred() {
     return 1
   fi
   O25_MARK="o25fake-$O25_GEN-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  ledger "cred-offered gen=$O25_GEN sha=$(printf '%s' "$O25_MARK" | python3 "$O25_PY" sha) "
+  # 잠금 기록(cred-offered)을 못 남기면 내놓지 않는다. 기록 없이 내놓으면 같은 세대의 두 번째 제공을 막지 못한다.
+  if ! ledger "cred-offered gen=$O25_GEN sha=$(printf '%s' "$O25_MARK" | python3 "$O25_PY" sha) "; then
+    O25_MARK=""
+    return 1
+  fi
   printf '%s' "$O25_MARK" | python3 "$O25_PY" cred-serve "$O25_RELAY/cred.sock" "$O25_LEDGER" &
   return 0
 }
 
 gate
 mkdir -p "$O25_OUT" "$O25_CTL"
-start_session || exit_restart session-fail
+start_session || fail_restart session-fail
 [ -p "$O25_CTL/in" ] || mkfifo -m 600 "$O25_CTL/in"
 printf '%s\n' "$O25_STEPS" | tr ' ' '\n' >"$O25_CTL/steps"
 printf '%s\n' "$$" >"$O25_CTL/executor.pid"
 ledger "ready gen=$O25_GEN"
+rm -f "$O25_FAIL"
 echo "o25: ready gen=$O25_GEN"
 
 # 앞 실행기가 단계 도중에 끝났으면(전체 재시작·ctl-crash 포함) 그 단계의 결과에 적고 끝난 것으로 표시한다.

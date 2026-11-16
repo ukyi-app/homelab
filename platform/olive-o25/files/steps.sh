@@ -7,8 +7,9 @@
 # shellcheck source=lib.sh
 . /opt/o25/lib.sh
 
-# send_body <글>: 본체 자리 셸에 한 줄을 보낸다. 중계를 지나 본체 pty에 들어간다.
+# send_body <글>: 본체 자리 셸에 한 줄을 보낸다. 중계를 지나 본체 pty에 들어간다. hc send의 종료 코드를 그대로 돌려준다.
 send_body() { hcq send body "$1" >/dev/null 2>&1; }
+nonce() { head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 # read_body [줄 수]: hc가 저장한 본체 터미널 화면. 정제해서 낸다.
 read_body() { hcq read body --lines "${1:-40}" 2>&1 </dev/null | clean; }
 relay_log() { clean <"$O25_OUT/relay-$O25_GEN.log" 2>/dev/null; }
@@ -42,8 +43,9 @@ step_preflight() {
   else
     verdict "0.제어-폴더-그룹쓰기-없음" "안 됨" "위 목록을 본다"
   fi
-  echo "== cgroup 상한(제어 컨테이너)"
-  for t in memory.max cpu.max pids.max; do printf '  %s: %s\n' "$t" "$(clean </sys/fs/cgroup/$t 2>&1)"; done
+  echo "== cgroup 상한(제어 컨테이너). 쿠버네티스는 컨테이너별 pid 상한을 파드 스펙으로 주지 못한다(kubelet podPidsLimit은 파드 단위)"
+  for t in memory.max cpu.max pids.max pids.current; do printf '  %s: %s\n' "$t" "$(clean </sys/fs/cgroup/$t 2>&1)"; done
+  fact "제어 컨테이너 pids.max $(clean </sys/fs/cgroup/pids.max 2>&1). 본체 쪽은 run.sh body status, 파드 단위 상한은 node-cgroup.sh live가 찍는다"
 }
 
 step_boot() {
@@ -150,56 +152,103 @@ step_relay_kill() {
   try_new_session "4.중계-끊긴-뒤-새-자격-0"
 }
 
+# alive_pid <표식>: 화면에서 "<표식>-42-<pid>" 실행 응답의 pid. 보낸 줄에는 $((40+2))로 들어가 에코와 실행 결과가 갈린다.
+alive_pid() { printf '%s' "$2" | grep -oE "$1-42-[0-9]+" | tail -n 1 | sed 's/.*-//'; }
+
 step_false_exit() {
-  local got
+  local got n1 n2 p1 p2 rc
   if [ -z "$(relay_pids)" ]; then
     undecided "중계가 없다" "4.거짓-종료-뒤-새-자격-0"
     return
   fi
+  n1="alive$(nonce)"
   # 본체가 "끝났다"고 화면에 쓰고 살아 있다. 실행기는 이 바이트를 종료 영수증으로 쓰지 않는다.
-  send_body "printf '\\n[o25] session ended, exit 0\\n'; echo still-alive-\$\$"
+  send_body "printf '\\n[o25] session ended, exit 0\\n'; echo $n1-\$((40+2))-\$\$"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    undecided "거짓 종료 글을 보내지 못했다(hc send exit $rc). 조작이 일어나지 않았다" "4.거짓-종료-뒤-새-자격-0"
+    return
+  fi
   sleep 2
   got=$(read_body 10)
   printf '%s\n' "$got" | tail -n 4
-  printf '%s' "$got" | grep -q 'still-alive-' && fact "본체가 종료를 알리는 글을 쓰고도 셸이 살아 있다"
-  try_new_session "4.거짓-종료-뒤-새-자격-0"
+  p1=$(alive_pid "$n1" "$got")
+  if [ -z "$p1" ]; then
+    undecided "거짓 종료 글의 실행 응답($n1-42-<pid>)이 화면에 없다. 본체가 받았다는 증거가 없다" "4.거짓-종료-뒤-새-자격-0"
+    return
+  fi
+  fact "본체 셸(pid $p1)이 종료를 알리는 글을 쓰고 응답했다"
+  try_new_session "4.거짓-종료-뒤-새-자격-0.제공-거절"
+  # 같은 본체가 살아 있는지: 새 표식으로 다시 묻고 같은 셸 pid가 답해야 한다.
+  n2="again$(nonce)"
+  send_body "echo $n2-\$((40+2))-\$\$"
+  rc=$?
+  sleep 2
+  p2=$(alive_pid "$n2" "$(read_body 10)")
+  if [ "$rc" -ne 0 ] || [ -z "$p2" ]; then
+    verdict "4.거짓-종료-뒤-새-자격-0" "판단 필요" "거절 뒤 본체 생존을 확인하지 못했다(send exit $rc, 응답 ${p2:-없음})"
+  elif [ "$p2" != "$p1" ]; then
+    verdict "4.거짓-종료-뒤-새-자격-0" "판단 필요" "거절 뒤 답한 셸 pid가 다르다($p1 → $p2)"
+  elif grep -q " cred-refused gen=$O25_GEN " "$O25_LEDGER" && [ "$(cred_count "$O25_GEN")" -le 1 ]; then
+    verdict "4.거짓-종료-뒤-새-자격-0" "됨" "본체(셸 pid $p1)가 거짓 종료를 알리고 살아 있는 동안 같은 세대의 자격 제공을 거절했다(이 세대 전달 $(cred_count "$O25_GEN")회)"
+  else
+    verdict "4.거짓-종료-뒤-새-자격-0" "안 됨" "이 세대 전달 $(cred_count "$O25_GEN")회 또는 거절 기록 없음"
+  fi
 }
 
 # ---- (전체 재시작) 심기 → 재시작 → 확인
 
+# 심기 영수증: plant.sh가 다섯 역할의 pid·시작 시각과 움직이는 첩자를 확인한 뒤에만 "receipt p-<세대> roles=5 sha=<16자>"를 찍는다.
+# 보낸 줄(에코)에는 "receipt "가 없어 실행 결과와 갈린다. 실행기는 그 sha를 장부에 남기고, 재시작 요청에 묶는다.
+receipt_of() { grep -E " plant-receipt gen=$1 sha=[0-9a-f]{16}$" "$O25_LEDGER" 2>/dev/null | tail -n 1 | sed 's/.* sha=//'; }
+
 step_plant() {
-  local got
+  local got sha rc
   if [ -z "$(relay_pids)" ]; then
-    undecided "중계가 없어 본체에 심을 수 없다" "3.심기"
+    undecided "중계가 없어 본체에 심을 수 없다" "3.심기-영수증"
+    return
+  fi
+  if [ -n "$(receipt_of "$O25_GEN")" ]; then
+    undecided "이 세대에는 이미 심었다(세대마다 한 번. restart로 새 세대를 만든다)" "3.심기-영수증"
     return
   fi
   send_body "bash /opt/o25/plant.sh plant p-$O25_GEN"
-  sleep 4
-  got=$(read_body 10)
-  printf '%s\n' "$got" | tail -n 3
-  ledger "planted gen=$O25_GEN"
-  if printf '%s' "$got" | grep -q "planted p-$O25_GEN"; then
-    verdict "3.심기" "됨" "본체 셸이 분리 후손 넷과 첩자 하나를 띄웠다(run.sh body status로 다시 본다)"
+  rc=$?
+  sleep 6
+  got=$(read_body 12)
+  printf '%s\n' "$got" | tail -n 4
+  sha=$(printf '%s' "$got" | grep -oE "receipt p-$O25_GEN roles=5 sha=[0-9a-f]{16}" | tail -n 1 | sed 's/.*sha=//')
+  if [ "$rc" -ne 0 ]; then
+    verdict "3.심기-영수증" "판단 필요" "심기 줄을 보내지 못했다(hc send exit $rc)"
+  elif [ -z "$sha" ]; then
+    verdict "3.심기-영수증" "판단 필요" "영수증 줄이 화면에 없다(심기 실패·첩자 시작 실패. 위 plant-failed 줄을 본다)"
+  elif ledger "plant-receipt gen=$O25_GEN sha=$sha"; then
+    verdict "3.심기-영수증" "됨" "다섯 역할(setsid·nohup·daemon·stubborn·spy)의 pid·시작 시각과 움직이는 첩자를 확인한 영수증 sha $sha. run.sh body status의 영수증과 대조한다"
   else
-    verdict "3.심기" "판단 필요" "planted 줄이 화면에 없다"
+    verdict "3.심기-영수증" "판단 필요" "영수증을 장부에 남기지 못했다"
   fi
 }
 
+# 재시작 요청에 이 세대의 심기 영수증을 묶는다. 영수증 없이도 재시작은 한다(새 세대가 필요할 때). 그 회차의 소멸 판정은 판단 필요가 된다.
 step_restart() {
-  echo "전체 재시작 요청: 세대 $O25_GEN, 종료 코드 $O25_RC. 이 단계의 끝 줄은 나오지 않는다(kubectl exec가 끊긴다). 이어서 after-restart를 돌린다."
-  ledger "restart-request gen=$O25_GEN"
+  local r
+  r=$(receipt_of "$O25_GEN")
+  echo "전체 재시작 요청: 세대 $O25_GEN, 영수증 ${r:-없음}, 종료 코드 $O25_RC. 이 단계의 끝 줄은 나오지 않는다(kubectl exec가 끊긴다). 이어서 after-restart를 돌린다."
+  ledger "restart-request gen=$O25_GEN receipt=${r:-none}"
   exit_restart step-restart
 }
 
 step_ctl_crash() {
-  echo "실행기만 끝냄: 세대 $O25_GEN, 종료 코드 $O25_RC_CRASH(규칙 밖). 제어 컨테이너만 다시 떠 허가가 이미 쓰인 것을 보고 전체 재시작을 요청해야 한다."
-  ledger "crash-request gen=$O25_GEN code=$O25_RC_CRASH"
+  local r
+  r=$(receipt_of "$O25_GEN")
+  echo "실행기만 끝냄: 세대 $O25_GEN, 영수증 ${r:-없음}, 종료 코드 $O25_RC_CRASH(규칙 밖). 제어 컨테이너만 다시 떠 허가가 이미 쓰인 것을 보고 전체 재시작을 요청해야 한다."
+  ledger "crash-request gen=$O25_GEN receipt=${r:-none} code=$O25_RC_CRASH"
   echo "o25: crash-request gen=$O25_GEN"
   exit "$O25_RC_CRASH"
 }
 
 step_after_restart() {
-  local req prev req_ns init_ns del_ns n_prev_after refused
+  local req prev req_ns init_ns del_ns off_ns n_prev_after refused next_gen receipt
   req=$(grep -E ' (restart|crash)-request gen=' "$O25_LEDGER" | tail -n 1)
   if [ -z "$req" ]; then
     undecided "장부에 재시작 요청이 없다(restart 또는 ctl-crash를 먼저 돌린다)" "3.새-세대" "3.init-이-요청-뒤" "4.옛-세대-추가-자격-0" "4.새-자격은-새-세대-init-뒤"
@@ -211,10 +260,20 @@ step_after_restart() {
   echo "요청: $(printf '%s' "$req" | clean)"
   echo "== 요청 뒤 장부"
   awk -v t="$req_ns" '$1 >= t' "$O25_LEDGER" | clean
-  if [ "$prev" != "$O25_GEN" ] && [ -n "$init_ns" ]; then
-    verdict "3.새-세대" "됨" "요청한 세대 $prev → 지금 세대 $O25_GEN"
-  else
+  # 요청 세대 바로 다음 세대가 지금 세대여야 이 결과가 그 요청의 것이다(사이에 다른 재시작이 끼면 순서를 섞어 읽는다).
+  next_gen=$(awk -v g="$prev" 'f { print $1; exit } $1 == g { f = 1 }' /c/boot/history)
+  if [ "$prev" = "$O25_GEN" ] || [ -z "$init_ns" ]; then
     verdict "3.새-세대" "안 됨" "지금 세대가 요청한 세대와 같다($O25_GEN)"
+  elif [ "$next_gen" != "$O25_GEN" ]; then
+    verdict "3.새-세대" "판단 필요" "요청 세대 $prev 다음 세대가 ${next_gen:-없음}이고 지금 세대는 $O25_GEN이다(사이에 다른 재시작)"
+  else
+    verdict "3.새-세대" "됨" "요청한 세대 $prev → 바로 다음 세대 $O25_GEN"
+  fi
+  receipt=$(printf '%s' "$req" | sed -n 's/.* receipt=\([0-9a-f]\{16\}\).*/\1/p')
+  if [ -n "$receipt" ] && [ "$receipt" = "$(receipt_of "$prev")" ]; then
+    verdict "3.요청-세대-준비-영수증" "됨" "요청에 세대 $prev의 심기 영수증 $receipt이 묶였다. 소멸 판정은 이 영수증의 대상만 본다"
+  else
+    verdict "3.요청-세대-준비-영수증" "판단 필요" "요청에 세대 $prev의 심기 영수증이 없다. 이번 회차의 관측 대상이 없어 소멸·순서 판정을 낼 수 없다"
   fi
   if [ -n "$init_ns" ] && [ "$init_ns" -gt "$req_ns" ]; then
     verdict "3.init-이-요청-뒤" "됨" "새 세대의 init 시각이 요청보다 $(((init_ns - req_ns) / 1000000))ms 뒤"
@@ -230,11 +289,15 @@ step_after_restart() {
     verdict "4.옛-세대-추가-자격-0" "안 됨" "요청 뒤 세대 $prev로 자격 ${n_prev_after}회"
   fi
   del_ns=$(awk -v g="$O25_GEN" '$2 == "cred-delivered" && $3 == "gen=" g { print $1; exit }' "$O25_LEDGER")
+  off_ns=$(awk -v g="$O25_GEN" '$2 == "cred-offered" && $3 == "gen=" g { print $1; exit }' "$O25_LEDGER")
   if [ -n "$del_ns" ] && [ -n "$init_ns" ] && [ "$del_ns" -gt "$init_ns" ]; then
-    verdict "4.새-자격은-새-세대-init-뒤" "됨" "새 세대 자격이 init보다 $(((del_ns - init_ns) / 1000000))ms 뒤에 나갔다(옛 본체가 그 전에 끝났는지는 run.sh body after-restart의 첩자 기록으로 본다)"
+    verdict "4.새-자격은-새-세대-init-뒤" "됨" "새 세대 자격이 init보다 $(((del_ns - init_ns) / 1000000))ms 뒤에 나갔다(옛 본체가 그 전에 끝났는지는 이 줄로 알 수 없다. 노드 판정을 본다)"
   else
     verdict "4.새-자격은-새-세대-init-뒤" "판단 필요" "새 세대 자격 전달 기록이 없다(본체가 아직 받지 않았을 수 있다)"
   fi
+  # 노드 판정의 입력. 시각은 제어 쪽 장부(본체가 쓸 수 없는 /c)의 ns이고, 노드와 같은 커널 시계다.
+  # 제공 시각(cred-offered: 자격 소켓을 열기 직전)을 쓴다. 전달 시각보다 앞이라 더 엄격하다.
+  fact "노드 판정 입력: node-cgroup.sh judge ${O25_POD_UID:-<파드 UID>} $prev ${init_ns:--} ${off_ns:--}"
   echo "== 옛 세대 파일(남는 것이 예상이다. 새 세대는 새 경로를 쓴다)"
   for d in /c/g/*/; do
     d=${d%/}
@@ -246,44 +309,53 @@ step_after_restart() {
 
 # ---- (자격 전달) 가짜 자격이 본체에만 있는가
 
+# 값은 검사기(o25.py scan)의 표준 입력으로만 넘긴다. printf는 셸 내장이라 새 프로세스의 argv에 값이 실리지 않는다.
+# grep·find에 값을 인자로 주면 그 검사 프로세스의 argv가 노출 경로가 된다.
 step_cred() {
-  local n_state hit_files hit_proc screen p
+  local n_state scan rc sum hits screen screen_hit s_files s_procs s_unread
   if [ -z "$O25_MARK" ]; then
     undecided "이 실행기가 이번 세대의 자격을 내놓지 않았다(값을 모른다)" "6.hc-상태-없음" "6.제어-argv-environ-없음" "6.제어-로그-장부-없음" "6.중계-폴더-없음" "6.hc-화면-없음"
     return
   fi
   fact "이번 세대 자격 sha $(printf '%s' "$O25_MARK" | python3 "$O25_PY" sha), 전달 $(cred_count "$O25_GEN")회. 본체가 받은 sha는 run.sh body cred가 찍는다"
   n_state=$(find "$O25_G" -xdev -type f 2>/dev/null | wc -l)
-  # 일반 파일만 본다. grep -r은 실행기 자신의 FIFO(/c/ctl/in)를 열고 쓰는 쪽이 올 때까지 멈춘다.
-  hit_files=$(find /c /relay -xdev -type f -exec grep -lF -- "$O25_MARK" {} + 2>/dev/null | clean)
-  echo "== /c와 /relay에서 값이 든 파일: ${hit_files:-없음} (hc 상태 파일 ${n_state}개 포함)"
-  if [ "$(cred_count "$O25_GEN")" -lt 1 ]; then
-    undecided "본체가 아직 자격을 받지 않았다" "6.hc-상태-없음" "6.제어-로그-장부-없음" "6.중계-폴더-없음"
+  scan=$(printf '%s' "$O25_MARK" | python3 "$O25_PY" scan /c /relay 2>&1)
+  rc=$?
+  echo "== 검사기 결과(값 없이 위치만, exit $rc)"
+  printf '%s\n' "$scan" | clean | head -n 40 | sed 's/^/  /'
+  sum=$(printf '%s\n' "$scan" | sed -n 's/^summary files=\([0-9]*\) procs=\([0-9]*\) gone=[0-9]* unreadable=\([0-9]*\) self=[0-9]*$/\1 \2 \3/p')
+  if [ "$rc" -ne 0 ] || [ -z "$sum" ]; then
+    undecided "검사기가 끝까지 돌지 않았다(exit $rc)" "6.hc-상태-없음" "6.제어-argv-environ-없음" "6.제어-로그-장부-없음" "6.중계-폴더-없음"
   else
-    if printf '%s' "$hit_files" | grep -q "^$O25_G/"; then verdict "6.hc-상태-없음" "안 됨" "hc 상태에 값이 있다"; elif [ "$n_state" -gt 0 ]; then verdict "6.hc-상태-없음" "됨" "hc 상태 파일 ${n_state}개에 값이 없다"; else verdict "6.hc-상태-없음" "판단 필요" "hc 상태 파일을 찾지 못했다"; fi
-    if printf '%s' "$hit_files" | grep -qE '^/c/(out|ledger|ctl)'; then verdict "6.제어-로그-장부-없음" "안 됨" "제어 쪽 기록에 값이 있다"; else verdict "6.제어-로그-장부-없음" "됨" "/c/out·/c/ledger·/c/ctl에 값이 없다"; fi
-    if printf '%s' "$hit_files" | grep -q '^/relay/'; then verdict "6.중계-폴더-없음" "안 됨" "중계 폴더에 값이 있다"; else verdict "6.중계-폴더-없음" "됨" "중계 폴더 파일에 값이 없다(소켓뿐)"; fi
-  fi
-  hit_proc=""
-  for p in /proc/[0-9]*; do
-    [ "${p#/proc/}" = "$$" ] && continue
-    if { tr '\0' '\n' <"$p/cmdline" | grep -qF -- "$O25_MARK"; } 2>/dev/null || { tr '\0' '\n' <"$p/environ" | grep -qF -- "$O25_MARK"; } 2>/dev/null; then
-      hit_proc="$hit_proc ${p#/proc/}"
+    read -r s_files s_procs s_unread <<<"$sum"
+    hits=$(printf '%s\n' "$scan" | sed -n 's/^file //p')
+    if [ "$(cred_count "$O25_GEN")" -lt 1 ]; then
+      undecided "본체가 아직 자격을 받지 않았다" "6.hc-상태-없음" "6.제어-로그-장부-없음" "6.중계-폴더-없음"
+    elif [ "$s_unread" -gt 0 ]; then
+      undecided "읽지 못한 파일·프로세스 ${s_unread}개(위 unreadable 줄)" "6.hc-상태-없음" "6.제어-로그-장부-없음" "6.중계-폴더-없음"
+    else
+      if printf '%s' "$hits" | grep -q "^$O25_G/"; then verdict "6.hc-상태-없음" "안 됨" "hc 상태에 값이 있다"; elif [ "$n_state" -gt 0 ]; then verdict "6.hc-상태-없음" "됨" "hc 상태 파일 ${n_state}개에 값이 없다"; else verdict "6.hc-상태-없음" "판단 필요" "hc 상태 파일을 찾지 못했다"; fi
+      if printf '%s' "$hits" | grep -qE '^/c/(out|ledger|ctl|fail)'; then verdict "6.제어-로그-장부-없음" "안 됨" "제어 쪽 기록에 값이 있다"; else verdict "6.제어-로그-장부-없음" "됨" "/c/out·/c/ledger·/c/ctl에 값이 없다(파일 ${s_files}개를 읽었다)"; fi
+      if printf '%s' "$hits" | grep -q '^/relay/'; then verdict "6.중계-폴더-없음" "안 됨" "중계 폴더에 값이 있다"; else verdict "6.중계-폴더-없음" "됨" "중계 폴더 파일에 값이 없다(소켓뿐)"; fi
     fi
-  done
-  if [ -n "$hit_proc" ]; then
-    verdict "6.제어-argv-environ-없음" "안 됨" "제어 쪽 프로세스의 argv·환경에 값:$hit_proc"
-  else
-    verdict "6.제어-argv-environ-없음" "됨" "제어 쪽 프로세스 $(find /proc -maxdepth 1 -name '[0-9]*' | wc -l)개의 argv·환경에 값이 없다(실행기 셸 변수는 내보내지 않는다)"
+    if printf '%s\n' "$scan" | grep -qE '^(argv|environ) '; then
+      verdict "6.제어-argv-environ-없음" "안 됨" "제어 쪽 프로세스의 argv·환경에 값: $(printf '%s\n' "$scan" | grep -E '^(argv|environ) ' | one_line)"
+    elif [ "$s_unread" -gt 0 ] || [ "$s_procs" -lt 2 ]; then
+      verdict "6.제어-argv-environ-없음" "판단 필요" "프로세스 ${s_procs}개 중 읽지 못한 것이 있거나 볼 대상이 없다"
+    else
+      verdict "6.제어-argv-environ-없음" "됨" "검사기를 뺀 제어 쪽 프로세스 ${s_procs}개(실행기 PID 1 포함)의 argv·환경에 값이 없다(실행기 셸 변수는 내보내지 않는다)"
+    fi
   fi
-  screen=$(hcq read body --lines 400 2>/dev/null </dev/null)
-  if [ -z "$screen" ]; then
-    verdict "6.hc-화면-없음" "판단 필요" "본체 터미널 화면을 읽지 못했다(중계를 끊었으면 restart 뒤 다시 돌린다)"
-  elif printf '%s' "$screen" | grep -qF -- "$O25_MARK"; then
-    verdict "6.hc-화면-없음" "안 됨" "hc가 저장한 화면에 값이 있다"
-  else
-    verdict "6.hc-화면-없음" "됨" "hc 화면 $(printf '%s' "$screen" | wc -l)줄에 값이 없다(자격은 중계를 지나지 않는다. 본체가 스스로 찍으면 남는다)"
+  # 화면은 파일이 아니라 hc 응답이다. 값 비교는 셸 안에서 한다(case 패턴은 새 프로세스를 띄우지 않는다).
+  screen_hit=unknown
+  if screen=$(hcq read body --lines 400 2>/dev/null </dev/null) && [ -n "$screen" ]; then
+    case "$screen" in *"$O25_MARK"*) screen_hit=yes ;; *) screen_hit=no ;; esac
   fi
+  case "$screen_hit" in
+    unknown) verdict "6.hc-화면-없음" "판단 필요" "본체 터미널 화면을 읽지 못했다(중계를 끊었으면 restart 뒤 다시 돌린다)" ;;
+    yes) verdict "6.hc-화면-없음" "안 됨" "hc가 저장한 화면에 값이 있다" ;;
+    no) verdict "6.hc-화면-없음" "됨" "hc 화면 $(printf '%s' "$screen" | wc -l)줄에 값이 없다(자격은 중계를 지나지 않는다. 본체가 스스로 찍으면 남는다)" ;;
+  esac
 }
 
 step_summary() {

@@ -11,8 +11,13 @@
   connect <경로>              Unix 소켓에 연결만 해 본다(@로 시작하면 abstract).
   peer <경로>                 연결해서 상대의 uid를 SO_PEERCRED로 읽는다.
   trycreate <경로>            파일 만들기를 시도해 ok 또는 errno 이름을 찍는다.
+  tryop <create|symlink|bind|rename> <경로>  그 조작을 시도해 ok 또는 errno 이름을 찍는다.
+  tcpscan                     /proc/net/tcp·tcp6의 모든 수신점에 그 주소·계열 그대로 붙어 본다.
+  scan <뿌리...>              표준 입력의 표식을 파일·프로세스 argv·환경에서 찾는다(표식은 인자로 받지 않는다).
   sanitize                    표준 입력의 제어·서식 문자를 지운다.
   sha                         표준 입력의 sha256 앞 16자.
+
+검사 결과는 종료 코드와 함께 읽는다. errno 이름이 아닌 출력(traceback, 빈 출력)은 차단의 증거가 아니다.
 
 중계는 바이트와 닫기만 나른다. 명령·인자·환경·크기 변경을 받지 않는다. 화면 크기는 ROWS×COLS로 고정이다.
 중계 소켓과 자격 소켓은 제어 쪽이 만든다. 중계 폴더는 본체에 읽기 전용으로 붙어, 본체는 거기에 소켓을 만들거나 바꿔치기하지 못하고
@@ -225,6 +230,8 @@ def cmd_body_init(args):
         except (OSError, ValueError):
             time.sleep(0.5)
     st.set(gen=gen, gen_init_ns=init_ns, phase="wait-cred")
+    # 본체 컨테이너가 뜬 세대의 차례. bctl.sh after-restart가 "바로 앞 세대"(이번 재시작으로 끝났어야 할 세대)를 여기서 읽는다.
+    append("/b/boots", f"{gen} {now_ns()}")
     gdir = f"/relay/{gen}"
     cred = b""
     while not stop["now"]:
@@ -262,6 +269,7 @@ def cmd_body_init(args):
         "TMPDIR": tmp,
         "TERM": "xterm-256color",
         "O25_GEN": gen,
+        "O25_POD_UID": os.environ.get("O25_POD_UID", "?"),
     }
     if cred:
         env["O25_FAKE_CRED"] = cred.decode("utf-8", errors="replace")
@@ -429,25 +437,167 @@ def cmd_peer(args):
 
 
 def cmd_trycreate(args):
-    try:
-        fd = os.open(args[0], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        os.close(fd)
-        os.unlink(args[0])
-        print("ok")
-    except OSError as e:
-        print(errno.errorcode.get(e.errno, str(e.errno)))
+    return cmd_tryop(["create", args[0]])
 
 
-def cmd_tcp(args):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(2)
+def _op_create(path):
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    os.close(fd)
+    os.unlink(path)
+
+
+def _op_symlink(path):
+    os.symlink("/b", path)
+    os.unlink(path)
+
+
+def _op_bind(path):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        s.connect((args[0], int(args[1])))
-        print("connected")
-    except OSError as e:
-        print(f"refused {errno.errorcode.get(e.errno, e.errno) if e.errno else type(e).__name__}")
+        s.bind(path)
     finally:
         s.close()
+    os.unlink(path)
+
+
+def _op_rename(path):
+    os.rename(path, path + ".x")
+    os.rename(path + ".x", path)
+
+
+OPS = {"create": _op_create, "symlink": _op_symlink, "bind": _op_bind, "rename": _op_rename}
+
+
+def cmd_tryop(args):
+    # 출력은 ok 또는 errno 이름 하나. 종료 코드 0은 조작 성공, 1은 errno로 실패. 그 밖의 예외는 traceback이 찍히므로
+    # 부르는 쪽은 첫 줄이 기대한 errno 이름일 때만 차단으로 읽는다.
+    try:
+        OPS[args[0]](args[1])
+    except OSError as e:
+        print(errno.errorcode.get(e.errno, str(e.errno)) if e.errno else type(e).__name__)
+        return 1
+    print("ok")
+    return 0
+
+
+def _hex_addr(h):
+    # /proc/net/tcp의 주소는 32비트 낱말마다 호스트 바이트 순서(x86은 little-endian)다.
+    raw = b"".join(bytes.fromhex(h[i:i + 8])[::-1] for i in range(0, len(h), 8))
+    if len(raw) == 4:
+        return socket.AF_INET, socket.inet_ntop(socket.AF_INET, raw)
+    return socket.AF_INET6, socket.inet_ntop(socket.AF_INET6, raw)
+
+
+def listeners():
+    out = []
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        with open(path) as f:
+            next(f)
+            for line in f:
+                p = line.split()
+                if len(p) < 4 or p[3] != "0A":
+                    continue
+                h, port = p[1].split(":")
+                fam, addr = _hex_addr(h)
+                out.append((fam, addr, int(port, 16)))
+    return sorted(set(out))
+
+
+def cmd_tcpscan(_args):
+    # 수신 주소를 버리지 않는다. Pod IP 전용·::1 전용 수신점은 127.0.0.1로 붙으면 거절되어 "없다"로 잘못 읽힌다.
+    # wildcard(0.0.0.0, ::)만 같은 계열의 loopback으로 바꾼다. IPv4-mapped(::ffff:a.b.c.d)는 IPv6 그대로 붙는다.
+    blocked = ("ECONNREFUSED",)
+    try:
+        ls = listeners()
+    except OSError as e:
+        print(f"summary error=read-proc-net-{errno.errorcode.get(e.errno, e.errno)}")
+        return 1
+    n_conn = n_block = n_unk = 0
+    for fam, addr, port in ls:
+        target = addr
+        if fam == socket.AF_INET and addr == "0.0.0.0":
+            target = "127.0.0.1"
+        elif fam == socket.AF_INET6 and addr == "::":
+            target = "::1"
+        s = socket.socket(fam, socket.SOCK_STREAM)
+        s.settimeout(2)
+        try:
+            s.connect((target, port))
+            res = "connected"
+            n_conn += 1
+        except OSError as e:
+            name = errno.errorcode.get(e.errno, "") if e.errno else type(e).__name__
+            res = f"refused {name}"
+            if name in blocked:
+                n_block += 1
+            else:
+                n_unk += 1
+        finally:
+            s.close()
+        fam_name = "inet6" if fam == socket.AF_INET6 else "inet"
+        print(f"tcp {fam_name} listen={addr} port={port} target={target} -> {res}")
+    print(f"summary listen={len(ls)} connected={n_conn} blocked={n_block} unknown={n_unk}")
+    return 0
+
+
+def cmd_scan(args):
+    """표준 입력의 표식을 뿌리 아래 일반 파일과 모든 프로세스의 argv·환경에서 찾는다.
+
+    표식을 argv·환경·임시 파일로 받지 않는다(검사기 자신이 노출 경로가 된다). 검사기 자신(self)만 빼고, PID 1은 executor로
+    따로 표시한다. 그새 끝난 프로세스는 gone으로 세고, 읽기 실패(EACCES 등)는 unreadable로 세어 성공과 구별한다.
+    """
+    mark = sys.stdin.buffer.read(MAX_CRED)
+    sys.stdin.close()
+    if len(mark) < 8:
+        print("summary error=short-mark")
+        return 2
+    me = os.getpid()
+    n_files = n_procs = n_gone = n_unread = 0
+    for root in args:
+        for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: print(f"unreadable dir {e.filename} {errno.errorcode.get(e.errno, e.errno)}")):
+            for name in filenames:
+                p = os.path.join(dirpath, name)
+                try:
+                    st = os.lstat(p)
+                    # 일반 파일만 연다. FIFO(실행기의 /c/ctl/in)를 열면 쓰는 쪽이 올 때까지 멈춘다.
+                    if (st.st_mode & 0o170000) != 0o100000:
+                        continue
+                    with open(p, "rb") as f:
+                        data = f.read()
+                except OSError as e:
+                    if e.errno == errno.ENOENT:
+                        continue
+                    n_unread += 1
+                    print(f"unreadable file {p} {errno.errorcode.get(e.errno, e.errno)}")
+                    continue
+                n_files += 1
+                if mark in data:
+                    print(f"file {p}")
+    for d in os.listdir("/proc"):
+        if not d.isdigit() or int(d) == me:
+            continue
+        label = "executor" if d == "1" else "proc"
+        n_procs += 1
+        for what in ("cmdline", "environ"):
+            try:
+                with open(f"/proc/{d}/{what}", "rb") as f:
+                    data = f.read()
+            except OSError as e:
+                if e.errno in (errno.ENOENT, errno.ESRCH):
+                    n_gone += 1
+                    break
+                n_unread += 1
+                try:
+                    with open(f"/proc/{d}/comm") as f:
+                        comm = f.read().strip()
+                except OSError:
+                    comm = "?"
+                print(f"unreadable {what} {d} {errno.errorcode.get(e.errno, e.errno)} comm={comm}")
+                continue
+            if mark in data:
+                print(f"{'argv' if what == 'cmdline' else 'environ'} {d} {label}")
+    print(f"summary files={n_files} procs={n_procs} gone={n_gone} unreadable={n_unread} self={me}")
+    return 0
 
 
 def cmd_sanitize(_args):
@@ -466,7 +616,9 @@ COMMANDS = {
     "connect": cmd_connect,
     "peer": cmd_peer,
     "trycreate": cmd_trycreate,
-    "tcp": cmd_tcp,
+    "tryop": cmd_tryop,
+    "tcpscan": cmd_tcpscan,
+    "scan": cmd_scan,
     "sanitize": cmd_sanitize,
     "sha": cmd_sha,
 }

@@ -15,6 +15,8 @@ fsGroup·supplementalGroups를 쓰지 않는다. 파드 수준 값이라 두 컨
 shareProcessNamespace를 쓰지 않는다(기본 false). 본체 컨테이너의 PID 1이 끝나면 커널이 그 컨테이너의 나머지를 모두 끝낸다.
 hostUsers·procMount·Localhost 프로필을 쓰지 않는다. 본체 때문에 여는 예외가 없는 것이 이 구조의 요점이다(D-47).
 SA 토큰 없음, 서비스 환경변수 없음, 읽기 전용 root, drop ALL, 권한 상승 금지, 컨테이너마다 limits.
+pid 상한은 여기서 줄 수 없다. 파드 스펙에 컨테이너별 pid 필드가 없고, 상한은 kubelet의 podPidsLimit(파드 단위, 노드 설정)뿐이다.
+그래서 실제 값은 시험이 찍는다: 제어 쪽 preflight, 본체 쪽 bctl.sh status, 파드 단위는 node-cgroup.sh live.
 
 전체 재시작: control의 restartPolicyRules가 고정 종료 코드에 RestartAllContainers를 건다(Kubernetes 1.36 beta, 기본 켜짐,
 기능 게이트 ContainerRestartRules·RestartAllContainersOnContainerExits). kubelet이 모든 컨테이너를 끝내고 init부터 다시 띄운다.
@@ -146,6 +148,11 @@ spec:
               value: {{ .Values.hc.version | quote }}
             - name: O25_RESTART_CODE
               value: {{ .Values.restartRule.exitCode | quote }}
+            # 노드 판정(node-cgroup.sh judge)에 넘길 파드 UID를 결과에 찍으려고 받는다. 비밀이 아니다.
+            - name: O25_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
             # hc의 XDG 경로는 여기 두지 않는다. 실행기가 세대마다 정한다(files/lib.sh hc_env).
             - name: HOME
               value: /c
@@ -185,6 +192,11 @@ spec:
           env:
             - name: HOME
               value: /b
+            # 심기 영수증에 파드 UID를 적는다(앞 회차·다른 파드의 기록과 섞이지 않게).
+            - name: O25_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
           securityContext:
             {{- include "o25.containerSecurity" . | nindent 12 }}
             runAsUser: 10002

@@ -50,51 +50,77 @@ case "$cmd" in
     echo "== 첩자 기록"
     for f in /b/spy/*.hb; do [ -e "$f" ] && printf '  %s: %s\n' "${f##*/}" "$(clean <"$f")"; done
     for f in /b/spy/*.caught; do [ -e "$f" ] && printf '  %s: %s줄\n' "${f##*/}" "$(wc -l <"$f")"; done
+    echo "== 이 세대의 심기 영수증(/b/receipt/$GEN)"
+    if [ -s "/b/receipt/$GEN" ]; then
+      sed 's/^/  /' "/b/receipt/$GEN" | clean
+      echo "  sha=$(python3 "$PY" sha <"/b/receipt/$GEN")"
+    else
+      echo "  없음"
+    fi
+    echo "== cgroup 상한(본체 컨테이너). 차트는 컨테이너별 pid 상한을 주지 못한다"
+    for t in memory.max pids.max pids.current; do printf '  %s: %s\n' "$t" "$(clean </sys/fs/cgroup/$t 2>&1)"; done
     ;;
   hide)
     bash /opt/o25/probe.sh body 2>&1 | clean
     ;;
   after-restart)
-    echo "== 세대 $GEN (init_ns $GEN_INIT_NS), 본체 PID 1 시작 $(state pid1_started_ns)"
-    alive=$(planted_alive)
-    old_alive=$(printf '%s\n' "$alive" | awk -v g="$GEN" 'NF && $2 !~ ("^p-" g "-") { print }')
-    n_hb_old=0 n_hb_late=0 n_hb_moving=0
-    for f in /b/spy/*.hb; do
-      [ -e "$f" ] || continue
-      born=$(sed -n 's/.*born=\([0-9a-f]*\).*/\1/p' "$f")
-      [ "$born" = "$GEN" ] && continue
-      n_hb_old=$((n_hb_old + 1))
-      last=$(sed -n 's/.*now_ns=\([0-9]*\).*/\1/p' "$f")
-      echo "  첩자 ${f##*/}: 태어난 세대 $born, 마지막 표시 $last, 새 세대 init보다 $(((GEN_INIT_NS - last) / 1000000))ms 앞"
-      [ "$last" -ge "$GEN_INIT_NS" ] && n_hb_late=$((n_hb_late + 1))
-      before=$last
-      sleep 2
-      [ "$(sed -n 's/.*now_ns=\([0-9]*\).*/\1/p' "$f")" != "$before" ] && n_hb_moving=$((n_hb_moving + 1))
-    done
-    echo "== 옛 세대의 심은 것 중 살아 있는 것: ${old_alive:-없음}"
-    if [ "$n_hb_old" -eq 0 ]; then
-      verdict "3.옛-본체-후손-0" "판단 필요" "옛 세대에 심은 첩자의 기록이 없다(plant를 먼저 돌렸는가)"
-    elif [ -z "$old_alive" ] && [ "$n_hb_moving" -eq 0 ]; then
-      verdict "3.옛-본체-후손-0" "됨" "옛 세대에 심은 분리 후손·TERM 무시·첩자가 하나도 없고, 첩자 표시 ${n_hb_old}개가 멈췄다"
-    else
-      verdict "3.옛-본체-후손-0" "안 됨" "살아 있음: ${old_alive:-없음}, 아직 움직이는 첩자 표시 ${n_hb_moving}개"
+    # 이번 재시작으로 끝났어야 할 세대 = 본체 컨테이너가 뜬 세대 차례(/b/boots)에서 지금 세대 바로 앞의 다른 세대.
+    # 그 세대의 심기 영수증에 적힌 대상만 본다. 앞 회차의 기록은 이번 회차의 증거로 쓰지 않는다.
+    # 파드 안에서는 옛 본체가 언제 끝났는지 알 수 없다. 첩자 표시는 "늦게까지 살아 있었다"를 잡는 보조 증거일 뿐이고,
+    # 순서(옛 본체 소멸 → 새 init → 새 자격)의 최종 판정은 노드 줄(node-cgroup.sh judge)이다.
+    prev=$(awk -v g="$GEN" '$1 != g { p = $1 } END { print p }' /b/boots 2>/dev/null)
+    rc_file=/b/receipt/$prev
+    echo "== 세대 $GEN (init_ns $GEN_INIT_NS), 본체 PID 1 시작 $(state pid1_started_ns), 바로 앞 본체 세대 ${prev:-없음}"
+    keys="3.body.옛-본체-후손-0 3.보조.옛-첩자-새-init-뒤-표시-없음 4.보조.첩자-포착-없음"
+    if [ -z "$prev" ] || [ ! -s "$rc_file" ]; then
+      for k in $keys; do verdict "$k" "판단 필요" "바로 앞 세대(${prev:-없음})의 심기 영수증이 없다. 이번 회차의 관측 대상이 없다"; done
+      exit 0
     fi
-    if [ "$n_hb_old" -gt 0 ] && [ "$n_hb_late" -eq 0 ]; then
-      verdict "3.옛-본체가-새-init-전에-끝남" "됨" "옛 첩자의 마지막 표시가 모두 새 세대 init 시각보다 앞이다(0.2초 간격으로 쓰던 것)"
-    elif [ "$n_hb_old" -gt 0 ]; then
-      verdict "3.옛-본체가-새-init-전에-끝남" "안 됨" "새 세대 init 뒤에도 표시를 쓴 첩자 ${n_hb_late}개"
+    echo "== 영수증 $rc_file (sha $(python3 "$PY" sha <"$rc_file"))"
+    sed 's/^/  /' "$rc_file" | clean
+    n_target=0 n_alive=0
+    while read -r r p s; do
+      p=${p#pid=} s=${s#start=}
+      n_target=$((n_target + 1))
+      now=""
+      if { read -r stat <"/proc/$p/stat"; } 2>/dev/null; then
+        read -ra f <<<"${stat##*) }"
+        [ "${f[0]}" != Z ] && now=${f[19]}
+      fi
+      if [ "$now" = "$s" ]; then
+        n_alive=$((n_alive + 1))
+        echo "  살아 있음: $r pid $p 상태 ${f[0]}"
+      fi
+    done < <(grep '^role=' "$rc_file")
+    tagged=$(planted_alive | awk -v t="p-$prev-" 'index($2, t) == 1')
+    hb=/b/spy/p-$prev-spy.hb
+    last=$(sed -n 's/.*now_ns=\([0-9]*\).*/\1/p' "$hb" 2>/dev/null)
+    sleep 2
+    last2=$(sed -n 's/.*now_ns=\([0-9]*\).*/\1/p' "$hb" 2>/dev/null)
+    echo "  첩자 표시: 마지막 ${last:-없음}, 2초 뒤 ${last2:-없음}, 새 세대 init 시각 $GEN_INIT_NS"
+    echo "== 꼬리표 p-$prev- 로 살아 있는 것: ${tagged:-없음}"
+    if [ "$n_target" -ne 5 ] || [ -z "$last" ]; then
+      verdict "3.body.옛-본체-후손-0" "판단 필요" "영수증 대상 ${n_target}개, 첩자 표시 ${last:-없음}"
+    elif [ "$n_alive" -eq 0 ] && [ -z "$tagged" ] && [ "$last" = "$last2" ]; then
+      verdict "3.body.옛-본체-후손-0" "됨" "영수증의 다섯 대상(pid·시작 시각)이 이 컨테이너에 없고 첩자 표시가 멈췄다(지금 시점의 사실. 언제 끝났는지는 노드 판정)"
     else
-      verdict "3.옛-본체가-새-init-전에-끝남" "판단 필요" "옛 첩자 기록이 없다"
+      verdict "3.body.옛-본체-후손-0" "안 됨" "영수증 대상 중 살아 있음 ${n_alive}개, 꼬리표로 찾은 것: ${tagged:-없음}, 첩자 표시 ${last}→${last2}"
+    fi
+    if [ -n "$last" ] && [ "$last" -ge "$GEN_INIT_NS" ]; then
+      verdict "3.보조.옛-첩자-새-init-뒤-표시-없음" "안 됨" "옛 첩자가 새 세대 init 뒤에도 표시를 썼다(늦게까지 살아 있었다)"
+    elif [ -n "$last" ]; then
+      verdict "3.보조.옛-첩자-새-init-뒤-표시-없음" "됨" "마지막 표시가 새 init보다 $(((GEN_INIT_NS - last) / 1000000))ms 앞이다. 그 뒤 언제 끝났는지는 모른다(보조 증거. 순서 판정이 아니다)"
+    else
+      verdict "3.보조.옛-첩자-새-init-뒤-표시-없음" "판단 필요" "첩자 표시가 없다"
     fi
     caught=$(cat /b/spy/*.caught 2>/dev/null | clean)
     tries=$(cat /b/spy/*.caught.tries 2>/dev/null | wc -l)
     if [ -n "$caught" ]; then
-      verdict "4.옛-본체가-새-자격을-못-봄" "안 됨" "첩자가 다른 세대의 소켓·환경에서 받은 것: $(printf '%s' "$caught" | head -n 3 | tr '\n' ' ')"
-    elif [ "$n_hb_old" -gt 0 ]; then
-      verdict "4.옛-본체가-새-자격을-못-봄" "됨" "첩자가 다른 세대에서 받은 것 0건(시도 기록 ${tries}줄)"
+      verdict "4.보조.첩자-포착-없음" "안 됨" "첩자가 다른 세대의 소켓·환경에서 받은 것: $(printf '%s' "$caught" | head -n 3 | tr '\n' ' ')"
     else
-      verdict "4.옛-본체가-새-자격을-못-봄" "판단 필요" "첩자 기록이 없다"
+      verdict "4.보조.첩자-포착-없음" "됨" "첩자가 기록한 포착 0건(시도 기록 ${tries}줄). 받고 기록 전에 끝난 경우를 배제하지 못한다(보조 증거)"
     fi
+    fact "순서의 최종 판정은 노드 줄 3.node.옛-본체-소멸이-새-init-앞, 4.node.옛-본체-소멸이-새-자격-앞이다"
     echo "== 옛 세대 본체 폴더(남는 것이 예상이다)"
     for d in /b/*/; do
       d=${d%/}
@@ -118,14 +144,21 @@ case "$cmd" in
       verdict "6.본체-프로세스에-있음" "안 됨" "본체 자리 프로그램 환경에 자격이 없거나 sha가 다르다"
       exit 0
     fi
-    in_pid1=no
-    { tr '\0' '\n' </proc/1/environ | grep -qF -- "$got"; } 2>/dev/null && in_pid1=yes
-    { tr '\0' '\n' </proc/1/cmdline | grep -qF -- "$got"; } 2>/dev/null && in_pid1=yes
-    files=$(find /b /relay -xdev -type f -exec grep -lF -- "$got" {} + 2>/dev/null | clean)
-    if [ "$in_pid1" = no ] && [ -z "$files" ]; then
-      verdict "6.본체-쪽-파일-argv-없음" "됨" "PID 1의 argv·환경과 /b·/relay 파일에 값이 없다(본체 자리 프로그램의 환경에만)"
+    # 값은 검사기의 표준 입력으로만 넘긴다(인자로 주면 검사 프로세스의 argv가 노출 경로가 된다).
+    scan=$(printf '%s' "$got" | python3 "$PY" scan /b /relay 2>&1)
+    rc=$?
+    printf '%s\n' "$scan" | clean | head -n 30 | sed 's/^/  /'
+    sum=$(printf '%s\n' "$scan" | sed -n 's/^summary files=[0-9]* procs=\([0-9]*\) gone=[0-9]* unreadable=\([0-9]*\) self=[0-9]*$/\1 \2/p')
+    # 본체 자리 프로그램과 그 자손의 환경에 있는 것은 예상이다(자격을 그 환경으로 준다). PID 1·argv·파일은 안 된다.
+    bad=$(printf '%s\n' "$scan" | grep -E '^(file |argv |environ [0-9]+ executor$)' | tr '\n' ' ')
+    if [ "$rc" -ne 0 ] || [ -z "$sum" ]; then
+      verdict "6.본체-쪽-파일-argv-없음" "판단 필요" "검사기가 끝까지 돌지 않았다(exit $rc)"
+    elif [ -n "$bad" ]; then
+      verdict "6.본체-쪽-파일-argv-없음" "안 됨" "값이 있는 곳: $bad"
+    elif [ "${sum#* }" != 0 ]; then
+      verdict "6.본체-쪽-파일-argv-없음" "판단 필요" "읽지 못한 파일·프로세스 ${sum#* }개"
     else
-      verdict "6.본체-쪽-파일-argv-없음" "안 됨" "PID 1=$in_pid1, 파일: ${files:-없음}"
+      verdict "6.본체-쪽-파일-argv-없음" "됨" "PID 1의 argv·환경, 모든 프로세스의 argv, /b·/relay 파일에 값이 없다(본체 자리 프로그램과 자손의 환경에만: $(printf '%s\n' "$scan" | grep -c '^environ ')곳)"
     fi
     ;;
   *)
