@@ -36,8 +36,9 @@ SLACK_NS = 30 * 10**9
 # 종료 요청의 상한. 리허설 실측(R2-EXIT 실험 2a~2f·4c)은 SIGTERM·SIGHUP·pty 닫기 뒤 0.2~0.5초였다. 노드의 CPU 상한(500m)과
 # 앱의 정리 시간을 넉넉히 보고 실측 최대의 열 배로 둔다. 넘으면 응하지 않은 것으로 본다(SIGKILL로 넘어가 됨을 만들지 않는다).
 TERM_LIMIT_NS = 5 * 10**9
-# 본체 PID 1은 프로그램을 거둔 직후 중계 연결을 닫는다. 그 시각(제어 쪽 relay-serve 로그)과 본체가 낸 종료 시각의 허용 차이.
-# 둘 사이에는 select 한 바퀴(1초)가 들어갈 수 있다.
+# 본체 PID 1은 종료 시각을 적은 뒤 중계 연결을 닫으므로, 제어 쪽 relay-serve가 본 닫힘은 본체 종료 시각보다 앞설 수 없다
+# (같은 노드의 같은 시계). 앞선 닫힘은 다른 원인(제어 쪽 relay 끝, hc kill)이라 됨의 근거로 쓰지 않는다.
+# 뒤쪽 허용 차이: 둘 사이에는 select 한 바퀴(1초)가 들어갈 수 있다.
 CLOSE_SLACK_NS = 2 * 10**9
 # SIGTERM에 응한 종료로 보는 상태. Claude Code는 SIGTERM에 핸들러가 있어 exit 143으로 끝났다(실측). 기본 처리면 signal:15다.
 TERM_OK = ("exit:143", "signal:15")
@@ -203,8 +204,8 @@ def judge(pod, gen, pin_sha, pin_ver, ui_text, body_text):
         put(TERM_KEY, "안 됨", "late-exit", f"SIGTERM 뒤 {(exit_t - sent) // 10**6}ms에 끝났다(상한 {TERM_LIMIT_NS // 10**9}초)")
     elif term["n"] == 0:
         put(TERM_KEY, "판단 필요", "relay-open", "본체 PID 1은 종료를 냈는데 제어 쪽 중계가 닫히지 않았다")
-    elif not ex["tr"] < term["closed"] <= term["t"] or abs(term["closed"] - exit_t) > CLOSE_SLACK_NS:
-        put(TERM_KEY, "판단 필요", "relay-mismatch", "제어 쪽 중계 닫힘 시각이 본체의 종료 시각과 맞지 않는다")
+    elif not sent < term["closed"] <= term["t"] or not 0 <= term["closed"] - exit_t <= CLOSE_SLACK_NS:
+        put(TERM_KEY, "판단 필요", "relay-mismatch", "제어 쪽 중계 닫힘이 본체의 종료 시각 뒤 2초 안이 아니다")
     elif status == "unknown":
         put(TERM_KEY, "판단 필요", "status-unknown", "종료는 봤지만 상태를 받지 못했다")
     elif status not in TERM_OK:
@@ -225,12 +226,17 @@ def judge(pod, gen, pin_sha, pin_ver, ui_text, body_text):
 
 
 def exit_fact(res):
-    v, code, _ = res[EXIT_KEY]
+    v, code, why = res[EXIT_KEY]
     if v == "됨":
         return ("사실 앱의 끝내기 키로 끝났다(exit:0). 그래서 종료 요청을 잴 대상이 없었다. 관리자 결정(2026-11-16)으로 (4)는"
                 " 2.claude.종료-요청으로 판정하므로 이 세대로는 (4)가 됨이 아니다. 사람이 본다")
-    head = ("앱의 끝내기 키로는 끝나지 않았다(첫 실행 화면의 알려진 앱 동작)" if v == "안 됨"
-            else f"앱의 끝내기 키 결과를 가리지 못했다(판단 필요, 이유 {code})")
+    # "알려진 앱 동작"은 끝나지 않음(not-exited)에만 맞는 설명이다. 신호로 죽은 것(killed)은 OOM·충돌일 수 있다.
+    if code == "not-exited":
+        head = "앱의 끝내기 키로는 끝나지 않았다(첫 실행 화면의 알려진 앱 동작)"
+    elif v == "안 됨":
+        head = f"앱의 끝내기 키 결과는 안 됨이지만 알려진 앱 동작이 아니다({why}, 이유 {code}). OOMKilled·이벤트를 본다"
+    else:
+        head = f"앱의 끝내기 키 결과를 가리지 못했다(판단 필요, 이유 {code})"
     return (f"사실 {head}. 관리자 결정(2026-11-16)으로 (4)는 본체 PID 1의 종료 요청에 응하는지(2.claude.종료-요청)로"
             " 판정했다. (4)의 끝내기를 한 부분 약하게 읽은 것이다")
 
