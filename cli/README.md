@@ -24,7 +24,7 @@ homelab doctor                    # 도구·로그인·kubectl context
 - 타입 검사: `bun run ci --only "cli typecheck"`(strict `tsc`, `cli/tsconfig.json`). 이 단계와 `cli` 시험·`deploy-merge merge` 단계를 고르면 `bun run ci`가 그보다 먼저 `npm deps` 단계(`bun install --frozen-lockfile --ignore-scripts`)를 한 번 돌려 `typescript`·`@types/bun`과 실행 의존성 `@clack/prompts`(정확한 버전, `bun cli/build.ts`가 실행 파일에 묶어 설치 뒤에는 받지 않는다)를 받는다. 버전을 바꾸면 `bun install`로 `bun.lock`을 같은 커밋에서 갱신한다. `@types/bun`은 `.tool-versions`의 bun과 같은 버전이다.
 - Infisical을 쓰는 명령은 `HOMELAB_INFISICAL_PROJECT_ID`(homelab 프로젝트 ID)를 읽는다. 없으면 tty에서 한 실행에 한 번만 묻는다(답이 틀려도 다시 묻지 않는다). CLI는 값을 저장하지 않으므로 매번 묻지 않게 하려면 셸 설정에 `export HOMELAB_INFISICAL_PROJECT_ID=<ID>`를 둔다. 값은 저장소에 두지 않는다.
 - `infisical`이 로그인 만료·인증 거부로 실패하면 다음 행동이 `infisical login`이다. 정해진 문구(`[infisical login]`, `status-code=401`, `Unauthorized`)에 맞았는지만 보고 오류 원문은 계속 버린다.
-- `infisical`을 부를 때마다 `~/.infisical/secrets-backup/`을 0500으로 잠그고(남은 파일은 지운다) 호출 뒤 파일이 0개인지 본다. 권한이 듣지 않는 파일시스템(또는 root)이면 실행하지 않고 멈춘다. 잠긴 폴더를 다시 열지 않고(남은 파일은 폴더째 바꾼다), `.`·`..`가 든 HOME은 거부한다. CLI 0.44.2가 조회 값을 그 폴더에 남기기 때문이다(`tools/tf-github.sh`와 같은 방식).
+- `infisical`을 부를 때마다 `~/.infisical/secrets-backup/`을 0500으로 잠그고(남은 파일은 지운다) 호출 뒤 파일이 0개인지 본다. 권한이 듣지 않는 파일시스템(또는 root)이면 실행하지 않고 멈춘다. 잠긴 폴더를 다시 열지 않고(남은 파일은 폴더째 바꾼다), `.`·`..`가 든 HOME은 거부한다. CLI 0.45.8이 조회 값을 그 폴더에 남기기 때문이다(`tools/tf-github.sh`와 같은 방식).
 
 ## 동작 규칙
 

@@ -89,7 +89,7 @@ export function appRepo(app: string, o: AppRepoOpts = {}): Rule[] {
   ];
 }
 
-// Infisical 0.44.2 폴더 목록 출력(core infisical.ts 실측): 항목 {folderId, folderName, folderPath}, 빈 목록은 null.
+// Infisical 0.45.8 폴더 목록 출력(core infisical.ts 실측): 항목 {folderId, folderName, folderPath}, 빈 목록은 null.
 export const folderJson = (parent: string, names: string[]) => JSON.stringify(names.length === 0 ? null : names.map((name, i) => ({ folderId: `f${i}`, folderName: name, folderPath: `${parent === "/" ? "" : parent}/${name}` })));
 
 // Infisical 폴더 목록(부모 → 자식 이름들).

@@ -1609,7 +1609,7 @@ EOF
 
 - 사람이 `infisical login`한 NUC에서 돌린다(Infisical CLI는 NUC의 mise에만 있다). 암호문구는 터미널로만 넣는다(만들 때 두 번, 이름 대조 때 한 번). **암호문구는 비워 두지 않는다.** 비우면 age가 만든 암호문구를 화면에 찍는다.
 - 암호문구는 비밀번호 관리자에 둔다. 암호화된 메모도 된다. 시험용이면 시험 뒤 지운다.
-- 로그인 사용자의 Infisical CLI 0.44.2가 읽은 값을 `~/.infisical/secrets-backup/`에 남기는 문제는 bootstrap.md 2.2 vm 1단계와 같은 잠금으로 막는다.
+- 로그인 사용자의 Infisical CLI 0.45.8이 읽은 값을 `~/.infisical/secrets-backup/`에 남기는 문제는 bootstrap.md 2.2 vm 1단계와 같은 잠금으로 막는다.
 - **H2(봇 작업자 자격) 전에 뜬 내보내기는 4)에서 못 쓴다.** sandbox가 실제 작업자로 바뀐 뒤(T16b S11)부터 지도의 sandbox 항목은 `sandbox/worker-credential-claude-subscription`이고 키는 `/apps/homelab-bot/worker/CLAUDE_CODE_OAUTH_TOKEN`이다(전에는 `sandbox/worker-seed`의 시험 키 `WORKER_PROBE`). 그 전 내보내기에는 이 경로가 없어 4)의 손 Secret 블록이 `missing`으로 멈춘다. H2 뒤 운영(`homelab`/`prod`)과 VM(`homelab-dev`/`dev`) 내보내기를 이 블록으로 새로 뜬다. Infisical에 키가 아직 없으면 이 블록도 `missing`으로 멈춘다. VM의 값은 실제 토큰이 아니라 작업자가 받는 모양의 가짜 문자열이다(`platform/root/templates/sandbox.yaml` 머리 주석). 실행기 프로필(`platform/sandbox/values.yaml`의 `worker.profile`)을 바꾸면 이 Secret 이름과 키가 함께 바뀌므로 그 뒤에도 내보내기를 새로 뜬다.
 - **인증 방식 키가 sandbox 지도에 들어가기 전에 뜬 내보내기도 4)에서 못 쓴다.** `worker.profile.methods`·`task.remoteApiKey`가 생긴 뒤 지도에 `/apps/homelab-bot/worker/CLAUDE_AUTH_METHOD`·`ANTHROPIC_API_KEY`·`ANTHROPIC_API_KEY_TASK`가 들어가, 그 전 내보내기로는 `missing`으로 멈춘다. 그 배포 뒤 운영·VM 내보내기를 새로 뜬다. 계정을 바꾼 뒤(`homelab bot account use`)에도 새로 뜬다. 옛 내보내기는 바꾸기 전 방식 표시와 자격을 담는다.
 - VM 시험: **`homelab-dev`/`dev`만 내보낸다.** 운영 내보내기를 VM에 넣으면 운영 터널 토큰·체크 URL·operator OAuth가 VM에 들어가 VM이 운영 터널에 붙는다(설계 B.8 E1, E8 VM 격리). 4)의 블록도 `vm`에서는 `homelab-dev`/`dev`가 아닌 내보내기를 거부한다. 시험 전(외부 자격을 다 넣고 bootstrap.md 2.2 vm 1단계 키 대조가 "빠진 키 0"인 뒤)에 만들고, 시험 뒤 파일과 암호문구를 지운다.
@@ -1626,7 +1626,7 @@ test -s "$map" || { echo "먼저 1) 지도를 만든다"; exit 1; }
 pid="${!idvar:-}"
 [ -n "$pid" ] || read -r -p "Infisical $project project ID: " pid </dev/tty
 [[ "$pid" =~ ^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$ ]] || { echo "UUID가 아니다"; exit 1; }
-# bootstrap.md 2.2 vm 1단계와 같은 잠금. 로그인 사용자의 CLI 0.44.2는 읽은 값을 secrets-backup에 남긴다
+# bootstrap.md 2.2 vm 1단계와 같은 잠금. 로그인 사용자의 CLI 0.45.8은 읽은 값을 secrets-backup에 남긴다
 mkdir -p ~/.infisical
 if [ -d ~/.infisical/secrets-backup ]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi
 mkdir -p ~/.infisical/secrets-backup && chmod 0500 ~/.infisical/secrets-backup
