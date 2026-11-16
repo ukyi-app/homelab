@@ -252,9 +252,12 @@ def finish(res, mark, ui=None):
         out.append(f"사실 hc 화면 줄 최대 바이트 {' '.join(w)}(상자 글자는 3바이트라 열 수가 아니다). 본체 pty는 50×200이고"
                    " hc 격자 크기는 claude-ui의 hc get 줄(rows·cols)")
     out.append(exit_fact(res))
-    done = all(res[k][0] == "됨" for k in BUNDLE) and mark not in (None, "dup") and mark[0] == "됨"
-    out.append(f"결과 4.claude.대화형 {'됨' if done else '판단 필요' if not any(res[k][0] == '안 됨' for k in BUNDLE) else '안 됨'}"
-               f" — 끝내기-키를 뺀 다섯 줄(종료-요청 포함)과 표식 줄이 모두 됨일 때만 됨 (이유 {'all' if done else 'not-all'})")
+    # 표식 줄도 묶음 줄과 같은 무게다. 확인된 누출(안 됨)이 증거 부족(판단 필요)으로 요약되면 결과 문서에 틀리게 옮겨진다.
+    # 표식 줄이 없거나 두 번이면 판단 필요로 친다.
+    need = [res[k][0] for k in BUNDLE] + [mark[0] if mark not in (None, "dup") else "판단 필요"]
+    verdict = "안 됨" if "안 됨" in need else "판단 필요" if any(v != "됨" for v in need) else "됨"
+    out.append(f"결과 4.claude.대화형 {verdict}"
+               f" — 끝내기-키를 뺀 다섯 줄(종료-요청 포함)과 표식 줄이 모두 됨일 때만 됨 (이유 {'all' if verdict == '됨' else 'not-all'})")
     return out
 
 
