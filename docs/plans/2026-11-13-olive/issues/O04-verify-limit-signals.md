@@ -1,7 +1,7 @@
 # O04 검증: 실제 한도·API 소진 때의 신호 모양
 
 - 단계: 0 끄기와 검증
-- 상태: 구독 한도 표본 완료(2026-11-16, 주간 한도와 틀린 키 401). API 표본(지출 한도, 크레딧 소진, OpenCode의 한도 신호)은 대기(O05의 실행과 관리자의 Console 준비 뒤)
+- 상태: 완료(2026-11-16). 구독 주간 한도, 틀린 키 401, API workspace 지출 한도(400, `claude -p`와 OpenCode)를 봤다. 크레딧 소진·402·API의 429 등 못 본 표본은 "못 봄"으로 남기고 O17에서 미상으로 다룬다
 - 명세: `spec.md` §8.2 2번·5번, `accounts.md` §2(판정표의 출발점)
 - Blocked by: 없음
 - 연결 AC: AC-03
@@ -23,7 +23,7 @@
 - [확인] OpenCode v2.1.0 소스에서 `run --format json`의 최종 오류에는 `type`, `message`, 있으면 `status`와 `response.body`만 있고 응답 헤더는 없다. 등급 상한 429는 `provider.quota`로, 직접 건 지출 한도 400은 `provider.invalid-request`로 묶인다. 소스를 읽은 것이고 실측이 아니다.
 - [확인] `autoContinueAtUsageLimit` 기본값은 true다. 감독형 실행에서는 false로 고정한다.
 - [미확인] 실제 한도·소진 때의 정확한 값과 순서.
-- [미확인] OpenCode(D-14의 크레딧 작업자 도구)가 API 지출 한도·소진을 어떤 모양으로 알리는지. 조사에서는 Claude Code의 `StopFailure`·SDK와 같은 수준의 계약을 확인하지 못했다.
+- [미확인] OpenCode(D-14의 크레딧 작업자 도구)가 API 지출 한도·소진을 어떤 모양으로 알리는지. 조사에서는 Claude Code의 `StopFailure`·SDK와 같은 수준의 계약을 확인하지 못했다. (workspace 지출 한도 400은 2026-11-16에 실측했다. 아래 "결과")
 
 ## 할 일
 
@@ -43,10 +43,10 @@
 
 ## 완료 조건
 
-- [ ] 구독 한도, API 지출 한도 두 경우의 신호 샘플(비식별)과 판정표가 있다. API 쪽은 OpenCode의 샘플을 포함한다. (구독 한도는 있다. API 지출 한도와 그 OpenCode 샘플은 아직 없다)
-- [x] 할 일 4번의 표본마다 "봄(샘플 있음)/못 봄"이 적혀 있고, 못 본 표본은 O17에서 미상으로 다룬다는 것이 판정표에 있다. (결과 "표본별 봄/못 봄", `accounts.md` §2.6·§10. API 표본을 모으면 다시 채운다)
-- [x] 소진과 결제 장애를 신호로 가를 수 있는지(됨/안 됨)가 적혀 있다. (지금은 안 됨: 표본이 하나도 없다)
-- [ ] `spec.md` §8.2 2번이 실측에 맞게 고쳐졌다. (구독 쪽은 고쳤다. API 쪽 문장은 표본이 없어 그대로다)
+- [x] 구독 한도, API 지출 한도 두 경우의 신호 샘플(비식별)과 판정표가 있다. API 쪽은 OpenCode의 샘플을 포함한다. (구독 주간 한도, API workspace 지출 한도의 `claude -p` 2개·OpenCode 2개. 판정표는 `accounts.md` §2.4·§2.5·§2.6)
+- [x] 할 일 4번의 표본마다 "봄(샘플 있음)/못 봄"이 적혀 있고, 못 본 표본은 O17에서 미상으로 다룬다는 것이 판정표에 있다. (결과 "표본별 봄/못 봄", `accounts.md` §2.6·§10)
+- [x] 소진과 결제 장애를 신호로 가를 수 있는지(됨/안 됨)가 적혀 있다. (안 됨: 크레딧 소진·402 표본이 하나도 없다. B-17의 미상 보류)
+- [x] `spec.md` §8.2 2번이 실측에 맞게 고쳐졌다. (구독 쪽과 API 지출 한도 쪽 모두)
 
 ## 검증
 
@@ -55,18 +55,21 @@
 
 ## 결과
 
-**구독 주간 한도와 틀린 키(401)의 신호는 봤다. API 지출 한도와 크레딧 소진은 못 봤다. 완료 조건은 반만 찼고, API 표본은 O05의 실행과 관리자의 Console 준비를 기다린다.**
+**구독 주간 한도, 틀린 키(401), API workspace 지출 한도(400)의 신호를 봤다. 크레딧 소진·402·API의 429는 못 봤다. 완료 조건은 모두 찼다.**
+
+API workspace 지출 한도에 닿은 키는 `claude -p`와 OpenCode 모두 재시도 없이 HTTP 400 `invalid_request_error`로 바로 최종 실패하고 종료 코드는 1이다. 상태 코드와 오류 종류는 일반 요청 오류와 같아서, 지출 한도를 가르는 것은 API 오류 문구의 접두어 `You have reached your specified workspace API usage limits`뿐이다. OpenCode는 `response.body`에서 이 접두어를 읽으면 결정적으로 가를 수 있다. 그래서 B-08의 "막히면"은 생기지 않았다(아래 "API 키 쪽: workspace 지출 한도").
 
 구독 주간 한도에 걸린 계정은 재시도 없이 약 0.6초 만에 최종 실패한다. 헤드리스는 `rate_limit_event`(`rejected`) → assistant(`error: rate_limit`, 429, `usage_limit_reached`) → result(`subtype: success`, `is_error: true`) → `StopFailure` 훅 순서이고 종료 코드는 1이다. `accounts.md` §2의 처리 방향이 틀린 곳은 없었고, 고친 곳은 넷이다(아래 "판정표와 다른 곳").
 
 ### 돌린 조건
 
-- 돌린 날: 2026-11-16. Claude Code 2.1.325, OpenCode v2.1.0(틀린 키 표본 하나만 돌렸다).
+- 돌린 날: 2026-11-16. Claude Code 2.1.325, OpenCode v2.1.0. 구독 쪽과 401은 11:51~12:00 KST, API 지출 한도는 13:40~13:51 KST.
 - 아래의 표시: [확인, 실측]은 이번에 돌려 본 것, [확인, 문서]는 같은 날 다시 읽은 공식 문서, [추론]은 실측에서 낸 판단이다.
 - 한도 계정: 주간 한도에 자연히 걸린 구독 계정(일부러 태우지 않았다). 비교 계정: 한도에 걸리지 않은 구독 계정.
 - 모델 호출: 한도 계정 4번(헤드리스 1, 대화형 3. 모두 거절됨), 비교 계정 2번(헤드리스 1, 대화형 1. 짧은 답 하나씩).
 - 환경: 새로 만든 환경(HOME, PATH, TERM, LANG, USER, 계정 폴더 지정만)과 빈 작업 폴더. 훅 여섯(SessionStart, UserPromptSubmit, Stop, StopFailure, Notification, SessionEnd)과 상태줄을 임시 설정으로 걸어 받은 JSON을 남겼다. 계정 폴더의 사용자 설정은 읽지 않게 했고 고치지 않았다. 관리 설정은 없는 상태다.
-- 비식별 표본 일곱 개와 관측 장치는 저장소 밖 검증 기록에 있다. 이 PR에는 표본 파일을 넣지 않았고, 아래에 필요한 칸만 옮겼다.
+- API 지출 한도: 계정 `claude`의 올리브 전용 workspace 키(O05와 같은 키). 관리자가 그 workspace의 Monthly spend limit를 Console이 받는 최소값으로 낮췄고, 그때까지 쓴 양이 한도에 못 미쳐 "한도에 닿을 때까지 호출로 채운다, 호출 40번 상한"을 따로 승인했다(위 "검증"의 "일부러 태우지 않는다"의 예외). 모델 호출 10번(채우기 4번, 정상 탐침 2번, 한도 응답 4번), 누적 출력 약 3.8만 토큰. 한도 응답은 토큰을 쓰지 않았다.
+- 비식별 표본 열두 개와 관측 장치, 호출 기록은 저장소 밖 검증 기록에 있다. 이 PR에는 표본 파일을 넣지 않았고, 아래에 필요한 칸만 옮겼다.
 
 ### 공식 문서와 설치본의 차이 [확인, 문서와 실측]
 
@@ -149,6 +152,25 @@
 - `claude -p`: `system/init`의 `apiKeySource: "ANTHROPIC_API_KEY"`. assistant는 `model: "<synthetic>"`, `error: "authentication_failed"`, `api_error_status: 401`, `api_error_type: "authentication_error"`. result는 `subtype: "success"`, `is_error: true`, `terminal_reason: "api_error"`, `api_error_status: 401`, `result: "Invalid API key · Fix external API key"`. `StopFailure` 훅은 `error: "authentication_failed"`(`error_details` 없음). 종료 코드 1. `system/api_retry`도 `rate_limit_event`도 없고 0.25초 만에 최종 실패했다.
 - OpenCode `run --standalone --format json`: stdout은 사건 하나뿐이다. `type: "error"`이고 `error`는 `type: "provider.auth"`, `message: "invalid x-api-key"`, `status: 401`, `response.body`(API 오류 JSON 문자열)다. `response.body` 안에 `error.type: "authentication_error"`와 요청 ID가 그대로 남고 응답 헤더는 없다. 종료 코드 1, stderr 비어 있음. error 사건과 종료 코드가 함께 온다. `accounts.md` §2.5가 소스에서 읽은 모양과 같다.
 
+### API 키 쪽: workspace 지출 한도 [확인, 실측]
+
+`claude -p`와 OpenCode를 한도에 닿은 뒤 각각 두 번씩 돌렸다. 두 번 모두 같은 응답이었다. 한도는 채우기 5·6번째 호출 사이에 넘었고, 사이에 탐침이 없어 Console 집계의 지연은 가르지 못했다.
+
+- 문구(두 도구 같음): `You have reached your specified workspace API usage limits. You will regain access on <날짜> at 00:00 UTC.` 이번 날짜는 다음 달 1일이었다.
+- `claude -p`: `system/init`(`apiKeySource: "ANTHROPIC_API_KEY"`) 뒤 약 0.35초에 assistant(`message.model: "<synthetic>"`, `is_api_error_message: true`, `error: "unknown"`, `api_error_status: 400`, `api_error_type: "invalid_request_error"`, 본문 `API Error: 400 <문구>`) → result(`subtype: "success"`, `is_error: true`, `terminal_reason: "api_error"`, `api_error_status: 400`, `api_error_type: "invalid_request_error"`, `result`는 assistant 본문과 같음) → `StopFailure` 훅(`error: "unknown"`, `error_details` 없음) → 종료 코드 1. stderr 비어 있음.
+- `claude -p`에는 `system/api_retry`도 `rate_limit_event`도 없다. `rate_limit_event`는 API 키의 정상 턴에도 오지 않았다(구독 턴에만 온다). `api_error` 칸(구독 한도의 `usage_limit_reached` 자리)도 없다.
+- Claude Code는 이 400을 `StopFailure`의 12종 가운데 `unknown`으로 분류한다(`invalid_request`가 아니다).
+- OpenCode `run --standalone --format json`: stdout은 약 0.9초에 사건 하나. `type: "error"`이고 `error`는 `type: "provider.invalid-request"`, `status: 400`, `message: <문구>`, `response.body`(API 오류 JSON 문자열: `error.type: "invalid_request_error"`, `error.message: <문구>`, 요청 ID). `provider.quota`가 아니다. 세부 코드(`error.details.error_code`)와 응답 헤더는 없고, 안에서 재시도한 흔적도 없다. 종료 코드 1, stderr 비어 있음.
+- `retry-after`: 두 도구 모두 응답 헤더를 내지 않아 볼 수 없다.
+
+감독이 "지출 한도"로 결정적으로 읽을 수 있는가:
+
+- 구조 칸만으로는 안 된다. 400 + `invalid_request_error`(OpenCode `provider.invalid-request`)는 일반 요청 오류와 같은 값이다.
+- **OpenCode: 됨.** 최상위 `type: "error"` + `error.type: "provider.invalid-request"` + `status: 400`이고, `response.body`를 JSON으로 읽어 `error.type: "invalid_request_error"`이며 `error.message`가 `You have reached your specified workspace API usage limits`로 시작하면 workspace 지출 한도다. 모두 도구가 API 응답에서 옮긴 칸이다. `accounts.md` §2.5가 소스에서 정한 "본문으로 가른다"와 같다.
+- **`claude -p`: 조건부 됨.** 구조 칸(`is_api_error_message: true`, `message.model: "<synthetic>"`, result의 `is_error: true`·`api_error_status: 400`)을 먼저 확인한 뒤 result 글의 접두어 `API Error: 400 You have reached your specified workspace API usage limits`를 본다. 이 글은 Claude Code가 API 오류에서 만든 것이고 모델 출력이 아니다. [추론] `accounts.md` §2.1의 "`result` 글은 신호가 아니다"에 이 경우만 예외를 적었다(§2.4).
+- **`StopFailure` 훅만으로는 안 됨.** `error: "unknown"`뿐이다. API 키는 대화형에 쓰지 않으므로(B-08) 막히는 경로는 없다 [추론].
+- [추론] 복귀 시각은 문구의 `You will regain access on <날짜> at 00:00 UTC`에서 읽는다. 꼴이 다르면 "모름"이다. 문구는 API가 바꿀 수 있어 시험 고정값에 넣고, 접두어가 안 맞으면 미상으로 떨어진다(O17).
+
 ### 판정표와 다른 곳
 
 처리 방향(무엇을 다음 후보로 넘기고 무엇을 기다리는지)이 틀린 곳은 없다. 아래 넷을 `accounts.md`에 고쳤다.
@@ -166,7 +188,17 @@
 - §2.2: `StopFailure`의 `error: rate_limit`는 실측과 같다. `error_details`는 오지 않았다. 창은 훅만으로 모른다는 문구도 그대로 맞다(`last_assistant_message`에 "weekly"가 있지만 규칙대로 신호로 쓰지 않는다).
 - §2.4의 "오류 종류 없음 + 429 + 마지막 `rejected`": 이 모양은 못 봤다. 오류 종류가 있었다.
 - §2.4의 `credits_required`: 오지 않았다. [추론] 이 계정은 사용 크레딧이 꺼져 있어서 그런 것으로 보인다.
-- `spec.md` §8.2 2번: 문구는 실측과 어긋나지 않았다. 구독 쪽 세 가지를 더했고 API 쪽 문장은 표본이 없어 그대로 뒀다.
+- `spec.md` §8.2 2번: 문구는 실측과 어긋나지 않았다. 구독 쪽 세 가지를 더했다. API 쪽은 지출 한도 표본을 모은 뒤 "400 `invalid_request_error`로 바로 최종 실패하고 문구 접두어로만 갈린다"를 더했다.
+
+API 지출 한도 표본으로 `accounts.md`에 더한 것:
+
+| 어디 | 옛 문구 | 고친 것 |
+|---|---|---|
+| §2.4 | API 키 헤드리스의 지출 한도 줄이 없었다 | 구조 칸을 먼저 확인한 뒤 result 글의 접두어로 workspace 지출 한도를 가르는 줄. `rate_limit_event`는 API 키 턴에 오지 않는다 |
+| §2.5 | `provider.invalid-request`는 "본문으로 가르고, 모르면 미상"(소스) | 실측으로 확인. `response.body`의 `error.message` 접두어로 가르는 조건을 적었다. [미확인] 줄에서 `provider.invalid-request`를 뺐다 |
+| §2.6 | 400 + 지출 한도 문구 → 지출 한도 | 실측으로 확인. 복귀 시각은 문구의 날짜, `retry-after`는 도구 출력에 없다 |
+| §2.2 | `unknown` → 미상 | API 키의 지출 한도 400도 `unknown`으로 온다는 것을 더했다 |
+| §3 | 지출 한도의 재확인은 "그 한도가 풀리는 시각, `retry-after`" | 문구의 날짜를 쓴다. 꼴이 다르면 모름 |
 
 ### 훅·상태줄을 어느 턴의 것으로 이을 수 있는가(할 일 6)
 
@@ -194,36 +226,37 @@
 | 거절 뒤 같은 턴 성공 | 못 봄 |
 | `system/api_retry`와 최종 실패의 갈림 | 반만 봄: 구독 한도는 `api_retry` 없이 최종 실패. `api_retry`가 나오는 경우는 못 봄 |
 | `rate_limit_event`와의 순서 | 봄(실패·성공 한 번씩) |
-| 400 셋(요청 오류, 지출 한도, 모르는 본문) | 못 봄 |
+| 400 셋 중 workspace 지출 한도 | 봄(`claude -p` 2, OpenCode 2. 같은 응답 반복) |
+| 400 셋 중 조직 지출 한도, 일반 요청 오류, 모르는 본문 | 못 봄 |
+| API 키의 정상 턴(비교) | 봄: `rate_limit_event`가 오지 않는다 |
 | 401 키 오류 | 봄(일부러 틀린 가짜 키. 철회·만료된 진짜 키는 못 봄) |
 | 402 결제 오류 | 못 봄 |
 | 429 넷(분당, `ramp_limit_exceeded`, workspace 지출 한도, `enforced_spend_limit_reached`) | 못 봄. 본 429는 구독의 `usage_limit_reached`뿐이다 |
 | 실제 크레딧 소진 | 못 봄 |
 | OpenCode `provider.auth` | 봄 |
-| OpenCode의 나머지 `error.type`(`provider.quota`, `provider.rate-limit`, `provider.invalid-request`, 계정 문제가 아닌 것들) | 못 봄 |
+| OpenCode `provider.invalid-request`(workspace 지출 한도 400) | 봄 |
+| OpenCode의 나머지 `error.type`(`provider.quota`, `provider.rate-limit`, 계정 문제가 아닌 것들) | 못 봄 |
 
 - 못 본 표본은 O17에서 **미상**으로 다룬다.
 - **소진과 결제 장애를 신호로 가를 수 있는가: 아직 안 됨.** 표본이 하나도 없다. B-17의 미상 보류가 그대로 적용된다.
 - 경고만으로 넘어가지 않는가(할 일 5): 최상위 `status`가 `rejected`이고 턴이 최종 실패일 때만 한도로 본다는 규칙은 실측과 맞는다. 거절된 턴 안에서도 `unifiedWindows`의 한 칸이 `allowed_warning`이었으므로 안쪽 칸의 상태로 판정하면 안 된다. 한도 뒤 정상 성공(사용 크레딧)이 섞이는 경우는 못 봤다(`isUsingOverage: false`).
-- OpenCode의 한도·지출 한도 신호를 감독이 결정적으로 읽을 수 있는지(B-08의 "막히면")는 `provider.auth` 하나만 봐서 아직 답하지 못한다. 크레딧 후보는 계속 꺼 둔다(D-15).
+- **OpenCode의 지출 한도 신호를 감독이 결정적으로 읽을 수 있는가: 됨**(workspace 지출 한도 400, `response.body`의 문구 접두어로). 그래서 B-08의 "막히면"(크레딧 작업자를 `claude -p`로 돌리는 안을 묻기)은 생기지 않았다. 등급 상한 429(`provider.quota`)와 크레딧 소진의 OpenCode 모양은 못 봐서 미상으로 다룬다.
+- O05와 O04가 모두 끝나 D-15의 "검증이 끝나기 전에는 `claude-work`부터"라는 조건은 찼다. 크레딧 후보를 실제로 켜는 것은 O17의 구현 때다.
 
 ### 남은 일
 
 | 표본 | 필요한 것 | 누가 |
 |---|---|---|
-| API 지출 한도(400, workspace 429), `claude -p`와 OpenCode 둘 다 | 올리브 전용 Console workspace의 키(O05와 같은 키)와 낮은 지출 한도. O05의 작은 실행(크레딧 차감 확인)이 먼저 끝나야 한다(한도를 먼저 낮추면 O05의 실행이 막힌다). 그 뒤 지출 한도를 이미 쓴 양 이하로 낮추면 추가 사용 없이 다음 요청이 한도 응답을 받는다. Console이 그렇게 낮은 값을 받지 않으면 모자란 만큼을 호출로 채워야 하는데, 그것은 일부러 태우는 호출이라 관리자가 따로 정한다 | 관리자(Console, 자격 보관), 그 뒤 에이전트 |
+| 조직 지출 한도 400, Claude Code workspace의 지출 한도 429(`retry-after` 있음) | 조직이나 Claude Code 전용 workspace에 낮은 한도를 거는 별도 준비. 지금 계획에는 없다. 그 전에는 미상으로 다룬다 | 관리자가 정하면 |
 | 크레딧 소진, 402, `enforced_spend_limit_reached`, `ramp_limit_exceeded` | 자연히 만날 때를 기다린다. 일부러 만들지 않는다 | 기다림 |
 | 5시간 창, 작업 도중 멈춤, `allowed_warning`, 거절 뒤 같은 턴 성공 | 자연히 만날 때 같은 관측 장치로 다시 모은다 | 기다림 |
 
-2026-11-16 기준 상태:
-
-- 관리자가 두 계정 모두 전용 workspace·지출 한도·키의 준비를 마쳤다고 답했다.
-- 첫 시도는 모델 호출까지 가지 못했다(자격을 읽는 CLI가 로그인돼 있지 않았다).
-- O05의 실행이 아직 돌지 않아 workspace의 사용량이 0이다. 지금 돌리면 한도 응답이 아니라 정상 응답이 와서 크레딧을 쓰고 O05의 차감 확인과 섞인다. O05가 끝나고 한도가 쓴 양 이하로 낮춰질 때까지 돌리지 않는다.
-- 자격 조회가 남기는 암호화된 백업 폴더(`infra/README.md` 2절)가 쓰기 불가인지는 검증 작업자가 확인하지 못했다. 관리자나 O05 쪽에서 확인한다.
+- 관리자가 낮춘 `claude` workspace의 지출 한도는 표본을 모은 뒤 되돌릴 일이다(관리자 몫). `claude-sub` workspace에서는 지출 한도 표본을 모으지 않았다.
+- 자격 조회가 남기는 암호화된 백업 폴더(`infra/README.md` 2절)가 쓰기 불가인지는 검증 작업자가 확인하지 못했다. 관리자가 O05 실행 전에 확인했다.
 
 ### 이 결과로 고친 곳
 
 - `accounts.md` §2.1(`prompt_id`), §2.2, §2.3, §2.4, §2.5, §2.6(본 범위), §10(O04 줄).
 - `spec.md` §8.2 2번(구독 쪽), §8.3(OpenCode 신호의 미확인 범위), §13(계정 전환 줄).
 - O09 5번·O10 5번(한도 메뉴와 입력 정지), O17 2번(판정 조건과 턴 귀속).
+- API 지출 한도 표본 뒤: `accounts.md` 머리말의 검증 상태, §1, §2.2, §2.4, §2.5, §2.6, §3, §10(O04 줄). `spec.md` §5.2 B-08, §8.2 2번(API 쪽), §8.3, §13(계정 전환 줄), §14.1(O04 줄). README "지금 상태".

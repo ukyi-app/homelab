@@ -3,8 +3,8 @@
 계정 전환(O17)과 그 앞의 검증 셋(O03·O04·O05)의 구현 기준이다. 이 문서는 조사 초안(저장소 밖)을 줄인 것이고, 관리자 결정은 `spec.md` §5.1이 기준이다. 초안과 §5.1이 다르면 §5.1이 이긴다. 감독·실행기·hc는 `supervisor.md`, Discord 글은 `discord.md`를 따른다.
 
 - 상태: 구현 전. D-40(구독 토큰 인증 실패 때의 전환)과 D-41(수동 선택의 유지 기간)은 관리자 결정이다. §9의 여섯 항목은 기본값(관리자 미확정, `spec.md` §5.2 B-17)이다. 표의 처리·시각·상태 이름은 따로 적지 않으면 [추론]이다.
-- 표시: [확인] 공식 문서, 저장소, OpenCode v2.1.0 소스를 읽은 것(조사 초안의 대조가 맞다고 적은 것만. 돌려 본 것이 아니다), [추론] 그 근거에서 낸 설계, [미확인] 실제로 돌려 봐야 아는 것. "[확인, O03 실측]"과 "[확인, O04 실측]"만 실제로 돌려 본 것이다(2026-11-16, Claude Code 2.1.325, OpenCode v2.1.0. 범위는 그 티켓의 "결과").
-- 검증 상태(2026-11-16): O03은 돌려 본 다섯 경우를 마쳤고 `claude-work` → `claude-sub` 쌍과 장기 토큰이 남았다. O04는 구독 주간 한도와 틀린 키(401)까지 봤고 API 지출 한도·크레딧 소진은 못 봤다. O05는 아직이다. 그래서 크레딧 후보는 계속 꺼 둔다(D-15).
+- 표시: [확인] 공식 문서, 저장소, OpenCode v2.1.0 소스를 읽은 것(조사 초안의 대조가 맞다고 적은 것만. 돌려 본 것이 아니다), [추론] 그 근거에서 낸 설계, [미확인] 실제로 돌려 봐야 아는 것. "[확인, O03 실측]"과 "[확인, O04 실측]"만 실제로 돌려 본 것이다(2026-11-16, Claude Code 2.1.325, OpenCode v2.1.0. 범위는 그 티켓의 "결과"). "[확인, O05]"는 실제로 돌린 뒤 관리자가 Console·claude.ai 화면에서 보고 답한 것이다(2026-11-16. 에이전트는 화면을 보지 않았다).
+- 검증 상태(2026-11-16): O03은 돌려 본 다섯 경우를 마쳤고 `claude-work` → `claude-sub` 쌍과 장기 토큰이 남았다. O04는 끝났다: 구독 주간 한도, 틀린 키(401), API workspace 지출 한도(400, `claude -p`와 OpenCode)를 봤고 크레딧 소진·402·API의 429는 못 봤다. O05는 끝났다: 두 계정 모두 `claude -p`와 OpenCode의 사용이 포함 크레딧에서 차감됐다. 두 검증이 끝나 D-15의 "검증 전에는 `claude-work`부터" 조건은 찼다(관리자 확인 2026-11-16). 크레딧 후보를 실제로 켜는 것은 O17이다.
 - 근거: `homelab`의 `5f85a642`, 옛 봇 `ukyi-app/homelab-bot`의 `02f5f3ff`, 2026-11-14에 읽은 공식 문서(끝의 링크).
 - 명령·상태 이름과 숫자는 초안이다. 예시의 계정 상태·시각·건수는 모두 가짜다.
 
@@ -17,7 +17,7 @@
 | 오케스트레이터 | `claude-work` → `claude-sub` → `claude` (크레딧 단계 없음) | 해당 없음 |
 | 하위 에이전트 | 포함 API 크레딧(`claude-sub` 것 → `claude` 것) → `claude-work` → `claude-sub` → `claude` | OpenCode(그 계정의 Console API 키) |
 
-`spec.md` §8.3과 같다(D-09, D-14, D-15). O04·O05 전에는 하위 에이전트도 `claude-work`부터 쓴다. Codex로 도는 조사·PR 리뷰 작업자는 순서 밖이다(B-08).
+`spec.md` §8.3과 같다(D-09, D-14, D-15). O04·O05의 검증 전에는 하위 에이전트도 `claude-work`부터 쓰기로 했고, 두 검증은 2026-11-16에 끝났다. Codex로 도는 조사·PR 리뷰 작업자는 순서 밖이다(B-08).
 
 | 일어난 일 | 하는 일 | Telegram | 기준 |
 |---|---|---|---|
@@ -41,7 +41,7 @@
 
 - 판정 단위는 한 턴이다. 신호를 감독이 낸 실행 ID·세대·턴·계정·방식에 묶는다. 옛 세대나 다른 실행의 신호는 근거가 아니다.
 - 같은 턴에 경고·거절·완료가 섞이면 최종 결과를 기다린다. 최종 실패면 그 실행의 새 입력을 먼저 막고 원인을 가른다. 순서는 검증된 구체 원인 → 일반 오류 종류 → 미상이다.
-- 취소, 강제 종료, 훅 누락, 종료 코드만으로는 한도가 아니다. 모델이 낸 출력, 화면 글자, `last_assistant_message`는 신호가 아니다. 오류 원문은 저장하지 않는다.
+- 취소, 강제 종료, 훅 누락, 종료 코드만으로는 한도가 아니다. 모델이 낸 출력, 화면 글자, `last_assistant_message`는 신호가 아니다. 오류 원문은 저장하지 않는다. 예외는 하나다: 도구가 구조로 API 오류라고 표시한 줄(§2.4의 `is_api_error_message` assistant·`is_error` result, §2.5의 `response.body`)에 한해 API 오류 문구가 정해진 접두어로 시작하는지만 본다. 지출 한도는 상태 코드와 오류 종류가 일반 요청 오류와 같아 이것으로만 갈린다 [확인, O04 실측]. 접두어가 안 맞으면 미상이다. 이 예외는 관리자가 2026-11-16에 받았다.
 - 대화형 훅에는 감독의 턴 ID가 없다. 입력을 한 번에 하나만 처리하고 순번·세션·세대로 잇는다. 가르지 못하면 미상이다(O04·O09).
 - [확인, O04 실측] Claude Code가 주는 `prompt_id`(사용자 입력마다의 UUID, 훅의 공통 칸)로 턴을 이을 수 있다. `UserPromptSubmit`과 그 턴의 `StopFailure`(정상이면 `Stop`)가 같은 값을 갖는다. [추론] 감독은 입력을 넣고 `UserPromptSubmit`에서 받은 `prompt_id`를 자기 턴 ID에 묶은 뒤, 같은 `session_id`·`prompt_id`의 `StopFailure`/`Stop`만 그 턴의 결과로 받는다. 묶이지 않는 값은 미상이다.
 - [확인, O04 실측] 상태줄의 `prompt_id`는 턴 귀속에 쓰지 않는다. 한도 메뉴를 닫으면 `UserPromptSubmit` 없이 새 값이 생긴다. hc로 넣은 입력은 훅의 `prompt` 칸에 감싸여 오므로 그 글로 턴을 맞추지도 않는다.
@@ -50,7 +50,7 @@
 
 ### 2.2 Claude Code 대화형: `StopFailure`
 
-[확인] API 오류로 턴이 끝날 때의 알림 훅이다. 출력이나 종료 코드로 다음 실행을 정하지 않는다. `error`는 아래 12종이다([훅][hooks]). [확인, O04 실측] 구독 주간 한도에서는 입력 약 0.5초 뒤에 `error: rate_limit`가 오고 `error_details`는 오지 않았다. 틀린 API 키에서는 `authentication_failed`가 왔다. [미확인] 나머지 값과 5시간 창·작업 도중 멈춤의 순서(O04의 남은 표본).
+[확인] API 오류로 턴이 끝날 때의 알림 훅이다. 출력이나 종료 코드로 다음 실행을 정하지 않는다. `error`는 아래 12종이다([훅][hooks]). [확인, O04 실측] 구독 주간 한도에서는 입력 약 0.5초 뒤에 `error: rate_limit`가 오고 `error_details`는 오지 않았다. 틀린 API 키에서는 `authentication_failed`가 왔다. API 키의 workspace 지출 한도(400)에서는 `unknown`이 왔다(헤드리스의 훅. 그래서 훅만으로는 지출 한도를 가를 수 없고, API 키는 대화형에 쓰지 않는다, B-08). [미확인] 나머지 값과 5시간 창·작업 도중 멈춤의 순서(O04의 남은 표본).
 
 [확인, O04 실측] 대화형에서 구독 한도로 턴이 거절되면 화면에 고르는 메뉴가 열리고, 그동안 터미널에 들어온 글자는 프롬프트가 아니라 메뉴 조작이 된다(선택지에 유료 사용 크레딧으로 바꾸기가 있다). 그래서 감독은 `StopFailure`를 받으면 그 세션에 아무것도 넣지 않고 끝낸다(§5의 1번).
 
@@ -81,6 +81,7 @@
 | 구독 턴의 최종 실패 + assistant `error=rate_limit`인데 `api_error`가 `usage_limit_reached`가 아님(분당 제한 등 못 본 모양) | 미상 |
 | 구독 턴의 최종 실패 + 오류 종류 없음 + 429 + 마지막 이벤트 `rejected` | O04가 이 모양을 보지 못했다. 표본이 생기기 전에는 미상 |
 | 최종 실패 + assistant `error=authentication_failed` + result의 `is_error: true`·`api_error_status: 401` | 구독이면 §2.2의 `authentication_failed`, API 키면 §2.6의 401로 가른다 |
+| API 키 턴의 최종 실패: assistant `message.model: "<synthetic>"`·`is_api_error_message: true`, result의 `is_error: true`·`api_error_status: 400`·`api_error_type: invalid_request_error`, 그리고 result 글이 `API Error: 400 You have reached your specified workspace API usage limits`로 시작 | workspace 지출 한도 → §2.6. 구조 칸이 맞아도 접두어가 다르면 §2.6의 400 줄로 가른다 |
 
 - [확인] 결과의 `subtype`이 `success`여도 `is_error`가 참일 수 있다. `error_max_turns`·`error_max_budget_usd`는 로컬 실행 상한이다([SDK][sdk]).
 - [확인] `stream-json`은 재시도 전에 `system/api_retry`를 낸다(`attempt`, `max_retries`, `retry_delay_ms`, `error_status`, 위 12종의 `error`). `rate_limit_event`는 SDK 참조에만 있다([헤드리스][headless]).
@@ -96,6 +97,13 @@
 - `utilization`·`errorCode`(`credits_required`)는 오지 않았다.
 - [미확인] 5시간 창, 작업 도중의 멈춤, 경고만 온 턴(`allowed_warning`), 거절 뒤 같은 턴의 성공, `system/api_retry`가 나오는 경우.
 
+[확인, O04 실측] API 키의 workspace 지출 한도(2.1.325, `claude -p` 두 번, 같은 응답):
+
+- 재시도 없이 init 뒤 약 0.35초에 최종 실패한다. 순서는 assistant(`message.model: "<synthetic>"`, `is_api_error_message: true`, `error: "unknown"`, `api_error_status: 400`, `api_error_type: "invalid_request_error"`, 토큰 0) → result(`subtype: success`, `is_error: true`, `terminal_reason: "api_error"`, 같은 400 칸) → `StopFailure`(`error: "unknown"`) 훅이고 종료 코드는 1, stderr는 비어 있다.
+- 글(assistant 본문과 result의 `result`): `API Error: 400 You have reached your specified workspace API usage limits. You will regain access on <날짜> at 00:00 UTC.` 이번 날짜는 다음 달 1일이었다.
+- `system/api_retry`, `rate_limit_event`, `api_error` 칸은 없다. `rate_limit_event`는 API 키의 정상 턴에도 오지 않았다(구독 턴에만 온다).
+- Claude Code의 `error` 분류는 `unknown`이다(`invalid_request`가 아니다). 그래서 `error`만 보면 미상이고, 위 표의 구조 칸 + 접두어로만 지출 한도가 된다.
+
 [확인, O03·O04 실측] 인증 실패(틀린 API 키)는 result가 `subtype: success`인 채 `is_error: true`, `api_error_status: 401`로 오고 종료 코드는 1이다. 재시도도 `rate_limit_event`도 없다. 이어 연 세션에서 실패하면 **실패한 턴도 기록에 덧붙는다.** 그래서 감독은 `subtype`이 아니라 `is_error`를 보고, 실패할 수 있는 이어 열기는 기록의 복사본에서 연다.
 
 ### 2.5 OpenCode
@@ -107,14 +115,16 @@
 | `provider.auth` | 인증 오류(통합 인증 오류 포함) | status·본문으로 키 인증 실패를 확정하면 API 잠금 → 다음 후보 |
 | `provider.quota` | 402, billing 코드, "usage limits" 문구의 429(등급 상한). 재시도 없음 | 이 값만으로 소진이라 하지 않고 §2.6으로 가른다 |
 | `provider.rate-limit` | 분당 429. 안에서 최대 10회 재시도 | 같은 계정에서 기다린다 |
-| `provider.invalid-request` | 직접 건 지출 한도의 400도 이 값 | 본문으로 가르고, 모르면 미상 |
+| `provider.invalid-request` | 직접 건 지출 한도의 400도 이 값 [확인, O04 실측] | `response.body`의 `error.message` 접두어로 가르고(아래), 모르면 미상 |
 | `provider.internal`·`transport`·`timeout`·`invalid-output`·`unknown`, `aborted` | 일시 장애, 미상, 취소 | 기다린다 |
 | `provider.content-filter`·`unsupported-operation`·`no-route`, `permission.rejected`, `tool.execution` | 계정 문제가 아니다 | 계정 상태를 바꾸지 않는다 |
 
 - [확인] OpenCode는 `error.details.error_code`를 읽지 않으므로 감독이 `response.body`에서 꺼낸다. 조직 한도와 workspace 한도는 본문의 접두어("specified API…" 대 "specified workspace API…")로만 갈린다. 요청된 대기는 15분으로 잘리고 시간 초과 재시도는 3회까지다.
 - 감독은 도구가 낸 최상위 사건만 스키마 검사 뒤 읽는다. 본문은 메모리에서만 보고 사유 코드와 시각만 남긴다.
 - [확인, O04 실측] 틀린 키에서 설치본(v2.1.0)은 위 모양을 냈다: stdout에 `type: "error"` 사건 하나(`error.type: "provider.auth"`, `status: 401`, `response.body`에 API 오류 JSON), 응답 헤더 없음, 종료 코드 1. error 사건과 종료 코드가 함께 온다.
-- [미확인] `provider.auth` 밖의 `error.type`(`provider.quota`, `provider.rate-limit`, `provider.invalid-request` 등)을 설치본이 실제로 이 모양으로 내는지(O04의 남은 표본). 이것이 확인되기 전에는 OpenCode의 한도 신호를 감독이 결정적으로 읽는다고 보지 않는다(`spec.md` B-08).
+- [확인, O04 실측] workspace 지출 한도에서 설치본(v2.1.0)은 stdout에 약 0.9초 만에 `type: "error"` 사건 하나를 내고 종료 코드 1로 끝났다(두 번, 같은 응답). `error.type: "provider.invalid-request"`(`provider.quota`가 아니다), `status: 400`, `message`는 API 문구 그대로, `response.body`는 API 오류 JSON 문자열(`error.type: "invalid_request_error"`, `error.message`, 요청 ID). `error.details.error_code`와 응답 헤더는 없고 안에서 재시도한 흔적도 없다. stderr는 비어 있다.
+- [확인, O04 실측] **감독은 이 신호를 결정적으로 읽을 수 있다.** 조건: 최상위 `type: "error"` + `error.type: "provider.invalid-request"` + `status: 400`, 그리고 `response.body`를 JSON으로 읽어 `error.type: "invalid_request_error"`이고 `error.message`가 `You have reached your specified workspace API usage limits`로 시작한다. 하나라도 어긋나면 미상이다. `error.type`과 `status`만으로는 일반 요청 오류와 같아서 가를 수 없다. 복귀 시각은 문구의 `You will regain access on <날짜> at 00:00 UTC`에서 읽고(§3), 꼴이 다르면 모름이다 [추론].
+- [미확인] `provider.quota`(402, 등급 상한 429), `provider.rate-limit`, 조직 지출 한도의 문구, 계정 문제가 아닌 `error.type`을 설치본이 실제로 이 모양으로 내는지(자연히 만날 때). 그 전에는 미상으로 다룬다.
 
 ### 2.6 HTTP: 직접 Anthropic API
 
@@ -122,7 +132,7 @@
 
 | 신호 | 처리 |
 |---|---|
-| 400 + 문서에 있는 조직·workspace 지출 한도 문구 | 지출 한도. 그 계정·그 범위만 기다리고 다음 후보로(B-17) |
+| 400 + 문서에 있는 조직·workspace 지출 한도 문구 | 지출 한도. 그 계정·그 범위만 기다리고 다음 후보로(B-17). [확인, O04 실측] workspace 쪽은 `invalid_request_error` + `You have reached your specified workspace API usage limits. You will regain access on <날짜> at 00:00 UTC.`로 왔다. 조직 쪽 문구는 못 봤다 |
 | 400, 알려진 요청 오류 | 그 일만 기다린다 |
 | 400, 모르는 본문(400은 목록에 없는 다른 4XX에도 쓰일 수 있다) | 미상. O04 샘플 전에는 요청 문제로 닫지 않는다 |
 | 401 `authentication_error` | 키 인증 실패가 확인되면 API 잠금 → 다음 후보. 경로·설정 오류면 미상 |
@@ -134,12 +144,12 @@
 
 [미확인] 실제 크레딧 소진의 모양. 공식 문서에 소진의 상태 코드·종류가 없다 [확인]. O04·O05가 샘플로 입증한 모양만 소진으로 적는다. 가르지 못한 것은 미상 보류다(B-17).
 
-O04는 2026-11-16까지 이 표의 줄 가운데 401(일부러 틀린 가짜 키. 철회·만료된 진짜 키는 아니다)만 봤다. 400, 402, API의 429, 크레딧 소진은 표본이 하나도 없다. 그래서 소진과 결제 장애를 신호로 가를 수 있는지는 아직 "안 됨"이고, 못 본 줄은 O17에서 미상으로 다룬다.
+O04는 2026-11-16에 이 표의 줄 가운데 401(일부러 틀린 가짜 키. 철회·만료된 진짜 키는 아니다)과 400 workspace 지출 한도(`claude -p`·OpenCode 두 번씩)를 봤다. 도구 출력에는 응답 헤더가 없어 `retry-after`는 어느 경우에도 볼 수 없다. 조직 지출 한도 400, 일반 요청 오류 400, 402, API의 429, 크레딧 소진은 표본이 하나도 없다. 그래서 소진과 결제 장애를 신호로 가를 수 있는지는 "안 됨"이고, 못 본 줄은 O17에서 미상으로 다룬다.
 
 ## 3. 상태와 복귀 시각
 
 - 역할은 순서만 갖고, 쓸 수 있는지는 공용 계정 장부에서 읽는다. 작업자가 확인한 `claude-work`의 한도는 오케스트레이터도 안다.
-- 후보에서 빼는 조건: 미등록·꺼짐, 자격 묶음 불일치, 잠금, 풀리지 않은 한도·소진·미상 보류·지출 한도, API 검증 게이트(O04·O05 전), 비상 정지. 한 번의 전환에서 후보마다 한 번만 시도한다. 등록되지 않은 계정·다른 모델·다른 실행 도구로 바꾸지 않는다.
+- 후보에서 빼는 조건: 미등록·꺼짐, 자격 묶음 불일치, 잠금, 풀리지 않은 한도·소진·미상 보류·지출 한도, API 검증 게이트(O04·O05. 둘 다 2026-11-16에 끝났다), 비상 정지. 한 번의 전환에서 후보마다 한 번만 시도한다. 등록되지 않은 계정·다른 모델·다른 실행 도구로 바꾸지 않는다.
 
 | 원인 | 첫 재확인 | 그 뒤 |
 |---|---|---|
@@ -147,7 +157,7 @@ O04는 2026-11-16까지 이 표의 줄 가운데 401(일부러 틀린 가짜 키
 | 구독 한도, 리셋을 모름 | 실패를 본 때 + 30분 | 일이 있을 때만 한 번. 또 실패하면 새로 예약 |
 | 크레딧 소진 | 그 계정의 다음 지급 예정일 뒤 | 늦으면 일이 있을 때 30분 간격, 24시간 뒤에도 없으면 한 번 알림(B-17) |
 | 미상 보류 | 하루 한 번, 그리고 다음 지급 예정일 뒤 | CLI로 앞당길 수 있다(B-17) |
-| 지출 한도, 분당 제한 | 그 한도가 풀리는 시각, `retry-after` | 크레딧 지급 예정일을 대신 넣지 않는다 |
+| 지출 한도, 분당 제한 | 그 한도가 풀리는 시각, `retry-after`. workspace 지출 한도는 API 문구의 `You will regain access on <날짜> at 00:00 UTC`(O04에서 다음 달 1일), 꼴이 다르면 모름(30분) | 크레딧 지급 예정일을 대신 넣지 않는다 |
 | 잠김 | 없음 | CLI로 푼 뒤 다음 실제 일로 확인 |
 
 - **복귀는 타이머가 아니라 실제 일의 성공으로 확정한다.** 빈 확인용 호출을 만들지 않는다. 기동·Ready는 증거가 아니다. 확인은 계정·방식마다 한 실행만 맡는다.
@@ -169,7 +179,8 @@ O04는 2026-11-16까지 이 표의 줄 가운데 401(일부러 틀린 가짜 키
 | 전환 | 전환 ID, 시도한 후보, 확인을 맡은 실행, 한도 구간 ID, 인계 참조, 알림 발송함과 전송 상태 |
 
 - API의 칸은 "소진 월"이 아니라 계정별 다음 지급 예정일이다. 관리자가 O05에서 확인한 날짜를 넣는다. 30일을 더해 추정하지 않고, 날짜만 알면 정밀도를 날짜로 적는다. 예정일은 지급을 보증하지 않는다.
-- [확인] 계정은 Console 조직 하나만 연결할 수 있고, Console 조직 하나는 플랜 하나에서만 크레딧을 받는다. 그래서 두 계정의 API는 서로 다른 조직이고 한쪽 한도가 다른 후보를 막지 않는다. 실제 연결은 O05가 본다.
+- [확인, O05] Console → Billing에는 포함 크레딧의 만료일이 시각(UTC)까지 보였다. 계정별 값은 O05의 "결과"에 있다. 새 크레딧이 그 무렵 결제 처리 뒤 들어온다는 것은 공식 안내에서 낸 [추론]이므로, 장부에는 출처를 "Console 만료일", 정밀도를 "시각"으로 적고 실제 지급은 §3대로 실제 일로 확인한다.
+- [확인] 계정은 Console 조직 하나만 연결할 수 있고, Console 조직 하나는 플랜 하나에서만 크레딧을 받는다. 그래서 두 계정의 API는 서로 다른 조직이고 한쪽 한도가 다른 후보를 막지 않는다. [확인, O05] 두 계정에 연결된 Console 조직은 서로 다르다.
 - 계정이나 방식이 바뀌면 새 실행 ID다. 같은 프로세스 안에서 자격을 바꾸지 않는다. 일 ID와 남은 예산은 이어받는다(전환이 예산을 새로 채우지 않는다).
 - [확인] 옛 봇의 `ExecutionSelection`(계정·자격 revision·방식·실행 ID를 묶고 안 맞으면 `not_run`)에서 출발한다.
 
@@ -270,9 +281,9 @@ O03의 인계 시험에서 위 목록만으로 두 도구, 세 계정 사이에�
 - CLI는 새 값을 넣고 마지막에 묶음을 쓴다. 감독은 지문을 대조해 섞인 묶음을 거부한다. 자동 전환은 ESO 동기화를 기다리지 않는다.
 - 감독과 작업자에게 Infisical 자격을 주지 않는다.
 
-### 6.3 실행에 자격 하나만(D-37)
+### 6.3 실행에 자격 하나만(D-37, D-47)
 
-- **오케스트레이터:** 세션 파드의 실행기가 세션마다(하루 교체와 계정 세대가 바뀔 때마다) 새 hc core를 띄우고 그 core의 환경에 이번 자격 하나만 준다. [확인] `hc run`은 core의 환경을 프로그램에 넘기고, argv나 env override로 넘긴 값은 hc 상태 파일에 남는다(`supervisor.md` §2.1). 그래서 같은 core에서 자격만 바꾸지 않는다.
+- **오케스트레이터:** 세션 파드의 실행기가 세션마다(하루 교체와 계정 세대가 바뀔 때마다) 새 hc core를 띄운다. [확인] `hc run`은 core의 환경을 프로그램에 넘기고, argv나 env override로 넘긴 값은 hc 상태 파일에 남는다(`supervisor.md` §2.1). 그래서 같은 core에서 자격만 바꾸지 않는다. D-47 뒤에는 본체가 hc와 다른 uid의 본체 컨테이너에서 돌고 hc의 터미널 프로그램은 중계이므로, 이번 자격 하나는 core 환경이 아니라 새 세대가 확인된 뒤 중계와 다른 통로로 본체에게만 준다(`supervisor.md` §2.2 규칙 3, §2.4. 통로는 O25·O10이 정한다). 계정을 바꿀 때는 새 core만이 아니라 본체 컨테이너 세대·HOME·인증 캐시·자격 통로도 함께 바뀐다. 옛 본체가 남았을 가능성이 있으면 새 계정의 자격을 보내지 않는다.
 - **작업자:** 역할별 파드의 실행기가 hc 없이 직접 띄운다. 자식의 환경은 물려받아 지우는 것이 아니라 허용 목록에서 새로 만든다. 구독 Claude에는 `CLAUDE_CODE_OAUTH_TOKEN` 하나, API로 도는 OpenCode 서버에는 `ANTHROPIC_API_KEY` 하나만 준다.
 - 자격을 argv, 프롬프트, 결과, 남는 파일에 쓰지 않는다(`supervisor.md` §9.2).
 - [확인] Claude는 API 키나 helper가 OAuth 토큰보다 앞설 수 있고, OpenCode는 저장된 계정이 환경변수보다 앞선다([Claude 인증][auth], [OpenCode 인증][oc-auth]). 그래서 다른 인증 변수·helper·저장 계정을 막고, OpenCode는 실행별 전용 서버·DB·데이터 경로와 `--standalone`을 쓴다.
@@ -285,12 +296,12 @@ O03의 인계 시험에서 위 목록만으로 두 도구, 세 계정 사이에�
 - `claude`와 `claude-sub`는 계정 별칭이지 개인 폴더가 아니다. 개인 계정 폴더의 자격·세션·설정을 복사하거나 마운트하지 않는다. 관리자가 올리브 전용 발급 흐름에서 직접 로그인한다.
 - 구독은 `claude setup-token`과 가려진 입력으로 등록한다. [확인] 이 토큰의 유효 기간은 1년이다([Claude 인증][auth]). 장부에 발급일과 만료일을 두고 만료 30일 전부터 미리 알린다(D-40). 발급 시각을 모르면 "추정 만료일"이다.
 - [확인] 지금 등록기의 `makeTerminalLogin`은 부모 환경을 그대로 넘기고 전용 발급 폴더를 만들지 않는다. [추론] 발급 환경까지 나눈다.
-- API는 관리자가 그 구독에 연결된 Console 조직에서 올리브 전용 workspace와 키를 만든다. [확인] default workspace에는 지출 한도를 걸 수 없다. 구독 로그인을 OpenCode에 넣지 않는다(B-08).
+- API는 관리자가 그 구독에 연결된 Console 조직에서 올리브 전용 workspace와 키를 만든다. [확인] default workspace에는 지출 한도를 걸 수 없다. [확인, O05] 2026-11-16에 두 계정 모두 전용 workspace, 그 workspace의 월 지출 한도, 그 workspace에 묶인 키를 만들었다. 구독 로그인을 OpenCode에 넣지 않는다(B-08).
 
 남는 위험:
 
 - [확인] 같은 계정의 개인 Claude 사용과 올리브의 구독 사용은 같은 한도를 나눠 쓴다. 토큰이나 폴더를 따로 둬도 한도가 따로 생기지 않는다.
-- 개인 API 작업도 같은 Console 조직의 잔액을 줄이고, 그 조직에 구매 잔액·자동 충전을 더하면 올리브의 키도 그 잔액을 쓴다. [확인] 영업 계약으로 청구받는 조직이면 크레딧을 넘는 사용이 평소처럼 청구된다(O05가 본다).
+- 개인 API 작업도 같은 Console 조직의 잔액을 줄이고, 그 조직에 구매 잔액·자동 충전을 더하면 올리브의 키도 그 잔액을 쓴다. [확인] 영업 계약으로 청구받는 조직이면 크레딧을 넘는 사용이 평소처럼 청구된다. [확인, O05] 2026-11-16에 두 계정 모두 그런 조직이 아니었고 구매 잔액·자동 충전도 없었다. 관리자가 뒤에 이 설정을 바꾸면 이 확인은 다시 해야 한다.
 - D-40에 따라 `claude-work`의 토큰이 인증에 실패하면 올리브는 개인 계정으로 넘어간다. 토큰을 일부러 철회했으면(유출 등) 비상 정지를 함께 건다.
 - [미확인] 올리브용 토큰의 발급·철회가 관리자의 개인 로그인이나 다른 토큰에 미치는 범위.
 
@@ -372,13 +383,13 @@ O03의 인계 시험에서 위 목록만으로 두 도구, 세 계정 사이에�
 
 ## 10. 실제로 돌려 봐야 아는 것
 
-아래는 [미확인]이다. 문서와 소스를 읽은 것만으로 통과로 치지 않는다. O03과 O04는 2026-11-16에 일부를 돌려 봤고, 표에는 남은 것만 적었다(본 것은 §2와 §5, 그 티켓의 "결과").
+아래는 [미확인]이다. 문서와 소스를 읽은 것만으로 통과로 치지 않는다. O03은 2026-11-16에 일부를 돌려 봤고 O04와 O05는 같은 날 끝났다. 표에는 남은 것만 적었다(본 것은 §2·§4·§5·§6.4, 그 티켓의 "결과").
 
 | 티켓 | 돌려 볼 것 | 통과 전에는 |
 |---|---|---|
 | O03(남은 것) | `claude-work` → `claude-sub` 쌍(`claude-sub`의 주간 한도가 풀리는 2026-11-19 뒤), 압축된 긴 세션과 background 자식이 있던 세션, 부속 폴더의 큰 출력 전문, 올리브가 실제로 쓸 모델. 장기 토큰(`claude setup-token`)으로 이어 열기는 O17에서 본다 | 그 조합은 인계 문서를 쓴다 |
-| O04(남은 것) | API 지출 한도(400, workspace 429)를 `claude -p`와 OpenCode 둘 다로(O05의 실행과 Console 준비 뒤). 자연히 만날 때 모을 것: 크레딧 소진, 402, 등급 상한과 ramp 제한의 429, 5시간 창, 작업 도중의 멈춤, 경고만 온 턴, 거절 뒤 같은 턴의 성공. OpenCode의 `provider.auth` 밖 `error.type` | 크레딧 후보를 켜지 않는다(D-15). 못 본 표본은 미상으로 다룬다 |
-| O05 | 두 계정 각각: Console 조직이 서로 다른지, 전용 workspace와 지출 한도, 구매 잔액·자동 충전·후불 청구가 없는지, OpenCode의 실제 차감, 구독 사용률, 다음 지급 예정일 | 크레딧 후보를 켜지 않는다 |
+| O04(못 본 것) | 티켓은 끝났다(2026-11-16). 자연히 만날 때 모을 것: 크레딧 소진, 402, 조직 지출 한도 400, Claude Code workspace 지출 한도·등급 상한·ramp 제한의 429, 5시간 창, 작업 도중의 멈춤, 경고만 온 턴, 거절 뒤 같은 턴의 성공. OpenCode의 `provider.auth`·`provider.invalid-request` 밖 `error.type` | 못 본 표본은 미상으로 다룬다(소진과 결제 장애는 B-17의 미상 보류) |
+| O05(남은 것) | 다음 지급 때 새 크레딧이 실제로 들어오는지(첫 예정일 2026-11-20 UTC, `claude`). O05는 지급을 보지 못했다. 확인 방법은 O17이 정한다(§3의 "실제 일의 성공으로 복귀") | 지급이 늦으면 §3의 늦을 때 규칙을 따른다 |
 | O09·O17·O21 | 훅 사건의 턴 귀속과 가짜 신호 방어, 도는 작업자의 회수, OpenCode 환경의 격리, 섞인 묶음의 거부, 삭제 뒤 남는 Secret, 장부 복원 뒤의 잠금, Alertmanager 경로의 "한 번" | 해당 기능을 켜지 않는다 |
 
 O17의 시험 고정값은 그 티켓의 완료 조건에 있다.
