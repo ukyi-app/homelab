@@ -524,7 +524,7 @@ flowchart TD
 | [O04](issues/O04-verify-limit-signals.md) | 검증: 실제 한도·API 소진 때의 신호 모양 | 0 끄기와 검증 | 없음 | 구독 한도 표본 완료(2026-11-16). API 표본(지출 한도, 크레딧 소진, OpenCode의 한도 신호)은 대기 | 에이전트 + 사람(한도 상태 관측) |
 | [O05](issues/O05-verify-included-credit-billing.md) | 검증: 포함 API 크레딧 실제 차감 | 0 끄기와 검증 | 없음 | 대기 | 사람 + 에이전트 |
 | [O06](issues/O06-verify-discord-github-access.md) | 검증: Discord 채널 독자와 GitHub main 보호 | 0 끄기와 검증 | 없음 | 읽기 확인 완료(2026-11-16, Discord 독자는 관리자 답으로 확인). 4-1 쓰기 시험과 writer 설치의 저장소 목록 확인은 대기 | 사람 + 에이전트 |
-| [O07](issues/O07-old-bot-triage.md) | 옛 봇 코드와 멈춘 작업 나누기 | 1 기반 | 없음 | 결과 작성(2026-11-16). 작성 작업자 코드는 O09에서 계약을 나누고 O13에서 옮긴다(D-46). 봇 PR #155를 닫을지는 관리자 결정 대기 | 에이전트 |
+| [O07](issues/O07-old-bot-triage.md) | 옛 봇 코드와 멈춘 작업 나누기 | 1 기반 | 없음 | 완료(2026-11-16). 작성 작업자 코드는 O09에서 계약을 나누고 O13에서 옮긴다(D-46). 봇 PR #155는 병합 없이 닫음 | 에이전트 |
 | [O08](issues/O08-front-door.md) | 현관 정리 | 1 기반 | O06, O07 | 대기 | 에이전트 |
 | [O09](issues/O09-supervisor.md) | 감독 프로세스 | 1 기반 | O02, O07 | 대기 | 에이전트 + 사람(배포 PR) |
 | [O10](issues/O10-orchestrator.md) | 올리브 오케스트레이터 | 2 올리브와 작업자 | O03, O08, O09 | 대기 | 에이전트 |
