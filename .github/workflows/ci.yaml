@@ -70,7 +70,7 @@ jobs:
           BUN_SHA256: "bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c" # 1.4.4 linux-x64
           HELM_SHA256: "479dca836e5b45e8bd222400c5591b0e3a647378f03ff96597180db97c17fdae" # 4.2.1 linux-amd64
           KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883" # 0.8.0 linux-amd64
-          TERRAFORM_SHA256: "38034b38d03096399a7a1264a14561a8029b2b496fd1f169452656e53968f1b7" # 1.16.6 linux_amd64
+          TERRAFORM_SHA256: "e6f16b2f0b137ee5729caa8c4e79a3bae4ee261acd198a1fcfa8584a6296605b" # 1.17.2 linux_amd64
           ALERTMANAGER_SHA256: "265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8" # 0.34.1 linux-amd64
           VMUTILS_SHA256: "989c8f73edc5d131eb169bb689d7b77bb1d31b14314159c7f6bbae38ba655938" # 1.154.1 linux-amd64(enterprise 아님)
         run: |
