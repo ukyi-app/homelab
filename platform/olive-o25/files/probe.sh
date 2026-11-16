@@ -18,7 +18,8 @@ clean() { LC_ALL=C tr '\000-\010\013-\037\177' '?'; }
 # one <이름> [인자...]: "<종료 코드> <첫 줄>"을 낸다.
 one() {
   local out rc
-  out=$(python3 "$PY" "$@" 2>&1 </dev/null)
+  # -I: 본체가 쓸 수 있는 사용자 site(.pth)·현재 폴더·PYTHON* 환경에서 코드를 읽지 않는다.
+  out=$(python3 -I "$PY" "$@" 2>&1 </dev/null)
   rc=$?
   printf '%s %s' "$rc" "$(printf '%s\n' "$out" | head -n 1 | clean)"
 }
@@ -180,7 +181,7 @@ for a in $abs; do
     unknown) n_unk=$((n_unk + 1)) ;;
   esac
 done
-tcp_out=$(python3 "$PY" tcpscan 2>&1 </dev/null)
+tcp_out=$(python3 -I "$PY" tcpscan 2>&1 </dev/null)
 tcp_rc=$?
 printf '%s\n' "$tcp_out" | clean | sed 's/^/  /'
 sum=$(printf '%s\n' "$tcp_out" | sed -n 's/^summary listen=\([0-9]*\) connected=\([0-9]*\) blocked=\([0-9]*\) unknown=\([0-9]*\)$/\1 \2 \3 \4/p')

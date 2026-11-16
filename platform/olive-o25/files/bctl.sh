@@ -176,10 +176,13 @@ case "$cmd" in
     ;;
   cred)
     k1=6.본체-프로세스에-있음 k2=6.본체-쪽-파일-argv-없음
+    # /b/state는 본체가 쓸 수 있다. 정해진 모양이 아니면 값을 쓰지도 찍지도 않는다(줄 구분 문자로 가짜 줄을 숨길 수 있다).
     prog=$(state program | sed -n 's/^pid=//p')
     want=$(state cred)
+    [[ $prog =~ ^[0-9]{1,10}$ ]] || prog=""
+    [[ $want =~ ^sha=[0-9a-f]{16}$ ]] || want="bad-form"
     echo "본체 PID 1이 받은 자격: $want, 본체 자리 프로그램 pid ${prog:-?}"
-    case "$want" in sha=[0-9a-f]*) fact "body-sha ${want#sha=}" ;; esac
+    case "$want" in sha=*) fact "body-sha ${want#sha=}" ;; esac
     fact "AppArmor 라벨(이 검사 셸) $(clean 2>&1 </proc/self/attr/current)"
     s0=$([ -n "$prog" ] && pstart "$prog")
     if [ -z "$s0" ]; then
@@ -198,7 +201,7 @@ case "$cmd" in
     unset envtxt
     if [ -z "$got" ]; then
       v1=("안 됨" absent "본체 자리 프로그램 환경을 읽었는데 자격이 없다")
-    elif [ "sha=$(printf '%s' "$got" | python3 "$PY" sha)" != "$want" ]; then
+    elif [ "sha=$(printf '%s' "$got" | python3 -I "$PY" sha)" != "$want" ]; then
       v1=("안 됨" sha-mismatch "본체 자리 프로그램 환경의 자격 sha가 PID 1이 받은 것($want)과 다르다")
     else
       v1=("됨" present "본체 자리 프로그램 환경에 자격이 있고 sha가 PID 1이 받은 것과 같다($want). 제어 쪽 장부의 cred-sha와 대조한다")
@@ -209,7 +212,7 @@ case "$cmd" in
       exit 0
     fi
     # 값은 검사기의 표준 입력으로만 넘긴다(인자로 주면 검사 프로세스의 argv가 노출 경로가 된다).
-    scan=$(printf '%s' "$got" | python3 "$PY" scan /b /relay 2>&1)
+    scan=$(printf '%s' "$got" | python3 -I "$PY" scan /b /relay 2>&1)
     rc=$?
     unset got
     printf '%s\n' "$scan" | grep -v '^summary ' | clean | head -n 30 | sed 's/^/  /'

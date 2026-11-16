@@ -887,7 +887,8 @@ def gate(ackdir, req, pid, start, reader=read_stat, kill=os.kill, label=read_lab
     lab("self", "self")
     state, _ = submitter_state(pid, start, reader)
     if state != "alive":
-        return done(False, "submitter-unseen", 0)
+        # 처음부터 못 읽은 것(EACCES 등)과 이미 없던 것을 나눈다. 앞의 것은 라벨 문제일 수 있어 다시 제출로 풀리지 않는다.
+        return done(False, "submitter-unread" if state == "unknown" else "submitter-unseen", 0)
     try:
         kill(pid, 0)
         lines.append("gate-fact sig0=OK")
@@ -970,11 +971,14 @@ _VERDICT = re.compile(r"결과 (\S+) (됨|안 됨|판단 필요) — (.*)")
 _CODE = re.compile(r" \(이유 ([a-z0-9-]{1,40})\)$")
 
 
-def publish_lines(job, pod, gen, req, run, text):
+def publish_lines(job, pod, gen, req, run, text, gate_lines=None):
     """검사 결과 글에서 정해진 모양의 줄만 골라 로그 줄로 바꾼다. 원문을 옮기지 않고 잡은 필드로 줄을 새로 만든다.
 
     판정 줄은 이 작업의 키와 정해진 이유 코드일 때만 내고, 근거 글은 sha 앞 16자로만 낸다. 경로는 뿌리 분류와 해시로만 낸다.
     모양에 안 맞는 줄은 개수(dropped)만 센다. 회수 쪽은 끝 줄의 결과 줄 수와 필수 키가 모두 맞아야 완료로 본다.
+
+    gate_lines를 주면(본체 쪽) gate·job 줄은 그 목록에서만 받고, text의 같은 모양 줄은 버린다. text에는 본체가 쓴 값이 실릴 수 있다.
+    줄은 LF로만 나눈다. splitlines는 U+2028·U+0085·VT·FF에서도 나눠, 한 줄 값 안에 숨긴 글이 따로 선 줄이 된다.
     """
     if not re.fullmatch(r"[0-9a-f-]{1,64}", pod or ""):
         pod = "?"
@@ -986,7 +990,13 @@ def publish_lines(job, pod, gen, req, run, text):
     out = [head + f"begin job={job} run={run}"]
     n_v = dropped = 0
     keys = JOB_KEYS[job]
-    for line in text.splitlines():
+    tagged = [(line, True) for line in gate_lines or []]
+    tagged += [(line, gate_lines is None) for line in text.split("\n") if line]
+    for line, trusted in tagged:
+        # 로그 줄은 LF·CR·제어·서식·줄 구분 문자를 하나도 품지 않는다. 어느 필드에 섞여도 그 줄 전체를 버린다.
+        if any(unicodedata.category(c) in DROP_CATEGORIES for c in line):
+            dropped += 1
+            continue
         m = _VERDICT.fullmatch(line)
         if m:
             c = _CODE.search(m[3])
@@ -999,6 +1009,8 @@ def publish_lines(job, pod, gen, req, run, text):
             continue
         for rx, fmt in _PUB:
             m = rx.fullmatch(line)
+            if m and not trusted and rx.pattern.startswith(("gate", "job ")):
+                m = None
             if m:
                 out.append(head + fmt(m))
                 break
@@ -1100,12 +1112,18 @@ BODY_JOB_ARGV = {
 }
 
 
+# 고정 작업과 그 하위 프로그램의 환경. 본체가 쓸 수 있는 곳(/b)에서 코드나 설정을 읽지 않게 한다: HOME·작업 폴더는 읽기 전용 루트,
+# PATH는 읽기 전용 루트의 폴더뿐, BASH_ENV·ENV·PYTHON*은 없다. 하위 python은 -I로 부른다(사용자 site의 .pth·현재 폴더를 읽지 않는다).
+BODY_JOB_ENV = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/", "LC_ALL": "C"}
+
+
 def spawn_body_job(rec):
     # 새 python으로 띄운다(PID 1의 메모리를 물려받지 않게). 환경은 고정 사전이다: 자격이 없고, PID 1의 환경은 검사 대상으로 남는다.
-    env = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/b", "LC_ALL": "C",
-           "O25_POD_UID": os.environ.get("O25_POD_UID", "?")}
-    argv = [sys.executable, "/opt/o25/o25.py", "body-job", rec["job"], rec["gen"], rec["req"], str(rec["pid"]), str(rec["start"])]
-    return subprocess.Popen(argv, env=env, cwd="/b", stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    # -I: HOME=/b였던 PID 1 쪽에서 본체가 심은 사용자 site 훅(.pth, usercustomize)과 PYTHON* 환경을 읽지 않는다.
+    env = dict(BODY_JOB_ENV, O25_POD_UID=os.environ.get("O25_POD_UID", "?"))
+    argv = [sys.executable, "-I", "/opt/o25/o25.py", "body-job", rec["job"], rec["gen"], rec["req"], str(rec["pid"]),
+            str(rec["start"])]
+    return subprocess.Popen(argv, env=env, cwd="/", stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
 
 
 def cmd_body_job(args):
@@ -1113,12 +1131,15 @@ def cmd_body_job(args):
     pod = os.environ.get("O25_POD_UID", "?")
     os.makedirs("/b/out", mode=0o700, exist_ok=True)
     ok, lines = gate("/b/ack", req, pid, start)
-    text = list(lines)
+    # 문지기 줄(lines)과 검사 출력(text)을 섞지 않는다. 검사 출력에는 본체가 쓴 값(/b/state 등)이 실릴 수 있어, 그 안의
+    # gate·라벨 모양 줄은 publish_lines가 버린다.
+    text = []
     if ok:
         out = f"/b/out/req-{req}.txt"
+        env = dict(BODY_JOB_ENV, O25_POD_UID=pod)
         with open(out, "wb") as f:
-            p = subprocess.Popen(BODY_JOB_ARGV[job], stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, cwd="/b",
-                                 close_fds=True)
+            p = subprocess.Popen(BODY_JOB_ARGV[job], stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, cwd="/",
+                                 env=env, close_fds=True)
             try:
                 rc = p.wait(timeout=JOB_LIMIT_S)
                 state = "done"
@@ -1127,12 +1148,12 @@ def cmd_body_job(args):
                 rc = p.wait()
                 state = "timeout"
         with open(out, "rb") as f:
-            text += f.read(256 * 1024).decode("utf-8", errors="replace").splitlines()
-        text.append(f"job state={state} rc={rc}")
+            text.append(f.read(256 * 1024).decode("utf-8", errors="replace"))
+        lines = lines + [f"job state={state} rc={rc}"]
     else:
         code = lines[-1].split()[2].split("=", 1)[1]
         text += [f"결과 {k} 판단 필요 — 제출자 소멸을 확인하지 못했다 (이유 {code})" for k in JOB_KEYS[job]]
-    for line in publish_lines(job, pod, gen, req, pid1_start(), "\n".join(text)):
+    for line in publish_lines(job, pod, gen, req, pid1_start(), "\n".join(text), gate_lines=lines):
         emit(line)
     return 0
 

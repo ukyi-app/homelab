@@ -24,61 +24,93 @@ CODES = frozenset((
     "submitter-unseen", "submitter-alive", "submitter-unread", "job-failed",
     "program-unknown", "env-open-failed", "absent", "sha-mismatch", "present", "program-changed", "not-checked",
 ))
-FIELD = r"[A-Za-z0-9._/&()+:=-]"
-BODY = [
-    re.compile(r"begin job=([a-z-]{1,16}) run=(\d{1,20})"),
-    re.compile(r"결과 (\S{1,60}) (됨|안 됨|판단 필요) code=([a-z0-9-]{1,40}) why=([0-9a-f]{16})"),
-    re.compile(rf"(gate|fact|scan|unread|hit|job) ({FIELD}{{1,120}}( {FIELD}{{1,120}}){{0,6}})"),
-    re.compile(r"end n=(\d{1,4}) dropped=(\d{1,6})"),
-]
+BODY_JOBS = ("body-cred", "body-hide")
+# 묶음 안 줄의 종류별 모양. 파드 쪽 publish_lines가 내는 모양 그대로이고, 하나라도 어긋나면 그 묶음은 미완료다.
+# 표식 모양 글이 섞일 수 있는 자유 글자 필드는 라벨 하나뿐이다(아래 MARK_SEEN으로 한 번 더 닫는다).
+ERRNO = r"(?:E[A-Z0-9]{1,15}|\d{1,5})"
+ROOT = r"(?:hc-state|ctl-record|relay|body|other)"
+LINE_RX = {
+    "begin": re.compile(r"begin job=([a-z-]{1,16}) run=(\d{1,20})"),
+    "verdict": re.compile(r"결과 ([0-9a-z.가-힣-]{1,60}) (됨|안 됨|판단 필요) code=([a-z0-9-]{1,40}) why=([0-9a-f]{16})"),
+    "gate": re.compile(r"gate state=(gone|undecided) code=(gone|reused|submitter-unseen|submitter-alive|submitter-unread) "
+                       r"pid=\d{1,10} start=\d{1,20} waited_ms=\d{1,10}"),
+    "fact": re.compile(r"fact (?:(?:sig0|ack)=(?:OK|E[A-Z0-9]{1,15})|(?:label-self|label-submitter)="
+                       r"(?:[A-Za-z0-9._/&()+:-]{1,80}|h:[0-9a-f]{16})|(?:cred-sha|body-sha)=[0-9a-f]{16})"),
+    "scan": re.compile(r"scan files=\d{1,10} procs=\d{1,10} gone=\d{1,10} unreadable=\d{1,10} self=\d{1,10}"),
+    "unread": re.compile(rf"unread kind=(?:(?:cmdline|environ) pid=\d{{1,10}}|(?:file|dir) root={ROOT} h=[0-9a-f]{{16}}) "
+                         rf"errno={ERRNO}"),
+    "hit": re.compile(rf"hit kind=(?:file root={ROOT} h=[0-9a-f]{{16}}|(?:argv|environ) pid=\d{{1,10}} who=(?:executor|proc))"),
+    "job": re.compile(r"job state=(done|timeout|failed) rc=-?\d{1,4}"),
+    "end": re.compile(r"end n=(\d{1,4}) dropped=(\d{1,6})"),
+}
+# re.A: \d가 ASCII 숫자만 받게 한다(기본은 모든 유니코드 숫자를 받는다).
+LINE_RX = {k: re.compile(rx.pattern, re.A) for k, rx in LINE_RX.items()}
+MARK_SEEN = "o25fake"
 
 
 def collect(text, pod, gen, req, job):
-    """(상태 "complete"|"incomplete", 이유 코드, 찍을 줄 목록)."""
+    """(상태 "complete"|"incomplete", 이유 코드, 찍을 줄 목록).
+
+    줄은 LF로만 나눈다(U+2028 등에서 나누면 한 줄 안에 숨긴 글이 따로 선 줄이 된다). 묶음은 begin으로 시작해 end로 끝나야 하고,
+    이 요청의 줄이 그 밖에 있으면 미완료다. 문지기 줄은 판정 줄보다 앞에 한 번, 소멸을 확인하지 못했으면(undecided) 판정은
+    모두 판단 필요여야 한다. 본체 작업은 소멸 확인 뒤 job state=done 줄이 한 번 있어야 한다.
+    """
     head = f"o25r {pod} {gen} {req} "
     keys = JOB_KEYS.get(job)
     if keys is None:
         return "incomplete", "bad-job", []
-    rows, verdicts, n_begin, n_end, end_n, bad = [], {}, 0, 0, None, False
-    for raw in text.splitlines():
+    rows, verdicts, end_n, phase, bad = [], {}, None, "before", None
+    gates, jobs = [], []
+    found = False
+    for raw in text.split("\n"):
         if not raw.startswith(head):
             continue
+        found = True
         rest = raw[len(head):]
-        if BODY[0].fullmatch(rest):
-            m = BODY[0].fullmatch(rest)
-            n_begin += 1
-            if m[1] != job:
-                bad = True
-            rows.append(f"begin job={m[1]} run={m[2]}")
+        kind = next((k for k, rx in LINE_RX.items() if rx.fullmatch(rest)), None)
+        if kind is None or MARK_SEEN in rest:
+            # 원문을 찍지 않는다. 모양이 어긋난 줄이 있었다는 사실만 남는다.
+            bad = bad or ("mark-seen" if kind is not None else "bad-line")
             continue
-        m = BODY[1].fullmatch(rest)
-        if m:
+        m = LINE_RX[kind].fullmatch(rest)
+        if kind == "begin":
+            if phase != "before":
+                bad = bad or "dup-block"
+            elif m[1] != job:
+                bad = bad or "bad-line"
+            phase = "in" if phase == "before" else phase
+        elif phase != "in":
+            bad = bad or ("dup-block" if kind == "end" and phase == "after" else "out-of-block")
+        if kind == "end" and phase == "in":
+            phase, end_n = "after", int(m[1])
+        elif kind == "gate":
+            gates.append(m[1])
+        elif kind == "job":
+            jobs.append(m[1])
+        elif kind == "verdict":
             if m[1] not in keys or (m[3] != "-" and m[3] not in CODES) or m[1] in verdicts:
-                bad = True
+                bad = bad or "bad-line"
                 continue
+            if len(gates) != 1:
+                bad = bad or "verdict-before-gate"
+            elif gates[0] != "gone" and m[2] != "판단 필요":
+                bad = bad or "undecided-gate-verdict"
             verdicts[m[1]] = m[2]
             rows.append(f"결과 {m[1]} {m[2]} code={m[3]} why={m[4]}")
             continue
-        m = BODY[3].fullmatch(rest)
-        if m:
-            n_end += 1
-            end_n = int(m[1])
-            rows.append(f"end n={m[1]} dropped={m[2]}")
-            continue
-        m = BODY[2].fullmatch(rest)
-        if m:
-            rows.append(f"{m[1]} {m[2]}")
-            continue
-        if rest.startswith("결과 "):
-            bad = True
-    if n_begin == 0 and end_n is None:
+        rows.append(rest)
+    if not found:
         return "incomplete", "not-found", rows
-    if n_begin > 1 or n_end > 1:
-        return "incomplete", "dup-block", rows
+    if bad:
+        return "incomplete", bad, rows
+    if phase == "before":
+        return "incomplete", "no-begin", rows
     if end_n is None:
         return "incomplete", "no-end", rows
-    if bad:
-        return "incomplete", "bad-line", rows
+    if len(gates) != 1:
+        return "incomplete", "no-gate" if not gates else "dup-gate", rows
+    if job in BODY_JOBS and gates[0] == "gone" and jobs != ["done"]:
+        return "incomplete", "job-not-done", rows
     if [k for k in keys if k not in verdicts]:
         return "incomplete", "missing-key", rows
     if end_n != len(verdicts):

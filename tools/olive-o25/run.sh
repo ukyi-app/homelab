@@ -219,8 +219,23 @@ case "$cmd" in
     {
       echo "전: $before"
       echo "지금: $now"
+      # 네 컨테이너의 "ID:횟수"가 전후 모두 정확히 한 번, 비어 있지 않은 ID로 있어야 견준다. 재기동 중인 API는 ID를 비워 둘 수 있고,
+      # 빈 값끼리는 같아 보인다.
+      bad=""
+      for snap in "$before" "$now"; do
+        [[ $(printf '%s' "$snap" | cut -d' ' -f2) =~ ^[0-9a-f-]{36}$ ]] || bad="$bad pod-uid"
+        for key in control body init-fetch-hc init-gen; do
+          [ "$(printf '%s\n' "$snap" | tr ' ' '\n' | grep -c "^$key=")" = 1 ] &&
+            [[ $(snap_get "$snap" "$key") =~ ^[a-z0-9]+://[0-9A-Za-z]{1,128}:[0-9]{1,6}$ ]] || bad="$bad $key"
+        done
+      done
+      b0=$(snap_get "$before" body) b1=$(snap_get "$now" body)
       if [ -z "$before" ] || [ -z "$now" ]; then
         echo "결과 $k 판단 필요 — 전 상태나 지금 상태를 읽지 못했다"
+      elif [ -n "$bad" ]; then
+        echo "결과 $k 판단 필요 — 컨테이너 ID·재시작 횟수가 없거나 모양이 다르다:$bad"
+      elif [ "${b0%:*}" = "${b1%:*}" ] && [ "$b0" != "$b1" ]; then
+        echo "결과 $k 판단 필요 — 본체 재시작 횟수는 바뀌었는데 컨테이너 ID가 그대로다"
       elif [ "$(printf '%s' "$before" | cut -d' ' -f2)" != "$(printf '%s' "$now" | cut -d' ' -f2)" ]; then
         echo "결과 $k 안 됨 — 파드 UID가 바뀌었다(파드가 새로 떴다)"
       else
@@ -228,7 +243,6 @@ case "$cmd" in
         for key in control init-fetch-hc init-gen; do
           [ "$(snap_get "$before" "$key")" = "$(snap_get "$now" "$key")" ] || changed="$changed $key"
         done
-        b0=$(snap_get "$before" body) b1=$(snap_get "$now" body)
         if [ -n "$changed" ]; then
           echo "결과 $k 안 됨 — 본체 밖에서도 바뀐 컨테이너:$changed"
         elif [ "$b0" = "$b1" ]; then
