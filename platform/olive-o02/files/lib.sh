@@ -6,7 +6,7 @@
 # shellcheck disable=SC2034
 
 # 실행기가 받는 단계 이름 전부. 이 목록에 없는 이름은 실행기가 거절한다.
-O02_STEPS="preflight core-direct core-auto core-term core-kill holder-kill outlive hide cred-new-core cred-old-core cred-override residue view-noinput view-ctrl view-nocore limit-cpu limit-mem detach summary"
+O02_STEPS="preflight node-path core-direct core-auto core-term core-kill holder-kill outlive hide cred-new-core cred-old-core cred-override residue view-noinput view-ctrl view-nocore limit-cpu limit-mem detach summary"
 
 O02_ROOT=/s
 O02_OUT=$O02_ROOT/out
@@ -24,6 +24,8 @@ hc_env() {
 }
 
 # 제어 문자를 ?로 바꾼다(탭·줄바꿈 제외). 한글은 그대로 둔다. 결과 파일에 원시 화면 바이트가 섞이지 않게 한다.
+# 바이트 단위라 C0와 DEL만 본다. UTF-8로 적힌 C1·서식 문자는 관리자 쪽으로 나가는 창구가 지운다
+# (ctl.sh show, probe.sh의 직접 출력, 밖의 tools/olive-o02/sanitize.py).
 clean() { LC_ALL=C tr '\000-\010\013-\037\177' '?'; }
 
 # hc를 시간 상한을 두고 부른다. 멈춘 호출 하나가 단계를 붙잡지 않게 한다.
@@ -63,15 +65,72 @@ ps_dump() {
 # 시험이 띄운 것만 추린 표(hc, 고정 프로그램).
 ps_ours() { ps_dump | awk 'NR == 1 || /\/opt\/hc\/|\/opt\/o02\/(prog\.sh|o02\.py)/'; }
 
-# pids_like <정규식>: 명령줄이 맞는 살아 있는 프로세스의 pid.
-pids_like() {
-  ps_dump | awk -v re="$1" 'NR > 1 && $5 != "Z" { cmd = ""; for (i = 7; i <= NF; i++) cmd = cmd " " $i; if (cmd ~ re) print $1 }'
+# 살아 있는(좀비가 아닌) 프로세스를 "pid 시작시각 명령줄" 한 줄씩 낸다. bash 내장만 쓴다.
+# 정규식을 argv에 든 도우미(awk 등)를 띄우면 그 도우미가 자기 정규식에 맞아 시험 프로세스로 잡힌다.
+# 시작시각은 /proc/<pid>/stat의 22번째 칸(부팅 뒤 tick)이다. 노드에서 읽어도 같은 값이라 pid와 함께 대조 열쇠로 쓴다.
+proc_scan() {
+  local d stat f args cmd
+  for d in /proc/[0-9]*; do
+    { read -r stat <"$d/stat"; } 2>/dev/null || continue
+    read -ra f <<<"${stat##*) }"
+    [ "${f[0]:-Z}" = Z ] && continue
+    args=()
+    { mapfile -d '' -t args <"$d/cmdline"; } 2>/dev/null || continue
+    [ "${#args[@]}" -gt 0 ] || continue
+    cmd=${args[*]}
+    printf '%s %s %s\n' "${d#/proc/}" "${f[19]:-0}" "${cmd//$'\n'/ }"
+  done
 }
+
+# pids_like <정규식>: 명령줄이 맞는 살아 있는 프로세스의 pid. 명령줄 앞에 공백 하나를 붙여 견준다("^ "가 argv[0]의 시작이다).
+pids_like() {
+  local pid start cmd
+  while read -r pid start cmd; do
+    if [[ " $cmd" =~ $1 ]]; then printf '%s\n' "$pid"; fi
+  done < <(proc_scan)
+}
+# 시험이 띄운 것(hc와 고정 프로그램). init.sh·executor.sh·ctl.sh·probe.sh는 시험 전부터 있거나 검사 쪽이라 넣지 않는다.
+O02_RE_TEST='/opt/hc/|/opt/o02/(prog\.sh|o02\.py)'
 # hc 0.1.21은 core를 "<실행 파일> serve", holder를 "<실행 파일> hold"로 띄운다(소스 client.rs, platform/systemd.rs).
 # 인자 모양이 다르면 아래 둘이 비어 나온다. 그때는 ps_ours 표를 사람이 본다.
 core_pids() { pids_like '/opt/hc/[a-z-]+ (.* )?serve( |$)'; }
 holder_pids() { pids_like '/opt/hc/[a-z-]+ (.* )?hold( |$)'; }
-prog_pids() { pids_like "/opt/o02/prog\\.sh [a-z]+ $1"; }
+# 고정 프로그램은 argv[0]부터 맞춘다. "hc run ... -- bash /opt/o02/prog.sh ..."처럼 같은 글자가 인자로 든 client는 프로그램이 아니다.
+prog_pids() { pids_like "^ [^ ]*bash /opt/o02/prog\\.sh [a-z]+ $1( |\$)"; }
+
+# role_pids <역할>: core | holder | det(세션을 분리한 후손과 그 대조군) | prog:<꼬리표> | py:<o02.py의 이름>
+role_pids() {
+  case "$1" in
+    core) core_pids ;;
+    holder) holder_pids ;;
+    det) pids_like '^ [^ ]*bash /opt/o02/prog\.sh [a-z]+ det-' ;;
+    prog:*) prog_pids "${1#prog:}" ;;
+    py:*) pids_like "^ [^ ]*python3 /opt/o02/o02\\.py ${1#py:}( |\$)" ;;
+  esac
+}
+
+# role_table <역할...>: "역할:pid:시작시각" 목록. 노드의 node-cgroup.sh가 이 줄로 같은 프로세스를 찾아 대조한다.
+role_table() {
+  local role pid p start cmd
+  for role in "$@"; do
+    for pid in $(role_pids "$role"); do
+      while read -r p start cmd; do
+        if [ "$p" = "$pid" ]; then printf '%s:%s:%s ' "${role%%:*}" "$pid" "$start"; fi
+      done < <(proc_scan)
+    done
+  done
+}
+
+# wait_role <역할> [초]: 그 역할의 프로세스가 보일 때까지 기다린다. 끝까지 안 보이면 0이 아닌 값.
+wait_role() {
+  local i=0
+  while [ "$i" -lt "${2:-10}" ]; do
+    [ -n "$(role_pids "$1")" ] && return 0
+    sleep 1
+    i=$((i + 1))
+  done
+  [ -n "$(role_pids "$1")" ]
+}
 
 # client 소켓의 경로. 기대한 자리에 없으면 소켓 폴더와 상태 폴더에서 holder 것이 아닌 소켓을 찾는다.
 find_sock() {
@@ -125,7 +184,12 @@ start_core() {
   echo "직접 실행한 serve(pid $cpid)가 소켓을 열지 못했다. client 자동 기동으로 대신한다. serve.log 끝:"
   tail -n 5 "$O02_OUT/serve.log" 2>/dev/null | clean
   O02_FAKE_CRED=$1 timeout 30 "$HC" server start 2>&1 </dev/null | clean
-  wait_core 75 && echo "core 기동: client 자동 기동(server start)"
+  if wait_core 75; then
+    echo "core 기동: client 자동 기동(server start)"
+    return 0
+  fi
+  echo "core 기동 실패: 소켓이 받지 않는다"
+  return 1
 }
 
 ensure_core() {
@@ -141,7 +205,7 @@ full_stop() {
   local p
   if core_up; then HC_T=10 hcq server stop >/dev/null 2>&1; fi
   sleep 1
-  for p in $(pids_like '/opt/hc/|/opt/o02/(prog\.sh|o02\.py)'); do
+  for p in $(pids_like "$O02_RE_TEST"); do
     kill -KILL "$p" 2>/dev/null
   done
   sleep 1
@@ -172,17 +236,35 @@ grep_marker() {
   if [ -n "$hit" ]; then printf '%s\n' "$hit" | clean; else echo "없음"; fi
 }
 
-# 컨테이너 안에서 본 cgroup: 시험 프로세스가 모두 이 컨테이너 cgroup에 있는지. 노드에서 본 값이 기준이고 이것은 보조다.
+# hc 상태 폴더의 파일 수. grep_marker의 "없음"은 볼 파일이 있을 때만 "남지 않았다"는 증거다.
+state_file_count() { find "$O02_ROOT/st" -xdev -type f 2>/dev/null | wc -l; }
+
+# cgroup_inside <기대 역할...>: 컨테이너 안에서 본 cgroup. 기대한 역할이 모두 떠 있고, 시험 프로세스가 모두 이 컨테이너 cgroup에 있는지.
+# 기대 역할이 하나라도 없으면 통과가 아니다. 볼 대상이 없는 채로 "밖에 0개"가 나오면 포함 관계를 본 것이 아니다.
+# 노드에서 본 값이 기준이고 이것은 보조다.
 cgroup_inside() {
-  local p n=0 missing=0 sub
-  for p in $(pids_like '/opt/hc/|/opt/o02/(prog\.sh|o02\.py)'); do
+  local role p n=0 missing=0 sub lack="" seen="" procs cg=${O02_CG:-/sys/fs/cgroup}
+  for role in "$@"; do
+    n=$(role_pids "$role" | wc -l)
+    if [ "$n" -gt 0 ]; then seen="$seen $role=$n"; else lack="$lack $role"; fi
+  done
+  echo "기대 역할:${seen:- 없음} / 없는 역할:${lack:- 없음}"
+  n=0
+  procs=$(cat "$cg/cgroup.procs" 2>/dev/null)
+  if [ -z "$procs" ]; then
+    echo "컨테이너의 cgroup.procs를 읽지 못했다"
+    return 1
+  fi
+  for p in $(pids_like "$O02_RE_TEST"); do
+    # 표를 읽은 뒤 끝난 프로세스(잠깐 도는 hc client)는 세지 않는다.
+    [ -d "/proc/$p" ] || continue
     n=$((n + 1))
-    if ! grep -qx "$p" /sys/fs/cgroup/cgroup.procs 2>/dev/null; then
+    if ! grep -qx "$p" <<<"$procs"; then
       missing=$((missing + 1))
       echo "컨테이너 cgroup.procs에 없음: pid $p"
     fi
   done
-  sub=$(find /sys/fs/cgroup -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+  sub=$(find "$cg" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
   echo "시험 프로세스 $n개, 컨테이너 cgroup 밖 $missing개, 하위 cgroup $sub개"
-  [ "$n" -gt 0 ] && [ "$missing" -eq 0 ]
+  [ -z "$lack" ] && [ "$n" -gt 0 ] && [ "$missing" -eq 0 ]
 }

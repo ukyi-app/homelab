@@ -104,6 +104,11 @@ spec:
             # "경로를 모르는 도구 역할" 시험이 성립하지 않는다.
             - name: HOME
               value: /s/h
+            # 노드 API 경로(노드 IP의 6443·10250)에 닿는지 재는 탐침이 쓴다. 저장소에 노드 주소를 적지 않으려고 실행 때 받는다.
+            - name: O02_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
           securityContext:
             {{- include "o02.containerSecurity" . | nindent 12 }}
             runAsUser: 10001
@@ -183,6 +188,7 @@ spec:
             defaultMode: 0444
 ---
 # 대조 파드: 같은 ns의 다른 파드. 세션 파드의 소켓·프로세스·세션 폴더가 보이지 않아야 한다.
+# 네트워크 허용 규칙은 없지만 무출구는 아니다. 노드 IP의 6443·10250 경로가 남는다(templates/networkpolicy.yaml 머리 주석).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -213,6 +219,12 @@ spec:
         - name: peer
           image: {{ include "o02.image" . }}
           {{- include "o02.idleCommand" . | nindent 10 }}
+          env:
+            # 세션 컨테이너와 같은 값. 탐침(probe.sh 7번)이 이 파드에서도 노드 API 경로를 잰다.
+            - name: O02_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
           securityContext:
             {{- include "o02.containerSecurity" . | nindent 12 }}
             # 세션 컨테이너와 같은 uid다. uid가 같아도 다른 파드에서는 닿지 않는지 본다.

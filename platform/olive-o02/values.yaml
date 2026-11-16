@@ -5,7 +5,9 @@
 #      그 Application의 resources-finalizer가 시험 ns와 안의 것을 함께 지운다(platform/root/templates/olive-o02.yaml).
 #   2. 확인: kubectl get application -n argocd olive-o02 와 kubectl get namespace olive-o02-test 가 둘 다 NotFound.
 #   3. 치우는 PR: platform/olive-o02/, platform/root/templates/olive-o02.yaml, values.yaml의 oliveO02 블록,
-#      tools/olive-o02/를 지운다. 2를 확인하기 전에 지우지 않는다(Application이 남은 채 원본이 사라지면 sync가 실패로 남는다).
+#      tools/olive-o02/, tools/ci/fixtures/platform/olive-o02/를 같은 PR에서 지운다. fixture만 남으면 CI가 그 fixture의
+#      차트(platform/olive-o02/Chart.yaml)를 찾지 못해 실패한다. 2를 확인하기 전에 지우지 않는다(Application이 남은 채
+#      원본이 사라지면 sync가 실패로 남는다).
 
 # 파드에 넣는 hc. 공식 릴리스 서비스의 고정 버전 파일을 init 컨테이너가 받아 sha256을 대조한다(templates/session.yaml).
 # 세 값은 함께 바꾼다. sha256은 https://releases.herdr.dev/core/<version>/manifest.json의 linux-x86_64 값이다.

@@ -2,9 +2,12 @@
 """O02 시험의 고정 프로그램과 도우미. 표준 라이브러리만 쓴다.
 
 터미널 안에서 도는 것: inputlog(받은 입력을 기록), emit(제어 문자 표본), hog·burn(상한 시험).
-실행기가 부르는 것: view(보기 흉내), viewcheck·ctrlcount(판정), apirun(API로 env override), connect, sanitize.
+실행기가 부르는 것: view(보기 흉내), viewcheck·ctrlcount(판정), apirun(API로 env override), connect, sanitize,
+trycreate(읽기 전용 root 확인), nodepath(노드 API 경로에 닿는지).
 """
+import errno
 import fcntl
+import ipaddress
 import json
 import os
 import select
@@ -36,10 +39,22 @@ MARKS = {
 }
 
 
+# 버리는 유니코드 범주: 제어(Cc: C0, DEL, C1), 서식(Cf: 방향 뒤집기, 폭 없는 문자, 태그), 대리·사용자 정의·미배정(Cs, Co, Cn),
+# 줄·문단 구분자(Zl, Zp). tools/olive-o02/sanitize.py와 같은 목록이다(바꾸면 함께 바꾼다).
+DROP_CATEGORIES = ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp")
+
+
+def unsafe_char(c: str) -> bool:
+    return c not in "\n\t" and unicodedata.category(c) in DROP_CATEGORIES
+
+
 def sanitize_text(data: bytes) -> str:
-    """관리자 단말에 찍기 전의 정제 표본: 탭·줄바꿈을 뺀 제어 문자(C0, DEL, C1)와 서식 문자를 버린다."""
+    """관리자 단말에 찍기 전의 정제 표본: 탭·줄바꿈을 뺀 제어 문자(C0, DEL, C1)와 서식 문자를 버린다.
+
+    UTF-8이 아닌 바이트는 U+FFFD로 바뀐다. 날것의 0x80~0x9F 바이트를 C1로 읽는 단말이 있어서다.
+    """
     text = data.decode("utf-8", errors="replace")
-    return "".join(c for c in text if c in "\n\t" or unicodedata.category(c) not in ("Cc", "Cf"))
+    return "".join(c for c in text if not unsafe_char(c))
 
 
 def cmd_sanitize(_args):
@@ -60,6 +75,52 @@ def cmd_connect(args):
     print("ok")
 
 
+def cmd_trycreate(args):
+    """파일 하나를 만들어 보고 결과를 한 낱말로 낸다: ok, 또는 errno 이름(EROFS, EACCES ...). 만들었으면 바로 지운다."""
+    try:
+        fd = os.open(args[0], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError as e:
+        print(errno.errorcode.get(e.errno, f"errno{e.errno}"))
+        return
+    os.close(fd)
+    os.unlink(args[0])
+    print("ok")
+
+
+def tcp_reach(host, port, timeout=4.0):
+    """TCP 연결만 해 보고 결과를 말로 돌려준다. 아무것도 보내지 않는다."""
+    try:
+        socket.create_connection((host, port), timeout=timeout).close()
+    except ConnectionRefusedError:
+        return "거절됨(RST가 왔다. 패킷은 닿았고 듣는 쪽이 없다)"
+    except (socket.timeout, TimeoutError):
+        return "안 닿음(시간 초과)"
+    except OSError as e:
+        return f"안 닿음({errno.errorcode.get(e.errno, e.errno)})"
+    return "닿음(TCP 연결됨)"
+
+
+def cmd_nodepath(args):
+    """노드 IP의 kube API(6443)·kubelet(10250)과 kubernetes Service에 닿는지 잰다. 판정이 아니라 사실 줄로 낸다.
+
+    주소 값은 찍지 않는다. 노드 IP는 파드 env의 O02_NODE_IP(status.hostIP)에서 받는다.
+    """
+    label = args[0]
+    targets = []
+    try:
+        node = str(ipaddress.ip_address(os.environ.get("O02_NODE_IP", "")))
+        targets += [("노드 IP:6443(kube API)", node, 6443), ("노드 IP:10250(kubelet)", node, 10250)]
+    except ValueError:
+        print(f"사실 노드경로.{label} 노드 IP를 모른다(환경에 O02_NODE_IP가 없다). 노드 IP 경로는 재지 못했다")
+    try:
+        svc = str(ipaddress.ip_address(os.environ.get("KUBERNETES_SERVICE_HOST", "")))
+        targets.append(("kubernetes Service(노드 IP:6443으로 바뀌는 길)", svc, int(os.environ.get("KUBERNETES_SERVICE_PORT", "443"))))
+    except ValueError:
+        print(f"사실 노드경로.{label} kubernetes Service 주소를 모른다(환경에 없다). 그 경로는 재지 못했다")
+    for name, host, port in targets:
+        print(f"사실 노드경로.{label} {name} {tcp_reach(host, port)}")
+
+
 def winsize(fd):
     try:
         rows, cols = struct.unpack("HHHH", fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8))[:2]
@@ -69,7 +130,11 @@ def winsize(fd):
 
 
 def cmd_inputlog(args):
-    """받은 입력 바이트와 크기 변경을 줄마다 기록한다. 1초마다 단말 질의를 낸다."""
+    """받은 입력 바이트와 크기 변경을 줄마다 기록한다. 1초마다 단말 질의를 내고 그때 tick 한 줄을 남긴다.
+
+    tick은 "이 구간에 기록기가 살아 있었다"는 증거다. 입력이 없는 구간에는 input·winch 줄이 없으므로,
+    tick이 없으면 "입력이 없었다"와 "기록기가 죽었다"를 가를 수 없다.
+    """
     log, phasefile = args
 
     def phase():
@@ -96,6 +161,7 @@ def cmd_inputlog(args):
             now = time.monotonic()
             if now - last >= 1.0:
                 last = now
+                w("tick")
                 # 장치 속성, 커서 위치, 배경색, 단말 버전 질의
                 os.write(1, b"\x1b[c\x1b[6n\x1b]11;?\x07\x1b[>q")
             ready, _, _ = select.select([0], [], [], 0.25)
@@ -197,52 +263,113 @@ def cmd_view(args):
         status = "스스로 끝남"
     print(f"view {mode} {term}: 받은 바이트 {len(got)}, attach 프로세스 {status}, 종료 상태 {code}")
     print("끝 200바이트(정제):", sanitize_text(bytes(got[-200:])).replace("\n", " ")[:200])
+    # 화면을 한 바이트도 받지 못했으면 붙지 못한 것이다. 그 구간의 "무입력"은 증거가 아니다.
+    if not got:
+        sys.exit(3)
 
 
-def cmd_viewcheck(args):
-    """inputlog 기록을 구간별로 읽어, 보기 흉내가 넣은 표식이 프로그램에 닿았는지 판정한다."""
+def read_phases(path):
+    """inputlog 기록을 구간별로 모은다. ticks는 그 구간에 기록기가 살아 있었다는 표시의 수다."""
     phases = {}
-    with open(args[0]) as f:
+    with open(path) as f:
         for line in f:
             try:
                 e = json.loads(line)
             except ValueError:
                 continue
-            p = phases.setdefault(e.get("phase", "?"), {"input": bytearray(), "winch": []})
+            if not isinstance(e, dict) or "kind" not in e:
+                continue
+            p = phases.setdefault(e.get("phase", "?"), {"input": bytearray(), "winch": [], "ticks": 0})
             if e["kind"] == "input":
-                p["input"] += bytes.fromhex(e["hex"])
+                p["input"] += bytes.fromhex(e.get("hex", ""))
             elif e["kind"] in ("winch", "start"):
                 p["winch"].append((e["kind"], e.get("size")))
+            elif e["kind"] == "tick":
+                p["ticks"] += 1
+    return phases
+
+
+def judge_view(phases, read_ok, observe_ok, control_attached):
+    """보기 판정. (키, 판정, 근거) 목록을 돌려준다.
+
+    무입력 "됨"의 조건: 그 읽기 경로가 실제로 돌았고, 그 구간에 기록기가 살아 있었고(tick), 표식·크기 변경이 없고,
+    대조군에서는 같은 입력이 닿았다(검사가 잡을 수 있다는 증거).
+    """
+
+    def hits_of(p):
+        return [label for label, mark in MARKS.items() if mark in p["input"]]
+
+    out = []
+    control = phases.get("control")
+    control_hits = hits_of(control) if control else []
+    control_ok = bool(control_attached and control_hits)
+
+    def clean_phase(key, phase, path_ok, path_why):
+        p = phases.get(phase)
+        if p is None or p["ticks"] == 0:
+            out.append((key, "판단 필요", f"구간 {phase}에 기록기가 살아 있었다는 표시(tick)가 없다. 입력이 없었는지 기록기가 죽었는지 가를 수 없다"))
+            return
+        hits = hits_of(p)
+        resized = any(kind == "winch" for kind, _ in p["winch"])
+        detail = f"닿은 표식 {hits or '없음'}, 크기 변경 {'있음' if resized else '없음'}, tick {p['ticks']}번"
+        if hits or resized:
+            out.append((key, "안 됨", detail))
+        elif not path_ok:
+            out.append((key, "판단 필요", f"{path_why}. {detail}"))
+        elif not control_ok:
+            out.append((key, "판단 필요", f"대조군에서 입력이 닿는 것을 보지 못해 이 무입력을 믿을 수 없다. {detail}"))
+        else:
+            out.append((key, "됨", detail))
+
+    clean_phase("7.read-무입력", "read", read_ok, "hc read가 실패했다")
+    clean_phase("7.observe-무입력", "observe", observe_ok, "hc attach --observe가 화면을 받지 못했다(붙지 못했다)")
+    if control_ok:
+        out.append(("7.대조군-입력이-닿음", "됨", f"대조군에서 표식이 닿았다(검사가 잡을 수 있다): {control_hits}"))
+    elif not control_attached:
+        out.append(("7.대조군-입력이-닿음", "판단 필요", "대조군 attach가 화면을 받지 못했다(붙지 못했다)"))
+    else:
+        out.append(("7.대조군-입력이-닿음", "판단 필요", "대조군에서도 표식이 닿지 않았다. 위 무입력 결과를 믿을 수 없다"))
+    return out
+
+
+def nonempty(path):
+    try:
+        return os.path.getsize(path) > 0
+    except OSError:
+        return False
+
+
+def cmd_viewcheck(args):
+    """viewcheck <inputlog 기록> <hc read의 종료 코드> <observe가 받은 파일> <대조군이 받은 파일>"""
+    log, read_rc, observe_file, control_file = args
+    try:
+        phases = read_phases(log)
+    except OSError:
+        phases = {}
+        print("입력 기록 파일을 읽지 못했다")
     for name, p in phases.items():
         hits = [label for label, mark in MARKS.items() if mark in p["input"]]
         sizes = [s for kind, s in p["winch"] if kind == "winch"]
-        print(f"구간 {name}: 받은 입력 {len(p['input'])}바이트, 표식 {hits or '없음'}, 크기 변경 {len(sizes)}번 {sizes[:4]}")
-
-    def judge(key, phase, want_clean):
-        p = phases.get(phase)
-        if p is None:
-            print(f"결과 {key} 판단 필요 — 구간 {phase}의 기록이 없다")
-            return
-        hits = [label for label, mark in MARKS.items() if mark in p["input"]]
-        resized = any(kind == "winch" for kind, _ in p["winch"])
-        if want_clean:
-            ok = not hits and not resized
-            print(f"결과 {key} {'됨' if ok else '안 됨'} — 닿은 표식 {hits or '없음'}, 크기 변경 {'있음' if resized else '없음'}")
-        else:
-            ok = bool(hits)
-            why = "대조군에서 표식이 닿았다(검사가 잡을 수 있다)" if ok else "대조군에서도 표식이 닿지 않았다. 위 무입력 결과를 믿을 수 없다"
-            print(f"결과 {key} {'됨' if ok else '판단 필요'} — {why}: {hits or '없음'}")
-
-    judge("7.read-무입력", "read", True)
-    judge("7.observe-무입력", "observe", True)
-    judge("7.대조군-입력이-닿음", "control", False)
+        print(f"구간 {name}: tick {p['ticks']}번, 받은 입력 {len(p['input'])}바이트, 표식 {hits or '없음'}, 크기 변경 {len(sizes)}번 {sizes[:4]}")
+    for key, word, why in judge_view(phases, read_rc == "0", nonempty(observe_file), nonempty(control_file)):
+        print(f"결과 {key} {word} — {why}")
 
 
 def cmd_ctrlcount(args):
     """읽기 경로가 낸 바이트에 제어 문자가 얼마나 들었는지, 정제 표본을 거치면 0이 되는지 센다."""
     key, path = args
-    with open(path, "rb") as f:
-        raw = f.read()
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        raw = b""
+    # 표본 프로그램(emit)이 내는 보이는 글자가 없으면 이 읽기 경로가 화면을 가져오지 못한 것이다.
+    # 그때 "제어 문자가 없다"는 출력이 비었거나 오류 문구라는 뜻이지 걸러졌다는 뜻이 아니다.
+    if b"O02-COLOR-SAMPLE" not in raw:
+        why = f"{path}에 표본 글자(O02-COLOR-SAMPLE)가 없다({len(raw)}바이트). 이 읽기 경로가 화면을 가져오지 못했다"
+        print(f"결과 {key}.원시-제어문자-없음 판단 필요 — {why}")
+        print(f"결과 {key}.정제-뒤-0개 판단 필요 — {why}")
+        return
     counts = {
         "ESC": raw.count(b"\x1b"),
         "BEL": raw.count(b"\x07"),
@@ -252,19 +379,48 @@ def cmd_ctrlcount(args):
         "JSON에 실린 ESC(\\u001b)": raw.lower().count(b"\\u001b"),
     }
     clean = sanitize_text(raw)
-    left = sum(1 for c in clean if c not in "\n\t" and unicodedata.category(c) == "Cc")
+    left = sum(1 for c in clean if unsafe_char(c))
     print(f"{path}: {len(raw)}바이트, {counts}")
     passes_raw = counts["ESC"] + counts["BEL"] + counts["JSON에 실린 ESC(\\u001b)"] > 0
     print(f"결과 {key}.원시-제어문자-없음 {'안 됨' if passes_raw else '됨'} — 이 읽기 경로의 출력에 제어 문자가 {'들어 있다' if passes_raw else '없다'}")
     print(f"결과 {key}.정제-뒤-0개 {'됨' if left == 0 else '안 됨'} — 정제 표본 뒤 남은 제어 문자 {left}개")
 
 
+def check_reply(line: bytes, want_id):
+    """JSON-RPC 응답 한 줄을 본다. (상태, 이유)를 돌려준다. 상태는 ok | skip(다른 줄이라 넘긴다) | fail."""
+    if not line:
+        return "fail", "응답 없이 연결이 끝났다"
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        return "fail", "응답이 JSON이 아니다"
+    if not isinstance(obj, dict):
+        return "fail", "응답이 JSON 객체가 아니다"
+    if "id" not in obj:
+        return "skip", "id가 없는 줄(알림)"
+    if obj["id"] != want_id or isinstance(obj["id"], bool):
+        return "fail", f"응답의 id가 다르다(기대 {want_id})"
+    if obj.get("error") is not None:
+        return "fail", "error 응답이다"
+    if "result" not in obj:
+        return "fail", "result가 없다"
+    return "ok", "result를 받았다"
+
+
 def cmd_apirun(args):
-    """API(terminal.run)의 env override로 가짜 표식을 넘겨 프로그램을 띄운다."""
+    """API(terminal.run)의 env override로 가짜 표식을 넘겨 프로그램을 띄운다.
+
+    호출마다 응답의 id·error·result를 본다. 하나라도 어긋나면 0이 아닌 값으로 끝난다.
+    실패한 호출을 성공으로 넘기면, 표식이 전달되지 않았는데 "상태에 남지 않았다"는 판정이 나온다.
+    """
     sock, name, marker, tag = args
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(15)
-    s.connect(sock)
+    try:
+        s.connect(sock)
+    except OSError as e:
+        print("소켓에 연결하지 못했다:", e.__class__.__name__, e.errno)
+        sys.exit(3)
     f = s.makefile("rwb", buffering=0)
     calls = [
         ("hello", {}),
@@ -279,9 +435,23 @@ def cmd_apirun(args):
         ),
     ]
     for i, (method, params) in enumerate(calls):
-        f.write((json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}) + "\n").encode())
-        reply = f.readline()
+        try:
+            f.write((json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}) + "\n").encode())
+            # 응답 앞에 id 없는 알림 줄이 올 수 있어 몇 줄까지 넘긴다.
+            for _ in range(20):
+                reply = f.readline()
+                state, why = check_reply(reply, i)
+                if state != "skip":
+                    break
+            else:
+                state, why = "fail", "id가 맞는 응답이 오지 않았다"
+        except OSError as e:
+            reply, state, why = b"", "fail", f"주고받다 실패했다({e.__class__.__name__})"
         print(method, "->", sanitize_text(reply)[:300].strip())
+        if state != "ok":
+            print(f"API 호출 실패: {method}: {why}")
+            sys.exit(3)
+    print("API 호출 성공: 모든 응답에 result가 있다")
 
 
 def cmd_hog(args):
@@ -310,6 +480,8 @@ def cmd_burn(args):
 COMMANDS = {
     "sanitize": cmd_sanitize,
     "connect": cmd_connect,
+    "trycreate": cmd_trycreate,
+    "nodepath": cmd_nodepath,
     "inputlog": cmd_inputlog,
     "emit": cmd_emit,
     "view": cmd_view,
