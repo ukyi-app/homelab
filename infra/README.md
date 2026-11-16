@@ -10,7 +10,7 @@ GitHub 보호 설정 root `infra/github`는 이 문서의 `tf` 함수가 아니�
 
 ## 1. 준비와 자격
 
-`mise install`로 `.tool-versions`의 Terraform 1.17.2와 Infisical CLI 0.44.2를 설치하고, `infisical login`으로 owner 계정에 로그인한다.
+`mise install`로 `.tool-versions`의 Terraform 1.17.2와 Infisical CLI 0.45.8을 설치하고, `infisical login`으로 owner 계정에 로그인한다.
 브라우저가 없는 호스트(NUC)에서는 출력된 주소를 다른 기기에서 열고, 받은 토큰을 `Paste your browser token here:` 칸에 붙여 넣는다(Email 칸이 아니다. 그 칸은 입력이 화면에 보인다).
 
 **키링이 없는 호스트의 함정:** Secret Service가 없는 서버에서는 CLI가 `vaultBackendType: file`로 바꿔 로그인 세션 토큰을 `~/infisical-keyring/`에 저장한다.
@@ -65,7 +65,7 @@ unset TF_WORKSPACE
 export TF_IN_AUTOMATION=1
 # TF_INPUT=0은 넣지 않는다. -input=false와 같아서 apply가 승인 질문을 못 하고 변경을 거부한다.
 # 변수 누락 때 질문하지 않고 실패하도록 init·plan에만 -input=false를 붙인다.
-# 로그인 사용자로 infisical run을 하면 CLI 0.44.2가 가져온 값을 암호화해 ~/.infisical/secrets-backup/에 파일로 남긴다
+# 로그인 사용자로 infisical run을 하면 CLI 0.45.8이 가져온 값을 암호화해 ~/.infisical/secrets-backup/에 파일로 남긴다
 # (packages/util/secrets.go WriteBackupSecrets). 호출부가 그 오류를 무시하므로 폴더를 쓰기 불가로 두어 파일을 만들지 못하게 한다.
 mkdir -p ~/.infisical
 if [ -d ~/.infisical/secrets-backup ]; then chmod 0700 ~/.infisical/secrets-backup; find ~/.infisical/secrets-backup -type f -delete; fi

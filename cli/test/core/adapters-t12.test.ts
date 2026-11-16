@@ -537,7 +537,7 @@ describe("파드 안 작업", () => {
 
 describe("Infisical 폴더·web·확인", () => {
   test("folderExists(읽기)·createFolder(없는 조각만 바깥부터)", async () => {
-    // 0.44.2 실제 출력(실측, packages/cmd/folder.go): 항목 {folderId, folderName, folderPath}, 빈 목록은 null.
+    // 0.45.8 실제 출력(실측, packages/cmd/folder.go): 항목 {folderId, folderName, folderPath}, 빈 목록은 null.
     const list = (parent: string, names: string[]) => rule(infArgv.folders(FAKE_PROJECT, parent), { stdout: names.length ? JSON.stringify(names.map((folderName, i) => ({ folderId: `f-${i}`, folderName, folderPath: parent }))) : "null" });
     const r = testCtx("plan", [list("/apps", ["other"])]);
     expect(r.ctx.infisical.folderExists("/apps/smoke")).toBe(false);
@@ -564,7 +564,7 @@ describe("Infisical 폴더·web·확인", () => {
     }
   });
 
-  test("빈 시크릿 폴더(0.44.2 실제 출력 null): has=false, listKeys=[], getValue=null, valueHash=null(#880 2라운드)", () => {
+  test("빈 시크릿 폴더(0.45.8 실제 출력 null): has=false, listKeys=[], getValue=null, valueHash=null(#880 2라운드)", () => {
     const { ctx, calls } = testCtx("plan", [rule(infArgv.list(FAKE_PROJECT, "/apps/smoke"), { stdout: "null" })]);
     expect(ctx.infisical.has("/apps/smoke", "PASSWORD")).toBe(false);
     expect(ctx.infisical.listKeys("/apps/smoke")).toEqual([]);
