@@ -19,7 +19,7 @@ hc:
 # (files/control.sh), 규칙이 없으면 실행기만 다시 떠 시작을 거부하고 CrashLoopBackOff에 머문다. 자격은 한 번도 나가지 않는다.
 # exitCode는 실행기 스크립트가 환경변수 O25_RESTART_CODE로 같은 값을 받는다. 다른 이유로 끝나는 코드(1, 2, 126, 127, 137 등)와 겹치지 않게 고른다.
 restartRule:
-  enabled: true
+  enabled: false
   exitCode: 86
 
 # 본체 자리 명령. 본체 PID 1(o25.py body-init)이 자격을 받고 중계에 붙은 뒤 pty에서 띄운다. 이 시험에서는 대화형 셸이다.
