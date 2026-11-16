@@ -71,8 +71,8 @@ jobs:
           HELM_SHA256: "0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b" # 4.3.1 linux-amd64
           KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883" # 0.8.0 linux-amd64
           TERRAFORM_SHA256: "e6f16b2f0b137ee5729caa8c4e79a3bae4ee261acd198a1fcfa8584a6296605b" # 1.17.2 linux_amd64
-          ALERTMANAGER_SHA256: "265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8" # 0.34.1 linux-amd64
-          VMUTILS_SHA256: "989c8f73edc5d131eb169bb689d7b77bb1d31b14314159c7f6bbae38ba655938" # 1.154.1 linux-amd64(enterprise 아님)
+          ALERTMANAGER_SHA256: "6c7752a903c40c8a749e0b29df9240437e4fbb8228068d0af8807377db32addd" # 0.35.0 linux-amd64
+          VMUTILS_SHA256: "d71f7f00e07782531000620ec6c2a9d7ec83324f364dd1f36095ab378b5fb43b" # 1.156.0 linux-amd64(enterprise 아님)
         run: |
           bin="$RUNNER_TEMP/bin"
           # 위 Restore tool archives의 path와 같은 곳이다. 받은 압축 파일만 두고, 푼 바이너리는 두지 않는다.
