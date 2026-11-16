@@ -16,8 +16,20 @@
   scan <뿌리...>              표준 입력의 표식을 파일·프로세스 argv·환경에서 찾는다(표식은 인자로 받지 않는다).
   sanitize                    표준 입력의 제어·서식 문자를 지운다.
   sha                         표준 입력의 sha256 앞 16자.
+요청 통로(자격·가림 검사를 원래 PID 1 계통에서 돌린다)
+  submit <작업>               관리자가 kubectl exec로 바로 부르는 제출자. 고정 필드 한 줄을 FIFO에 쓰고 인수 표시를 기다린 뒤 끝난다.
+  accept <세대> <받은 목록>    제어 PID 1이 요청 줄(표준 입력)을 검사한다. "ok ..." 또는 "reject <코드> <요청|->".
+  gate <인수 폴더> <요청> <pid> <시작>  제출자가 보이는지 확인하고 신호 0을 재고 인수 표시를 쓴 뒤, 사라질 때까지 기다린다.
+  publish <작업> <파드> <세대> <요청>   표준 입력(검사 결과)에서 정해진 모양의 줄만 골라 컨테이너 로그용 줄로 낸다.
+  body-job <작업> <세대> <요청> <pid> <시작>  본체 PID 1이 띄우는 자식. gate → 고정 검사 → publish.
 
 검사 결과는 종료 코드와 함께 읽는다. errno 이름이 아닌 출력(traceback, 빈 출력)은 차단의 증거가 아니다.
+
+요청 통로를 두는 이유: 이 노드에서 kubectl exec로 들어온 프로세스는 AppArmor 라벨이 겹쳐져(…//&unconfined) 원래 프로세스가
+그 환경을 읽지 못한다. 검사하는 순간 exec 계통이 컨테이너 안에 살아 있으면 검사가 읽지 못한 대상으로 남는다. 그래서 제출자는
+쓰고 끝나며, PID 1 계통이 그 PID·시작 시각이 실제로 사라진 것을 본 뒤에만 검사하고, 결과는 PID 1의 표준 출력(컨테이너 로그)으로
+낸다. 회수는 exec 없이 kubectl logs로 한다(tools/olive-o25/result.py). 로그에는 고정 키·판정 낱말·고정 이유 코드·개수·errno·
+PID·시작 시각·해시·요청 식별자만 싣는다(원시 환경·argv·화면·파일 내용·파일 이름·traceback은 싣지 않는다).
 
 중계는 바이트와 닫기만 나른다. 명령·인자·환경·크기 변경을 받지 않는다. 화면 크기는 ROWS×COLS로 고정이다.
 중계 소켓과 자격 소켓은 제어 쪽이 만든다. 중계 폴더는 본체에 읽기 전용으로 붙어, 본체는 거기에 소켓을 만들거나 바꿔치기하지 못하고
@@ -27,10 +39,12 @@ import errno
 import hashlib
 import os
 import pty
+import re
 import select
 import signal
 import socket
 import struct
+import subprocess
 import sys
 import time
 import unicodedata
@@ -40,6 +54,28 @@ BODY_UID = 10002
 ROWS, COLS = 50, 200
 DROP_CATEGORIES = ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp")
 MAX_CRED = 4096
+
+# 요청 통로의 작업과 그 작업이 꼭 내야 하는 판정 키. 회수 쪽(tools/olive-o25/result.py)의 같은 표와 함께 바꾼다.
+CONTROL_JOBS = ("cred",)
+BODY_JOBS = ("body-cred", "body-hide")
+JOB_KEYS = {
+    "cred": ["6.hc-상태-없음", "6.제어-argv-environ-없음", "6.제어-로그-장부-없음", "6.중계-폴더-없음", "6.hc-화면-없음"],
+    "body-cred": ["6.본체-프로세스에-있음", "6.본체-쪽-파일-argv-없음"],
+    "body-hide": ["5.body.hc-socket", "5.body.hc-ls", "5.body.state", "5.body.proc", "5.body.netns", "5.body.relay-dir"],
+}
+# 판정 줄 끝의 "(이유 <코드>)"로 쓸 수 있는 코드. 이 목록 밖의 코드가 붙은 줄은 로그로 내지 않는다(그 키가 빠져 회수가 미완료가 된다).
+CODES = frozenset((
+    "no-mark", "scan-failed", "not-delivered", "unreadable", "hit", "clean", "no-state-files", "no-procs",
+    "screen-unread", "screen-hit", "screen-clean",
+    "submitter-unseen", "submitter-alive", "submitter-unread", "job-failed",
+    "program-unknown", "env-open-failed", "absent", "sha-mismatch", "present", "program-changed", "not-checked",
+))
+REQ_MAX = 200
+REQ_RE = re.compile(r"req1 ([a-z-]{1,16}) ([0-9a-f]{12}) ([0-9a-f]{12}) ([0-9]{1,10}) ([0-9]{1,20})")
+LABEL_RE = re.compile(r"[A-Za-z0-9._/&()+:-]{1,80}")
+GATE_LIMIT_S = 20
+ACK_WAIT_S = 10
+JOB_LIMIT_S = 180
 
 
 def now_ns():
@@ -232,10 +268,12 @@ def cmd_body_init(args):
     st.set(gen=gen, gen_init_ns=init_ns, phase="wait-cred")
     # 본체 컨테이너가 뜬 세대의 차례. bctl.sh after-restart가 "바로 앞 세대"(이번 재시작으로 끝났어야 할 세대)를 여기서 읽는다.
     append("/b/boots", f"{gen} {now_ns()}")
+    reqs = ReqServer.open_fifo(BODY_JOBS, gen)
     gdir = f"/relay/{gen}"
     cred = b""
     while not stop["now"]:
-        if wait_path(f"{gdir}/cred.sock", True, 5):
+        reqs.service(0)
+        if wait_path(f"{gdir}/cred.sock", True, 1):
             try:
                 s = connect_checked(f"{gdir}/cred.sock", CONTROL_UID)
                 chunks = []
@@ -253,7 +291,9 @@ def cmd_body_init(args):
         reap()
     st.set(cred=f"sha={sha16(cred)}" if cred else "empty", cred_received_ns=now_ns(), phase="wait-relay")
     while True:
-        wait_path(f"{gdir}/r.sock", True)
+        reqs.service(0)
+        if not wait_path(f"{gdir}/r.sock", True, 1):
+            continue
         try:
             sock = connect_checked(f"{gdir}/r.sock", CONTROL_UID)
             break
@@ -292,14 +332,14 @@ def cmd_body_init(args):
     # 다시 붙지도 않는다. 제어 쪽은 세대마다 연결 하나만 받는다.
     while child["alive"]:
         try:
-            pump_child(master, sock, on_relay_eof, child, pid, st)
+            pump_child(master, sock, on_relay_eof, child, pid, st, reqs)
         except OSError:
             pass
         break
     # 프로그램이 끝난 뒤에도 PID 1은 남는다(컨테이너가 혼자 다시 떠서 새 자격을 기다리는 일을 만들지 않는다).
     while True:
+        reqs.service(1.0)
         reap()
-        time.sleep(1)
 
 
 def reap():
@@ -312,11 +352,14 @@ def reap():
             return
 
 
-def pump_child(master, sock, on_relay_eof, child, pid, st):
+def pump_child(master, sock, on_relay_eof, child, pid, st, reqs):
     relay_open = True
     while True:
-        rl = [master] + ([sock] if relay_open else [])
+        rl = [master] + ([sock] if relay_open else []) + reqs.fds()
         r, _, _ = select.select(rl, [], [], 1.0)
+        if reqs.fds() and reqs.fds()[0] in r:
+            reqs.on_readable()
+        reqs.poll()
         if relay_open and sock in r:
             try:
                 data = sock.recv(65536)
@@ -556,9 +599,14 @@ def cmd_scan(args):
     # os.walk는 열지 못한 폴더(뿌리 포함: 없음, EACCES)를 onerror로 알리고 건너뛴다. 세지 않으면 그 안의 파일이 '없음'으로 통과한다.
     dir_errs = []
 
+    # 파일 이름과 comm은 본체가 고를 수 있다. 줄바꿈 하나로 가짜 "결과" 줄을 만들 수 있으므로 인쇄되지 않는 글자는 \xNN으로 바꿔
+    # 한 줄로 찍는다. 앞부분(뿌리 경로)은 그대로라 분류가 바뀌지 않는다.
+    def one_line(s):
+        return "".join(c if c.isprintable() else f"\\x{ord(c):02x}" for c in str(s))
+
     def dir_err(e):
         dir_errs.append(e)
-        print(f"unreadable dir {e.filename} {errno.errorcode.get(e.errno, e.errno)}")
+        print(f"unreadable dir {one_line(e.filename)} {errno.errorcode.get(e.errno, e.errno)}")
 
     for root in args:
         for dirpath, dirnames, filenames in os.walk(root, onerror=dir_err):
@@ -575,11 +623,11 @@ def cmd_scan(args):
                     if e.errno == errno.ENOENT:
                         continue
                     n_unread += 1
-                    print(f"unreadable file {p} {errno.errorcode.get(e.errno, e.errno)}")
+                    print(f"unreadable file {one_line(p)} {errno.errorcode.get(e.errno, e.errno)}")
                     continue
                 n_files += 1
                 if mark in data:
-                    print(f"file {p}")
+                    print(f"file {one_line(p)}")
     for d in os.listdir("/proc"):
         if not d.isdigit() or int(d) == me:
             continue
@@ -599,13 +647,445 @@ def cmd_scan(args):
                         comm = f.read().strip()
                 except OSError:
                     comm = "?"
-                print(f"unreadable {what} {d} {errno.errorcode.get(e.errno, e.errno)} comm={comm}")
+                print(f"unreadable {what} {d} {errno.errorcode.get(e.errno, e.errno)} comm={one_line(comm)}")
                 continue
             if mark in data:
                 print(f"{'argv' if what == 'cmdline' else 'environ'} {d} {label}")
     n_unread += len(dir_errs)
     print(f"summary files={n_files} procs={n_procs} gone={n_gone} unreadable={n_unread} self={me}")
     return 0
+
+
+# ---- 요청 통로
+
+def errname(no):
+    return errno.errorcode.get(no, str(no)) if no else "E?"
+
+
+def read_stat(pid):
+    with open(f"/proc/{pid}/stat", "rb") as f:
+        return f.read()
+
+
+def stat_start(raw):
+    """/proc/<pid>/stat에서 (상태, 시작 시각 tick). comm에 공백·괄호가 있을 수 있어 마지막 ')' 뒤를 센다. 못 읽으면 None."""
+    s = raw.decode("ascii", errors="replace")
+    i = s.rfind(")")
+    if i < 0:
+        return None
+    f = s[i + 1:].split()
+    if len(f) < 20 or not f[19].isdigit():
+        return None
+    return f[0], int(f[19])
+
+
+def submitter_state(pid, start, reader=read_stat):
+    """("alive"|"gone"|"unknown", 자세히). 없음(ENOENT·ESRCH)과 같은 PID의 다른 시작 시각(재사용)만 소멸이다.
+
+    좀비는 아직 있는 것으로 센다. 읽기 실패·해석 실패는 모름이다(없음으로 읽지 않는다).
+    """
+    try:
+        raw = reader(pid)
+    except OSError as e:
+        if e.errno in (errno.ENOENT, errno.ESRCH):
+            return "gone", None
+        return "unknown", errname(e.errno)
+    p = stat_start(raw)
+    if p is None:
+        return "unknown", "parse"
+    if p[1] != start:
+        return "gone", "reused"
+    return "alive", p[0]
+
+
+def wait_gone(pid, start, limit_s, reader=read_stat, clock=time.monotonic, sleep=time.sleep):
+    """(소멸 확인 여부, 코드, 기다린 ms, 자세히). 기한을 넘기거나 읽지 못하면 확인 못 함이다."""
+    t0 = clock()
+    while True:
+        state, detail = submitter_state(pid, start, reader)
+        waited = int((clock() - t0) * 1000)
+        if state == "gone":
+            return True, detail or "gone", waited, detail
+        if state == "unknown":
+            return False, "submitter-unread", waited, detail
+        if clock() - t0 >= limit_s:
+            return False, "submitter-alive", waited, detail
+        sleep(0.1)
+
+
+def read_label(pid):
+    with open(f"/proc/{pid}/attr/current", "rb") as f:
+        return f.read(256).decode("ascii", errors="replace")
+
+
+def label_word(text):
+    v = text.strip().replace(" ", "_")
+    return v if LABEL_RE.fullmatch(v) else "h:" + sha16(text.encode("utf-8", errors="replace"))
+
+
+def gate(ackdir, req, pid, start, reader=read_stat, kill=os.kill, label=read_label, clock=time.monotonic,
+         sleep=time.sleep, limit_s=GATE_LIMIT_S):
+    """제출자 문지기. (소멸 확인 여부, 줄 목록). 마지막 줄은 늘 "gate state=…".
+
+    1. 제출자가 그 PID·시작 시각으로 지금 보여야 한다(요청 줄의 PID가 실제 제출자였다는 증거). 안 보이면 인수하지 않는다.
+    2. 원래 계통 → exec 계통 신호 0을 한 번 잰다(판정이 아니라 사실). 두 계통의 라벨도 사실로 남긴다.
+    3. 인수 표시를 쓰면 제출자가 끝난다. 그 PID·시작 시각이 사라질 때까지 기다린다.
+    """
+    lines = []
+
+    def lab(who, p):
+        try:
+            lines.append(f"gate-fact label-{who}={label_word(label(p))}")
+        except OSError as e:
+            lines.append(f"gate-fact label-{who}={errname(e.errno)}")
+
+    def done(ok, code, waited):
+        lines.append(f"gate state={'gone' if ok else 'undecided'} code={code} pid={pid} start={start} waited_ms={waited}")
+        return ok, lines
+
+    lab("self", "self")
+    state, _ = submitter_state(pid, start, reader)
+    if state != "alive":
+        return done(False, "submitter-unseen", 0)
+    try:
+        kill(pid, 0)
+        lines.append("gate-fact sig0=OK")
+    except OSError as e:
+        lines.append(f"gate-fact sig0={errname(e.errno)}")
+    lab("submitter", pid)
+    try:
+        fd = os.open(os.path.join(ackdir, req), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        os.close(fd)
+    except OSError as e:
+        lines.append(f"gate-fact ack={errname(e.errno)}")
+    ok, code, waited, _ = wait_gone(pid, start, limit_s, reader, clock, sleep)
+    return done(ok, code, waited)
+
+
+def parse_req(line, jobs):
+    """요청 줄 "req1 <작업> <세대> <요청 ID> <제출자 pid> <시작 시각>"을 검사한다. (사전, None) 또는 (None, 거절 코드)."""
+    if len(line) > REQ_MAX:
+        return None, "bad-form"
+    m = REQ_RE.fullmatch(line.rstrip("\n"))
+    if not m:
+        return None, "bad-form"
+    if m.group(1) not in jobs:
+        return None, "bad-job"
+    return {"job": m.group(1), "gen": m.group(2), "req": m.group(3), "pid": int(m.group(4)), "start": int(m.group(5))}, None
+
+
+def accept_req(line, jobs, cur_gen, seen):
+    """받는 쪽의 인수 조건. 다른 세대·이미 받은 요청 ID는 거절한다. 인수하면 seen에 넣는다."""
+    rec, code = parse_req(line, jobs)
+    if rec is None:
+        return None, code
+    if rec["gen"] != cur_gen:
+        return rec, "gen"
+    if rec["req"] in seen:
+        return rec, "dup"
+    seen.add(rec["req"])
+    return rec, "ok"
+
+
+def pid1_start():
+    try:
+        p = stat_start(read_stat(1))
+    except OSError:
+        p = None
+    return str(p[1]) if p else "0"
+
+
+def root_class(p):
+    if p.startswith("/c/g/"):
+        return "hc-state"
+    if p.startswith("/c/"):
+        return "ctl-record"
+    if p == "/relay" or p.startswith("/relay/"):
+        return "relay"
+    if p.startswith("/b/"):
+        return "body"
+    return "other"
+
+
+_PUB = [
+    (re.compile(r"gate state=(gone|undecided) code=(gone|reused|submitter-unseen|submitter-alive|submitter-unread) "
+                r"pid=(\d{1,10}) start=(\d{1,20}) waited_ms=(\d{1,10})"),
+     lambda m: f"gate state={m[1]} code={m[2]} pid={m[3]} start={m[4]} waited_ms={m[5]}"),
+    (re.compile(r"gate-fact (sig0|ack)=(OK|E[A-Z0-9]{1,15})"), lambda m: f"fact {m[1]}={m[2]}"),
+    (re.compile(r"gate-fact (label-self|label-submitter)=(\S+)"),
+     lambda m: f"fact {m[1]}={m[2] if LABEL_RE.fullmatch(m[2]) else 'h:' + sha16(m[2].encode())}"),
+    (re.compile(r"\s*summary files=(\d{1,10}) procs=(\d{1,10}) gone=(\d{1,10}) unreadable=(\d{1,10}) self=(\d{1,10})"),
+     lambda m: f"scan files={m[1]} procs={m[2]} gone={m[3]} unreadable={m[4]} self={m[5]}"),
+    (re.compile(r"\s*unreadable (cmdline|environ) (\d{1,10}) (E[A-Z0-9]{1,15}|\d{1,5})( comm=.*)?"),
+     lambda m: f"unread kind={m[1]} pid={m[2]} errno={m[3]}"),
+    (re.compile(r"\s*unreadable (file|dir) (.+) (E[A-Z0-9]{1,15}|\d{1,5})"),
+     lambda m: f"unread kind={m[1]} root={root_class(m[2])} h={sha16(m[2].encode())} errno={m[3]}"),
+    (re.compile(r"\s*file (.+)"), lambda m: f"hit kind=file root={root_class(m[1])} h={sha16(m[1].encode())}"),
+    (re.compile(r"\s*(argv|environ) (\d{1,10}) (executor|proc)"), lambda m: f"hit kind={m[1]} pid={m[2]} who={m[3]}"),
+    (re.compile(r"사실 (cred-sha|body-sha) ([0-9a-f]{16})"), lambda m: f"fact {m[1]}={m[2]}"),
+    (re.compile(r"job state=(done|timeout|failed) rc=(-?\d{1,4})"), lambda m: f"job state={m[1]} rc={m[2]}"),
+]
+_VERDICT = re.compile(r"결과 (\S+) (됨|안 됨|판단 필요) — (.*)")
+_CODE = re.compile(r" \(이유 ([a-z0-9-]{1,40})\)$")
+
+
+def publish_lines(job, pod, gen, req, run, text):
+    """검사 결과 글에서 정해진 모양의 줄만 골라 로그 줄로 바꾼다. 원문을 옮기지 않고 잡은 필드로 줄을 새로 만든다.
+
+    판정 줄은 이 작업의 키와 정해진 이유 코드일 때만 내고, 근거 글은 sha 앞 16자로만 낸다. 경로는 뿌리 분류와 해시로만 낸다.
+    모양에 안 맞는 줄은 개수(dropped)만 센다. 회수 쪽은 끝 줄의 결과 줄 수와 필수 키가 모두 맞아야 완료로 본다.
+    """
+    if not re.fullmatch(r"[0-9a-f-]{1,64}", pod or ""):
+        pod = "?"
+    if not re.fullmatch(r"[0-9a-f]{12}", gen) or not re.fullmatch(r"[0-9a-f]{12}", req) or job not in JOB_KEYS:
+        return []
+    if not run.isdigit():
+        run = "0"
+    head = f"o25r {pod} {gen} {req} "
+    out = [head + f"begin job={job} run={run}"]
+    n_v = dropped = 0
+    keys = JOB_KEYS[job]
+    for line in text.splitlines():
+        m = _VERDICT.fullmatch(line)
+        if m:
+            c = _CODE.search(m[3])
+            code = c[1] if c else "-"
+            if m[1] in keys and (code == "-" or code in CODES):
+                out.append(head + f"결과 {m[1]} {m[2]} code={code} why={sha16(line.encode())}")
+                n_v += 1
+            else:
+                dropped += 1
+            continue
+        for rx, fmt in _PUB:
+            m = rx.fullmatch(line)
+            if m:
+                out.append(head + fmt(m))
+                break
+        else:
+            dropped += 1
+    out.append(head + f"end n={n_v} dropped={dropped}")
+    return out
+
+
+def emit(line):
+    # 한 줄을 한 번의 write로. 같은 표준 출력에 PID 1과 그 자식이 함께 쓴다.
+    os.write(1, (line + "\n").encode("utf-8", errors="replace"))
+
+
+class ReqServer:
+    """본체 PID 1의 요청 통로. 본체 전용 /b/req FIFO에서 고정 작업 코드만 받는다. 한 번에 하나, 같은 세대, 처음 보는 요청 ID.
+
+    이 통로는 신뢰의 근거가 아니다. 같은 uid의 본체 프로그램도 이 FIFO에 쓰고, 읽고, 로그 줄을 흉내 낼 수 있다. 그래서 본체가 낸
+    결과는 보조 증거이고, 자격 발급·제어 쪽 조작·세대 교체의 권한은 이 통로에 없다. 작업은 PID 1의 자식으로 띄우고 기다리지 않는다
+    (중계 입출력을 막지 않는다).
+    """
+
+    def __init__(self, jobs, gen, spawn, emit=emit, fd=None):
+        self.jobs, self.gen, self.spawn, self.emit, self.fd = jobs, gen, spawn, emit, fd
+        self.seen, self.job, self.buf = set(), None, b""
+
+    @classmethod
+    def open_fifo(cls, jobs, gen, path="/b/req", ackdir="/b/ack"):
+        fd = None
+        try:
+            os.makedirs(ackdir, mode=0o700, exist_ok=True)
+            try:
+                os.mkfifo(path, 0o600)
+            except FileExistsError:
+                pass
+            st = os.lstat(path)
+            if (st.st_mode & 0o170000) == 0o010000 and st.st_uid == os.getuid():
+                # O_RDWR: 쓰는 쪽이 없어도 EOF가 되풀이되지 않게 이쪽이 쓰는 끝도 쥔다(Linux).
+                fd = os.open(path, os.O_RDWR | os.O_NONBLOCK | os.O_NOFOLLOW)
+            else:
+                emit(f"o25r {os.environ.get('O25_POD_UID', '?')} {gen} - reqfifo refused")
+        except OSError as e:
+            emit(f"o25r {os.environ.get('O25_POD_UID', '?')} {gen} - reqfifo {errname(e.errno)}")
+        return cls(jobs, gen, spawn_body_job, emit, fd)
+
+    def fds(self):
+        return [self.fd] if self.fd is not None else []
+
+    def busy(self):
+        return self.job is not None and self.job.poll() is None
+
+    def poll(self):
+        if self.job is not None and self.job.poll() is not None:
+            self.job = None
+
+    def reject(self, req, code):
+        self.emit(f"o25r {os.environ.get('O25_POD_UID', '?')} {self.gen} {req} reject code={code}")
+        return code
+
+    def handle_line(self, line):
+        rec, code = parse_req(line, self.jobs)
+        if rec is None:
+            return self.reject("-", code)
+        if self.busy():
+            return self.reject(rec["req"], "busy")
+        rec, code = accept_req(line, self.jobs, self.gen, self.seen)
+        if code != "ok":
+            return self.reject(rec["req"], code)
+        self.job = self.spawn(rec)
+        return "ok"
+
+    def on_readable(self):
+        try:
+            data = os.read(self.fd, 4096)
+        except OSError:
+            return
+        self.buf += data
+        while b"\n" in self.buf:
+            raw, self.buf = self.buf.split(b"\n", 1)
+            self.handle_line(raw.decode("ascii", errors="replace"))
+        if len(self.buf) > REQ_MAX:
+            self.buf = b""
+            self.reject("-", "bad-form")
+
+    def service(self, timeout):
+        self.poll()
+        if self.fd is None:
+            if timeout:
+                time.sleep(timeout)
+            return
+        r, _, _ = select.select([self.fd], [], [], timeout)
+        if r:
+            self.on_readable()
+
+
+BODY_JOB_ARGV = {
+    "body-cred": ["/bin/bash", "/opt/o25/bctl.sh", "cred"],
+    "body-hide": ["/bin/bash", "/opt/o25/probe.sh", "body"],
+}
+
+
+def spawn_body_job(rec):
+    # 새 python으로 띄운다(PID 1의 메모리를 물려받지 않게). 환경은 고정 사전이다: 자격이 없고, PID 1의 환경은 검사 대상으로 남는다.
+    env = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/b", "LC_ALL": "C",
+           "O25_POD_UID": os.environ.get("O25_POD_UID", "?")}
+    argv = [sys.executable, "/opt/o25/o25.py", "body-job", rec["job"], rec["gen"], rec["req"], str(rec["pid"]), str(rec["start"])]
+    return subprocess.Popen(argv, env=env, cwd="/b", stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+
+
+def cmd_body_job(args):
+    job, gen, req, pid, start = args[0], args[1], args[2], int(args[3]), int(args[4])
+    pod = os.environ.get("O25_POD_UID", "?")
+    os.makedirs("/b/out", mode=0o700, exist_ok=True)
+    ok, lines = gate("/b/ack", req, pid, start)
+    text = list(lines)
+    if ok:
+        out = f"/b/out/req-{req}.txt"
+        with open(out, "wb") as f:
+            p = subprocess.Popen(BODY_JOB_ARGV[job], stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, cwd="/b",
+                                 close_fds=True)
+            try:
+                rc = p.wait(timeout=JOB_LIMIT_S)
+                state = "done"
+            except subprocess.TimeoutExpired:
+                p.kill()
+                rc = p.wait()
+                state = "timeout"
+        with open(out, "rb") as f:
+            text += f.read(256 * 1024).decode("utf-8", errors="replace").splitlines()
+        text.append(f"job state={state} rc={rc}")
+    else:
+        code = lines[-1].split()[2].split("=", 1)[1]
+        text += [f"결과 {k} 판단 필요 — 제출자 소멸을 확인하지 못했다 (이유 {code})" for k in JOB_KEYS[job]]
+    for line in publish_lines(job, pod, gen, req, pid1_start(), "\n".join(text)):
+        emit(line)
+    return 0
+
+
+def cmd_accept(args):
+    """제어 PID 1용. 표준 입력의 요청 줄 하나를 검사하고, 인수하면 받은 목록 파일에 요청 ID를 더한다."""
+    gen, seen_path = args[0], args[1]
+    line = sys.stdin.buffer.read(REQ_MAX + 1).decode("ascii", errors="replace").split("\n", 1)[0]
+    try:
+        with open(seen_path) as f:
+            seen = {s.strip() for s in f}
+    except FileNotFoundError:
+        seen = set()
+    rec, code = accept_req(line, CONTROL_JOBS, gen, seen)
+    if code != "ok":
+        print(f"reject {code} {rec['req'] if rec else '-'}")
+        return 1
+    append(seen_path, rec["req"])
+    print(f"ok {rec['job']} {rec['req']} {rec['pid']} {rec['start']}")
+    return 0
+
+
+def cmd_gate(args):
+    ok, lines = gate(args[0], args[1], int(args[2]), int(args[3]))
+    print("\n".join(lines))
+    return 0 if ok else 1
+
+
+def cmd_publish(args):
+    job, pod, gen, req = args[:4]
+    text = sys.stdin.buffer.read(256 * 1024).decode("utf-8", errors="replace")
+    for line in publish_lines(job, pod, gen, req, pid1_start(), text):
+        emit(line)
+    return 0
+
+
+def cmd_submit(args):
+    """제출자. 셸·timeout·sleep을 띄우지 않는다. 고정 필드만 쓴다: 작업, 세대, 요청 ID, 자기 PID와 시작 시각.
+
+    제출 성공은 검사 성공이 아니다. 결과는 kubectl logs에서 이 요청 ID로 회수한다(run.sh result).
+    """
+    job = args[0] if args else ""
+    if job in CONTROL_JOBS:
+        fifo, ackdir = "/c/ctl/in", "/c/ctl/ack"
+        gen_src = "/c/boot/current"
+    elif job in BODY_JOBS:
+        fifo, ackdir = "/b/req", "/b/ack"
+        gen_src = "/relay/current"
+    else:
+        print("submit: 모르는 작업", file=sys.stderr)
+        return 2
+    try:
+        gen = open(gen_src).read().split()[0]
+        start = stat_start(read_stat("self"))[1]
+    except (OSError, IndexError, TypeError):
+        print("submit: 세대나 자기 시작 시각을 읽지 못했다", file=sys.stderr)
+        return 3
+    req = os.urandom(6).hex()
+    line = f"req1 {job} {gen} {req} {os.getpid()} {start}\n"
+    try:
+        print(f"사실 라벨 제출자(exec 계통) {label_word(read_label('self'))}")
+    except OSError as e:
+        print(f"사실 라벨 제출자(exec 계통) {errname(e.errno)}")
+    try:
+        st = os.lstat(fifo)
+        if (st.st_mode & 0o170000) != 0o010000:
+            raise OSError(errno.EINVAL, "not a fifo")
+    except OSError as e:
+        print(f"제출 실패: 요청 통로 {errname(e.errno)}")
+        return 3
+    t0 = time.monotonic()
+    while True:
+        try:
+            fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+            break
+        except OSError as e:
+            # ENXIO: 받는 쪽이 지금 FIFO를 열고 있지 않다(다른 단계가 도는 중이거나 루프 사이).
+            if e.errno != errno.ENXIO or time.monotonic() - t0 > 5:
+                print(f"제출 실패: 받는 쪽 없음 {errname(e.errno)} (다른 단계가 도는 중일 수 있다)")
+                return 4
+            time.sleep(0.1)
+    try:
+        os.write(fd, line.encode())
+    finally:
+        os.close(fd)
+    print(f"제출 req={req} gen={gen} job={job} pid={os.getpid()} start={start}", flush=True)
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < ACK_WAIT_S:
+        if os.path.exists(os.path.join(ackdir, req)):
+            print("인수 확인. 이 제출자가 끝난 뒤 검사가 돈다. 결과는 run.sh result로 회수한다")
+            return 0
+        time.sleep(0.05)
+    print("인수 확인 없음(거절·중복·바쁨일 수 있다. 컨테이너 로그의 reject 줄을 본다)")
+    return 5
 
 
 def cmd_sanitize(_args):
@@ -629,6 +1109,11 @@ COMMANDS = {
     "scan": cmd_scan,
     "sanitize": cmd_sanitize,
     "sha": cmd_sha,
+    "submit": cmd_submit,
+    "accept": cmd_accept,
+    "gate": cmd_gate,
+    "publish": cmd_publish,
+    "body-job": cmd_body_job,
 }
 
 if __name__ == "__main__":

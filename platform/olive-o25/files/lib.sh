@@ -5,7 +5,11 @@
 # shellcheck disable=SC2034
 
 # 실행기가 받는 단계 이름 전부. 이 목록에 없는 이름은 거절한다.
-O25_STEPS="preflight boot relay hide-control relay-kill false-exit plant restart ctl-crash after-restart cred summary"
+# 자격 검사(cred)는 여기 없다. ctl.sh로 부르면 기다리는 exec 셸이 검사 대상으로 남아 읽지 못한다. 요청 통로로만 받는다
+# (o25.py submit cred → control.sh serve_req).
+O25_STEPS="preflight boot relay hide-control relay-kill false-exit plant restart ctl-crash after-restart shm body-term body-after summary"
+# 자격 검사 요청이 꼭 내야 하는 판정 키(o25.py JOB_KEYS["cred"]와 같다).
+O25_CRED_KEYS="6.hc-상태-없음 6.제어-argv-environ-없음 6.제어-로그-장부-없음 6.중계-폴더-없음 6.hc-화면-없음"
 
 # 전체 재시작을 부르는 고정 종료 코드. 차트의 restartPolicyRules(templates/session.yaml)와 같은 값이어야 한다(O25_RESTART_CODE로 받는다).
 O25_RC=${O25_RESTART_CODE:-86}
@@ -45,6 +49,8 @@ rec() {
 }
 # verdict <키> <됨|안 됨|판단 필요> <근거>. "됨"은 안전한 쪽 성질이 성립한다는 뜻이다.
 verdict() { printf '결과 %s %s — %s\n' "$1" "$2" "$3"; }
+# verdict_c <키> <판정> <이유 코드> <근거>. 요청 통로로 로그에 나가는 판정. 코드는 o25.py CODES 안의 것만 쓴다(밖이면 그 줄이 버려진다).
+verdict_c() { printf '결과 %s %s — %s (이유 %s)\n' "$1" "$2" "$4" "$3"; }
 fact() { printf '사실 %s\n' "$*"; }
 undecided() {
   local why=$1 k
@@ -53,6 +59,10 @@ undecided() {
 }
 # 시각은 ns(o25.py의 time.time_ns()와 같은 단위). 이미지의 date(busybox)는 %N을 몰라 bash의 마이크로초 시각을 쓴다.
 ledger() { printf '%s %s\n' "${EPOCHREALTIME/./}000" "$*" >>"$O25_LEDGER"; }
+# 컨테이너 로그로 한 줄. control.sh가 시작 때 원래 표준 출력을 fd 3에 둔다(단계 블록은 표준 출력을 결과 파일로 돌린다).
+# exec가 끊겨도(전체 재시작 단계) 그 실행의 로그에는 남는다. 다만 전체 재시작 뒤 앞 실행의 로그(--previous)는 못 읽을 수 있어
+# 장부와 /c/out의 단계 파일이 기준이다.
+logline() { printf '%s\n' "$*" >&3 2>/dev/null; }
 # cred_count [세대]: 장부에 적힌 자격 전달 횟수. 세대를 주면 그 세대만.
 cred_count() {
   if [ -n "${1:-}" ]; then grep -c " cred-delivered gen=$1 " "$O25_LEDGER" 2>/dev/null; else grep -c ' cred-delivered ' "$O25_LEDGER" 2>/dev/null; fi

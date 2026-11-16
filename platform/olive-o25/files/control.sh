@@ -21,6 +21,7 @@
 trap 'exit 0' TERM INT
 umask 077
 cd /c || exit 1
+exec 3>&1
 
 O25_FAIL=/c/fail-count
 O25_FAIL_LIMIT=${O25_FAIL_LIMIT:-3}
@@ -127,8 +128,44 @@ deliver_cred() {
   return 0
 }
 
+# serve_req <요청 줄>: 자격 검사 요청(o25.py submit cred가 쓴 고정 필드 한 줄). 실행기 PID 1 안에서 차례로 돈다(한 번에 하나).
+#   1. accept: 모양·작업·세대·처음 보는 요청 ID인지. 아니면 로그에 거절 줄만 남긴다.
+#   2. gate: 제출자가 그 PID·시작 시각으로 보였고, 인수 표시 뒤 실제로 사라졌는지. 확인하지 못하면 검사하지 않고 판단 필요.
+#      고정 대기 시간·이름·PPID·kill -0 실패는 소멸의 증거로 쓰지 않는다.
+#   3. step_cred(표식은 이 셸 변수에만 있다) → 결과 파일 → publish가 정해진 모양의 줄만 원래 표준 출력(컨테이너 로그)으로.
+# 결과 파일 /c/out/req-<요청 ID>.txt는 근거 글 전체다. 로그의 판정 줄은 그 줄의 sha만 싣는다(ctl.sh show-req로 대조).
+serve_req() {
+  local acc st job req pid start f g code k
+  acc=$(printf '%s\n' "$1" | python3 "$O25_PY" accept "$O25_GEN" "$O25_CTL/reqs" 2>/dev/null)
+  if [[ $acc =~ ^reject\ ([a-z-]{1,16})\ ([0-9a-f]{12}|-)$ ]]; then
+    logline "o25r ${O25_POD_UID:-?} $O25_GEN ${BASH_REMATCH[2]} reject code=${BASH_REMATCH[1]}"
+    return
+  fi
+  read -r st job req pid start <<<"$acc"
+  if [ "$st" != ok ] || [ "$job" != cred ] || ! [[ $req =~ ^[0-9a-f]{12}$ && $pid =~ ^[0-9]+$ && $start =~ ^[0-9]+$ ]]; then
+    logline "o25r ${O25_POD_UID:-?} $O25_GEN - reject code=accept-failed"
+    return
+  fi
+  f=$O25_OUT/req-$req.txt
+  printf 'req-%s\n' "$req" >"$O25_CTL/busy"
+  {
+    printf '요청 %s 작업 %s 세대 %s 실행기 pid %s 제출자 pid %s 시작 %s\n' "$req" "$job" "$O25_GEN" "$$" "$pid" "$start"
+    g=$(python3 "$O25_PY" gate "$O25_CTL/ack" "$req" "$pid" "$start" 2>&1)
+    code=$?
+    printf '%s\n' "$g" | clean
+    if [ "$code" -eq 0 ]; then
+      step_cred
+    else
+      code=$(printf '%s\n' "$g" | sed -n 's/^gate state=undecided code=\(submitter-[a-z]*\) .*/\1/p')
+      for k in $O25_CRED_KEYS; do verdict_c "$k" "판단 필요" "${code:-submitter-unread}" "제출자가 사라진 것을 확인하지 못해 검사하지 않았다"; done
+    fi
+  } >"$f" 2>&1
+  python3 "$O25_PY" publish cred "${O25_POD_UID:-?}" "$O25_GEN" "$req" <"$f" >&3 2>/dev/null
+  rm -f "$O25_CTL/busy"
+}
+
 gate
-mkdir -p "$O25_OUT" "$O25_CTL"
+mkdir -p "$O25_OUT" "$O25_CTL" "$O25_CTL/ack"
 start_session || fail_restart session-fail
 [ -p "$O25_CTL/in" ] || mkfifo -m 600 "$O25_CTL/in"
 printf '%s\n' "$O25_STEPS" | tr ' ' '\n' >"$O25_CTL/steps"
@@ -151,6 +188,10 @@ while :; do
   step=""
   if ! read -r step <"$O25_CTL/in"; then
     sleep 1
+    continue
+  fi
+  if [[ $step == "req1 "* ]]; then
+    serve_req "$step"
     continue
   fi
   case "$step" in
