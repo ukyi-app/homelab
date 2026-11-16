@@ -219,6 +219,7 @@ bun pm cache
 
 4. **되돌리기:** 삭제 취소는 없다. 필요한 이미지를 다음 시작 때 다시 받으며 레지스트리 장애·네트워크 단절이면 시작·롤백이 늦거나 실패한다. `--prune`에는 삭제 대상만 미리 보여 주는 dry-run이 없으므로 `images`를 후보 목록으로 오해하지 않는다.
 5. **지우지 않을 것:** 실행 중 컨테이너·스냅샷·content 파일, PV, k3s 서버 데이터. `rmi --all`이나 `ctr`로 강제 삭제하지 않는다. 회수가 작다고 snapshotter 폴더를 지우지 않는다.
+6. **오류 줄이 많아도 실패가 아닐 수 있다:** `rmi --prune`이 `context deadline exceeded` 오류 줄을 많이 찍어도 지우기는 됐을 수 있다. [확인] 2026-11-16 정리에서 163개 가운데 161개에 이 오류가 찍혔지만 151.5GiB가 회수됐다. 오류 줄 수로 판단하지 말고 `sudo k3s crictl images`로 남은 이미지 수를 확인한다.
 
 [확인] Kubernetes는 kubelet의 이미지 GC 사용을 권장하고 외부 청소 도구와의 충돌을 경고한다([공식 GC 문서](https://kubernetes.io/docs/concepts/architecture/garbage-collection/#garbage-collection-of-unused-containers-and-images)).
 [추론] 위 prune은 관리자 확인을 거친 일회성 공간 확보로만 쓰고 cron으로 반복하지 않는다. 반복 문제는 7절의 kubelet 설정으로 다룬다.
