@@ -5,7 +5,7 @@
 # 안 바꾸면 ci의 설치 단계가 sha256 불일치로 실패한다.
 actionlint 1.7.12
 # amtool: Alertmanager 설정 검사(tools/ci/alerting.ts). 배포 이미지(platform/observability/stack/alertmanager.yaml)와 같은 버전.
-aqua:prometheus/alertmanager 0.34.1
+aqua:prometheus/alertmanager 0.35.0
 # bun: ci 검사 실행기(bun run ci, tools/ci/). 외부 패키지 없이 내장 YAML 파서만 쓴다. homelab CLI도 같은 bun을 쓴다.
 bun 1.4.4
 gitleaks 8.30.1
@@ -23,7 +23,7 @@ shellcheck 0.11.0
 uv 0.13.8
 # vmutils의 vmalert-tool-prod: 경보 룰 단위 시험(U11, tools/ci/alerting.ts). 배포 vmalert와 같은 버전으로 올린다.
 # 자산 이름에 버전을 직접 적는다. v*.tar.gz로 두면 enterprise 자산이 먼저 잡힌다(실측). 버전을 바꾸면 두 곳을 함께 바꾼다.
-github:VictoriaMetrics/VictoriaMetrics[asset_pattern=vmutils-linux-amd64-v1.154.1.tar.gz,bin=vmalert-tool-prod] 1.154.1
+github:VictoriaMetrics/VictoriaMetrics[asset_pattern=vmutils-linux-amd64-v1.156.0.tar.gz,bin=vmalert-tool-prod] 1.156.0
 # Terraform: apply·plan은 owner 로컬에서만. CI는 자격 없이 fmt·validate·test만 한다(설계 C.3.9).
 terraform 1.17.2
 # age: Infisical 암호화 내보내기의 암호화·복호화(age 암호문구, docs/runbooks-public/restore.md 3.1, recovery-assets.md).
