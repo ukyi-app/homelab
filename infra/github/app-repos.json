@@ -2,5 +2,6 @@
   "files",
   "homelab-bot",
   "homelab-probe",
-  "homelab-smoke"
+  "homelab-smoke",
+  "olive"
 ]
