@@ -418,9 +418,9 @@ flowchart TD
 | `homelab-app-template`, `homelab-bot-ops` | 올리지 못한다(D-43) | 위와 같다 |
 
 - 쓰기 App은 조직에 "모든 저장소"로 설치한다. 새 저장소에 따로 설치하지 않는다.
-- 설치 범위가 넓어진 만큼 현관이 뚫렸을 때 닿는 범위도 조직 전체가 된다. 줄이는 장치: 현관은 게시할 때마다 대상 저장소 하나와 필요한 권한만으로 좁힌 설치 토큰을 발급받는다 [확인, O06 4-1 A 실측 2026-11-17: 저장소 하나·쓰기 권한으로 좁힌 토큰이 `homelab-smoke`에 `bot/` 브랜치를 만들었고, 읽기로 줄인 토큰의 같은 쓰기는 403. 다른 저장소로 좁힌 토큰의 거절은 대조 저장소가 없어 못 봄]. App에는 workflows·administration·secrets·actions 권한을 주지 않는다. 워크플로 파일을 바꾸는 쓰기는 그 권한 없이 거절된다 [확인, O06 4-1 B 실측 2026-11-17: writer의 Git push는 workflows 권한이 없다는 거절, REST(Contents API)는 403, 둘 다 원격 그대로]. 그래서 확인 카드의 승인만으로는 writer가 워크플로 파일을 게시할 수 없다. O06의 읽기 확인(2026-11-16): 지금 쓰기 App과 리뷰 App의 설치 권한에 그 네 항목이 없다 [확인].
+- 설치 범위가 넓어진 만큼 현관이 뚫렸을 때 닿는 범위도 조직 전체가 된다. 줄이는 장치: 현관은 게시할 때마다 대상 저장소 하나와 필요한 권한만으로 좁힌 설치 토큰을 발급받는다 [확인, O06 4-1 A 실측 2026-11-17: 저장소 하나·쓰기 권한으로 좁힌 토큰이 `homelab-smoke`에 `bot/` 브랜치를 만들었고, 읽기로 줄인 토큰의 같은 쓰기는 403. 다른 저장소로 좁힌 토큰의 거절은 대조 저장소가 없어 못 봄. O15에서 writer 설치가 둘째 저장소에 닿은 뒤 현관의 게시를 허용하기 전에 잰다(관리자 결정 2026-11-17)]. App에는 workflows·administration·secrets·actions 권한을 주지 않는다. 워크플로 파일을 바꾸는 쓰기는 그 권한 없이 거절된다 [확인, O06 4-1 B 실측 2026-11-17: writer의 Git push는 workflows 권한이 없다는 거절, REST(Contents API)는 403, 둘 다 원격 그대로]. 그래서 확인 카드의 승인만으로는 writer가 워크플로 파일을 게시할 수 없다. O06의 읽기 확인(2026-11-16): 지금 쓰기 App과 리뷰 App의 설치 권한에 그 네 항목이 없다 [확인].
 - 모든 대상 저장소에 main 보호와 `bot/` 브랜치 규칙을 건다. 비공개 저장소는 Team 요금제 뒤에야 규칙이 걸린다(B-13).
-- 막는 저장소 넷(자기 저장소 둘과 D-43의 둘)에는 쓰기 App이 어떤 브랜치도 만들거나 고치거나 지우지 못하게 하는 규칙을 건다. 브랜치 쓰기는 말로 금지하는 것이 아니라 서버가 거절해야 한다. 관리자와 관리자의 개발 세션은 그대로 쓴다. 그런 규칙은 걸 수 있다 [확인, O06 4-1 C 실측 2026-11-17: 저장소 수준 ruleset(모든 브랜치, `creation`·`update`·`deletion`, 통과 목록은 관리자 역할 하나)이 켜진 동안 writer의 만들기·바꾸기·지우기는 422로 거절되고 관리자의 같은 쓰기는 됐다]. 만들기 차단의 응답은 규칙을 말하지 않는 일반 문구였고, 통과 목록에 없는 App(배포·Renovate 등)은 같이 막히며 그 App들의 정상 동작은 재지 않았다(O06 결과 5-2절, O15 1번).
+- 막는 저장소 넷(자기 저장소 둘과 D-43의 둘)에는 쓰기 App이 어떤 브랜치도 만들거나 고치거나 지우지 못하게 하는 규칙을 건다. 브랜치 쓰기는 말로 금지하는 것이 아니라 서버가 거절해야 한다. 관리자와 관리자의 개발 세션은 그대로 쓴다. 그런 규칙은 걸 수 있다 [확인, O06 4-1 C 실측 2026-11-17: 저장소 수준 ruleset(모든 브랜치, `creation`·`update`·`deletion`, 통과 목록은 관리자 역할 하나)이 켜진 동안 writer의 만들기·바꾸기·지우기는 422로 거절되고 관리자의 같은 쓰기는 됐다]. 만들기 차단의 응답은 규칙을 말하지 않는 일반 문구였고, 통과 목록에 없는 App(배포·Renovate 등)은 같이 막히며 그 App들의 정상 동작은 재지 않았다(O06 결과 5-2절, O15 1번). 그 대조는 O15에서 그 App을 통과 목록에 넣은 운영 규칙을 켠 직후, 설치를 넓히기 전에 잰다(관리자 결정 2026-11-17).
 - 서버 규칙이 막는 것은 브랜치 쓰기까지다 [확인, GitHub 공식 문서. O06 4-1 C-PR 실측 2026-11-17: 위 규칙이 켜진 채로 writer가 이미 있는 두 브랜치 사이에 draft PR을 만들었다(201)]. PR 만들기는 이미 있는 브랜치를 가리키는 별도의 API라 브랜치 규칙이 막지 못하고, 읽기도 막지 못한다([ruleset 규칙](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets), [PR 만들기 API](https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request)). 그래서 그 넷을 대상으로 한 PR 요청은 현관 writer의 코드가 거절한다.
 - "모든 저장소"로 설치하면 저장소 하나만 설치에서 뺄 수 없다 [확인]. 빼는 API는 "고른 저장소만" 설치에서만 되고 "모든 저장소"에서는 422로 거절된다([설치에서 저장소 빼기](https://docs.github.com/en/rest/apps/installations#remove-a-repository-from-an-app-installation)). 그래서 쓰기 App의 권한은 막는 저장소 넷에도 닿고, App은 그 넷을 읽을 수 있다. 현관은 요청마다 저장소 하나로 좁힌 토큰만 내지만, App 키를 쥔 현관이 뚫리면 다른 저장소로 좁힌 토큰도 낼 수 있다([설치 토큰의 범위](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)).
 - GitHub 서버가 그 넷의 PR 요청과 읽기까지 거절해야 한다면 쓰기 App을 "고른 저장소만"으로 설치해야 한다. 그것은 D-24를 바꾸는 일이라 관리자에게 다시 묻는다. 관리자는 D-43에서 이 한계를 듣고 지금 구조를 골랐다.
@@ -538,20 +538,20 @@ flowchart TD
 | ID | 제목 | 단계 | Blocked by | 상태 | 수행 |
 |---|---|---|---|---|---|
 | [O01](issues/O01-retire-old-bot.md) | 옛 봇 끄기 | 0 끄기와 검증 | 없음 | 끄기 완료(게시 서버 #1281, 작업자 둘 #1282). 남은 일: Healthchecks 확인 일시 중지(관리자) | 에이전트 + 사람(배포 PR 병합) |
-| [O02](issues/O02-verify-hc-in-pod.md) | 검증: 세션 파드 안 hc와 실행기 경계 | 0 끄기와 검증 | 없음 | 시험 완료(2026-11-16, 운영 클러스터, hc 0.1.21). 파드 경계는 됨, B-02 유지. 시험 파드는 껐고(#1293) 치우는 PR(#1294)만 남음 | 에이전트 + 사람(배포 PR) |
+| [O02](issues/O02-verify-hc-in-pod.md) | 검증: 세션 파드 안 hc와 실행기 경계 | 0 끄기와 검증 | 없음 | 완료(2026-11-16, 운영 클러스터, hc 0.1.21). 파드 경계는 됨, B-02 유지. 시험 파드는 껐고(#1293) 치우는 PR(#1294)도 병합(2026-11-16) | 에이전트 + 사람(배포 PR) |
 | [O03](issues/O03-verify-cross-account-resume.md) | 검증: 계정·방식을 바꾼 뒤 세션 이어 열기 | 0 끄기와 검증 | 없음 | 돌려 본 다섯 경우 완료(2026-11-16, 구독 ↔ 구독은 조건부 됨). `claude-work` → `claude-sub` 쌍과 장기 토큰은 대기 | 에이전트 + 사람(계정 준비) |
 | [O04](issues/O04-verify-limit-signals.md) | 검증: 실제 한도·API 소진 때의 신호 모양 | 0 끄기와 검증 | 없음 | 완료(2026-11-16). 구독 주간 한도, 401, API workspace 지출 한도(`claude -p`·OpenCode). 크레딧 소진·402·API의 429는 못 봄 | 에이전트 + 사람(한도 상태 관측) |
 | [O05](issues/O05-verify-included-credit-billing.md) | 검증: 포함 API 크레딧 실제 차감 | 0 끄기와 검증 | 없음 | 완료(2026-11-16, 두 계정 모두 `claude -p`와 OpenCode가 포함 크레딧에서 차감됨, 관리자 화면 확인). 다음 지급 때의 동작은 못 봄 | 사람 + 에이전트 |
-| [O06](issues/O06-verify-discord-github-access.md) | 검증: Discord 채널 독자와 GitHub main 보호 | 0 끄기와 검증 | 없음 | 진행 중. 읽기 확인 완료(2026-11-16, Discord 독자는 관리자 답으로 확인). 4-1 쓰기 시험 A·B·C·C-PR·D 실행 끝(2026-11-17: 좁힌 토큰 됨, workflows 권한 없는 쓰기 거절 됨, 임시 ruleset으로 writer의 브랜치 쓰기 차단 됨, writer를 `bot/` 안에 가두기 됨, 규칙이 켜진 채 PR 만들기는 됨), writer 설치는 `homelab-smoke` 하나로 봄(마지막 변경 시각으로 간접 확인). 남은 것: 다른 저장소 배제와 다른 App의 정상 대조(못 봄, 별도 승인 전까지 보류), 빈틈 고칠 안의 승인 기록 | 사람 + 에이전트 |
+| [O06](issues/O06-verify-discord-github-access.md) | 검증: Discord 채널 독자와 GitHub main 보호 | 0 끄기와 검증 | 없음 | 완료(2026-11-17, 관리자 결정으로 닫음). 읽기 확인 완료(2026-11-16, Discord 독자는 관리자 답으로 확인). 4-1 쓰기 시험 A·B·C·C-PR·D 실행 끝(2026-11-17: 좁힌 토큰 됨, workflows 권한 없는 쓰기 거절 됨, 임시 ruleset으로 writer의 브랜치 쓰기 차단 됨, writer를 `bot/` 안에 가두기 됨, 규칙이 켜진 채 PR 만들기는 됨), writer 설치는 `homelab-smoke` 하나로 봄(마지막 변경 시각으로 간접 확인). 다른 저장소 배제와 다른 App의 정상 대조는 `못 봄` 그대로 O15의 확인 조건으로 옮김(관리자 결정 2026-11-17). 빈틈 고칠 안 다섯은 O15가 따를 방향으로 승인(2026-11-17, 설정 변경의 승인은 아님) | 사람 + 에이전트 |
 | [O07](issues/O07-old-bot-triage.md) | 옛 봇 코드와 멈춘 작업 나누기 | 1 기반 | 없음 | 완료(2026-11-16). 작성 작업자 코드는 O09에서 계약을 나누고 O13에서 옮긴다(D-46). 봇 PR #155는 병합 없이 닫음 | 에이전트 |
-| [O08](issues/O08-front-door.md) | 현관 정리 | 1 기반 | O06, O07 | 대기 | 에이전트 |
-| [O09](issues/O09-supervisor.md) | 감독 프로세스 | 1 기반 | O02, O07, O25 | 대기 | 에이전트 + 사람(배포 PR) |
+| [O08](issues/O08-front-door.md) | 현관 정리 | 1 기반 | O06, O07 | 대기. 선행 O06·O07 끝(O06은 2026-11-17). 시작은 관리자 승인 전 | 에이전트 |
+| [O09](issues/O09-supervisor.md) | 감독 프로세스 | 1 기반 | O02, O07, O25 | 진행 중(2026-11-17 관리자 시작 승인, 선행 셋 끝). 할 일 0번의 등록 PR(`app-repos.json`에 `olive`)을 올림 | 에이전트 + 사람(배포 PR) |
 | [O10](issues/O10-orchestrator.md) | 올리브 오케스트레이터 | 2 올리브와 작업자 | O03, O08, O09, O25 | 대기 | 에이전트 |
 | [O11](issues/O11-diagnosis-worker.md) | 진단 작업자 | 2 올리브와 작업자 | O09 | 대기 | 에이전트 + 사람(RBAC PR) |
 | [O12](issues/O12-isolated-reader.md) | 격리 읽기 작업자 | 2 올리브와 작업자 | O09 | 대기 | 에이전트 |
 | [O13](issues/O13-code-author.md) | 코드 작성 작업자 | 2 올리브와 작업자 | O07, O09 | 대기 | 에이전트 |
 | [O14](issues/O14-pr-review.md) | PR 리뷰 | 2 올리브와 작업자 | O08, O10, O12 | 대기 | 에이전트 |
-| [O15](issues/O15-pr-auto-publish.md) | PR 자동 게시와 보호 경로 확인 카드 | 3 스스로 일하기 | O06, O08, O13 | 대기 | 에이전트 + 사람(Team 올리기, 쓰기 App 설치 범위, Terraform apply) |
+| [O15](issues/O15-pr-auto-publish.md) | PR 자동 게시와 보호 경로 확인 카드 | 3 스스로 일하기 | O06, O08, O13 | 대기(O06은 끝남, O08·O13 남음). O06에서 옮겨 온 확인 둘(다른 저장소 배제, 다른 App의 정상 대조)과 방향 승인된 고칠 안 다섯을 맡음 | 에이전트 + 사람(Team 올리기, 쓰기 App 설치 범위, Terraform apply) |
 | [O16](issues/O16-alert-self-start.md) | 경보로 스스로 시작 | 3 스스로 일하기 | O10, O11, O15 | 대기 | 에이전트 + 사람(시험 발화) |
 | [O17](issues/O17-account-switch.md) | 계정 전환 | 4 계정·기억·스킬 | O03, O04, O05, O09 | 대기 | 에이전트 + 사람(계정 등록) |
 | [O18](issues/O18-memory-retention.md) | 기억과 보관 | 4 계정·기억·스킬 | O09, O10 | 대기 | 에이전트 + 사람(현관 DB 원문 저장 방식 결정) |
