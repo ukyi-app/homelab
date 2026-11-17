@@ -247,6 +247,65 @@ export type BotWrite = BotRead & {
   waitWorkerCredentials(want: Record<WorkerLane, string>, timeoutSec: number, method: BotMethod): Record<WorkerLane, boolean>;
 };
 
+// 올리브 비상 정지(supervisor.md §7). 대상 ns·Deployment·Application 이름과 기다림 상한은 명령이 넘긴다.
+// 자물쇠의 이름·모양(파드 0개 ResourceQuota, Git 밖)과 replicas 값(0·1)은 core가 고정한다.
+// 읽지 못한 것은 던지거나 "unconfirmed"·"unreadable"로 내고, 없음·성공으로 바꾸지 않는다.
+export type StopLockState = "absent" | "same" | "different";
+// Argo CD Application의 동기화 진행. inProgress는 요청된 operation이 있거나 단계가 Running·Terminating일 때다.
+export type AppOperation = { inProgress: boolean; phase: "Running" | "Terminating" | "Succeeded" | "Failed" | "Error" | null };
+// 실행 파드 한 개. forceDeleting은 지우는 중인데 유예가 0초인 것(강제 삭제)이다. 강제 삭제된 파드는 API에서 곧 사라져
+// 이 값으로는 지나간 강제 삭제를 알 수 없다(그 판정은 지우기 전에 적어 둔 UID와 노드 cgroup으로 한다).
+export type RunPod = {
+  name: string;
+  uid: string;
+  phase: string | null;
+  nodeName: string | null;
+  deletionTimestamp: string | null;
+  deletionGracePeriodSeconds: number | null;
+  terminationGracePeriodSeconds: number | null;
+  forceDeleting: boolean;
+};
+export type StopTarget = { ns: string; deployment: string };
+// last: 마지막으로 읽은 spec.replicas, Deployment가 없으면 absent, 읽지 못했으면 unread. rezeroed: 0으로 다시 쓴 횟수.
+export type HoldZeroTarget = StopTarget & { last: number | "absent" | "unread"; rezeroed: number; writeFailed: number };
+// zero: 같은 회차에서 모든 Application이 진행 중이 아니고, 그 뒤 읽은 모든 대상이 0이었다. 그 밖은 unconfirmed(차단됨, replicas 미확정).
+export type HoldZero = { result: "zero" | "unconfirmed"; targets: HoldZeroTarget[]; syncing: string[]; unreadApps: string[] };
+
+export type OliveRead = {
+  // 그 ns의 자물쇠. 같은 이름이 다른 모양이면 different.
+  stopLock(ns: string): StopLockState;
+  // ns argocd의 Application. 없으면 null.
+  appOperation(app: string): AppOperation | null;
+  // selector는 key=value를 쉼표로 이은 꼴만.
+  runPods(ns: string, selector: string): RunPod[];
+};
+
+export type OliveWrite = {
+  // 값은 0·1만. 강제 삭제 옵션이 들어갈 자리가 없다.
+  setReplicas(ns: string, deployment: string, replicas: 0 | 1): void;
+  // 다시 걸어도 같다(same). 다른 모양이면 덮어쓰지 않고 different.
+  stopLockSet(ns: string): "created" | "same" | "different";
+  // 같은 모양만 그 uid로 지운다. 다른 모양이면 지우지 않고 different.
+  stopLockClear(ns: string): "deleted" | "absent" | "different";
+  // 상한까지 지켜보며 0이 아닌 대상은 바로 0을 다시 쓴다(supervisor.md §7.3 6단계). timeoutSec은 1~3600.
+  holdZero(o: { targets: StopTarget[]; apps: string[]; timeoutSec: number }): HoldZero;
+};
+
+// 이 프로세스가 클러스터 노드 위인지. /etc/machine-id와 Node의 status.nodeInfo.machineID가 하나만 맞아야 node다.
+export type NodeHost = { state: "node"; node: string } | { state: "not-node" } | { state: "unknown"; reason: string };
+// 파드 UID의 cgroup(kubepods.slice 아래 고정 꼴)의 cgroup.events. absent는 그 경로가 없음, empty는 populated 0.
+export type PodCgroup = "absent" | "empty" | "populated" | "unreadable";
+export type RuntimeContainer = { podUid: string | null; podNamespace: string | null; podName: string | null; container: string; state: string };
+export type RuntimeList = { state: "ok"; containers: RuntimeContainer[] } | { state: "unreadable"; reason: "no-sudo" | "sudo-auth" | "timeout" | "failed" | "format" };
+
+export type NodeRead = {
+  host(): NodeHost;
+  // uid는 소문자 UUID만(아니면 던진다). sudo 없이 읽는다.
+  podCgroup(uid: string): PodCgroup;
+  // stop verify --deep: sudo -n으로 k3s crictl 컨테이너 목록(argv 고정). sudo 자격이 캐시돼 있지 않으면 sudo-auth.
+  runtimeContainers(): RuntimeList;
+};
+
 export type HttpWrite = {
   // port-forward로 앱 파드에 붙어 헬스 경로의 응답 코드. 경로는 셋만.
   appStatus(ns: string, deployment: string, port: number, path: "/healthz" | "/healthz/db" | "/healthz/cache"): Promise<number>;
@@ -334,6 +393,8 @@ export type ReadCtx = {
   tools: ToolsRead;
   web: WebRead;
   bot: BotRead;
+  olive: OliveRead;
+  node: NodeRead;
   // kind delegate 명령과 wrapper 표시 명령(app new)에만 있다.
   github?: GithubDelegate;
   engine(plan: Plan): Promise<Result>;
@@ -367,6 +428,8 @@ export type WriteCtx = {
   http: HttpWrite;
   pgRestore: PgRestoreWrite;
   bot: BotWrite;
+  olive: OliveRead & OliveWrite;
+  node: NodeRead;
   // wrapper 표시 명령(app new)에만 있다.
   github?: { apply(): number };
   appRepo?: AppRepoWrite;

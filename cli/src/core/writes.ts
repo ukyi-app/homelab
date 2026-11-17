@@ -4,6 +4,7 @@
 // 읽기 허용 목록 방식이다. 목록에 없으면 쓰기로 본다(모르는 도구·하위 명령 포함). 목록을 넓히면 이 판정과
 // cli/test/core/writes.test.ts의 표를 함께 고친다. exec가 plan·read 모드에서 쓰기를 막고, 시험이 스텁 원장을 이 판정으로 센다.
 import { basename } from "node:path";
+import { freeze } from "./intrinsics";
 
 // sensitiveOutput: stdout에 시크릿 값이 나오는 호출. exec가 secretStdout으로만 실행하게 한다.
 export type Verdict = { write: boolean; reason: string; sensitiveOutput?: boolean };
@@ -142,6 +143,16 @@ function curl(args: string[]): Verdict {
   return urls === 1 ? read("curl GET") : write(`curl: URL이 ${urls}개`);
 }
 
+// sudo는 이 argv 하나만 읽기로 본다(stop verify --deep의 컨테이너 목록, core/node.ts). -n이라 비밀번호를 묻지 않고,
+// k3s를 절대 경로로 불러 secure_path·PATH에 기대지 않는다(k3s 제거 때 /usr/local/bin/crictl 심링크가 사라진 적이 있다).
+// 이 상수는 node.ts가 그대로 쓴다(node.ts → exec.ts → writes.ts라 여기 둔다). 한 글자라도 다르면 쓰기로 본다.
+export const RUNTIME_LIST_ARGV: readonly string[] = freeze(["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"]);
+
+function sudo(argv: string[]): Verdict {
+  const exact = argv.length === RUNTIME_LIST_ARGV.length && argv.every((a, i) => a === RUNTIME_LIST_ARGV[i]);
+  return exact ? read("sudo -n k3s crictl ps(컨테이너 목록)") : write("sudo(고정 목록 argv 밖)");
+}
+
 export function classify(argv: string[]): Verdict {
   const tool = basename(argv[0] ?? "");
   const args = argv.slice(1);
@@ -164,6 +175,8 @@ export function classify(argv: string[]): Verdict {
     case "claude":
       // homelab bot account add만 부른다. 새 토큰을 발급하므로 쓰기다.
       return args.length === 1 && args[0] === "setup-token" ? write("claude setup-token(토큰 발급)") : write(`claude ${args[0] ?? ""}`.trim());
+    case "sudo":
+      return argv[0] === "sudo" ? sudo(argv) : write("sudo는 이름으로만 부른다");
     case "tf-github.sh":
       return args[0] === "plan" || args[0] === "verify" ? read(`tf-github.sh ${args[0]}`) : write(`tf-github.sh ${args[0] ?? ""}`.trim());
     default:

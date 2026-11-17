@@ -66,6 +66,8 @@ const FS_IMPORTERS: Record<string, Set<string> | "any"> = {
   "core/github.ts": new Set(["existsSync", "readFileSync", "realpathSync"]),
   "core/tools.ts": new Set(["realpathSync"]),
   "core/input.ts": new Set(["readFileSync", "readSync"]),
+  // 노드 정지 확인: /etc/machine-id와 파드 cgroup의 cgroup.events(sudo 없이 읽기).
+  "core/node.ts": new Set(["readFileSync", "statSync"]),
   "main.ts": new Set(["readSync"]),
 };
 // 어디서도 import하지 않는 모듈(프로세스·네트워크·Bun 내장 API. 실행은 exec.ts의 전역 Bun.spawnSync 하나로만).
@@ -250,6 +252,16 @@ describe("소스 규칙", () => {
     expect(src.filter((p) => !rel(p).startsWith("core/") && /\brevealSecret\b/.test(body(p))).map(rel)).toEqual([]);
     expect(offenders(/\bresetTrackedForTests\b/, ["core/secret.ts"])).toEqual([]);
     expect(offenders(/\bresetBackupGuardForTests\b/, ["core/infisical-backup.ts"])).toEqual([]);
+  });
+
+  test("올리브 정지: 강제 삭제 옵션은 어디에도 없고, replicas 쓰기는 olive.ts만, sudo argv는 writes.ts의 고정 상수 하나만", () => {
+    expect(offenders(/--grace-period|["'`]--force["'`=]|["'`]--now["'`]/, [])).toEqual([]);
+    expect(offenders(/["'`]scale["'`]/, ["core/olive.ts"])).toEqual([]);
+    expect(offenders(/["'`]sudo["'`]/, ["core/writes.ts"])).toEqual([]);
+    expect(offenders(/\bRUNTIME_LIST_ARGV\b/, ["core/writes.ts", "core/node.ts"])).toEqual([]);
+    // 노드 경로 뿌리를 바꾸는 인자는 시험만 준다(runtime.ts는 기본값으로 부른다).
+    expect(body(join(SRC, "core", "runtime.ts"))).toContain("nodeRead(readExec)");
+    expect(body(join(SRC, "core", "runtime.ts"))).not.toMatch(/nodeRead\([^)]*,/);
   });
 
   test("exitCode는 github 하위 명령만", () => {

@@ -30,6 +30,8 @@ const READS: string[][] = [
   ["tf-github.sh", "plan"],
   ["/tmp/clone/tools/tf-github.sh", "verify"],
   ["jq", "-r", ".x"],
+  // stop verify --deep의 컨테이너 목록(core/node.ts). 이 argv 한 글자도 다르지 않은 것만.
+  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"],
 ];
 
 const WRITES: string[][] = [
@@ -87,6 +89,15 @@ const WRITES: string[][] = [
   ["sh", "-c", "anything"],
   ["bash", "tools/tf-github.sh", "plan"],
   ["unknown-tool"],
+  ["kubectl", "-n", "x", "scale", "deployments.apps", "y", "--replicas=0"],
+  // sudo는 고정 argv 하나만 읽기다. 비밀번호를 묻는 꼴, 다른 경로, 더한 인자, 다른 하위 명령은 쓰기다.
+  ["sudo", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"],
+  ["sudo", "-n", "k3s", "crictl", "ps", "-a", "-o", "json"],
+  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json", "--all"],
+  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "rm", "-a"],
+  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "stop", "x"],
+  ["/usr/bin/sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"],
+  ["sudo", "-n", "cat", "/etc/shadow"],
 ];
 
 describe("쓰기 판정(읽기 허용 목록, 나머지는 쓰기)", () => {
