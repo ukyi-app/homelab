@@ -1,21 +1,19 @@
-// 노드에서 하는 정지 확인(supervisor.md §7.4, spec D-39). cgroup은 sudo 없이 파일로 읽고(cgroup.events는 0444),
-// 컨테이너 목록만 sudo로 부른다(containerd 소켓은 root 전용). 경로 꼴과 sudo argv는 여기 고정이고 명령은 UID만 넘긴다.
-// 읽지 못한 것은 unreadable·unknown으로 내고 "없음"으로 바꾸지 않는다.
+// 노드에서 하는 정지 확인(supervisor.md §7.4, spec D-39). cgroup은 sudo 없이 파일로 읽는다(cgroup.events는 0444).
+// 경로 꼴은 여기 고정이고 명령은 UID만 넘긴다. 읽지 못한 것은 unreadable·unknown으로 내고 "없음"으로 바꾸지 않는다.
+// 런타임 목록(--deep)은 두지 않는다: k3s 런처는 crictl을 부르기 전에 내장 도구를 풀고 데이터 디렉터리·CNI 링크를
+// 바꿀 수 있어(v1.36.6+k3s1 cmd/k3s/main.go extract) sudo 호출이 읽기가 아니다. /usr/local/bin/crictl도 같은 런처다.
 import { readFileSync, statSync } from "node:fs";
-import type { NodeHost, NodeRead, PodCgroup, RuntimeContainer, RuntimeList } from "./command";
+import type { NodeHost, NodeRead, PodCgroup } from "./command";
 import type { Exec } from "./exec";
 import { isArray, jsonParse } from "./intrinsics";
 import { kubectlArgv } from "./kubectl";
 import { POD_UID } from "./olive";
-import { RUNTIME_LIST_ARGV } from "./writes";
 
 // 시험만 다른 뿌리를 준다(runtime.ts는 이 기본값만 쓴다).
 export type NodePaths = { cgroup: string; machineId: string };
 export const NODE_PATHS: NodePaths = { cgroup: "/sys/fs/cgroup", machineId: "/etc/machine-id" };
 
 const MACHINE_ID = /^[0-9a-f]{32}$/;
-const CONTAINER_STATES = new Set(["CONTAINER_CREATED", "CONTAINER_RUNNING", "CONTAINER_EXITED", "CONTAINER_UNKNOWN"]);
-const SUDO_AUTH = /a password is required|a terminal is required|may not run sudo|is not in the sudoers/;
 
 type Stat = "dir" | "missing" | "other" | "error";
 
@@ -91,29 +89,6 @@ export function nodeRead(exec: Exec, paths: NodePaths = NODE_PATHS): NodeRead {
       if (lines[0] === "populated 0") return "empty";
       if (lines[0] === "populated 1") return "populated";
       return "unreadable";
-    },
-    runtimeContainers(): RuntimeList {
-      const r = exec([...RUNTIME_LIST_ARGV]);
-      if (r.errKind === "not-found") return { state: "unreadable", reason: "no-sudo" };
-      if (r.errKind === "timeout") return { state: "unreadable", reason: "timeout" };
-      if (r.code !== 0) return { state: "unreadable", reason: SUDO_AUTH.test(r.stderr) ? "sudo-auth" : "failed" };
-      try {
-        const doc = jsonParse(r.stdout);
-        if (!isArray(doc?.containers)) return { state: "unreadable", reason: "format" };
-        const out: RuntimeContainer[] = [];
-        for (const c of doc.containers) {
-          const labels = c?.labels ?? {};
-          const uid = labels["io.kubernetes.pod.uid"];
-          const container = c?.metadata?.name;
-          if (typeof container !== "string" || typeof c?.state !== "string" || !CONTAINER_STATES.has(c.state)) return { state: "unreadable", reason: "format" };
-          if (uid !== undefined && (typeof uid !== "string" || !POD_UID.test(uid))) return { state: "unreadable", reason: "format" };
-          const str = (v: unknown) => (typeof v === "string" ? v : null);
-          out.push({ podUid: uid ?? null, podNamespace: str(labels["io.kubernetes.pod.namespace"]), podName: str(labels["io.kubernetes.pod.name"]), container, state: c.state });
-        }
-        return { state: "ok", containers: out };
-      } catch {
-        return { state: "unreadable", reason: "format" };
-      }
     },
   };
 }

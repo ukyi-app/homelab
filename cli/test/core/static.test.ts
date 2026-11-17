@@ -254,11 +254,11 @@ describe("소스 규칙", () => {
     expect(offenders(/\bresetBackupGuardForTests\b/, ["core/infisical-backup.ts"])).toEqual([]);
   });
 
-  test("올리브 정지: 강제 삭제 옵션은 어디에도 없고, replicas 쓰기는 olive.ts만, sudo argv는 writes.ts의 고정 상수 하나만", () => {
+  test("올리브 정지: 강제 삭제 옵션은 어디에도 없고, replicas 쓰기는 olive.ts만, sudo·k3s·crictl은 어디서도 부르지 않는다", () => {
     expect(offenders(/--grace-period|["'`]--force["'`=]|["'`]--now["'`]/, [])).toEqual([]);
     expect(offenders(/["'`]scale["'`]/, ["core/olive.ts"])).toEqual([]);
-    expect(offenders(/["'`]sudo["'`]/, ["core/writes.ts"])).toEqual([]);
-    expect(offenders(/\bRUNTIME_LIST_ARGV\b/, ["core/writes.ts", "core/node.ts"])).toEqual([]);
+    // k3s 런처는 crictl을 부르기 전에 호스트의 도구·링크를 바꿀 수 있다(core/node.ts 머리 주석). 읽기 경로가 확인되기 전까지 없다.
+    expect(offenders(/["'`](sudo|crictl)["'`]|\/usr\/local\/bin\/(k3s|crictl)/, [])).toEqual([]);
     // 노드 경로 뿌리를 바꾸는 인자는 시험만 준다(runtime.ts는 기본값으로 부른다).
     expect(body(join(SRC, "core", "runtime.ts"))).toContain("nodeRead(readExec)");
     expect(body(join(SRC, "core", "runtime.ts"))).not.toMatch(/nodeRead\([^)]*,/);

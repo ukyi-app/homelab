@@ -1,5 +1,5 @@
 // 올리브 비상 정지 어댑터(core/olive.ts·core/node.ts). 실제 클러스터·노드·sudo에 닿지 않는다:
-// kubectl·sudo는 PATH 스텁, cgroup·machine-id는 시험 임시 폴더를 뿌리로 준 nodeRead로만 읽는다.
+// kubectl은 PATH 스텁, cgroup·machine-id는 시험 임시 폴더를 뿌리로 준 nodeRead로만 읽는다.
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,8 +7,8 @@ import { ExecTimeout, makeExec } from "../../src/core/exec";
 import { kubectlArgv } from "../../src/core/kubectl";
 import { nodeRead, podCgroupDirs } from "../../src/core/node";
 import { STOP_LOCK_LABEL, STOP_LOCK_NAME, stopLockManifest } from "../../src/core/olive";
-import { RUNTIME_LIST_ARGV, classify } from "../../src/core/writes";
-import { DEFAULT_TOOLS, applyWith, expectPlanReadOnly, rule, stubSandbox, testCtx, testRoot, type Call, type Resp } from "../harness";
+import { classify } from "../../src/core/writes";
+import { applyWith, expectPlanReadOnly, rule, stubSandbox, testCtx, testRoot, type Call, type Resp } from "../harness";
 
 const NS = "olive-run";
 const DEP = "session";
@@ -23,6 +23,7 @@ const notFound = (what: string): Resp => ({ code: 1, stderr: `Error from server 
 const failed: Resp = { code: 1, stderr: "error: dial tcp 127.0.0.1:6443: connect: connection refused\n" };
 // 스텁이 HOMELAB_TEST_TIMEOUT_MS(3초)보다 오래 자면 exec가 시간 초과로 끝낸다.
 const hang: Resp = { sleepMs: 3_500 };
+const conflict: Resp = { code: 1, stderr: "Error from server (Conflict): Operation cannot be fulfilled on resourcequotas \"olive-stop\": Precondition failed: ResourceVersion in precondition: 10, ResourceVersion in object meta: 11\n" };
 
 const deployArgv = (dep = DEP) => k(["-n", NS, "get", "deployments.apps", dep, "-o", "json"]);
 const scaleArgv = (n: 0 | 1, dep = DEP) => k(["-n", NS, "scale", "deployments.apps", dep, `--replicas=${n}`]);
@@ -32,12 +33,21 @@ const lockCreate = (ns = NS) => k(["-n", ns, "create", "-f", "-"]);
 const lockDelete = (ns = NS) => k(["delete", "--raw", `/api/v1/namespaces/${ns}/resourcequotas/${STOP_LOCK_NAME}`, "-f", "-"]);
 const podsArgv = (sel: string) => k(["-n", NS, "get", "pods", "-l", sel, "-o", "json"]);
 
-const deployment = (replicas: number | undefined) => json({ kind: "Deployment", metadata: { name: DEP }, spec: replicas === undefined ? {} : { replicas } });
-const app = (o: { operation?: unknown; phase?: string }) => json({ kind: "Application", metadata: { name: APP }, ...(o.operation ? { operation: o.operation } : {}), status: o.phase ? { operationState: { phase: o.phase } } : {} });
-const lockDoc = (patch: { hard?: Record<string, string>; scopes?: string[]; label?: string | null } = {}) =>
+const deployment = (replicas: number | undefined, o: { kind?: string; name?: string; ns?: string } = {}) =>
+  json({ kind: o.kind ?? "Deployment", metadata: { name: o.name ?? DEP, namespace: o.ns ?? NS }, spec: replicas === undefined ? {} : { replicas } });
+const app = (o: { operation?: unknown; phase?: string }) =>
+  json({ kind: "Application", metadata: { name: APP, namespace: "argocd" }, ...(o.operation ? { operation: o.operation } : {}), status: o.phase ? { operationState: { phase: o.phase } } : {} });
+const lockDoc = (patch: { hard?: Record<string, string>; scopes?: string[]; label?: string | null; rv?: string | null; deleting?: boolean } = {}) =>
   json({
     kind: "ResourceQuota",
-    metadata: { name: STOP_LOCK_NAME, namespace: NS, uid: QUOTA_UID, labels: patch.label === null ? {} : { [STOP_LOCK_LABEL]: patch.label ?? "lock" } },
+    metadata: {
+      name: STOP_LOCK_NAME,
+      namespace: NS,
+      uid: QUOTA_UID,
+      ...(patch.rv === null ? {} : { resourceVersion: patch.rv ?? "10" }),
+      labels: patch.label === null ? {} : { [STOP_LOCK_LABEL]: patch.label ?? "lock" },
+      ...(patch.deleting ? { deletionTimestamp: "2026-11-17T11:00:00Z", finalizers: ["example.com/hold"] } : {}),
+    },
     spec: { hard: patch.hard ?? { pods: "0" }, ...(patch.scopes ? { scopes: patch.scopes } : {}) },
   });
 
@@ -114,31 +124,71 @@ describe("자물쇠(ResourceQuota)", () => {
     }
   });
 
+  test("삭제 시각이 붙은 quota는 모양이 같아도 걸린 자물쇠가 아니다: 읽기·걸기·풀기 모두 deleting이고 쓰지 않는다", async () => {
+    for (const doc of [lockDoc({ deleting: true }), lockDoc({ deleting: true, hard: { pods: "1" } })]) {
+      const { ctx, calls } = testCtx("apply", [rule(lockGet(), doc)]);
+      expect(ctx.olive.stopLock(NS)).toBe("deleting");
+      expect((await applyWith(ctx, (w) => w.olive.stopLockSet(NS))).value).toBe("deleting");
+      expect((await applyWith(ctx, (w) => w.olive.stopLockClear(NS))).value).toBe("deleting");
+      expect(calls().writes).toEqual([]);
+    }
+    // 만드는 사이 지우는 중인 것과 부딪혀도 created·same이 아니다.
+    const raced = testCtx("apply", [rule(lockGet(), [notFound("resourcequotas"), lockDoc({ deleting: true })]), rule(lockCreate(), { code: 1, stderr: "Error from server (AlreadyExists): resourcequotas \"olive-stop\" already exists\n" })]);
+    expect((await applyWith(raced.ctx, (w) => w.olive.stopLockSet(NS))).value).toBe("deleting");
+    // 만든 뒤 다시 읽었더니 지우는 중이면 던진다.
+    const after = testCtx("apply", [rule(lockGet(), [notFound("resourcequotas"), lockDoc({ deleting: true })]), rule(lockCreate())]);
+    await expect(applyWith(after.ctx, (w) => w.olive.stopLockSet(NS))).rejects.toThrow("걸린 자물쇠가 아니다");
+  });
+
   test("만드는 사이 누가 먼저 만들었으면(AlreadyExists) 그 모양으로 답한다", async () => {
     const { ctx } = testCtx("apply", [rule(lockGet(), [notFound("resourcequotas"), lockDoc({ hard: { pods: "3" } })]), rule(lockCreate(), { code: 1, stderr: "Error from server (AlreadyExists): resourcequotas \"olive-stop\" already exists\n" })]);
     expect((await applyWith(ctx, (w) => w.olive.stopLockSet(NS))).value).toBe("different");
   });
 
-  test("풀기는 같은 모양만 확인한 uid로 지우고, 지운 뒤 없음을 다시 본다", async () => {
+  test("풀기는 같은 모양만 확인한 uid·resourceVersion으로 지우고, 지운 뒤 없음을 다시 본다", async () => {
     const { ctx, calls } = testCtx("apply", [rule(lockGet(), [lockDoc(), notFound("resourcequotas")]), rule(lockDelete(), {}, { captureStdin: true })]);
     expect((await applyWith(ctx, (w) => w.olive.stopLockClear(NS))).value).toBe("deleted");
     const del = calls().calls.find((c) => c.argv.includes("delete"))!;
-    expect(JSON.parse(del.stdin!)).toEqual({ kind: "DeleteOptions", apiVersion: "v1", preconditions: { uid: QUOTA_UID } });
+    expect(JSON.parse(del.stdin!)).toEqual({ kind: "DeleteOptions", apiVersion: "v1", preconditions: { uid: QUOTA_UID, resourceVersion: "10" } });
     expectNoForce(calls().calls);
   });
 
-  test("없으면 absent, 지운 뒤에도 있거나 uid가 바뀌었으면 던진다", async () => {
+  test("확인 뒤 같은 uid가 다른 모양으로 고쳐지면 지우지 않는다(버전 충돌 → 다시 읽어 different)", async () => {
+    const changed = lockDoc({ rv: "11", hard: { pods: "0", cpu: "1" } });
+    const { ctx, calls } = testCtx("apply", [rule(lockGet(), [lockDoc(), changed]), rule(lockDelete(), [conflict], { captureStdin: true })]);
+    expect((await applyWith(ctx, (w) => w.olive.stopLockClear(NS))).value).toBe("different");
+    const dels = calls().calls.filter((c) => c.argv.includes("delete"));
+    expect(dels.map((c) => JSON.parse(c.stdin!).preconditions)).toEqual([{ uid: QUOTA_UID, resourceVersion: "10" }]);
+    // 라벨만 바뀐 경우도 같다.
+    const relabeled = testCtx("apply", [rule(lockGet(), [lockDoc(), lockDoc({ rv: "11", label: "x" })]), rule(lockDelete(), [conflict])]);
+    expect((await applyWith(relabeled.ctx, (w) => w.olive.stopLockClear(NS))).value).toBe("different");
+    expect(relabeled.calls().calls.filter((c) => c.argv.includes("delete")).length).toBe(1);
+  });
+
+  test("버전만 바뀌고 모양이 같으면 새 버전으로 다시 지운다. 충돌이 거듭되면 지우지 않고 던진다", async () => {
+    const { ctx, calls } = testCtx("apply", [rule(lockGet(), [lockDoc(), lockDoc({ rv: "11" }), notFound("resourcequotas")]), rule(lockDelete(), [conflict, {}], { captureStdin: true })]);
+    expect((await applyWith(ctx, (w) => w.olive.stopLockClear(NS))).value).toBe("deleted");
+    expect(calls().calls.filter((c) => c.argv.includes("delete")).map((c) => JSON.parse(c.stdin!).preconditions.resourceVersion)).toEqual(["10", "11"]);
+    const busy = testCtx("apply", [rule(lockGet(), lockDoc()), rule(lockDelete(), [conflict])]);
+    await expect(applyWith(busy.ctx, (w) => w.olive.stopLockClear(NS))).rejects.toThrow("지우지 않았다");
+    expect(busy.calls().calls.filter((c) => c.argv.includes("delete")).length).toBe(3);
+  });
+
+  test("없으면 absent, resourceVersion을 못 읽거나 지운 뒤에도 있으면 던진다. finalizer로 남았으면 deleting", async () => {
     const { ctx } = testCtx("apply", [rule(lockGet(), notFound("resourcequotas"))]);
     expect(ctx.olive.stopLock(NS)).toBe("absent");
     expect((await applyWith(ctx, (w) => w.olive.stopLockClear(NS))).value).toBe("absent");
+    const noRv = testCtx("apply", [rule(lockGet(), lockDoc({ rv: null })), rule(lockDelete())]);
+    await expect(applyWith(noRv.ctx, (w) => w.olive.stopLockClear(NS))).rejects.toThrow("resourceVersion");
+    expect(noRv.calls().writes).toEqual([]);
     const still = testCtx("apply", [rule(lockGet(), lockDoc()), rule(lockDelete())]);
     await expect(applyWith(still.ctx, (w) => w.olive.stopLockClear(NS))).rejects.toThrow("지운 뒤에도 있다");
-    const swapped = testCtx("apply", [rule(lockGet(), lockDoc()), rule(lockDelete(), { code: 1, stderr: "Error from server (Conflict): Precondition failed: UID in precondition\n" })]);
-    await expect(applyWith(swapped.ctx, (w) => w.olive.stopLockClear(NS))).rejects.toThrow("지우지 않았다");
+    const held = testCtx("apply", [rule(lockGet(), [lockDoc(), lockDoc({ rv: "12", deleting: true })]), rule(lockDelete())]);
+    expect((await applyWith(held.ctx, (w) => w.olive.stopLockClear(NS))).value).toBe("deleting");
   });
 
   test("읽기 실패·시간 초과·모르는 출력은 absent가 아니라 던진다", async () => {
-    for (const resp of [failed, { stdout: "not json" }, json({ kind: "ConfigMap", metadata: { name: STOP_LOCK_NAME } }), json({ kind: "ResourceQuota", metadata: { name: "other" } })]) {
+    for (const resp of [failed, { stdout: "not json" }, json({ kind: "ConfigMap", metadata: { name: STOP_LOCK_NAME, namespace: NS } }), json({ kind: "ResourceQuota", metadata: { name: "other", namespace: NS } }), json({ kind: "ResourceQuota", metadata: { name: STOP_LOCK_NAME, namespace: "other" } })]) {
       const { ctx } = testCtx("plan", [rule(lockGet(), resp)]);
       expect(() => ctx.olive.stopLock(NS)).toThrow();
     }
@@ -150,17 +200,19 @@ describe("자물쇠(ResourceQuota)", () => {
 });
 
 describe("replicas 지켜보기", () => {
+  const one = { targets: [{ ns: NS, deployment: DEP }], apps: [APP] };
+
   test("1로 돌아오면 그 읽기 바로 다음에 0을 쓰고, 다음 회차에 0을 읽어야 zero다", async () => {
     // 이미 0이고 동기화가 없으면 쓰지 않고 바로 zero다.
     const { ctx, calls } = testCtx("apply", [rule(appArgv(), app({ phase: "Succeeded" })), rule(deployArgv(), deployment(0)), rule(scaleArgv(0))]);
-    const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }], apps: [APP], timeoutSec: 30 }));
+    const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 30 }));
     expect(value.result).toBe("zero");
     expect(calls().calls.filter((c) => c.argv.includes("scale"))).toEqual([]);
 
     // 동기화 중 1로 돌아옴 → 같은 회차에 0 쓰기 → 다음 회차에 동기화 끝·0 읽기.
     const back = testCtx("apply", [rule(appArgv(), [app({ phase: "Running" }), app({ phase: "Succeeded" })]), rule(deployArgv(), [deployment(1), deployment(0)]), rule(scaleArgv(0))]);
-    const r = await applyWith(back.ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }], apps: [APP], timeoutSec: 30 }));
-    expect(r.value).toEqual({ result: "zero", targets: [{ ns: NS, deployment: DEP, last: 0, rezeroed: 1, writeFailed: 0 }], syncing: [], unreadApps: [] });
+    const r = await applyWith(back.ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 30 }));
+    expect(r.value).toEqual({ result: "zero", targets: [{ ns: NS, deployment: DEP, last: 0, rezeroed: 1, writeFailed: 0 }], syncing: [], unreadApps: [], missingApps: [] });
     const argv = back.calls().calls.map((c) => c.argv);
     expect(argv).toEqual([appArgv(), deployArgv(), scaleArgv(0), appArgv(), deployArgv()]);
     expectNoForce(back.calls().calls);
@@ -168,7 +220,7 @@ describe("replicas 지켜보기", () => {
 
   test("상한이 지나도 1이 계속 돌아오면 unconfirmed다(다시 쓴 횟수와 마지막 값을 낸다)", async () => {
     const { ctx, calls } = testCtx("apply", [rule(appArgv(), app({})), rule(deployArgv(), deployment(1)), rule(scaleArgv(0))]);
-    const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }], apps: [APP], timeoutSec: 1 }));
+    const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
     expect(value.result).toBe("unconfirmed");
     expect(value.targets[0].last).toBe(1);
     expect(value.targets[0].rezeroed).toBeGreaterThanOrEqual(1);
@@ -177,11 +229,22 @@ describe("replicas 지켜보기", () => {
 
   test("0이어도 동기화가 끝나지 않았거나 Application을 못 읽으면 unconfirmed다", async () => {
     const syncing = testCtx("apply", [rule(appArgv(), app({ operation: { sync: {} }, phase: "Succeeded" })), rule(deployArgv(), deployment(0))]);
-    const a = await applyWith(syncing.ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }], apps: [APP], timeoutSec: 1 }));
+    const a = await applyWith(syncing.ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
     expect([a.value.result, a.value.syncing]).toEqual(["unconfirmed", [APP]]);
     const unread = testCtx("apply", [rule(appArgv(), failed), rule(deployArgv(), deployment(0))]);
-    const b = await applyWith(unread.ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }], apps: [APP], timeoutSec: 1 }));
+    const b = await applyWith(unread.ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
     expect([b.value.result, b.value.unreadApps]).toEqual(["unconfirmed", [APP]]);
+  });
+
+  test("넘겨받은 Application이 없으면(NotFound) 대상이 0이어도 zero가 아니고 missingApps에 드러난다", async () => {
+    const { ctx } = testCtx("apply", [rule(appArgv(), notFound("applications.argoproj.io")), rule(deployArgv(), deployment(0))]);
+    const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
+    expect([value.result, value.missingApps, value.syncing, value.unreadApps]).toEqual(["unconfirmed", [APP], [], []]);
+    // 상한에 걸려 끊긴 마지막 회차면 대상은 unread로 남는다. 어느 쪽이든 0이 아닌 값은 아니다.
+    expect([0, "unread"]).toContain(value.targets[0].last);
+    // 다음 회차에 다시 나타나 끝났으면 zero다.
+    const back = testCtx("apply", [rule(appArgv(), [notFound("applications.argoproj.io"), app({ phase: "Succeeded" })]), rule(deployArgv(), deployment(0))]);
+    expect((await applyWith(back.ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 30 }))).value).toMatchObject({ result: "zero", missingApps: [] });
   });
 
   test("대상을 못 읽음·없음·replicas 없음·0 쓰기 실패는 zero가 아니다", async () => {
@@ -197,6 +260,49 @@ describe("replicas 지켜보기", () => {
     expect(value.targets[0].writeFailed).toBeGreaterThanOrEqual(1);
     // 경우마다 상한(1초)을 다 기다린다.
   }, 20_000);
+
+  test("다른 종류·다른 이름·다른 ns의 응답이 replicas 0이어도 대상의 0으로 보지 않는다", async () => {
+    for (const resp of [deployment(0, { kind: "StatefulSet" }), deployment(0, { name: "other" }), deployment(0, { ns: "other" })]) {
+      const { ctx } = testCtx("apply", [rule(deployArgv(), resp)]);
+      const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }], apps: [], timeoutSec: 1 }));
+      expect([value.result, value.targets[0].last]).toEqual(["unconfirmed", "unread"]);
+    }
+  }, 10_000);
+
+  test("상한을 넘긴 응답으로 zero를 내지 않는다: 느린 Application 읽기는 남은 시간에 끊긴다", async () => {
+    // 호출에 남은 시간을 걸지 않으면 1.5초 뒤 정상 응답을 받고 이어 0을 읽어 상한 뒤에 zero를 낸다.
+    const { ctx, calls } = testCtx("apply", [rule(appArgv(), { ...app({ phase: "Succeeded" }), sleepMs: 1_500 }), rule(deployArgv(), deployment(0))]);
+    const t0 = Date.now();
+    const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
+    const took = Date.now() - t0;
+    expect(value.result).toBe("unconfirmed");
+    expect(value.unreadApps).toEqual([APP]);
+    expect(took).toBeLessThan(1_400);
+    // 상한 뒤에는 Deployment도 읽지 않는다.
+    expect(calls().calls.filter((c) => c.argv.includes("deployments.apps"))).toEqual([]);
+  });
+
+  test("상한 뒤에는 새 쓰기를 시작하지 않는다: 앞 대상의 읽기가 상한을 다 쓰면 뒤 대상은 읽지도 쓰지도 않는다", async () => {
+    const DEP2 = "worker";
+    const { ctx, calls } = testCtx("apply", [rule(deployArgv(), { ...deployment(1), sleepMs: 1_500 }), rule(deployArgv(DEP2), deployment(1)), rule(scaleArgv(0)), rule(scaleArgv(0, DEP2))]);
+    const t0 = Date.now();
+    const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }, { ns: NS, deployment: DEP2 }], apps: [], timeoutSec: 1 }));
+    expect(Date.now() - t0).toBeLessThan(1_400);
+    expect(value.result).toBe("unconfirmed");
+    expect(value.targets.map((t) => t.last)).toEqual(["unread", "unread"]);
+    expect(calls().calls.filter((c) => c.argv.includes("scale"))).toEqual([]);
+    expect(calls().calls.filter((c) => c.argv.includes(DEP2))).toEqual([]);
+  });
+
+  test("운영 기본 간격(2초)에서도 짧은 상한 안에 0 쓰기 뒤 한 번 더 읽어 zero를 낸다", async () => {
+    // 다음 회차까지 poll 간격을 통째로 기다리면 "지금 + 2초 > 상한"이라 0 쓰기 뒤 확인 없이 unconfirmed로 끝난다.
+    const { ctx, calls } = testCtx("apply", [rule(appArgv(), app({ phase: "Succeeded" })), rule(deployArgv(), [deployment(1), deployment(0)]), rule(scaleArgv(0))], { env: { HOMELAB_TEST_POLL_MS: "2000" } });
+    const t0 = Date.now();
+    const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 2 }));
+    expect(Date.now() - t0).toBeLessThan(2_000);
+    expect(value).toMatchObject({ result: "zero", targets: [{ last: 0, rezeroed: 1 }] });
+    expect(calls().calls.map((c) => c.argv)).toEqual([appArgv(), deployArgv(), scaleArgv(0), appArgv(), deployArgv()]);
+  });
 
   test("상한·대상·이름은 호출 전에 검사한다", async () => {
     const { ctx, calls } = testCtx("apply", []);
@@ -229,7 +335,7 @@ describe("Argo CD 동기화 진행", () => {
   });
 
   test("실패·시간 초과·모르는 단계·다른 객체는 던진다", () => {
-    for (const resp of [failed, app({ phase: "Paused" }), json({ kind: "Application", metadata: { name: "other" } }), json({ kind: "Application", metadata: { name: APP }, operation: "x" })]) {
+    for (const resp of [failed, app({ phase: "Paused" }), json({ kind: "Application", metadata: { name: "other", namespace: "argocd" } }), json({ kind: "Application", metadata: { name: APP, namespace: "default" } }), json({ kind: "Application", metadata: { name: APP, namespace: "argocd" }, operation: "x" })]) {
       const { ctx } = testCtx("plan", [rule(appArgv(), resp)]);
       expect(() => ctx.olive.appOperation(APP)).toThrow();
     }
@@ -240,11 +346,13 @@ describe("Argo CD 동기화 진행", () => {
 
 describe("실행 파드 목록", () => {
   const SEL = "app.kubernetes.io/part-of=olive,homelab.ukyi.app/run=1";
-  const pod = (o: Record<string, unknown>) => ({ metadata: { name: "session-0", uid: UID_A, ...o }, spec: { nodeName: "nuc", terminationGracePeriodSeconds: 30 }, status: { phase: "Running" } });
+  const pod = (o: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ kind: "Pod", metadata: { name: "session-0", namespace: NS, uid: UID_A, ...o }, spec: { nodeName: "nuc", terminationGracePeriodSeconds: 30 }, status: { phase: "Running" }, ...extra });
+  // kubectl get -l -o json이 내는 꼴(kind List, 항목마다 kind Pod).
+  const list = (items: unknown[], metadata: Record<string, unknown> = { resourceVersion: "" }) => json({ apiVersion: "v1", kind: "List", metadata, items });
 
   test("UID·단계·노드·삭제 시각·유예를 읽고, 유예 0초 삭제는 forceDeleting이다", () => {
     const items = [pod({}), pod({ name: "session-1", uid: UID_B, deletionTimestamp: "2026-11-17T11:00:00Z", deletionGracePeriodSeconds: 30 }), pod({ name: "session-2", uid: UID_B, deletionTimestamp: "2026-11-17T11:00:00Z", deletionGracePeriodSeconds: 0 })];
-    const { ctx, calls } = testCtx("plan", [rule(podsArgv(SEL), json({ items }))]);
+    const { ctx, calls } = testCtx("plan", [rule(podsArgv(SEL), list(items))]);
     const pods = ctx.olive.runPods(NS, SEL);
     expect(pods.map((p) => [p.name, p.uid, p.phase, p.nodeName, p.deletionTimestamp, p.deletionGracePeriodSeconds, p.terminationGracePeriodSeconds, p.forceDeleting])).toEqual([
       ["session-0", UID_A, "Running", "nuc", null, null, 30, false],
@@ -254,14 +362,34 @@ describe("실행 파드 목록", () => {
     expectPlanReadOnly(calls());
   });
 
-  test("빈 items는 0개, items 없는 응답·실패·시간 초과·uid 꼴 틀림은 던진다", () => {
-    expect(testCtx("plan", [rule(podsArgv(SEL), json({ items: [] }))]).ctx.olive.runPods(NS, SEL)).toEqual([]);
-    for (const resp of [failed, json({}), json({ items: [pod({ uid: "../x" })] }), json({ items: [pod({ deletionTimestamp: "yesterday" })] }), { stdout: "" }]) {
+  test("빈 List는 0개, API의 PodList 원문(항목에 kind 없음)도 읽는다", () => {
+    expect(testCtx("plan", [rule(podsArgv(SEL), list([]))]).ctx.olive.runPods(NS, SEL)).toEqual([]);
+    const { kind: _, ...bare } = pod({});
+    expect(testCtx("plan", [rule(podsArgv(SEL), json({ kind: "PodList", metadata: {}, items: [bare] }))]).ctx.olive.runPods(NS, SEL).map((p) => p.uid)).toEqual([UID_A]);
+  });
+
+  test("items 없음·실패·시간 초과·uid 꼴 틀림은 던진다", () => {
+    for (const resp of [failed, json({ kind: "List" }), list([pod({ uid: "../x" })]), list([pod({ deletionTimestamp: "yesterday" })]), { stdout: "" }]) {
       const { ctx } = testCtx("plan", [rule(podsArgv(SEL), resp)]);
       expect(() => ctx.olive.runPods(NS, SEL)).toThrow();
     }
     const t = testCtx("plan", [rule(podsArgv(SEL), hang)]);
     expect(() => t.ctx.olive.runPods(NS, SEL)).toThrow(ExecTimeout);
+  });
+
+  test("다른 종류의 목록·남은 페이지가 있는 부분 목록·Pod가 아닌 항목·다른 ns 항목은 0개나 목록으로 바꾸지 않고 던진다", () => {
+    const cases: [Resp, string][] = [
+      [json({ apiVersion: "v1", kind: "NodeList", items: [] }), "파드 목록 응답이 아니다"],
+      [json({ items: [] }), "파드 목록 응답이 아니다"],
+      [list([], { continue: "eyJ2IjoibWV0YS5rOHMuaW8vdjEifQ" }), "부분 목록"],
+      [json({ kind: "PodList", metadata: { continue: "x", remainingItemCount: 3 }, items: [] }), "부분 목록"],
+      [list([pod({}, { kind: "Node" })]), "Pod가 아니다"],
+      [list([pod({ namespace: "other" })]), "다른 ns"],
+    ];
+    for (const [resp, msg] of cases) {
+      const { ctx } = testCtx("plan", [rule(podsArgv(SEL), resp)]);
+      expect(() => ctx.olive.runPods(NS, SEL)).toThrow(msg);
+    }
   });
 
   test("selector는 key=value 꼴만", () => {
@@ -271,9 +399,9 @@ describe("실행 파드 목록", () => {
   });
 });
 
-// 노드 쪽 시험 장치. 임시 폴더를 cgroup 뿌리·machine-id로 주고, kubectl·sudo는 스텁 PATH로 부른다.
-function nodeWorld(rules: Parameters<typeof stubSandbox>[0], opts: { machineId?: string | null; tools?: string[] } = {}) {
-  const sb = stubSandbox(rules, opts.tools ? { tools: opts.tools } : {});
+// 노드 쪽 시험 장치. 임시 폴더를 cgroup 뿌리·machine-id로 주고, kubectl은 스텁 PATH로 부른다.
+function nodeWorld(rules: Parameters<typeof stubSandbox>[0], opts: { machineId?: string | null } = {}) {
+  const sb = stubSandbox(rules);
   const root = mkdtempSync(join(testRoot(), "node-"));
   const cgroup = join(root, "cgroup");
   mkdirSync(join(cgroup, "kubepods.slice"), { recursive: true });
@@ -361,41 +489,14 @@ describe("노드 판별", () => {
   });
 });
 
-describe("컨테이너 런타임 목록(--deep, sudo)", () => {
-  const listing = { containers: [{ id: "c1", metadata: { name: "body" }, state: "CONTAINER_RUNNING", labels: { "io.kubernetes.pod.uid": UID_A, "io.kubernetes.pod.namespace": NS, "io.kubernetes.pod.name": "session-0" } }] };
-
-  test("sudo argv는 고정 하나이고 읽기로 판정된다. 읽기 문맥에서 돌고 쓰기는 0건이다", () => {
-    expect([...RUNTIME_LIST_ARGV]).toEqual(["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"]);
-    expect(Object.isFrozen(RUNTIME_LIST_ARGV)).toBe(true);
-    expect(classify([...RUNTIME_LIST_ARGV]).write).toBe(false);
-    const { ctx, calls } = testCtx("plan", [rule([...RUNTIME_LIST_ARGV], json(listing))]);
-    expect(ctx.node.runtimeContainers()).toEqual({ state: "ok", containers: [{ podUid: UID_A, podNamespace: NS, podName: "session-0", container: "body", state: "CONTAINER_RUNNING" }] });
-    expect(calls().calls.map((c) => c.argv)).toEqual([[...RUNTIME_LIST_ARGV]]);
-    expectPlanReadOnly(calls());
-  });
-
-  test("명령 쪽에서 argv를 바꿀 길이 없다: 인자를 받지 않고, 상수를 고쳐도 막힌다", () => {
-    const { ctx, calls } = testCtx("plan", [rule(["sudo", "..."], json(listing))]);
-    expect(() => (RUNTIME_LIST_ARGV as string[]).push("--all")).toThrow();
-    (ctx.node.runtimeContainers as any)(["sudo", "-n", "sh"]);
-    expect(calls().calls.map((c) => c.argv)).toEqual([[...RUNTIME_LIST_ARGV]]);
-  });
-
-  test("sudo 없음·비밀번호 필요·실패·시간 초과·모르는 출력은 unreadable이다(빈 목록으로 바꾸지 않는다)", () => {
-    const cases: [Resp, string][] = [
-      [{ code: 1, stderr: "sudo: a password is required\n" }, "sudo-auth"],
-      [{ code: 1, stderr: "time=... level=fatal msg=\"connect: permission denied\"\n" }, "failed"],
-      [hang, "timeout"],
-      [{ stdout: "nope" }, "format"],
-      [json({}), "format"],
-      [json({ containers: [{ metadata: { name: "x" }, state: "RUNNING?" }] }), "format"],
-      [json({ containers: [{ metadata: { name: "x" }, state: "CONTAINER_RUNNING", labels: { "io.kubernetes.pod.uid": "../x" } }] }), "format"],
-    ];
-    for (const [resp, reason] of cases) {
-      const { ctx } = testCtx("plan", [rule([...RUNTIME_LIST_ARGV], resp)]);
-      expect(ctx.node.runtimeContainers()).toEqual({ state: "unreadable", reason } as any);
+describe("컨테이너 런타임 목록(--deep)은 없다", () => {
+  test("읽기·쓰기 문맥 어디에도 런타임 어댑터가 없고, k3s crictl을 부르는 sudo는 어떤 꼴도 쓰기로 판정된다", async () => {
+    const { ctx } = testCtx("plan", []);
+    expect(Object.keys(ctx.node).sort()).toEqual(["host", "podCgroup"]);
+    const w = testCtx("apply", []);
+    expect((await applyWith(w.ctx, (x) => Object.keys(x.node).sort())).value).toEqual(["host", "podCgroup"]);
+    for (const argv of [["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"], ["sudo", "-n", "/usr/local/bin/crictl", "ps", "-a", "-o", "json"], ["/usr/local/bin/crictl", "ps"], ["k3s", "crictl", "ps"]]) {
+      expect([argv.join(" "), classify(argv).write]).toEqual([argv.join(" "), true]);
     }
-    const none = testCtx("plan", [], { tools: DEFAULT_TOOLS });
-    expect(none.ctx.node.runtimeContainers()).toEqual({ state: "unreadable", reason: "no-sudo" });
   });
 });

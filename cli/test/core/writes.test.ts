@@ -30,8 +30,6 @@ const READS: string[][] = [
   ["tf-github.sh", "plan"],
   ["/tmp/clone/tools/tf-github.sh", "verify"],
   ["jq", "-r", ".x"],
-  // stop verify --deep의 컨테이너 목록(core/node.ts). 이 argv 한 글자도 다르지 않은 것만.
-  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"],
 ];
 
 const WRITES: string[][] = [
@@ -90,7 +88,8 @@ const WRITES: string[][] = [
   ["bash", "tools/tf-github.sh", "plan"],
   ["unknown-tool"],
   ["kubectl", "-n", "x", "scale", "deployments.apps", "y", "--replicas=0"],
-  // sudo는 고정 argv 하나만 읽기다. 비밀번호를 묻는 꼴, 다른 경로, 더한 인자, 다른 하위 명령은 쓰기다.
+  // sudo는 어떤 꼴도 쓰기다. k3s crictl ps도 런처가 내장 도구를 풀고 링크를 바꿀 수 있어 읽기가 아니다.
+  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"],
   ["sudo", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"],
   ["sudo", "-n", "k3s", "crictl", "ps", "-a", "-o", "json"],
   ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json", "--all"],
