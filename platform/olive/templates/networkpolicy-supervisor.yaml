@@ -1,0 +1,52 @@
+{{- /*
+olive-control 기본 전부 거부 + 감독 포트로 들어오는 실행기 연결만 허용(D-55).
+감독이 밖으로 나가는 길은 열지 않는다(DNS 포함). 지금 감독이 먼저 여는 연결이 없다: 실행기는 감독에 붙고, 허용한 연결의
+응답 패킷은 egress 규칙 없이 나간다. 현관·기억 저장·모델 공급자로 가는 길은 그 연결을 만드는 티켓이 이유와 함께 연다.
+감독 지표 수집(O09 할 일 7)의 들어오는 길도 그때 연다.
+kubelet 프로브는 노드에서 오므로 이 정책에 막히지 않는다(설계 B.8).
+*/}}
+{{- $t := include "olive.supervisorTarget" . | fromYaml }}
+{{- $clients := list }}
+{{- range (include "olive.targets" . | fromYaml).items }}
+{{- if eq .kind "executor" }}{{ $clients = append $clients .namespace }}{{ end }}
+{{- end }}
+{{- $clients = concat $clients .Values.supervisor.extraClientNamespaces | uniq }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: {{ $t.namespace }}
+  labels:
+    {{- include "olive.labels" $t | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: supervisor-from-clients
+  namespace: {{ $t.namespace }}
+  labels:
+    {{- include "olive.labels" $t | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "olive.selectorLabels" $t | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # 네임스페이스 이름 라벨(Kubernetes가 붙이고 바꿀 수 없다)로 고른다. 그 ns의 모든 파드가 들어오지만 실행기 ns에는
+        # 실행기 파드 하나뿐이다. 상대가 누구인지는 mTLS가 가린다(인증서 작업).
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  {{- toYaml $clients | nindent 18 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.supervisor.port }}

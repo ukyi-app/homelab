@@ -1,0 +1,27 @@
+{{- /*
+자원 상한(B-07, S-09). 실행 네임스페이스마다 limits 합을 그 파드 하나의 limits로 묶는다. Deployment가 Recreate이고 replicas는
+0 또는 1이라 파드는 한 번에 하나다. 그래서 두 번째 파드는 이 한도에 걸려 생기지 않는다.
+CPU·메모리만 건다. PID 상한은 걸지 않는다(2026-11-18 관리자 결정으로 유예. PID는 파드 limits가 아니라 kubelet podPidsLimit이다).
+
+함정: 이것은 비상 정지의 자물쇠가 아니다. 자물쇠는 CLI가 정지 때 만드는 ResourceQuota olive-stop(pods: 0, Git 밖)이다.
+이 차트는 그 이름을 만들지 않고, 이 한도는 파드 수를 세지 않는다. 둘은 따로 판정되고 둘 다 지켜져야 파드가 생긴다.
+이름을 olive-stop으로 바꾸면 Argo CD가 CLI의 자물쇠를 덮어쓰거나 prune한다.
+함정: limits.cpu를 세므로 이 ns의 모든 파드는 cpu limit이 있어야 한다. 없으면 생성이 거부된다(뒤에 이 ns에 파드를 더하는 티켓도 같다).
+B-07 전체(올리브 CPU 4개·메모리 8GB)는 네임스페이스를 넘는 합이라 이 한도로 강제되지 않는다. 감독의 동시 실행 상한(작업자 1)과 합친
+배분(values.yaml 주석)으로 지킨다.
+*/}}
+{{- range (include "olive.targets" . | fromYaml).items }}
+{{- $resources := include "olive.resources" (dict "root" $ "target" .) | fromYaml }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: olive-limits
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "olive.labels" . | nindent 4 }}
+spec:
+  hard:
+    limits.cpu: {{ required (printf "resources.limits.cpu is required for %s" .id) $resources.limits.cpu | quote }}
+    limits.memory: {{ required (printf "resources.limits.memory is required for %s" .id) $resources.limits.memory | quote }}
+{{- end }}

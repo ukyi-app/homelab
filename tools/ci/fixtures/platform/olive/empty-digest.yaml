@@ -1,0 +1,9 @@
+# expect: fail
+# match: image.digest is required
+# digest가 비면 렌더가 실패해야 한다. 켠 채 병합되면 감독·실행기가 태그 없는 이미지 이름을 당긴다(platform/olive/values.yaml image).
+infisical:
+  projectSlug: ci-project
+  environmentSlug: ci
+supervisor:
+  account:
+    name: ci-account

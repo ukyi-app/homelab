@@ -1,0 +1,54 @@
+{{- /*
+실행기 ns 기본 전부 거부 + 감독 포트로 나가는 길 하나(D-55). 들어오는 것은 전부 닫는다(실행기는 듣지 않는다).
+DNS(CoreDNS 53)는 열지 않는다. 실행기 파드에서는 모델 프로세스가 돌고, CoreDNS는 임의 이름을 공용 DNS에 재귀 질의하므로
+열면 이름에 실은 값이 허용 목록 밖으로 나간다(spec.md §6 불변 조건 9, platform/sandbox worker-networkpolicy.yaml과 같은 이유).
+그래서 실행기는 감독 Service의 고정 주소(values.yaml supervisor.clusterIP)로 붙는다. 이 정책의 목적지는 DNAT 뒤 주소(감독 파드)다.
+모델·관측 중계·웹으로 가는 길은 역할 프로필 티켓(O11·O12)이 역할별 프록시와 함께 연다. 지금 열지 않는다.
+
+함정: NetworkPolicy는 노드 로컬 경로(노드 IP의 6443·10250·22)를 막지 못하고(설계 P19), kube-router가 새 파드 규칙을 수 초 늦게
+건다(B.8 E4). sandbox는 NET_ADMIN init 방화벽으로 둘을 막는다. 이 ns들은 restricted라 그 방식을 쓸 수 없다. 모델 프로세스를
+여기서 돌리기 전(targets.yaml start를 true로 바꾸는 PR 전)에 막는 방법을 정한다.
+*/}}
+{{- $sup := include "olive.supervisorTarget" . | fromYaml }}
+{{- range (include "olive.targets" . | fromYaml).items }}
+{{- if eq .kind "executor" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "olive.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: executor-to-supervisor
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "olive.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "olive.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $sup.namespace }}
+          podSelector:
+            matchLabels:
+              {{- include "olive.selectorLabels" $sup | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.supervisor.port }}
+{{- end }}
+{{- end }}

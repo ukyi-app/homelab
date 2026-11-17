@@ -1,0 +1,22 @@
+{{- /*
+실행기 → 감독 연결(D-55: 실행기가 먼저 붙어 연결을 유지한다). 실행기는 이 고정 주소로 붙고 DNS를 쓰지 않는다
+(templates/networkpolicy-executors.yaml). 이름 supervisor.<ns>.svc는 DNS가 있는 클라이언트(뒤의 현관 등)와 인증서 이름의 자리다.
+*/}}
+{{- $t := include "olive.supervisorTarget" . | fromYaml }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: supervisor
+  namespace: {{ $t.namespace }}
+  labels:
+    {{- include "olive.labels" $t | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: {{ .Values.supervisor.clusterIP }}
+  selector:
+    {{- include "olive.selectorLabels" $t | nindent 4 }}
+  ports:
+    - name: control
+      port: {{ .Values.supervisor.port }}
+      targetPort: control
+      protocol: TCP

@@ -1,0 +1,103 @@
+{{- /*
+감독(D-37, supervisor.md §1.1·§8). 모델이 아닌 프로세스이고 hc·Kubernetes 자격이 없다. 장부(SQLite)를 혼자 쓴다.
+env 이름은 이 차트가 정한 자리다. ukyi-app/olive의 감독 코드가 같은 이름을 읽는다(아직 코드가 없어 이미지는 69로 끝난다).
+*/}}
+{{- $t := include "olive.supervisorTarget" . | fromYaml }}
+{{- $tls := .Values.supervisor.tls }}
+{{- $account := required "supervisor.account.name is required (account alias under Infisical /bot-accounts/<name>)" .Values.supervisor.account.name }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $t.deployment }}
+  namespace: {{ $t.namespace }}
+  labels:
+    {{- include "olive.labels" $t | nindent 4 }}
+  annotations:
+    # 장부 PVC와 같은 wave(templates/supervisor-pvc.yaml 주석).
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  # Git 값은 늘 0이다(D-38). 켜고 끄기는 관리자 CLI가 하고, 이 칸은 root의 ignoreDifferences(/spec/replicas)로 Argo CD가
+  # 되돌리지 않는다(platform/root/templates/olive.yaml). 빈 클러스터에서 다시 만들면 꺼진 채 시작한다.
+  replicas: 0
+  # 장부는 단일 작성자다(S-04). RollingUpdate면 교체 중 두 파드가 같은 RWO 볼륨의 SQLite를 함께 열려 하고,
+  # olive-limits ResourceQuota가 두 번째 파드를 막아 교체가 멈춘다.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "olive.selectorLabels" $t | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "olive.labels" $t | nindent 8 }}
+    spec:
+      {{- include "olive.podSecurity" $t | nindent 6 }}
+      containers:
+        - name: supervisor
+          image: {{ include "olive.image" . }}
+          command: ["bun", "src/main/supervisor.ts"]
+          # 실행기가 붙는 포트. 이미지에는 듣는 포트가 적혀 있지 않아 env로 준다.
+          ports:
+            - name: control
+              containerPort: {{ .Values.supervisor.port }}
+              protocol: TCP
+          env:
+            - name: OLIVE_SUPERVISOR_PORT
+              value: {{ .Values.supervisor.port | quote }}
+            # 장부 디렉터리(PVC). DB 오류나 디스크 부족이면 새 실행은 0건이다(§8).
+            - name: OLIVE_LEDGER_DIR
+              value: {{ .Values.supervisor.ledger.mountPath | quote }}
+            # 지시 서명 키 파일이 든 디렉터리(파일 이름 = Infisical 키 이름).
+            - name: OLIVE_SIGNING_KEY_DIR
+              value: /run/olive/signing
+            # 계정 묶음 디렉터리. 계정마다 하위 디렉터리 <별칭>/<키 이름> 파일이다(지금은 고정 계정 하나).
+            - name: OLIVE_ACCOUNTS_DIR
+              value: /run/olive/accounts
+            {{- if $tls.secretName }}
+            - name: OLIVE_TLS_DIR
+              value: {{ $tls.mountPath | quote }}
+            {{- end }}
+          # 프로브는 두지 않는다. 건강 확인 포트는 아직 정하지 않았다(spec.md §5.3 "같은 파드의 공유 통로"). 감독 코드가 생긴 뒤 더한다.
+          {{- include "olive.containerSecurity" . | nindent 10 }}
+          resources:
+            {{- include "olive.resources" (dict "root" . "target" $t) | nindent 12 }}
+          volumeMounts:
+            - name: ledger
+              mountPath: {{ .Values.supervisor.ledger.mountPath }}
+            - name: signing
+              mountPath: /run/olive/signing
+              readOnly: true
+            - name: account
+              mountPath: /run/olive/accounts/{{ $account }}
+              readOnly: true
+            {{- if $tls.secretName }}
+            - name: tls
+              mountPath: {{ $tls.mountPath }}
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ledger
+          persistentVolumeClaim:
+            claimName: ledger
+        # Secret 볼륨은 subPath로 붙이지 않는다. subPath면 kubelet이 갱신을 반영하지 않아 키·토큰 교체가 파드 재시작까지 안 보인다.
+        # optional을 두지 않는다(기본 false): 없으면 FailedMount로 컨테이너 생성 전에 멈춰 원인이 이벤트에 바로 보인다.
+        - name: signing
+          secret:
+            secretName: olive-signing-key
+            defaultMode: 0440
+        - name: account
+          secret:
+            secretName: olive-account-{{ $account }}
+            defaultMode: 0440
+        {{- if $tls.secretName }}
+        - name: tls
+          secret:
+            secretName: {{ $tls.secretName }}
+            defaultMode: 0440
+        {{- end }}
+        # 이미지가 쓰는 유일한 자리(D-54). SQLite 임시 파일도 여기다. 크기는 [가정]이다. 넘으면 kubelet이 파드를 쫓아낸다.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi

@@ -1,0 +1,70 @@
+{{- /*
+olive: 올리브의 감독과 역할별 작업자 실행기(ns olive-control, olive-diagnosis, olive-reader, D-37). wave 1.
+세 ns에 걸쳐 destination.namespace를 비운다. 리소스마다 metadata.namespace를 적고, ns와 PSA 라벨도 차트가 만든다
+(platform/olive/templates/namespaces.yaml: 꺼 둔 동안 빈 ns가 생기지 않게).
+켜기: values.yaml의 components.olive.enabled. 클러스터 값은 cluster.infisical(감독 전용 store infisical-olive)만 받는다.
+
+wave 1(맨 뒤, 봇 자리·go와 같다): 올리브에 기대는 구성 요소가 없다. root sync는 마지막 wave의 health를 기다리지 않으므로
+올리브의 Degraded(Infisical 키 누락, 이미지 문제)가 플랫폼·앱 wave를 막지 않는다(설계 C.3.1). 앞에 두면 그 실패로 root가
+appset-apps(0)·bot-slot(1)에 닿지 못한다. 필요한 앞 wave는 ESO(-8)·store(-7)와 인증서 작업이 쓸 cert-manager(-7)뿐이다.
+함정: 이 Application보다 뒤 wave를 더하지 않는다(ci checkBotSlotLastWave는 bot-slot보다 뒤만 본다. 같은 wave는 된다).
+*/}}
+{{- if .Values.components.olive.enabled }}
+{{- $infisical := .Values.cluster.infisical | default dict }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: olive
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: platform
+  source:
+    repoURL: {{ include "homelab.repoURL" . }}
+    targetRevision: main
+    path: platform/olive
+    helm:
+      valuesObject:
+        infisical:
+          projectSlug: {{ required "cluster.infisical.projectSlug is missing in values-<cluster>.yaml" $infisical.projectSlug | quote }}
+          environmentSlug: {{ required "cluster.infisical.environmentSlug is missing in values-<cluster>.yaml" $infisical.environmentSlug | quote }}
+        {{- with include "homelab.externalSecretsValues" . }}{{ . | nindent 8 }}{{- end }}
+  destination:
+    server: https://kubernetes.default.svc
+  # 실행 Deployment의 replicas만 Argo CD 예외다(D-38). Git 값은 0이고 켜고 끄기는 관리자 CLI가 한다.
+  # 대상은 platform/olive/targets.yaml에서 declaredBy가 platform/olive인 줄과 같아야 한다. root 차트는 그 파일을 읽지 못해
+  # 손으로 적는다. 셋(이 목록, 그 파일, CLI 대상)이 같은지는 CI 정책 검사가 맡는다(O09 할 일 6, 아직 없음).
+  # 이름 없이 kind만 적지 않는다. 뒤에 이 차트에 실행 대상이 아닌 Deployment가 생기면 그 replicas까지 Git이 놓친다.
+  # 함정: 이 예외는 "CLI만 그 칸을 쓴다"가 아니다. Argo CD는 읽은 라이브 값을 다시 쓴다(supervisor.md §7.2). 정지가 자물쇠
+  # (ResourceQuota olive-stop)를 먼저 거는 이유다.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      namespace: olive-control
+      name: supervisor
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: Deployment
+      namespace: olive-diagnosis
+      name: executor
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: Deployment
+      namespace: olive-reader
+      name: executor
+      jsonPointers:
+        - /spec/replicas
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # ignoreDifferences는 diff만 가린다. 이 옵션이 없으면 다른 이유의 sync가 Git 값 0으로 덮어써 CLI가 켠 파드를 내린다.
+    # 위 ignoreDifferences에 든 필드만 sync에서 뺀다. 처음 만드는 리소스에는 적용되지 않아 빈 클러스터에서는 0으로 생긴다.
+    syncOptions:
+      - RespectIgnoreDifferences=true
+    retry:
+      {{- include "homelab.retry" . | nindent 6 }}
+{{- end }}
