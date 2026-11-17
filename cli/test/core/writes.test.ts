@@ -87,6 +87,16 @@ const WRITES: string[][] = [
   ["sh", "-c", "anything"],
   ["bash", "tools/tf-github.sh", "plan"],
   ["unknown-tool"],
+  ["kubectl", "-n", "x", "scale", "deployments.apps", "y", "--replicas=0"],
+  // sudo는 어떤 꼴도 쓰기다. k3s crictl ps도 런처가 내장 도구를 풀고 링크를 바꿀 수 있어 읽기가 아니다.
+  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"],
+  ["sudo", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"],
+  ["sudo", "-n", "k3s", "crictl", "ps", "-a", "-o", "json"],
+  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json", "--all"],
+  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "rm", "-a"],
+  ["sudo", "-n", "/usr/local/bin/k3s", "crictl", "stop", "x"],
+  ["/usr/bin/sudo", "-n", "/usr/local/bin/k3s", "crictl", "ps", "-a", "-o", "json"],
+  ["sudo", "-n", "cat", "/etc/shadow"],
 ];
 
 describe("쓰기 판정(읽기 허용 목록, 나머지는 쓰기)", () => {

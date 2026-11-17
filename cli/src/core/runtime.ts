@@ -14,6 +14,8 @@ import { botRead, botWrite, httpWrite, pgWrite, valkeyWrite } from "./podops";
 import { infisicalRead, infisicalWrite, projectResolver } from "./infisical";
 import { askHiddenTty, readStdinAll, readApiKeys, readSecretInput, readSetupTokens, setupTokenLogin, type SlotInput } from "./input";
 import { kubeRead, kubeWrite } from "./kubectl";
+import { nodeRead } from "./node";
+import { oliveRead, oliveWrite } from "./olive";
 import { writeStderr } from "./output";
 import { repoRead } from "./pr";
 import type { Mode } from "./result";
@@ -80,6 +82,8 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       http: httpWrite(makeForward(exec, { env: o.env, live: () => live })),
       pgRestore: pgRestoreWrite(exec, k8sRead, makePipe({ env: o.env, live: () => live }), (ns, job) => k8sRead.waitCondition("job", ns, { jobPods: job }, "Ready", 60)),
       bot: botWrite(exec, k8sRead, kube.pollMs ?? 2_000),
+      olive: { ...oliveRead(readExec), ...oliveWrite(exec, readExec, kube) },
+      node: nodeRead(readExec),
       progress: o.progress,
     };
     if (o.wrapper && delegateRead) {
@@ -103,6 +107,8 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
     ghcr: ghcrRead(readExec),
     web: webRead(readExec),
     bot: botRead(kubeRead(readExec, kube)),
+    olive: oliveRead(readExec),
+    node: nodeRead(readExec),
     tools: toolsRead(readExec, o.env),
     progress: o.progress,
     // 엔진은 한 번에 하나만 돈다(중첩·병렬 거부). 한 apply의 쓰기 문맥이 살아 있는 동안 다른 엔진의 단계가 돌 수 없다.
