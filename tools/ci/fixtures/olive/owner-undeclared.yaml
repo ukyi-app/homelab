@@ -2,7 +2,14 @@
 # rule: olive-owner
 # match: declaredBy가 빈 대상 session의 자리에 adguard(platform/adguard)가 Deployment를 낸다
 # 아직 선언되지 않은 세션 자리(olive-session/session)에 다른 차트가 Deployment를 냈다. 그 replicas·예외를 아무 규칙도 보지 않는다.
+# 전제(session 미선언, 그 자리에 다른 Deployment 없음)를 직접 만든다. 대조군 O10은 세션을 선언하고 Deployment를 낸다.
 patch:
+  - in: targets
+    select: {id: session}
+    set: {declaredBy: "", start: false}
+  - in: all
+    select: {kind: Deployment, namespace: olive-session, name: session}
+    drop: true
   - in: render
     render: root
     origin: "adguard[prod]:platform/adguard"

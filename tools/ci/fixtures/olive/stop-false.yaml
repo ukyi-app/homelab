@@ -2,7 +2,8 @@
 # rule: olive-targets
 # match: stop이 true가 아니다(start: false)
 # 지금 켤 수 없는 읽기 실행기를 정지에서 뺐다. Deployment와 replicas 예외는 그대로라 다른 경로로 뜬 파드를 정지·소멸 확인이 놓친다.
+# 전제(reader start: false)를 직접 만든다. 역할 프로필이 채워져 reader를 켜도 같은 사례다.
 patch:
   - in: targets
     select: {id: reader}
-    set: {stop: false}
+    set: {stop: false, start: false}

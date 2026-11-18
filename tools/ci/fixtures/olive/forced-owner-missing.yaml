@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-ignore-differences
+# match: platform/olive를 배포하는 Application이 0개다
+# 대상 차트를 켠 root에 꺼 두었던 소유 Application(olive)이 없다(예: components 이름이 디렉터리 이름과 달라 켜지지 않음).
+# 그 Application의 예외와 Respect 옵션을 확인할 수 없다.
+patch:
+  - in: apps
+    render: root+켬
+    select: {kind: Application, name: olive}
+    drop: true

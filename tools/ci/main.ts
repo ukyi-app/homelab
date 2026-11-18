@@ -465,7 +465,8 @@ const steps: Step[] = [
   },
   {
     name: "olive fixtures",
-    // 지금 main의 선언에 patch 하나를 얹은 음성 사례(tools/ci/fixtures/olive/*.yaml). 규칙마다 하나 이상, 기대한 위반만 나야 한다.
+    // 대조군 셋(지금 선언, 정상 O13 전환, 정상 O10 세션)마다 patch 하나를 얹은 사례(tools/ci/fixtures/olive/*.yaml)와 렌더 경로의
+    // 작은 시험. 규칙마다 음성 사례가 하나 이상, 기대한 위반만 나야 한다.
     run: () => checkOliveFixtures(oliveInput()),
   },
   {

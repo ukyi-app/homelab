@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-chart-targets
+# match: 대상 writer(Deployment sandbox/worker-task)가 platform/sandbox의 실제 값 렌더에 없다
+# 지금 root의 VM 값에서 켜진 sandbox Application이 작성 Deployment를 렌더하지 않는다(예: task.enabled가 그 조합에서만 꺼짐).
+# 대상 차트를 켠 root에만 있으면 정지 대상 목록과 실제 배포가 어긋난 채 통과한다.
+patch:
+  - in: render
+    render: root
+    select: {origin: "sandbox[vm]:platform/sandbox", kind: Deployment, namespace: sandbox, name: worker-task}
+    drop: true

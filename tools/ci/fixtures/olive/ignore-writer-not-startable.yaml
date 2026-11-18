@@ -2,7 +2,11 @@
 # rule: olive-ignore-differences
 # match: 대상 writer가 start: true가 아닌데
 # O13 전(writer start: false)에 정확한 replicas 예외만 먼저 넣었다. 옛 작성 작업자를 손으로 켜면 selfHeal이 0으로 되돌리지 않는다(D-17).
+# 전제(writer start: false)를 직접 만든다. 대조군 O13(start: true)에서도 같은 사례다.
 patch:
+  - in: targets
+    select: {id: writer}
+    set: {start: false}
   - in: apps
     select: {kind: Application, name: sandbox}
     append:

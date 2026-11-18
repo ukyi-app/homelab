@@ -1,0 +1,17 @@
+# expect: fail
+# rule: olive-isolation
+# match: claimRef 없는 정적 PV에 이전 클래스 주석 volume.beta.kubernetes.io/storage-class를 두지 않는다
+# claimRef 없는 정적 PV가 spec.storageClassName 없이 이전 주석으로만 local-retain을 선언했다. Kubernetes는 주석을 먼저 읽어
+# 이 PV를 local-retain 결합 후보로 본다.
+patch:
+  - in: chart
+    add:
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: stray-beta
+        annotations: {volume.beta.kubernetes.io/storage-class: local-retain}
+      spec:
+        capacity: {storage: 1Gi}
+        accessModes: [ReadWriteOnce]
+        hostPath: {path: /var/lib/stray}

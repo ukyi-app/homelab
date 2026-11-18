@@ -154,18 +154,41 @@ export function clusterRestore(vf: string, overlay?: RootOverlay): Restore {
 // 덧씌우기가 있으면 3.(남은 kustomization) build는 건너뛴다. 배포되지 않는 디렉터리라 스위치와 상관없고, 켠 렌더가 이미 본다.
 // components는 꺼 둔 구성 요소를 켠 렌더(tools/ci/olive.ts)가 쓴다.
 export type RootOverlay = { cluster?: { restore?: Record<string, unknown> }; components?: Record<string, { enabled: boolean }> };
-// fill: source path → Application의 valuesObject에 없는 키만 채울 값. 배포 전이라 비어 있는 필수 입력(digest 등)을 보충해
-// 실제 Application 값으로 렌더한다(tools/ci/olive.ts RENDER_FILL). valuesObject에 이미 있는 키는 덮지 않는다.
+// fill: source path → 최종 값이 비었을 때만 채울 값. 배포 전이라 비어 있는 필수 입력(digest 등)을 보충해 실제 Application 값으로
+// 렌더한다(tools/ci/olive.ts RENDER_FILL). 최종 값은 Helm과 같은 순서(차트 values.yaml → valueFiles → valuesObject)로 합친 것이다.
 export type RenderOptions = { rootOverlay?: RootOverlay; chartOverlay?: Record<string, unknown>; fill?: Record<string, Record<string, unknown>> };
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-function fillMissing(base: Record<string, unknown> | undefined, fill: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+const isEmptyValue = (v: unknown) => v === undefined || v === null || v === "";
+// layers: 차트 values.yaml과 valueFiles를 읽은 값(앞이 먼저). fill의 잎마다 layers와 valuesObject를 차례로 덮어 본 최종 값이 비었을 때만
+// valuesObject에 그 잎을 쓴다. valuesObject의 명시적 빈 값("", null)도 비었다고 보고 덮는다. 아무것도 채우지 않으면 base를 그대로 돌려준다.
+export function fillEmpty(layers: unknown[], base: Record<string, unknown> | undefined, fill: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!fill) return base;
-  const out: Record<string, unknown> = structuredClone(base ?? {});
-  for (const [k, v] of Object.entries(fill)) {
-    if (out[k] === undefined) out[k] = structuredClone(v);
-    else if (isMap(out[k]) && isMap(v)) out[k] = fillMissing(out[k] as Record<string, unknown>, v);
-  }
+  let out = base;
+  const walk = (node: Record<string, unknown>, path: string[]) => {
+    for (const [k, v] of Object.entries(node)) {
+      const p = [...path, k];
+      if (isMap(v)) {
+        walk(v, p);
+        continue;
+      }
+      const at = (o: unknown) => p.reduce<unknown>((x, key) => (isMap(x) ? x[key] : undefined), o);
+      let final: unknown = undefined;
+      for (const layer of [...layers, base]) {
+        const x = at(layer);
+        if (x !== undefined) final = x;
+      }
+      if (!isEmptyValue(final)) continue;
+      out = structuredClone(out ?? {});
+      let cur: Record<string, unknown> = out;
+      for (const key of p.slice(0, -1)) {
+        if (!isMap(cur[key])) cur[key] = {};
+        cur = cur[key] as Record<string, unknown>;
+      }
+      cur[p[p.length - 1]] = structuredClone(v);
+    }
+  };
+  walk(fill, []);
   return out;
 }
 // 차트 schema가 덧씌우기의 키를 거부하는가. 복구 스위치가 없는 닫힌 schema(bot-slot은 ExternalSecret이 없다)는 root도 그 키를 넘기지 않으므로 덧씌우지 않는다.
@@ -311,6 +334,17 @@ function clusterBuckets(clusterFiles: string[]): [string, string | undefined][] 
   });
 }
 
+// 목록 문서(items가 배열인 것: v1 List와 *List) 안의 Application·ApplicationSet. Argo CD는 목록을 펴서 항목마다 적용하지만
+// (v3.6.1 reposerver/repository/repository.go) renderAll은 최상위 문서에서만 자식 Application을 찾아 렌더한다. 펴서 따라가면
+// 같은 렌더를 두 길로 재현해야 하므로, 목록 안에 두는 것을 실패로 둔다. 지금 저장소에는 없다.
+export function listedArgoApps(obj: any): string[] {
+  if (!obj || typeof obj !== "object" || !Array.isArray(obj.items)) return [];
+  return obj.items.flatMap((it: any) => [
+    ...(it?.kind === "Application" || it?.kind === "ApplicationSet" ? [`${it.kind}/${it.metadata?.name}`] : []),
+    ...listedArgoApps(it),
+  ]);
+}
+
 // 렌더 결과 캐시. 같은 차트·값이면 결과가 같으므로 켠 렌더와 끈 렌더(tools/ci/switch.ts)가 함께 쓴다.
 // kustomize 원격 base(argocd install.yaml)를 두 번 받지 않는다. 기본 렌더 결과도 한 번만 만든다.
 const cache = new Map<string, { ok: boolean; out: string }>();
@@ -408,7 +442,12 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
         }
         files.push(join(srcDir, f));
       }
-      const valuesObject = fillMissing(helm.valuesObject, opts.fill?.[path]);
+      const fill = opts.fill?.[path];
+      const readLayer = (f: string) => {
+        const abs = f.startsWith("/") ? f : join(ROOT, f);
+        return existsSync(abs) ? Bun.YAML.parse(readFileSync(abs, "utf8")) : undefined;
+      };
+      const valuesObject = fill ? fillEmpty([readLayer(join(srcDir, "values.yaml")), ...files.map(readLayer)], helm.valuesObject, fill) : helm.valuesObject;
       if (valuesObject) {
         const vfile = join(tmp, `${name}-${cluster}-values.json`);
         writeFileSync(vfile, JSON.stringify(valuesObject));
@@ -469,6 +508,10 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     if (out === undefined) continue;
     // 2. root가 만든 Application의 자기 저장소 source. 렌더 결과에 다시 Application이 있으면(app-of-apps) 그것도 따라간다.
     const visit = (text: string, depth: number) => {
+      for (const d of parseAll(text)) {
+        const nested = listedArgoApps(d);
+        if (nested.length > 0) fail(`${d?.metadata?.name ?? d?.kind}[${cluster}]`, `목록(items) 안의 ${nested.join(", ")}는 render.ts가 따라가지 않는다. 최상위 문서로 둔다`);
+      }
       // ApplicationSet이 만드는 Application도 검사해야 한다. 어느 단계에서 나오든 여기서 전개하는 것만 받는다(아래 5.).
       for (const set of parseAll(text).filter((d) => d?.kind === "ApplicationSet")) {
         const ok = APPSET_RENDERERS[set.metadata?.name]?.(set, clusterRestore(`platform/root/values-${cluster}.yaml`, opts.rootOverlay));

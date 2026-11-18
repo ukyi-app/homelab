@@ -1,0 +1,12 @@
+# expect: fail
+# rule: olive-isolation
+# match: PVC에 이전 클래스 주석 volume.beta.kubernetes.io/storage-class를 두지 않는다
+# 장부 PVC에 이전 클래스 주석을 달았다. Kubernetes는 이 주석을 spec.storageClassName보다 먼저 읽어, 필드가 허용 클래스여도 실제 클래스가 바뀐다.
+# 점 경로가 키의 점을 나누므로 맵을 통째로 바꾼다(기존 sync-wave 포함).
+patch:
+  - in: chart
+    select: {kind: PersistentVolumeClaim, namespace: olive-control, name: ledger}
+    set:
+      metadata.annotations:
+        argocd.argoproj.io/sync-wave: "2"
+        volume.beta.kubernetes.io/storage-class: ""

@@ -1,0 +1,54 @@
+# expect: pass
+# O10의 정상 입력(대조군 O10): 세션을 platform/olive 밖의 차트(여기서는 platform/go)가 선언하고 켤 수 있게 한다.
+# 선언 차트의 ci 렌더와 두 클러스터의 실제 값 렌더(지금 root, 켠 root)에 olive-session의 Namespace(PSA restricted)·전용 SA·
+# replicas 0의 session Deployment가 있고, 그 차트의 Application에 정확한 replicas 예외와 RespectIgnoreDifferences=true가 있다.
+# 차트 이름은 예시다. 실제 O10은 선언 차트에 ci/*.yaml을 두고 targets.yaml의 declaredBy를 같은 PR에서 채운다.
+patch:
+  - in: targets
+    select: {id: session}
+    set: {declaredBy: platform/go, start: true}
+  - in: chart
+    chart: platform/go
+    addRender: chart:go/ci/o10.yaml
+  - in: chart
+    chart: platform/go
+    add: &ns
+      apiVersion: v1
+      kind: Namespace
+      metadata: {name: olive-session, labels: {pod-security.kubernetes.io/enforce: restricted}}
+  - in: chart
+    chart: platform/go
+    add: &sa
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata: {name: session, namespace: olive-session}
+      automountServiceAccountToken: false
+  - in: chart
+    chart: platform/go
+    add: &deploy
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: session, namespace: olive-session}
+      spec:
+        replicas: 0
+        selector: {matchLabels: {app: session}}
+        template:
+          metadata: {labels: {app: session}}
+          spec:
+            serviceAccountName: session
+            automountServiceAccountToken: false
+            containers:
+              - name: session
+                image: x
+                securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+  - {in: render, origin: "go[prod]:platform/go", add: *ns}
+  - {in: render, origin: "go[prod]:platform/go", add: *sa}
+  - {in: render, origin: "go[prod]:platform/go", add: *deploy}
+  - {in: render, origin: "go[vm]:platform/go", add: *ns}
+  - {in: render, origin: "go[vm]:platform/go", add: *sa}
+  - {in: render, origin: "go[vm]:platform/go", add: *deploy}
+  - in: apps
+    select: {kind: Application, name: go}
+    append:
+      spec.ignoreDifferences: {group: apps, kind: Deployment, namespace: olive-session, name: session, jsonPointers: [/spec/replicas]}
+      spec.syncPolicy.syncOptions: RespectIgnoreDifferences=true

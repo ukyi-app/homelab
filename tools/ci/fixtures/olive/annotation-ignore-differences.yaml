@@ -1,0 +1,12 @@
+# expect: fail
+# rule: olive-ignore-differences
+# match: 대상 writer의 Deployment에 Argo CD 주석 argocd.argoproj.io/ignore-differences를 두지 않는다
+# 작성 Deployment 자신에 replicas 예외 주석을 달았다. Application의 ignoreDifferences는 비어 있어도 Argo CD가 이 주석을 합쳐 diff에서
+# replicas를 빼므로, start: false인 지금 손으로 올린 값을 selfHeal이 되돌리지 않는다. 점 경로가 키의 점을 나누므로 맵을 통째로 바꾼다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: sandbox, name: worker-task}
+    set:
+      metadata.annotations:
+        argocd.argoproj.io/sync-wave: "2"
+        argocd.argoproj.io/ignore-differences: "jsonPointers:\n- /spec/replicas"

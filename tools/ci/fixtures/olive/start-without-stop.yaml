@@ -5,4 +5,4 @@
 patch:
   - in: targets
     select: {id: supervisor}
-    set: {stop: false}
+    set: {stop: false, start: true}

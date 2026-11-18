@@ -1,13 +1,14 @@
 // 올리브 실행 대상 검사(D-38·D-39, docs/plans/2026-11-13-olive/supervisor.md §1.1·§7.1·§7.2, AC-29).
 // 비상 정지는 실행 대상 목록 하나(platform/olive/targets.yaml)를 믿는다. 차트가 만드는 Deployment, Argo CD 예외(ignoreDifferences),
 // CLI가 내리고 올리는 대상이 이 목록과 어긋나면 정지가 덮지 못하는 파드가 생긴다. 규칙 이름은 OLIVE_RULES, 각 함수 머리 주석이 이유다.
-// 구성 요소를 root에서 꺼 둬도 돈다. 차트의 ci/*.yaml 렌더와, 대상 차트를 켠 root의 실제 Application 값 렌더를 함께 본다.
+// 구성 요소를 root에서 꺼 둬도 돈다. 차트의 ci/*.yaml 렌더, 지금 root와 대상 차트를 켠 root의 실제 Application 값 렌더,
+// 호스트가 설치하는 매니페스트(host/k3s-manifests)를 함께 본다.
 // CLI의 올리브 명령은 아직 없다. 생기면 대상을 이 파일에서 읽어야 하고, 손으로 적은 목록을 두면 이 검사가 그 목록을 보지 못한다.
 import { existsSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { type Doc, type Violation, ROOT, effectiveSources, fmt, gitFiles, parseAll, readText, sameRepo } from "./lib";
 import { WORKLOAD_KINDS, context, expand, id, podSpec } from "./policy";
-import { helmTemplate, renderAll } from "./render";
+import { fillEmpty, helmTemplate, listedArgoApps, renderAll } from "./render";
 
 export const OLIVE_TARGETS_FILE = "platform/olive/targets.yaml";
 const OLIVE_CHART = "platform/olive";
@@ -31,9 +32,11 @@ const FORCED = "root+켬";
 export type Target = { id: string; kind: string; namespace: string; deployment: string; declaredBy: string; stop: unknown; start: unknown };
 // targets: targets.yaml의 파싱 결과 그대로. charts: declaredBy → 켠 값 파일 렌더, chartRenders: 그 렌더 호출의 출처(문서가 0개여도 남는다).
 // deployed: REAL·FORCED → 전체 렌더 문서(출처는 render.ts의 `<Application>[<클러스터>]:<source path>` 등).
-export type OliveInput = { targets: any; charts: Record<string, Doc[]>; chartRenders: Record<string, string[]>; deployed: Record<string, Doc[]> };
+// host: 호스트가 설치하는 매니페스트(host/k3s-manifests). 격리 검사의 PV·StorageClass 입력이다.
+export type OliveInput = { targets: any; charts: Record<string, Doc[]>; chartRenders: Record<string, string[]>; deployed: Record<string, Doc[]>; host: HostManifests };
 
-const nsOf = (d: Doc): string | undefined => d.obj.metadata?.namespace ?? d.ns;
+// 빈 문자열도 생략과 같다. Argo CD는 namespaced 리소스의 빈 namespace를 Application destination으로 채운다(v3.6.1 controller/state.go).
+const nsOf = (d: Doc): string | undefined => d.obj.metadata?.namespace || d.ns;
 const isString = (v: unknown): v is string => typeof v === "string";
 
 // 렌더 출처에서 그 문서를 낸 Application·클러스터·source path. cluster가 없으면 배포되지 않는 렌더(차트 시험 값, 남은 kustomization)다.
@@ -122,6 +125,25 @@ function replicasViolations(d: Doc, t: Target): Violation[] {
   return [];
 }
 
+// 대상 Deployment 자신에 두면 Argo CD v3.6.1이 그 리소스의 diff·동기 상태를 바꾸는 주석. 예외를 둘 자리는 소유 Application의
+// ignoreDifferences 하나다(checkIgnoreDifferences가 모양을 본다). 값과 상관없이 키가 있으면 거절한다.
+//   ignore-differences: Application 예외에 더해 diff에서 뺀다(util/argo/diff/ignore.go ExtractIgnoreDifferencesFromAnnotations, diff.go StateDiffs).
+//   compare-options: 리소스 비교 옵션(IgnoreExtraneous, controller/state.go).
+//   hook 둘: hook 리소스는 동기 상태에 들지 않아 selfHeal이 replicas를 고치지 않는다(gitops-engine/pkg/sync/hook/hook.go IsHook, controller/state.go).
+export const ARGO_RESOURCE_ANNOTATIONS = ["argocd.argoproj.io/ignore-differences", "argocd.argoproj.io/compare-options", "argocd.argoproj.io/hook", "helm.sh/hook"];
+function annotationViolations(d: Doc, t: Target): Violation[] {
+  const ann = d.obj.metadata?.annotations ?? {};
+  return ARGO_RESOURCE_ANNOTATIONS.filter((k) => Object.hasOwn(ann, k)).map((k) => ({
+    rule: "olive-ignore-differences",
+    where: id(d),
+    message: `대상 ${t.id}의 Deployment에 Argo CD 주석 ${k}를 두지 않는다. 예외는 소유 Application의 ignoreDifferences에만 둔다`,
+  }));
+}
+
+const argoApps = (docs: Doc[]) => docs.filter((d) => d.obj.kind === "Application" && String(d.obj.apiVersion).startsWith("argoproj.io/") && deployedDoc(d));
+const deployersOf = (apps: Doc[], cluster: string, chart: string) =>
+  apps.filter((a) => context(a.origin) === cluster && effectiveSources(a.obj.spec).some((s) => sameRepo(s?.repoURL) && s?.path === chart));
+
 // 차트의 ci/*.yaml 렌더마다 그 차트가 선언한 대상이 있고 replicas가 0인지. 렌더 호출 단위로 보므로 문서가 0개인 값 파일도 걸린다.
 // platform/olive는 목록과 렌더가 같은 집합이어야 한다.
 function checkChartTargets(targets: Target[], charts: Record<string, Doc[]>, renders: Record<string, string[]>): Violation[] {
@@ -136,7 +158,7 @@ function checkChartTargets(targets: Target[], charts: Record<string, Doc[]>, ren
       for (const t of mine) {
         const found = deps.filter((d) => nsOf(d) === t.namespace && d.obj.metadata?.name === t.deployment);
         if (found.length === 0) out.push({ rule: "olive-chart-targets", where: origin, message: `${OLIVE_TARGETS_FILE}의 대상 ${t.id}(Deployment ${t.namespace}/${t.deployment})가 렌더에 없다` });
-        for (const d of found) out.push(...replicasViolations(d, t));
+        for (const d of found) out.push(...replicasViolations(d, t), ...annotationViolations(d, t));
       }
       if (chart !== OLIVE_CHART) continue;
       for (const d of deps) {
@@ -150,7 +172,9 @@ function checkChartTargets(targets: Target[], charts: Record<string, Doc[]>, ren
 }
 
 // 실제 Application 값의 렌더(AC-29: 최초 배포 때 1로 생기면 안 된다). 클러스터마다 본다.
-//   - REAL(지금 root): 켜진 구성 요소의 대상. FORCED(대상 차트를 켠 root): 꺼 둔 구성 요소도 실제 값으로. FORCED에는 대상이 꼭 있어야 한다.
+//   - REAL(지금 root): 그 클러스터에 대상 차트를 source로 하는 Application이 있으면 그 렌더에 대상이 있어야 한다(없으면 꺼진 구성
+//     요소라 요구하지 않는다). FORCED(대상 차트를 켠 root): 꺼 둔 구성 요소도 실제 값으로 보며 대상이 꼭 있어야 한다.
+//     소유 Application의 존재·개수는 checkIgnoreDifferences가 본다(FORCED는 클러스터마다 하나, REAL은 둘 이상이면 실패).
 //   - 소유(olive-owner): 대상 자리(유효 ns·Deployment 이름)의 Deployment는 declaredBy 차트를 source로 하는 Application 하나만 낸다.
 //     declaredBy가 빈 대상의 자리에는 어느 렌더에도 Deployment가 없다. 다른 소스가 같은 자리에 내면 그 replicas·예외를 아무도 보지 않는다.
 //   유효 ns는 metadata.namespace, 없으면 Application의 destination.namespace다(render.ts가 Doc.ns로 넘긴다).
@@ -160,6 +184,7 @@ function checkDeployed(targets: Target[], deployed: Record<string, Doc[]>): Viol
   for (const [variant, raw] of Object.entries(deployed)) {
     const docs = expand(raw);
     const forced = variant === FORCED;
+    const applications = argoApps(docs);
     const seenClusters = new Set(docs.map((d) => sourceOf(d.origin).cluster).filter(isString));
     for (const c of clusters) if (!seenClusters.has(c)) out.push({ rule: "olive-chart-targets", where: `${variant}[${c}]`, message: "이 클러스터의 Application 렌더가 없다. 실제 값의 대상을 확인할 수 없다" });
     for (const t of targets) {
@@ -176,8 +201,9 @@ function checkDeployed(targets: Target[], deployed: Record<string, Doc[]>): Viol
         const own = at.filter((d) => sourceOf(d.origin).cluster === c && sourceOf(d.origin).path === t.declaredBy);
         const apps = [...new Set(own.map((d) => sourceOf(d.origin).app))];
         if (apps.length > 1) out.push({ rule: "olive-owner", where: `${variant}[${c}]`, message: `대상 ${t.id}를 Application ${apps.join(", ")}가 함께 낸다(하나여야 한다)` });
-        if (forced && own.length === 0) out.push({ rule: "olive-chart-targets", where: `${variant}[${c}]`, message: `대상 ${t.id}(Deployment ${t.namespace}/${t.deployment})가 ${t.declaredBy}의 실제 값 렌더에 없다` });
-        for (const d of own) out.push(...replicasViolations(d, t));
+        const deployed = forced || deployersOf(applications, c, t.declaredBy).length > 0;
+        if (deployed && own.length === 0) out.push({ rule: "olive-chart-targets", where: `${variant}[${c}]`, message: `대상 ${t.id}(Deployment ${t.namespace}/${t.deployment})가 ${t.declaredBy}의 실제 값 렌더에 없다` });
+        for (const d of own) out.push(...replicasViolations(d, t), ...annotationViolations(d, t));
       }
     }
     for (const d of docs) {
@@ -193,7 +219,8 @@ function checkDeployed(targets: Target[], deployed: Record<string, Doc[]>): Viol
 
 // Argo CD v3.6.1 util/argo/normalizers/diff_normalizer.go(ignoreNormalizer.Normalize)의 선택: group·kind는 glob(gobwas, 빈 값은 빈
 // group·kind에만 맞는다), name·namespace는 빈 값이면 전부, 아니면 정확히 같을 때. 이 검사는 glob을 풀지 않고 glob 문자가 든 값과
-// 문자열이 아닌 값을 "적용된다"로 본다. jqPathExpressions·managedFieldsManagers도 같은 선택을 거친다.
+// 문자열이 아닌 값을 "적용된다"로 본다(보수적: 대상과 겹치지 않는 glob, 예 kind Stateful*도 거절한다).
+// jqPathExpressions·managedFieldsManagers도 같은 선택을 거친다.
 const GLOB_CHARS = /[*?[\]{}\\!]/;
 function fieldApplies(pattern: unknown, value: string, emptyIsAll: boolean): boolean {
   if (pattern === undefined || pattern === null || pattern === "") return emptyIsAll;
@@ -206,7 +233,9 @@ const exactSelector = (e: any, t: Target) => e?.group === "apps" && e?.kind === 
 const exactEntry = (e: any, t: Target) =>
   exactSelector(e, t) && Object.keys(e).every((k) => ["group", "kind", "namespace", "name", "jsonPointers"].includes(k)) && JSON.stringify(e.jsonPointers) === JSON.stringify(REPLICAS_POINTER);
 
-// 대상을 배포하는 Application의 replicas 예외(supervisor.md §7.1 1). 클러스터마다, 대상 차트를 켠 root가 내는 Application 전부에서 본다.
+// 대상을 배포하는 Application의 replicas 예외(supervisor.md §7.1 1). 클러스터마다 두 렌더에서 본다. FORCED(대상 차트를 켠 root)에는
+// 소유 Application이 꼭 하나다. REAL(지금 root)은 지금 실제로 배포하는 Application이라 그 예외가 클러스터에 적용되는 값이다.
+// REAL에 소유 Application이 없으면(꺼진 구성 요소) 보지 않는다. FORCED만 보면 지금 켜진 Application이 꺼진 조합에서만 내는 예외를 놓친다.
 // 예외가 없으면 selfHeal이 CLI가 켠 값을 Git 값 0으로 되돌리고, RespectIgnoreDifferences가 없으면 다른 이유의 sync가 덮는다.
 // 대상에 적용되는 항목은 정확한 모양 하나만이다. 넓은 선택자나 다른 칸이 끼면 그 칸의 라이브 변경(이미지, 볼륨, 다른 Deployment)을
 // Git이 되돌리지 않는다. platform/olive 밖의 대상은 start: true일 때만 예외를 둔다(그 전에는 손으로 올린 값을 selfHeal이 내린다).
@@ -214,15 +243,15 @@ function checkIgnoreDifferences(targets: Target[], deployed: Record<string, Doc[
   const out: Violation[] = [];
   const push = (where: string, message: string) => out.push({ rule: "olive-ignore-differences", where, message });
   const charts = [...new Set(targets.map((t) => t.declaredBy).filter((d) => d !== ""))];
-  const all = expand(deployed[FORCED] ?? []).filter((d) => d.obj.kind === "Application" && String(d.obj.apiVersion).startsWith("argoproj.io/") && deployedDoc(d));
   const clusters = clusterNames();
-  for (const c of clusters) {
-    const applications = all.filter((d) => context(d.origin) === c);
+  const appsOf: Record<string, Doc[]> = { [REAL]: argoApps(expand(deployed[REAL] ?? [])), [FORCED]: argoApps(expand(deployed[FORCED] ?? [])) };
+  for (const [variant, c] of [REAL, FORCED].flatMap((v) => clusters.map((x) => [v, x] as const))) {
     for (const chart of charts) {
       const mine = targets.filter((t) => t.declaredBy === chart);
-      const deployers = applications.filter((a) => effectiveSources(a.obj.spec).some((s) => sameRepo(s?.repoURL) && s?.path === chart));
+      const deployers = deployersOf(appsOf[variant], c, chart);
+      if (variant === REAL && deployers.length === 0) continue;
       if (deployers.length !== 1) {
-        push(`${FORCED}[${c}] ${chart}`, `${chart}를 배포하는 Application이 ${deployers.length}개다(하나여야 그 예외를 확인한다)`);
+        push(`${variant}[${c}] ${chart}`, `${chart}를 배포하는 Application이 ${deployers.length}개다(하나여야 그 예외를 확인한다)`);
         continue;
       }
       const app = deployers[0];
@@ -272,7 +301,7 @@ export function checkOliveTargets(input: OliveInput): Violation[] {
     ...checkChartTargets(targets, input.charts, input.chartRenders),
     ...checkDeployed(targets, input.deployed),
     ...checkIgnoreDifferences(targets, input.deployed),
-    ...checkOliveIsolation(forcedApps, input.targets),
+    ...checkOliveIsolation(forcedApps, input.targets, input.host),
   ];
 }
 
@@ -292,20 +321,51 @@ export function readOliveTargets(): any {
 //     추가를 막는다(초기화·임시 컨테이너 포함). Namespace에는 PSA enforce: restricted가 있어야 한다. 렌더에서 막는 이유: PSA는 생성 때만
 //     거절하므로 잘못된 템플릿이 병합되면 다음 기동이 실패한다.
 //   - 볼륨은 emptyDir·secret·configMap·PVC만. PVC는 OLIVE_PVC_CLASSES의 동적 프로비저닝만이다. selector·volumeName이 있거나 그 클래스로
-//     묶일 수 있는 Git 정적 PV가 있으면 노드의 아무 경로나 가리키는 PV에 묶일 수 있다.
+//     묶일 수 있는 Git 정적 PV가 있으면 노드의 아무 경로나 가리키는 PV에 묶일 수 있다. 정적 PV·StorageClass는 플랫폼 렌더와
+//     호스트가 설치하는 매니페스트(host/k3s-manifests, install.sh가 전부 k3s 자동 배포에 넣는다)를 함께 본다. 허용 클래스는 호스트
+//     매니페스트에 선언돼 있고 provisioner가 정한 동적 프로비저너여야 한다.
+//     이전 클래스 표기(volume.beta.kubernetes.io/storage-class 주석)는 Kubernetes가 spec.storageClassName보다 먼저 읽는다
+//     (component-helpers storage/volume GetPersistentVolume(Claim)Class). 유효 클래스를 따로 계산하지 않고 올리브 PVC와
+//     결합 후보 PV(claimRef 없음)에서 거절한다.
 //   - 두 번째 조절 주체: 대상 Deployment(위임한 ns 포함)를 가리키는 HorizontalPodAutoscaler. CLI가 켠 뒤 replicas를 바꾼다.
 //     이 저장소에는 다른 조절 리소스(KEDA·VPA)의 CRD가 없다.
 const OLIVE_VOLUME_TYPES = new Set(["emptyDir", "secret", "configMap", "persistentVolumeClaim"]);
-// host/k3s-manifests/local-retain.yaml: provisioner rancher.io/local-path, WaitForFirstConsumer. 파드가 놓인 노드에 PV를 새로 만든다.
-const OLIVE_PVC_CLASSES = new Set(["local-retain"]);
-export function checkOliveIsolation(docs: Doc[], raw: any = readOliveTargets()): Violation[] {
+// 허용 클래스 → 그 provisioner. host/k3s-manifests/local-retain.yaml: rancher.io/local-path, WaitForFirstConsumer. 파드가 놓인 노드에
+// PV를 새로 만든다. provisioner가 바뀌면(정적 PV만 쓰는 클래스 등) 이름이 같아도 동적 프로비저닝이 아니다.
+const OLIVE_PVC_CLASSES = new Map([["local-retain", "rancher.io/local-path"]]);
+const BETA_CLASS = "volume.beta.kubernetes.io/storage-class";
+export const HOST_MANIFESTS = "host/k3s-manifests/*.yaml";
+export type HostManifests = { docs: Doc[]; errors: string[] };
+export function readHostManifests(): HostManifests {
+  const out: HostManifests = { docs: [], errors: [] };
+  const files = gitFiles(HOST_MANIFESTS);
+  if (files.length === 0) out.errors.push(`${HOST_MANIFESTS}에 추적 파일이 없다`);
+  for (const f of files) {
+    try {
+      for (const obj of parseAll(readText(f))) if (obj && typeof obj === "object" && !Array.isArray(obj)) out.docs.push({ origin: `host:${f}`, obj });
+    } catch (e) {
+      out.errors.push(`${f}: ${(e as Error).message}`);
+    }
+  }
+  return out;
+}
+// host: 호스트 매니페스트. null이면 그 몫(읽기 실패, 허용 클래스 선언)을 보지 않는다(같은 입력을 두 번 부를 때 한 번만 보려고).
+export function checkOliveIsolation(docs: Doc[], raw: any = readOliveTargets(), host: HostManifests | null = readHostManifests()): Violation[] {
   const out: Violation[] = [];
   const push = (where: string, message: string) => out.push({ rule: "olive-isolation", where, message });
+  if (host) {
+    for (const e of host.errors) push("host/k3s-manifests", `호스트 매니페스트를 읽지 못했다: ${e}`);
+    for (const cls of OLIVE_PVC_CLASSES.keys()) {
+      if (!expand(host.docs).some((d) => d.obj.kind === "StorageClass" && d.obj.metadata?.name === cls)) push(HOST_MANIFESTS, `허용 클래스 ${cls}의 StorageClass 선언이 없다(동적 프로비저닝인지 확인할 수 없다)`);
+    }
+    docs = [...docs, ...host.docs];
+  }
   const targets = targetList(raw);
   const nss = new Set(targets.map((t) => t.namespace).filter((ns) => !Object.hasOwn(ISOLATION_DELEGATED, ns)));
   const inOlive = (d: Doc) => nss.has(nsOf(d) ?? "");
   const coversOlive = (s: any, bindingNs: string | undefined) => {
-    if (s?.kind === "ServiceAccount") return nss.has(s.namespace ?? bindingNs ?? "");
+    // 빈 namespace의 SA 주체는 바인딩의 ns로 풀린다(RBAC authorizer appliesToUser).
+    if (s?.kind === "ServiceAccount") return nss.has(s.namespace || bindingNs || "");
     if (s?.kind === "User") return nss.has(String(s.name).match(/^system:serviceaccount:([^:]+):/)?.[1] ?? "");
     if (s?.kind === "Group") {
       const n = String(s.name);
@@ -345,12 +405,18 @@ export function checkOliveIsolation(docs: Doc[], raw: any = readOliveTargets()):
       const spec = d.obj.spec ?? {};
       if (spec.volumeName !== undefined) push(where, `PVC를 정적 PV ${spec.volumeName}에 묶지 않는다(노드 경로를 고를 수 있다)`);
       if (spec.selector !== undefined) push(where, "PVC에 selector를 두지 않는다(동적 프로비저닝 대상이 아니고 조건에 맞는 정적 PV에 묶인다)");
-      if (!OLIVE_PVC_CLASSES.has(spec.storageClassName)) push(where, `PVC의 storageClassName ${JSON.stringify(spec.storageClassName)}은 허용 클래스(${[...OLIVE_PVC_CLASSES].join("·")})가 아니다(없으면 기본 클래스, 빈 값이면 정적 PV)`);
+      if (!OLIVE_PVC_CLASSES.has(spec.storageClassName)) push(where, `PVC의 storageClassName ${JSON.stringify(spec.storageClassName)}은 허용 클래스(${[...OLIVE_PVC_CLASSES.keys()].join("·")})가 아니다(없으면 기본 클래스, 빈 값이면 정적 PV)`);
+      if (Object.hasOwn(d.obj.metadata?.annotations ?? {}, BETA_CLASS)) push(where, `PVC에 이전 클래스 주석 ${BETA_CLASS}를 두지 않는다(storageClassName보다 먼저 읽힌다)`);
     }
     if (k === "PersistentVolume") {
       const claimNs = d.obj.spec?.claimRef?.namespace;
       if (nss.has(claimNs ?? "")) push(where, `올리브 네임스페이스 ${claimNs}의 PVC에 묶인 정적 PV를 두지 않는다`);
       else if (OLIVE_PVC_CLASSES.has(d.obj.spec?.storageClassName) && claimNs === undefined) push(where, `storageClassName ${d.obj.spec.storageClassName}의 claimRef 없는 정적 PV는 올리브 PVC에 묶일 수 있다`);
+      if (claimNs === undefined && Object.hasOwn(d.obj.metadata?.annotations ?? {}, BETA_CLASS)) push(where, `claimRef 없는 정적 PV에 이전 클래스 주석 ${BETA_CLASS}를 두지 않는다(올리브 PVC의 결합 후보가 될 수 있다)`);
+    }
+    if (k === "StorageClass" && OLIVE_PVC_CLASSES.has(d.obj.metadata?.name)) {
+      const want = OLIVE_PVC_CLASSES.get(d.obj.metadata.name);
+      if (d.obj.provisioner !== want) push(where, `허용 클래스 ${d.obj.metadata.name}의 provisioner가 ${JSON.stringify(d.obj.provisioner)}다(${want}여야 올리브 PVC가 동적 프로비저닝된다)`);
     }
     if (!WORKLOAD_KINDS.has(k) || !inOlive(d)) continue;
     seen++;
@@ -387,8 +453,9 @@ export function checkOliveIsolation(docs: Doc[], raw: any = readOliveTargets()):
 }
 
 // 렌더에 꼭 필요한데 실제 배포 값이 아직 비운 키(source path → 점 경로 → 값). 빈 값이면 템플릿의 required가 렌더를 멈춘다.
-// 켜는 PR이 실제 값을 넣으면 그 차트 values.yaml에서 비지 않으므로 채우지 않는다. replicas·대상 켜짐(targets.yaml, executors, enabled)에
-// 닿는 키는 두지 않는다. 값은 platform/olive/ci/enabled.yaml과 같은 가짜다.
+// render.ts fillEmpty가 Application의 최종 값(차트 values.yaml → valueFiles → valuesObject)이 비었을 때만 채운다. 켜는 PR이 어느 자리에든
+// 실제 값을 넣으면 그 값이 남는다. replicas·대상 켜짐(targets.yaml, executors, enabled)에 닿는 키는 두지 않는다.
+// 값은 platform/olive/ci/enabled.yaml과 같은 가짜다.
 const RENDER_FILL: Record<string, Record<string, string>> = {
   [OLIVE_CHART]: {
     "image.digest": `sha256:${"0".repeat(64)}`,
@@ -398,24 +465,14 @@ const RENDER_FILL: Record<string, Record<string, string>> = {
 function renderFill(): Record<string, Record<string, unknown>> {
   const out: Record<string, Record<string, unknown>> = {};
   for (const [chart, paths] of Object.entries(RENDER_FILL)) {
-    const values = Bun.YAML.parse(readText(`${chart}/values.yaml`)) as any;
     for (const [p, v] of Object.entries(paths)) {
-      const cur = p.split(".").reduce((o, k) => o?.[k], values);
-      if (cur !== "" && cur !== undefined && cur !== null) continue;
-      const fill = (out[chart] ??= {});
       const parts = p.split(".");
-      let node: any = fill;
+      let node: any = (out[chart] ??= {});
       for (const k of parts.slice(0, -1)) node = node[k] ??= {};
       node[parts[parts.length - 1]] = v;
     }
   }
   return out;
-}
-export function renderFillKeys(): string[] {
-  return Object.entries(renderFill()).flatMap(([chart, v]) => {
-    const flat = (o: any, pre: string): string[] => Object.entries(o).flatMap(([k, x]) => (x && typeof x === "object" ? flat(x, `${pre}${k}.`) : [`${pre}${k}`]));
-    return flat(v, "").map((k) => `${chart}:${k}`);
-  });
 }
 
 // 입력: 대상 차트마다 ci/*.yaml 렌더(호출마다 출처를 남긴다), 지금 root의 전체 렌더(render 단계 캐시), 대상 차트를 켠 root의 전체 렌더.
@@ -425,19 +482,12 @@ export function oliveInput(): OliveInput {
   if (cached) return structuredClone(cached);
   const targets = readOliveTargets();
   const declaring = [...new Set(targetList(targets).map((t) => t.declaredBy))].filter((d) => /^platform\/[a-z0-9-]+$/.test(d) && existsSync(join(ROOT, d, "Chart.yaml")));
-  const parse = (origin: string, text: string): Doc[] => parseAll(text).filter((o) => typeof o === "object" && !Array.isArray(o)).map((obj) => ({ origin, obj }));
   const charts: Record<string, Doc[]> = {};
   const chartRenders: Record<string, string[]> = {};
   for (const dir of declaring) {
-    charts[dir] = [];
-    chartRenders[dir] = [];
-    for (const f of gitFiles(`${dir}/ci/*.yaml`)) {
-      const origin = `chart:${relative("platform", dir)}/${relative(dir, f)}`;
-      const r = helmTemplate(basename(dir), dir, `app-${basename(dir)}`, [f]);
-      if (!r.ok) throw new Error(`${origin} 렌더 실패: ${r.out.trim()}`);
-      chartRenders[dir].push(origin);
-      charts[dir].push(...parse(origin, r.out));
-    }
+    const c = collectChartRenders(dir, gitFiles(`${dir}/ci/*.yaml`), (f) => helmTemplate(basename(dir), dir, `app-${basename(dir)}`, [f]));
+    charts[dir] = c.docs;
+    chartRenders[dir] = c.origins;
   }
   const real = renderAll();
   const forced = renderAll({ rootOverlay: { components: Object.fromEntries(declaring.map((d) => [basename(d), { enabled: true }])) }, fill: renderFill() });
@@ -445,23 +495,44 @@ export function oliveInput(): OliveInput {
   const known = new Set(real.violations.map((v) => `${v.where}|${v.message}`));
   const extra = forced.violations.filter((v) => !known.has(`${v.where}|${v.message}`));
   if (extra.length > 0) throw new Error(`대상 차트를 켠 root 렌더 실패: ${extra.map(fmt).join("; ")}`);
-  cached = { targets, charts, chartRenders, deployed: { [REAL]: real.docs, [FORCED]: forced.docs } };
+  cached = { targets, charts, chartRenders, deployed: { [REAL]: real.docs, [FORCED]: forced.docs }, host: readHostManifests() };
   return structuredClone(cached);
 }
 
-// fixture(tools/ci/fixtures/olive/*.yaml). 지금 main의 선언(oliveInput)에 patch를 얹는다.
-// 머리 주석: # expect: fail(# rule:, # match: 메시지 일부) 또는 pass. # also: <규칙,...>은 그 patch가 함께 내는 줄 아는 다른 규칙이다.
-// 대조군은 patch 없는 입력 자체다. 규칙마다 음성 fixture가 하나 이상 있어야 한다.
+// 차트 ci 렌더 수집. 렌더 호출마다 문서 수와 상관없이 출처를 남긴다(문서 0개인 값 파일도 checkChartTargets가 본다).
+export function collectChartRenders(dir: string, files: string[], render: (f: string) => { ok: boolean; out: string }): { docs: Doc[]; origins: string[] } {
+  const docs: Doc[] = [];
+  const origins: string[] = [];
+  for (const f of files) {
+    const origin = `chart:${relative("platform", dir)}/${relative(dir, f)}`;
+    const r = render(f);
+    if (!r.ok) throw new Error(`${origin} 렌더 실패: ${r.out.trim()}`);
+    origins.push(origin);
+    for (const obj of parseAll(r.out)) if (typeof obj === "object" && obj !== null && !Array.isArray(obj)) docs.push({ origin, obj });
+  }
+  return { docs, origins };
+}
+
+// fixture(tools/ci/fixtures/olive/*.yaml). 대조군(FIXTURE_CONTROLS)마다 patch를 얹는다.
+// 머리 주석: # expect: fail(# rule:, # match: 메시지 일부) 또는 pass. # also: <규칙,...>은 그 patch가 함께 내는 다른 규칙이고, 대조군마다
+// 실제로 한 번 이상 나야 한다(안 나면 그 줄이 낡은 것이다).
+// 음성 fixture는 자기 전제(대상의 start·declaredBy, 있어야 하거나 없어야 하는 리소스)를 patch로 직접 만든다. 지금 선언이 우연히 그
+// 상태라서 통과하면 정상 전환(O10·O13) 뒤에 fixture가 깨지거나 아무것도 증명하지 않는다.
 // patch 한 줄:
-//   in: targets(select는 id 등 칸) | chart(chart: 기본 platform/olive) | render(render: root·root+켬, 없으면 둘 다) | apps(root+켬의 Application)
-//   select: chart·render·apps는 kind·namespace·name·origin(출처 그대로). 고를 것이 없으면 fixture 오류다.
+//   in: targets(select는 id 등 칸) | chart(chart: 기본 platform/olive. 렌더가 없는 차트는 빈 렌더 목록으로 시작한다)
+//     | render(render: root·root+켬, 없으면 둘 다) | apps(Application. render가 없으면 두 렌더 모두) | all(차트 렌더 전부와 두 렌더)
+//     | host(호스트 매니페스트)
+//   select: targets 밖은 kind·namespace·name·origin(출처 그대로). 고를 것이 없으면 fixture 오류다(drop은 예외).
 //   set({점 경로: 값}), unset([점 경로]): 고른 것마다. 점 경로의 숫자는 목록 번호다.
 //   remove({목록 경로: {칸: 값}}): 칸이 모두 같은 항목을 지운다. 없어도 된다. append({목록 경로: 값}): 끝에 더한다.
 //   edit({목록 경로: {match: {칸: 값}, set: {점 경로: 값}}}): 맞는 항목이 하나 이상이어야 한다.
-//   add(문서): chart는 그 차트의 ci 렌더마다, render는 origin(필수) 출처로 더한다. ns는 그 출처 Application의 destination.namespace다.
+//   drop(true): 고른 문서를 지운다. 없어도 된다.
+//   add(문서): chart는 그 차트의 ci 렌더마다, render는 origin(필수) 출처로, host는 host:<origin> 출처로 더한다.
+//     ns는 그 출처 Application의 destination.namespace다.
 //   addRender(출처): chart에 문서 0개인 ci 렌더 호출 하나를 더한다.
 type PatchOp = {
   ns?: string;
+  drop?: boolean;
   addRender?: string;
   in?: string;
   chart?: string;
@@ -516,35 +587,54 @@ export function applyPatch(input: OliveInput, ops: PatchOp[]): string | undefine
     let objs: any[];
     if (op.in === "targets") {
       objs = (input.targets?.targets ?? []).filter((t: any) => Object.entries(sel).every(([k, v]) => t?.[k] === v));
-    } else if (op.in === "chart" || op.in === "render" || op.in === "apps") {
+    } else if (["chart", "render", "apps", "all", "host"].includes(op.in ?? "")) {
       const chart = op.chart ?? OLIVE_CHART;
-      let docs: Doc[];
+      // 고를 문서가 든 목록들(drop은 이 목록에서 지운다).
+      let lists: Doc[][];
       if (op.in === "chart") {
-        if (!input.charts[chart]) return `patch[${i}]: 차트 ${chart}의 렌더가 없다`;
-        docs = input.charts[chart];
+        if (!input.charts[chart]) {
+          if (!existsSync(join(ROOT, chart, "Chart.yaml"))) return `patch[${i}]: 차트 ${chart}가 없다`;
+          input.charts[chart] = [];
+          input.chartRenders[chart] = [];
+        }
         if (isString(op.addRender)) {
           input.chartRenders[chart].push(op.addRender);
           continue;
         }
+        if (op.add !== undefined) {
+          for (const origin of input.chartRenders[chart]) input.charts[chart].push({ origin, obj: structuredClone(op.add) as Record<string, any> });
+          continue;
+        }
+        lists = [input.charts[chart]];
+      } else if (op.in === "host") {
+        if (op.add !== undefined) {
+          input.host.docs.push({ origin: `host:${op.origin ?? "fixture"}`, obj: structuredClone(op.add) as Record<string, any> });
+          continue;
+        }
+        lists = [input.host.docs];
       } else {
-        const variants = op.in === "apps" ? [FORCED] : op.render ? [op.render] : Object.keys(input.deployed);
+        const variants = op.render ? [op.render] : Object.keys(input.deployed);
         if (variants.some((v) => !input.deployed[v])) return `patch[${i}]: 렌더 ${op.render}가 없다(${Object.keys(input.deployed).join("·")})`;
         if (op.add !== undefined) {
-          if (!isString(op.origin)) return `patch[${i}]: render의 add는 origin이 필요하다`;
+          if (op.in !== "render" || !isString(op.origin)) return `patch[${i}]: add는 in: render와 origin이 필요하다`;
           for (const v of variants) input.deployed[v].push({ origin: op.origin, obj: structuredClone(op.add) as Record<string, any>, ns: op.ns });
           continue;
         }
-        docs = variants.flatMap((v) => input.deployed[v]);
-        if (op.in === "apps") docs = docs.filter((d) => d.obj.kind === "Application" && deployedDoc(d));
+        lists = variants.map((v) => input.deployed[v]);
+        if (op.in === "all") lists.push(...Object.values(input.charts));
       }
-      if (op.add !== undefined) {
-        for (const origin of input.chartRenders[chart] ?? []) docs.push({ origin, obj: structuredClone(op.add) as Record<string, any> });
+      const picked = (d: Doc) =>
+        (op.in !== "apps" || (d.obj.kind === "Application" && deployedDoc(d))) &&
+        (sel.kind === undefined || d.obj.kind === sel.kind) &&
+        (sel.namespace === undefined || nsOf(d) === sel.namespace) &&
+        (sel.name === undefined || d.obj.metadata?.name === sel.name) &&
+        (sel.origin === undefined || d.origin === sel.origin);
+      if (op.drop === true) {
+        for (const list of lists) list.splice(0, list.length, ...list.filter((d) => !picked(d)));
         continue;
       }
-      objs = docs
-        .filter((d) => (sel.kind === undefined || d.obj.kind === sel.kind) && (sel.namespace === undefined || nsOf(d) === sel.namespace) && (sel.name === undefined || d.obj.metadata?.name === sel.name) && (sel.origin === undefined || d.origin === sel.origin))
-        .map((d) => d.obj);
-    } else return `patch[${i}]: in은 targets·chart·render·apps 중 하나다`;
+      objs = lists.flat().filter(picked).map((d) => d.obj);
+    } else return `patch[${i}]: in은 targets·chart·render·apps·all·host 중 하나다`;
     if (objs.length === 0) return `patch[${i}]: select ${JSON.stringify(sel)}에 맞는 것이 없다`;
     for (const o of objs) {
       for (const [p, v] of Object.entries(op.set ?? {})) setPath(o, p, v);
@@ -570,45 +660,98 @@ export function applyPatch(input: OliveInput, ops: PatchOp[]): string | undefine
 }
 
 // render 단계는 지금 root 전체 렌더(차트 ci 렌더 포함)에 checkOliveIsolation을 건다. 여기서는 대상 차트 ci 렌더로 그 몫을 대신한다.
-export const allChecks = (input: OliveInput) => [...checkOliveTargets(input), ...checkOliveIsolation(Object.values(input.charts).flat(), input.targets)];
+// 호스트 매니페스트의 몫은 checkOliveTargets 안의 호출이 한 번 본다.
+export const allChecks = (input: OliveInput) => [...checkOliveTargets(input), ...checkOliveIsolation(Object.values(input.charts).flat(), input.targets, null)];
+
+// 대조군. "지금"은 patch 없는 입력(이 PR의 sandbox CI 값 포함), 나머지는 정상 전환을 그린 양성 fixture를 얹은 입력이다.
+// fixture 묶음 전체가 대조군마다 같은 결과여야 한다. 한 대조군에서만 맞는 음성 fixture는 정상 전환 PR을 막거나 그 뒤 아무것도 증명하지 않는다.
+const FIXTURE_DIR = "tools/ci/fixtures/olive";
+const FIXTURE_CONTROLS: Record<string, string> = { O13: `${FIXTURE_DIR}/writer-start-o13.yaml`, O10: `${FIXTURE_DIR}/session-o10.yaml` };
+
+type Fixture = { file: string; expect: string; rule?: string; match?: string; also: Set<string>; ops: PatchOp[] };
+function readFixture(f: string): Fixture | string {
+  const text = readText(f);
+  const expect = header(text, "expect") ?? "";
+  const rule = header(text, "rule");
+  const match = header(text, "match");
+  const also = new Set((header(text, "also") ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+  const ops = (Bun.YAML.parse(text) as any)?.patch;
+  const okHeader = expect === "pass" ? !rule && !match && also.size === 0 : expect === "fail" && !!rule && !!match && !also.has(rule);
+  if (!okHeader || !Array.isArray(ops) || ops.length === 0 || [...also].some((r) => !OLIVE_RULES.includes(r))) {
+    return "머리 주석 # expect: fail(# rule:, # match: 메시지 일부, 필요하면 # also: 다른 규칙) 또는 # expect: pass와 patch 목록이 필요하다";
+  }
+  return { file: f, expect, rule, match, also, ops };
+}
+
+// 렌더 경로의 작은 시험. fixture는 렌더가 끝난 입력에 patch를 얹으므로 렌더 쪽 판단(목록 안 Application, 보충값 우선순위, 0문서 출처)을
+// 보지 못한다. 그 함수를 직접 부른다.
+function renderSelfTests(): string[] {
+  const bad: string[] = [];
+  const list = Bun.YAML.parse("apiVersion: v1\nkind: List\nitems:\n  - {apiVersion: argoproj.io/v1alpha1, kind: Application, metadata: {name: child}}\n  - {kind: ConfigMapList, items: [{kind: ApplicationSet, metadata: {name: nested}}]}\n");
+  if (JSON.stringify(listedArgoApps(list)) !== JSON.stringify(["Application/child", "ApplicationSet/nested"])) bad.push(`listedArgoApps가 목록 안 Application을 찾지 못했다: ${JSON.stringify(listedArgoApps(list))}`);
+  if (listedArgoApps({ kind: "Application", metadata: { name: "top" } }).length !== 0) bad.push("listedArgoApps가 최상위 Application을 목록 항목으로 봤다");
+  const fill = { image: { digest: "fill" } };
+  const digest = (layers: unknown[], vo: any) => (fillEmpty(layers, vo, fill) as any)?.image?.digest;
+  const cases: [string, unknown[], any, unknown][] = [
+    ["값 파일의 정상 값이 남는다", [{ image: { digest: "" } }, { image: { digest: "sha256:real" } }], undefined, undefined],
+    ["valuesObject의 정상 값이 남는다", [{ image: { digest: "" } }], { image: { digest: "sha256:real" } }, "sha256:real"],
+    ["valuesObject의 빈 문자열은 채운다", [{ image: { digest: "sha256:real" } }], { image: { digest: "" } }, "fill"],
+    ["모두 비면 채운다", [{ image: { digest: "" } }, undefined], { other: 1 }, "fill"],
+  ];
+  for (const [name, layers, vo, want] of cases) if (digest(layers, vo) !== want) bad.push(`fillEmpty(${name}): ${JSON.stringify(digest(layers, vo))}, 기대 ${JSON.stringify(want)}`);
+  const c = collectChartRenders("platform/x", ["platform/x/ci/a.yaml", "platform/x/ci/empty.yaml"], (f) => ({ ok: true, out: f.endsWith("a.yaml") ? "kind: ConfigMap\n" : "" }));
+  if (JSON.stringify(c.origins) !== JSON.stringify(["chart:x/ci/a.yaml", "chart:x/ci/empty.yaml"]) || c.docs.length !== 1) bad.push(`collectChartRenders가 문서 0개인 렌더의 출처를 남기지 않았다: ${JSON.stringify(c.origins)}`);
+  return bad;
+}
 
 export function checkOliveFixtures(base: OliveInput): Violation[] {
   const out: Violation[] = [];
-  const dir = "tools/ci/fixtures/olive";
-  const baseHits = allChecks(base);
-  if (baseHits.length > 0) out.push({ rule: "fixture", where: `${dir} (대조군: 지금 main의 선언)`, message: `대조군이 걸렸다: ${baseHits.map(fmt).join("; ")}` });
-  const covered = new Set<string>();
-  const files = gitFiles(`${dir}/*.yaml`);
+  for (const m of renderSelfTests()) out.push({ rule: "fixture", where: "tools/ci/olive.ts renderSelfTests", message: m });
+  const files = gitFiles(`${FIXTURE_DIR}/*.yaml`);
+  const fixtures: Fixture[] = [];
   for (const f of files) {
-    const text = readText(f);
-    const expect = header(text, "expect");
-    const rule = header(text, "rule");
-    const match = header(text, "match");
-    const also = new Set((header(text, "also") ?? "").split(",").map((s) => s.trim()).filter(Boolean));
-    const ops = (Bun.YAML.parse(text) as any)?.patch;
-    const okHeader = expect === "pass" ? !rule && !match && also.size === 0 : expect === "fail" && !!rule && !!match && !also.has(rule);
-    if (!okHeader || !Array.isArray(ops) || ops.length === 0 || [...also].some((r) => !OLIVE_RULES.includes(r))) {
-      out.push({ rule: "fixture", where: f, message: "머리 주석 # expect: fail(# rule:, # match: 메시지 일부, 필요하면 # also: 다른 규칙) 또는 # expect: pass와 patch 목록이 필요하다" });
+    const fx = readFixture(f);
+    if (typeof fx === "string") out.push({ rule: "fixture", where: f, message: fx });
+    else fixtures.push(fx);
+  }
+  const controls: [string, OliveInput][] = [["지금", base]];
+  for (const [name, f] of Object.entries(FIXTURE_CONTROLS)) {
+    const fx = fixtures.find((x) => x.file === f);
+    if (!fx || fx.expect !== "pass") {
+      out.push({ rule: "fixture", where: f, message: `대조군 ${name}의 양성 fixture가 없다` });
       continue;
     }
     const input = structuredClone(base);
-    const err = applyPatch(input, ops);
-    if (err) {
-      out.push({ rule: "fixture", where: f, message: err });
-      continue;
-    }
-    const got = allChecks(input);
-    if (expect === "pass") {
-      if (got.length > 0) out.push({ rule: "fixture", where: f, message: `양성 fixture가 걸렸다: ${got.map(fmt).join("; ")}` });
-      continue;
-    }
-    covered.add(rule!);
-    if (!got.some((v) => v.rule === rule && v.message.includes(match!))) out.push({ rule: "fixture", where: f, message: `${rule}(${match})가 걸리지 않았다(걸린 것: ${got.map(fmt).join("; ") || "없음"})` });
-    // 모든 위반이 기대한 규칙·메시지(또는 # also의 규칙)여야 한다. 다른 위반이 섞이면 대상 검사가 사라져도 fixture가 초록으로 남는다.
-    const other = got.filter((v) => (v.rule !== rule || !v.message.includes(match!)) && !also.has(v.rule));
-    if (other.length > 0) out.push({ rule: "fixture", where: f, message: `기대하지 않은 위반: ${other.map(fmt).join("; ")}` });
+    const err = applyPatch(input, fx.ops);
+    if (err) out.push({ rule: "fixture", where: f, message: `대조군 ${name}: ${err}` });
+    else controls.push([name, input]);
   }
-  for (const r of OLIVE_RULES) if (!covered.has(r)) out.push({ rule: "fixture", where: dir, message: `규칙 ${r}의 음성 fixture가 없다` });
-  console.log(`olive fixture ${files.length}개`);
+  const covered = new Set<string>();
+  for (const [name, control] of controls) {
+    const where = (f: string) => `${f} (대조군 ${name})`;
+    const hits = allChecks(control);
+    if (hits.length > 0) out.push({ rule: "fixture", where: `${FIXTURE_DIR} (대조군 ${name})`, message: `대조군이 걸렸다: ${hits.map(fmt).join("; ")}` });
+    for (const fx of fixtures) {
+      const input = structuredClone(control);
+      const err = applyPatch(input, fx.ops);
+      if (err) {
+        out.push({ rule: "fixture", where: where(fx.file), message: err });
+        continue;
+      }
+      const got = allChecks(input);
+      if (fx.expect === "pass") {
+        if (got.length > 0) out.push({ rule: "fixture", where: where(fx.file), message: `양성 fixture가 걸렸다: ${got.map(fmt).join("; ")}` });
+        continue;
+      }
+      covered.add(fx.rule!);
+      if (!got.some((v) => v.rule === fx.rule && v.message.includes(fx.match!))) out.push({ rule: "fixture", where: where(fx.file), message: `${fx.rule}(${fx.match})가 걸리지 않았다(걸린 것: ${got.map(fmt).join("; ") || "없음"})` });
+      // 모든 위반이 기대한 규칙·메시지(또는 # also의 규칙)여야 한다. 다른 위반이 섞이면 대상 검사가 사라져도 fixture가 초록으로 남는다.
+      const other = got.filter((v) => (v.rule !== fx.rule || !v.message.includes(fx.match!)) && !fx.also.has(v.rule));
+      if (other.length > 0) out.push({ rule: "fixture", where: where(fx.file), message: `기대하지 않은 위반: ${other.map(fmt).join("; ")}` });
+      for (const r of fx.also) if (!got.some((v) => v.rule === r)) out.push({ rule: "fixture", where: where(fx.file), message: `# also의 ${r}가 걸리지 않았다(낡은 줄이면 지운다)` });
+    }
+  }
+  for (const r of OLIVE_RULES) if (!covered.has(r)) out.push({ rule: "fixture", where: FIXTURE_DIR, message: `규칙 ${r}의 음성 fixture가 없다` });
+  console.log(`olive fixture ${files.length}개 × 대조군 ${controls.length}개(${controls.map(([n]) => n).join("·")})`);
   return out;
 }
