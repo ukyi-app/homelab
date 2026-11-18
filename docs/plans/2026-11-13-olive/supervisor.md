@@ -262,7 +262,8 @@ MCP 서버 이름은 `olive`다. 도구는 아래 열 개뿐이다. 입력·반�
 - [확인] 수동 sync는 요청에서 옵션을 바꿀 수 있고, SSA의 field manager도 잠금이 아니다. 예외를 끈 수동 sync까지 막아 주지 않는다.
 - [확인] root에서 구성 요소를 끄면 Application만 지워지고, finalizer가 없어 Deployment가 남는다. "Git에서 끄면 꺼진다"를 정지로 쓰지 않는다.
 - [확인] 자식 Application의 health가 root에 전파된다(`platform/argocd/argocd-cm.yaml`). replicas 0이어도 Pending PVC나 실패한 ExternalSecret으로 root가 멈출 수 있다.
-- [확인] ResourceQuota와 admission 정책은 이 저장소에 아직 없다. 지금 CI는 작성 Deployment의 replicas 0과 1을 모두 받고, `platform/sandbox/values.yaml`의 켜고 끄는 절차는 Git 값 기준이다. [추론] 둘 다 D-38에 맞게 고친다(보호 경로, B-12).
+- [확인] 올리브의 ResourceQuota는 둘이고 용도가 다르다. 자원 한도 `olive-limits`는 `platform/olive` 차트가 자기 대상의 네임스페이스마다 Git에 선언한 것으로, CPU·메모리 합만 묶고 파드 수는 세지 않는다. 정지 자물쇠 `olive-stop`(파드 0개)은 정지 때 CLI가 실행 네임스페이스마다 Git 밖에서 만든다. 올리브는 root에서 꺼져 있어 `olive-limits` 선언이 클러스터에 적용된 적은 없다. admission 정책은 이 저장소에 아직 없다.
+- [확인] CI는 작성 Deployment(`worker-task`)의 Git replicas로 0만 받는다(`tools/ci/policy.ts`, #1326). `platform/sandbox/values.yaml`의 주석도 Git 값은 0이고 켜고 끄기는 O13 뒤 CLI가 라이브 replicas로 한다고 적는다. 남은 CI 일은 CLI 대상 목록과의 일치 확인뿐이다(CLI의 올리브 명령이 아직 없다, §7.3).
 - 자물쇠의 한계 [추론]: 한도는 새 파드의 생성만 막는다. 이미 뜬 파드는 막지 못한다. 그래서 replicas 0과 소멸 확인이 함께 있어야 한다.
 - 정지 중에도 떠 있어야 하는 것(현관, 관측 중계, 정리 작업, 프록시)은 실행 네임스페이스 밖에 두거나 한도에서 뺀다(기본값, §11). 세션 폴더의 정리 작업을 빼는 방법은 O09·O18이 정하고 시험한다 [미확인].
 
@@ -280,7 +281,10 @@ MCP 서버 이름은 `olive`다. 도구는 아래 열 개뿐이다. 입력·반�
 | 8. 보고 | CLI가 접수, 차단, 실제 소멸을 따로 말한다 | 접수만 된 것을 "정지 완료"라고 하지 않는다 |
 
 - 6단계에서 동기화가 끝나기만 기다리면 안 된다. 늦은 쓰기가 replicas를 1로 되살리면 자물쇠 때문에 파드가 없는 채 Deployment가 비정상으로 남고, 그 health를 기다리는 root 동기화는 CLI가 다시 0으로 내려야 끝난다 [추론]. 그래서 지켜보며 내리고, 기다림에는 상한을 둔다(값은 O09가 정한다).
-- 대상은 CLI의 고정 목록이다. Git의 실행 Deployment 목록, 예외 목록과 같아야 한다(CI 검사, §11).
+- 대상 자료는 `platform/olive/targets.yaml` 하나이고, 대상마다 정지·소멸 확인 대상인지(`stop`)와 지금 켤 수 있는지(`start`)를 따로 적는다. CI는 모든 대상에 `stop: true`를 요구한다.
+- [확인] 정지 대상과 Argo CD 예외 목록은 같은 집합이 아니다. 세션은 정지 대상이지만 아직 선언한 곳이 없다. 작성은 `platform/sandbox`가 선언하므로 예외가 올리브 Application이 아니라 sandbox Application에 들어가야 하고, 그 예외는 O13의 몫이다.
+- [확인] CI(`tools/ci/olive.ts`의 `olive targets` 단계)는 선언한 곳이 `platform/olive`인 대상과 그 Application의 replicas 예외가 서로 빠짐없이 맞는지 본다. 다른 차트가 선언한 대상은 `start: true`일 때만 그 Application에 예외를 요구하고, `start: true`가 아닌데 예외가 있으면 거절한다.
+- CLI가 대상을 어떻게 읽을지는 CLI 명령 작업의 일이고 관리자가 정하지 않았다. [확인] 지금 코드 주석은 CLI가 이 파일을 읽는다고 전제하고, CLI 대상을 보는 CI 검사는 아직 없다(§11).
 - 정지 전에 이미 나간 GitHub 요청은 뒤늦게 성공할 수 있다. 현관은 그 건을 조회만 한다.
 - NUC에서 직접 정지를 거는 길을 준비한다(기본값, §11). 어디에도 닿지 못하면 정지를 보장할 수 없다고 보고한다.
 
@@ -411,7 +415,7 @@ MCP 서버 이름은 `olive`다. 도구는 아래 열 개뿐이다. 입력·반�
 | S-10 실행 감시 | 갱신 10초, 끊김 판정 30초, 준비 60초, 종료 유예 5초, 관리자 요청 우선(경보가 굶지 않게) | 실패를 빨리 닫는다. 느린 NUC에서 재야 한다 |
 | S-08의 방향 | 현관의 Discord 입력 원문을 DB 밖으로 옮긴다. 확정은 O18이 안을 낸 뒤 관리자가 한다(`spec.md` §5.3) | [확인] R2의 PostgreSQL 백업 보존은 14일이다(`platform/cnpg/cluster/templates/objectstore.yaml`). 원문이 DB를 거치면 WAL과 함께 168시간을 넘겨 남는다 |
 | CLI 종료 코드 | **정함(D-61, 관리자 2026-11-18):** `homelab` CLI의 공통 규칙을 따른다(3 = 대기, 1 실패, 64 사용법, §10). 상태별 숫자의 전체 표는 CLI 명령 작업이 정하고 그 PR에서 관리자가 본다 | `homelab`의 다른 명령과 같은 숫자를 같은 뜻으로 읽는다. "3 거부, 4 미지원"은 옛 봇 파드 안 관리 진입점의 코드였다 |
-| D-38에 딸린 제약 | 정지 중에도 떠 있어야 하는 것은 실행 네임스페이스 밖에 두거나 한도에서 뺀다. CI에 "실행 Deployment의 Git replicas는 0"과 실행 대상·예외 대상·CLI 대상 목록의 일치 검사를 넣는다. NUC에서 직접 정지를 거는 길을 준비하고 시험한다 | 자물쇠가 정리 작업과 현관을 막지 않게, Git의 실수가 켜짐 쪽으로 가지 않게, 원격 접근을 잃어도 멈출 수 있게 |
+| D-38에 딸린 제약 | 정지 중에도 떠 있어야 하는 것은 실행 네임스페이스 밖에 두거나 한도에서 뺀다. CI에 "실행 Deployment의 Git replicas는 0", 대상 자료와 실제 선언·Argo CD 예외의 대조, CLI 대상과의 일치 검사를 둔다(CLI 대상과의 일치 검사만 아직 없다, §7.3). NUC에서 직접 정지를 거는 길을 준비하고 시험한다 | 자물쇠가 정리 작업과 현관을 막지 않게, Git의 실수가 켜짐 쪽으로 가지 않게, 원격 접근을 잃어도 멈출 수 있게 |
 
 시험 클러스터에서 한도가 기대대로 막지 않으면 관리자에게 다시 묻는다. 차선은 admission 정책이다(D-38).
 
