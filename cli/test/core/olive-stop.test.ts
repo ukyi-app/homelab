@@ -201,6 +201,18 @@ describe("자물쇠(ResourceQuota)", () => {
 
 describe("replicas 지켜보기", () => {
   const one = { targets: [{ ns: NS, deployment: DEP }], apps: [APP] };
+  // 함정: 시험은 실제 시계(상한 1초)와 프로세스로 뜨는 스텁을 쓴다. 마지막 회차는 남은 시간이 50ms 남짓일 때 시작해,
+  // 러너가 느리면 대상을 읽기 전에 상한에 걸리거나(unread) 읽기 자체가 남은 시간에 끊긴다. 마지막 관측은 값 하나로 못 박지 않고
+  // 원장이나 걸린 시간으로 어느 경우인지 가려 단언한다.
+  // 끊긴 호출은 남은 시간(밀리초 내림)을 다 쓰고 끝나므로 그 실행은 상한 1ms 앞 이후에 끝난다. 타이머 오차로 10ms를 둔다.
+  const CUT_MS = 1_000 - 10;
+  const same = (a: string[] | undefined, b: string[]) => JSON.stringify(a) === JSON.stringify(b);
+  // 마지막 회차의 Application 읽기가 끊기면 syncing·missingApps 대신 unreadApps에 남는다. 그때는 상한까지 기다렸고 대상도 못 읽었다.
+  const expectAppSeen = (v: { syncing: string[]; missingApps: string[]; unreadApps: string[]; targets: { last: unknown }[] }, field: "syncing" | "missingApps", took: number) => {
+    expect(v[field === "syncing" ? "missingApps" : "syncing"]).toEqual([]);
+    if (v.unreadApps.length === 0) expect(v[field]).toEqual([APP]);
+    else expect([v.unreadApps, v[field], v.targets[0].last, took >= CUT_MS]).toEqual([[APP], [], "unread", true]);
+  };
 
   test("1로 돌아오면 그 읽기 바로 다음에 0을 쓰고, 다음 회차에 0을 읽어야 zero다", async () => {
     // 이미 0이고 동기화가 없으면 쓰지 않고 바로 zero다.
@@ -221,16 +233,31 @@ describe("replicas 지켜보기", () => {
   test("상한이 지나도 1이 계속 돌아오면 unconfirmed다(다시 쓴 횟수와 마지막 값을 낸다)", async () => {
     const { ctx, calls } = testCtx("apply", [rule(appArgv(), app({})), rule(deployArgv(), deployment(1)), rule(scaleArgv(0))]);
     const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
+    const [t] = value.targets;
+    const ledger = calls().calls;
     expect(value.result).toBe("unconfirmed");
-    expect(value.targets[0].last).toBe(1);
-    expect(value.targets[0].rezeroed).toBeGreaterThanOrEqual(1);
-    expect(value.targets[0].rezeroed).toBe(calls().calls.filter((c) => c.argv.includes("scale")).length);
+    // 성공한 0 쓰기는 모두 원장에 있다. 상한에 끊긴 0 쓰기는 원장에 남았을 수도 있고 writeFailed로 센다(끊기면 남은 시간이 없어 많아야 하나).
+    const scales = ledger.filter((c) => same(c.argv, scaleArgv(0))).length;
+    expect(t.rezeroed).toBeGreaterThanOrEqual(1);
+    expect(t.writeFailed).toBeLessThanOrEqual(1);
+    expect(scales).toBeGreaterThanOrEqual(t.rezeroed);
+    expect(scales).toBeLessThanOrEqual(t.rezeroed + t.writeFailed);
+    // last는 마지막으로 실제 관측한 1이거나, 마지막 회차가 대상을 못 읽었으면 unread다. 0(성공 값)이나 absent는 될 수 없다.
+    // Application 읽기로 끝났거나 그 읽기가 끊겼으면(unreadApps) 대상을 못 읽은 회차라 unread, 0 쓰기로 끝났으면 방금 읽은 1,
+    // Deployment 읽기로 끝났으면 읽은 1이거나 그 읽기가 남은 시간에 끊긴 unread다.
+    expect([1, "unread"]).toContain(t.last);
+    const tail = ledger.at(-1)?.argv;
+    const allowed: unknown[] = same(tail, appArgv()) || value.unreadApps.length > 0 ? ["unread"] : same(tail, scaleArgv(0)) ? [1] : [1, "unread"];
+    expect([tail, t.last, allowed.includes(t.last)]).toEqual([tail, t.last, true]);
   });
 
   test("0이어도 동기화가 끝나지 않았거나 Application을 못 읽으면 unconfirmed다", async () => {
+    // 첫 회차는 상한이 넉넉해 끊기지 않는다. 동기화를 놓쳤다면 그 회차에 zero로 끝났다.
     const syncing = testCtx("apply", [rule(appArgv(), app({ operation: { sync: {} }, phase: "Succeeded" })), rule(deployArgv(), deployment(0))]);
+    const t0 = Date.now();
     const a = await applyWith(syncing.ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
-    expect([a.value.result, a.value.syncing]).toEqual(["unconfirmed", [APP]]);
+    expect(a.value.result).toBe("unconfirmed");
+    expectAppSeen(a.value, "syncing", Date.now() - t0);
     const unread = testCtx("apply", [rule(appArgv(), failed), rule(deployArgv(), deployment(0))]);
     const b = await applyWith(unread.ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
     expect([b.value.result, b.value.unreadApps]).toEqual(["unconfirmed", [APP]]);
@@ -238,8 +265,10 @@ describe("replicas 지켜보기", () => {
 
   test("넘겨받은 Application이 없으면(NotFound) 대상이 0이어도 zero가 아니고 missingApps에 드러난다", async () => {
     const { ctx } = testCtx("apply", [rule(appArgv(), notFound("applications.argoproj.io")), rule(deployArgv(), deployment(0))]);
+    const t0 = Date.now();
     const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
-    expect([value.result, value.missingApps, value.syncing, value.unreadApps]).toEqual(["unconfirmed", [APP], [], []]);
+    expect(value.result).toBe("unconfirmed");
+    expectAppSeen(value, "missingApps", Date.now() - t0);
     // 상한에 걸려 끊긴 마지막 회차면 대상은 unread로 남는다. 어느 쪽이든 0이 아닌 값은 아니다.
     expect([0, "unread"]).toContain(value.targets[0].last);
     // 다음 회차에 다시 나타나 끝났으면 zero다.
@@ -250,8 +279,12 @@ describe("replicas 지켜보기", () => {
   test("대상을 못 읽음·없음·replicas 없음·0 쓰기 실패는 zero가 아니다", async () => {
     for (const [resp, last] of [[failed, "unread"], [notFound("deployments.apps"), "absent"], [deployment(undefined), "unread"], [{ stdout: "{" }, "unread"]] as const) {
       const { ctx } = testCtx("apply", [rule(deployArgv(), resp)]);
+      const t0 = Date.now();
       const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }], apps: [], timeoutSec: 1 }));
-      expect([value.result, value.targets[0].last]).toEqual(["unconfirmed", last]);
+      expect(value.result).toBe("unconfirmed");
+      // 마지막 회차의 읽기가 남은 시간에 끊기면 응답과 상관없이 unread다. absent 자리만 그 경우를 상한까지 기다린 실행에서 받는다.
+      if (last === "absent" && value.targets[0].last === "unread") expect(Date.now() - t0).toBeGreaterThanOrEqual(CUT_MS);
+      else expect(value.targets[0].last).toBe(last);
     }
     const { ctx } = testCtx("apply", [rule(deployArgv(), deployment(1)), rule(scaleArgv(0), failed)]);
     const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }], apps: [], timeoutSec: 1 }));
@@ -270,24 +303,26 @@ describe("replicas 지켜보기", () => {
   }, 10_000);
 
   test("상한을 넘긴 응답으로 zero를 내지 않는다: 느린 Application 읽기는 남은 시간에 끊긴다", async () => {
-    // 호출에 남은 시간을 걸지 않으면 1.5초 뒤 정상 응답을 받고 이어 0을 읽어 상한 뒤에 zero를 낸다.
-    const { ctx, calls } = testCtx("apply", [rule(appArgv(), { ...app({ phase: "Succeeded" }), sleepMs: 1_500 }), rule(deployArgv(), deployment(0))]);
+    // 호출에 남은 시간을 걸지 않으면 2.5초 뒤 정상 응답을 받고 이어 0을 읽어 상한 뒤에 zero를 낸다.
+    // 걸린 시간은 상한(1초)과 스텁 응답(2.5초)의 가운데(2초)로 잰다. 느린 러너의 끝맺음 시간이 여유 안에 들게.
+    const { ctx, calls } = testCtx("apply", [rule(appArgv(), { ...app({ phase: "Succeeded" }), sleepMs: 2_500 }), rule(deployArgv(), deployment(0))]);
     const t0 = Date.now();
     const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ ...one, timeoutSec: 1 }));
     const took = Date.now() - t0;
     expect(value.result).toBe("unconfirmed");
     expect(value.unreadApps).toEqual([APP]);
-    expect(took).toBeLessThan(1_400);
+    expect(took).toBeLessThan(2_000);
     // 상한 뒤에는 Deployment도 읽지 않는다.
     expect(calls().calls.filter((c) => c.argv.includes("deployments.apps"))).toEqual([]);
   });
 
   test("상한 뒤에는 새 쓰기를 시작하지 않는다: 앞 대상의 읽기가 상한을 다 쓰면 뒤 대상은 읽지도 쓰지도 않는다", async () => {
     const DEP2 = "worker";
-    const { ctx, calls } = testCtx("apply", [rule(deployArgv(), { ...deployment(1), sleepMs: 1_500 }), rule(deployArgv(DEP2), deployment(1)), rule(scaleArgv(0)), rule(scaleArgv(0, DEP2))]);
+    // 걸린 시간은 위 시험처럼 상한(1초)과 스텁 응답(2.5초)의 가운데로 잰다.
+    const { ctx, calls } = testCtx("apply", [rule(deployArgv(), { ...deployment(1), sleepMs: 2_500 }), rule(deployArgv(DEP2), deployment(1)), rule(scaleArgv(0)), rule(scaleArgv(0, DEP2))]);
     const t0 = Date.now();
     const { value } = await applyWith(ctx, (w) => w.olive.holdZero({ targets: [{ ns: NS, deployment: DEP }, { ns: NS, deployment: DEP2 }], apps: [], timeoutSec: 1 }));
-    expect(Date.now() - t0).toBeLessThan(1_400);
+    expect(Date.now() - t0).toBeLessThan(2_000);
     expect(value.result).toBe("unconfirmed");
     expect(value.targets.map((t) => t.last)).toEqual(["unread", "unread"]);
     expect(calls().calls.filter((c) => c.argv.includes("scale"))).toEqual([]);
