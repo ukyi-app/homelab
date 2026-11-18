@@ -265,7 +265,7 @@ describe("소스 규칙", () => {
   });
 
   test("정적: 명령 파일이 이 어댑터를 문맥으로만 쓰고 외부 명령을 직접 부르지 못한다", () => {
-    // 새 파일이 아래 규칙들의 검사 대상(src)에 든다.
+    // 이 어댑터가 검사 대상(src)에서 빠지면 아래 규칙들이 아무것도 보지 않고 통과한다.
     expect(src.map(rel)).toContain("core/olive-admin.ts");
     expect(commandProblems("olive.ts", 'import { oliveAdminWrite } from "../core/olive-admin";')).toEqual(["import ../core/olive-admin"]);
     expect(commandProblems("olive.ts", 'import { makeExec } from "../core/exec";')).toEqual(["import ../core/exec"]);

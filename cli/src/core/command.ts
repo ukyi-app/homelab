@@ -297,10 +297,12 @@ export type OliveWrite = {
 
 // 올리브 감독 파드의 고정 관리 진입점(D-60). 동작 이름만 넘기고 ns·파드 라벨·컨테이너·진입점은 core 상수다.
 export type OliveAdminAction = "status";
-// ready만 실행 대상이다. absent는 파드가 없는 것(꺼 둔 정상 상태일 수 있다)이고, 목록을 읽지 못한 것은 이 값이 아니라 던진다.
-// pods: absent·not-ready는 목록의 파드 수, terminating·multiple은 끝나지 않은 파드 수다.
-export type OliveSupervisorMissing = { state: "absent" | "not-ready" | "terminating" | "multiple"; pods: number };
-export type OliveSupervisorPod = { state: "ready"; pod: string } | OliveSupervisorMissing;
+// ready만 실행 대상이다. absent는 파드가 없는 것(꺼 둔 정상 상태일 수 있다)이고, 목록이나 소유 객체를 읽지 못한 것은 이 값이 아니라 던진다.
+// not-owned는 셀렉터에 걸린 파드가 감독 Deployment의 것으로 확인되지 않은 것이다. 감독이 없다는 뜻이 아니다.
+// pods: absent·not-owned·not-ready는 목록의 파드 수, terminating·multiple은 끝나지 않은 파드 수다.
+export type OliveSupervisorMissing = { state: "absent" | "not-owned" | "not-ready" | "terminating" | "multiple"; pods: number };
+// argv는 찾은 파드에서 실행할 kubectl argv다(plan이 그대로 보인다). 표시용이고, 실행은 run이 파드를 다시 찾아 만든다.
+export type OliveSupervisorTarget = { state: "ready"; pod: string; argv: string[] } | OliveSupervisorMissing;
 // 감독이 낸 상태. 수·불리언·좁은 enum만 있고 자유 문자열 칸은 없다.
 export type OliveSupervisorStatus = {
   alive: boolean;
@@ -315,10 +317,8 @@ export type OliveSupervisorStatus = {
 export type OliveAdminOutcome = { state: "reported"; pod: string; status: OliveSupervisorStatus } | { state: "no-target"; target: OliveSupervisorMissing } | { state: "unknown" };
 
 export type OliveAdminRead = {
-  // 대상 파드 찾기. exec하지 않는다. 읽지 못하면 던지고, 시간 초과는 ExecTimeout이다.
-  pod(): OliveSupervisorPod;
-  // 그 파드에서 실행할 kubectl argv(plan이 그대로 보인다).
-  argv(pod: string, action: OliveAdminAction): string[];
+  // 대상 파드와 그 파드의 표시용 argv. exec하지 않는다. 읽지 못하면 던지고, 시간 초과는 ExecTimeout이다.
+  target(action: OliveAdminAction): OliveSupervisorTarget;
 };
 
 // 쓰기 문맥만: kubectl exec는 바꾸는 것이 없어도 쓰기로 판정한다(설계 C.7).

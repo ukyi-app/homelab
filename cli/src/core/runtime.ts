@@ -84,7 +84,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       pgRestore: pgRestoreWrite(exec, k8sRead, makePipe({ env: o.env, live: () => live }), (ns, job) => k8sRead.waitCondition("job", ns, { jobPods: job }, "Ready", 60)),
       bot: botWrite(exec, k8sRead, kube.pollMs ?? 2_000),
       olive: { ...oliveRead(readExec), ...oliveWrite(exec, readExec, kube) },
-      oliveAdmin: oliveAdminWrite(exec, readExec),
+      oliveAdmin: oliveAdminWrite(exec, readExec, alive),
       node: nodeRead(readExec),
       progress: o.progress,
     };
