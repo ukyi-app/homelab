@@ -8,7 +8,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { type Doc, type Violation, ROOT, effectiveSources, fmt, gitFiles, parseAll, readText, sameRepo, tempDir } from "./lib";
 import { WORKLOAD_KINDS, context, expand, id, podSpec } from "./policy";
-import { fillEmpty, filledValuesObject, helmTemplate, listedArgoApps, parseRendered, renderAll } from "./render";
+import { fillEmpty, filledValuesObject, helmTemplate, listShapeErrors, listedArgoApps, parseRendered, renderAll } from "./render";
 
 export const OLIVE_TARGETS_FILE = "platform/olive/targets.yaml";
 const OLIVE_CHART = "platform/olive";
@@ -349,7 +349,12 @@ export function readHostManifests(tracked: string[] = gitFiles(HOST_MANIFESTS), 
   if (files.length === 0) out.errors.push(`${HOST_MANIFESTS}에 바로 아래 추적 파일이 없다`);
   for (const f of files) {
     try {
-      for (const obj of parseAll(read(f))) if (obj && typeof obj === "object" && !Array.isArray(obj)) out.docs.push({ origin: `host:${f}`, obj });
+      for (const obj of parseAll(read(f))) {
+        if (!obj || typeof obj !== "object" || Array.isArray(obj)) continue;
+        out.docs.push({ origin: `host:${f}`, obj });
+        // k3s는 타입을 생략한 목록 자식에 목록 kind에서 복원한 타입을 채워 적용한다. 검사는 복원하지 않으므로 그 모양을 거절한다.
+        for (const m of listShapeErrors(obj)) out.errors.push(`${f}: ${m}`);
+      }
     } catch (e) {
       out.errors.push(`${f}: ${(e as Error).message}`);
     }
@@ -362,7 +367,8 @@ export function checkOliveIsolation(docs: Doc[], raw: any = readOliveTargets(), 
   const push = (where: string, message: string) => out.push({ rule: "olive-isolation", where, message });
   if (host) {
     for (const e of host.errors) push("host/k3s-manifests", `호스트 매니페스트를 읽지 못했다: ${e}`);
-    for (const cls of OLIVE_PVC_CLASSES.keys()) {
+    // 읽지 못한 문서가 있으면 선언이 없는지 판단할 수 없다. 실패는 위 오류가 이미 낸다.
+    if (host.errors.length === 0) for (const cls of OLIVE_PVC_CLASSES.keys()) {
       if (!expand(host.docs).some((d) => d.obj.kind === "StorageClass" && d.obj.metadata?.name === cls)) push(HOST_MANIFESTS, `허용 클래스 ${cls}의 StorageClass 선언이 없다(동적 프로비저닝인지 확인할 수 없다)`);
     }
     docs = [...docs, ...host.docs];
@@ -781,9 +787,107 @@ function hostScopeTest(): string[] {
   return bad;
 }
 
+// 목록 모양의 거절(render.ts listShapeErrors)이 렌더·호스트 입력 양쪽에 걸리는지. 리뷰의 입력을 그대로 쓴다.
+// 타입을 생략한 자식은 "선언이 없다"가 아니라 거절 메시지로 실패해야 한다(복원하지 않는다는 것이 보이게).
+const UNTYPED_SC = "apiVersion: storage.k8s.io/v1\nkind: StorageClassList\nitems:\n  - metadata: {name: local-retain}\n    provisioner: rancher.io/local-path\n    reclaimPolicy: Retain\n    volumeBindingMode: WaitForFirstConsumer\n";
+const UNTYPED_PV = "apiVersion: v1\nkind: PersistentVolumeList\nitems:\n  - metadata: {name: stray}\n    spec: {capacity: {storage: 1Gi}, accessModes: [ReadWriteOnce], storageClassName: local-retain, hostPath: {path: /var/lib/stray}}\n";
+const TYPED_SC = "apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata: {name: local-retain}\nprovisioner: rancher.io/local-path\n";
+function listShapeTests(base: OliveInput): string[] {
+  const bad: string[] = [];
+  const untyped = "에 apiVersion·kind가 없다";
+  const nested = "가 다시 목록이다";
+  const hosts: [string, Record<string, string>][] = [
+    ["타입을 생략한 StorageClassList", { "sc.yaml": UNTYPED_SC }],
+    ["타입을 생략한 PersistentVolumeList", { "local-retain.yaml": TYPED_SC, "stray-pv.yaml": UNTYPED_PV }],
+  ];
+  for (const [name, files] of hosts) {
+    const host = readHostManifests(Object.keys(files).map((f) => `${HOST_MANIFEST_DIR}/${f}`), (f) => files[basename(f)]);
+    const got = checkOliveIsolation([], readOliveTargets(), host).filter((v) => v.where.startsWith(HOST_MANIFEST_DIR));
+    if (!got.some((v) => v.rule === "olive-isolation" && v.message.includes(untyped)) || got.some((v) => v.message.includes("StorageClass 선언이 없다"))) {
+      bad.push(`호스트 ${name}가 목록 모양 거절로 실패하지 않았다: ${got.map(fmt).join("; ") || "없음"}`);
+    }
+    for (const text of Object.values(files)) {
+      if (!text.includes("List\n")) continue;
+      const r = parseRendered("fixture[vm]:platform/x", text, "x");
+      if (!r.violations.some((v) => v.rule === "render" && v.message.includes(untyped))) bad.push(`렌더 ${name}를 parseRendered가 거절하지 않았다`);
+    }
+  }
+  // 목록 안의 목록: 켠 root 렌더에서 olive-diagnosis의 Namespace를 List → NamespaceList 안에만 둔다. Argo CD가 배포하는 것은
+  // NamespaceList 하나이므로 거절돼야 하고, 거절이 없어도 격리 검사가 Namespace를 손자에서 찾아 조용히 통과하면 안 된다.
+  const docs = structuredClone(base.deployed[FORCED] ?? []);
+  const wrapped = docs.filter((d) => d.obj.kind === "Namespace" && d.obj.metadata?.name === "olive-diagnosis");
+  if (wrapped.length === 0) return [...bad, `${FORCED} 렌더에 olive-diagnosis Namespace가 없다`];
+  for (const d of wrapped) d.obj = { apiVersion: "v1", kind: "List", items: [{ apiVersion: "v1", kind: "NamespaceList", items: [d.obj] }] };
+  const r = parseRendered(wrapped[0].origin, JSON.stringify(wrapped[0].obj), wrapped[0].ns);
+  if (!r.violations.some((v) => v.rule === "render" && v.message.includes(nested))) bad.push(`List → NamespaceList → Namespace를 parseRendered가 거절하지 않았다: ${r.violations.map(fmt).join("; ") || "없음"}`);
+  if (!checkOliveIsolation(docs, base.targets, null).some((v) => v.message.includes("olive-diagnosis의 Namespace가 같은 렌더에 없다"))) bad.push("Namespace가 목록 안의 목록에만 있는데 격리 검사가 손자를 배포된 것으로 셌다");
+  const host = readHostManifests([`${HOST_MANIFEST_DIR}/nested.yaml`, `${HOST_MANIFEST_DIR}/local-retain.yaml`], (f) => (f.endsWith("nested.yaml") ? `apiVersion: v1\nkind: List\nitems:\n  - ${JSON.stringify(wrapped[0].obj.items[0])}\n` : TYPED_SC));
+  if (!host.errors.some((e) => e.includes(nested))) bad.push(`호스트의 목록 안의 목록을 거절하지 않았다: ${JSON.stringify(host.errors)}`);
+  return bad;
+}
+
+// 대조군과 fixture는 정책이 보는 모양(한 겹 목록을 편 문서, 출처·destination 유지)의 기존 입력에서 문서를 고른다(select·drop·from).
+// 원본 모양 그대로면 다른 차트가 DeploymentList로 낸 세션을 O10 대조군이 지우지 못해 정상 전환이 소유 충돌로 깨진다.
+// fixture가 새로 넣는 목록은 펴지 않고 정책에 넘긴다(목록 전개의 회귀를 그 사례가 잡는다).
+function flatInput(input: OliveInput): OliveInput {
+  const out = structuredClone(input);
+  for (const k of Object.keys(out.charts)) out.charts[k] = expand(out.charts[k]);
+  for (const k of Object.keys(out.deployed)) out.deployed[k] = expand(out.deployed[k]);
+  out.host.docs = expand(out.host.docs);
+  return out;
+}
+
+function buildControls(base: OliveInput, fixtures: Fixture[]): { controls: [string, OliveInput][]; errors: Violation[] } {
+  const flat = flatInput(base);
+  const controls: [string, OliveInput][] = [["지금", flat]];
+  const errors: Violation[] = [];
+  for (const [name, f] of Object.entries(FIXTURE_CONTROLS)) {
+    const fx = fixtures.find((x) => x.file === f);
+    if (!fx || fx.expect !== "pass") {
+      errors.push({ rule: "fixture", where: f, message: `대조군 ${name}의 양성 fixture가 없다` });
+      continue;
+    }
+    const input = structuredClone(flat);
+    const err = applyPatch(input, fx.ops);
+    if (err) errors.push({ rule: "fixture", where: f, message: `대조군 ${name}: ${err}` });
+    else controls.push([name, input]);
+  }
+  return { controls, errors };
+}
+
+// 다른 차트(platform/adguard)가 세션을 DeploymentList의 자식으로 이미 낸 입력. O10 대조군의 정리가 목록 안의 세션도 지워야
+// 대조군 셋이 모두 통과한다. 그 입력은 O10 양성 fixture의 patch에서 차트 이름을 바꾸고 Deployment를 목록으로 감싸 만든다.
+function listedSessionTest(base: OliveInput, fixtures: Fixture[]): string[] {
+  const o10 = fixtures.find((x) => x.file === FIXTURE_CONTROLS.O10);
+  if (!o10) return ["O10 양성 fixture가 없다"];
+  const names = new Map([
+    ["platform/go", "platform/adguard"],
+    ["chart:go/ci/o10.yaml", "chart:adguard/ci/o10.yaml"],
+    ["go[prod]:platform/go", "adguard[prod]:platform/adguard"],
+    ["go[vm]:platform/go", "adguard[vm]:platform/adguard"],
+    ["go", "adguard"],
+  ]);
+  const swap = (v: any): any =>
+    typeof v === "string" ? (names.get(v) ?? v) : Array.isArray(v) ? v.map(swap) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, swap(x)])) : v;
+  const ops: PatchOp[] = swap(o10.ops).map((op: PatchOp) => ((op.add as any)?.kind === "Deployment" ? { ...op, add: { apiVersion: "apps/v1", kind: "DeploymentList", items: [op.add] } } : op));
+  const input = structuredClone(base);
+  const err = applyPatch(input, ops);
+  if (err) return [`세션을 DeploymentList로 낸 입력을 만들지 못했다: ${err}`];
+  if (!input.deployed[REAL].some((d) => d.obj.kind === "DeploymentList" && d.origin.startsWith("adguard["))) return ["세션을 DeploymentList로 낸 입력에 목록이 없다"];
+  const { controls, errors } = buildControls(input, fixtures);
+  const bad = errors.map(fmt);
+  if (JSON.stringify(controls.map(([n]) => n)) !== JSON.stringify(EXPECTED_CONTROLS)) bad.push(`대조군이 ${controls.map(([n]) => n).join("·")}다`);
+  for (const [name, c] of controls) {
+    const hits = allChecks(c);
+    if (hits.length > 0) bad.push(`대조군 ${name}가 걸렸다: ${hits.map(fmt).join("; ")}`);
+  }
+  return bad;
+}
+
 export function checkOliveFixtures(base: OliveInput): Violation[] {
   const out: Violation[] = [];
   for (const m of renderSelfTests()) out.push({ rule: "fixture", where: "tools/ci/olive.ts renderSelfTests", message: m });
+  for (const m of listShapeTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts listShapeTests", message: m });
   const files = gitFiles(`${FIXTURE_DIR}/*.yaml`);
   const fixtures: Fixture[] = [];
   for (const f of files) {
@@ -791,18 +895,9 @@ export function checkOliveFixtures(base: OliveInput): Violation[] {
     if (typeof fx === "string") out.push({ rule: "fixture", where: f, message: fx });
     else fixtures.push(fx);
   }
-  const controls: [string, OliveInput][] = [["지금", base]];
-  for (const [name, f] of Object.entries(FIXTURE_CONTROLS)) {
-    const fx = fixtures.find((x) => x.file === f);
-    if (!fx || fx.expect !== "pass") {
-      out.push({ rule: "fixture", where: f, message: `대조군 ${name}의 양성 fixture가 없다` });
-      continue;
-    }
-    const input = structuredClone(base);
-    const err = applyPatch(input, fx.ops);
-    if (err) out.push({ rule: "fixture", where: f, message: `대조군 ${name}: ${err}` });
-    else controls.push([name, input]);
-  }
+  for (const m of listedSessionTest(base, fixtures)) out.push({ rule: "fixture", where: "tools/ci/olive.ts listedSessionTest", message: m });
+  const { controls, errors } = buildControls(base, fixtures);
+  out.push(...errors);
   const ran = controls.map(([n]) => n);
   if (JSON.stringify(ran) !== JSON.stringify(EXPECTED_CONTROLS)) out.push({ rule: "fixture", where: FIXTURE_DIR, message: `대조군이 ${EXPECTED_CONTROLS.length}개(${EXPECTED_CONTROLS.join("·")})가 아니다: ${ran.join("·")}` });
   const covered = new Set<string>();

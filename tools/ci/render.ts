@@ -371,9 +371,25 @@ export function listedArgoApps(obj: any): string[] {
   ]);
 }
 
+// 목록 문서(최상위 items가 배열)는 자식이 apiVersion·kind를 다 적은 한 겹만 받는다. 그 밖의 모양은 도구마다 다르게 편다.
+// 고정한 k3s(호스트 매니페스트)는 타입을 생략한 자식에 목록 kind에서 복원한 타입을 채워 적용하고, Argo CD v3.6.1은 한 겹만 펴서
+// 안쪽 목록을 객체 하나로 다루며, kubeconform은 직계 항목만 본다. 검사(policy.ts expand)가 그 전개를 흉내 내면 한 도구와 어긋날 때마다
+// 리소스가 검사에서 빠지거나 배포되지 않는 손자를 배포된 것으로 센다. 그래서 검사가 정확히 다루는 모양 밖은 거절한다. 지금 저장소에는 없다.
+export function listShapeErrors(obj: any): string[] {
+  if (!obj || typeof obj !== "object" || !Array.isArray(obj.items)) return [];
+  const typed = (v: unknown) => typeof v === "string" && v !== "";
+  return obj.items.flatMap((it: any, i: number) => {
+    const at = `목록 ${obj.kind ?? "(kind 없음)"}의 items[${i}]`;
+    const out: string[] = [];
+    if (!it || typeof it !== "object" || !typed(it.apiVersion) || !typed(it.kind)) out.push(`${at}에 apiVersion·kind가 없다. 목록의 자식은 타입을 다 적는다(생략한 타입은 도구마다 다르게 복원된다)`);
+    if (Array.isArray(it?.items)) out.push(`${at}(${it.kind ?? "kind 없음"})가 다시 목록이다. 목록 안의 목록은 받지 않는다(Argo CD는 한 겹만 편다)`);
+    return out;
+  });
+}
+
 // 렌더 결과 텍스트 하나를 문서로 나눈다. renderAll의 모든 렌더(root 파일 자체, Application source, 차트 시험 values, 남은
-// kustomization, apps·data 전개)가 이 함수를 지난다. 목록 안 Application 거절을 여기 두는 이유: root 파일처럼 visit을 거치지 않는
-// 입력도 운영자가 그대로 적용한다(bootstrap). visit에만 두면 그 입력의 목록 속 자식 Application이 검사 없이 지나간다.
+// kustomization, apps·data 전개)가 이 함수를 지난다. 목록 안 Application과 목록 모양의 거절을 여기 두는 이유: root 파일처럼 visit을
+// 거치지 않는 입력도 운영자가 그대로 적용한다(bootstrap). visit에만 두면 그 입력의 목록 속 자식이 검사 없이 지나간다.
 export function parseRendered(origin: string, text: string, ns?: string): { docs: Doc[]; violations: Violation[] } {
   const docs: Doc[] = [];
   const violations: Violation[] = [];
@@ -383,6 +399,7 @@ export function parseRendered(origin: string, text: string, ns?: string): { docs
       docs.push({ origin, obj, ns });
       const nested = listedArgoApps(obj);
       if (nested.length > 0) violations.push({ rule: "render", where: origin, message: `목록(items) 안의 ${nested.join(", ")}는 render.ts가 따라가지 않는다. 최상위 문서로 둔다` });
+      for (const m of listShapeErrors(obj)) violations.push({ rule: "render", where: origin, message: m });
     }
   } catch (e) {
     violations.push({ rule: "render", where: origin, message: `YAML 파싱 실패: ${(e as Error).message}` });
