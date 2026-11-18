@@ -1,0 +1,18 @@
+# expect: fail
+# rule: olive-owner
+# match: declaredBy가 빈 대상 session의 자리에 adguard(platform/adguard)가 Deployment를 낸다
+# 아직 선언되지 않은 세션 자리(olive-session/session)에 다른 차트가 Deployment를 냈다. 그 replicas·예외를 아무 규칙도 보지 않는다.
+patch:
+  - in: render
+    render: root
+    origin: "adguard[prod]:platform/adguard"
+    add:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: session, namespace: olive-session}
+      spec:
+        replicas: 0
+        selector: {matchLabels: {app: session}}
+        template:
+          metadata: {labels: {app: session}}
+          spec: {containers: [{name: session, image: x}]}

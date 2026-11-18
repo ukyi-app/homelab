@@ -1,0 +1,13 @@
+# expect: pass
+# O13의 정상 전환 입력: writer start: true, sandbox Application에 worker-task의 정확한 replicas 예외와 RespectIgnoreDifferences=true.
+# 이 모양은 위반 0건이어야 한다. writer-start.yaml이 이 짝에서 예외만 뺀 음성 사례다.
+patch:
+  - in: targets
+    select: {id: writer}
+    set: {start: true}
+  - in: apps
+    select: {kind: Application, name: sandbox}
+    remove: {spec.ignoreDifferences: {kind: Deployment, namespace: sandbox, name: worker-task}}
+    append:
+      spec.ignoreDifferences: {group: apps, kind: Deployment, namespace: sandbox, name: worker-task, jsonPointers: [/spec/replicas]}
+      spec.syncPolicy.syncOptions: RespectIgnoreDifferences=true

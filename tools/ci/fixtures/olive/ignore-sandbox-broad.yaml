@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-ignore-differences
+# match: 대상 writer(Deployment sandbox/worker-task)에 적용되는 넓은 예외다
+# sandbox Application에 모든 group·kind의 replicas 예외를 넣었다. 작성 Deployment의 replicas까지 덮어, 손으로 올린 값을 selfHeal이 내리지 못한다.
+# Respect 옵션은 함께 넣어 이 위반만 나게 한다.
+patch:
+  - in: apps
+    select: {kind: Application, name: sandbox}
+    append:
+      spec.ignoreDifferences: {group: "*", kind: "*", jsonPointers: [/spec/replicas]}
+      spec.syncPolicy.syncOptions: RespectIgnoreDifferences=true

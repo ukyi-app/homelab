@@ -1,8 +1,12 @@
 # expect: fail
 # rule: olive-ignore-differences
 # match: 대상 writer가 start: true인데
-# sandbox의 worker-task를 켤 수 있게 바꿨는데 root의 sandbox Application에 replicas 예외가 없다. O13이 예외와 함께 바꾼다.
+# sandbox의 worker-task를 켤 수 있게 바꿨는데 root의 sandbox Application에 그 replicas 예외가 없다. 짝인 양성 사례는 writer-start-o13.yaml.
+# 예외를 리소스 식별자로 지운다(지금처럼 없어도 된다). O13이 예외를 넣은 뒤에도 이 사례는 "예외 없이 켬"을 만든다.
 patch:
   - in: targets
     select: {id: writer}
     set: {start: true}
+  - in: apps
+    select: {kind: Application, name: sandbox}
+    remove: {spec.ignoreDifferences: {kind: Deployment, namespace: sandbox, name: worker-task}}

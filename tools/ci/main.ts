@@ -458,8 +458,9 @@ const steps: Step[] = [
   },
   {
     name: "olive targets",
-    // 올리브 실행 대상(platform/olive/targets.yaml)과 차트의 실행 Deployment(Git replicas 0), root의 replicas 예외가 맞는지(tools/ci/olive.ts).
-    // 구성 요소를 root에서 꺼 둬도 켠 값으로 렌더해 본다. 정지가 덮지 못하는 파드를 병합 전에 막는 자리다(D-38·D-39).
+    // 올리브 실행 대상(platform/olive/targets.yaml)과 차트의 실행 Deployment(Git replicas 0, 소유 Application), root의 replicas 예외가
+    // 맞는지(tools/ci/olive.ts). ci/*.yaml 렌더와 실제 Application 값 렌더(꺼 둔 구성 요소는 root에서 켜서)를 함께 본다.
+    // 정지가 덮지 못하는 파드를 병합 전에 막는 자리다(D-38·D-39). 위 단계의 렌더 캐시를 함께 쓴다.
     run: () => checkOliveTargets(oliveInput()),
   },
   {

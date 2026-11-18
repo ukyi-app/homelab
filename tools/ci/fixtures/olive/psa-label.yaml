@@ -1,0 +1,14 @@
+# expect: fail
+# rule: olive-isolation
+# match: 올리브 네임스페이스 olive-control에 pod-security.kubernetes.io/enforce: restricted가 없다
+# 감독 네임스페이스의 PSA enforce를 baseline으로 낮췄다. 렌더 검사가 놓친 호스트 포트·특권을 클러스터도 받는다.
+# 점 경로는 라벨 키의 점을 나누므로 labels 맵을 통째로 바꾼다.
+patch:
+  - in: chart
+    select: {kind: Namespace, name: olive-control}
+    set:
+      metadata.labels:
+        app.kubernetes.io/part-of: olive
+        pod-security.kubernetes.io/enforce: baseline
+        pod-security.kubernetes.io/warn: restricted
+        pod-security.kubernetes.io/audit: restricted

@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-replicas
+# match: 대상 writer의 spec.replicas가 0이 아니다(1)
+# 지금 root(켜진 sandbox)의 VM 값 렌더에서만 작성 Deployment가 1이다. ci/*.yaml 렌더만 보면 놓친다.
+patch:
+  - in: render
+    render: root
+    select: {origin: "sandbox[vm]:platform/sandbox", kind: Deployment, namespace: sandbox, name: worker-task}
+    set: {spec.replicas: 1}

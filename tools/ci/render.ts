@@ -152,8 +152,22 @@ export function clusterRestore(vf: string, overlay?: RootOverlay): Restore {
 
 // 끈 렌더(tools/ci/switch.ts). root 값 위에 얹는 값과, 로컬 차트 시험 values 위에 얹는 값이다.
 // 덧씌우기가 있으면 3.(남은 kustomization) build는 건너뛴다. 배포되지 않는 디렉터리라 스위치와 상관없고, 켠 렌더가 이미 본다.
-export type RootOverlay = { cluster?: { restore?: Record<string, unknown> } };
-export type RenderOptions = { rootOverlay?: RootOverlay; chartOverlay?: Record<string, unknown> };
+// components는 꺼 둔 구성 요소를 켠 렌더(tools/ci/olive.ts)가 쓴다.
+export type RootOverlay = { cluster?: { restore?: Record<string, unknown> }; components?: Record<string, { enabled: boolean }> };
+// fill: source path → Application의 valuesObject에 없는 키만 채울 값. 배포 전이라 비어 있는 필수 입력(digest 등)을 보충해
+// 실제 Application 값으로 렌더한다(tools/ci/olive.ts RENDER_FILL). valuesObject에 이미 있는 키는 덮지 않는다.
+export type RenderOptions = { rootOverlay?: RootOverlay; chartOverlay?: Record<string, unknown>; fill?: Record<string, Record<string, unknown>> };
+
+const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+function fillMissing(base: Record<string, unknown> | undefined, fill: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!fill) return base;
+  const out: Record<string, unknown> = structuredClone(base ?? {});
+  for (const [k, v] of Object.entries(fill)) {
+    if (out[k] === undefined) out[k] = structuredClone(v);
+    else if (isMap(out[k]) && isMap(v)) out[k] = fillMissing(out[k] as Record<string, unknown>, v);
+  }
+  return out;
+}
 // 차트 schema가 덧씌우기의 키를 거부하는가. 복구 스위치가 없는 닫힌 schema(bot-slot은 ExternalSecret이 없다)는 root도 그 키를 넘기지 않으므로 덧씌우지 않는다.
 function schemaRejects(dir: string, overlay: Record<string, unknown>): boolean {
   const path = join(ROOT, dir, "values.schema.json");
@@ -303,7 +317,7 @@ const cache = new Map<string, { ok: boolean; out: string }>();
 let defaultResult: RenderResult | undefined;
 
 export function renderAll(opts: RenderOptions = {}): RenderResult {
-  const plain = !opts.rootOverlay && !opts.chartOverlay;
+  const plain = !opts.rootOverlay && !opts.chartOverlay && !opts.fill;
   if (plain && defaultResult) return defaultResult;
   const res: RenderResult = { targets: [], docs: [], violations: [], skipped: [] };
   const tmp = tempDir("render");
@@ -394,13 +408,14 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
         }
         files.push(join(srcDir, f));
       }
-      if (helm.valuesObject) {
+      const valuesObject = fillMissing(helm.valuesObject, opts.fill?.[path]);
+      if (valuesObject) {
         const vfile = join(tmp, `${name}-${cluster}-values.json`);
-        writeFileSync(vfile, JSON.stringify(helm.valuesObject));
+        writeFileSync(vfile, JSON.stringify(valuesObject));
         files.push(vfile);
       }
       const release = helm.releaseName ?? name;
-      const key = JSON.stringify(["helm", srcDir, ns, release, helm.valueFiles ?? [], helm.valuesObject ?? null]);
+      const key = JSON.stringify(["helm", srcDir, ns, release, helm.valueFiles ?? [], valuesObject ?? null]);
       r = cache.get(key) ?? helmTemplate(release, srcDir, ns, files);
       cache.set(key, r);
     } else if (srcDir !== path) {

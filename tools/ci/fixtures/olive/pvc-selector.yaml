@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-isolation
+# match: PVC에 selector를 두지 않는다
+# 장부 PVC에 selector를 달았다. 동적 프로비저닝을 하지 않고 라벨이 맞는 기존 정적 PV(노드의 아무 경로)에 묶인다.
+patch:
+  - in: chart
+    select: {kind: PersistentVolumeClaim, namespace: olive-control, name: ledger}
+    set: {spec.selector: {matchLabels: {volume: ledger}}}

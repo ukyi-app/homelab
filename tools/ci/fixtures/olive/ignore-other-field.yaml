@@ -5,4 +5,7 @@
 patch:
   - in: apps
     select: {kind: Application, name: olive}
-    set: {spec.ignoreDifferences.0.jsonPointers: [/spec/template]}
+    edit:
+      spec.ignoreDifferences:
+        match: {kind: Deployment, namespace: olive-control, name: supervisor}
+        set: {jsonPointers: [/spec/template]}
