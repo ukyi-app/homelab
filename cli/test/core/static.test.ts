@@ -264,6 +264,19 @@ describe("소스 규칙", () => {
     expect(body(join(SRC, "core", "runtime.ts"))).not.toMatch(/nodeRead\([^)]*,/);
   });
 
+  test("정적: 명령 파일이 이 어댑터를 문맥으로만 쓰고 외부 명령을 직접 부르지 못한다", () => {
+    // 새 파일이 아래 규칙들의 검사 대상(src)에 든다.
+    expect(src.map(rel)).toContain("core/olive-admin.ts");
+    expect(commandProblems("olive.ts", 'import { oliveAdminWrite } from "../core/olive-admin";')).toEqual(["import ../core/olive-admin"]);
+    expect(commandProblems("olive.ts", 'import { makeExec } from "../core/exec";')).toEqual(["import ../core/exec"]);
+    expect(offenders(/\boliveAdmin(Read|Write)\b/, ["core/olive-admin.ts", "core/runtime.ts"])).toEqual([]);
+    // 어댑터가 프로세스를 직접 띄우지 않고 받은 exec만 부른다.
+    expect(body(join(SRC, "core", "olive-admin.ts"))).not.toMatch(/\bBun\.|\bprocess\.|node:/);
+    // 감독 ns로 가는 길은 이 파일 하나고, 비상 정지 어댑터에는 exec가 없다.
+    expect(offenders(/olive-control/, ["core/olive-admin.ts"])).toEqual([]);
+    for (const f of ["olive.ts", "node.ts"]) expect([f, /["'`]exec["'`]/.test(body(join(SRC, "core", f)))]).toEqual([f, false]);
+  });
+
   test("exitCode는 github 하위 명령만", () => {
     expect(src.filter((p) => rel(p).startsWith("commands/") && !rel(p).startsWith("commands/github") && /exitCode/.test(body(p))).map(rel)).toEqual([]);
   });

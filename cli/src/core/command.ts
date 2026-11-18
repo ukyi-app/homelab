@@ -295,6 +295,38 @@ export type OliveWrite = {
   holdZero(o: { targets: StopTarget[]; apps: string[]; timeoutSec: number }): HoldZero;
 };
 
+// 올리브 감독 파드의 고정 관리 진입점(D-60). 동작 이름만 넘기고 ns·파드 라벨·컨테이너·진입점은 core 상수다.
+export type OliveAdminAction = "status";
+// ready만 실행 대상이다. absent는 파드가 없는 것(꺼 둔 정상 상태일 수 있다)이고, 목록을 읽지 못한 것은 이 값이 아니라 던진다.
+// pods: absent·not-ready는 목록의 파드 수, terminating·multiple은 끝나지 않은 파드 수다.
+export type OliveSupervisorMissing = { state: "absent" | "not-ready" | "terminating" | "multiple"; pods: number };
+export type OliveSupervisorPod = { state: "ready"; pod: string } | OliveSupervisorMissing;
+// 감독이 낸 상태. 수·불리언·좁은 enum만 있고 자유 문자열 칸은 없다.
+export type OliveSupervisorStatus = {
+  alive: boolean;
+  queued: number;
+  running: number;
+  diagnosis: "active" | "paused";
+  stop: "none" | "stopping" | "stopped";
+  stopGeneration: number;
+  intakeOpen: boolean;
+};
+// unknown: 시간 초과로 결과를 알 수 없다. 꺼짐이나 없음으로 읽지 않는다.
+export type OliveAdminOutcome = { state: "reported"; pod: string; status: OliveSupervisorStatus } | { state: "no-target"; target: OliveSupervisorMissing } | { state: "unknown" };
+
+export type OliveAdminRead = {
+  // 대상 파드 찾기. exec하지 않는다. 읽지 못하면 던지고, 시간 초과는 ExecTimeout이다.
+  pod(): OliveSupervisorPod;
+  // 그 파드에서 실행할 kubectl argv(plan이 그대로 보인다).
+  argv(pod: string, action: OliveAdminAction): string[];
+};
+
+// 쓰기 문맥만: kubectl exec는 바꾸는 것이 없어도 쓰기로 판정한다(설계 C.7).
+export type OliveAdminWrite = OliveAdminRead & {
+  // 파드를 다시 찾아 고정 argv를 한 번 실행한다. 재시도하지 않는다. 출력이 정해진 꼴이 아니면 원문 없이 던진다.
+  run(action: OliveAdminAction): OliveAdminOutcome;
+};
+
 // 이 프로세스가 클러스터 노드 위인지. /etc/machine-id와 Node의 status.nodeInfo.machineID가 하나만 맞아야 node다.
 export type NodeHost = { state: "node"; node: string } | { state: "not-node" } | { state: "unknown"; reason: string };
 // 파드 UID의 cgroup(kubepods.slice 아래 고정 꼴)의 cgroup.events. absent는 그 경로가 없음, empty는 populated 0.
@@ -395,6 +427,7 @@ export type ReadCtx = {
   web: WebRead;
   bot: BotRead;
   olive: OliveRead;
+  oliveAdmin: OliveAdminRead;
   node: NodeRead;
   // kind delegate 명령과 wrapper 표시 명령(app new)에만 있다.
   github?: GithubDelegate;
@@ -430,6 +463,7 @@ export type WriteCtx = {
   pgRestore: PgRestoreWrite;
   bot: BotWrite;
   olive: OliveRead & OliveWrite;
+  oliveAdmin: OliveAdminWrite;
   node: NodeRead;
   // wrapper 표시 명령(app new)에만 있다.
   github?: { apply(): number };
