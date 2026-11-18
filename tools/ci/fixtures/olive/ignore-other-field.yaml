@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-ignore-differences
+# match: /spec/replicas 말고 다른 칸을 가리킨다
+# 감독의 예외가 파드 템플릿을 가리킨다. 이미지·볼륨의 라이브 변경을 Git이 되돌리지 않는다.
+patch:
+  - in: apps
+    select: {kind: Application, name: olive}
+    set: {spec.ignoreDifferences.0.jsonPointers: [/spec/template]}

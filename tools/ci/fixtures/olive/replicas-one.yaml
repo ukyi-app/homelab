@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-replicas
+# match: spec.replicas가 0이 아니다
+# O09 완료 조건 여섯째: Git replicas를 1로 바꾼 PR을 CI가 거절한다(AC-29). 켜도 Git 값은 0이다(D-38).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    set: {spec.replicas: 1}

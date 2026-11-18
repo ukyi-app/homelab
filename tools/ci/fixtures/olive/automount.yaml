@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-isolation
+# match: 파드의 automountServiceAccountToken이 false가 아니다
+# 감독 파드에 SA 토큰 자동 마운트를 켰다. 파드 값이 SA 값보다 우선하므로 SA가 꺼 둬도 토큰이 붙는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    set: {spec.template.spec.automountServiceAccountToken: true}

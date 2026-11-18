@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-targets
+# match: 칸이 없다: stop
+# 칸이 빠진 대상. CLI가 정지 대상인지 알 수 없다.
+patch:
+  - in: targets
+    select: {id: diagnosis}
+    unset: [stop]

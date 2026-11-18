@@ -452,9 +452,12 @@ function checkSandboxTaskShape(d: Doc, spec: any): Violation[] {
   const bad = (message: string, w = where) => out.push({ rule: "sandbox", where: w, message: `${SANDBOX_TASK}: ${message}` });
   if (spec.hostUsers !== false) bad("hostUsers: false가 아니다");
   if (spec.shareProcessNamespace !== true) bad("shareProcessNamespace: true가 아니다(PID 1이 좀비를 회수하지 않는다)");
-  // 0은 작업자를 멈춘 상태라 받는다(platform/sandbox values.yaml task.replicas). 2 이상은 두 파드가 같은 PVC를 쓰고
-  // 정리 판정의 "작업 전용 파드" 전제가 깨져 작업 격리가 무너진다. Recreate도 같은 이유다(교체 중 두 파드가 겹친다).
-  if (![0, 1].includes(d.obj.spec?.replicas) || d.obj.spec?.strategy?.type !== "Recreate") bad("replicas 0 또는 1, Recreate가 아니다");
+  // Git 값은 0만 받는다. 이 Deployment는 올리브 작성 대상이고(platform/olive/targets.yaml writer, D-38) O13 전에는 켜지 않는다(D-17).
+  // 켜고 끄기는 O13 뒤 관리자 CLI가 live replicas로 한다. 그때 필요한 sandbox Application의 replicas 예외는 tools/ci/olive.ts가 본다.
+  // values.schema.json은 0과 1을 받으므로 이 줄이 1을 막는 자리다.
+  // Recreate: 교체 중 두 파드가 같은 PVC를 쓰면 정리 판정의 "작업 전용 파드" 전제가 깨진다(CLI가 켠 뒤에도 같다).
+  if (d.obj.spec?.replicas !== 0) bad(`replicas가 0이 아니다(${JSON.stringify(d.obj.spec?.replicas)}). Git 값은 0이고 켜고 끄기는 O13 뒤 관리자 CLI다`);
+  if (d.obj.spec?.strategy?.type !== "Recreate") bad("strategy가 Recreate가 아니다");
   const containers: any[] = spec.containers ?? [];
   if (containers.length !== 1 || containers[0]?.name !== SANDBOX_TASK_CONTAINER) bad(`본 컨테이너는 ${SANDBOX_TASK_CONTAINER} 하나여야 한다`);
   // 재시작형 init(사이드카)은 PID 공간을 함께 써 정리 sweep이 끝내고, 그동안 기준 상태 확인이 어긋난다.

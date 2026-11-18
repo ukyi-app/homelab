@@ -2,10 +2,11 @@
 infisical:
   projectSlug: ci-project
   environmentSlug: ci
-# 작업자 둘을 켠(replicas 1) 렌더도 이 파일이 맡는다. root 렌더는 values.yaml의 replicas를 따른다.
+# 대화·리뷰 작업자를 켠(replicas 1) 렌더도 이 파일이 맡는다. root 렌더는 values.yaml의 replicas를 따른다.
+# 작업 레인은 0이다. 올리브 작성 대상(platform/olive/targets.yaml writer)이라 CI가 Git replicas 0만 받는다(tools/ci/olive.ts, D-38).
 worker:
   replicas: 1
 task:
   enabled: true
-  replicas: 1
+  replicas: 0
   nodeName: ci-node

@@ -46,7 +46,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata: {name: worker-task, namespace: sandbox}
 spec:
-  replicas: 1
+  replicas: 0
   strategy: {type: Recreate}
   selector: {matchLabels: {app: worker-task}}
   template:

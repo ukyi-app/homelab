@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-ignore-differences
+# match: RespectIgnoreDifferences=true가 없다
+# 예외는 diff만 가린다. 이 옵션이 없으면 다른 이유의 sync가 Git 값 0으로 덮어 CLI가 켠 파드를 내린다.
+patch:
+  - in: apps
+    select: {kind: Application, name: olive}
+    set: {spec.syncPolicy.syncOptions: []}

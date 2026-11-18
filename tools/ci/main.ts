@@ -10,6 +10,7 @@ import { basename, dirname, join } from "node:path";
 import { checkAlerting } from "./alerting";
 import { checkPgAclOrder, checkSecretPaths, checkValkeyWiring, checkVendoredCharts } from "./data";
 import { type Doc, type Violation, ARGOCD_SOURCE_OVERRIDE, ROOT, endGroup, errorLine, fmt, gitFiles, group, parseAll, readText, run, tempDir } from "./lib";
+import { checkOliveFixtures, checkOliveIsolation, checkOliveTargets, oliveInput } from "./olive";
 import { checkAll, checkBotSlotLastWave, checkIngress, checkNoSecrets, checkReadonlyRbac, checkRevisions, checkSandbox, checkTailnetPolicy, checkTailnetTags, checkWorkloads, readTailnetPolicy } from "./policy";
 import { kubeconform, renderAll } from "./render";
 import { checkExternalSecretsSwitch } from "./switch";
@@ -451,8 +452,20 @@ const steps: Step[] = [
       const r = renderAll();
       for (const t of r.targets) console.log(`렌더: ${t.origin}`);
       for (const s of r.skipped) console.log(`외부 차트(렌더하지 않음): ${s}`);
-      return [...r.violations, ...checkAll(r.docs), ...checkSecretPaths(r.docs), ...checkPgAclOrder(r.docs), ...checkVolumes(r.docs), ...kubeconform(r.targets)];
+      // checkOliveIsolation은 전체 렌더에서 본다. 다른 차트가 올리브 ns에 워크로드를 두거나 올리브 SA를 묶어도 걸린다.
+      return [...r.violations, ...checkAll(r.docs), ...checkOliveIsolation(r.docs), ...checkSecretPaths(r.docs), ...checkPgAclOrder(r.docs), ...checkVolumes(r.docs), ...kubeconform(r.targets)];
     },
+  },
+  {
+    name: "olive targets",
+    // 올리브 실행 대상(platform/olive/targets.yaml)과 차트의 실행 Deployment(Git replicas 0), root의 replicas 예외가 맞는지(tools/ci/olive.ts).
+    // 구성 요소를 root에서 꺼 둬도 켠 값으로 렌더해 본다. 정지가 덮지 못하는 파드를 병합 전에 막는 자리다(D-38·D-39).
+    run: () => checkOliveTargets(oliveInput()),
+  },
+  {
+    name: "olive fixtures",
+    // 지금 main의 선언에 patch 하나를 얹은 음성 사례(tools/ci/fixtures/olive/*.yaml). 규칙마다 하나 이상, 기대한 위반만 나야 한다.
+    run: () => checkOliveFixtures(oliveInput()),
   },
   {
     name: "external secrets switch",

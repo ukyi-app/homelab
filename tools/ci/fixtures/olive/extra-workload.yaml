@@ -1,0 +1,19 @@
+# expect: fail
+# rule: olive-isolation
+# match: 대상 자료 밖의 워크로드다
+# 읽기 실행기 네임스페이스에 CronJob을 더했다. 정지는 대상 Deployment만 내리고 자물쇠는 이미 뜬 파드를 막지 못한다.
+patch:
+  - in: chart
+    add:
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata: {name: cleanup, namespace: olive-reader}
+      spec:
+        schedule: "0 * * * *"
+        jobTemplate:
+          spec:
+            template:
+              spec:
+                automountServiceAccountToken: false
+                restartPolicy: Never
+                containers: [{name: cleanup, image: x}]
