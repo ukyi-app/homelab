@@ -35,13 +35,19 @@ const KUBECTL_TIMEOUT = /^(?:Error from server \((?:Timeout|ServerTimeout)\):|(?
 // exec.ts가 stderr를 앞에서부터 이 길이까지만 남긴다.
 const STDERR_KEPT = 2_000;
 
-// stdout과 stderr의 앞부분은 진입점이 쓸 수 있으므로 분류에 쓰지 않는다. kubectl은 자기 오류를 stderr 맨 끝에 쓰고, 원격 명령이 0이 아니게
-// 끝나면 끝 줄이 "command terminated with exit code N"이라 진입점이 쓴 글이 끝 줄이 되지 못한다.
-// 잘린 stderr는 끝 줄을 알 수 없다. 진입점이 잘리는 자리에 맞춰 kubectl 오류를 흉내 낼 수 있어 시간 초과로 치지 않는다.
+// kubectl은 자기 오류를 stderr 맨 끝에 쓴다. 잘린 stderr는 끝 줄을 알 수 없어 null이다.
+const endLine = (r: ExecResult) => (r.stderr.length >= STDERR_KEPT ? null : r.stderr.slice(r.stderr.lastIndexOf("\n") + 1));
+
+// stdout과 stderr의 앞부분은 진입점이 쓸 수 있으므로 분류에 쓰지 않는다. 원격 명령이 0이 아니게 끝나면 kubectl이 stderr 맨 끝에
+// "command terminated with exit code N"을 붙인다. 진입점의 stderr에 마지막 줄바꿈이 없으면 그 문구가 같은 줄에 이어지므로 줄 시작이 아니라
+// 줄 끝을 실제 종료 코드와 대조한다.
+// 잘린 stderr는 진입점이 잘리는 자리에 맞춰 kubectl 오류를 흉내 낼 수 있어 시간 초과로 치지 않는다.
 function timedOut(r: ExecResult): boolean {
   if (r.errKind === "timeout") return true;
-  if (r.code === 0 || r.stderr.length >= STDERR_KEPT) return false;
-  return KUBECTL_TIMEOUT.test(r.stderr.slice(r.stderr.lastIndexOf("\n") + 1));
+  if (r.code === 0) return false;
+  const end = endLine(r);
+  if (end === null || end.endsWith(`command terminated with exit code ${r.code}`)) return false;
+  return KUBECTL_TIMEOUT.test(end);
 }
 
 function wordsOf(action: OliveAdminAction): string[] {
@@ -53,6 +59,8 @@ const failure = (r: ExecResult) => (r.errKind === "not-found" ? "kubectl이 없�
 const present = (v: unknown) => v !== undefined && v !== null;
 const isName = (v: unknown): v is string => typeof v === "string" && v.length <= 253 && POD_NAME.test(v);
 const isUid = (v: unknown): v is string => typeof v === "string" && POD_UID.test(v);
+// 목록의 항목은 타입 정보를 생략할 수 있다. 적혀 있으면 기대한 값이어야 한다.
+const versionFits = (doc: any, want: string) => doc?.apiVersion === undefined || doc.apiVersion === want;
 const isReady = (p: any) => isArray(p?.status?.conditions) && p.status.conditions.some((c: any) => c?.type === "Ready" && c?.status === "True");
 // 쫓겨나거나 끝난 파드는 Deployment가 지우기 전까지 목록에 남는다. 지금 도는 감독으로 세지 않는다.
 const finished = (p: any) => p?.status?.phase === "Succeeded" || p?.status?.phase === "Failed";
@@ -63,7 +71,9 @@ function isSupervisorPod(p: any, bareItems: boolean): boolean {
   const containers = p?.spec?.containers;
   return (
     (p?.kind === "Pod" || (bareItems && p?.kind === undefined)) &&
+    versionFits(p, "v1") &&
     isName(p?.metadata?.name) &&
+    isUid(p?.metadata?.uid) &&
     p?.metadata?.namespace === OLIVE_ADMIN_NS &&
     entries(OLIVE_ADMIN_LABELS).every(([k, v]) => labels?.[k] === v) &&
     isArray(containers) &&
@@ -82,17 +92,19 @@ function listPods(exec: Exec): any[] {
     throw new Error("감독 파드를 읽지 못했다(응답이 JSON이 아니다)");
   }
   // 다른 종류의 빈 목록이나 남은 페이지가 있는 부분 목록을 받으면 "감독 없음"을 지어낸다.
-  if ((doc?.kind !== "List" && doc?.kind !== "PodList") || !isArray(doc?.items)) throw new Error("감독 파드를 읽지 못했다(파드 목록 응답이 아니다)");
+  if ((doc?.kind !== "List" && doc?.kind !== "PodList") || !versionFits(doc, "v1") || !isArray(doc?.items)) throw new Error("감독 파드를 읽지 못했다(파드 목록 응답이 아니다)");
   if (present(doc?.metadata?.continue) && doc.metadata.continue !== "") throw new Error("감독 파드를 읽지 못했다(남은 페이지가 있는 부분 목록이다)");
   if (!doc.items.every((p: any) => isSupervisorPod(p, doc.kind === "PodList"))) throw new Error("감독 파드를 읽지 못했다(감독 파드 모양이 아닌 항목이 있다)");
   return doc.items;
 }
 
 // 소유 사슬의 한 객체. 없으면 null(대상 아님의 근거다), 읽지 못했거나 다른 객체가 오면 던진다.
+// 없다는 근거는 이 호출이 읽은 객체를 가리키는 kubectl의 끝 줄뿐이다. ExecResult.notFound는 stderr 어느 줄이든 맞아서 다른 오류를 가린다.
 function readOwner(exec: Exec, kind: "Deployment" | "ReplicaSet", name: string): any | null {
-  const r = exec(kubectlArgv(["-n", OLIVE_ADMIN_NS, "get", kind === "Deployment" ? "deployments.apps" : "replicasets.apps", name, "-o", "json"]));
+  const resource = kind === "Deployment" ? "deployments.apps" : "replicasets.apps";
+  const r = exec(kubectlArgv(["-n", OLIVE_ADMIN_NS, "get", resource, name, "-o", "json"]));
   if (timedOut(r)) throw new ExecTimeout(`감독 ${kind} 읽기: 시간 초과(결과 미상)`);
-  if (r.code !== 0 && r.notFound) return null;
+  if (r.code === 1 && endLine(r) === `Error from server (NotFound): ${resource} "${name}" not found`) return null;
   if (r.code !== 0) throw new Error(`감독 파드를 읽지 못했다(${kind}: ${failure(r)})`);
   let doc: any;
   try {
@@ -100,7 +112,7 @@ function readOwner(exec: Exec, kind: "Deployment" | "ReplicaSet", name: string):
   } catch {
     throw new Error(`감독 파드를 읽지 못했다(${kind} 응답이 JSON이 아니다)`);
   }
-  if (doc?.kind !== kind || doc?.metadata?.name !== name || doc?.metadata?.namespace !== OLIVE_ADMIN_NS || !isUid(doc?.metadata?.uid)) throw new Error(`감독 파드를 읽지 못했다(${kind} 응답이 그 객체가 아니다)`);
+  if (doc?.apiVersion !== "apps/v1" || doc?.kind !== kind || doc?.metadata?.name !== name || doc?.metadata?.namespace !== OLIVE_ADMIN_NS || !isUid(doc?.metadata?.uid)) throw new Error(`감독 파드를 읽지 못했다(${kind} 응답이 그 객체가 아니다)`);
   return doc;
 }
 
@@ -212,10 +224,14 @@ export function oliveAdminRead(readExec: Exec): OliveAdminRead {
   };
 }
 
-// alive: 끝난 apply의 쓰기 문맥이면 던진다. 쓰기 exec의 막기는 파드 조회 뒤에야 닿으므로 run 입구에서 먼저 본다.
+// alive: 끝난 apply의 쓰기 문맥이면 던진다. target은 읽기 exec만 쓰고 run도 파드 조회 뒤에야 쓰기 exec의 막기에 닿으므로 두 입구에서 먼저 본다.
 export function oliveAdminWrite(exec: Exec, readExec: Exec, alive: () => void): OliveAdminWrite {
+  const read = oliveAdminRead(readExec);
   return {
-    ...oliveAdminRead(readExec),
+    target(action) {
+      alive();
+      return read.target(action);
+    },
     run(action): OliveAdminOutcome {
       alive();
       wordsOf(action);

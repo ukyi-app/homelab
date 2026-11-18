@@ -15,6 +15,7 @@ const RS = "supervisor-7c9d8f6b5";
 const DEPLOY_UID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const RS_UID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const OTHER_UID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const POD_OWN_UID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const CANARY = "canary-raw-output-7f3a";
 const FIXED_REPORT_ERROR = "감독 관리 진입점 출력이 정해진 꼴이 아니다";
 
@@ -40,12 +41,14 @@ const execArgv = (pod = POD) => ["kubectl", "-n", "olive-control", "exec", pod, 
 const rsRef = (o: Record<string, unknown> = {}) => ({ apiVersion: "apps/v1", kind: "ReplicaSet", name: RS, uid: RS_UID, controller: true, ...o });
 const deployRef = (o: Record<string, unknown> = {}) => ({ apiVersion: "apps/v1", kind: "Deployment", name: "supervisor", uid: DEPLOY_UID, controller: true, ...o });
 
-type PodOpts = { name?: string; ns?: string; phase?: string; ready?: boolean; deleting?: boolean; owners?: unknown[]; labels?: Record<string, string>; kind?: string; container?: string };
+type PodOpts = { name?: string; ns?: string; phase?: string; ready?: boolean; deleting?: boolean; owners?: unknown[]; labels?: Record<string, string>; kind?: string; container?: string; apiVersion?: string; uid?: string };
 const pod = (o: PodOpts = {}) => ({
+  apiVersion: o.apiVersion ?? "v1",
   kind: o.kind ?? "Pod",
   metadata: {
     name: o.name ?? POD,
     namespace: o.ns ?? "olive-control",
+    uid: o.uid ?? POD_OWN_UID,
     labels: o.labels ?? { ...CHART_POD_LABELS },
     ownerReferences: o.owners ?? [rsRef()],
     ...(o.deleting ? { deletionTimestamp: "2026-11-19T01:00:00Z" } : {}),
@@ -55,8 +58,8 @@ const pod = (o: PodOpts = {}) => ({
 });
 const list = (...items: unknown[]): Resp => ({ stdout: JSON.stringify({ kind: "List", metadata: {}, items }) });
 const json = (x: unknown): Resp => ({ stdout: JSON.stringify(x) });
-const deployment = (o: Record<string, unknown> = {}) => ({ kind: "Deployment", metadata: { name: "supervisor", namespace: "olive-control", uid: DEPLOY_UID, ...o } });
-const replicaSet = (o: Record<string, unknown> = {}) => ({ kind: "ReplicaSet", metadata: { name: RS, namespace: "olive-control", uid: RS_UID, ownerReferences: [deployRef()], ...o } });
+const deployment = (o: Record<string, unknown> = {}) => ({ apiVersion: "apps/v1", kind: "Deployment", metadata: { name: "supervisor", namespace: "olive-control", uid: DEPLOY_UID, ...o } });
+const replicaSet = (o: Record<string, unknown> = {}) => ({ apiVersion: "apps/v1", kind: "ReplicaSet", metadata: { name: RS, namespace: "olive-control", uid: RS_UID, ownerReferences: [deployRef()], ...o } });
 const notFound = (what: string): Resp => ({ code: 1, stderr: `Error from server (NotFound): ${what} not found\n` });
 // 감독 Deployment가 제어하는 정상 소유 사슬.
 const chain = () => [rule(deployArgv, json(deployment())), rule(rsArgv(), json(replicaSet()))];
@@ -146,27 +149,35 @@ describe("감독 관리 진입점 argv", () => {
 
 describe("대상 파드", () => {
   test("pod: Running·Ready 하나일 때만 대상이고, 0개·둘·삭제 중·Ready 아님을 각각 구별해 돌려준다", () => {
-    const cases: [Resp, OliveSupervisorTarget][] = [
-      [list(pod()), READY],
-      [list(), { state: "absent", pods: 0 }],
-      [list(pod(), pod({ name: `${POD}-b` })), { state: "multiple", pods: 2 }],
-      [list(pod({ deleting: true })), { state: "terminating", pods: 1 }],
-      [list(pod({ ready: false })), { state: "not-ready", pods: 1 }],
-      [list(pod({ phase: "Pending", ready: false })), { state: "not-ready", pods: 1 }],
+    // 빈 목록은 소유를 대조할 파드가 없어 목록만 읽고, 나머지는 사슬의 객체를 한 번씩만 읽는다.
+    const listOnly = [podsArgv];
+    const fullChain = [podsArgv, deployArgv, rsArgv()];
+    const cases: [Resp, OliveSupervisorTarget, string[][]][] = [
+      [list(pod()), READY, fullChain],
+      [list(), { state: "absent", pods: 0 }, listOnly],
+      [list(pod(), pod({ name: `${POD}-b` })), { state: "multiple", pods: 2 }, fullChain],
+      [list(pod({ deleting: true })), { state: "terminating", pods: 1 }, fullChain],
+      [list(pod({ ready: false })), { state: "not-ready", pods: 1 }, fullChain],
+      [list(pod({ phase: "Pending", ready: false })), { state: "not-ready", pods: 1 }, fullChain],
       // Ready 조건이 남아 있어도 Running이 아니면 대상이 아니다.
-      [list(pod({ phase: "Pending" })), { state: "not-ready", pods: 1 }],
+      [list(pod({ phase: "Pending" })), { state: "not-ready", pods: 1 }, fullChain],
       // 지우는 중인 파드와 새 파드가 함께 있으면 어느 쪽도 고르지 않는다.
-      [list(pod({ deleting: true }), pod({ name: `${POD}-b` })), { state: "multiple", pods: 2 }],
+      [list(pod({ deleting: true }), pod({ name: `${POD}-b` })), { state: "multiple", pods: 2 }, fullChain],
       // 쫓겨나 끝난 파드는 세지 않는다.
-      [list(pod({ phase: "Failed", ready: false, name: `${POD}-old` }), pod()), READY],
-      [list(pod({ phase: "Failed", ready: false })), { state: "not-ready", pods: 1 }],
+      [list(pod({ phase: "Failed", ready: false, name: `${POD}-old` }), pod()), READY, fullChain],
+      [list(pod({ phase: "Failed", ready: false })), { state: "not-ready", pods: 1 }, fullChain],
       // not-ready의 수는 끝난 파드까지 든 목록 전체다.
-      [list(pod({ phase: "Failed", ready: false, name: `${POD}-old` }), pod({ phase: "Pending", ready: false })), { state: "not-ready", pods: 2 }],
-      [list(pod({ phase: "Failed", ready: false, name: `${POD}-old` }), pod({ phase: "Succeeded", ready: false })), { state: "not-ready", pods: 2 }],
+      [list(pod({ phase: "Failed", ready: false, name: `${POD}-old` }), pod({ phase: "Pending", ready: false })), { state: "not-ready", pods: 2 }, fullChain],
+      [list(pod({ phase: "Failed", ready: false, name: `${POD}-old` }), pod({ phase: "Succeeded", ready: false })), { state: "not-ready", pods: 2 }, fullChain],
     ];
     const { ctx, calls } = testCtx("plan", owned(cases.map(([r]) => r)));
-    for (const [, want] of cases) expect(ctx.oliveAdmin.target("status")).toEqual(want);
-    expect(calls().calls.filter((c) => c.argv.includes("pods")).length).toBe(cases.length);
+    let seen = 0;
+    for (const [, want, ledger] of cases) {
+      expect(ctx.oliveAdmin.target("status")).toEqual(want);
+      const all = calls().calls.map((c) => c.argv);
+      expect(all.slice(seen)).toEqual(ledger);
+      seen = all.length;
+    }
     expect(calls().unmatched).toEqual([]);
   });
 
@@ -190,8 +201,9 @@ describe("대상 파드", () => {
     ["Job이 제어하는 파드", list(pod({ owners: [rsRef({ kind: "Job", apiVersion: "batch/v1" })] })), chain()],
     ["옵션 꼴 이름의 ReplicaSet을 가리키는 파드", list(pod({ owners: [rsRef({ name: "--raw" })] })), chain()],
     ["정상 파드와 섞인 다른 소유의 파드", list(pod(), pod({ name: `${POD}-b`, phase: "Failed", ready: false, owners: [] })), chain()],
-    ["ReplicaSet이 없는 파드", list(pod()), [rule(deployArgv, json(deployment())), rule(rsArgv(), notFound('replicasets.apps "x"'))]],
+    ["ReplicaSet이 없는 파드", list(pod()), [rule(deployArgv, json(deployment())), rule(rsArgv(), notFound(`replicasets.apps "${RS}"`))]],
     ["감독 Deployment가 없는데 남은 파드", list(pod()), [rule(deployArgv, notFound('deployments.apps "supervisor"'))]],
+    ["인증 플러그인의 경고 줄 뒤에 온 그 객체의 NotFound", list(pod()), [rule(deployArgv, { code: 1, stderr: 'Warning: exec plugin notice\nError from server (NotFound): deployments.apps "supervisor" not found\n' })]],
   ];
 
   test("소유: 감독 Deployment의 파드로 확인되지 않으면 not-owned이고 없음으로 바꾸지 않는다", () => {
@@ -241,6 +253,75 @@ describe("대상 파드", () => {
       const e = thrown(() => ctx.oliveAdmin.target("status"));
       expect([name, e.message.startsWith("감독 파드를 읽지 못했다")]).toEqual([name, true]);
       expect([name, e.message.includes(CANARY)]).toEqual([name, false]);
+    }
+  });
+
+  test(
+    "소유: NotFound는 그 호출이 읽은 객체를 가리키는 kubectl의 끝 줄일 때만 대상 아님이고 나머지는 읽기 실패다",
+    async () => {
+      const deployMissing = 'Error from server (NotFound): deployments.apps "supervisor" not found';
+      const rsMissing = `Error from server (NotFound): replicasets.apps "${RS}" not found`;
+      const forbidden = `Error from server (Forbidden): ${CANARY}`;
+      const onDeploy = (r: Resp) => [rule(deployArgv, r)];
+      const onRs = (r: Resp) => [rule(deployArgv, json(deployment())), rule(rsArgv(), r)];
+      const bad: [string, ReturnType<typeof rule>[]][] = [
+        ["Deployment 조회에 다른 이름의 NotFound", onDeploy({ code: 1, stderr: 'Error from server (NotFound): deployments.apps "other" not found\n' })],
+        ["Deployment 조회에 다른 리소스의 NotFound", onDeploy({ code: 1, stderr: `${rsMissing}\n` })],
+        ["ReplicaSet 조회에 다른 이름의 NotFound", onRs({ code: 1, stderr: 'Error from server (NotFound): replicasets.apps "x" not found\n' })],
+        ["ReplicaSet 조회에 Deployment의 NotFound", onRs({ code: 1, stderr: `${deployMissing}\n` })],
+        ["Deployment 조회의 stderr 중간에 NotFound, 끝 줄은 Forbidden", onDeploy({ code: 1, stderr: `${deployMissing}\n${forbidden}\n` })],
+        ["ReplicaSet 조회의 stderr 중간에 NotFound, 끝 줄은 Forbidden", onRs({ code: 1, stderr: `${rsMissing}\n${forbidden}\n` })],
+        ["API 경로가 없어 난 일반 404", onDeploy({ code: 1, stderr: "Error from server (NotFound): the server could not find the requested resource (get deployments.apps supervisor)\n" })],
+        ["잘려서 끝 줄을 알 수 없는 stderr", onDeploy({ code: 1, stderr: `${"x".repeat(2_000)}\n${deployMissing}\n` })],
+        ["kubectl의 API 오류가 아닌 종료 코드", onDeploy({ code: 2, stderr: `${deployMissing}\n` })],
+        ["stdout에만 있는 NotFound", onDeploy({ code: 1, stdout: `${deployMissing}\n`, stderr: `${forbidden}\n` })],
+      ];
+      for (const [name, rules] of bad) {
+        const plan = testCtx("plan", [rule(podsArgv, list(pod())), ...rules]);
+        const e = thrown(() => plan.ctx.oliveAdmin.target("status"));
+        expect([name, e.message.startsWith("감독 파드를 읽지 못했다")]).toEqual([name, true]);
+        expect([name, e.message.includes(CANARY)]).toEqual([name, false]);
+        const apply = testCtx("apply", [rule(podsArgv, list(pod())), ...rules]);
+        await expect(applyWith(apply.ctx, (w) => w.oliveAdmin.run("status"))).rejects.toThrow("감독 파드를 읽지 못했다");
+        expect([name, apply.calls().calls.some((c) => c.argv.includes("exec"))]).toEqual([name, false]);
+      }
+    },
+    30_000,
+  );
+
+  test("응답: 파드 자신의 UID 꼴과 명시된 API 버전이 다르면 대상으로 삼지 않고 읽기 실패다", () => {
+    const item = pod();
+    const bad: [string, Resp][] = [
+      ["UID가 없는 파드", list({ ...item, metadata: { ...item.metadata, uid: undefined } })],
+      ["UID 꼴이 아닌 파드", list(pod({ uid: "not-a-uid" }))],
+      ["List 항목의 틀린 API 버전", list(pod({ apiVersion: "apps/v1" }))],
+      ["PodList 항목의 틀린 API 버전", json({ apiVersion: "v1", kind: "PodList", metadata: {}, items: [{ ...item, kind: undefined, apiVersion: "v2" }] })],
+    ];
+    for (const [name, resp] of bad) {
+      const { ctx } = testCtx("plan", [rule(podsArgv, resp)]);
+      expect([name, thrown(() => ctx.oliveAdmin.target("status")).message]).toEqual([name, "감독 파드를 읽지 못했다(감독 파드 모양이 아닌 항목이 있다)"]);
+    }
+    const { ctx: wrongList } = testCtx("plan", [rule(podsArgv, json({ apiVersion: "v2", kind: "List", metadata: {}, items: [] }))]);
+    expect(thrown(() => wrongList.oliveAdmin.target("status")).message).toBe("감독 파드를 읽지 못했다(파드 목록 응답이 아니다)");
+  });
+
+  test("응답: PodList 항목은 생략된 타입 정보를 받는다", () => {
+    const { kind: _kind, apiVersion: _apiVersion, ...bare } = pod();
+    const { ctx } = testCtx("plan", owned(json({ apiVersion: "v1", kind: "PodList", metadata: {}, items: [bare] })));
+    expect(ctx.oliveAdmin.target("status")).toEqual(READY);
+  });
+
+  test("응답: 소유 객체의 API 버전이 apps/v1이 아니면 소유 참조가 맞아도 읽기 실패다", () => {
+    const bad: [string, ReturnType<typeof rule>[]][] = [
+      ["Deployment의 틀린 버전", [rule(deployArgv, json({ ...deployment(), apiVersion: "extensions/v1beta1" }))]],
+      ["Deployment의 빠진 버전", [rule(deployArgv, json({ ...deployment(), apiVersion: undefined }))]],
+      ["ReplicaSet의 틀린 버전", [rule(deployArgv, json(deployment())), rule(rsArgv(), json({ ...replicaSet(), apiVersion: "extensions/v1beta1" }))]],
+      ["ReplicaSet의 빠진 버전", [rule(deployArgv, json(deployment())), rule(rsArgv(), json({ ...replicaSet(), apiVersion: undefined }))]],
+    ];
+    for (const [name, rules] of bad) {
+      const { ctx } = testCtx("plan", [rule(podsArgv, list(pod())), ...rules]);
+      const e = thrown(() => ctx.oliveAdmin.target("status"));
+      expect([name, e.message.endsWith("응답이 그 객체가 아니다)")]).toEqual([name, true]);
     }
   });
 
@@ -378,6 +459,49 @@ describe("쓰기 문맥의 실행", () => {
     }
   });
 
+  test("exec: 줄바꿈 없는 원격 stderr 뒤에 붙은 종료 문구는 확인된 실패다", async () => {
+    const forged = "Unable to connect to the server: net/http: TLS handshake timeout";
+    const cases: [number, string][] = [
+      [1, `${forged}command terminated with exit code 1\n`],
+      [7, `${forged}command terminated with exit code 7\n`],
+      [7, `Error from server (Timeout): ${CANARY}command terminated with exit code 7\n`],
+      [7, `error: context deadline exceeded command terminated with exit code 7\n`],
+    ];
+    for (const [code, stderr] of cases) {
+      const { ctx, calls } = testCtx("apply", [...owned(list(pod())), rule(execArgv(), { code, stderr })]);
+      const err = await failed(ctx);
+      expect(err?.message).toBe(`감독 관리 진입점이 실패했다(exit ${code})`);
+      expect(execs(calls())).toEqual([execArgv()]);
+    }
+  });
+
+  test("exec: 끝의 종료 문구가 실제 종료 코드와 맞지 않으면 전송 오류는 결과 미상으로 남는다", async () => {
+    const transport = "Unable to connect to the server: net/http: TLS handshake timeout";
+    const cases: [number, string][] = [
+      [1, `${transport}command terminated with exit code 7\n`],
+      [7, `${transport}command terminated with exit code 17\n`],
+      [1, `command terminated with exit code 1\n${transport}\n`],
+      [1, `${transport}\n`],
+    ];
+    for (const [code, stderr] of cases) {
+      const { ctx, calls } = testCtx("apply", [...owned(list(pod())), rule(execArgv(), { code, stderr })]);
+      const { value } = await applyWith(ctx, (w) => w.oliveAdmin.run("status"));
+      expect([stderr, value]).toEqual([stderr, { state: "unknown" }]);
+      expect(execs(calls())).toEqual([execArgv()]);
+    }
+  });
+
+  test(
+    "exec: 프로세스 시한을 넘기면 stderr 끝의 종료 문구와 상관없이 결과 미상이다",
+    async () => {
+      const { ctx, calls } = testCtx("apply", [...owned(list(pod())), rule(execArgv(), { code: 7, stderr: "command terminated with exit code 7\n", holdMs: 3_500 })]);
+      const { value } = await applyWith(ctx, (w) => w.oliveAdmin.run("status"));
+      expect(value).toEqual({ state: "unknown" });
+      expect(execs(calls())).toEqual([execArgv()]);
+    },
+    20_000,
+  );
+
   test("exec: 파드 찾기가 시간 초과면 결과 미상이고 실행하지 않는다", async () => {
     const { ctx, calls } = testCtx("apply", [rule(podsArgv, { code: 1, stderr: "Unable to connect to the server: context deadline exceeded\n" })]);
     const { value } = await applyWith(ctx, (w) => w.oliveAdmin.run("status"));
@@ -418,8 +542,16 @@ describe("쓰기 문맥의 실행", () => {
       const { ctx, calls } = testCtx("apply", [...owned(pods), rule(execArgv(), report())]);
       const { value: kept } = await applyWith(ctx, (w) => w.oliveAdmin);
       expect(() => kept.run("status")).toThrow(PLAN_WRITE_BLOCKED);
+      expect(() => kept.target("status")).toThrow(PLAN_WRITE_BLOCKED);
       expect(calls().calls).toEqual([]);
     }
+  });
+
+  test("exec: 진행 중인 apply의 쓰기 문맥에서는 target이 대상을 돌려준다", async () => {
+    const { ctx, calls } = testCtx("apply", owned(list(pod())));
+    const { value } = await applyWith(ctx, (w) => w.oliveAdmin.target("status"));
+    expect(value).toEqual(READY);
+    expect(execs(calls())).toEqual([]);
   });
 
   test("exec: 꼴이 다른 출력은 쓰기 문맥에서도 원문 없이 던진다", async () => {
