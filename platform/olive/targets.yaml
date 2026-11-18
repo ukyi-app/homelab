@@ -12,7 +12,8 @@
 #   start: (나) 지금 켤 수 있는지. 켜기(start)는 true인 줄만 켠다. 역할 프로필·자격 전달이 준비된 티켓의 PR이 false를 true로 바꾼다.
 #
 # 함정: platform/root/templates/olive.yaml의 ignoreDifferences(/spec/replicas)는 root 차트라 이 파일을 읽지 못해 손으로 적었다.
-# declaredBy: platform/olive인 줄과 그 목록, CLI 대상 목록이 같은지는 CI 정책 검사가 맡는다(O09 할 일 6, 아직 없음).
+# declaredBy: platform/olive인 줄과 그 목록이 같은지는 CI(tools/ci/olive.ts의 olive targets 단계)가 본다.
+# CLI 대상 목록과의 일치는 아직 보지 않는다(CLI의 올리브 명령이 아직 없다, O09 할 일 6).
 # 줄을 더하거나 이름을 바꾸면 그 셋을 같은 PR에서 함께 바꾼다.
 targets:
   - id: supervisor
