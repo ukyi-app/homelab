@@ -109,16 +109,19 @@ securityContext:
     drop: ["ALL"]
 {{- end }}
 
-{{/* 파드에 붙일 인증서 Secret 이름. 받는 값: root, tls(supervisor.tls 또는 executors.<id>.tls). 빈 결과면 볼륨을 붙이지 않는다. */}}
+{{/*
+파드에 붙일 인증서 Secret 이름. 받는 값: root, tls(supervisor.tls 또는 executors.<id>.tls). 빈 결과면 볼륨을 붙이지 않는다.
+함정: pki.enabled면 이 이름은 cert-manager가 쓰는 출력이다. 값으로 열면 감독의 서명 키·계정 Secret을 덮어쓸 수 있어 이름을 고정한다.
+*/}}
 {{- define "olive.tlsSecretName" -}}
-{{- if .tls.secretName -}}
-{{ .tls.secretName }}
-{{- else if .root.Values.pki.enabled -}}
+{{- if .root.Values.pki.enabled -}}
 olive-tls
+{{- else -}}
+{{ .tls.secretName }}
 {{- end -}}
 {{- end }}
 
-{{/* 고정한 신뢰 묶음을 파드에 붙일지. 비어 있지 않은 문자열이 참이다. */}}
+{{/* 묶음이 비면 신뢰 경로를 아예 주지 않는다. 파드가 시스템 CA로 대신 검증하지 않고 기동을 거부하게 하는 자리다. */}}
 {{- define "olive.trustEnabled" -}}
 {{- if and .Values.pki.enabled .Values.pki.trustBundlePem -}}true{{- end -}}
 {{- end }}
@@ -135,6 +138,21 @@ spiffe://olive.internal/ns/{{ .namespace }}/executor/{{ .id }}
 {{- end -}}
 {{- end }}
 
+{{/* 감독 인증서의 DNS SAN. 받는 값: 대상 한 줄. */}}
+{{- define "olive.pki.dnsName" -}}
+supervisor.{{ .namespace }}.svc
+{{- end }}
+
+{{/* 대상의 확장 키 용도. 받는 값: 대상 한 줄. 실행기 인증서로 감독 행세를 하지 못하게 서버 용도는 감독에게만 준다. */}}
+{{- define "olive.pki.usage" -}}
+{{- if eq .kind "supervisor" -}}server auth{{- else -}}client auth{{- end -}}
+{{- end }}
+
+{{/* 세대의 ClusterIssuer 이름. 받는 값: 세대 번호. templates/pki-policy.yaml이 이 접두로 올리브 발급 기관을 가려낸다. */}}
+{{- define "olive.pki.issuerName" -}}
+olive-internal-g{{ int . }}
+{{- end }}
+
 {{- define "olive.pki.labels" -}}
 app.kubernetes.io/name: olive
 app.kubernetes.io/component: pki
@@ -142,12 +160,22 @@ app.kubernetes.io/part-of: olive
 {{- end }}
 
 {{/*
-수명 규칙. 어기면 렌더를 멈춘다. cert-manager는 발급 기관보다 오래 사는 leaf를 막지 않는다.
-발급 기관이 갱신을 시작하기 직전에 나간 leaf도 옛 발급 기관 인증서가 만료되기 전에 끝나려면 leaf 수명 < ca.renewBeforeHours여야 한다.
+수명·이름 규칙. 어기면 렌더를 멈춘다.
+leaf 수명 < ca.renewBeforeHours: 발급 기관 인증서가 제때 갱신되는 동안, 갱신 직전에 나간 leaf도 옛 발급 기관 인증서보다 먼저 끝나게 하는 여유다.
+함정: 선언값만 본다. 갱신이 오래 실패해 실제 발급 기관의 남은 기간이 leaf 수명보다 짧아져도 렌더는 통과하고, cert-manager도 그런 leaf를 막지 않는다.
+실제 남은 기간은 docs/runbooks-public/rotate.md 3i의 A로 따로 본다.
 */}}
 {{- define "olive.pki.validate" -}}
 {{- $ca := .Values.pki.ca -}}
 {{- $leaf := .Values.pki.leaf -}}
+{{- if .Values.supervisor.tls.secretName -}}
+{{- fail "supervisor.tls.secretName must be empty when pki.enabled is true (cert-manager writes the fixed Secret olive-tls)" -}}
+{{- end -}}
+{{- range $id, $executor := .Values.executors -}}
+{{- if $executor.tls.secretName -}}
+{{- fail (printf "executors.%s.tls.secretName must be empty when pki.enabled is true (cert-manager writes the fixed Secret olive-tls)" $id) -}}
+{{- end -}}
+{{- end -}}
 {{- if ge (int $ca.renewBeforeHours) (int $ca.durationHours) -}}
 {{- fail "pki.ca.renewBeforeHours must be shorter than pki.ca.durationHours" -}}
 {{- end -}}
@@ -155,7 +183,7 @@ app.kubernetes.io/part-of: olive
 {{- fail "pki.leaf.renewBeforeHours must be shorter than pki.leaf.durationHours" -}}
 {{- end -}}
 {{- if ge (int $leaf.durationHours) (int $ca.renewBeforeHours) -}}
-{{- fail "pki.leaf.durationHours must be shorter than pki.ca.renewBeforeHours (a leaf must not outlive the CA certificate that signed it)" -}}
+{{- fail "pki.leaf.durationHours must be shorter than pki.ca.renewBeforeHours (keeps a margin before the signing CA certificate expires while CA renewal works)" -}}
 {{- end -}}
 {{- $active := false -}}
 {{- range $ca.generations -}}

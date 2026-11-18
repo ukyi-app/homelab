@@ -25,7 +25,11 @@
       "additionalProperties": false,
       "required": ["secretName", "mountPath"],
       "properties": {
-        "secretName": { "type": "string", "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$" },
+        "secretName": {
+          "type": "string",
+          "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$",
+          "not": { "pattern": "^(olive-signing-key$|olive-account-)" }
+        },
         "mountPath": { "type": "string", "pattern": "^/run/" }
       }
     },
@@ -35,6 +39,18 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["infisical", "image", "supervisor", "pki", "executors", "externalSecrets"],
+  "if": {
+    "required": ["pki"],
+    "properties": { "pki": { "required": ["enabled"], "properties": { "enabled": { "const": true } } } }
+  },
+  "then": {
+    "properties": {
+      "supervisor": { "properties": { "tls": { "properties": { "secretName": { "const": "" } } } } },
+      "executors": {
+        "additionalProperties": { "properties": { "tls": { "properties": { "secretName": { "const": "" } } } } }
+      }
+    }
+  },
   "properties": {
     "infisical": {
       "type": "object",

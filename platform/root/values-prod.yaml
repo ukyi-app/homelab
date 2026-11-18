@@ -62,6 +62,14 @@ cluster:
   r08:
     enabled: true
 
+  # 올리브 내부 인증서의 공개 값(templates/olive.yaml이 platform/olive로 넘긴다). 비면 넘기지 않는다.
+  # 발급 기관과 지시 서명 키가 클러스터마다 따로 만들어져 공용 값 파일에 두면 다른 클러스터의 신뢰 기준까지 바뀐다.
+  # trustBundlePem: 이 클러스터 발급 기관의 인증서(PEM). supervisorSigningPublicKeyPem: 이 클러스터 감독의 지시 서명 공개 키(PEM).
+  # 넣기 전 대조와 교체 순서는 docs/runbooks-public/rotate.md 3i다.
+  olive:
+    trustBundlePem: ""
+    supervisorSigningPublicKeyPem: ""
+
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈추는 값(values-vm.yaml의 같은 블록에 쓰는 법).
   # 운영은 비워 둔다. 빈 값이면 root가 ApplicationSet에 넘기지 않아 렌더가 이 블록이 없을 때와 같다.
   # 빈 NUC 복구는 지금 restore.md 3절 1단계대로 apps/·data/ values를 쓴다(운영이 곧 복구 대상이라).

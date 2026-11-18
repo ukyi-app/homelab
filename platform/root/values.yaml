@@ -74,7 +74,7 @@ components:
   #   1. 이미지: platform/olive/values.yaml image.digest(ukyi-app/olive main 빌드). 비면 렌더가 실패한다.
   #   2. 계정: 같은 파일 supervisor.account.name과 Infisical /bot-accounts/<그 이름>/CLAUDE_CODE_OAUTH_TOKEN(올리브 전용 발급).
   #   3. Infisical 폴더 /olive/supervisor와 INSTRUCTION_SIGNING_KEY(운영 homelab/prod, VM homelab-dev/dev는 가짜 값).
-  #   4. mTLS 인증서(cert-manager의 올리브 전용 발급 기관, 다른 작업)와 supervisor.tls·executors.<id>.tls의 Secret 이름.
+  #   4. mTLS 인증서: platform/olive/values.yaml pki.enabled와 클러스터별 공개 값 values-<클러스터>.yaml cluster.olive(docs/runbooks-public/rotate.md 3i).
   #   5. 관리자 승인(approvals.md). 켜도 실행 Deployment는 replicas 0이라 파드는 관리자 CLI가 켤 때 생긴다(D-38).
   # 키나 폴더가 빠지면 olive만 Degraded다(맨 뒤 wave라 다른 구성 요소는 막지 않는다).
   olive:

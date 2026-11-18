@@ -432,83 +432,184 @@ h database r2-backup ACCESS_KEY_ID; h database r2-backup SECRET_ACCESS_KEY     #
 
 ## 3i. 올리브 내부 인증서
 
-**이 절은 운영에서도 시험 클러스터에서도 돌려 보지 않았다.** 2026-11-19에 cert-manager 공식 문서와 `platform/olive` 선언을 읽고 쓴 순서다. 수명과 발급 기관 키의 보관 자리는 관리자가 배포 PR에서 고르는 안이다. 고른 값이 다르면 이 절을 함께 고친다. 처음 돌릴 때 다르게 한 것이 있으면 이 절을 먼저 고친다.
+**이 절은 운영에서도 시험 클러스터에서도 돌려 보지 않았다.** 2026-11-19에 cert-manager 공식 문서와 `platform/olive` 선언을 읽고 쓴 순서다. 처음 돌릴 때 다르게 한 것이 있으면 이 절을 먼저 고친다.
+
+**관리자가 정한 것은 D-58까지다.** mTLS와 효과별 Ed25519 서명, 인증서를 클러스터 cert-manager의 올리브 전용 발급 기관에서 낸다는 것이다. 발급 기관 키의 보관 자리, 수명, 아래 A~D의 교체 절차, 인증서 신원과 역할을 잇는 규칙은 **승인되지 않은 안**이다. 관리자가 배포 PR에서 다르게 고르면 이 절을 함께 고친다.
 
 **순서 요약**
 
 1. 평소: leaf와 발급 기관의 상태를 본다(A).
 2. 발급 기관 인증서가 스스로 갱신되면: 고정한 신뢰 묶음을 새 인증서로 바꾼다(B).
 3. 발급 기관 키를 바꿀 때: 새 세대를 만들고, 둘 다 믿게 하고, 서명을 옮기고, 옛 세대를 뺀다(C).
-4. 키가 샜다고 의심되면: 멈추고 옛 세대를 바로 뺀다(D).
+4. 키가 샜다고 의심되면: 정지를 확인한 뒤 옛 세대를 바로 뺀다(D).
 
-**인증서가 가는 길.** 발급 기관 `olive-internal-ca-g<세대>`는 `cert-manager` 네임스페이스의 Certificate이고 키는 같은 이름의 Secret에만 있다. ClusterIssuer `olive-internal`이 `pki.ca.activeGeneration` 세대의 키로 서명한다. 감독과 실행기의 네임스페이스마다 Certificate `olive-tls`가 Secret `olive-tls`를 만들고, 파드에는 `tls.crt`와 `tls.key`만 붙는다. 상대를 확인하는 기준은 Git 값 `pki.trustBundlePem`에서 만든 ConfigMap `olive-trust`다.
+**인증서가 가는 길.** 발급 기관 `olive-internal-ca-g<세대>`는 `cert-manager` 네임스페이스의 Certificate이고 키는 같은 이름의 Secret에만 있다. 세대마다 ClusterIssuer `olive-internal-g<세대>`가 있고, leaf는 `pki.ca.activeGeneration` 세대의 ClusterIssuer를 가리킨다. 감독과 실행기의 네임스페이스마다 Certificate `olive-tls`가 Secret `olive-tls`를 만들고, 파드에는 `tls.crt`와 `tls.key`만 붙는다. 상대를 확인하는 기준은 `platform/root/values-<클러스터>.yaml`의 `cluster.olive.trustBundlePem`에서 만든 ConfigMap `olive-trust`다.
 
 **알아 둘 것**
 
-- leaf는 cert-manager가 자동으로 갱신한다. 발급 기관을 바꿔도 leaf는 저절로 다시 발급되지 않는다. `pki.leaf.durationHours`를 바꾸는 PR이 다시 발급시킨다(공식 문서: `duration` 변경은 재발급을 일으킨다).
-- 신뢰 묶음은 PR로만 바뀐다. 클러스터를 새로 만들면 새 발급 기관이 생겨 Git의 묶음과 맞지 않고, 묶음을 고칠 때까지 연결이 거절된다(닫히는 쪽이다).
-- 경보 `CertificateExpiringSoon`·`CertificateExpiringCritical`·`CertificateNotReady`는 Certificate 리소스만 본다. **Git에 고정한 신뢰 묶음의 만료는 어떤 경보도 보지 않는다.** A의 대조로 본다.
+- **재발급.** leaf는 cert-manager가 자동으로 갱신한다. 발급 기관 Secret을 바꿔도 leaf는 저절로 다시 발급되지 않는다. `pki.ca.activeGeneration`을 바꾸면 leaf의 `issuerRef`가 바뀌어 다시 발급된다. 공식 문서는 Secret의 발급 기관 표시가 Certificate와 다르면 항상 재발급한다고 적는다([FAQ](https://cert-manager.io/docs/faq/#when-do-certs-get-re-issued)). `duration` 변경은 재발급 수단으로 쓰지 않는다. 최신 CertificateRequest가 없으면 cert-manager가 변경을 알아채지 못한다. 세대를 바꾸지 않고 다시 내야 하면 공식 문서의 `cmctl renew`를 쓴다([cmctl](https://cert-manager.io/docs/reference/cmctl/#renew)). cmctl은 이 저장소가 고정한 도구가 아니다.
+- **클러스터별 값.** 운영과 VM은 발급 기관과 지시 서명 키가 서로 달라 공개 값도 다르다. `platform/olive/values.yaml`에 넣지 않고 `platform/root/values-<클러스터>.yaml`의 `cluster.olive`에 넣는다. PR로만 바뀐다. 클러스터를 새로 만들면 새 발급 기관이 생겨, 그 클러스터의 묶음 PR이 들어갈 때까지 연결이 거절되고 올리브가 멈춘다(닫히는 쪽이다).
+- **만료 감시.** 경보 `CertificateExpiringSoon`·`CertificateExpiringCritical`·`CertificateNotReady`는 Certificate 리소스만 본다. **Git에 고정한 신뢰 묶음의 만료는 어떤 경보도 보지 않는다.** 선언의 규칙(leaf 수명 < `ca.renewBeforeHours`)은 발급 기관이 제때 갱신될 때의 여유일 뿐이고, 갱신이 오래 실패하면 cert-manager는 발급 기관보다 오래 사는 leaf도 낸다. 실제 서명 발급 기관의 남은 기간과 묶음의 만료는 A에서 따로 본다.
+- **같은 키 갱신.** 같은 세대의 Secret이 보존돼 키와 subject가 그대로일 때만 이미 나간 leaf와 고정한 옛 묶음이 계속 맞는다. **[미확인]** 이 클러스터의 cert-manager와 Bun 조합으로 갱신 전후를 양방향 검증하지 않았다.
+- **cert-manager가 없거나 멈췄을 때.** CRD가 없으면 `olive` Application의 동기화가 실패하고 Deployment까지 적용되지 않는다(**[미확인]** 실제 오류 문구). root에서 `components.certManager.enabled`만 끄면 자식 Application에 finalizer가 없어 컨트롤러와 CRD가 남으므로 발급은 멈추지 않는다. CRD는 있고 컨트롤러만 멈추면 제출은 되지만 Certificate가 Ready가 되지 않고, 이미 발급된 Secret과 떠 있는 파드는 그대로 남아 갱신만 멎는다(**[미확인]** 첫 동기화의 health와 wave 진행).
 - **[미확인]** Secret·ConfigMap 볼륨의 파일이 바뀌는 시점, 감독과 실행기가 새 파일을 읽는 시점, 이미 맺은 연결을 끊는 규칙은 재지 않았다. 코드가 생긴 뒤 이 절에 확인 방법을 적는다. 그 전에는 파드를 다시 띄워 새 파일을 읽게 한다.
 - 키 값은 출력하지 않는다. 아래 명령은 공개 값인 `tls.crt`와 ConfigMap만 읽는다.
 
+**대상 클러스터 고르기.** 클러스터 선택은 [bootstrap.md](bootstrap.md) 0절과 2.2절의 vm 분기, [vm.md](vm.md) 3절을 따른다. 이 절은 kubeconfig를 고르지 않는다. NUC의 작업 사본에서 `CLUSTER`(`prod` 또는 `vm`)와 `KUBECONFIG`를 먼저 정하고 bash로 아래 함수를 읽는다. **`olive_target`이 실패하면 어떤 단계도 시작하지 않는다.** 삭제 단계 앞에서는 다시 부른다.
+
 ```bash
-export KUBECONFIG=~/.kube/homelab.yaml
+# 기대한 context와 노드가 맞을 때만 성공한다
+olive_target() {
+  [ -n "${CLUSTER:-}" ] && [ -n "${KUBECONFIG:-}" ] || { echo "CLUSTER와 KUBECONFIG를 먼저 정한다" >&2; return 1; }
+  local want; want="$(. "host/clusters/$CLUSTER.env" && printf %s "$KUBE_CONTEXT")" || return 1
+  [ "$(kubectl config current-context)" = "$want" ] || { echo "지금 context가 $want가 아니다" >&2; return 1; }
+  host/verify.sh --cluster "$CLUSTER" --identity
+}
 # PEM 묶음의 인증서마다 이름, 만료, 지문을 한 번씩 보인다
 pems() { awk -v c='openssl x509 -noout -subject -enddate -fingerprint -sha256' '/BEGIN CERTIFICATE/{b=""} {b=b $0 "\n"} /END CERTIFICATE/{printf "%s", b | c; close(c)}'; }
+# 세대의 발급 기관 인증서(공개 값)
+ca_crt() { kubectl -n cert-manager get secret "olive-internal-ca-g$1" -o jsonpath='{.data.tls\.crt}' | base64 -d; }
+# 지금 서명하는 세대(감독 leaf의 issuerRef에서 읽는다)
+active_gen() { local n; n="$(kubectl -n olive-control get certificate olive-tls -o jsonpath='{.spec.issuerRef.name}')" && [ -n "$n" ] && printf '%s\n' "${n#olive-internal-g}"; }
+# 리소스가 없을 때만 성공한다. API 오류는 "없음"으로 치지 않는다
+gone() { local out; out="$(kubectl "$@" --ignore-not-found -o name)" && [ -z "$out" ]; }
+# 세 leaf가 세대 $1의 발급 기관으로 검증되는지 본다. Certificate가 실제로 쓰는 Secret을 먼저 읽는다
+leaf_ok() {
+  local gen="$1" ns secret ca rc=0
+  ca="$(mktemp)"; ca_crt "$gen" > "$ca"
+  [ -s "$ca" ] || { echo "세대 $gen의 발급 기관 인증서를 읽지 못했다" >&2; rm -f "$ca"; return 1; }
+  for ns in olive-control olive-diagnosis olive-reader; do
+    secret="$(kubectl -n "$ns" get certificate olive-tls -o jsonpath='{.spec.secretName}')"
+    if [ -n "$secret" ] && kubectl -n "$ns" get secret "$secret" -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl verify -CAfile "$ca" /dev/stdin >/dev/null; then
+      echo "$ns/$secret: 세대 $gen으로 검증됨"
+    else
+      echo "$ns/$secret: 세대 $gen으로 검증되지 않음" >&2; rc=1
+    fi
+  done
+  rm -f "$ca"
+  return "$rc"
+}
 ```
 
 **A. 상태 확인**
 
 ```bash
-for ns in olive-control olive-diagnosis olive-reader; do
-  kubectl -n "$ns" get certificate olive-tls \
-    -o jsonpath='{.metadata.namespace} ready={.status.conditions[?(@.type=="Ready")].status} notAfter={.status.notAfter} renewal={.status.renewalTime}{"\n"}'
-  kubectl -n "$ns" get secret olive-tls -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -issuer -enddate -ext subjectAltName
-done
-kubectl -n cert-manager get certificate -l app.kubernetes.io/part-of=olive    # 발급 기관 세대마다 READY True
-kubectl -n cert-manager get secret olive-internal-ca-g1 -o jsonpath='{.data.tls\.crt}' | base64 -d | pems   # 지금 발급 기관(세대 번호를 맞춘다)
-for ns in olive-control olive-diagnosis olive-reader; do
-  kubectl -n "$ns" get configmap olive-trust -o jsonpath='{.data.ca-bundle\.pem}' | pems                     # 고정한 신뢰 묶음
-done
+olive_target && {
+  kubectl get clusterissuer -l app.kubernetes.io/part-of=olive \
+    -o custom-columns='NAME:.metadata.name,SECRET:.spec.ca.secretName,READY:.status.conditions[?(@.type=="Ready")].status'
+  kubectl -n cert-manager get certificate -l app.kubernetes.io/part-of=olive    # 발급 기관 세대마다 READY True
+  for ns in olive-control olive-diagnosis olive-reader; do
+    kubectl -n "$ns" get certificate olive-tls \
+      -o jsonpath='{.metadata.namespace} issuer={.spec.issuerRef.name} secret={.spec.secretName} ready={.status.conditions[?(@.type=="Ready")].status} notAfter={.status.notAfter} renewal={.status.renewalTime}{"\n"}'
+    kubectl -n "$ns" get configmap olive-trust -o jsonpath='{.data.ca-bundle\.pem}' | pems   # 고정한 신뢰 묶음
+  done
+  G="$(active_gen)" && leaf_ok "$G" && ca_crt "$G" | pems                 # 세 곳 모두 검증되고, 지금 서명하는 발급 기관을 보인다
+  ca_crt "$G" | openssl x509 -noout -checkend $((720 * 3600))             # leaf 수명(pki.leaf.durationHours)보다 오래 남았는지
+}
 ```
 
-세 ConfigMap의 지문이 서로 같고, 지금 발급 기관의 인증서가 그 안에 있어야 한다. 묶음의 만료가 1년 안이면 B를 한다.
+다음을 모두 만족해야 정상이다.
+
+- 세 leaf의 `issuer`가 같은 세대이고 `leaf_ok`가 세 곳 모두 통과한다.
+- 세 ConfigMap의 지문이 서로 같고, 지금 서명하는 발급 기관의 지문이 그 안에 있다.
+- **실제 서명 발급 기관**의 남은 기간이 leaf 수명보다 길다. `checkend`가 실패하면 새로 나가는 leaf가 발급 기관보다 오래 산다. 발급 기관 Certificate의 갱신 실패 원인부터 푼다.
+- **Git에 고정한 묶음**의 모든 인증서가 1년 넘게 남았다. 1년 안이면 B를 한다.
+
+**값을 넣는 PR 앞의 대조.** `cluster.olive`를 바꾸는 PR마다 한다. 모양만 맞는 PEM은 렌더를 통과하므로 여기서 잡는다.
+
+```bash
+# 묶음의 모든 블록을 읽어 지문을 낸다. 승인한 세대의 발급 기관 지문(ca_crt <세대> | pems)과 모두 같아야 한다
+yq '.cluster.olive.trustBundlePem' "platform/root/values-$CLUSTER.yaml" | pems
+# 공개 키가 그 환경 감독의 개인 키와 짝인지 본다. 해시 둘이 같아야 하고 개인 키는 출력하지 않는다
+yq '.cluster.olive.supervisorSigningPublicKeyPem' "platform/root/values-$CLUSTER.yaml" | openssl pkey -pubin -outform DER | sha256sum
+infisical run --silent --log-level=error --projectId="<그 클러스터의 프로젝트 ID>" --env=<그 클러스터의 환경> --path=/olive/supervisor -- \
+  bash -c 'printf %s "$INSTRUCTION_SIGNING_KEY" | openssl pkey -pubout -outform DER | sha256sum'
+```
+
+블록 하나라도 읽히지 않거나, 승인하지 않은 지문이 있거나, 해시가 다르면 PR을 올리지 않는다.
 
 **B. 발급 기관 인증서가 갱신된 뒤**
 
-갱신은 같은 키로 일어나므로 이미 나간 leaf는 그대로 맞는다. 옛 인증서의 만료 전에 묶음만 바꾸면 된다.
+같은 세대의 Secret이 보존돼 있으면 갱신은 같은 키로 일어난다(위 "같은 키 갱신"의 조건과 [미확인]). 옛 인증서의 만료 전에 새 묶음을 모든 프로세스에 적용한다.
 
-1. A의 발급 기관 출력에서 만료일이 바뀐 것을 본다. 지문도 바뀐다.
-2. `kubectl -n cert-manager get secret olive-internal-ca-g<세대> -o jsonpath='{.data.tls\.crt}' | base64 -d`의 **첫 인증서**를 `platform/olive/values.yaml`의 `pki.trustBundlePem`에 넣는 PR을 낸다. 옛 인증서가 아직 유효하면 함께 둔다.
-3. 병합 뒤 A의 대조를 다시 한다.
+1. A의 발급 기관 출력에서 만료일과 지문이 바뀐 것을 본다.
+2. `ca_crt <세대>`의 **첫 인증서**를 `platform/root/values-<클러스터>.yaml`의 `cluster.olive.trustBundlePem`에 넣는 PR을 낸다. 옛 인증서가 아직 유효하면 함께 둔다. PR 앞의 대조를 한다.
+3. 병합 뒤 A의 대조를 다시 하고, 파드가 새 묶음을 읽게 한다(위 [미확인]).
 
 **C. 발급 기관 키 교체(계획된 교체)**
 
-옛 세대와 새 세대를 함께 믿는 구간을 두므로 순서를 바꾸지 않는다. 단계마다 PR 하나이고, 앞 단계의 확인이 끝나야 다음 PR을 올린다.
+옛 세대(`O`)와 새 세대(`N`)를 함께 믿는 구간을 두므로 순서를 바꾸지 않는다. 단계마다 PR 하나이고, 앞 단계의 확인이 끝나야 다음 PR을 올린다.
 
-1. **새 세대 만들기.** `pki.ca.generations: [1, 2]`, `activeGeneration: 1`. 병합 뒤 `olive-internal-ca-g2`가 Ready인지 본다. 서명은 아직 옛 세대다.
-2. **둘 다 믿기.** g2의 `tls.crt`를 `pki.trustBundlePem` 뒤에 이어 붙인다. 병합 뒤 세 ConfigMap에 두 장이 있는지 A로 보고, 파드가 새 묶음을 읽게 한다(위 [미확인]). **모든 파드가 두 장을 읽기 전에는 3단계로 가지 않는다.** 새 세대가 서명한 leaf를 옛 묶음이 거절한다.
-3. **서명 옮기기.** 한 PR에서 `activeGeneration: 2`로 바꾸고 `pki.leaf.durationHours`를 1 늘린다. wave 순서대로 ClusterIssuer가 먼저 바뀌고 leaf가 다시 발급된다. 병합 뒤 A의 `issuer`가 세 곳 모두 `CN=olive-internal-ca-g2`인지 본다. 파드가 새 leaf를 읽고 다시 연결하게 한다.
-4. **옛 세대 빼기.** 세 leaf와 모든 연결이 새 세대임을 본 뒤, 한 PR에서 묶음의 g1 인증서를 지우고 `generations: [2]`로 바꾼다. Certificate는 prune되지만 키 Secret은 남는다. 키 삭제는 관리자가 직접 실행한다.
+0. **세대 번호 정하기.** 지금 서명하는 세대를 읽고, 쓴 적 없는 새 번호를 고른다. 한 번 쓴 번호는 다시 쓰지 않는다. `rotationPolicy: Never`라 남은 Secret의 키가 재사용되어 새 세대가 새 키가 아니게 된다.
 
    ```bash
-   kubectl -n cert-manager delete secret olive-internal-ca-g1
+   olive_target && {
+     for ns in olive-control olive-diagnosis olive-reader; do kubectl -n "$ns" get certificate olive-tls -o jsonpath='{.spec.issuerRef.name}{"\n"}'; done   # 셋이 같아야 한다
+     kubectl -n cert-manager get secret -o name | grep olive-internal-ca-g   # 남아 있는 세대
+     O="$(active_gen)"; echo "지금 세대: $O"
+   }
+   N=<남은 세대와 approvals.md의 기록보다 큰 번호>
+   olive_target && gone -n cert-manager get secret "olive-internal-ca-g$N" && echo "세대 $N은 쓸 수 있다"
    ```
 
-5. [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄을 남긴다.
+1. **새 세대 만들기.** `pki.ca.generations: [O, N]`, `activeGeneration: O`. 병합 뒤 Certificate `olive-internal-ca-gN`과 ClusterIssuer `olive-internal-gN`이 Ready인지 본다. 두 세대의 공개 키가 다른지도 본다(`ca_crt <세대> | openssl x509 -noout -pubkey | sha256sum`). 서명은 아직 옛 세대다.
+2. **둘 다 믿기.** `ca_crt N`을 `cluster.olive.trustBundlePem` 뒤에 이어 붙인다. PR 앞의 대조를 한다. 병합 뒤 세 ConfigMap에 두 장이 있는지 A로 보고, 파드가 새 묶음을 읽게 한다(위 [미확인]). **모든 프로세스가 두 장을 읽기 전에는 3단계로 가지 않는다.** 새 세대가 서명한 leaf를 옛 묶음이 거절한다.
+3. **서명 옮기기.** `activeGeneration: N`으로 바꾼다. leaf의 `issuerRef`가 바뀌어 다시 발급된다. 병합 뒤 `leaf_ok N`이 세 곳 모두 통과해야 다음으로 간다. 파드가 새 leaf를 읽고 다시 연결하게 한다.
+4. **옛 세대 빼기.** 세 leaf와 모든 연결이 새 세대임을 본 뒤, 한 PR에서 묶음의 `O` 인증서를 지우고 `generations: [N]`으로 바꾼다. 완료 조건은 셋이다.
+   - `leaf_ok N`이 세 곳 모두 통과한다.
+   - 모든 프로세스가 새 묶음 하나만 읽었다.
+   - 새 연결에서 새 세대 leaf는 통과하고 옛 세대 leaf는 거절된다.
 
-**도중에 실패하면.** 1·2단계는 PR을 되돌리면 된다. 3단계 뒤에 연결이 거절되면 `activeGeneration: 1`로 되돌리고 `pki.leaf.durationHours`를 다시 바꿔 leaf를 옛 세대로 재발급한다. 4단계에서 키 Secret을 지운 뒤에는 옛 세대로 돌아갈 수 없다.
+   **[미확인]** 프로세스가 묶음을 다시 읽는 시점과 옛 세대 거절을 확인할 도구는 아직 없다. 뒤의 두 조건을 확인하지 못했으면 완료로 적지 않고 5단계로 가지 않는다. 옛 키 Secret을 지워도 이미 나간 옛 세대 leaf가 폐기되지는 않는다.
+5. **옛 키 지우기.** 관리자가 직접 실행한다. 대상 클러스터, 옛 Certificate와 ClusterIssuer의 소멸, 남은 ClusterIssuer가 새 세대 하나인지, 세 leaf의 검증이 모두 맞아야 삭제까지 이어진다.
+
+   ```bash
+   [ -n "${O:-}" ] && [ -n "${N:-}" ] && [ "$O" != "$N" ] \
+     && olive_target \
+     && gone -n cert-manager get certificate "olive-internal-ca-g$O" \
+     && gone get clusterissuer "olive-internal-g$O" \
+     && [ "$(kubectl get clusterissuer -l app.kubernetes.io/part-of=olive -o jsonpath='{range .items[*]}{.metadata.name}={.spec.ca.secretName}{"\n"}{end}')" = "olive-internal-g$N=olive-internal-ca-g$N" ] \
+     && leaf_ok "$N" \
+     && kubectl -n cert-manager delete secret "olive-internal-ca-g$O"
+   ```
+
+6. [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 쓴 세대 번호와 함께 줄을 남긴다.
+
+**도중에 실패하면.** 어느 단계든 되돌린 뒤 **`leaf_ok <목표 세대>`가 세 곳 모두 통과한 뒤에만** 다시 시작한다.
+
+- 1·2단계: PR을 되돌린다. 세대 `N`의 Secret은 남으므로 다음 시도는 더 큰 번호를 쓴다.
+- 3단계 뒤 연결이 거절되면: `activeGeneration: O`로 되돌린다. `issuerRef`가 바뀌어 leaf가 옛 세대로 다시 발급된다. 묶음에 `O`가 남아 있어야 한다.
+- 4단계 뒤, 5단계 전: 4단계 PR을 되돌린다. 옛 Certificate가 남은 Secret의 키를 다시 쓴다. 같은 번호를 다시 쓰는 경우는 이 되돌림뿐이다.
+- 5단계 뒤: 옛 세대로 돌아갈 수 없다.
 
 **D. 키가 샜다고 의심되면**
 
 폐기 목록이 없어서 **이미 나간 인증서는 다시 발급해도 만료까지 유효하다.** 그래서 leaf 키만 샜어도 발급 기관을 바꾼다. 함께 믿는 구간을 두지 않고 멈춘 채로 바꾼다.
 
-1. 실행 Deployment를 모두 0으로 내린다. 그동안 올리브는 멈춘다.
-2. C의 1단계로 새 세대를 만든다.
-3. 한 PR에서 `pki.trustBundlePem`을 새 세대 인증서 **한 장만** 남기고, `activeGeneration`을 새 세대로 바꾸고, `pki.leaf.durationHours`를 1 늘린다.
-4. A로 세 leaf의 `issuer`와 묶음을 확인한다.
-5. C의 4단계로 옛 세대를 뺀다. 지시 서명 키가 함께 샜을 수 있으면 `INSTRUCTION_SIGNING_KEY`와 `supervisor.signingKey.publicKeyPem`도 바꾼다.
-6. 관리자가 올리브를 다시 켠다.
+1. **정지하고 확인한다.** replicas를 0으로 내린 것은 정지 완료가 아니다. 종료 중인 파드와 이미 인증된 연결이 남고, 앞서 1을 읽은 Argo CD 동기화가 replicas를 되살릴 수 있다. [supervisor.md](../plans/2026-11-13-olive/supervisor.md) 7.3절의 순서를 따른다: 접수·발급 차단 → 실행 네임스페이스마다 자물쇠 → 권한 폐기와 실행 종료 → replicas 0 → 다시 확인 → 소멸 확인(7.4절).
+
+   관리자 CLI의 `homelab olive stop on`은 **아직 없다**(같은 문서 10절의 초안). 그 명령이 생기면 그것을 쓴다. 지금은 설계의 순서를 손으로 따른다. 대상은 `platform/olive/targets.yaml`에서 `stop: true`인 줄 전부이고, 없는 네임스페이스는 "없음"으로 적는다. `sandbox`의 자물쇠는 그 네임스페이스의 다른 작업자도 함께 막는다. 강제 삭제는 쓰지 않는다.
+
+   `olive_target`이 성공한 뒤에만 아래를 돌린다.
+
+   ```bash
+   olive_target && yq '.targets[] | select(.stop) | .namespace + " " + .deployment' platform/olive/targets.yaml
+   # 네임스페이스마다 자물쇠를 먼저 걸고, 그다음 그 줄의 Deployment만 내린다
+   kubectl -n <네임스페이스> create quota olive-stop --hard=pods=0
+   kubectl -n <네임스페이스> scale deployment <Deployment> --replicas=0
+   # 네임스페이스마다 자물쇠가 pods 0이고, replicas가 0으로 유지되고, 실행 파드가 없어야 한다
+   kubectl -n <네임스페이스> get resourcequota olive-stop -o jsonpath='{.spec.hard.pods}{"\n"}'
+   kubectl -n <네임스페이스> get deployment <Deployment> -o jsonpath='{.spec.replicas}{"\n"}'
+   kubectl -n <네임스페이스> get pods
+   ```
+
+   **이 확인이 끝나기 전에는 2단계로 가지 않는다.** 확인하지 못하면 자물쇠를 건 채 두고 확인하지 못한 곳을 관리자에게 보고한다.
+2. C의 0·1단계로 새 세대 `N`을 만든다.
+3. 한 PR에서 `cluster.olive.trustBundlePem`을 새 세대 인증서 **한 장만** 남기고 `activeGeneration: N`으로 바꾼다. PR 앞의 대조를 한다.
+4. `leaf_ok N`이 세 곳 모두 통과하고 A의 묶음 대조가 맞아야 다음으로 간다. 실패하면 자물쇠를 건 채 둔다. 샌 세대로 되돌리지 않는다.
+5. C의 4·5단계로 옛 세대를 빼고 키를 지운다. 지시 서명 키가 함께 샜을 수 있으면 `INSTRUCTION_SIGNING_KEY`와 `cluster.olive.supervisorSigningPublicKeyPem`도 바꾼다.
+6. **재개는 풀기 절차로만 한다.** 같은 문서 7.6절의 순서다: 실행 파드 0개 확인 → 자물쇠 제거 → 접수를 닫은 채 감독과 실행기를 올려 기동 검사 → 새 실행 세대 기록 → 접수를 마지막에 연다. `homelab olive stop off`도 **아직 없어** 지금은 이 순서를 손으로 따른다. 도중에 실패하면 다시 정지 상태로 두고 올라온 파드를 내린다.
+7. [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 쓴 세대 번호와 함께 줄을 남긴다.
 
 ## 4. 아직 채우지 않은 절
 
