@@ -3,8 +3,9 @@
 # match: 대상 writer(Deployment sandbox/worker-task)가 platform/sandbox의 실제 값 렌더에 없다
 # 지금 root의 VM 값에서 켜진 sandbox Application이 작성 Deployment를 렌더하지 않는다(예: task.enabled가 그 조합에서만 꺼짐).
 # 대상 차트를 켠 root에만 있으면 정지 대상 목록과 실제 배포가 어긋난 채 통과한다.
+# 전제(지금 root의 VM에 sandbox Application이 있다)를 켠 root에서 복사해 직접 만든다. 소유 Application이 없으면 꺼진 구성 요소라
+# 대상을 요구하지 않으므로, 전제 없이는 sandbox가 prod에만 켜진 구성에서 아무것도 증명하지 않는다.
 patch:
-  - in: render
-    render: root
-    select: {origin: "sandbox[vm]:platform/sandbox", kind: Deployment, namespace: sandbox, name: worker-task}
-    drop: true
+  - {in: render, render: root, select: {kind: Application, name: sandbox, origin: "root-vm[vm]:platform/root"}, drop: true}
+  - {in: render, render: root, from: root+켬, select: {kind: Application, name: sandbox, origin: "root-vm[vm]:platform/root"}}
+  - {in: render, render: root, select: {origin: "sandbox[vm]:platform/sandbox", kind: Deployment, name: worker-task}, drop: true}

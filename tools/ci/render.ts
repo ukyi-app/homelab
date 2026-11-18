@@ -156,7 +156,8 @@ export function clusterRestore(vf: string, overlay?: RootOverlay): Restore {
 export type RootOverlay = { cluster?: { restore?: Record<string, unknown> }; components?: Record<string, { enabled: boolean }> };
 // fill: source path → 최종 값이 비었을 때만 채울 값. 배포 전이라 비어 있는 필수 입력(digest 등)을 보충해 실제 Application 값으로
 // 렌더한다(tools/ci/olive.ts RENDER_FILL). 최종 값은 Helm과 같은 순서(차트 values.yaml → valueFiles → valuesObject)로 합친 것이다.
-export type RenderOptions = { rootOverlay?: RootOverlay; chartOverlay?: Record<string, unknown>; fill?: Record<string, Record<string, unknown>> };
+// rootText: 시험용. root 파일 경로 → 저장소 파일 대신 읽을 내용(tools/ci/olive.ts renderSelfTests가 root 파일 자체의 목록을 넣는다).
+export type RenderOptions = { rootOverlay?: RootOverlay; chartOverlay?: Record<string, unknown>; fill?: Record<string, Record<string, unknown>>; rootText?: Record<string, string> };
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const isEmptyValue = (v: unknown) => v === undefined || v === null || v === "";
@@ -190,6 +191,31 @@ export function fillEmpty(layers: unknown[], base: Record<string, unknown> | und
   };
   walk(fill, []);
   return out;
+}
+
+// 값 파일 하나를 Helm 4.3.1과 같이 읽는다: 문서를 차례로 읽어 뒤 문서가 앞 문서를 깊게 덮는다(pkg/chart/v2/loader/load.go
+// LoadValues·MergeMaps, pkg/cli/values/options.go). 한 번에 파싱하면 여러 문서가 배열로 와 fillEmpty가 안의 정상 값을 보지 못하고
+// 시험값으로 덮는다.
+export function loadValues(text: string): Record<string, unknown> {
+  const merge = (a: Record<string, unknown>, b: Record<string, unknown>): Record<string, unknown> => {
+    const out = { ...a };
+    for (const [k, v] of Object.entries(b)) out[k] = isMap(v) && isMap(out[k]) ? merge(out[k] as Record<string, unknown>, v) : v;
+    return out;
+  };
+  let out: Record<string, unknown> = {};
+  for (const doc of parseAll(text)) if (isMap(doc)) out = merge(out, doc);
+  return out;
+}
+
+// 로컬 차트 source의 최종 valuesObject. fill이 있으면 차트 values.yaml → valueFiles(files) → valuesObject 순서의 최종 값이 빈 잎만
+// 채운다(fillEmpty). 없으면 valuesObject를 그대로 돌려준다.
+export function filledValuesObject(srcDir: string, files: string[], valuesObject: Record<string, unknown> | undefined, fill: Record<string, unknown> | undefined) {
+  if (!fill) return valuesObject;
+  const readLayer = (f: string) => {
+    const abs = f.startsWith("/") ? f : join(ROOT, f);
+    return existsSync(abs) ? loadValues(readFileSync(abs, "utf8")) : undefined;
+  };
+  return fillEmpty([readLayer(join(srcDir, "values.yaml")), ...files.map(readLayer)], valuesObject, fill);
 }
 // 차트 schema가 덧씌우기의 키를 거부하는가. 복구 스위치가 없는 닫힌 schema(bot-slot은 ExternalSecret이 없다)는 root도 그 키를 넘기지 않으므로 덧씌우지 않는다.
 function schemaRejects(dir: string, overlay: Record<string, unknown>): boolean {
@@ -345,13 +371,32 @@ export function listedArgoApps(obj: any): string[] {
   ]);
 }
 
+// 렌더 결과 텍스트 하나를 문서로 나눈다. renderAll의 모든 렌더(root 파일 자체, Application source, 차트 시험 values, 남은
+// kustomization, apps·data 전개)가 이 함수를 지난다. 목록 안 Application 거절을 여기 두는 이유: root 파일처럼 visit을 거치지 않는
+// 입력도 운영자가 그대로 적용한다(bootstrap). visit에만 두면 그 입력의 목록 속 자식 Application이 검사 없이 지나간다.
+export function parseRendered(origin: string, text: string, ns?: string): { docs: Doc[]; violations: Violation[] } {
+  const docs: Doc[] = [];
+  const violations: Violation[] = [];
+  try {
+    for (const obj of parseAll(text)) {
+      if (typeof obj !== "object" || Array.isArray(obj)) continue;
+      docs.push({ origin, obj, ns });
+      const nested = listedArgoApps(obj);
+      if (nested.length > 0) violations.push({ rule: "render", where: origin, message: `목록(items) 안의 ${nested.join(", ")}는 render.ts가 따라가지 않는다. 최상위 문서로 둔다` });
+    }
+  } catch (e) {
+    violations.push({ rule: "render", where: origin, message: `YAML 파싱 실패: ${(e as Error).message}` });
+  }
+  return { docs, violations };
+}
+
 // 렌더 결과 캐시. 같은 차트·값이면 결과가 같으므로 켠 렌더와 끈 렌더(tools/ci/switch.ts)가 함께 쓴다.
 // kustomize 원격 base(argocd install.yaml)를 두 번 받지 않는다. 기본 렌더 결과도 한 번만 만든다.
 const cache = new Map<string, { ok: boolean; out: string }>();
 let defaultResult: RenderResult | undefined;
 
 export function renderAll(opts: RenderOptions = {}): RenderResult {
-  const plain = !opts.rootOverlay && !opts.chartOverlay && !opts.fill;
+  const plain = !opts.rootOverlay && !opts.chartOverlay && !opts.fill && !opts.rootText;
   if (plain && defaultResult) return defaultResult;
   const res: RenderResult = { targets: [], docs: [], violations: [], skipped: [] };
   const tmp = tempDir("render");
@@ -359,13 +404,9 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
 
   const add = (origin: string, text: string, ns?: string) => {
     res.targets.push({ origin, text });
-    try {
-      for (const obj of parseAll(text)) {
-        if (typeof obj === "object" && !Array.isArray(obj)) res.docs.push({ origin, obj, ns });
-      }
-    } catch (e) {
-      res.violations.push({ rule: "render", where: origin, message: `YAML 파싱 실패: ${(e as Error).message}` });
-    }
+    const p = parseRendered(origin, text, ns);
+    res.docs.push(...p.docs);
+    res.violations.push(...p.violations);
   };
   const fail = (origin: string, message: string) => res.violations.push({ rule: "render", where: origin, message });
 
@@ -442,12 +483,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
         }
         files.push(join(srcDir, f));
       }
-      const fill = opts.fill?.[path];
-      const readLayer = (f: string) => {
-        const abs = f.startsWith("/") ? f : join(ROOT, f);
-        return existsSync(abs) ? Bun.YAML.parse(readFileSync(abs, "utf8")) : undefined;
-      };
-      const valuesObject = fill ? fillEmpty([readLayer(join(srcDir, "values.yaml")), ...files.map(readLayer)], helm.valuesObject, fill) : helm.valuesObject;
+      const valuesObject = filledValuesObject(srcDir, files, helm.valuesObject, opts.fill?.[path]);
       if (valuesObject) {
         const vfile = join(tmp, `${name}-${cluster}-values.json`);
         writeFileSync(vfile, JSON.stringify(valuesObject));
@@ -481,7 +517,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
   if (rootFiles.length === 0) fail("platform/root", "root Application 파일(root-<클러스터>.yaml)이 0개다");
   const clusterFiles: string[] = [];
   for (const rf of rootFiles) {
-    const text = readFileSync(join(ROOT, rf), "utf8");
+    const text = opts.rootText?.[rf] ?? readFileSync(join(ROOT, rf), "utf8");
     // root 파일 자체도 검사 대상이다(revision, kubeconform). templates/ 밖이라 root가 렌더하지 않는다.
     add(rf, text);
     const roots = parseAll(text).filter((d) => d?.kind === "Application");
@@ -507,11 +543,8 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     const out = renderSource(roots[0], cluster, opts.rootOverlay ? { ...src, helm: { ...src.helm, valuesObject: opts.rootOverlay } } : src);
     if (out === undefined) continue;
     // 2. root가 만든 Application의 자기 저장소 source. 렌더 결과에 다시 Application이 있으면(app-of-apps) 그것도 따라간다.
+    // 목록 안 Application·ApplicationSet은 add(parseRendered)가 거절한다. 여기서는 최상위 문서만 따라간다.
     const visit = (text: string, depth: number) => {
-      for (const d of parseAll(text)) {
-        const nested = listedArgoApps(d);
-        if (nested.length > 0) fail(`${d?.metadata?.name ?? d?.kind}[${cluster}]`, `목록(items) 안의 ${nested.join(", ")}는 render.ts가 따라가지 않는다. 최상위 문서로 둔다`);
-      }
       // ApplicationSet이 만드는 Application도 검사해야 한다. 어느 단계에서 나오든 여기서 전개하는 것만 받는다(아래 5.).
       for (const set of parseAll(text).filter((d) => d?.kind === "ApplicationSet")) {
         const ok = APPSET_RENDERERS[set.metadata?.name]?.(set, clusterRestore(`platform/root/values-${cluster}.yaml`, opts.rootOverlay));

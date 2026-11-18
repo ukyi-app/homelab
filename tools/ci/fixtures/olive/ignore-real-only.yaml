@@ -3,10 +3,15 @@
 # match: 대상 writer(Deployment sandbox/worker-task)에 적용되는 넓은 예외다
 # 지금 root(olive가 꺼진 조합)의 sandbox Application에만 writer를 덮는 넓은 예외가 있다. 대상 차트를 켠 root만 보면 놓치는데,
 # 클러스터에 적용되는 것은 지금 root의 Application이다. Respect 옵션은 함께 넣어 이 위반만 나게 한다.
+# 전제(지금 root의 VM에 sandbox Application과 작성 Deployment가 있다)를 켠 root에서 복사해 직접 만든다.
 patch:
+  - {in: render, render: root, select: {kind: Application, name: sandbox, origin: "root-vm[vm]:platform/root"}, drop: true}
+  - {in: render, render: root, from: root+켬, select: {kind: Application, name: sandbox, origin: "root-vm[vm]:platform/root"}}
+  - {in: render, render: root, select: {origin: "sandbox[vm]:platform/sandbox", kind: Deployment, name: worker-task}, drop: true}
+  - {in: render, render: root, from: root+켬, select: {origin: "sandbox[vm]:platform/sandbox", kind: Deployment, name: worker-task}}
   - in: apps
     render: root
-    select: {kind: Application, name: sandbox}
+    select: {kind: Application, name: sandbox, origin: "root-vm[vm]:platform/root"}
     append:
       spec.ignoreDifferences: {group: apps, kind: "*", jsonPointers: [/spec/replicas]}
       spec.syncPolicy.syncOptions: RespectIgnoreDifferences=true

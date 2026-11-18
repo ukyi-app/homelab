@@ -1,0 +1,27 @@
+# expect: fail
+# rule: olive-isolation
+# match: 대상 자료 밖의 워크로드다
+# list-job-top의 Job을 batch/v1 JobList로 묶었다. Argo CD v3.6.1은 kind가 아니라 최상위 items 배열로 목록을 고른다(apimachinery IsList).
+# kind: List만 펴면 이 Job이 격리 검사에서 빠지고 비상 정지 대상 목록에도 없다.
+patch:
+  - in: render
+    render: root+켬
+    origin: "olive[vm]:platform/olive"
+    ns: olive-reader
+    add:
+      apiVersion: batch/v1
+      kind: JobList
+      items:
+        - apiVersion: batch/v1
+          kind: Job
+          metadata: {name: cleanup}
+          spec:
+            template:
+              spec:
+                serviceAccountName: executor
+                automountServiceAccountToken: false
+                restartPolicy: Never
+                containers:
+                  - name: cleanup
+                    image: x
+                    securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}

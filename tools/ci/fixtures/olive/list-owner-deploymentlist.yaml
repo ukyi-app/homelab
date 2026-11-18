@@ -1,0 +1,22 @@
+# expect: fail
+# rule: olive-owner
+# match: 대상 writer의 자리에 다른 소스 adguard(platform/adguard)가 Deployment를 낸다
+# owner-other-source의 Deployment를 apps/v1 DeploymentList로 묶었다. 소유 검사도 격리 검사와 같은 목록 펴기를 거친다.
+patch:
+  - in: render
+    render: root
+    origin: "adguard[vm]:platform/adguard"
+    ns: sandbox
+    add:
+      apiVersion: apps/v1
+      kind: DeploymentList
+      items:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata: {name: worker-task}
+          spec:
+            replicas: 0
+            selector: {matchLabels: {app: worker-task}}
+            template:
+              metadata: {labels: {app: worker-task}}
+              spec: {containers: [{name: worker, image: x}]}

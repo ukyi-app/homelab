@@ -3,7 +3,14 @@
 # 선언 차트의 ci 렌더와 두 클러스터의 실제 값 렌더(지금 root, 켠 root)에 olive-session의 Namespace(PSA restricted)·전용 SA·
 # replicas 0의 session Deployment가 있고, 그 차트의 Application에 정확한 replicas 예외와 RespectIgnoreDifferences=true가 있다.
 # 차트 이름은 예시다. 실제 O10은 선언 차트에 ci/*.yaml을 두고 targets.yaml의 declaredBy를 같은 PR에서 채운다.
+# 먼저 기존 세션 선언(실제 O10이 다른 차트에 둔 Namespace·SA·Deployment와 그 Application의 세션 예외)을 모든 렌더에서 지운다.
+# 남기면 원래 차트의 Deployment가 platform/go 소유의 자리에 "다른 소스"로 걸려 양성 대조군이 실제 O10 뒤에 깨진다.
 patch:
+  - {in: all, select: {kind: Deployment, namespace: olive-session, name: session}, drop: true}
+  - {in: all, select: {kind: ServiceAccount, namespace: olive-session, name: session}, drop: true}
+  - {in: all, select: {kind: Namespace, name: olive-session}, drop: true}
+  - in: apps
+    remove: {spec.ignoreDifferences: {kind: Deployment, namespace: olive-session, name: session}}
   - in: targets
     select: {id: session}
     set: {declaredBy: platform/go, start: true}

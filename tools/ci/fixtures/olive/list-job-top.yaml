@@ -1,0 +1,25 @@
+# expect: fail
+# rule: olive-isolation
+# match: 대상 자료 밖의 워크로드다
+# 실제 값 렌더(olive를 켠 root)의 platform/olive 출처가 읽기 실행기 네임스페이스에 정리 Job을 최상위 문서로 낸다. list-job-list·list-job-joblist와
+# 같은 Job이다. 세 사례가 같은 위반을 내야 목록으로 묶어도 검사에서 빠지지 않는다는 것이 보인다.
+# namespace는 비워 destination(olive-reader)으로 풀리게 한다. 이 위반만 나도록 SA·보안 문맥은 올리브 격리 조건에 맞춘다.
+patch:
+  - in: render
+    render: root+켬
+    origin: "olive[vm]:platform/olive"
+    ns: olive-reader
+    add:
+      apiVersion: batch/v1
+      kind: Job
+      metadata: {name: cleanup}
+      spec:
+        template:
+          spec:
+            serviceAccountName: executor
+            automountServiceAccountToken: false
+            restartPolicy: Never
+            containers:
+              - name: cleanup
+                image: x
+                securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}

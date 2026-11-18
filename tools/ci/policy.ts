@@ -83,12 +83,12 @@ function coversReader(s: any): boolean {
   return false;
 }
 
-// kind: List의 items를 펼친다. kubectl·Argo CD는 List 안 리소스를 각각 적용한다.
-// kind: List를 펼친다. 항목은 List와 같은 Application에서 렌더됐으므로 부모의 유효 ns(destination)를 물려받는다.
+// 목록 문서의 items를 펼친다. Argo CD v3.6.1(reposerver/repository/repository.go GenerateManifests)은 apimachinery
+// Unstructured.IsList로 목록을 고른다. kind와 상관없이 최상위 items가 배열이면 목록이다(v1 List, JobList 등 <종류>List 모두).
+// kind만 보면 JobList 안의 Job이 검사에서 빠진다. 항목은 목록과 같은 Application에서 렌더됐으므로 부모의 유효 ns(destination)를 물려받는다.
+// Argo CD는 한 겹만 펴지만 여기서는 끝까지 편다(안쪽 목록의 항목도 검사한다).
 export function expand(docs: Doc[]): Doc[] {
-  return docs.flatMap((d) =>
-    d.obj?.kind === "List" && Array.isArray(d.obj.items) ? expand(d.obj.items.map((obj: any) => ({ origin: d.origin, obj, ns: d.ns }))) : [d],
-  );
+  return docs.flatMap((d) => (Array.isArray(d.obj?.items) ? expand(d.obj.items.map((obj: any) => ({ origin: d.origin, obj, ns: d.ns }))) : [d]));
 }
 
 export function podSpec(obj: any): any | undefined {

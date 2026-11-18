@@ -4,11 +4,11 @@
 // 구성 요소를 root에서 꺼 둬도 돈다. 차트의 ci/*.yaml 렌더, 지금 root와 대상 차트를 켠 root의 실제 Application 값 렌더,
 // 호스트가 설치하는 매니페스트(host/k3s-manifests)를 함께 본다.
 // CLI의 올리브 명령은 아직 없다. 생기면 대상을 이 파일에서 읽어야 하고, 손으로 적은 목록을 두면 이 검사가 그 목록을 보지 못한다.
-import { existsSync } from "node:fs";
-import { basename, join, relative } from "node:path";
-import { type Doc, type Violation, ROOT, effectiveSources, fmt, gitFiles, parseAll, readText, sameRepo } from "./lib";
+import { existsSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
+import { type Doc, type Violation, ROOT, effectiveSources, fmt, gitFiles, parseAll, readText, sameRepo, tempDir } from "./lib";
 import { WORKLOAD_KINDS, context, expand, id, podSpec } from "./policy";
-import { fillEmpty, helmTemplate, listedArgoApps, renderAll } from "./render";
+import { fillEmpty, filledValuesObject, helmTemplate, listedArgoApps, parseRendered, renderAll } from "./render";
 
 export const OLIVE_TARGETS_FILE = "platform/olive/targets.yaml";
 const OLIVE_CHART = "platform/olive";
@@ -322,7 +322,7 @@ export function readOliveTargets(): any {
 //     거절하므로 잘못된 템플릿이 병합되면 다음 기동이 실패한다.
 //   - 볼륨은 emptyDir·secret·configMap·PVC만. PVC는 OLIVE_PVC_CLASSES의 동적 프로비저닝만이다. selector·volumeName이 있거나 그 클래스로
 //     묶일 수 있는 Git 정적 PV가 있으면 노드의 아무 경로나 가리키는 PV에 묶일 수 있다. 정적 PV·StorageClass는 플랫폼 렌더와
-//     호스트가 설치하는 매니페스트(host/k3s-manifests, install.sh가 전부 k3s 자동 배포에 넣는다)를 함께 본다. 허용 클래스는 호스트
+//     호스트가 설치하는 매니페스트(install.sh가 host/k3s-manifests 바로 아래 *.yaml을 k3s 자동 배포에 넣는다)를 함께 본다. 허용 클래스는 호스트
 //     매니페스트에 선언돼 있고 provisioner가 정한 동적 프로비저너여야 한다.
 //     이전 클래스 표기(volume.beta.kubernetes.io/storage-class 주석)는 Kubernetes가 spec.storageClassName보다 먼저 읽는다
 //     (component-helpers storage/volume GetPersistentVolume(Claim)Class). 유효 클래스를 따로 계산하지 않고 올리브 PVC와
@@ -334,15 +334,22 @@ const OLIVE_VOLUME_TYPES = new Set(["emptyDir", "secret", "configMap", "persiste
 // PV를 새로 만든다. provisioner가 바뀌면(정적 PV만 쓰는 클래스 등) 이름이 같아도 동적 프로비저닝이 아니다.
 const OLIVE_PVC_CLASSES = new Map([["local-retain", "rancher.io/local-path"]]);
 const BETA_CLASS = "volume.beta.kubernetes.io/storage-class";
-export const HOST_MANIFESTS = "host/k3s-manifests/*.yaml";
+const HOST_MANIFEST_DIR = "host/k3s-manifests";
+export const HOST_MANIFESTS = `${HOST_MANIFEST_DIR}/*.yaml`;
 export type HostManifests = { docs: Doc[]; errors: string[] };
-export function readHostManifests(): HostManifests {
+// install.sh의 설치 루프(bash 기본 glob "$HOST_DIR"/k3s-manifests/*.yaml)와 같은 범위: 바로 아래의 숨김 아닌 .yaml만.
+// git pathspec의 *는 디렉터리 경계를 넘어 하위 디렉터리 파일도 고른다. 그 파일은 호스트에 설치되지 않으므로 거기 둔 StorageClass가
+// 존재 검사를 채우면 안 된다(render.ts plainDir와 같은 거르기).
+export function hostManifestFiles(tracked: string[]): string[] {
+  return tracked.filter((f) => dirname(f) === HOST_MANIFEST_DIR && !basename(f).startsWith(".") && f.endsWith(".yaml"));
+}
+export function readHostManifests(tracked: string[] = gitFiles(HOST_MANIFESTS), read: (f: string) => string = readText): HostManifests {
   const out: HostManifests = { docs: [], errors: [] };
-  const files = gitFiles(HOST_MANIFESTS);
-  if (files.length === 0) out.errors.push(`${HOST_MANIFESTS}에 추적 파일이 없다`);
+  const files = hostManifestFiles(tracked);
+  if (files.length === 0) out.errors.push(`${HOST_MANIFESTS}에 바로 아래 추적 파일이 없다`);
   for (const f of files) {
     try {
-      for (const obj of parseAll(readText(f))) if (obj && typeof obj === "object" && !Array.isArray(obj)) out.docs.push({ origin: `host:${f}`, obj });
+      for (const obj of parseAll(read(f))) if (obj && typeof obj === "object" && !Array.isArray(obj)) out.docs.push({ origin: `host:${f}`, obj });
     } catch (e) {
       out.errors.push(`${f}: ${(e as Error).message}`);
     }
@@ -530,7 +537,11 @@ export function collectChartRenders(dir: string, files: string[], render: (f: st
 //   add(문서): chart는 그 차트의 ci 렌더마다, render는 origin(필수) 출처로, host는 host:<origin> 출처로 더한다.
 //     ns는 그 출처 Application의 destination.namespace다.
 //   addRender(출처): chart에 문서 0개인 ci 렌더 호출 하나를 더한다.
+//   from(렌더 이름): in: render와 render가 필요하다. from 렌더에서 select에 맞는 문서(하나 이상)를 출처·ns 그대로 render에 복사한다.
+//     지금 root에 소유 Application·대상이 있는지는 대조군과 클러스터 구성에 따라 다르다. 실제 root를 고치는 음성 사례는 이 클러스터의
+//     기존 문서를 drop한 뒤 켠 root(클러스터마다 소유 Application이 하나, 대조군의 patch가 함께 얹힌 것)에서 복사해 전제를 만든다.
 type PatchOp = {
+  from?: string;
   ns?: string;
   drop?: boolean;
   addRender?: string;
@@ -579,6 +590,17 @@ function unsetPath(obj: any, path: string): boolean {
   return true;
 }
 
+function docPicked(op: PatchOp, d: Doc): boolean {
+  const sel = op.select ?? {};
+  return (
+    (op.in !== "apps" || (d.obj.kind === "Application" && deployedDoc(d))) &&
+    (sel.kind === undefined || d.obj.kind === sel.kind) &&
+    (sel.namespace === undefined || nsOf(d) === sel.namespace) &&
+    (sel.name === undefined || d.obj.metadata?.name === sel.name) &&
+    (sel.origin === undefined || d.origin === sel.origin)
+  );
+}
+
 const matches = (item: any, fields: Record<string, unknown>) => Object.entries(fields).every(([k, v]) => JSON.stringify(item?.[k]) === JSON.stringify(v));
 
 export function applyPatch(input: OliveInput, ops: PatchOp[]): string | undefined {
@@ -615,6 +637,13 @@ export function applyPatch(input: OliveInput, ops: PatchOp[]): string | undefine
       } else {
         const variants = op.render ? [op.render] : Object.keys(input.deployed);
         if (variants.some((v) => !input.deployed[v])) return `patch[${i}]: 렌더 ${op.render}가 없다(${Object.keys(input.deployed).join("·")})`;
+        if (isString(op.from)) {
+          if (op.in !== "render" || !op.render || !input.deployed[op.from]) return `patch[${i}]: from은 in: render와 render, 있는 렌더 이름이 필요하다`;
+          const found = input.deployed[op.from].filter((d) => docPicked(op, d));
+          if (found.length === 0) return `patch[${i}]: from ${op.from}에 select ${JSON.stringify(sel)}에 맞는 문서가 없다`;
+          input.deployed[op.render].push(...structuredClone(found));
+          continue;
+        }
         if (op.add !== undefined) {
           if (op.in !== "render" || !isString(op.origin)) return `patch[${i}]: add는 in: render와 origin이 필요하다`;
           for (const v of variants) input.deployed[v].push({ origin: op.origin, obj: structuredClone(op.add) as Record<string, any>, ns: op.ns });
@@ -623,12 +652,7 @@ export function applyPatch(input: OliveInput, ops: PatchOp[]): string | undefine
         lists = variants.map((v) => input.deployed[v]);
         if (op.in === "all") lists.push(...Object.values(input.charts));
       }
-      const picked = (d: Doc) =>
-        (op.in !== "apps" || (d.obj.kind === "Application" && deployedDoc(d))) &&
-        (sel.kind === undefined || d.obj.kind === sel.kind) &&
-        (sel.namespace === undefined || nsOf(d) === sel.namespace) &&
-        (sel.name === undefined || d.obj.metadata?.name === sel.name) &&
-        (sel.origin === undefined || d.origin === sel.origin);
+      const picked = (d: Doc) => docPicked(op, d);
       if (op.drop === true) {
         for (const list of lists) list.splice(0, list.length, ...list.filter((d) => !picked(d)));
         continue;
@@ -667,6 +691,9 @@ export const allChecks = (input: OliveInput) => [...checkOliveTargets(input), ..
 // fixture 묶음 전체가 대조군마다 같은 결과여야 한다. 한 대조군에서만 맞는 음성 fixture는 정상 전환 PR을 막거나 그 뒤 아무것도 증명하지 않는다.
 const FIXTURE_DIR = "tools/ci/fixtures/olive";
 const FIXTURE_CONTROLS: Record<string, string> = { O13: `${FIXTURE_DIR}/writer-start-o13.yaml`, O10: `${FIXTURE_DIR}/session-o10.yaml` };
+// 대조군 이름을 따로 적는다. FIXTURE_CONTROLS에서 항목을 빼도 끝의 규칙별 음성 사례 검사는 초록으로 남으므로, 실제로 돈 대조군이 이 목록과
+// 같아야 한다. 대조군을 바꾸는 PR은 두 곳을 함께 고친다.
+const EXPECTED_CONTROLS = ["지금", "O13", "O10"];
 
 type Fixture = { file: string; expect: string; rule?: string; match?: string; also: Set<string>; ops: PatchOp[] };
 function readFixture(f: string): Fixture | string {
@@ -701,6 +728,56 @@ function renderSelfTests(): string[] {
   for (const [name, layers, vo, want] of cases) if (digest(layers, vo) !== want) bad.push(`fillEmpty(${name}): ${JSON.stringify(digest(layers, vo))}, 기대 ${JSON.stringify(want)}`);
   const c = collectChartRenders("platform/x", ["platform/x/ci/a.yaml", "platform/x/ci/empty.yaml"], (f) => ({ ok: true, out: f.endsWith("a.yaml") ? "kind: ConfigMap\n" : "" }));
   if (JSON.stringify(c.origins) !== JSON.stringify(["chart:x/ci/a.yaml", "chart:x/ci/empty.yaml"]) || c.docs.length !== 1) bad.push(`collectChartRenders가 문서 0개인 렌더의 출처를 남기지 않았다: ${JSON.stringify(c.origins)}`);
+  bad.push(...listedAppTests(), ...multiDocValuesTest(), ...hostScopeTest());
+  return bad;
+}
+
+// 목록 안 Application은 모든 렌더가 지나는 parseRendered가 거절한다. root 차트 출력(Application source 렌더)과 root 파일 자체 둘 다.
+// root 파일은 실제 renderAll에 내용을 바꿔 넣어 본다(root 파일은 visit을 거치지 않고 add만 지난다).
+const LISTED_APP = "---\napiVersion: v1\nkind: List\nitems:\n  - {apiVersion: argoproj.io/v1alpha1, kind: Application, metadata: {name: child}}\n";
+function listedAppTests(): string[] {
+  const bad: string[] = [];
+  const hit = (vs: Violation[], where: string) => vs.some((v) => v.rule === "render" && v.where === where && v.message.includes("목록(items) 안의 Application/child"));
+  const out = parseRendered("root-prod[prod]:platform/root", `apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata: {name: adguard}\n${LISTED_APP}`, "argocd");
+  if (out.docs.length !== 2 || !hit(out.violations, "root-prod[prod]:platform/root")) bad.push(`parseRendered가 root 차트 출력의 목록 안 Application을 거절하지 않았다: ${out.violations.map(fmt).join("; ") || "없음"}`);
+  const rf = gitFiles("platform/root/root-*.yaml")[0];
+  if (!rf) return [...bad, "root 파일(platform/root/root-*.yaml)이 없다"];
+  const r = renderAll({ rootText: { [rf]: `${readText(rf)}\n${LISTED_APP}` } });
+  if (!hit(r.violations, rf)) bad.push(`renderAll이 root 파일 ${rf} 자체의 목록 안 Application을 거절하지 않았다: ${r.violations.map(fmt).join("; ") || "없음"}`);
+  return bad;
+}
+
+// 다중 문서 값 파일(Helm은 문서별로 읽어 뒤 문서가 덮는다). 첫 문서는 platform/olive/ci/enabled.yaml, 둘째 문서는 정상 digest다.
+// 보충값을 거친 렌더의 Deployment 이미지가 Helm 단독 렌더와 같아야 한다(보충값이 정상 digest를 시험값으로 덮지 않는다).
+function multiDocValuesTest(): string[] {
+  const real = `sha256:${"7".repeat(64)}`;
+  const dir = tempDir("olive-values");
+  const vf = join(dir, "multi.yaml");
+  writeFileSync(vf, `${readText(`${OLIVE_CHART}/ci/enabled.yaml`)}\n---\nimage:\n  digest: ${real}\n`);
+  const images = (r: { ok: boolean; out: string }) =>
+    r.ok ? parseAll(r.out).filter((d) => d?.kind === "Deployment").flatMap((d) => (podSpec(d)?.containers ?? []).map((c: any) => String(c.image))).sort() : [`렌더 실패: ${r.out.trim()}`];
+  const helmOnly = images(helmTemplate("olive", OLIVE_CHART, "app-olive", [vf]));
+  const vo = filledValuesObject(OLIVE_CHART, [vf], undefined, renderFill()[OLIVE_CHART]);
+  const files = [vf];
+  if (vo) {
+    files.push(join(dir, "values.json"));
+    writeFileSync(files[1], JSON.stringify(vo));
+  }
+  const filled = images(helmTemplate("olive", OLIVE_CHART, "app-olive", files));
+  if (helmOnly.length === 0 || !helmOnly.every((i) => i.endsWith(`@${real}`)) || JSON.stringify(filled) !== JSON.stringify(helmOnly)) {
+    return [`다중 문서 값 파일: 보충값 렌더 이미지 ${JSON.stringify(filled)}가 Helm 단독 ${JSON.stringify(helmOnly)}와 다르다(기대 digest ${real})`];
+  }
+  return [];
+}
+
+// 호스트 매니페스트는 install.sh와 같이 바로 아래의 숨김 아닌 .yaml만 읽는다. 허용 클래스가 하위 디렉터리나 숨김 파일에만 있으면 실패다.
+function hostScopeTest(): string[] {
+  const sc = "apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata: {name: local-retain}\nprovisioner: rancher.io/local-path\n";
+  const tracked = [`${HOST_MANIFEST_DIR}/examples/local-retain.yaml`, `${HOST_MANIFEST_DIR}/.local-retain.yaml`, `${HOST_MANIFEST_DIR}/other.yaml`];
+  const host = readHostManifests(tracked, (f) => (f.endsWith("/other.yaml") ? "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: x, namespace: kube-system}\n" : sc));
+  const bad: string[] = [];
+  if (JSON.stringify(host.docs.map((d) => d.origin)) !== JSON.stringify([`host:${HOST_MANIFEST_DIR}/other.yaml`])) bad.push(`readHostManifests가 바로 아래가 아닌 파일을 읽었다: ${JSON.stringify(host.docs.map((d) => d.origin))}`);
+  if (!checkOliveIsolation([], readOliveTargets(), host).some((v) => v.message.includes("허용 클래스 local-retain의 StorageClass 선언이 없다"))) bad.push("허용 클래스가 하위 디렉터리·숨김 파일에만 있는데 olive-isolation이 실패하지 않았다");
   return bad;
 }
 
@@ -726,6 +803,8 @@ export function checkOliveFixtures(base: OliveInput): Violation[] {
     if (err) out.push({ rule: "fixture", where: f, message: `대조군 ${name}: ${err}` });
     else controls.push([name, input]);
   }
+  const ran = controls.map(([n]) => n);
+  if (JSON.stringify(ran) !== JSON.stringify(EXPECTED_CONTROLS)) out.push({ rule: "fixture", where: FIXTURE_DIR, message: `대조군이 ${EXPECTED_CONTROLS.length}개(${EXPECTED_CONTROLS.join("·")})가 아니다: ${ran.join("·")}` });
   const covered = new Set<string>();
   for (const [name, control] of controls) {
     const where = (f: string) => `${f} (대조군 ${name})`;
