@@ -65,7 +65,7 @@ cluster:
   # 올리브 내부 인증서의 공개 값(templates/olive.yaml이 platform/olive로 넘긴다). 비면 넘기지 않는다.
   # 발급 기관과 지시 서명 키가 클러스터마다 따로 만들어져 공용 값 파일에 두면 다른 클러스터의 신뢰 기준까지 바뀐다.
   # trustBundlePem: 이 클러스터 발급 기관의 인증서(PEM). supervisorSigningPublicKeyPem: 이 클러스터 감독의 지시 서명 공개 키(PEM).
-  # 넣기 전 대조와 교체 순서는 docs/runbooks-public/rotate.md 3i다.
+  # 넣기 전 묶음 대조는 docs/runbooks-public/rotate.md 3i다.
   olive:
     trustBundlePem: ""
     supervisorSigningPublicKeyPem: ""

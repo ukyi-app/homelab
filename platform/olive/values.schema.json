@@ -45,9 +45,27 @@
   },
   "then": {
     "properties": {
-      "supervisor": { "properties": { "tls": { "properties": { "secretName": { "const": "" } } } } },
+      "supervisor": {
+        "properties": {
+          "tls": {
+            "properties": {
+              "secretName": { "const": "" },
+              "mountPath": { "not": { "pattern": "^/run(/olive(/trust(/.*)?)?)?/?$" } }
+            }
+          }
+        }
+      },
       "executors": {
-        "additionalProperties": { "properties": { "tls": { "properties": { "secretName": { "const": "" } } } } }
+        "additionalProperties": {
+          "properties": {
+            "tls": {
+              "properties": {
+                "secretName": { "const": "" },
+                "mountPath": { "not": { "pattern": "^/run(/olive(/trust(/.*)?)?)?/?$" } }
+              }
+            }
+          }
+        }
       }
     }
   },

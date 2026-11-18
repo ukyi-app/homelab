@@ -148,7 +148,7 @@ supervisor.{{ .namespace }}.svc
 {{- if eq .kind "supervisor" -}}server auth{{- else -}}client auth{{- end -}}
 {{- end }}
 
-{{/* 세대의 ClusterIssuer 이름. 받는 값: 세대 번호. templates/pki-policy.yaml이 이 접두로 올리브 발급 기관을 가려낸다. */}}
+{{/* 세대의 ClusterIssuer 이름. 받는 값: 세대 번호. */}}
 {{- define "olive.pki.issuerName" -}}
 olive-internal-g{{ int . }}
 {{- end }}
@@ -164,6 +164,7 @@ app.kubernetes.io/part-of: olive
 leaf 수명 < ca.renewBeforeHours: 발급 기관 인증서가 제때 갱신되는 동안, 갱신 직전에 나간 leaf도 옛 발급 기관 인증서보다 먼저 끝나게 하는 여유다.
 함정: 선언값만 본다. 갱신이 오래 실패해 실제 발급 기관의 남은 기간이 leaf 수명보다 짧아져도 렌더는 통과하고, cert-manager도 그런 leaf를 막지 않는다.
 실제 남은 기간은 docs/runbooks-public/rotate.md 3i의 A로 따로 본다.
+tls.mountPath가 신뢰 볼륨 경로(/run/olive/trust)와 겹치면 멈춘다. 같은 경로면 PodTemplate이 유효하지 않고, 포개면 한쪽 파일이 가려진다.
 */}}
 {{- define "olive.pki.validate" -}}
 {{- $ca := .Values.pki.ca -}}
@@ -184,6 +185,16 @@ leaf 수명 < ca.renewBeforeHours: 발급 기관 인증서가 제때 갱신되�
 {{- end -}}
 {{- if ge (int $leaf.durationHours) (int $ca.renewBeforeHours) -}}
 {{- fail "pki.leaf.durationHours must be shorter than pki.ca.renewBeforeHours (keeps a margin before the signing CA certificate expires while CA renewal works)" -}}
+{{- end -}}
+{{- $tlsPaths := list .Values.supervisor.tls.mountPath -}}
+{{- range .Values.executors -}}
+{{- $tlsPaths = append $tlsPaths .tls.mountPath -}}
+{{- end -}}
+{{- range $path := $tlsPaths -}}
+{{- $clean := clean $path -}}
+{{- if or (eq $clean "/run/olive/trust") (hasPrefix "/run/olive/trust/" $clean) (hasPrefix (printf "%s/" $clean) "/run/olive/trust") -}}
+{{- fail (printf "tls.mountPath %s overlaps the trust volume /run/olive/trust" $path) -}}
+{{- end -}}
 {{- end -}}
 {{- $active := false -}}
 {{- range $ca.generations -}}

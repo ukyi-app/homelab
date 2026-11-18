@@ -2,7 +2,6 @@
 이 차트가 선언한 파드의 인증서(targets.yaml에서 declaredBy가 platform/olive인 줄마다 하나). 세션·작성·현관의 인증서는 그 티켓이 자기 대상을 선언할 때 더한다.
 감독은 서버 용도만, 실행기는 클라이언트 용도만 받는다(D-55: 실행기가 감독에 먼저 붙는다). 실행기 인증서로 감독 행세를 하지 못하게 한다.
 dnsNames는 실행기의 OLIVE_SUPERVISOR_SERVER_NAME과 같아야 한다(templates/executor-deployments.yaml).
-uris·dnsNames·usages를 바꾸면 templates/pki-policy.yaml의 모양 검사도 같은 helper에서 함께 바뀐다.
 rotationPolicy Always: 갱신마다 새 개인 키를 만든다. 발급 기관과 달리 leaf는 갱신해도 신뢰 기준이 바뀌지 않는다.
 issuerRef는 지금 서명하는 세대의 ClusterIssuer다. activeGeneration을 바꾸면 세 leaf가 새 세대로 다시 발급된다(templates/pki-ca.yaml).
 wave 1: 발급 기관(wave 0) 뒤, Deployment(wave 2) 앞. 발급되지 않으면 Deployment까지 가지 않는다.
