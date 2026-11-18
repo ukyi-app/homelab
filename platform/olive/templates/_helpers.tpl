@@ -108,3 +108,60 @@ securityContext:
   capabilities:
     drop: ["ALL"]
 {{- end }}
+
+{{/* 파드에 붙일 인증서 Secret 이름. 받는 값: root, tls(supervisor.tls 또는 executors.<id>.tls). 빈 결과면 볼륨을 붙이지 않는다. */}}
+{{- define "olive.tlsSecretName" -}}
+{{- if .tls.secretName -}}
+{{ .tls.secretName }}
+{{- else if .root.Values.pki.enabled -}}
+olive-tls
+{{- end -}}
+{{- end }}
+
+{{/* 고정한 신뢰 묶음을 파드에 붙일지. 비어 있지 않은 문자열이 참이다. */}}
+{{- define "olive.trustEnabled" -}}
+{{- if and .Values.pki.enabled .Values.pki.trustBundlePem -}}true{{- end -}}
+{{- end }}
+
+{{/*
+인증서가 증명하는 신원(URI SAN 하나). 받는 값: 대상 한 줄. 네임스페이스와 대상 id까지만 담는다.
+인스턴스·저장소 ID는 파드보다 오래 사는 인증서에 넣을 수 없어 서명 봉투가 증명한다.
+*/}}
+{{- define "olive.pki.uri" -}}
+{{- if eq .kind "supervisor" -}}
+spiffe://olive.internal/ns/{{ .namespace }}/supervisor
+{{- else -}}
+spiffe://olive.internal/ns/{{ .namespace }}/executor/{{ .id }}
+{{- end -}}
+{{- end }}
+
+{{- define "olive.pki.labels" -}}
+app.kubernetes.io/name: olive
+app.kubernetes.io/component: pki
+app.kubernetes.io/part-of: olive
+{{- end }}
+
+{{/*
+수명 규칙. 어기면 렌더를 멈춘다. cert-manager는 발급 기관보다 오래 사는 leaf를 막지 않는다.
+발급 기관이 갱신을 시작하기 직전에 나간 leaf도 옛 발급 기관 인증서가 만료되기 전에 끝나려면 leaf 수명 < ca.renewBeforeHours여야 한다.
+*/}}
+{{- define "olive.pki.validate" -}}
+{{- $ca := .Values.pki.ca -}}
+{{- $leaf := .Values.pki.leaf -}}
+{{- if ge (int $ca.renewBeforeHours) (int $ca.durationHours) -}}
+{{- fail "pki.ca.renewBeforeHours must be shorter than pki.ca.durationHours" -}}
+{{- end -}}
+{{- if ge (int $leaf.renewBeforeHours) (int $leaf.durationHours) -}}
+{{- fail "pki.leaf.renewBeforeHours must be shorter than pki.leaf.durationHours" -}}
+{{- end -}}
+{{- if ge (int $leaf.durationHours) (int $ca.renewBeforeHours) -}}
+{{- fail "pki.leaf.durationHours must be shorter than pki.ca.renewBeforeHours (a leaf must not outlive the CA certificate that signed it)" -}}
+{{- end -}}
+{{- $active := false -}}
+{{- range $ca.generations -}}
+{{- if eq (int .) (int $ca.activeGeneration) -}}{{- $active = true -}}{{- end -}}
+{{- end -}}
+{{- if not $active -}}
+{{- fail "pki.ca.activeGeneration must be listed in pki.ca.generations" -}}
+{{- end -}}
+{{- end }}

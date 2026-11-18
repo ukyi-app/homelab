@@ -430,6 +430,86 @@ h database r2-backup ACCESS_KEY_ID; h database r2-backup SECRET_ACCESS_KEY     #
 
 **유출이 의심되면.** 옛 토큰을 먼저 철회하고 새 키를 넣는다. 새 키가 들어갈 때까지 백업과 WAL 아카이브가 멈춘다. 유출된 키는 되돌릴 값으로 쓰지 않는다.
 
+## 3i. 올리브 내부 인증서
+
+**이 절은 운영에서도 시험 클러스터에서도 돌려 보지 않았다.** 2026-11-19에 cert-manager 공식 문서와 `platform/olive` 선언을 읽고 쓴 순서다. 수명과 발급 기관 키의 보관 자리는 관리자가 배포 PR에서 고르는 안이다. 고른 값이 다르면 이 절을 함께 고친다. 처음 돌릴 때 다르게 한 것이 있으면 이 절을 먼저 고친다.
+
+**순서 요약**
+
+1. 평소: leaf와 발급 기관의 상태를 본다(A).
+2. 발급 기관 인증서가 스스로 갱신되면: 고정한 신뢰 묶음을 새 인증서로 바꾼다(B).
+3. 발급 기관 키를 바꿀 때: 새 세대를 만들고, 둘 다 믿게 하고, 서명을 옮기고, 옛 세대를 뺀다(C).
+4. 키가 샜다고 의심되면: 멈추고 옛 세대를 바로 뺀다(D).
+
+**인증서가 가는 길.** 발급 기관 `olive-internal-ca-g<세대>`는 `cert-manager` 네임스페이스의 Certificate이고 키는 같은 이름의 Secret에만 있다. ClusterIssuer `olive-internal`이 `pki.ca.activeGeneration` 세대의 키로 서명한다. 감독과 실행기의 네임스페이스마다 Certificate `olive-tls`가 Secret `olive-tls`를 만들고, 파드에는 `tls.crt`와 `tls.key`만 붙는다. 상대를 확인하는 기준은 Git 값 `pki.trustBundlePem`에서 만든 ConfigMap `olive-trust`다.
+
+**알아 둘 것**
+
+- leaf는 cert-manager가 자동으로 갱신한다. 발급 기관을 바꿔도 leaf는 저절로 다시 발급되지 않는다. `pki.leaf.durationHours`를 바꾸는 PR이 다시 발급시킨다(공식 문서: `duration` 변경은 재발급을 일으킨다).
+- 신뢰 묶음은 PR로만 바뀐다. 클러스터를 새로 만들면 새 발급 기관이 생겨 Git의 묶음과 맞지 않고, 묶음을 고칠 때까지 연결이 거절된다(닫히는 쪽이다).
+- 경보 `CertificateExpiringSoon`·`CertificateExpiringCritical`·`CertificateNotReady`는 Certificate 리소스만 본다. **Git에 고정한 신뢰 묶음의 만료는 어떤 경보도 보지 않는다.** A의 대조로 본다.
+- **[미확인]** Secret·ConfigMap 볼륨의 파일이 바뀌는 시점, 감독과 실행기가 새 파일을 읽는 시점, 이미 맺은 연결을 끊는 규칙은 재지 않았다. 코드가 생긴 뒤 이 절에 확인 방법을 적는다. 그 전에는 파드를 다시 띄워 새 파일을 읽게 한다.
+- 키 값은 출력하지 않는다. 아래 명령은 공개 값인 `tls.crt`와 ConfigMap만 읽는다.
+
+```bash
+export KUBECONFIG=~/.kube/homelab.yaml
+# PEM 묶음의 인증서마다 이름, 만료, 지문을 한 번씩 보인다
+pems() { awk -v c='openssl x509 -noout -subject -enddate -fingerprint -sha256' '/BEGIN CERTIFICATE/{b=""} {b=b $0 "\n"} /END CERTIFICATE/{printf "%s", b | c; close(c)}'; }
+```
+
+**A. 상태 확인**
+
+```bash
+for ns in olive-control olive-diagnosis olive-reader; do
+  kubectl -n "$ns" get certificate olive-tls \
+    -o jsonpath='{.metadata.namespace} ready={.status.conditions[?(@.type=="Ready")].status} notAfter={.status.notAfter} renewal={.status.renewalTime}{"\n"}'
+  kubectl -n "$ns" get secret olive-tls -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -issuer -enddate -ext subjectAltName
+done
+kubectl -n cert-manager get certificate -l app.kubernetes.io/part-of=olive    # 발급 기관 세대마다 READY True
+kubectl -n cert-manager get secret olive-internal-ca-g1 -o jsonpath='{.data.tls\.crt}' | base64 -d | pems   # 지금 발급 기관(세대 번호를 맞춘다)
+for ns in olive-control olive-diagnosis olive-reader; do
+  kubectl -n "$ns" get configmap olive-trust -o jsonpath='{.data.ca-bundle\.pem}' | pems                     # 고정한 신뢰 묶음
+done
+```
+
+세 ConfigMap의 지문이 서로 같고, 지금 발급 기관의 인증서가 그 안에 있어야 한다. 묶음의 만료가 1년 안이면 B를 한다.
+
+**B. 발급 기관 인증서가 갱신된 뒤**
+
+갱신은 같은 키로 일어나므로 이미 나간 leaf는 그대로 맞는다. 옛 인증서의 만료 전에 묶음만 바꾸면 된다.
+
+1. A의 발급 기관 출력에서 만료일이 바뀐 것을 본다. 지문도 바뀐다.
+2. `kubectl -n cert-manager get secret olive-internal-ca-g<세대> -o jsonpath='{.data.tls\.crt}' | base64 -d`의 **첫 인증서**를 `platform/olive/values.yaml`의 `pki.trustBundlePem`에 넣는 PR을 낸다. 옛 인증서가 아직 유효하면 함께 둔다.
+3. 병합 뒤 A의 대조를 다시 한다.
+
+**C. 발급 기관 키 교체(계획된 교체)**
+
+옛 세대와 새 세대를 함께 믿는 구간을 두므로 순서를 바꾸지 않는다. 단계마다 PR 하나이고, 앞 단계의 확인이 끝나야 다음 PR을 올린다.
+
+1. **새 세대 만들기.** `pki.ca.generations: [1, 2]`, `activeGeneration: 1`. 병합 뒤 `olive-internal-ca-g2`가 Ready인지 본다. 서명은 아직 옛 세대다.
+2. **둘 다 믿기.** g2의 `tls.crt`를 `pki.trustBundlePem` 뒤에 이어 붙인다. 병합 뒤 세 ConfigMap에 두 장이 있는지 A로 보고, 파드가 새 묶음을 읽게 한다(위 [미확인]). **모든 파드가 두 장을 읽기 전에는 3단계로 가지 않는다.** 새 세대가 서명한 leaf를 옛 묶음이 거절한다.
+3. **서명 옮기기.** 한 PR에서 `activeGeneration: 2`로 바꾸고 `pki.leaf.durationHours`를 1 늘린다. wave 순서대로 ClusterIssuer가 먼저 바뀌고 leaf가 다시 발급된다. 병합 뒤 A의 `issuer`가 세 곳 모두 `CN=olive-internal-ca-g2`인지 본다. 파드가 새 leaf를 읽고 다시 연결하게 한다.
+4. **옛 세대 빼기.** 세 leaf와 모든 연결이 새 세대임을 본 뒤, 한 PR에서 묶음의 g1 인증서를 지우고 `generations: [2]`로 바꾼다. Certificate는 prune되지만 키 Secret은 남는다. 키 삭제는 관리자가 직접 실행한다.
+
+   ```bash
+   kubectl -n cert-manager delete secret olive-internal-ca-g1
+   ```
+
+5. [approvals.md](../plans/2026-10-17-homelab-rebuild/approvals.md)에 줄을 남긴다.
+
+**도중에 실패하면.** 1·2단계는 PR을 되돌리면 된다. 3단계 뒤에 연결이 거절되면 `activeGeneration: 1`로 되돌리고 `pki.leaf.durationHours`를 다시 바꿔 leaf를 옛 세대로 재발급한다. 4단계에서 키 Secret을 지운 뒤에는 옛 세대로 돌아갈 수 없다.
+
+**D. 키가 샜다고 의심되면**
+
+폐기 목록이 없어서 **이미 나간 인증서는 다시 발급해도 만료까지 유효하다.** 그래서 leaf 키만 샜어도 발급 기관을 바꾼다. 함께 믿는 구간을 두지 않고 멈춘 채로 바꾼다.
+
+1. 실행 Deployment를 모두 0으로 내린다. 그동안 올리브는 멈춘다.
+2. C의 1단계로 새 세대를 만든다.
+3. 한 PR에서 `pki.trustBundlePem`을 새 세대 인증서 **한 장만** 남기고, `activeGeneration`을 새 세대로 바꾸고, `pki.leaf.durationHours`를 1 늘린다.
+4. A로 세 leaf의 `issuer`와 묶음을 확인한다.
+5. C의 4단계로 옛 세대를 뺀다. 지시 서명 키가 함께 샜을 수 있으면 `INSTRUCTION_SIGNING_KEY`와 `supervisor.signingKey.publicKeyPem`도 바꾼다.
+6. 관리자가 올리브를 다시 켠다.
+
 ## 4. 아직 채우지 않은 절
 
 설계 C.6.5 표의 순서를 따른다. 자격을 만드는 티켓이 이 문서에 절을 더한다.

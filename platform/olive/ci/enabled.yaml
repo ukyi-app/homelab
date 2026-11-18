@@ -8,3 +8,16 @@ image:
 supervisor:
   account:
     name: ci-account
+  # 모양만 맞춘 자리표시다. 실제 키가 아니다.
+  signingKey:
+    publicKeyPem: |
+      -----BEGIN PUBLIC KEY-----
+      ci-placeholder
+      -----END PUBLIC KEY-----
+pki:
+  enabled: true
+  # 모양만 맞춘 자리표시다. 실제 인증서가 아니다.
+  trustBundlePem: |
+    -----BEGIN CERTIFICATE-----
+    ci-placeholder
+    -----END CERTIFICATE-----

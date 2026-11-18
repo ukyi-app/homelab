@@ -1,0 +1,77 @@
+{{- /*
+올리브 전용 발급 기관(D-58). 값은 클러스터 안에서 만들어지고 저장소와 Infisical에 사본이 없다. kind: Secret을 선언하지 않는다.
+
+ClusterIssuer인 이유: 인증서가 세 네임스페이스에 필요하다. 네임스페이스별 Issuer는 발급 기관 키를 모델이 도는 실행기 네임스페이스마다
+복사해야 한다. 함정: ClusterIssuer는 어느 네임스페이스의 Certificate 요청에도 서명하고, 기본 승인자는 요청을 모두 승인하며, 요청한 SAN이
+그 네임스페이스의 것인지 보지 않는다. 그래서 "이 CA가 서명했다"는 "Certificate를 만들 수 있는 주체가 허락했다"까지만 뜻한다.
+이 저장소의 선언에서 그 주체는 main에 병합된 root·AppProject platform의 Application과 클러스터 관리자뿐이다. AppProject apps·data의
+허용 목록에는 cert-manager.io가 없다. 외부 차트가 설치하는 권한은 저장소에서 보이지 않아 켜기 전에 라이브에서 확인한다.
+CA Secret이 cert-manager 네임스페이스에 있는 이유: ClusterIssuer는 cluster resource namespace(기본 cert-manager)의 Secret만 읽는다.
+
+rotationPolicy Never인 이유: 이 CA 인증서는 cert-manager가 스스로 갱신한다. 갱신 때 키가 바뀌면 이미 나간 leaf와 고정한 신뢰 묶음이 한꺼번에
+어긋나 올리브 전체 연결이 끊긴다. 키를 바꾸는 일은 세대를 더하는 수동 절차로만 한다(docs/runbooks-public/rotate.md 3i).
+encoding PKCS8: Bun TLS 실측에 쓴 키 형식과 같다. 기본값 PKCS1(EC는 SEC1)은 재지 않았다. Ed25519 TLS 인증서도 재지 않아 ECDSA P-256을 쓴다.
+
+wave 0: leaf(wave 1)와 Deployment(wave 2)보다 먼저 Ready여야 한다. 이들을 Ready로 만드는 cert-manager는 root wave -7이라 교착이 없다.
+함정: cert-manager가 꺼져 있거나 CRD가 없으면 이 Application의 동기화가 "could not find" 류 오류로 실패하고 Deployment까지 적용되지 않는다(닫힘).
+올리브는 root의 맨 뒤 wave라 다른 구성 요소를 막지 않는다. 재시도는 10번(homelab.retry, 약 40분)뿐이라 그 뒤에 CRD가 생기면 수동 sync로 다시 돌린다.
+함정: 이 파일의 리소스를 지워도 cert-manager가 만든 Secret은 남는다. 발급 기관 키 삭제는 사람이 한다.
+*/}}
+{{- if .Values.pki.enabled }}
+{{- include "olive.pki.validate" . }}
+{{- $ca := .Values.pki.ca }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: olive-ca-bootstrap
+  namespace: cert-manager
+  labels:
+    {{- include "olive.pki.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  selfSigned: {}
+{{- range $ca.generations }}
+{{- $name := printf "olive-internal-ca-g%d" (int .) }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}
+  namespace: cert-manager
+  labels:
+    {{- include "olive.pki.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  isCA: true
+  commonName: {{ $name }}
+  secretName: {{ $name }}
+  duration: {{ printf "%dh" (int $ca.durationHours) }}
+  renewBefore: {{ printf "%dh" (int $ca.renewBeforeHours) }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    encoding: PKCS8
+    rotationPolicy: Never
+  usages:
+    - cert sign
+    - crl sign
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: olive-ca-bootstrap
+{{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: olive-internal
+  labels:
+    {{- include "olive.pki.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  ca:
+    secretName: {{ printf "olive-internal-ca-g%d" (int $ca.activeGeneration) }}
+{{- end }}
