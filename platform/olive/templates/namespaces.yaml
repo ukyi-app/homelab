@@ -4,6 +4,7 @@
 봇 자리의 시험 ns(platform/bot-slot/templates/probe.yaml)와 같은 방식이다. CreateNamespace가 아니라 PSA 라벨을 직접 단다.
 restricted: 감독·실행기는 비root, 읽기 전용 루트, capability 없음, seccomp RuntimeDefault만 쓴다(D-54).
 Prune=false,Delete=false: 장부 PVC와 Secret이 ns와 함께 지워지지 않게 한다. 이 차트에서 빠지거나 Application이 지워져도 ns는 남는다.
+ns가 남아도 감독 Secret은 자기 ExternalSecret이 지워지면 함께 GC된다(templates/supervisor-externalsecrets.yaml 머리 주석).
 */}}
 {{- range (include "olive.targets" . | fromYaml).items }}
 ---

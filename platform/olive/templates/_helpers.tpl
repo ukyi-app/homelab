@@ -87,7 +87,7 @@ hc 소켓·호스트 경로를 붙이지 않는다(작업자 파드에 hc가 없
 */}}
 {{- define "olive.podSecurity" -}}
 serviceAccountName: {{ .kind }}
-# SA에서도 끄지만(templates/serviceaccounts.yaml) 파드에서 한 번 더 끈다. 둘 중 하나만 켜져도 토큰이 붙는다.
+# 파드와 SA 양쪽에 값이 있으면 파드 값이 우선한다. 파드에서 명시해 끄고, 이 줄이 빠진 파드도 안전하도록 SA 기본값도 끈다(templates/serviceaccounts.yaml).
 automountServiceAccountToken: false
 # 같은 ns Service의 env를 넣지 않는다. 실행기가 붙을 주소는 아래 env로만 준다.
 enableServiceLinks: false
