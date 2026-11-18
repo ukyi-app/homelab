@@ -1,0 +1,77 @@
+{{- /*
+역할별 작업자 실행기(D-37, supervisor.md §9.2). targets.yaml의 kind executor인 줄마다 하나. 실행기는 감독에 먼저 붙어
+연결을 유지하고(D-55) 듣는 포트가 없다. 모델 자격 Secret을 붙이지 않는다. 자격은 실행마다 감독이 그 연결로 하나만 넘긴다.
+명령·이미지·볼륨·argv·환경을 지시에서 받지 않으므로 역할은 이 파드의 env OLIVE_ROLE로만 정해진다.
+env 이름은 이 차트가 정한 자리다. ukyi-app/olive의 실행기 코드가 같은 이름을 읽는다(아직 코드가 없어 이미지는 69로 끝난다).
+*/}}
+{{- $sup := include "olive.supervisorTarget" . | fromYaml }}
+{{- range (include "olive.targets" . | fromYaml).items }}
+{{- if eq .kind "executor" }}
+{{- $values := index $.Values.executors .id }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .deployment }}
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "olive.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  # Git 값은 늘 0이다(D-38, 감독과 같은 이유). 켜는 것은 CLI이고 targets.yaml의 start가 true인 대상만 켠다.
+  replicas: 0
+  # 한 파드씩(B-07 작업자 1). RollingUpdate면 교체 중 두 파드가 함께 떠 olive-limits ResourceQuota에 걸린다.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "olive.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "olive.labels" . | nindent 8 }}
+    spec:
+      {{- include "olive.podSecurity" . | nindent 6 }}
+      containers:
+        - name: executor
+          image: {{ include "olive.image" $ }}
+          command: ["bun", "src/main/executor.ts"]
+          env:
+            - name: OLIVE_ROLE
+              value: {{ .id | quote }}
+            # 감독의 고정 Service 주소. DNS 없이 붙는다(templates/networkpolicy-executors.yaml).
+            - name: OLIVE_SUPERVISOR_ADDR
+              value: {{ printf "%s:%d" $.Values.supervisor.clusterIP (int $.Values.supervisor.port) | quote }}
+            # 주소가 IP라 TLS에서 확인할 이름을 따로 준다. 감독 인증서의 이름과 같아야 한다(인증서 작업).
+            - name: OLIVE_SUPERVISOR_SERVER_NAME
+              value: {{ printf "supervisor.%s.svc" $sup.namespace | quote }}
+            {{- if $values.tls.secretName }}
+            - name: OLIVE_TLS_DIR
+              value: {{ $values.tls.mountPath | quote }}
+            {{- end }}
+          # 프로브는 두지 않는다. 실행기는 듣는 포트가 없고(D-55) 건강 확인 방식은 아직 정하지 않았다(spec.md §5.3).
+          {{- include "olive.containerSecurity" . | nindent 10 }}
+          resources:
+            {{- include "olive.resources" (dict "root" $ "target" .) | nindent 12 }}
+          volumeMounts:
+            {{- if $values.tls.secretName }}
+            - name: tls
+              mountPath: {{ $values.tls.mountPath }}
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- if $values.tls.secretName }}
+        - name: tls
+          secret:
+            secretName: {{ $values.tls.secretName }}
+            defaultMode: 0440
+        {{- end }}
+        # 실행마다 빈 HOME·작업 공간을 만들 자리. 모델 CLI의 임시 사용량을 아직 몰라 512Mi [가정]이다. 넘으면 kubelet이 파드를 쫓아낸다.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+{{- end }}
+{{- end }}

@@ -1,0 +1,10 @@
+# 켠 모양의 렌더. root는 components.olive.enabled가 false라 이 차트를 렌더하지 않으므로, 이 파일이 정책·kubeconform·복구 스위치
+# 검사를 대신 받는다. digest와 계정 별칭은 가짜다(실제 값은 켜는 PR이 values.yaml에 넣는다).
+infisical:
+  projectSlug: ci-project
+  environmentSlug: ci
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+supervisor:
+  account:
+    name: ci-account

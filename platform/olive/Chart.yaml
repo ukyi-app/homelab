@@ -1,0 +1,8 @@
+# 올리브의 감독(ns olive-control)과 역할별 작업자 실행기(ns olive-diagnosis, olive-reader)(D-37, supervisor.md §1.1).
+# 차트인 이유: 감독 전용 ClusterSecretStore가 읽을 Infisical 프로젝트·환경이 클러스터마다 달라 root가 valuesObject로 넘긴다
+# (E8 VM 격리 1번 A안). 실행 대상 목록(targets.yaml)도 이 차트가 .Files로 읽는다.
+apiVersion: v2
+name: olive
+description: Olive supervisor and role executors for one homelab cluster
+type: application
+version: 0.1.0

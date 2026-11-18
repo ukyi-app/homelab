@@ -1,0 +1,29 @@
+{{- /*
+감독 장부(S-04: SQLite 파일 하나, 감독 하나만 쓴다, supervisor.md §8). 감독 파드에만 붙는다.
+local-retain(노드 로컬, Retain): PVC가 지워져도 노드의 폴더가 남는다. 다시 붙이려면 PV를 손으로 다시 묶는다.
+노드 밖 사본(R2)은 이 차트 밖의 다른 작업이다. 그 전까지 노드 디스크를 잃으면 장부를 잃는다(계정 잠금·장애 색인 포함).
+*/}}
+{{- $t := include "olive.supervisorTarget" . | fromYaml }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ledger
+  namespace: {{ $t.namespace }}
+  labels:
+    {{- include "olive.labels" $t | nindent 4 }}
+  annotations:
+    # wave는 감독 Deployment와 같아야 한다. local-retain은 WaitForFirstConsumer라 파드가 생겨야 Bound가 되는데, 앞 wave에 두면
+    # Argo CD가 Pending인 PVC를 기다리며 Deployment wave로 넘어가지 않는다(platform/sandbox worker-pvc.yaml 첫 배포 실측).
+    argocd.argoproj.io/sync-wave: "2"
+    # Git replicas가 늘 0이라(D-38) 빈 클러스터에서는 CLI가 감독을 켤 때까지 이 PVC가 Pending(Progressing)이다.
+    # ignore-healthcheck는 이 리소스의 health만 Application 합산에서 뺀다(Argo CD v3.5.5 controller/health.go).
+    # 묶이지 못하는 문제는 감독 파드 Pending → Deployment Progressing으로 보인다.
+    argocd.argoproj.io/ignore-healthcheck: "true"
+    # 장부에는 지우면 안 되는 것(계정 잠금, 장애 색인)이 든다(accounts.md §4). Application이 지워지거나 이 차트에서 빠져도 남긴다.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.supervisor.ledger.storageClassName }}
+  resources:
+    requests:
+      storage: {{ .Values.supervisor.ledger.size }}

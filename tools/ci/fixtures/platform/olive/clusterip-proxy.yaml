@@ -1,0 +1,12 @@
+# expect: fail
+# match: clusterIP
+# 감독 Service의 고정 주소가 sandbox egress 프록시(10.43.0.28)와 겹치면 Service 생성이 실패한다(values.schema.json).
+infisical:
+  projectSlug: ci-project
+  environmentSlug: ci
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+supervisor:
+  clusterIP: 10.43.0.28
+  account:
+    name: ci-account
