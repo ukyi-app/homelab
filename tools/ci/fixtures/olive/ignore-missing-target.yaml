@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-ignore-differences
+# match: reader(Deployment olive-reader/executor)의 /spec/replicas 예외가 없다
+# root 템플릿의 ignoreDifferences에서 대상 하나(reader)를 뺐다. selfHeal이 CLI가 켠 값을 0으로 되돌린다.
+patch:
+  - in: apps
+    select: {kind: Application, name: olive}
+    remove: {spec.ignoreDifferences: {kind: Deployment, namespace: olive-reader, name: executor}}

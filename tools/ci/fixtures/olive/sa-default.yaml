@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-isolation
+# match: 파드가 쓰는 ServiceAccount default이 같은 네임스페이스 olive-control에 렌더되지 않는다
+# 감독 파드에서 serviceAccountName이 빠져 클러스터의 default SA를 쓴다. 렌더된 전용 SA의 automount 값은 이 파드와 상관없다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    unset: [spec.template.spec.serviceAccountName]

@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-replicas
+# match: 대상 supervisor의 spec.replicas가 0이 아니다(1)
+# ci/*.yaml 렌더는 0인데 운영 값의 실제 Application 렌더에서만 1이다(꺼 둔 olive를 켠 root). 최초 배포 때 1로 생긴다(AC-29).
+patch:
+  - in: render
+    render: root+켬
+    select: {origin: "olive[prod]:platform/olive", kind: Deployment, namespace: olive-control, name: supervisor}
+    set: {spec.replicas: 1}

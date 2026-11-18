@@ -1,0 +1,15 @@
+# expect: fail
+# rule: olive-isolation
+# match: HorizontalPodAutoscaler가 대상 writer(Deployment sandbox/worker-task)를 조절한다
+# 작성 Deployment를 가리키는 HPA. CLI가 켠 뒤 HPA가 replicas를 바꾸는 두 번째 조절 주체가 된다. 위임한 ns(sandbox)의 대상도 본다.
+patch:
+  - in: chart
+    chart: platform/sandbox
+    add:
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata: {name: worker-task, namespace: sandbox}
+      spec:
+        scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: worker-task}
+        minReplicas: 1
+        maxReplicas: 2

@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-isolation
+# match: 허용 클래스 local-retain의 provisioner가 "kubernetes.io/no-provisioner"다
+# 호스트의 local-retain StorageClass를 정적 PV 전용 provisioner로 바꿨다. 이름은 허용 목록 그대로라 PVC 검사는 지나가지만
+# 올리브 PVC는 동적 프로비저닝되지 않고 미리 만든 PV(노드의 아무 경로)에 묶인다.
+patch:
+  - in: host
+    select: {kind: StorageClass, name: local-retain}
+    set: {provisioner: kubernetes.io/no-provisioner}

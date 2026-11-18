@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-chart-targets
+# match: 대상 writer(Deployment sandbox/worker-task)가 렌더에 없다
+# 차트의 시험 값 파일 하나가 문서를 0개 냈다. 다른 값 파일이 대상을 내도 이 렌더 호출에서 대상이 빠진 것은 걸려야 한다.
+patch:
+  - in: chart
+    chart: platform/sandbox
+    addRender: chart:sandbox/ci/empty.yaml

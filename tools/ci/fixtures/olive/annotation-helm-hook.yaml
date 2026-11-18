@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-ignore-differences
+# match: 대상 reader의 Deployment에 Argo CD 주석 helm.sh/hook를 두지 않는다
+# 읽기 실행기 Deployment를 Helm hook으로 만들었다. Argo CD는 hook 리소스를 동기 상태에서 빼므로 selfHeal이 그 replicas를 고치지 않는다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    set:
+      metadata.annotations:
+        helm.sh/hook: post-install

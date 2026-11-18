@@ -1,0 +1,43 @@
+# expect: fail
+# rule: olive-isolation
+# match: 대상 자료 밖의 워크로드다
+# also: olive-chart-targets
+# 세션을 다른 차트(여기서는 platform/sandbox)가 선언해도 olive-session은 올리브 격리 검사를 받는다. 그 ns에 대상 밖 Job을 더했다.
+# 세션 Deployment는 실제로 렌더되지 않으므로 olive-chart-targets(대상이 렌더에 없다)가 함께 걸린다.
+# 전제(세션 Deployment 없음, start: false라 예외 요구 없음)를 직접 만든다. 대조군 O10은 다른 차트에 세션 Deployment를 둔다.
+patch:
+  - in: targets
+    select: {id: session}
+    set: {declaredBy: platform/sandbox, start: false}
+  - in: all
+    select: {kind: Deployment, namespace: olive-session, name: session}
+    drop: true
+  - in: chart
+    chart: platform/sandbox
+    add:
+      apiVersion: v1
+      kind: Namespace
+      metadata: {name: olive-session, labels: {pod-security.kubernetes.io/enforce: restricted}}
+  - in: chart
+    chart: platform/sandbox
+    add:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata: {name: session, namespace: olive-session}
+      automountServiceAccountToken: false
+  - in: chart
+    chart: platform/sandbox
+    add:
+      apiVersion: batch/v1
+      kind: Job
+      metadata: {name: side, namespace: olive-session}
+      spec:
+        template:
+          spec:
+            serviceAccountName: session
+            automountServiceAccountToken: false
+            restartPolicy: Never
+            containers:
+              - name: side
+                image: x
+                securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}

@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-ignore-differences
+# match: 대상 supervisor의 Deployment에 Argo CD 주석 argocd.argoproj.io/compare-options를 두지 않는다
+# 감독 Deployment에 비교 옵션 주석을 달았다. 비교 방식은 소유 Application이 정하고 대상 리소스는 바꾸지 않는다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    set:
+      metadata.annotations:
+        argocd.argoproj.io/compare-options: IgnoreExtraneous

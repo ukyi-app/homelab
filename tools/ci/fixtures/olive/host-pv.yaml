@@ -1,0 +1,17 @@
+# expect: fail
+# rule: olive-isolation
+# match: storageClassName local-retain의 claimRef 없는 정적 PV는 올리브 PVC에 묶일 수 있다
+# 호스트 매니페스트(host/k3s-manifests)에 local-retain 클래스의 정적 PV를 더했다. install.sh가 이 디렉터리를 전부 k3s 자동 배포에
+# 넣으므로 플랫폼 렌더에 없어도 클러스터에 생겨 올리브 PVC의 결합 후보가 된다.
+patch:
+  - in: host
+    origin: host/k3s-manifests/stray-pv.yaml
+    add:
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata: {name: stray}
+      spec:
+        capacity: {storage: 1Gi}
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-retain
+        hostPath: {path: /var/lib/stray}

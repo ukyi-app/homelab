@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-replicas
+# match: spec.replicas 칸이 없다
+# replicas 칸을 지우면 Kubernetes 기본값 1로 뜬다. 빈 클러스터에서 다시 만들 때 켜진 채 시작한다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    unset: [spec.replicas]

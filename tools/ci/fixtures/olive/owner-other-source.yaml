@@ -1,0 +1,20 @@
+# expect: fail
+# rule: olive-owner
+# match: 대상 writer의 자리에 다른 소스 adguard(platform/adguard)가 Deployment를 낸다
+# 다른 Application이 metadata.namespace 없이 destination.namespace(sandbox)로 같은 자리(sandbox/worker-task)에 Deployment를 낸다.
+# 유효 네임스페이스는 destination으로 정해진다. 두 소스가 같은 리소스를 다투면 소유 Application의 예외·replicas가 보장되지 않는다.
+patch:
+  - in: render
+    render: root
+    origin: "adguard[vm]:platform/adguard"
+    ns: sandbox
+    add:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: worker-task}
+      spec:
+        replicas: 0
+        selector: {matchLabels: {app: worker-task}}
+        template:
+          metadata: {labels: {app: worker-task}}
+          spec: {containers: [{name: worker, image: x}]}

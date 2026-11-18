@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-targets
+# match: stop이 true가 아니다(start: true)
+# 켤 수 있는데 비상 정지가 덮지 않는 대상. 차트 템플릿도 이 모양을 거부하지만 CLI는 렌더 없이 이 파일을 읽는다.
+patch:
+  - in: targets
+    select: {id: supervisor}
+    set: {stop: false, start: true}

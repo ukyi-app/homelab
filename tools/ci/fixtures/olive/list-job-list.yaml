@@ -1,0 +1,26 @@
+# expect: fail
+# rule: olive-isolation
+# match: 대상 자료 밖의 워크로드다
+# list-job-top의 Job을 v1 List로 묶었다. Argo CD는 목록을 펴서 Job을 따로 배포하고, 항목은 목록의 destination(olive-reader)으로 풀린다.
+patch:
+  - in: render
+    render: root+켬
+    origin: "olive[vm]:platform/olive"
+    ns: olive-reader
+    add:
+      apiVersion: v1
+      kind: List
+      items:
+        - apiVersion: batch/v1
+          kind: Job
+          metadata: {name: cleanup}
+          spec:
+            template:
+              spec:
+                serviceAccountName: executor
+                automountServiceAccountToken: false
+                restartPolicy: Never
+                containers:
+                  - name: cleanup
+                    image: x
+                    securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}

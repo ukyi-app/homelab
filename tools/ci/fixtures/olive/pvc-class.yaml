@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-isolation
+# match: PVC의 storageClassName ""은 허용 클래스
+# 장부 PVC의 클래스를 빈 값으로 바꿨다. 빈 클래스는 동적 프로비저닝 없이 클래스 없는 정적 PV에 묶인다.
+patch:
+  - in: chart
+    select: {kind: PersistentVolumeClaim, namespace: olive-control, name: ledger}
+    set: {spec.storageClassName: ""}

@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-isolation
+# match: hostPort 8443를 쓰지 않는다
+# 감독 포트를 노드 포트로 열었다. PSA restricted가 생성 때 거절하므로 병합되면 다음 기동이 실패하고, PSA가 빠지면 노드에 열린다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: supervisor}
+        set: {ports: [{name: control, containerPort: 8443, hostPort: 8443}]}

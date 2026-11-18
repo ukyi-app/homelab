@@ -138,7 +138,12 @@ task:
   # 빌드 증명은 gh attestation verify로 대조했다(서명 워크플로 homelab app-build.yaml@app-build-v1.0.1, 원본 build.yaml@refs/heads/main
   # 36c96b6, GitHub 호스트 runner).
   image: ghcr.io/ukyi-app/homelab-bot@sha256:37e91af6113545aa9c6989606db6c6117b2824af6997828e7a75d7e134c49723
-  # 0이면 작업 레인 작업자 파드를 띄우지 않는다. 0 또는 1만 받는다. 이유와 다시 켤 때 볼 것은 worker.replicas와 같다.
+  # Git 값은 늘 0이다. 이 Deployment는 올리브의 작성 대상(platform/olive/targets.yaml writer)이고 CI가 0만 받는다
+  # (tools/ci/policy.ts, D-38. values.schema.json은 0·1을 받지만 1은 CI에서 막힌다). 켜고 끄기는 이 값이 아니라 올리브 관리자 CLI가
+  # live replicas로 하고, O13이 이 레인을 올리브 작성 작업자로 바꾼 뒤의 일이다. 그 전에는 켜지 않는다(D-17: 할 일 없이 모델 자격을
+  # 쥔 옛 작업자 파드를 남기지 않는다). 지금은 root의 sandbox Application에 replicas 예외가 없어 손으로 올린 값도 selfHeal이 0으로 되돌린다.
+  # O13의 PR이 그 예외(/spec/replicas, RespectIgnoreDifferences=true)와 targets.yaml writer의 start: true를 함께 넣는다(CI가 짝을 본다).
+  # 비상 정지의 자물쇠는 sandbox 네임스페이스 전체에 걸려 대화·리뷰 작업자(worker)의 새 파드도 막는다.
   # enabled: false와 다르다: 그쪽은 Secret·PVC까지 내리고 restore.md 개수가 바뀐다. 이 값은 파드만 내리고 작업 상태 PVC는 남긴다.
   # 함정: 멈출 때 진행 중이던 턴은 끝나지 못한다. 다시 켜면 PVC에 남은 작업 상태를 그대로 읽는다.
   replicas: 0

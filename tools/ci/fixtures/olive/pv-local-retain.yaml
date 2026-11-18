@@ -1,0 +1,15 @@
+# expect: fail
+# rule: olive-isolation
+# match: claimRef 없는 정적 PV는 올리브 PVC에 묶일 수 있다
+# Git에 local-retain 클래스의 정적 PV(hostPath)를 더했다. claimRef가 없어 크기·접근 모드가 맞는 올리브 PVC가 이 PV에 묶일 수 있다.
+patch:
+  - in: chart
+    add:
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata: {name: stray}
+      spec:
+        capacity: {storage: 1Gi}
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-retain
+        hostPath: {path: /var/lib/stray}

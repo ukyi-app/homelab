@@ -1,0 +1,19 @@
+# expect: fail
+# rule: olive-isolation
+# match: storageClassName local-retain의 claimRef 없는 정적 PV는 올리브 PVC에 묶일 수 있다
+# host-pv의 정적 PV를 v1 PersistentVolumeList로 묶었다. PV 검사도 격리 검사와 같은 목록 펴기를 거친다.
+patch:
+  - in: host
+    origin: host/k3s-manifests/stray-pv.yaml
+    add:
+      apiVersion: v1
+      kind: PersistentVolumeList
+      items:
+        - apiVersion: v1
+          kind: PersistentVolume
+          metadata: {name: stray}
+          spec:
+            capacity: {storage: 1Gi}
+            accessModes: [ReadWriteOnce]
+            storageClassName: local-retain
+            hostPath: {path: /var/lib/stray}
