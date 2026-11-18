@@ -45,7 +45,8 @@ spec:
     server: https://kubernetes.default.svc
   # 실행 Deployment의 replicas만 Argo CD 예외다(D-38). Git 값은 0이고 켜고 끄기는 관리자 CLI가 한다.
   # 대상은 platform/olive/targets.yaml에서 declaredBy가 platform/olive인 줄과 같아야 한다. root 차트는 그 파일을 읽지 못해
-  # 손으로 적는다. 셋(이 목록, 그 파일, CLI 대상)이 같은지는 CI 정책 검사가 맡는다(O09 할 일 6, 아직 없음).
+  # 손으로 적는다. 이 목록과 그 파일이 같은지는 CI(tools/ci/olive.ts의 olive targets 단계)가 본다.
+  # CLI 대상과의 일치는 아직 보지 않는다(CLI의 올리브 명령이 아직 없다, O09 할 일 6).
   # 이름 없이 kind만 적지 않는다. 뒤에 이 차트에 실행 대상이 아닌 Deployment가 생기면 그 replicas까지 Git이 놓친다.
   # 함정: 이 예외는 "CLI만 그 칸을 쓴다"가 아니다. Argo CD는 읽은 라이브 값을 다시 쓴다(supervisor.md §7.2). 정지가 자물쇠
   # (ResourceQuota olive-stop)를 먼저 거는 이유다.
