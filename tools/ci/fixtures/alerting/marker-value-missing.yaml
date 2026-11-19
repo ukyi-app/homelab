@@ -1,0 +1,5 @@
+# match: 표식 선택자(olive-control)는 annotation_homelab_ukyi_app_olive_started="true"까지 맞춰야 한다
+# 표식이 없는 네임스페이스도 kube_namespace_annotations 한 줄이 나온다. 값을 맞추지 않으면 켠 적 없는 상태에서 운다.
+replace:
+  - from: ', annotation_homelab_ukyi_app_olive_started="true"'
+    to: ""

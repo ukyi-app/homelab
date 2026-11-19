@@ -1,0 +1,12 @@
+# match: 규칙 그룹 other의 공통 olive_self 라벨은 쓸 수 없다
+# 그룹 공통 라벨은 규칙마다 합쳐진다. 이 그룹의 경보가 봇 receiver를 건너뛰고 Telegram으로만 간다.
+other: |
+  groups:
+    - name: other
+      labels:
+        olive_self: "true"
+      rules:
+        - alert: SomeOtherAlert
+          expr: vector(1)
+          labels:
+            severity: critical
