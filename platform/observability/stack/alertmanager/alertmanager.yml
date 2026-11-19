@@ -15,6 +15,14 @@ route:
       # 다시 보내기는 group_interval 틱에서만 일어난다. 빼면 기본 5m이 실제 간격이 되어 Period 5분과 같아진다.
       group_interval: 1m
       repeat_interval: 1m
+    # 올리브 자신의 경보(vmalert/rules/olive.yaml)는 Telegram으로만 간다. 봇 route보다 앞에 있어야 봇 receiver로 새지 않는다.
+    - matchers: ['olive_self="true"']
+      receiver: telegram
+      routes:
+        # 일부러 건 정지는 시작과 끝에만 알린다. 알림 기록의 보존 기간(--data.retention 기본 120h)을 넘겨 잡아도 기록이 지워지면 다시 보내므로 그 값에 맞춘다.
+        # 함정: 정지가 5일을 넘기면 5일마다 한 번, Alertmanager 파드가 바뀌면(기록이 emptyDir) 한 번 더 온다.
+        - matchers: ['alertname="OliveStopEngaged"']
+          repeat_interval: 120h
     # 봇(설계 C.8, T16b). 두 route는 함께 둔다. continue: true는 다음 형제 route를 계속 검사하게 할 뿐,
     # 일치한 자식이 있으면 부모 receiver(telegram)로는 보내지 않는다. Telegram 형제 route가 없으면 warning·critical이
     # 봇에만 가고, 봇이 멈추면 아무 데도 안 온다(D-10). tools/ci/alerting.ts가 route 결과를 시험한다.

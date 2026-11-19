@@ -50,6 +50,7 @@ configMapGenerator:
       - vmalert/rules/platform.yaml
       - vmalert/rules/adguard.yaml
       - vmalert/rules/bot.yaml
+      - vmalert/rules/olive.yaml
   - name: vmsingle-scrape
     options:
       disableNameSuffixHash: true

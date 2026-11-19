@@ -1,0 +1,5 @@
+# match: OliveDownWhileEnabled에 olive_self: "true" 라벨이 없다
+# 라벨이 없으면 올리브 route를 지나쳐 봇 receiver로도 간다.
+replace:
+  - from: 'olive_self: "true"'
+    to: 'olive_self: "false"'

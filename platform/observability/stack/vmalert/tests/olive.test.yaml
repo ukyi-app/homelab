@@ -1,0 +1,330 @@
+rule_files:
+  - ../rules/olive.yaml
+evaluation_interval: 1m
+tests:
+  - name: 켠 적 없음(표식 없음)이면 꺼져 있어도 울리지 않는다
+    interval: 1m
+    input_series:
+      # 표식이 없는 네임스페이스도 kube-state-metrics는 annotation_ 라벨 없이 한 줄을 낸다.
+      - series: 'kube_namespace_annotations{namespace="olive-control"}'
+        values: "1x40"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+
+  - name: 켜 둠이고 15분 꺼짐이면 울리고 14분에는 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x40"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 14m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: &down-control
+          - exp_labels:
+              severity: warning
+              olive_self: "true"
+              namespace: olive-control
+            exp_annotations:
+              summary: 올리브 olive-control의 실행 파드가 켜 둔 상태인데 15분 넘게 준비되지 않았다
+              description: kubectl -n olive-control get deploy,pods로 상태를 보고 파드 로그를 확인한다. 일부러 멈추려면 homelab olive stop on을 쓴다.
+
+  - name: 켜 둠이고 파드가 준비돼 있으면 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x40"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+
+  - name: 켜 둠인데 Deployment 시계열이 없으면 꺼짐으로 울린다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: *down-control
+
+  - name: 수집이 끊기면 꺼짐이 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x5 stale _x39"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "1x5 stale _x39"
+    alert_rule_test:
+      - eval_time: 40m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+
+  # 표식과 Deployment 시계열이 함께 끊기는 공백마다 for를 처음부터 센다.
+  - name: kube-state-metrics가 다시 뜨는 공백이 되풀이되면 꺼짐이 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x9 stale _x5 1x9 stale _x5 1x9"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "0x9 stale _x5 0x9 stale _x5 0x9"
+    alert_rule_test:
+      - eval_time: 24m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+
+  - name: 정지 중(자물쇠 있음)에는 꺼짐이 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x40"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "0x40"
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+
+  - name: 켤 수 없는 대상이 꺼져 있다고 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-reader", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x40"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-reader", deployment="executor"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+
+  - name: 정지인데 대상 파드가 있으면 울린다
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      - series: 'kube_pod_info{namespace="olive-control", pod="supervisor-6c9f7-x2k4p", created_by_kind="ReplicaSet", created_by_name="supervisor-6c9f7", uid="u1"}'
+        values: "1x20"
+      - series: 'kube_pod_status_phase{namespace="olive-control", pod="supervisor-6c9f7-x2k4p", phase="Running", uid="u1"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 2m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+      - eval_time: 4m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              olive_self: "true"
+              namespace: olive-control
+              pod: supervisor-6c9f7-x2k4p
+            exp_annotations:
+              summary: 올리브 정지 중인데 olive-control/supervisor-6c9f7-x2k4p 파드가 떠 있다
+              description: 자물쇠는 새 파드만 막고 이미 뜬 파드는 내리지 못한다. homelab olive stop status로 상태를 보고 homelab olive stop on을 다시 실행한다. 강제 삭제는 쓰지 않는다.
+
+  - name: 정지 직후 내려가는 동안은 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      # 3분에 파드가 사라진다. 정상 정지(약 95초)보다 늦어도 for 3m 안이면 조용하다. 수집기는 사라진 시계열에 stale 표시를 남긴다.
+      - series: 'kube_pod_info{namespace="olive-control", pod="supervisor-6c9f7-x2k4p", created_by_kind="ReplicaSet", created_by_name="supervisor-6c9f7", uid="u1"}'
+        values: "1x2 stale _x17"
+    alert_rule_test:
+      - eval_time: 2m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+      - eval_time: 3m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+      - eval_time: 10m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+
+  - name: 끝난 파드는 정지 중에 남아 있어도 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      - series: 'kube_pod_info{namespace="olive-control", pod="supervisor-6c9f7-evict", created_by_kind="ReplicaSet", created_by_name="supervisor-6c9f7", uid="u2"}'
+        values: "1x20"
+      - series: 'kube_pod_status_phase{namespace="olive-control", pod="supervisor-6c9f7-evict", phase="Failed", uid="u2"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+
+  - name: sandbox의 정지 대상이 아닌 Deployment의 파드로는 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="sandbox", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      # 대화·리뷰 작업자. 이름이 worker로 시작해도 정지 대상이 아니다.
+      - series: 'kube_pod_info{namespace="sandbox", pod="worker-7d8b9-abcde", created_by_kind="ReplicaSet", created_by_name="worker-7d8b9", uid="u3"}'
+        values: "1x20"
+      # 정지 대상인 작성 작업자만 울린다.
+      - series: 'kube_pod_info{namespace="sandbox", pod="worker-task-5f6c7-fghij", created_by_kind="ReplicaSet", created_by_name="worker-task-5f6c7", uid="u4"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              olive_self: "true"
+              namespace: sandbox
+              pod: worker-task-5f6c7-fghij
+            exp_annotations:
+              summary: 올리브 정지 중인데 sandbox/worker-task-5f6c7-fghij 파드가 떠 있다
+              description: 자물쇠는 새 파드만 막고 이미 뜬 파드는 내리지 못한다. homelab olive stop status로 상태를 보고 homelab olive stop on을 다시 실행한다. 강제 삭제는 쓰지 않는다.
+
+  - name: 자물쇠가 없으면 대상 파드가 떠 있어도 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_info{namespace="olive-control", pod="supervisor-6c9f7-x2k4p", created_by_kind="ReplicaSet", created_by_name="supervisor-6c9f7", uid="u1"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+
+  # 지금 운영의 모습이다. 올리브 네임스페이스·자물쇠·표식·Deployment가 없고 다른 네임스페이스의 시계열만 있다.
+  - name: 올리브 리소스가 하나도 없으면 아무것도 울리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="observability"}'
+        values: "1x40"
+      - series: 'kube_deployment_status_replicas_ready{namespace="observability", deployment="vmalert"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="sandbox", pod="worker-7d8b9-abcde", created_by_kind="ReplicaSet", created_by_name="worker-7d8b9", uid="u3"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+      - eval_time: 30m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+      - eval_time: 30m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: []
+
+  # 13분에 자물쇠를 풀면 마지막으로 걸려 있던 12분에서 keep_firing_for 5분 뒤 해소된다.
+  - name: 정지 알림은 자물쇠가 있는 동안 켜지고 풀리면 꺼진다
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "_x2 0x10 stale _x19"
+    alert_rule_test:
+      - eval_time: 1m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: []
+      - eval_time: 3m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: &stop-engaged
+          - exp_labels:
+              severity: info
+              olive_self: "true"
+            exp_annotations:
+              summary: 올리브 비상 정지가 걸려 있다
+              description: 실행 파드를 새로 띄우지 못한다. 풀려면 homelab olive stop off를 실행한다.
+      - eval_time: 11m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: *stop-engaged
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: *stop-engaged
+      - eval_time: 19m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: []
+
+  - name: 정지 알림은 네임스페이스가 여럿이어도 하나로 묶인다
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x10"
+      - series: 'kube_resourcequota{namespace="olive-diagnosis", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x10"
+      - series: 'kube_resourcequota{namespace="sandbox", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: *stop-engaged
+
+  # 공백이 해소·재발생으로 보이면 정지 한 번에 알림이 여러 번 간다.
+  - name: 정지 알림은 kube-state-metrics가 다시 뜨는 공백에 꺼지지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x5 stale _x2 0x10"
+    alert_rule_test:
+      - eval_time: 7m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: *stop-engaged
+      - eval_time: 8m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: *stop-engaged
+
+  - name: 자물쇠가 아닌 quota는 정지로 보지 않는다
+    interval: 1m
+    input_series:
+      # 자원 한도 olive-limits는 이름이 다르다.
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-limits", resource="pods", type="hard"}'
+        values: "0x20"
+      # 이름이 같아도 pods 한도가 0이 아니면 파드를 막지 못한다.
+      - series: 'kube_resourcequota{namespace="olive-reader", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "5x20"
+      # used는 한도가 아니다.
+      - series: 'kube_resourcequota{namespace="olive-diagnosis", resourcequota="olive-stop", resource="pods", type="used"}'
+        values: "0x20"
+      # 대상 밖 네임스페이스의 같은 이름은 올리브의 정지가 아니다.
+      - series: 'kube_resourcequota{namespace="app-a", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: []

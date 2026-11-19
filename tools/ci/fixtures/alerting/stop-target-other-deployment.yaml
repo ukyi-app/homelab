@@ -1,0 +1,5 @@
+# match: OlivePodsUpWhileStopped의 정지 대상의 sandbox/worker가
+# sandbox의 대화·리뷰 작업자(worker)는 정지 대상이 아니다. 이 파드로 세면 정지할 때마다 거짓으로 운다.
+replace:
+  - from: 'created_by_name=~"worker-task-[a-z0-9]+"'
+    to: 'created_by_name=~"worker-[a-z0-9]+"'

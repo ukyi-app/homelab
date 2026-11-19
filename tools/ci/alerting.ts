@@ -2,6 +2,7 @@
 // 도구는 PATH에서 찾는다: vmalert-tool-prod(vmutils), amtool(alertmanager). 로컬은 mise install, CI는 ci.yaml이 깐다.
 import { basename, dirname, join } from "node:path";
 import { type Violation, ROOT, gitFiles, parseAll, readText, run } from "./lib";
+import { OLIVE_TARGETS_FILE, readOliveTargets, targetList } from "./olive";
 
 const STACK = "platform/observability/stack";
 const RULES = `${STACK}/vmalert/rules`;
@@ -10,8 +11,83 @@ const AM_CONFIG = `${STACK}/alertmanager/alertmanager.yml`;
 // Telegram은 "nuc-dns-outage.md" 같은 상대 경로를 .md(몰도바) 도메인으로 자동 링크한다(라이브 실측). 그래서 전체 URL만 받는다.
 const RUNBOOK_BASE = "https://github.com/ukyi-app/homelab/blob/main/";
 
-type RuleFile = { groups?: { name: string; rules?: { alert?: string; record?: string; annotations?: { runbook?: string } }[] }[] };
+const OLIVE_RULE_FILE = `${RULES}/olive.yaml`;
+const OLIVE_ALERT_FIXTURES = "tools/ci/fixtures/alerting/*.yaml";
+const OLIVE_MARKER_LABEL = "annotation_homelab_ukyi_app_olive_started";
+
+type Rule = { alert?: string; record?: string; expr?: string; labels?: Record<string, string>; annotations?: { runbook?: string } };
+type RuleFile = { groups?: { name: string; rules?: Rule[] }[] };
 type TestFile = { rule_files?: string[]; tests?: { alert_rule_test?: { alertname: string; exp_alerts?: unknown[] }[] }[] };
+
+// 식에서 그 지표의 선택자마다 라벨을 읽는다.
+function selectors(expr: string, metric: string): Record<string, string>[] {
+  return [...expr.matchAll(new RegExp(`\\b${metric}\\{([^}]*)\\}`, "g"))].map((m) => Object.fromEntries([...m[1].matchAll(/([a-zA-Z_]+)=~?"([^"]*)"/g)].map((l) => [l[1], l[2]])));
+}
+
+// 경보의 대상과 targets.yaml이 어긋나면 정지·꺼짐을 놓치거나 정지 대상이 아닌 파드로 거짓 경보가 난다.
+export function checkOliveAlerts(oliveText: string, rawTargets: unknown, others: { file: string; text: string }[]): Violation[] {
+  const out: Violation[] = [];
+  const bad = (message: string) => out.push({ rule: "olive-alert-targets", where: OLIVE_RULE_FILE, message });
+  const same = (what: string, got: Set<string>, want: Set<string>) => {
+    for (const w of want) if (!got.has(w)) bad(`${what}에 ${w}가 빠졌다(${OLIVE_TARGETS_FILE})`);
+    for (const g of got) if (!want.has(g)) bad(`${what}의 ${g}가 ${OLIVE_TARGETS_FILE}의 대상이 아니다`);
+  };
+  const rules = ((parseAll(oliveText)[0] as RuleFile).groups ?? []).flatMap((g) => g.rules ?? []);
+  const expr = (name: string) => {
+    const r = rules.find((x) => x.alert === name);
+    if (!r) bad(`경보 ${name}가 없다`);
+    return r?.expr ?? "";
+  };
+  for (const r of rules) if (r.alert && r.labels?.olive_self !== "true") bad(`${r.alert}에 olive_self: "true" 라벨이 없다. 봇 receiver로 샌다`);
+  for (const o of others) {
+    for (const g of (parseAll(o.text)[0] as RuleFile).groups ?? []) {
+      for (const r of g.rules ?? []) if (r.labels?.olive_self !== undefined) out.push({ rule: "olive-alert-targets", where: o.file, message: `${r.alert}의 olive_self 라벨은 ${OLIVE_RULE_FILE}의 경보만 단다` });
+    }
+  }
+
+  const targets = targetList(rawTargets);
+  const pair = (t: { namespace: string; deployment: string }) => `${t.namespace}/${t.deployment}`;
+  const startable = targets.filter((t) => t.start === true);
+  const stoppable = targets.filter((t) => t.stop === true);
+
+  const down = expr("OliveDownWhileEnabled");
+  same("OliveDownWhileEnabled의 켤 수 있는 대상", new Set(selectors(down, "kube_deployment_status_replicas_ready").map((s) => `${s.namespace}/${s.deployment}`)), new Set(startable.map(pair)));
+  const markers = selectors(down, "kube_namespace_annotations");
+  same("OliveDownWhileEnabled의 표식 네임스페이스", new Set(markers.map((s) => s.namespace)), new Set(startable.map((t) => t.namespace)));
+  for (const m of markers) if (m[OLIVE_MARKER_LABEL] !== "true") bad(`OliveDownWhileEnabled의 표식 선택자(${m.namespace})는 ${OLIVE_MARKER_LABEL}="true"까지 맞춰야 한다`);
+
+  const pods = selectors(expr("OlivePodsUpWhileStopped"), "kube_pod_info");
+  for (const p of pods) if (p.created_by_kind !== "ReplicaSet" || !/^.+-\[a-z0-9\]\+$/.test(p.created_by_name ?? "")) bad(`OlivePodsUpWhileStopped의 ${p.namespace} 선택자는 ReplicaSet과 <Deployment>-[a-z0-9]+로 골라야 한다`);
+  same("OlivePodsUpWhileStopped의 정지 대상", new Set(pods.map((p) => `${p.namespace}/${(p.created_by_name ?? "").replace(/-\[a-z0-9\]\+$/, "")}`)), new Set(stoppable.map(pair)));
+
+  const locks = selectors(expr("OliveStopEngaged"), "kube_resourcequota");
+  same("OliveStopEngaged의 네임스페이스", new Set(locks.flatMap((l) => (l.namespace ?? "").split("|"))), new Set(stoppable.map((t) => t.namespace)));
+  return out;
+}
+
+// 음성 fixture: 실제 규칙 파일에 replace를 얹거나 other 규칙 파일을 더하면 # match:의 위반이 나야 한다.
+function checkOliveAlertFixtures(oliveText: string, rawTargets: unknown): Violation[] {
+  const out: Violation[] = [];
+  const files = gitFiles(OLIVE_ALERT_FIXTURES);
+  if (files.length === 0) out.push({ rule: "fixture", where: OLIVE_ALERT_FIXTURES, message: "음성 fixture가 없다" });
+  for (const f of files) {
+    const text = readText(f);
+    const match = text.match(/^# match: (.+)$/m)?.[1].trim();
+    const doc = parseAll(text)[0] as { replace?: { from: string; to: string }[]; other?: string };
+    if (!match) {
+      out.push({ rule: "fixture", where: f, message: "머리 주석 # match:가 필요하다" });
+      continue;
+    }
+    let mutated = oliveText;
+    for (const r of doc.replace ?? []) {
+      if (!mutated.includes(r.from)) out.push({ rule: "fixture", where: f, message: `규칙 파일에 없는 문자열이다: ${r.from}` });
+      mutated = mutated.replace(r.from, () => r.to);
+    }
+    const got = checkOliveAlerts(mutated, rawTargets, doc.other ? [{ file: f, text: doc.other }] : []);
+    if (!got.some((v) => v.message.includes(match))) out.push({ rule: "fixture", where: f, message: `기대한 위반이 나지 않았다(나온 것: ${got.map((v) => v.message).join(" / ") || "없음"})` });
+  }
+  return out;
+}
 
 export function checkAlerting(): Violation[] {
   const out: Violation[] = [];
@@ -55,6 +131,11 @@ export function checkAlerting(): Violation[] {
   for (const [name, f] of alerts) if (!fired.has(name)) out.push({ rule: "alert-rules", where: f, message: `경보 ${name}의 발화 시험이 없다(${TESTS})` });
   for (const f of ruleFiles) if (!testedRuleFiles.has(f)) out.push({ rule: "alert-rules", where: f, message: `어느 시험의 rule_files에도 없다` });
 
+  const oliveText = readText(OLIVE_RULE_FILE);
+  const oliveTargets = readOliveTargets();
+  out.push(...checkOliveAlerts(oliveText, oliveTargets, ruleFiles.filter((f) => f !== OLIVE_RULE_FILE).map((f) => ({ file: f, text: readText(f) }))));
+  out.push(...checkOliveAlertFixtures(oliveText, oliveTargets));
+
   // 시험 파일의 rule_files는 그 파일 기준 상대 경로라 tests 폴더에서 돌린다.
   const vt = run(["vmalert-tool-prod", "unittest", ...testFiles.flatMap((f) => ["-files", basename(f)])], { cwd: join(ROOT, TESTS) });
   const vtOut = (vt.stdout + vt.stderr).trim();
@@ -77,6 +158,12 @@ export function checkAlerting(): Violation[] {
     [["alertname=HomelabBotModelPausedAuthExpired", "severity=warning", "kind=auth_expired"], "bot,telegram"],
     [["alertname=HomelabBotModelPausedBilling", "severity=warning", "kind=billing"], "bot,telegram"],
     [["alertname=Watchdog", "severity=none"], "healthchecks"],
+    // 올리브 자신의 경보는 심각도와 상관없이 Telegram으로만 간다. 봇 receiver가 끼면 올리브가 자기 장애 알림을 받는 되먹임이 된다.
+    [["alertname=OliveDownWhileEnabled", "severity=warning", "olive_self=true"], "telegram"],
+    [["alertname=OlivePodsUpWhileStopped", "severity=critical", "olive_self=true"], "telegram"],
+    [["alertname=OliveStopEngaged", "severity=info", "olive_self=true"], "telegram"],
+    // 라벨 값이 다르면 올리브 route에 들지 않는다.
+    [["alertname=OliveDownWhileEnabled", "severity=warning", "olive_self=false"], "bot,telegram"],
   ];
   for (const [labels, want] of ROUTES) {
     const r = run(["amtool", "config", "routes", "test", `--config.file=${AM_CONFIG}`, `--verify.receivers=${want}`, ...labels], { cwd: ROOT });

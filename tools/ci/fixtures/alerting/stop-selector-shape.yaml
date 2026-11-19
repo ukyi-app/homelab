@@ -1,0 +1,5 @@
+# match: OlivePodsUpWhileStopped의 olive-control 선택자는 ReplicaSet과
+# 이름의 끝을 열어 두면 같은 접두의 다른 Deployment 파드까지 센다.
+replace:
+  - from: 'created_by_name=~"supervisor-[a-z0-9]+"'
+    to: 'created_by_name=~"supervisor-.*"'
