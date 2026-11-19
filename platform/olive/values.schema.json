@@ -50,7 +50,7 @@
           "tls": {
             "properties": {
               "secretName": { "const": "" },
-              "mountPath": { "not": { "pattern": "^/run(/olive(/trust(/.*)?)?)?/?$" } }
+              "mountPath": { "const": "/run/olive/tls" }
             }
           }
         }
@@ -61,7 +61,7 @@
             "tls": {
               "properties": {
                 "secretName": { "const": "" },
-                "mountPath": { "not": { "pattern": "^/run(/olive(/trust(/.*)?)?)?/?$" } }
+                "mountPath": { "const": "/run/olive/tls" }
               }
             }
           }

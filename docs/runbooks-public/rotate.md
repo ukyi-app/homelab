@@ -432,133 +432,47 @@ h database r2-backup ACCESS_KEY_ID; h database r2-backup SECRET_ACCESS_KEY     #
 
 ## 3i. 올리브 내부 인증서
 
-**발급 기관의 교체와 키 유출 대응 절차는 아직 없다. 시험 클러스터에서 돌려 본 뒤에 더한다. 그 전에는 올리브의 인증서 선언을 켜지 않는다.** 이 절에는 선언의 관계, 읽기만 하는 상태 확인, 쓰는 절차가 지켜야 할 조건만 있다.
+**발급 기관의 교체·폐기·키 유출 대응 절차와 상태 확인 명령은 아직 없다. 독립된 시험 환경에서 실제 응답으로 돌려 본 뒤에 더한다. 그 전에는 올리브의 인증서 선언을 켜지 않는다.** 이 절에는 선언의 관계, 상태 확인이 봐야 할 것, 쓰는 절차가 지켜야 할 조건만 있다. 독립된 시험 환경은 이 저장소의 main을 읽는 root가 없는 환경이다.
 
-**관리자가 정한 것은 D-58까지다.** mTLS와 효과별 Ed25519 서명, 인증서를 클러스터 cert-manager의 올리브 전용 발급 기관에서 낸다는 것이다. 발급 기관 키의 보관 자리, 수명, 교체 방식, 인증서 신원과 역할을 잇는 규칙은 **승인되지 않은 안**이다. 켜기 전에 풀 것의 목록은 [PR #1328](https://github.com/ukyi-app/homelab/pull/1328) 본문에 있다.
+**관리자가 정한 것은 D-58까지다.** mTLS와 효과별 Ed25519 서명, 인증서를 클러스터 cert-manager의 올리브 전용 발급 기관에서 낸다는 것이다. 발급 기관 키의 보관 자리, 수명, 교체 방식, 인증서 신원과 역할을 잇는 규칙은 **승인되지 않은 안**이다. 대상 클러스터에서 처음 켜기 전에 끝낼 것과 발급 뒤에 활성화 PR이 순서대로 확인할 것의 목록은 [PR #1328](https://github.com/ukyi-app/homelab/pull/1328) 본문에 있다.
 
 **인증서가 가는 길.** 발급 기관 `olive-internal-ca-g<세대>`는 `cert-manager` 네임스페이스의 Certificate이고 키는 같은 이름의 Secret에만 있다. 세대마다 ClusterIssuer `olive-internal-g<세대>`가 있고, leaf는 `pki.ca.activeGeneration` 세대의 ClusterIssuer를 가리킨다. 감독과 실행기의 네임스페이스마다 Certificate `olive-tls`가 Secret `olive-tls`를 만들고, 파드에는 `tls.crt`와 `tls.key`만 붙는다. 상대를 확인하는 기준은 `platform/root/values-<클러스터>.yaml`의 `cluster.olive.trustBundlePem`에서 만든 ConfigMap `olive-trust`다.
 
 **알아 둘 것**
 
 - **발급 범위.** 이 선언만으로는 올리브 발급 기관의 발급 범위가 좁혀지지 않는다. 받을 수 있는 길은 `platform/olive/templates/pki-ca.yaml` 머리 주석에 있다.
-- **세대 값은 클러스터 공통이다.** `pki.ca.generations`와 `pki.ca.activeGeneration`은 `platform/olive/values.yaml`의 값이라 모든 클러스터가 함께 읽는다. 세대 값을 클러스터마다 따로 넘길 수 있게 되기 전에는 한 클러스터에서만 켠다.
-- **클러스터별 값.** 운영과 VM은 발급 기관과 지시 서명 키가 서로 달라 공개 값도 다르다. `platform/olive/values.yaml`에 넣지 않고 `platform/root/values-<클러스터>.yaml`의 `cluster.olive`에 넣는다. PR로만 바뀐다. 클러스터를 새로 만들면 새 발급 기관이 생겨, 그 클러스터의 묶음 PR이 들어갈 때까지 연결이 거절되고 올리브가 멈춘다(닫히는 쪽이다).
-- **만료 감시.** 경보 `CertificateExpiringSoon`·`CertificateExpiringCritical`·`CertificateNotReady`는 Certificate 리소스만 본다. **Git에 고정한 신뢰 묶음의 만료는 어떤 경보도 보지 않는다.** 선언의 규칙(leaf 수명 < `ca.renewBeforeHours`)은 발급 기관이 제때 갱신될 때의 여유일 뿐이고, 갱신이 오래 실패하면 cert-manager는 발급 기관보다 오래 사는 leaf도 낸다. 실제 서명 발급 기관의 남은 기간과 묶음의 만료는 A에서 따로 본다.
-- 키 값은 출력하지 않는다. 아래 명령은 공개 값인 `tls.crt`와 ConfigMap만 읽는다.
+- **켜짐과 세대 값은 클러스터 공통이다.** 운영과 VM의 root는 같은 main과 같은 `components.olive.enabled`를 읽고, `pki.enabled`, `pki.ca.generations`, `pki.ca.activeGeneration`은 `platform/olive/values.yaml`의 값이라 모든 클러스터가 함께 읽는다. 클러스터마다 켜짐과 세대 값을 따로 줄 수 있다는 것을 두 root의 렌더로 보이기 전까지 이 main을 읽는 root에서는 인증서 선언을 켜지 않는다. 최초 발급의 검증은 이 main을 읽지 않는 독립된 시험 환경에서 하고, 켜는 일은 그 뒤의 활성화 PR이 맡는다.
+- **끄는 것은 폐기가 아니다.** root에서 올리브를 꺼도 자식 Application에 finalizer가 없어 자체 서명 Issuer와 발급 기관 Certificate가 클러스터에 남는다. 그 상태에서 발급 기관 Secret을 지우면 cert-manager가 같은 세대 이름으로 새 키를 낼 수 있다.
+- **클러스터별 값.** 운영과 VM은 발급 기관과 지시 서명 키가 서로 달라 공개 값도 다르다. `platform/olive/values.yaml`에 넣지 않고 `platform/root/values-<클러스터>.yaml`의 `cluster.olive`에 넣는다. PR로만 바뀐다. 발급 기관이 생겨야 얻는 값은 `trustBundlePem`이고, `supervisorSigningPublicKeyPem`은 Infisical에 둔 Ed25519 개인 키의 짝이라 발급과 무관하다. 두 값 모두 최초 발급의 전제가 아니고, 발급을 확인한 뒤 같은 PR로 넣는다. 클러스터를 새로 만들면 새 발급 기관이 생겨, 그 클러스터의 묶음 PR이 들어갈 때까지 연결이 거절되고 올리브가 멈춘다(닫히는 쪽이다).
+- **만료 감시.** 경보 `CertificateExpiringSoon`·`CertificateExpiringCritical`·`CertificateNotReady`는 Certificate 리소스만 본다. **Git에 고정한 신뢰 묶음의 만료는 어떤 경보도 보지 않는다.** 선언의 규칙(leaf 수명 < `ca.renewBeforeHours`)은 발급 기관이 제때 갱신될 때의 여유일 뿐이고, 갱신이 오래 실패하면 cert-manager는 발급 기관보다 오래 사는 leaf도 낸다. 실제 서명 발급 기관의 남은 기간과 묶음의 만료는 아래 상태 확인의 조건 4·5가 다룬다.
 
-**A. 상태 확인(읽기만 한다)**
+**상태 확인이 봐야 할 것**
 
-클러스터 선택은 [bootstrap.md](bootstrap.md) 0절과 2.2절의 vm 분기, [vm.md](vm.md) 3절을 따른다. 이 절은 kubeconfig를 고르지 않는다. NUC의 작업 사본에서 `CLUSTER`(`prod` 또는 `vm`)와 `KUBECONFIG`를 먼저 정하고 bash로 아래 함수를 읽은 뒤 `olive_status`를 부른다.
+명령이 아니라 조건이다. 명령을 더할 때 아래를 모두 지킨다.
 
-```bash
-# 기대한 context와 노드가 맞을 때만 성공한다
-olive_target() {
-  [ -n "${BASH_VERSION:-}" ] || { echo "bash에서 읽는다" >&2; return 1; }
-  [ -n "${CLUSTER:-}" ] && [ -n "${KUBECONFIG:-}" ] || { echo "CLUSTER와 KUBECONFIG를 먼저 정한다" >&2; return 1; }
-  export KUBECONFIG
-  local want; want="$(. "host/clusters/$CLUSTER.env" && printf %s "$KUBE_CONTEXT")" && [ -n "$want" ] || return 1
-  [ "$(kubectl config current-context)" = "$want" ] || { echo "지금 context가 $want가 아니다" >&2; return 1; }
-  host/verify.sh --cluster "$CLUSTER" --identity
-}
-# PEM 묶음의 인증서마다 이름, 만료, 지문을 보인다. 깨진 블록, 블록 밖의 내용, 빈 입력은 실패다
-olive_pems() {
-  local line block="" inside=0 count=0
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      '-----BEGIN CERTIFICATE-----')
-        [ "$inside" = 0 ] || { echo "닫히지 않은 블록이 있다" >&2; return 1; }
-        inside=1; block="$line"$'\n' ;;
-      '-----END CERTIFICATE-----')
-        [ "$inside" = 1 ] || { echo "BEGIN 없는 END가 있다" >&2; return 1; }
-        inside=0; count=$((count + 1))
-        printf '%s%s\n' "$block" "$line" | openssl x509 -noout -subject -enddate -fingerprint -sha256 \
-          || { echo "${count}번째 블록을 읽지 못했다" >&2; return 1; } ;;
-      '')
-        [ "$inside" = 0 ] || { echo "블록 안에 빈 줄이 있다" >&2; return 1; } ;;
-      *)
-        [ "$inside" = 1 ] || { echo "블록 밖에 내용이 있다" >&2; return 1; }
-        block+="$line"$'\n' ;;
-    esac
-  done
-  [ "$inside" = 0 ] && [ "$count" -gt 0 ] || { echo "온전한 인증서 블록이 없다" >&2; return 1; }
-}
-# Secret의 공개 인증서(tls.crt). 개인 키 칸은 읽지 않는다
-olive_crt() {
-  local b64; b64="$(kubectl -n "$1" get secret "$2" -o jsonpath='{.data.tls\.crt}')" && [ -n "$b64" ] \
-    || { echo "$1/$2의 tls.crt를 읽지 못했다" >&2; return 1; }
-  printf %s "$b64" | base64 -d
-}
-# leaf($2)가 발급 기관 인증서($1) 하나만 믿었을 때 검증되는지 본다. -trusted는 호스트의 기본 신뢰 저장소를 쓰지 않는다
-olive_verify() {
-  [ "$(grep -c -- '-----BEGIN CERTIFICATE-----' <<<"$1")" = 1 ] || { echo "발급 기관 인증서가 한 장이 아니다" >&2; return 1; }
-  openssl verify -trusted <(printf '%s\n' "$1") <(printf '%s\n' "$2") >/dev/null
-}
-# Go 형식의 수명(720h, 720h0m0s)을 초로 바꾼다. 읽지 못하면 실패다
-olive_seconds() {
-  [ -n "$1" ] && [[ "$1" =~ ^([0-9]+h)?([0-9]+m)?([0-9]+s)?$ ]] || { echo "수명을 읽지 못했다: '$1'" >&2; return 1; }
-  local h="${BASH_REMATCH[1]%h}" m="${BASH_REMATCH[2]%m}" s="${BASH_REMATCH[3]%s}"
-  echo $(( 10#${h:-0} * 3600 + 10#${m:-0} * 60 + 10#${s:-0} ))
-}
-# 읽기만 한다. 하나라도 어긋나면 실패로 끝난다
-olive_status() {
-  olive_target || return 1
-  local ns issuer="" name secret duration seconds max=0 ca leaf fp bundle first="" rc=0
-  kubectl get clusterissuer -l app.kubernetes.io/part-of=olive \
-    -o custom-columns='NAME:.metadata.name,SECRET:.spec.ca.secretName,READY:.status.conditions[?(@.type=="Ready")].status' || rc=1
-  kubectl -n cert-manager get certificate -l app.kubernetes.io/part-of=olive \
-    -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,NOT_AFTER:.status.notAfter,RENEW_BEFORE:.spec.renewBefore' || rc=1
-  for ns in olive-control olive-diagnosis olive-reader; do
-    name="$(kubectl -n "$ns" get certificate olive-tls -o jsonpath='{.spec.issuerRef.name}')" || return 1
-    [[ "$name" =~ ^olive-internal-g[0-9]+$ ]] || { echo "$ns: 발급 기관 이름이 올리브 세대가 아니다: '$name'" >&2; return 1; }
-    [ -z "$issuer" ] || [ "$issuer" = "$name" ] || { echo "$ns: leaf의 발급 기관 세대가 서로 다르다" >&2; return 1; }
-    issuer="$name"
-    duration="$(kubectl -n "$ns" get certificate olive-tls -o jsonpath='{.spec.duration}')" || return 1
-    seconds="$(olive_seconds "$duration")" || return 1
-    [ "$seconds" -le "$max" ] || max="$seconds"
-  done
-  ca="$(olive_crt cert-manager "olive-internal-ca-g${issuer#olive-internal-g}")" || return 1
-  fp="$(printf '%s\n' "$ca" | openssl x509 -noout -fingerprint -sha256)" || return 1
-  echo "지금 서명하는 발급 기관: $issuer $fp"
-  for ns in olive-control olive-diagnosis olive-reader; do
-    secret="$(kubectl -n "$ns" get certificate olive-tls -o jsonpath='{.spec.secretName}')" && [ -n "$secret" ] || return 1
-    leaf="$(olive_crt "$ns" "$secret")" || return 1
-    if olive_verify "$ca" "$leaf"; then echo "$ns/$secret: $issuer로 검증됨"; else echo "$ns/$secret: $issuer로 검증되지 않음" >&2; rc=1; fi
-    bundle="$(kubectl -n "$ns" get configmap olive-trust -o jsonpath='{.data.ca-bundle\.pem}' | olive_pems)" \
-      || { echo "$ns: 신뢰 묶음을 읽지 못했다" >&2; return 1; }
-    echo "$ns 신뢰 묶음:"; printf '%s\n' "$bundle"
-    [ -z "$first" ] || [ "$first" = "$bundle" ] || { echo "$ns: 신뢰 묶음이 다른 네임스페이스와 다르다" >&2; rc=1; }
-    first="$bundle"
-    grep -qxF -- "$fp" <<<"$bundle" || { echo "$ns: 신뢰 묶음에 지금 서명하는 발급 기관이 없다" >&2; rc=1; }
-  done
-  printf '%s\n' "$ca" | openssl x509 -noout -checkend "$max" >/dev/null \
-    || { echo "발급 기관의 남은 기간이 leaf 수명(${max}초)보다 짧다" >&2; rc=1; }
-  return "$rc"
-}
-```
-
-`olive_status`가 exit 0이면 다음이 모두 맞다. 세 leaf가 같은 세대이고 그 세대의 발급 기관 하나만 믿어도 검증된다. 세 ConfigMap의 묶음이 서로 같고 그 안에 지금 서명하는 발급 기관이 있다. 발급 기관의 남은 기간이 세 leaf에 선언된 수명의 최댓값보다 길다.
-
-출력에서 사람이 더 보는 것은 둘이다. `READY`가 모두 `True`인지, 묶음의 인증서마다 남은 기간이 발급 기관 Certificate의 `RENEW_BEFORE`보다 긴지 본다. 어긋나면 관리자에게 알린다. 고치는 절차는 아직 없다.
-
-**[미확인]** 이 함수들의 판정은 임시 키와 가짜 응답으로만 시험했다. 실제 API 서버의 응답으로는 돌려 보지 않았다.
-
-**값을 넣는 PR 앞의 대조.** 모양만 맞는 PEM도 렌더를 통과하므로 `cluster.olive.trustBundlePem`을 바꾸는 PR마다 묶음의 모든 블록을 읽는다. 지문이 승인한 세대의 발급 기관과 모두 같아야 한다.
-
-```bash
-yq '.cluster.olive.trustBundlePem' "platform/root/values-$CLUSTER.yaml" | olive_pems
-```
+1. **지금 서명하는 발급 기관.** leaf의 `issuerRef`가 가리키는 실제 ClusterIssuer를 읽고, 그 `spec.ca.secretName`이 가리키는 Secret을 따라간다. 세대 번호로 Secret 이름을 지어내지 않는다.
+2. **발급 기관 하나로 검증.** 세 leaf가 그 발급 기관 인증서 한 장만 믿었을 때 검증되어야 한다. 호스트의 기본 신뢰 저장소를 쓰지 않고, 입력이 정확히 인증서 한 장인지 인증서로 읽어서 판정한다.
+3. **leaf Secret의 위치.** leaf Secret은 Certificate의 `spec.secretName`에서 읽는다.
+4. **발급 기관의 남은 기간.** 지금 서명하는 발급 기관의 남은 기간을 세 Certificate에 선언된 leaf 수명의 최댓값과 비교한다.
+5. **Git에 고정한 묶음.** `cluster.olive.trustBundlePem`의 인증서 수와 각 인증서의 만료를 보고, 모든 지문이 승인한 세대의 발급 기관과 같은지 대조한다. 모양만 맞는 PEM도 렌더를 통과한다.
+6. **읽기 실패.** 어느 읽기든 실패하면 확인 전체가 실패로 끝난다. 일부를 출력한 뒤 실패한 읽기, 깨진 PEM, 빈 입력도 성공으로 끝나지 않는다.
+7. **필요한 권한.** 발급 기관 Secret의 `tls.crt`를 읽으려면 그 Secret의 `get` 권한이 든다. 이 권한은 같은 Secret의 `tls.key`도 읽을 수 있어, 출력에 공개 인증서만 남겨도 이 확인을 맡는 주체는 발급 기관 키를 읽을 수 있는 주체다.
+8. **실제 신뢰 묶음.** 세 네임스페이스의 실제 ConfigMap `olive-trust`에 든 묶음이 Git에 고정한 묶음과 같고, 지금 서명하는 발급 기관을 포함한다. 하나라도 다르거나 빠지면 실패다.
 
 **쓰는 절차가 지켜야 할 조건**
 
-교체와 유출 대응 절차를 더할 때 아래를 모두 지킨다. 절차가 아니라 조건이다.
+교체, 폐기, 유출 대응 절차를 더할 때 아래를 모두 지킨다. 절차가 아니라 조건이다.
 
-1. **대상 확인.** 쓰기와 삭제마다 바로 앞에서 `olive_target`을 부르고, 실패하면 그 블록 전체가 멈춘다. 확인과 쓰기를 서로 묶이지 않은 줄로 두지 않는다.
+1. **대상 확인.** 쓰기와 삭제마다 바로 앞에서 기대한 context와 노드를 확인하고, 실패하면 그 블록 전체가 멈춘다. 확인과 쓰기를 서로 묶이지 않은 줄로 두지 않는다.
 2. **세대 검증.** 세 leaf가 목표 세대 하나만 믿었을 때 검증된 뒤에 다음 단계로 간다. 되돌린 뒤에 다시 시작할 때도 같다.
 3. **삭제 대상.** 지우기 전에 지울 것이 이번 교체의 옛 세대인지 확인한다. 교체를 시작할 때 대상 클러스터, 세대 번호, Secret의 UID, 공개 키 지문을 기록하고, 삭제 직전에 그 기록과 같은지, 그 Secret을 가리키는 Issuer·ClusterIssuer가 남지 않았는지 본다. 확인 뒤 Secret이 다시 만들어졌으면 멈춘다.
 4. **유출 대응의 시작.** [supervisor.md](../plans/2026-11-13-olive/supervisor.md) 7.3절과 7.4절의 비상 정지 증거(자물쇠, 실행 파드 소멸)가 확인된 지점에서만 시작한다. 검증에 실패하면 다시 잠그고 실패한 위치를 관리자에게 보고한다.
 5. **유출 대응의 재개.** 정지 중에는 "모든 프로세스가 새 묶음을 읽었다"를 요구할 수 없다. 같은 문서 7.6절처럼 접수를 닫은 제한 기동에서 새 연결을 검증하고, 성공한 뒤에 옛 키를 지우고 접수를 연다.
 6. **개인 키.** 서명 개인 키를 디스크에 남기지 않는다. `infisical run`으로 읽는 절차는 [infra/README.md](../../infra/README.md) 2절의 백업 폴더 준비(쓰기 불가 확인)를 한 셸에서 하고, 끝난 뒤 그 절의 `backup_files`가 0인지 본다.
 7. **같은 키로 갱신한 뒤의 묶음.** 발급 기관 인증서가 같은 키로 갱신되면 옛 인증서와 새 인증서를 함께 묶음에 두되, 옛 인증서의 승인 지문과 만료 전 제거 마감을 함께 적는다. 새 묶음이 모든 프로세스에 전파된 것을 확인한 뒤 옛 인증서를 뺀다. **[미확인]** 같은 키와 subject로 갱신한 인증서가 옛 leaf와 옛 묶음에 양방향으로 맞는지는 재지 않았다.
+8. **폐기.** 발급 기관 키를 지우기 전에 그 세대의 발급 기관 Certificate와 ClusterIssuer가 클러스터에서 사라진 것을 확인한다. 모든 세대를 없앨 때는 자체 서명 Issuer까지 확인한다. 발급하는 리소스가 남아 있으면 cert-manager가 같은 세대 이름으로 새 키를 낼 수 있다.
+9. **유출된 세대.** 키가 샜으면 옛 세대를 이중 묶음이나 되돌림 대상으로 다시 믿지 않는다. 감독의 지시 서명 키도 함께 샜으면 그 키와 클러스터별 공개 키를 함께 바꾸고 옛 서명이 거절되는 것을 확인한다.
+10. **새 세대의 키.** 새 발급 기관 세대를 만들기 전에 예정된 이름의 Secret이 이미 있는지 보고, 발급 뒤에 공개 키 지문을 옛 세대와 비교해 정말 새 키인지 확인한다. 예정된 이름의 Secret이 이미 있으면 그 소유·사용 이력과 승인된 복원인지를 확인하기 전에는 새 키로 받아들이지 않는다. `rotationPolicy: Never`는 있던 키를 다시 쓰므로, 옛 세대와 지문이 다르다는 것만으로는 새로 만든 키라는 증거가 아니다.
 
 ## 4. 아직 채우지 않은 절
 

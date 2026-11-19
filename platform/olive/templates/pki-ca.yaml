@@ -7,7 +7,7 @@ kind: Secret을 선언하지 않는다.
 ClusterIssuer인 이유: 인증서가 세 네임스페이스에 필요하다. 네임스페이스별 Issuer는 발급 기관 키를 모델이 도는 실행기 네임스페이스마다
 복사해야 한다. CA Secret이 cert-manager 네임스페이스에 있는 이유: ClusterIssuer는 cluster resource namespace(기본 cert-manager)의 Secret만 읽는다.
 함정: 이 선언만으로는 발급 범위가 좁혀지지 않는다. ClusterIssuer는 어느 네임스페이스의 요청에도 서명하고, 기본 승인자는 요청을 모두 승인하며,
-요청한 SAN이 그 네임스페이스의 것인지 보지 않는다. 범위를 좁히는 방법을 고르고 시험 클러스터에서 확인하기 전에는 pki.enabled를 켜지 않는다.
+요청한 SAN이 그 네임스페이스의 것인지 보지 않는다. 범위를 좁히는 방법을 고르고 이 main을 읽지 않는 독립된 시험 환경에서 확인하기 전에는 pki.enabled를 켜지 않는다.
 이 발급 기관으로 인증서를 받는 길은 셋이다.
   직접 배포: Certificate를 선언한다. AppProject apps·data의 허용 목록에는 cert-manager.io가 없다. root와 AppProject platform의 Application,
     Application을 고칠 수 있는 Argo CD owner 계정, 클러스터 관리자는 만들 수 있다. 외부 차트가 설치한 권한은 저장소에서 보이지 않는다.
@@ -29,7 +29,9 @@ wave 0: leaf(wave 1)와 Deployment(wave 2)보다 먼저 Ready여야 한다. 이�
   CRD가 없으면 이 Application의 동기화가 실패하고 Deployment까지 적용되지 않는다. 재시도는 10번(homelab.retry, 약 40분)뿐이라 그 뒤에 CRD가 생기면 수동 sync로 다시 돌린다.
   root에서 cert-manager만 끄면 자식 Application에 finalizer가 없어 컨트롤러와 CRD가 남는다. 끈 것이 발급을 멈추지 않는다.
   CRD는 있고 컨트롤러만 멈추면 제출은 되지만 Certificate가 Ready가 되지 않는다. 이미 발급된 Secret과 떠 있는 파드는 그대로 남는다.
-함정: 이 파일의 리소스를 지워도 cert-manager가 만든 Secret은 남는다. 발급 기관 키 삭제는 사람이 한다.
+함정: root에서 올리브를 끄는 것만으로는 이 파일의 리소스가 지워지지 않는다(자식 Application에 finalizer가 없다). 자체 서명 Issuer와 CA Certificate가 남은 채
+Secret을 지우면 cert-manager가 같은 세대 이름으로 새 키를 낼 수 있다. 이 파일의 리소스를 지워도 cert-manager가 만든 Secret은 남는다.
+발급하는 리소스가 사라진 것을 확인하는 폐기 절차는 아직 없다(docs/runbooks-public/rotate.md 3i).
 */}}
 {{- if .Values.pki.enabled }}
 {{- include "olive.pki.validate" . }}
