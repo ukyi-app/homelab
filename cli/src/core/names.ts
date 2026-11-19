@@ -4,6 +4,9 @@
 import type { BotMethod } from "./command";
 import { jsonStringify } from "./intrinsics";
 
+// 명령 파일이 import할 수 있는 core 모듈이 정해져 있어 올리브 대상 목록은 여기로 내보낸다.
+export { oliveTargets, type OliveTarget } from "./olive-targets";
+
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
 export function hasControl(value: string): boolean {
