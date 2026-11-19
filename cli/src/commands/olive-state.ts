@@ -1,19 +1,9 @@
-// homelab olive의 공통부: 숫자, 대상 읽기, 보고 문구, 엔진 한 단계로 돌리기.
+// homelab olive의 공통부: 대상 읽기, 보고 문구, 엔진 한 단계로 돌리기.
 // 읽지 못한 것은 "unread"·null로 남긴다. 0이나 없음으로 바꾸지 않는다. 오류 원문은 출력에 싣지 않는다(kubectl stderr가 섞일 수 있다).
 import type { ReadCtx, RunPod, Step, StopLockState, WriteCtx } from "../core/command";
 import { oliveTargets, type OliveTarget } from "../core/names";
 import type { Result, Status } from "../core/result";
 
-// 설계가 값을 정하지 않은 숫자의 안. 지켜보는 간격 2초는 어댑터(core/olive.ts POLL_MS)의 값이라 여기서 정하지 않는다.
-export type Limits = {
-  // replicas를 지켜보며 다시 내리는 상한. Argo CD의 selfHeal(약 5초)과 작은 차트의 동기화가 몇 번 지나갈 시간이고, 비상 정지가 터미널을 오래 붙들지 않는 길이다.
-  holdZeroSec: number;
-  // replicas 1을 쓴 뒤 준비를 기다리는 시한. 이미지를 새로 받는 첫 기동까지 덮는다(kubectl rollout status 어댑터의 기본값과 같다).
-  startReadySec: number;
-};
-export const LIMITS: Limits = { holdZeroSec: 120, startReadySec: 180 };
-
-export const INTAKE_UNREACHED = "접수: 닿지 못함. 현관의 관리 진입점이 아직 없어 새 입력·게시·승인을 닫지 못했다";
 export const INTAKE_UNKNOWN = "접수: 확인하지 못함. 현관의 관리 진입점이 아직 없다";
 
 type Reader = Pick<ReadCtx, "k8s" | "olive">;
@@ -137,44 +127,10 @@ export const replicasWords = (views: TargetView[]): string => `replicas: ${views
 // 읽기가 실패한 대상이 있는지. 파드를 가려낼 방법이 없는 대상(blind)은 읽기 실패가 아니다.
 export const readFailed = (views: TargetView[]): boolean => views.some((v) => v.namespace === "unread" || v.deployment.state === "unread" || (v.deployment.state === "present" && v.deployment.replicas === null) || v.lock === "unread" || (v.pods === null && !v.blind));
 
-// 확인하지 못한 것이 하나라도 있는지. 정지·풀기의 판정은 이쪽을 쓴다.
+// 확인하지 못한 것이 하나라도 있는지. stop status·stop verify의 판정은 이쪽을 쓴다.
 export const anyUnread = (views: TargetView[]): boolean => readFailed(views) || views.some((v) => v.blind);
 
 export const unreadWhy = (views: TargetView[]): string => (readFailed(views) ? "읽지 못한 대상이 있다" : "파드를 식별할 수 없는 대상이 있다");
-
-export type LockSpot = { ns: string; lock: TargetView["lock"] };
-
-export const lockSpots = (views: TargetView[]): LockSpot[] => uniqueNamespaces(views).map((v) => ({ ns: v.target.namespace, lock: v.lock }));
-
-// 자물쇠만 다시 읽는다. 없는 네임스페이스의 quota도 NotFound라 absent다.
-export const readLocks = (c: Pick<ReadCtx, "olive">, namespaces: string[]): LockSpot[] =>
-  namespaces.map((ns) => {
-    const r = attempt(() => c.olive.stopLock(ns));
-    return { ns, lock: r.ok ? r.value : "unread" };
-  });
-
-// ready: 다시 읽은 Deployment가 replicas 1, 현재 세대, 준비된 파드 1개 이상이고 rollout이 끝났다.
-// not-ready: replicas 1은 읽었지만 준비를 확인하지 못했다. deleting: 다시 읽은 Deployment에 삭제 표식이 있다.
-// unknown: 다시 읽지 못했거나 replicas가 1이 아니다.
-export type UpState = "ready" | "not-ready" | "deleting" | "unknown";
-// asked는 replicas 1 쓰기를 부른 것이다(응답과 상관없이). 이미 1로 읽은 대상에는 부르지 않는다.
-export type Up = { state: UpState; asked: boolean };
-
-// replicas 1을 쓰고 기다린 뒤 다시 읽어 판정한다.
-// 함정: rollout status는 동기화가 0을 되쓴 뒤에도 완료로 끝난다. 쓰기가 시간 초과로 끝나도 서버에는 반영됐을 수 있어 쓰기 결과로 판정하지 않는다.
-export function bringUp(w: WriteCtx, v: TargetView, readySec: number): Up {
-  const { namespace: ns, deployment: name } = v.target;
-  const asked = !(v.deployment.state === "present" && v.deployment.replicas === 1);
-  if (asked) attempt(() => w.olive.setReplicas(ns, name, 1));
-  const rolled = attempt(() => w.k8s.rolloutStatus(ns, name, readySec));
-  const seen = attempt(() => w.k8s.get("deployment", ns, name));
-  if (!seen.ok || seen.value?.spec?.replicas !== 1) return { state: "unknown", asked };
-  const { metadata, status } = seen.value;
-  if (metadata?.deletionTimestamp !== undefined && metadata?.deletionTimestamp !== null) return { state: "deleting", asked };
-  const current = typeof metadata?.generation === "number" && typeof status?.observedGeneration === "number" && status.observedGeneration >= metadata.generation;
-  const ready = typeof status?.readyReplicas === "number" && status.readyReplicas >= 1;
-  return { state: rolled.ok && rolled.value && current && ready ? "ready" : "not-ready", asked };
-}
 
 export type Outcome = {
   status: Status;
@@ -206,7 +162,7 @@ export async function runAction(ctx: ReadCtx, a: Action): Promise<Result> {
     target: a.target,
     async read(c) {
       if (done) return { state: "same", action: "none", detail: done.label };
-      // 비상 정지는 읽기 실패로 시작을 막지 않는다. 실제 읽기는 apply 안에서 대상마다 한다.
+      // apply는 읽기 실패로 시작을 막지 않는다. 실제 읽기는 apply 안에서 대상마다 한다.
       if (c.mode === "apply") return { state: "differs", action: "update", detail: "실행" };
       planned = a.plan(c);
       return a.apply ? { state: "differs", action: "update", detail: planned.label } : { state: "same", action: "none", detail: planned.label };
