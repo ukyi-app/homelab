@@ -38,7 +38,9 @@ export function checkOliveAlerts(oliveText: string, rawTargets: unknown, others:
     for (const w of want) if (!got.has(w)) bad(`${what}에 ${w}가 빠졌다(${OLIVE_TARGETS_FILE})`);
     for (const g of got) if (!want.has(g)) bad(`${what}의 ${g}가 ${OLIVE_TARGETS_FILE}의 대상이 아니다`);
   };
-  const rules = ((parseAll(oliveText)[0] as RuleFile).groups ?? []).flatMap((g) => g.rules ?? []);
+  // vmalert는 한 파일의 YAML 문서를 모두 평가한다. 첫 문서만 보면 둘째 문서의 그룹을 놓친다.
+  const groupsOf = (text: string) => (parseAll(text) as RuleFile[]).flatMap((d) => d.groups ?? []);
+  const rules = groupsOf(oliveText).flatMap((g) => g.rules ?? []);
   const expr = (name: string) => {
     const r = rules.find((x) => x.alert === name);
     if (!r) bad(`경보 ${name}가 없다`);
@@ -46,7 +48,7 @@ export function checkOliveAlerts(oliveText: string, rawTargets: unknown, others:
   };
   for (const r of rules) if (r.alert && r.labels?.olive_self !== "true") bad(`${r.alert}에 olive_self: "true" 라벨이 없다. 봇 receiver로 샌다`);
   for (const o of others) {
-    for (const g of (parseAll(o.text)[0] as RuleFile).groups ?? []) {
+    for (const g of groupsOf(o.text)) {
       // vmalert는 그룹 공통 라벨을 규칙마다 합친다. 그룹에 달아도 그 경보들이 봇 receiver를 건너뛴다.
       if (g.labels?.olive_self !== undefined) out.push({ rule: "olive-alert-targets", where: o.file, message: `규칙 그룹 ${g.name}의 공통 olive_self 라벨은 쓸 수 없다. ${OLIVE_RULE_FILE}의 경보만 단다` });
       for (const r of g.rules ?? []) if (r.labels?.olive_self !== undefined) out.push({ rule: "olive-alert-targets", where: o.file, message: `${r.alert}의 olive_self 라벨은 ${OLIVE_RULE_FILE}의 경보만 단다` });
