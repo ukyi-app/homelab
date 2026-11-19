@@ -23,8 +23,9 @@ export type TargetView = {
   namespace: "present" | "absent" | "unread";
   deployment: DeploymentView;
   lock: StopLockState | "unread";
-  // null은 읽지 못한 것이다.
+  // null은 파드 수를 모르는 것이다. blind면 읽기가 실패한 것이 아니라 이 대상의 파드를 가려낼 방법이 없는 것이다.
   pods: RunPod[] | null;
+  blind: boolean;
 };
 
 export const stopTargets = (): OliveTarget[] => oliveTargets().filter((t) => t.stop);
@@ -55,37 +56,48 @@ function readDeployment(c: Reader, t: OliveTarget): DeploymentView {
   return { state: "present", replicas: typeof n === "number" ? n : null, selector: selectorOf(r.value) };
 }
 
-// Deployment가 없어도 차트 라벨이 붙은 파드가 남았을 수 있어 그 라벨로 한 번 본다.
-function readPods(c: Reader, t: OliveTarget, d: DeploymentView): RunPod[] | null {
-  if (d.state === "unread" || (d.state === "present" && d.selector === null)) return null;
+// 대상 라벨은 올리브 차트의 파드 템플릿에만 있다(platform/olive/templates/_helpers.tpl의 olive.labels).
+const CHART_LABELED = "platform/olive";
+
+function readPods(c: Reader, t: OliveTarget, d: DeploymentView): { pods: RunPod[] | null; blind: boolean } {
+  if (d.state === "unread" || (d.state === "present" && d.selector === null)) return { pods: null, blind: false };
+  // 함정: 다른 곳이 선언한 대상(작성 작업자는 app=worker-task)에 대상 라벨로 물으면 빈 목록이 와서 남은 파드가 없는 것처럼 보인다.
+  if (d.state === "absent" && t.declaredBy !== CHART_LABELED) return { pods: null, blind: true };
   const selector = d.state === "present" ? (d.selector as string) : `homelab.ukyi.app/olive-target=${t.id}`;
   const r = attempt(() => c.olive.runPods(t.namespace, selector));
   // 끝난 파드(Succeeded·Failed)는 프로세스가 없고 Deployment가 지우기 전까지 목록에 남는다.
-  return r.ok ? r.value.filter((p) => p.phase !== "Succeeded" && p.phase !== "Failed") : null;
+  // 강제 삭제 표식이 있으면 남긴다. kubelet의 확인 없이 지워지는 파드라 phase가 종료의 증거가 아니다.
+  return { pods: r.ok ? r.value.filter((p) => p.forceDeleting || (p.phase !== "Succeeded" && p.phase !== "Failed")) : null, blind: false };
 }
 
 export function readTarget(c: Reader, t: OliveTarget): TargetView {
   const ns = attempt(() => c.k8s.get("namespace", null, t.namespace));
-  if (ns.ok && ns.value === null) return { target: t, namespace: "absent", deployment: { state: "absent" }, lock: "absent", pods: [] };
+  if (ns.ok && ns.value === null) return { target: t, namespace: "absent", deployment: { state: "absent" }, lock: "absent", pods: [], blind: false };
   const deployment = readDeployment(c, t);
   const lock = attempt(() => c.olive.stopLock(t.namespace));
-  return { target: t, namespace: ns.ok ? "present" : "unread", deployment, lock: lock.ok ? lock.value : "unread", pods: readPods(c, t, deployment) };
+  return { target: t, namespace: ns.ok ? "present" : "unread", deployment, lock: lock.ok ? lock.value : "unread", ...readPods(c, t, deployment) };
 }
 
 export const readAll = (c: Reader, targets: OliveTarget[]): TargetView[] => targets.map((t) => readTarget(c, t));
 
-export type PodCount = { live: number; deleting: number; forced: number; unread: number };
+// read는 파드 목록을 얻은 대상 수, unread는 읽기가 실패한 대상 수, blind는 파드를 가려낼 방법이 없는 대상 수다.
+export type PodCount = { live: number; deleting: number; forced: number; read: number; unread: number; blind: number };
 export function countPods(views: TargetView[]): PodCount {
   const all = views.flatMap((v) => v.pods ?? []);
   const forced = all.filter((p) => p.forceDeleting).length;
   const deleting = all.filter((p) => p.deletionTimestamp !== null && !p.forceDeleting).length;
-  return { live: all.length, deleting, forced, unread: views.filter((v) => v.pods === null).length };
+  const blind = views.filter((v) => v.blind).length;
+  return { live: all.length, deleting, forced, read: views.filter((v) => v.pods !== null).length, unread: views.filter((v) => v.pods === null).length - blind, blind };
 }
 
 export function podWords(n: PodCount): string {
+  const unknown = [...(n.unread > 0 ? [`읽지 못한 대상 ${n.unread}곳`] : []), ...(n.blind > 0 ? [`파드를 식별할 수 없는 대상 ${n.blind}곳`] : [])].join(", ");
+  if (unknown && n.read === 0) return `실행 파드 개수 미상(${unknown})`;
   const base = `실행 파드 ${n.live}개(삭제 중 ${n.deleting}개, 강제 삭제 중 ${n.forced}개)`;
-  return n.unread > 0 ? `${base}, 읽지 못한 대상 ${n.unread}곳` : base;
+  return unknown ? `읽은 대상 ${n.read}곳의 ${base}, ${unknown}` : base;
 }
+
+export const forcedUids = (views: TargetView[]): string[] => views.flatMap((v) => (v.pods ?? []).filter((p) => p.forceDeleting).map((p) => p.uid));
 
 const LOCK_WORD: Record<TargetView["lock"], string> = { absent: "없음", same: "걸림", different: "다른 모양", deleting: "지우는 중", unread: "읽지 못함" };
 
@@ -110,14 +122,36 @@ export function lockSummary(views: TargetView[]): { held: number; present: numbe
   return { held, present: spaces.length, words: `자물쇠 ${held}/${spaces.length}곳 걸림${absent > 0 ? `(없는 네임스페이스 ${absent}곳)` : ""}` };
 }
 
-export function replicasWords(views: TargetView[]): string {
-  const present = views.filter((v) => v.deployment.state === "present");
-  const total = present.reduce((sum, v) => sum + (v.deployment.state === "present" ? (v.deployment.replicas ?? 0) : 0), 0);
-  const unread = views.filter((v) => v.deployment.state === "unread" || (v.deployment.state === "present" && v.deployment.replicas === null)).length;
-  return `replicas: Deployment ${present.length}개의 합 ${total}${unread > 0 ? `, 읽지 못한 대상 ${unread}곳` : ""}`;
+function replicasValue(d: DeploymentView): string {
+  if (d.state === "absent") return "없음";
+  return d.state === "unread" || d.replicas === null ? "미상" : String(d.replicas);
 }
 
-export const anyUnread = (views: TargetView[]): boolean => views.some((v) => v.namespace === "unread" || v.deployment.state === "unread" || (v.deployment.state === "present" && v.deployment.replicas === null) || v.lock === "unread" || v.pods === null);
+export const replicasWords = (views: TargetView[]): string => `replicas: ${views.map((v) => `${v.target.id} ${replicasValue(v.deployment)}`).join(", ")}`;
+
+// 읽기가 실패한 대상이 있는지. 파드를 가려낼 방법이 없는 대상(blind)은 읽기 실패가 아니다.
+export const readFailed = (views: TargetView[]): boolean => views.some((v) => v.namespace === "unread" || v.deployment.state === "unread" || (v.deployment.state === "present" && v.deployment.replicas === null) || v.lock === "unread" || (v.pods === null && !v.blind));
+
+// 확인하지 못한 것이 하나라도 있는지. 정지·풀기의 판정은 이쪽을 쓴다.
+export const anyUnread = (views: TargetView[]): boolean => readFailed(views) || views.some((v) => v.blind);
+
+export const unreadWhy = (views: TargetView[]): string => (readFailed(views) ? "읽지 못한 대상이 있다" : "파드를 식별할 수 없는 대상이 있다");
+
+export type UpState = "ready" | "not-ready" | "unknown";
+
+// replicas 1을 쓰고 기다린 뒤 다시 읽어 판정한다.
+// 함정: rollout status는 동기화가 0을 되쓴 뒤에도 완료로 끝난다. 쓰기가 시간 초과로 끝나도 서버에는 반영됐을 수 있어 쓰기 결과로 판정하지 않는다.
+export function bringUp(w: WriteCtx, v: TargetView, readySec: number): UpState {
+  const { namespace: ns, deployment: name } = v.target;
+  if (!(v.deployment.state === "present" && v.deployment.replicas === 1)) attempt(() => w.olive.setReplicas(ns, name, 1));
+  const rolled = attempt(() => w.k8s.rolloutStatus(ns, name, readySec));
+  const seen = attempt(() => w.k8s.get("deployment", ns, name));
+  if (!seen.ok || seen.value?.spec?.replicas !== 1) return "unknown";
+  const { metadata, status } = seen.value;
+  const current = typeof metadata?.generation === "number" && typeof status?.observedGeneration === "number" && status.observedGeneration >= metadata.generation;
+  const ready = typeof status?.readyReplicas === "number" && status.readyReplicas >= 1;
+  return rolled.ok && rolled.value && current && ready ? "ready" : "not-ready";
+}
 
 export type Outcome = {
   status: Status;

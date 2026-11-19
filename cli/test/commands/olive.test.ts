@@ -34,13 +34,28 @@ const lockDoc = (ns: string, o: { deleting?: boolean } = {}) =>
     metadata: { name: "olive-stop", namespace: ns, uid: "0f0e0d0c-0b0a-4908-8706-050403020100", resourceVersion: "10", labels: { "homelab.ukyi.app/olive-stop": "lock" }, ...(o.deleting ? { deletionTimestamp: "2026-11-19T01:00:00Z" } : {}) },
     spec: { hard: { pods: "0" } },
   });
+// 작성 작업자는 올리브 차트가 아니라 platform/sandbox가 선언해 파드 라벨이 다르다.
+const podLabels = (t: (typeof TARGETS)[number]): Record<string, string> => (t.id === "writer" ? { app: "worker-task" } : { "app.kubernetes.io/name": "olive", "app.kubernetes.io/component": t.id });
+const deploymentSelector = (t: (typeof TARGETS)[number]) => Object.entries(podLabels(t)).map(([k, v]) => `${k}=${v}`).sort().join(",");
+const OLIVE_CHART_TARGETS = new Set(["supervisor", "diagnosis", "reader"]);
+const ADMIN_SELECTOR = "app.kubernetes.io/name=olive,app.kubernetes.io/component=supervisor,homelab.ukyi.app/olive-target=supervisor";
 const depDoc = (t: (typeof TARGETS)[number], replicas: number) =>
   json({
     apiVersion: "apps/v1",
     kind: "Deployment",
     metadata: { name: t.dep, namespace: t.ns, uid: DEPLOY_UID },
-    spec: { replicas, selector: { matchLabels: { "app.kubernetes.io/name": "olive", "app.kubernetes.io/component": t.id } } },
+    spec: { replicas, selector: { matchLabels: podLabels(t) } },
   });
+// replicas 1을 쓴 뒤의 모습. ready가 0이면 아직 준비되지 않았다.
+const upDoc = (t: (typeof TARGETS)[number], ready = 1) =>
+  json({
+    apiVersion: "apps/v1",
+    kind: "Deployment",
+    metadata: { name: t.dep, namespace: t.ns, uid: DEPLOY_UID, generation: 2 },
+    spec: { replicas: 1, selector: { matchLabels: podLabels(t) } },
+    status: { observedGeneration: 2, readyReplicas: ready },
+  });
+const syncingApp = (app: string) => json({ kind: "Application", metadata: { name: app, namespace: "argocd" }, operation: { sync: {} }, status: {} });
 type PodOpts = { uid?: string; deleting?: boolean; forced?: boolean; phase?: string; owned?: boolean };
 const podDoc = (ns: string, o: PodOpts = {}) => ({
   apiVersion: "v1",
@@ -78,7 +93,12 @@ function world(o: World = {}): Rule[] {
     rules.push(kubectlRule(["get", "namespaces", t.ns, "-o", "json"], o.noNs?.includes(t.ns) ? notFound : json({ kind: "Namespace", metadata: { name: t.ns } })));
     rules.push(kubectlRule(["-n", t.ns, "get", "deployments.apps", t.dep, "-o", "json"], o.noDep?.includes(t.id) ? notFound : (o.replicas?.[t.id] ?? [depDoc(t, 1), depDoc(t, 0)])));
     rules.push(kubectlRule(["-n", t.ns, "get", "resourcequotas", "olive-stop", "-o", "json"], o.locks?.[t.ns] ?? notFound));
-    rules.push(kubectlRule(["-n", t.ns, "get", "pods", "-l", /.+/, "-o", "json"], o.pods?.[t.ns] ?? podList()));
+    // 실제 API처럼 셀렉터에 맞는 파드만 돌려준다. 틀린 셀렉터는 빈 목록을 받아 남은 파드를 놓친다.
+    const pods = o.pods?.[t.ns] ?? podList();
+    rules.push(kubectlRule(["-n", t.ns, "get", "pods", "-l", deploymentSelector(t), "-o", "json"], pods));
+    if (OLIVE_CHART_TARGETS.has(t.id)) rules.push(kubectlRule(["-n", t.ns, "get", "pods", "-l", `homelab.ukyi.app/olive-target=${t.id}`, "-o", "json"], pods));
+    if (t.id === "supervisor") rules.push(kubectlRule(["-n", t.ns, "get", "pods", "-l", ADMIN_SELECTOR, "-o", "json"], pods));
+    rules.push(kubectlRule(["-n", t.ns, "get", "pods", "-l", /.+/, "-o", "json"], podList()));
     rules.push(kubectlRule(["-n", t.ns, "create", "-f", "-"], o.create?.[t.ns] ?? {}));
     rules.push(kubectlRule(["-n", t.ns, "scale", "deployments.apps", t.dep, /--replicas=[01]/], o.scale?.[t.id] ?? {}));
     rules.push(kubectlRule(["delete", "--raw", `/api/v1/namespaces/${t.ns}/resourcequotas/olive-stop`, "-f", "-"], o.clear?.[t.ns] ?? {}));
@@ -143,7 +163,7 @@ describe("plan", () => {
 
 describe("start", () => {
   test("start: 대상 파일에서 켤 수 없음인 sandbox/worker-task에는 replicas를 쓰지 않는다", async () => {
-    const r = await runCli(["olive", "start", "--apply", "--json"], world({ replicas: zeroed() }));
+    const r = await runCli(["olive", "start", "--apply", "--json"], world({ replicas: { ...zeroed(), supervisor: [depDoc(TARGETS[0], 0), upDoc(TARGETS[0])] } }));
     expect(r.code).toBe(0);
     expect(r.calls.filter((c) => c.argv.includes("worker-task") && !c.argv.includes("get")).map(line)).toEqual([]);
     expect(writesOf(r)).toEqual([scaleOf(TARGETS[0], 1)]);
@@ -164,7 +184,7 @@ describe("start", () => {
   });
 
   test("replicas를 썼지만 준비되지 않으면 3이고 켜졌다고 하지 않는다", async () => {
-    const r = await runCli(["olive", "start", "--apply", "--json"], world({ replicas: zeroed(), rollout: { code: 1, stderr: "timed out\n" } }));
+    const r = await runCli(["olive", "start", "--apply", "--json"], world({ replicas: { ...zeroed(), supervisor: [depDoc(TARGETS[0], 0), upDoc(TARGETS[0], 0)] }, rollout: { code: 1, stderr: "timed out\n" } }));
     expect(r.code).toBe(3);
     expect(r.json.body).not.toContain("켜짐");
   });
@@ -173,6 +193,37 @@ describe("start", () => {
     const r = await runCli(["olive", "start", "--apply", "--json"], world({ noDep: ["supervisor"] }));
     expect(r.code).toBe(1);
     expect(r.writes).toEqual([]);
+  });
+
+  describe("start: 다시 읽어 확인한 것만 켜졌다고 말한다", () => {
+    const sup = TARGETS[0];
+    const after = (...docs: Resp[]) => ({ ...zeroed(), supervisor: [depDoc(sup, 0), ...docs] });
+
+    test("rollout이 끝나도 다시 읽은 replicas가 0이면 켜졌다고 하지 않는다", async () => {
+      const r = await runCli(["olive", "start", "--apply", "--json"], world({ replicas: after(depDoc(sup, 0)) }));
+      expect(r.code).toBe(1);
+      expect(r.json.body).not.toContain("켜짐");
+      expect(r.json.error.message).toContain("켜기 미상");
+    });
+
+    test("replicas 1이어도 준비된 파드가 없으면 3이다", async () => {
+      const r = await runCli(["olive", "start", "--apply", "--json"], world({ replicas: after(upDoc(sup, 0)) }));
+      expect(r.code).toBe(3);
+      expect(r.json.body).not.toContain("켜짐");
+    });
+
+    test("쓰기 응답이 시간 초과면 쓰지 못했다고 단정하지 않고 미상으로 낸다", async () => {
+      const r = await runCli(["olive", "start", "--apply", "--json"], world({ replicas: after(depDoc(sup, 0)), scale: { supervisor: { sleepMs: 3_500 } } }));
+      expect(r.code).toBe(1);
+      expect(r.json.error.message).toContain("미상");
+      expect(r.json.error.message).not.toContain("쓰지 못했다");
+    }, 30_000);
+
+    test("쓰기 응답이 시간 초과여도 다시 읽어 1과 준비를 확인하면 켜짐이다", async () => {
+      const r = await runCli(["olive", "start", "--apply", "--json"], world({ replicas: after(upDoc(sup)), scale: { supervisor: { sleepMs: 3_500 } } }));
+      expect(r.code).toBe(0);
+      expect(r.json.body).toContain("켜짐: supervisor");
+    }, 30_000);
   });
 });
 
@@ -188,13 +239,13 @@ describe("stop on", () => {
   }, 30_000);
 
   test("없는 네임스페이스·Deployment는 없음으로 넘어가고 쓰지 않는다", async () => {
-    const r = await runCli(["olive", "stop", "on", "--apply", "--verbose", "--json"], world({ locks: freshLocks(), noNs: ["olive-session"], noDep: ["writer"] }));
+    const r = await runCli(["olive", "stop", "on", "--apply", "--verbose", "--json"], world({ locks: freshLocks(), noNs: ["olive-session"], noDep: ["reader"] }));
     expect(r.code).toBe(0);
     const writes = writesOf(r);
     expect(writes).not.toContain(createOf("olive-session"));
     expect(writes).not.toContain(scaleOf(TARGETS[3], 0));
-    expect(writes).not.toContain(scaleOf(TARGETS[4], 0));
-    expect(writes).toContain(createOf("sandbox"));
+    expect(writes).not.toContain(scaleOf(TARGETS[2], 0));
+    expect(writes).toContain(createOf("olive-reader"));
     expect(r.json.body).toContain("없는 네임스페이스 1곳");
     expect(r.json.body).toContain("Deployment 없음");
   }, 30_000);
@@ -273,12 +324,120 @@ describe("stop on", () => {
     const ok = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks: freshLocks() }));
     const bad = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks: { ...freshLocks(), sandbox: [notFound] }, create: { sandbox: denied } }));
     const plan = await runCli(["olive", "stop", "on", "--json"], world());
-    for (const r of [ok, bad, plan]) expect(r.json.body).toContain("접수: 닿지 못함");
-    for (const r of [ok, bad]) {
+    for (const r of [ok, bad, plan]) {
+      expect(r.json.body).toContain("접수: 닿지 못함");
       expect(r.json.body.split("\n")[0]).toContain("접수 닿지 못함");
-      expect(r.json.body).toContain("권한 폐기·실행 종료 지시: 하지 못함");
     }
+    for (const r of [ok, bad]) expect(r.json.body).toContain("권한 폐기·실행 종료 지시: 하지 못함");
   }, 60_000);
+
+  describe("stop on: 끝 상태는 마지막에 읽은 증거로만 정한다", () => {
+    const notClaimed = (body: string) => {
+      expect(body).not.toContain("정지 완료");
+      expect(body).not.toContain("정지됨(노드 미확인)");
+    };
+
+    test("마지막 자물쇠 조회가 실패하면 차단 미확정이고 1이다", async () => {
+      const locks = { ...freshLocks(), "olive-reader": [notFound, notFound, lockDoc("olive-reader"), denied] };
+      const r = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks }));
+      expect(r.code).toBe(1);
+      expect(r.json.error.message).toContain("차단 미확정");
+      expect(r.json.body).toContain("olive-reader(자물쇠를 읽지 못했다)");
+      expect(r.json.body.split("\n")[0]).toContain("자물쇠 4/5곳");
+      notClaimed(r.json.body);
+    }, 30_000);
+
+    test("쓰기는 됐지만 마지막 읽기에서 사라진 자물쇠는 걸린 수에 넣지 않는다", async () => {
+      const locks = { ...freshLocks(), sandbox: [notFound, notFound, lockDoc("sandbox"), notFound] };
+      const r = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks }));
+      expect(r.code).toBe(1);
+      expect(r.json.error.message).toContain("차단 미완");
+      expect(r.json.body.split("\n")[0]).toContain("자물쇠 4/5곳");
+      expect(r.json.body).toContain("sandbox(다시 읽으니 걸려 있지 않다)");
+    }, 30_000);
+
+    test("다섯 네임스페이스가 전부 없으면 정지됨이 아니고 stop verify와 같은 말로 1이다", async () => {
+      const on = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ noNs: NAMESPACES }));
+      const verify = await runCli(["olive", "stop", "verify", "--json"], world({ noNs: NAMESPACES }));
+      expect(on.code).toBe(1);
+      expect(verify.code).toBe(1);
+      for (const r of [on, verify]) expect(r.json.error.message).toContain("확인할 네임스페이스가 하나도 없다");
+      expect(on.writes).toEqual([]);
+      notClaimed(on.json.body);
+    }, 30_000);
+
+    test("지켜본 뒤 마지막 읽기의 replicas가 1이면 3이고 그 대상을 적는다", async () => {
+      const replicas = { supervisor: [depDoc(TARGETS[0], 1), depDoc(TARGETS[0], 0), depDoc(TARGETS[0], 1)] };
+      const r = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks: freshLocks(), replicas }));
+      expect(r.code).toBe(3);
+      expect(r.json.body).toContain("차단됨, replicas 미확정");
+      expect(r.json.body).toContain("supervisor(replicas 1)");
+      expect(r.json.next).toContain("stop on --apply");
+      notClaimed(r.json.body);
+    }, 30_000);
+
+    test("마지막 읽기의 replicas를 읽지 못하면 0으로 세지 않고 3이다", async () => {
+      const replicas = { reader: [depDoc(TARGETS[2], 1), depDoc(TARGETS[2], 0), denied] };
+      const r = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks: freshLocks(), replicas }));
+      expect(r.code).toBe(3);
+      expect(r.json.body).toContain("reader(읽지 못함)");
+      notClaimed(r.json.body);
+    }, 30_000);
+
+    test("replicas 미확정이면 다음 행동은 stop on 재실행이고 미확정 대상과 Application을 적는다", async () => {
+      const replicas = { diagnosis: [depDoc(TARGETS[1], 1)] };
+      const d = await direct("apply", ["stop", "on", "--apply"], world({ locks: freshLocks(), replicas, app: syncingApp }), { limits: SHORT });
+      expect(d.code).toBe(3);
+      expect(d.body).toContain("diagnosis(replicas 1)");
+      // 상한이 회차 중간에 오면 같은 Application이 읽지 못함으로 남는다. 어느 쪽이든 이름은 보여야 한다.
+      expect(d.body).toMatch(/(동기화 중|읽지 못한 Application) olive/);
+      expect(d.r.next).toContain("stop on --apply");
+      expect(d.r.next).not.toContain("stop verify");
+    }, 30_000);
+
+    test("작성 대상의 Deployment 없이 남은 작업 파드가 있으면 파드 수를 미상으로 두고 3이다", async () => {
+      const pods = { sandbox: [podList(podDoc("sandbox"))] };
+      const r = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks: freshLocks(), noDep: ["writer"], pods }));
+      expect(r.code).toBe(3);
+      expect(r.json.body).toContain("차단됨, 소멸 확인 전");
+      expect(r.json.body).toContain("식별할 수 없는 대상 1곳");
+      notClaimed(r.json.body);
+    }, 30_000);
+
+    test("작성 대상의 Deployment가 있으면 그 셀렉터로 남은 파드를 찾는다", async () => {
+      const pods = { sandbox: [podList(podDoc("sandbox"))] };
+      const r = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks: freshLocks(), pods }));
+      expect(r.code).toBe(3);
+      expect(r.json.body).toContain("실행 파드 1개");
+      expect(r.calls.some((c) => c.argv.includes("app=worker-task"))).toBe(true);
+    }, 30_000);
+
+    test("두 관측 사이에 사라진 강제 삭제 파드는 정지됨을 막고 노드 확인을 안내한다", async () => {
+      const pods = { "olive-control": [podList(podDoc("olive-control", { forced: true })), podList()] };
+      const r = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks: freshLocks(), pods }));
+      expect(r.code).toBe(1);
+      expect(r.json.error.message).toContain("강제 삭제");
+      expect(r.json.next).toContain("노드");
+      expect(r.json.next).toContain(`--uids ${UID_A}`);
+      expect(r.json.next).not.toContain("잠시 뒤");
+      notClaimed(r.json.body);
+    }, 30_000);
+
+    test("끝난 파드라도 강제 삭제 표식을 먼저 본다", async () => {
+      const pods = { "olive-control": [podList(podDoc("olive-control", { forced: true, phase: "Succeeded" })), podList()] };
+      const r = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks: freshLocks(), pods }));
+      expect(r.code).toBe(1);
+      expect(r.json.error.message).toContain("강제 삭제");
+      notClaimed(r.json.body);
+    }, 30_000);
+
+    test("내리기 전에 일부 파드를 읽지 못하면 UID 목록이 완전하지 않다고 그 줄에 적는다", async () => {
+      const pods = { "olive-control": [podList(podDoc("olive-control")), podList()], "olive-reader": [denied, podList()] };
+      const r = await runCli(["olive", "stop", "on", "--apply", "--json"], world({ locks: freshLocks(), pods }));
+      expect(r.json.next).toContain(`--uids ${UID_A}`);
+      expect(r.json.next).toContain("완전하지 않다");
+    }, 30_000);
+  });
 
   test("파드를 지우거나 강제 삭제하는 호출이 없고 가짜 시크릿이 출력에 없다", async () => {
     const pods = { "olive-control": [podList(podDoc("olive-control")), podList()] };
@@ -317,10 +476,11 @@ describe("stop verify", () => {
     });
 
     for (const state of ["absent", "empty"] as const) {
-      test(`${state}: 정지 완료(노드 확인)`, async () => {
+      test(`${state}: 지정한 UID의 cgroup까지만 말한다`, async () => {
         const d = await direct("plan", ["stop", "verify", "--uids", `${UID_A},${UID_B}`], held(), { node: nodeWith(state) });
         expect(d.code).toBe(0);
-        expect(d.body).toContain("정지 완료(노드 확인)");
+        expect(d.body).toContain("지정한 UID 2개의 cgroup이 비었거나 사라졌다");
+        expect(d.body).not.toContain("정지 완료");
       });
     }
 
@@ -351,6 +511,19 @@ describe("stop verify", () => {
       expect(d.code).toBe(0);
       expect(d.body).toContain("정지됨(노드 미확인)");
     });
+  });
+
+  test("일부 UID만 넘겨도 지정한 UID의 관측까지만 말하고 정지 완료(노드 확인)를 내지 않는다", async () => {
+    const d = await direct("plan", ["stop", "verify", "--uids", UID_A], held(), { node: nodeWith("absent") });
+    expect(d.body).not.toContain("정지 완료");
+    expect(d.code).toBe(0);
+    expect(d.body).toContain("지정한 UID 1개");
+    expect(d.body).toContain("지정하지 않은 파드는 확인하지 않았다");
+  });
+
+  test("기본 단계는 소멸 확인이고 replicas 유지는 보지 않는다고 말한다", async () => {
+    const d = await direct("plan", ["stop", "verify"], held(), { node: nodeWith("empty") });
+    expect(d.body).toContain("replicas가 0으로 유지되는지는 보지 않는다");
   });
 
   test("기본 단계: 자물쇠가 빠졌거나 강제 삭제 중이면 1, 파드가 남았으면 3, 읽지 못하면 1이다", async () => {
@@ -384,6 +557,60 @@ describe("stop off", () => {
     }
   });
 
+  test("작성 대상의 Deployment 없이 남은 작업 파드가 있으면 자물쇠를 지우지 않는다", async () => {
+    const pods = { sandbox: [podList(podDoc("sandbox"))] };
+    const r = await runCli(["olive", "stop", "off", "--apply", "--json"], world({ locks: heldLocks(), replicas: zeroed(), noDep: ["writer"], pods }));
+    expect(r.code).toBe(1);
+    expect(r.writes).toEqual([]);
+    expect(r.json.error.message).toContain("식별할 수 없는");
+  });
+
+  test("자물쇠 아래의 켤 수 없는 대상이 replicas 1이면 자물쇠를 하나도 지우지 않고 stop on으로 안내한다", async () => {
+    const replicas = { ...zeroed(), reader: [depDoc(TARGETS[2], 1)] };
+    for (const flags of [[], ["--apply"]]) {
+      const r = await runCli(["olive", "stop", "off", ...flags, "--json"], world({ locks: heldLocks(), replicas }));
+      expect([flags, r.code]).toEqual([flags, 1]);
+      expect(r.writes).toEqual([]);
+      expect(r.json.error.message).toContain("켤 수 없는 대상");
+      expect(r.json.next).toContain("stop on --apply");
+    }
+  });
+
+  test("켤 수 없는 대상의 replicas를 읽지 못하면 자물쇠를 지우지 않는다", async () => {
+    const r = await runCli(["olive", "stop", "off", "--apply", "--json"], world({ locks: heldLocks(), replicas: { ...zeroed(), reader: [denied] } }));
+    expect(r.code).toBe(1);
+    expect(r.writes).toEqual([]);
+    expect(r.json.next).toContain("stop on --apply");
+  });
+
+  test("Argo CD 동기화가 진행 중이면 자물쇠를 지우지 않는다", async () => {
+    for (const flags of [[], ["--apply"]]) {
+      const r = await runCli(["olive", "stop", "off", ...flags, "--json"], world({ locks: heldLocks(), replicas: zeroed(), app: syncingApp }));
+      expect([flags, r.code]).toEqual([flags, 1]);
+      expect(r.writes).toEqual([]);
+      expect(r.json.error.message).toContain("동기화");
+      expect(r.json.next).toContain("stop on --apply");
+    }
+  });
+
+  test("Application을 읽지 못하면 동기화가 없다고 보지 않고 자물쇠를 지우지 않는다", async () => {
+    const r = await runCli(["olive", "stop", "off", "--apply", "--json"], world({ locks: heldLocks(), replicas: zeroed(), app: () => denied }));
+    expect(r.code).toBe(1);
+    expect(r.writes).toEqual([]);
+    expect(r.json.error.message).toContain("동기화");
+  });
+
+  test("되돌리기에서 replicas 0 요청만 접수되고 파드가 남아도 되돌렸다고 단정하지 않는다", async () => {
+    const locks = Object.fromEntries(NAMESPACES.map((ns) => [ns, [lockDoc(ns), lockDoc(ns), notFound, notFound, lockDoc(ns)]]));
+    const pods = { "olive-control": [podList(), podList(podDoc("olive-control", { deleting: true }))] };
+    const r = await runCli(["olive", "stop", "off", "--apply", "--json"], world({ locks, replicas: zeroed(), pods, rollout: { code: 1, stderr: "timed out\n" } }));
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).not.toContain("되돌렸다");
+    expect(r.json.error.message).toContain("파드 소멸은 확인하지 않았다");
+    expect(r.json.body).toContain("supervisor에 replicas 0을 요청했다");
+    expect(r.json.next).toContain("stop on --apply");
+  }, 30_000);
+
   test("파드를 읽지 못하면 0으로 보지 않고 자물쇠를 지우지 않는다", async () => {
     const r = await runCli(["olive", "stop", "off", "--apply", "--json"], world({ locks: heldLocks(), replicas: zeroed(), pods: { sandbox: [denied] } }));
     expect(r.code).toBe(1);
@@ -391,7 +618,7 @@ describe("stop off", () => {
   });
 
   test("stop off: 현관이 없어 끝나지 않은 것을 성공으로 내지 않는다", async () => {
-    const r = await runCli(["olive", "stop", "off", "--apply", "--json"], world({ locks: clearingLocks(), replicas: zeroed() }));
+    const r = await runCli(["olive", "stop", "off", "--apply", "--json"], world({ locks: clearingLocks(), replicas: { ...zeroed(), supervisor: [depDoc(TARGETS[0], 0), upDoc(TARGETS[0])] } }));
     expect(r.code).toBe(3);
     expect(r.json.status).toBe("waiting");
     const writes = writesOf(r);
@@ -422,7 +649,8 @@ describe("stop off", () => {
     expect(writes).toContain(createOf("olive-diagnosis"));
     expect(writes).not.toContain(clearOf("olive-session"));
     expect(writes.filter((w) => w.includes(" scale "))).toEqual([]);
-    expect(r.json.error.message).toContain("다시 정지 상태로 되돌렸다");
+    expect(r.json.error.message).toContain("자물쇠를 다시 걸었다. 파드 소멸은 확인하지 않았다");
+    expect(r.json.next).toContain("stop on --apply");
   }, 30_000);
 
   test("올린 대상이 준비되지 않으면 자물쇠를 다시 걸고 그 대상을 0으로 내린다", async () => {
@@ -437,7 +665,7 @@ describe("stop off", () => {
     expect(up).toBeGreaterThanOrEqual(0);
     expect(relock).toBeGreaterThan(up);
     expect(down).toBeGreaterThan(relock);
-    expect(r.json.error.message).toContain("다시 정지 상태로 되돌렸다");
+    expect(r.json.error.message).toContain("자물쇠를 다시 걸었다, 올린 대상에 replicas 0을 요청했다. 파드 소멸은 확인하지 않았다");
   }, 30_000);
 
   test("되돌리기가 실패하면 되돌렸다고 하지 않고 못 한 곳을 적는다", async () => {
@@ -500,6 +728,36 @@ describe("status", () => {
     expect(r.code).toBe(0);
     expect(r.json.body).toContain("session olive-session/session: 네임스페이스 없음");
     expect(r.json.body).toContain("writer sandbox/worker-task: Deployment 없음");
+  });
+
+  test("status: 기본 출력에 관측한 replicas를 넣고 없는 대상과 미상을 구별한다", async () => {
+    const seen = await runCli(["olive", "status", "--json"], world({ replicas: { ...zeroed(), supervisor: [depDoc(TARGETS[0], 1)] }, noNs: ["olive-session"], noDep: ["reader"] }));
+    expect(seen.code).toBe(0);
+    expect(seen.json.body).toContain("replicas: supervisor 1, diagnosis 0, reader 없음, session 없음, writer 0");
+    const unread = await runCli(["olive", "status", "--json"], world({ replicas: { ...zeroed(), diagnosis: [denied] } }));
+    expect(unread.code).toBe(1);
+    expect(unread.json.body).toContain("diagnosis 미상");
+  });
+
+  test("status: Deployment가 없어 파드를 식별할 수 없는 대상은 0개로 세지 않고 미상으로 적는다", async () => {
+    const r = await runCli(["olive", "status", "--json"], world({ replicas: zeroed(), noDep: ["writer"] }));
+    expect(r.code).toBe(0);
+    expect(r.json.body).toContain("식별할 수 없는 대상 1곳");
+  });
+
+  test("전부 읽지 못하면 0개로 시작하지 않고 개수 미상이다", async () => {
+    const pods = Object.fromEntries(NAMESPACES.map((ns) => [ns, [denied]]));
+    const r = await runCli(["olive", "status", "--json"], world({ replicas: zeroed(), pods }));
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).toContain("실행 파드 개수 미상");
+    expect(r.json.error.message).not.toContain("실행 파드 0개");
+  });
+
+  test("일부만 읽으면 읽은 수와 미상 수를 가른다", async () => {
+    const r = await runCli(["olive", "status", "--json"], world({ replicas: zeroed(), pods: { sandbox: [denied] } }));
+    expect(r.code).toBe(1);
+    expect(r.json.error.message).toContain("읽은 대상 4곳의 실행 파드 0개");
+    expect(r.json.error.message).toContain("읽지 못한 대상 1곳");
   });
 
   test("읽지 못한 대상은 없음으로 바꾸지 않고 1이다", async () => {

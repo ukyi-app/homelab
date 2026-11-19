@@ -4,7 +4,7 @@
 import { defineCommand, type OliveAdminOutcome, type OliveSupervisorMissing, type OliveSupervisorTarget, type ReadCtx, type WriteCtx } from "../core/command";
 import { oliveTargets } from "../core/names";
 import { UsageError } from "../core/result";
-import { LIMITS, anyUnread, countPods, lockSummary, podWords, readAll, runAction, targetLine, type Action, type Limits, type Outcome, type TargetView } from "./olive-state";
+import { LIMITS, bringUp, countPods, lockSummary, podWords, readAll, readFailed, replicasWords, runAction, targetLine, type Action, type Limits, type Outcome, type TargetView } from "./olive-state";
 import { stopOff, stopOn, stopStatus, stopVerify } from "./olive-stop";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -51,9 +51,9 @@ function reportedSupervisor(w: WriteCtx): Supervisor {
 function statusOutcome(views: TargetView[], sup: Supervisor, verbose: boolean, planned: boolean): Outcome {
   const locks = lockSummary(views);
   const state = locks.held === 0 ? "정지 아님" : locks.held === locks.present ? "정지 중" : "일부만 정지";
-  const lines = [sup.line, ...(verbose ? views.map(targetLine) : [])];
+  const lines = [sup.line, replicasWords(views), ...(verbose ? views.map(targetLine) : [])];
   const summary = `${locks.words}, ${podWords(countPods(views))}`;
-  if (anyUnread(views)) return { status: "failed", label: "읽지 못함", headline: `확인 실패: 읽지 못한 대상이 있다. ${summary}`, lines: [sup.line, ...views.map(targetLine)], next: "kubectl 접속을 확인한 뒤 다시: homelab olive status" };
+  if (readFailed(views)) return { status: "failed", label: "읽지 못함", headline: `확인 실패: 읽지 못한 대상이 있다. ${summary}`, lines: [sup.line, replicasWords(views), ...views.map(targetLine)], next: "kubectl 접속을 확인한 뒤 다시: homelab olive status" };
   if (sup.status === "failed") return { status: "failed", label: "감독 확인 실패", headline: `${state}: ${summary}. ${sup.line}`, lines, next: "homelab olive status --verbose로 대상별 상태를 본다" };
   if (sup.status === "waiting") return { status: "waiting", label: "감독 대기", headline: `${state}: ${summary}. ${sup.line}`, lines, next: "잠시 뒤 다시: homelab olive status --apply" };
   return { status: planned ? "pending" : "done", label: state, headline: `${state}: ${summary}`, lines, ...(planned ? {} : { next: null }) };
@@ -86,22 +86,11 @@ function startApply(w: WriteCtx, limits: Limits, verbose: boolean): Outcome {
   const present = startable.filter((v) => v.deployment.state === "present");
   const lines = [...startable.filter((v) => v.deployment.state !== "present").map((v) => `${v.target.id}: Deployment ${v.deployment.state === "absent" ? "없음" : "읽지 못함"}`), ...(verbose ? views.map(targetLine) : [])];
   if (present.length === 0) return { status: "failed", label: "켤 대상 없음", headline: "켜지 않음: 켤 수 있는 Deployment가 없다", lines, next: "homelab olive status --verbose로 대상을 확인한다" };
-  const failed: string[] = [];
-  const notReady: string[] = [];
-  for (const v of present) {
-    try {
-      if (v.deployment.state === "present" && v.deployment.replicas !== 1) w.olive.setReplicas(v.target.namespace, v.target.deployment, 1);
-    } catch {
-      failed.push(v.target.id);
-      continue;
-    }
-    try {
-      if (!w.k8s.rolloutStatus(v.target.namespace, v.target.deployment, limits.startReadySec)) notReady.push(v.target.id);
-    } catch {
-      notReady.push(v.target.id);
-    }
-  }
-  if (failed.length) return { status: "failed", label: "켜기 실패", headline: `켜기 실패: ${failed.join(", ")}에 replicas 1을 쓰지 못했다`, lines, next: "원인을 고친 뒤 다시: homelab olive start --apply" };
+  const results = present.map((v) => ({ id: v.target.id, up: bringUp(w, v, limits.startReadySec) }));
+  const idsOf = (up: string) => results.filter((r) => r.up === up).map((r) => r.id);
+  const unknown = idsOf("unknown");
+  const notReady = idsOf("not-ready");
+  if (unknown.length) return { status: "failed", label: "켜기 미상", headline: `켜기 미상: ${unknown.join(", ")}의 replicas 1을 다시 읽어 확인하지 못했다`, lines, next: "homelab olive status --verbose로 확인한 뒤 다시: homelab olive start --apply" };
   const unread = startable.filter((v) => v.deployment.state === "unread").map((v) => v.target.id);
   if (unread.length) return { status: "failed", label: "일부 확인 실패", headline: `일부만 켰다: ${unread.join(", ")}의 Deployment를 읽지 못했다`, lines, next: "kubectl 접속을 확인한 뒤 다시: homelab olive start --apply" };
   if (notReady.length) return { status: "waiting", label: "준비 대기", headline: `replicas 1을 썼지만 ${limits.startReadySec}초 안에 준비되지 않았다: ${notReady.join(", ")}`, lines, next: "homelab olive status --verbose로 확인한다" };
@@ -130,7 +119,8 @@ export function makeOlive(limits: Limits = LIMITS) {
     help: {
       about:
         "올리브의 상태를 보고, 켜고, 비상 정지를 걸고 풉니다. 바꾸는 동작은 --apply가 있어야 실행합니다. 감독 상태 줄도 kubectl exec로 읽어 --apply에서만 나옵니다. 종료 코드는 0 완료, 1 실패·차단 미완, 3 대기, 64 사용법입니다.",
-      examples: ["homelab olive status", "homelab olive stop on --apply", "homelab olive stop verify"],
+      examples: ["homelab olive status", "homelab olive stop on", "homelab olive stop verify"],
+      destructive: "stop on을 실행하면 진행 중인 실행과 세션이 끝나고, 끝난 실행은 되살릴 수 없습니다.",
       actions: [
         { name: "status", about: "정지 여부·replicas·자물쇠·실행 파드 보기" },
         { name: "start", about: "켤 수 있는 대상만 켜기(정지 중이면 거절)" },
@@ -148,7 +138,7 @@ export function makeOlive(limits: Limits = LIMITS) {
     flags: [
       { name: "verbose", kind: "bool", help: "대상별 줄까지 보기" },
       { name: "deep", kind: "bool", help: "런타임 대조(stop verify 전용, 아직 없어 실패로 끝남)" },
-      { name: "uids", kind: "value", valueName: "UID,UID", help: "stop on이 알려 준 파드 UID(stop verify 전용)", pattern: UIDS },
+      { name: "uids", kind: "value", valueName: "UID,UID", help: "cgroup을 볼 파드 UID. 지정한 것만 확인(stop verify 전용)", pattern: UIDS },
     ],
     async run(ctx, input) {
       const action = input.args.action as string;
