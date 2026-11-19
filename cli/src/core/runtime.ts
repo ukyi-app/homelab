@@ -16,6 +16,7 @@ import { askHiddenTty, readStdinAll, readApiKeys, readSecretInput, readSetupToke
 import { kubeRead, kubeWrite } from "./kubectl";
 import { nodeRead } from "./node";
 import { oliveRead, oliveWrite } from "./olive";
+import { oliveAdminRead, oliveAdminWrite } from "./olive-admin";
 import { writeStderr } from "./output";
 import { repoRead } from "./pr";
 import type { Mode } from "./result";
@@ -83,6 +84,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       pgRestore: pgRestoreWrite(exec, k8sRead, makePipe({ env: o.env, live: () => live }), (ns, job) => k8sRead.waitCondition("job", ns, { jobPods: job }, "Ready", 60)),
       bot: botWrite(exec, k8sRead, kube.pollMs ?? 2_000),
       olive: { ...oliveRead(readExec), ...oliveWrite(exec, readExec, kube) },
+      oliveAdmin: oliveAdminWrite(exec, readExec, alive),
       node: nodeRead(readExec),
       progress: o.progress,
     };
@@ -108,6 +110,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
     web: webRead(readExec),
     bot: botRead(kubeRead(readExec, kube)),
     olive: oliveRead(readExec),
+    oliveAdmin: oliveAdminRead(readExec),
     node: nodeRead(readExec),
     tools: toolsRead(readExec, o.env),
     progress: o.progress,

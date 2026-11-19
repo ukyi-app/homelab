@@ -1,6 +1,8 @@
 // 올리브 비상 정지용 kubectl 어댑터(supervisor.md §7.1~§7.4, spec D-38·D-39).
 // 명령은 ns·Deployment·Application 이름과 상한만 넘긴다. 자물쇠의 이름·모양, replicas 값, argv는 여기 고정이다.
-// 파드를 지우거나 kubectl exec로 들어가는 길은 두지 않는다(강제 삭제 금지, supervisor.md §2.4의 exec 제약).
+// 파드를 지우는 길은 두지 않는다(강제 삭제 금지). 세션·작업자 파드로 kubectl exec로 들어가는 길도 없다: exec로 들어간 프로세스는
+// 컨테이너의 원래 프로세스와 다른 AppArmor 라벨을 받아, 세션 프로세스를 읽거나 끝내는 일은 원래 PID 1 계통만 한다(supervisor.md §2.4).
+// exec는 감독 파드의 고정 관리 진입점 하나뿐이고 olive-admin.ts에 있다. 감독 상태만 읽고 세션 프로세스에는 닿지 않는다.
 // 읽지 못한 것은 던진다. 시간 초과는 ExecTimeout(결과 미상)이고 "없음"으로 바꾸지 않는다.
 import type { AppOperation, HoldZero, HoldZeroTarget, OliveRead, OliveWrite, RunPod, StopLockState, StopTarget } from "./command";
 import { ExecTimeout, must, why, type Exec } from "./exec";
