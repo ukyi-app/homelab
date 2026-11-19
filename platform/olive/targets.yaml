@@ -6,15 +6,16 @@
 # 칸:
 #   id: 대상의 이름. 차트 값(values.yaml executors.<id>)과 실행기의 역할 env(OLIVE_ROLE)가 이 값을 쓴다.
 #   kind: supervisor 또는 executor. 차트가 어느 모양(감독, 작업자 실행기)으로 만들지 고른다.
-#   namespace, deployment: 실제 리소스 자리. 정지의 자물쇠(ResourceQuota olive-stop, CLI가 만든다)는 namespace마다 건다.
+#   namespace, deployment: 실제 리소스 자리. 정지 확인은 namespace마다 ResourceQuota olive-stop을 조회한다.
 #   declaredBy: 그 Deployment를 Git에 선언한 곳. platform/olive인 줄만 이 차트가 만든다. 빈 값은 아직 아무도 선언하지 않았다는 뜻이다.
-#   stop: (가) 비상 정지와 소멸 확인의 대상인지. 정지는 true인 줄 전부를 보수적으로 덮는다. 아직 리소스가 없는 줄도 true로 둔다.
-#   start: (나) 지금 켤 수 있는지. 켜기(start)는 true인 줄만 켠다. 역할 프로필·자격 전달이 준비된 티켓의 PR이 false를 true로 바꾼다.
+#   stop: (가) 비상 정지와 소멸 확인의 대상인지. stop status와 stop verify는 true인 모든 줄을 조회한다. 아직 리소스가 없는 줄도 true로 둔다.
+#   start: (나) 설계에서 기동을 허용한 대상인지 표시한다. 현재 CLI는 기동을 제공하지 않는다. 역할 프로필·자격 전달이 준비된 티켓의 PR이 false를 true로 바꾼다.
 #
 # 함정: platform/root/templates/olive.yaml의 ignoreDifferences(/spec/replicas)는 root 차트라 이 파일을 읽지 못해 손으로 적었다.
 # declaredBy: platform/olive인 줄과 그 목록이 같은지는 CI(tools/ci/olive.ts의 olive targets 단계)가 본다.
-# CLI 대상 목록과의 일치는 아직 보지 않는다(CLI의 올리브 명령이 아직 없다, O09 할 일 6).
-# 줄을 더하거나 이름을 바꾸면 그 셋을 같은 PR에서 함께 바꾼다.
+# 관리자 CLI(homelab olive)는 빌드할 때 이 파일을 실행 파일에 넣어(cli/src/core/olive-targets.ts) 따로 적은 목록이 없다.
+# 함정: 이 파일을 바꾼 뒤 CLI를 다시 설치할 때까지 상태 조회와 정지 확인은 이전 목록을 사용한다.
+# 대상을 추가하거나 이름을 바꾸면 해당 Argo CD replicas 예외 목록도 같은 PR에서 맞추고, 병합 뒤 CLI를 다시 설치한다.
 targets:
   - id: supervisor
     kind: supervisor
@@ -39,7 +40,7 @@ targets:
     stop: true
     start: false
   # 세션 파드(O10). 네임스페이스는 supervisor.md §1.1의 초안이고 Deployment 이름은 O10이 정한다. 그 PR이 이 줄을 고친다.
-  # 정지는 리소스가 생기기 전부터 대상이다. 없는 네임스페이스·Deployment는 CLI가 "없음"으로 보고하고 넘어간다.
+  # 정지는 리소스가 생기기 전부터 대상이다. 네임스페이스가 없으면 없음으로 보고한다. 세션 네임스페이스만 있고 Deployment가 없으면 파드를 식별할 수 없어 두 stop 조회는 1을 반환한다.
   - id: session
     kind: session
     namespace: olive-session
