@@ -1,0 +1,20 @@
+# match: 규칙 그룹 other의 공통 olive_self 라벨은 쓸 수 없다
+# vmalert는 한 파일의 YAML 문서를 모두 읽는다. 둘째 문서의 그룹 공통 라벨도 그 경보들을 Telegram으로만 보낸다.
+other: |
+  groups:
+    - name: first
+      rules:
+        - alert: SomeFirstAlert
+          expr: vector(1)
+          labels:
+            severity: warning
+  ---
+  groups:
+    - name: other
+      labels:
+        olive_self: "true"
+      rules:
+        - alert: SomeOtherAlert
+          expr: vector(1)
+          labels:
+            severity: critical

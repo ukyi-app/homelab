@@ -1,0 +1,5 @@
+# match: OliveDownWhileEnabled의 켤 수 있는 대상의 olive-reader/executor가
+# 아직 켤 수 없는 대상(start: false)을 꺼짐 경보로 본다. 켜지 않은 대상이 꺼져 있다고 운다.
+replace:
+  - from: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+    to: 'kube_deployment_status_replicas_ready{namespace="olive-reader", deployment="executor"}'

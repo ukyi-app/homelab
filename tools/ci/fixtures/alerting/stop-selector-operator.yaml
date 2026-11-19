@@ -1,0 +1,5 @@
+# match: OlivePodsUpWhileStopped의 olive-diagnosis 선택자는 namespace·created_by_kind를 =로, created_by_name을 =~로 맞춰야 한다
+# 문자열 비교로 바뀌면 실제 ReplicaSet 이름(executor-6c9f7)에 맞지 않아 정지 중에 떠 있는 파드를 놓친다.
+replace:
+  - from: 'created_by_name=~"executor-[a-z0-9]+"'
+    to: 'created_by_name="executor-[a-z0-9]+"'

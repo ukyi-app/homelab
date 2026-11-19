@@ -1,0 +1,5 @@
+# match: OliveDownWhileEnabled의 자물쇠 판정은 소유 라벨이 다른 quota를 빼야 한다
+# 소유 라벨이 없는 같은 이름의 quota가 켜 둔 감독의 꺼짐 경보를 가린다.
+replace:
+  - from: 'unless on (namespace, resourcequota) kube_resourcequota_labels{resourcequota="olive-stop", label_homelab_ukyi_app_olive_stop!="lock"}'
+    to: ""

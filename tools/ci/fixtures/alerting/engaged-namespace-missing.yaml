@@ -1,0 +1,5 @@
+# match: OliveStopEngaged의 네임스페이스에 sandbox가 빠졌다
+# sandbox에만 자물쇠가 남아 있으면 정지 알림이 꺼진 것으로 보인다.
+replace:
+  - from: 'olive-session|sandbox"'
+    to: 'olive-session"'

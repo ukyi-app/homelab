@@ -1,0 +1,5 @@
+# match: OlivePodsUpWhileStopped의 정지 대상에 olive-reader/executor가 빠졌다
+# 정지 대상 하나를 식에서 뺐다. 그 파드가 정지 중에 떠 있어도 경보가 울리지 않는다.
+replace:
+  - from: 'or kube_pod_info{namespace="olive-reader", created_by_kind="ReplicaSet", created_by_name=~"executor-[a-z0-9]+"}'
+    to: ""

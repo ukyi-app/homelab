@@ -1,0 +1,5 @@
+# match: OliveDownWhileEnabled의 표식 네임스페이스에 olive-control가 빠졌다
+# 표식을 다른 네임스페이스에서 읽는다. 켜 둔 감독이 꺼져도 울리지 않는다.
+replace:
+  - from: 'kube_namespace_annotations{namespace="olive-control",'
+    to: 'kube_namespace_annotations{namespace="olive-reader",'

@@ -1,0 +1,5 @@
+# match: OliveDownWhileEnabled의 자물쇠 판정은 pods 밖의 hard 자원이 있는 quota를 빼야 한다
+# CLI가 자물쇠로 인정하지 않는 quota가 켜 둔 감독의 꺼짐 경보를 가린다.
+replace:
+  - from: 'unless on (namespace, resourcequota) kube_resourcequota{resourcequota="olive-stop", resource!="pods", type="hard"}'
+    to: ""
