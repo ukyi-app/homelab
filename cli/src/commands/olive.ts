@@ -15,6 +15,8 @@ const MISSING_WORD: Record<OliveSupervisorMissing["state"], string> = {
   multiple: "파드가 여럿이라 고르지 않았다",
 };
 
+const UNSUPPORTED = "이 CLI가 지원하는 동작은 status, stop status, stop verify입니다. 켜기, 정지 걸기·풀기, 노드 확인, 런타임 대조는 아직 지원하지 않습니다.";
+
 type Supervisor = { line: string; status: "ok" | "waiting" | "failed" };
 
 function missing(t: OliveSupervisorMissing): Supervisor {
@@ -73,7 +75,7 @@ export function makeOlive() {
     summary: "올리브 상태와 정지 상태 보기",
     help: {
       about:
-        "올리브의 상태와 비상 정지 상태를 읽어 보여 줍니다. 정지를 걸거나 푸는 명령은 이 CLI에 아직 없습니다. stop verify는 밖에서 실제로 걸린 자물쇠만 판독합니다. 감독 상태 줄은 kubectl exec로 읽어 status --apply에서만 나옵니다. 종료 코드는 1 실패·차단 미완, 3 대기, 64 사용법이고, 0의 뜻은 동작마다 다릅니다: status·stop status는 읽은 상태를 보고했다, stop verify는 Kubernetes에서 자물쇠와 파드 소멸까지 확인했다(정지됨, 노드 미확인).",
+        "올리브의 상태와 비상 정지 상태를 읽어 보여 줍니다. 정지를 걸거나 푸는 명령은 이 CLI에 아직 없습니다. stop verify는 밖에서 실제로 걸린 자물쇠만 판독합니다. 기본 status도 감독 파드 탐색 결과를 표시합니다. 준비된 파드에서는 예정 명령도 표시하며, 감독 프로세스의 상태 응답은 status --apply에서 조회합니다. 종료 코드는 1 실패·차단 미완, 3 대기, 64 사용법이고, 0의 뜻은 동작마다 다릅니다: status·stop status는 읽은 상태를 보고했다, stop verify는 Kubernetes에서 자물쇠와 파드 소멸까지 확인했다(정지됨, 노드 미확인).",
       examples: ["homelab olive status", "homelab olive stop verify"],
       actions: [
         { name: "status", about: "정지 여부·replicas·자물쇠·실행 파드 보기" },
@@ -84,14 +86,16 @@ export function makeOlive() {
     // status --apply가 감독 파드에 exec해서(쓰기로 판정) --apply를 받아야 한다.
     kind: "change",
     args: [
-      { name: "action", required: true, help: "동작(아래 동작 목록)", pattern: /status|stop/ },
-      { name: "sub", required: false, help: "stop의 동작(status, verify)", pattern: /status|verify/ },
+      // start·on·off는 받기만 하고 run에서 고정 안내와 함께 64로 거절한다. 공통 파서의 "형식이 아니다"로는 지원하지 않는 동작인지 알 수 없다.
+      { name: "action", required: true, help: "동작(아래 동작 목록)", pattern: /status|stop|start/ },
+      { name: "sub", required: false, help: "stop의 동작(status, verify)", pattern: /status|verify|on|off/ },
     ],
     flags: [{ name: "verbose", kind: "bool", help: "대상별 줄까지 보기" }],
     async run(ctx, input) {
       const action = input.args.action as string;
       const sub = input.args.sub;
       const verbose = input.flags.verbose === true;
+      if (action === "start" || (action === "stop" && (sub === "on" || sub === "off"))) throw new UsageError(UNSUPPORTED);
       if (action === "stop" && sub === undefined) throw new UsageError("stop 뒤에 status, verify 중 하나를 준다");
       if (action !== "stop" && sub !== undefined) throw new UsageError(`${action}에는 뒤 인자를 주지 않는다`);
       if (action === "stop" && input.apply) throw new UsageError(`stop ${sub}는 읽기 동작이라 --apply를 받지 않는다`);

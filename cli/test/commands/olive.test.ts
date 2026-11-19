@@ -25,10 +25,10 @@ const json = (x: unknown): Resp => ({ stdout: JSON.stringify(x) });
 const notFound: Resp = { code: 1, stderr: "Error from server (NotFound): not found\n" };
 const denied: Resp = { code: 1, stderr: "Error from server (Forbidden): denied\n" };
 
-const lockDoc = (ns: string, o: { deleting?: boolean } = {}) =>
+const lockDoc = (ns: string) =>
   json({
     kind: "ResourceQuota",
-    metadata: { name: "olive-stop", namespace: ns, uid: "0f0e0d0c-0b0a-4908-8706-050403020100", resourceVersion: "10", labels: { "homelab.ukyi.app/olive-stop": "lock" }, ...(o.deleting ? { deletionTimestamp: "2026-11-19T01:00:00Z" } : {}) },
+    metadata: { name: "olive-stop", namespace: ns, uid: "0f0e0d0c-0b0a-4908-8706-050403020100", resourceVersion: "10", labels: { "homelab.ukyi.app/olive-stop": "lock" } },
     spec: { hard: { pods: "0" } },
   });
 // 작성 작업자는 올리브 차트가 아니라 platform/sandbox가 선언해 파드 라벨이 다르다.
@@ -90,10 +90,19 @@ const zeroed = (): Record<string, Resp[]> => Object.fromEntries(TARGETS.map((t) 
 
 const line = (c: Call) => c.argv.join(" ");
 
+// 지원하지 않는 동작(start, stop on|off)은 고정 안내를 받는다. 모르는 플래그(--uids, --deep)는 공통 파서가 먼저 거절해 이 안내가 없다.
+// 어느 쪽이든 입력 값(UID)을 오류에 되찍지 않는다.
+function expectUnsupportedWords(args: string[], message: string) {
+  const flagged = args.some((a) => a === "--uids" || a === "--deep");
+  const action = args[0] === "start" || (args[0] === "stop" && (args[1] === "on" || args[1] === "off"));
+  expect([args, message.includes("켜기, 정지 걸기·풀기, 노드 확인, 런타임 대조는 아직 지원하지 않습니다")]).toEqual([args, action && !flagged]);
+  expect([args, message.includes(UID_A)]).toEqual([args, false]);
+}
+
 // 결과 객체를 직접 보는 시험은 같은 프로세스에서 명령을 돌린다.
-async function direct(mode: "plan" | "apply", tokens: string[], rules: Rule[]) {
+async function direct(tokens: string[], rules: Rule[]) {
   const cmd = makeOlive();
-  const t = testCtx(mode, rules);
+  const t = testCtx("plan", rules);
   const r = await cmd.run(t.ctx, parseInput(allFlags(cmd), cmd.args, tokens));
   return { r, code: EXIT[r.status], body: r.body ?? "", ...t.calls() };
 }
@@ -118,6 +127,7 @@ describe("plan", () => {
       const r = await runCli(["olive", ...args, "--json"], []);
       expect([args, r.code]).toEqual([args, 64]);
       expect(r.calls).toEqual([]);
+      expectUnsupportedWords(args, r.json.error.message);
     }
   });
 
@@ -126,6 +136,7 @@ describe("plan", () => {
       const r = await runCli(["olive", ...args, "--json"], []);
       expect([args, r.code]).toEqual([args, 64]);
       expect(r.calls).toEqual([]);
+      expectUnsupportedWords(args, r.json.error.message);
     }
   });
 
@@ -134,6 +145,7 @@ describe("plan", () => {
       const r = await runCli(["olive", ...args, "--json"], []);
       expect([args, r.code]).toEqual([args, 64]);
       expect(r.calls).toEqual([]);
+      expectUnsupportedWords(args, r.json.error.message);
     }
   });
 
@@ -170,6 +182,19 @@ describe("stop status", () => {
     expect(bad.code).toBe(1);
     expect(bad.json.error.message).toContain("확인 실패");
   });
+
+  test("자물쇠를 하나도 읽지 못하면 걸리지 않은 곳으로 세지 않고 미상으로 적으며 1이다", async () => {
+    const locks = Object.fromEntries(NAMESPACES.map((ns) => [ns, [denied]]));
+    for (const args of [["stop", "status"], ["stop", "verify"], ["status"]]) {
+      const r = await runCli(["olive", ...args, "--json"], world({ locks, replicas: zeroed() }));
+      expect([args, r.code]).toEqual([args, 1]);
+      const text = `${r.json.error.message}\n${r.json.body}`;
+      expect([args, text.includes("0/5곳 걸림")]).toEqual([args, false]);
+      expect([args, text.includes("자물쇠 상태 미상 5곳")]).toEqual([args, true]);
+    }
+    const some = await runCli(["olive", "stop", "status", "--json"], world({ locks: { ...heldLocks(), sandbox: [denied] }, replicas: zeroed() }));
+    expect(some.json.error.message).toContain("자물쇠 읽은 4곳 중 4곳 걸림, 미상 1곳");
+  }, 30_000);
 });
 
 describe("stop verify", () => {
@@ -185,18 +210,18 @@ describe("stop verify", () => {
   });
 
   test("기본 단계는 소멸 확인이고 replicas 유지는 보지 않는다고 말한다", async () => {
-    const d = await direct("plan", ["stop", "verify"], held());
+    const d = await direct(["stop", "verify"], held());
     expect(d.body).toContain("replicas가 0으로 유지되는지는 보지 않는다");
   });
 
   test("기본 단계: 자물쇠가 빠졌거나 강제 삭제 중이면 1, 파드가 남았으면 3, 읽지 못하면 1이다", async () => {
-    const noLock = await direct("plan", ["stop", "verify"], world({ locks: { ...heldLocks(), sandbox: [notFound] }, replicas: zeroed() }));
+    const noLock = await direct(["stop", "verify"], world({ locks: { ...heldLocks(), sandbox: [notFound] }, replicas: zeroed() }));
     expect([noLock.code, noLock.body.includes("차단 미완")]).toEqual([1, true]);
-    const forced = await direct("plan", ["stop", "verify"], world({ locks: heldLocks(), replicas: zeroed(), pods: { "olive-control": [podList(podDoc("olive-control", { forced: true }))] } }));
+    const forced = await direct(["stop", "verify"], world({ locks: heldLocks(), replicas: zeroed(), pods: { "olive-control": [podList(podDoc("olive-control", { forced: true }))] } }));
     expect([forced.code, forced.body.includes("강제 삭제 중")]).toEqual([1, true]);
-    const left = await direct("plan", ["stop", "verify"], world({ locks: heldLocks(), replicas: zeroed(), pods: { "olive-control": [podList(podDoc("olive-control", { deleting: true }))] } }));
+    const left = await direct(["stop", "verify"], world({ locks: heldLocks(), replicas: zeroed(), pods: { "olive-control": [podList(podDoc("olive-control", { deleting: true }))] } }));
     expect([left.code, left.body.includes("종료 대기")]).toEqual([3, true]);
-    const unread = await direct("plan", ["stop", "verify"], world({ locks: heldLocks(), replicas: zeroed(), pods: { sandbox: [denied] } }));
+    const unread = await direct(["stop", "verify"], world({ locks: heldLocks(), replicas: zeroed(), pods: { sandbox: [denied] } }));
     expect([unread.code, unread.body.includes("확인 실패")]).toEqual([1, true]);
   });
 
@@ -224,6 +249,17 @@ describe("stop verify", () => {
     expect(verify.code).toBe(1);
     expect(verify.json.error.message).toContain("확인할 네임스페이스가 하나도 없다");
     expect(verify.json.body).not.toContain("정지됨(노드 미확인)");
+  });
+
+  test("자물쇠가 모두 걸리고 파드가 없어도 작성 대상의 Deployment가 없으면 두 stop 조회 모두 1이고 정지됨이 아니다", async () => {
+    const blind = () => world({ locks: heldLocks(), replicas: zeroed(), noDep: ["writer"] });
+    const status = await runCli(["olive", "stop", "status", "--json"], blind());
+    expect(status.code).toBe(1);
+    expect(status.json.error.message).toContain("파드를 식별할 수 없는 대상");
+    const verify = await runCli(["olive", "stop", "verify", "--json"], blind());
+    expect(verify.code).toBe(1);
+    expect(verify.json.error.message).toContain("파드를 식별할 수 없는 대상");
+    expect(verify.json.body).not.toContain("정지됨");
   });
 
   test("작성 대상의 Deployment가 있으면 그 셀렉터로 남은 파드를 찾는다", async () => {

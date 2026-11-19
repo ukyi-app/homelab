@@ -110,11 +110,15 @@ export function targetLine(v: TargetView): string {
   return `${head}: ${replicas}, 자물쇠 ${LOCK_WORD[v.lock]}, ${podWords(countPods([v]))}`;
 }
 
+// held·present는 판정에 쓰고, words는 네임스페이스나 자물쇠를 읽지 못한 곳을 걸리지 않은 곳으로 세지 않고 미상으로 따로 센다.
 export function lockSummary(views: TargetView[]): { held: number; present: number; words: string } {
   const spaces = uniqueNamespaces(views).filter((v) => v.namespace !== "absent");
   const held = spaces.filter((v) => v.lock === "same").length;
   const absent = uniqueNamespaces(views).length - spaces.length;
-  return { held, present: spaces.length, words: `자물쇠 ${held}/${spaces.length}곳 걸림${absent > 0 ? `(없는 네임스페이스 ${absent}곳)` : ""}` };
+  const known = spaces.filter((v) => v.namespace !== "unread" && v.lock !== "unread");
+  const unknown = spaces.length - known.length;
+  const counted = unknown === 0 ? `${held}/${spaces.length}곳 걸림` : known.length === 0 ? `상태 미상 ${unknown}곳` : `읽은 ${known.length}곳 중 ${known.filter((v) => v.lock === "same").length}곳 걸림, 미상 ${unknown}곳`;
+  return { held, present: spaces.length, words: `자물쇠 ${counted}${absent > 0 ? `(없는 네임스페이스 ${absent}곳)` : ""}` };
 }
 
 function replicasValue(d: DeploymentView): string {
