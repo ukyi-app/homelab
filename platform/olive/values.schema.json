@@ -25,15 +25,50 @@
       "additionalProperties": false,
       "required": ["secretName", "mountPath"],
       "properties": {
-        "secretName": { "type": "string", "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$" },
+        "secretName": {
+          "type": "string",
+          "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$",
+          "not": { "pattern": "^(olive-signing-key$|olive-account-)" }
+        },
         "mountPath": { "type": "string", "pattern": "^/run/" }
       }
     },
-    "namespace": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" }
+    "namespace": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" },
+    "hours": { "type": "integer", "minimum": 1 }
   },
   "type": "object",
   "additionalProperties": false,
-  "required": ["infisical", "image", "supervisor", "executors", "externalSecrets"],
+  "required": ["infisical", "image", "supervisor", "pki", "executors", "externalSecrets"],
+  "if": {
+    "required": ["pki"],
+    "properties": { "pki": { "required": ["enabled"], "properties": { "enabled": { "const": true } } } }
+  },
+  "then": {
+    "properties": {
+      "supervisor": {
+        "properties": {
+          "tls": {
+            "properties": {
+              "secretName": { "const": "" },
+              "mountPath": { "const": "/run/olive/tls" }
+            }
+          }
+        }
+      },
+      "executors": {
+        "additionalProperties": {
+          "properties": {
+            "tls": {
+              "properties": {
+                "secretName": { "const": "" },
+                "mountPath": { "const": "/run/olive/tls" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
   "properties": {
     "infisical": {
       "type": "object",
@@ -75,8 +110,15 @@
         "signingKey": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["key"],
-          "properties": { "key": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" } }
+          "required": ["key", "publicKeyPem"],
+          "properties": {
+            "key": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+            "publicKeyPem": {
+              "type": "string",
+              "pattern": "^(-----BEGIN PUBLIC KEY-----\\n[\\s\\S]*-----END PUBLIC KEY-----\\n?)?$",
+              "not": { "pattern": "PRIVATE KEY" }
+            }
+          }
         },
         "account": {
           "type": "object",
@@ -89,6 +131,45 @@
         },
         "extraClientNamespaces": { "type": "array", "items": { "$ref": "#/definitions/namespace" } },
         "tls": { "$ref": "#/definitions/tls" }
+      }
+    },
+    "pki": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "ca", "leaf", "trustBundlePem"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ca": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["generations", "activeGeneration", "durationHours", "renewBeforeHours"],
+          "properties": {
+            "generations": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": { "type": "integer", "minimum": 1 }
+            },
+            "activeGeneration": { "type": "integer", "minimum": 1 },
+            "durationHours": { "$ref": "#/definitions/hours" },
+            "renewBeforeHours": { "$ref": "#/definitions/hours" }
+          }
+        },
+        "leaf": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["durationHours", "renewBeforeHours"],
+          "properties": {
+            "durationHours": { "$ref": "#/definitions/hours" },
+            "renewBeforeHours": { "$ref": "#/definitions/hours" }
+          }
+        },
+        "trustBundlePem": {
+          "type": "string",
+          "pattern": "^(-----BEGIN CERTIFICATE-----\\n[\\s\\S]*-----END CERTIFICATE-----\\n?)?$",
+          "not": { "pattern": "PRIVATE KEY" }
+        }
       }
     },
     "executors": {

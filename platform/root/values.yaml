@@ -74,8 +74,10 @@ components:
   #   1. 이미지: platform/olive/values.yaml image.digest(ukyi-app/olive main 빌드). 비면 렌더가 실패한다.
   #   2. 계정: 같은 파일 supervisor.account.name과 Infisical /bot-accounts/<그 이름>/CLAUDE_CODE_OAUTH_TOKEN(올리브 전용 발급).
   #   3. Infisical 폴더 /olive/supervisor와 INSTRUCTION_SIGNING_KEY(운영 homelab/prod, VM homelab-dev/dev는 가짜 값).
-  #   4. mTLS 인증서(cert-manager의 올리브 전용 발급 기관, 다른 작업)와 supervisor.tls·executors.<id>.tls의 Secret 이름.
+  #   4. mTLS 인증서의 최초 발급 전제: platform/olive/values.yaml pki.enabled(docs/runbooks-public/rotate.md 3i). 클러스터마다 켜짐과 세대 값을 따로 줄 수 있다는 것을
+  #      두 root의 렌더로 보이기 전까지 이 main을 읽는 root에서 켜지 않는다. 최초 발급의 검증은 이 main을 읽지 않는 독립된 시험 환경에서 한다.
   #   5. 관리자 승인(approvals.md). 켜도 실행 Deployment는 replicas 0이라 파드는 관리자 CLI가 켤 때 생긴다(D-38).
+  # 발급 뒤에 넣는 값: 클러스터별 공개 값 두 칸(values-<클러스터>.yaml cluster.olive). 발급 기관이 생겨야 얻는 값은 trustBundlePem이고, supervisorSigningPublicKeyPem은 Infisical에 둔 Ed25519 개인 키의 짝이라 발급과 무관하다. 두 값을 발급을 확인한 뒤 같은 PR로 넣고, 그 전에는 파드를 켜지 않는다.
   # 키나 폴더가 빠지면 olive만 Degraded다(맨 뒤 wave라 다른 구성 요소는 막지 않는다).
   olive:
     enabled: false

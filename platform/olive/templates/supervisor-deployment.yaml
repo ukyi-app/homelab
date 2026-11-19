@@ -4,6 +4,8 @@ env 이름은 이 차트가 정한 자리다. ukyi-app/olive의 감독 코드가
 */}}
 {{- $t := include "olive.supervisorTarget" . | fromYaml }}
 {{- $tls := .Values.supervisor.tls }}
+{{- $tlsSecret := include "olive.tlsSecretName" (dict "root" . "tls" $tls) }}
+{{- $trust := include "olive.trustEnabled" . }}
 {{- $account := required "supervisor.account.name is required (account alias under Infisical /bot-accounts/<name>)" .Values.supervisor.account.name }}
 apiVersion: apps/v1
 kind: Deployment
@@ -53,9 +55,13 @@ spec:
             # 계정 묶음 디렉터리. 계정마다 하위 디렉터리 <별칭>/<키 이름> 파일이다(지금은 고정 계정 하나).
             - name: OLIVE_ACCOUNTS_DIR
               value: /run/olive/accounts
-            {{- if $tls.secretName }}
+            {{- if $tlsSecret }}
             - name: OLIVE_TLS_DIR
               value: {{ $tls.mountPath | quote }}
+            {{- end }}
+            {{- if $trust }}
+            - name: OLIVE_TRUST_DIR
+              value: /run/olive/trust
             {{- end }}
           # 프로브는 두지 않는다. 건강 확인 포트는 아직 정하지 않았다(spec.md §5.3 "같은 파드의 공유 통로"). 감독 코드가 생긴 뒤 더한다.
           {{- include "olive.containerSecurity" . | nindent 10 }}
@@ -70,9 +76,14 @@ spec:
             - name: account
               mountPath: /run/olive/accounts/{{ $account }}
               readOnly: true
-            {{- if $tls.secretName }}
+            {{- if $tlsSecret }}
             - name: tls
               mountPath: {{ $tls.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- if $trust }}
+            - name: trust
+              mountPath: /run/olive/trust
               readOnly: true
             {{- end }}
             - name: tmp
@@ -91,11 +102,25 @@ spec:
           secret:
             secretName: olive-account-{{ $account }}
             defaultMode: 0440
-        {{- if $tls.secretName }}
+        {{- if $tlsSecret }}
         - name: tls
           secret:
-            secretName: {{ $tls.secretName }}
+            secretName: {{ $tlsSecret }}
             defaultMode: 0440
+            {{- if .Values.pki.enabled }}
+            # ca.crt를 빼고 붙인다. 신뢰 기준은 ConfigMap olive-trust 하나다(templates/pki-trust.yaml).
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+            {{- end }}
+        {{- end }}
+        {{- if $trust }}
+        - name: trust
+          configMap:
+            name: olive-trust
+            defaultMode: 0444
         {{- end }}
         # 이미지가 쓰는 유일한 자리(D-54). SQLite 임시 파일도 여기다. 크기는 [가정]이다. 넘으면 kubelet이 파드를 쫓아낸다.
         - name: tmp
