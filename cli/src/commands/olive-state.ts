@@ -97,7 +97,12 @@ export function podWords(n: PodCount): string {
   return unknown ? `읽은 대상 ${n.read}곳의 ${base}, ${unknown}` : base;
 }
 
-export const forcedUids = (views: TargetView[]): string[] => views.flatMap((v) => (v.pods ?? []).filter((p) => p.forceDeleting).map((p) => p.uid));
+// 강제 삭제 표식을 본 파드. 사람이 노드에서 찾을 수 있게 네임스페이스·이름·UID를 함께 적고 UID로 겹침을 없앤다.
+export function forcedPods(views: TargetView[]): string[] {
+  const seen = new Map<string, string>();
+  for (const v of views) for (const p of v.pods ?? []) if (p.forceDeleting && !seen.has(p.uid)) seen.set(p.uid, `${v.target.namespace}/${p.name}(UID ${p.uid})`);
+  return [...seen.values()];
+}
 
 const LOCK_WORD: Record<TargetView["lock"], string> = { absent: "없음", same: "걸림", different: "다른 모양", deleting: "지우는 중", unread: "읽지 못함" };
 
@@ -137,20 +142,38 @@ export const anyUnread = (views: TargetView[]): boolean => readFailed(views) || 
 
 export const unreadWhy = (views: TargetView[]): string => (readFailed(views) ? "읽지 못한 대상이 있다" : "파드를 식별할 수 없는 대상이 있다");
 
-export type UpState = "ready" | "not-ready" | "unknown";
+export type LockSpot = { ns: string; lock: TargetView["lock"] };
+
+export const lockSpots = (views: TargetView[]): LockSpot[] => uniqueNamespaces(views).map((v) => ({ ns: v.target.namespace, lock: v.lock }));
+
+// 자물쇠만 다시 읽는다. 없는 네임스페이스의 quota도 NotFound라 absent다.
+export const readLocks = (c: Pick<ReadCtx, "olive">, namespaces: string[]): LockSpot[] =>
+  namespaces.map((ns) => {
+    const r = attempt(() => c.olive.stopLock(ns));
+    return { ns, lock: r.ok ? r.value : "unread" };
+  });
+
+// ready: 다시 읽은 Deployment가 replicas 1, 현재 세대, 준비된 파드 1개 이상이고 rollout이 끝났다.
+// not-ready: replicas 1은 읽었지만 준비를 확인하지 못했다. deleting: 다시 읽은 Deployment에 삭제 표식이 있다.
+// unknown: 다시 읽지 못했거나 replicas가 1이 아니다.
+export type UpState = "ready" | "not-ready" | "deleting" | "unknown";
+// asked는 replicas 1 쓰기를 부른 것이다(응답과 상관없이). 이미 1로 읽은 대상에는 부르지 않는다.
+export type Up = { state: UpState; asked: boolean };
 
 // replicas 1을 쓰고 기다린 뒤 다시 읽어 판정한다.
 // 함정: rollout status는 동기화가 0을 되쓴 뒤에도 완료로 끝난다. 쓰기가 시간 초과로 끝나도 서버에는 반영됐을 수 있어 쓰기 결과로 판정하지 않는다.
-export function bringUp(w: WriteCtx, v: TargetView, readySec: number): UpState {
+export function bringUp(w: WriteCtx, v: TargetView, readySec: number): Up {
   const { namespace: ns, deployment: name } = v.target;
-  if (!(v.deployment.state === "present" && v.deployment.replicas === 1)) attempt(() => w.olive.setReplicas(ns, name, 1));
+  const asked = !(v.deployment.state === "present" && v.deployment.replicas === 1);
+  if (asked) attempt(() => w.olive.setReplicas(ns, name, 1));
   const rolled = attempt(() => w.k8s.rolloutStatus(ns, name, readySec));
   const seen = attempt(() => w.k8s.get("deployment", ns, name));
-  if (!seen.ok || seen.value?.spec?.replicas !== 1) return "unknown";
+  if (!seen.ok || seen.value?.spec?.replicas !== 1) return { state: "unknown", asked };
   const { metadata, status } = seen.value;
+  if (metadata?.deletionTimestamp !== undefined && metadata?.deletionTimestamp !== null) return { state: "deleting", asked };
   const current = typeof metadata?.generation === "number" && typeof status?.observedGeneration === "number" && status.observedGeneration >= metadata.generation;
   const ready = typeof status?.readyReplicas === "number" && status.readyReplicas >= 1;
-  return rolled.ok && rolled.value && current && ready ? "ready" : "not-ready";
+  return { state: rolled.ok && rolled.value && current && ready ? "ready" : "not-ready", asked };
 }
 
 export type Outcome = {
