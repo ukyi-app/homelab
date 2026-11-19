@@ -5,9 +5,11 @@
 env 이름은 이 차트가 정한 자리다. ukyi-app/olive의 실행기 코드가 같은 이름을 읽는다(아직 코드가 없어 이미지는 69로 끝난다).
 */}}
 {{- $sup := include "olive.supervisorTarget" . | fromYaml }}
+{{- $trust := include "olive.trustEnabled" . }}
 {{- range (include "olive.targets" . | fromYaml).items }}
 {{- if eq .kind "executor" }}
 {{- $values := index $.Values.executors .id }}
+{{- $tlsSecret := include "olive.tlsSecretName" (dict "root" $ "tls" $values.tls) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -46,28 +48,51 @@ spec:
             # 주소가 IP라 TLS에서 확인할 이름을 따로 준다. 감독 인증서의 이름과 같아야 한다(인증서 작업).
             - name: OLIVE_SUPERVISOR_SERVER_NAME
               value: {{ printf "supervisor.%s.svc" $sup.namespace | quote }}
-            {{- if $values.tls.secretName }}
+            {{- if $tlsSecret }}
             - name: OLIVE_TLS_DIR
               value: {{ $values.tls.mountPath | quote }}
+            {{- end }}
+            {{- if $trust }}
+            - name: OLIVE_TRUST_DIR
+              value: /run/olive/trust
             {{- end }}
           # 프로브는 두지 않는다. 실행기는 듣는 포트가 없고(D-55) 건강 확인 방식은 아직 정하지 않았다(spec.md §5.3).
           {{- include "olive.containerSecurity" . | nindent 10 }}
           resources:
             {{- include "olive.resources" (dict "root" $ "target" .) | nindent 12 }}
           volumeMounts:
-            {{- if $values.tls.secretName }}
+            {{- if $tlsSecret }}
             - name: tls
               mountPath: {{ $values.tls.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- if $trust }}
+            - name: trust
+              mountPath: /run/olive/trust
               readOnly: true
             {{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
-        {{- if $values.tls.secretName }}
+        {{- if $tlsSecret }}
         - name: tls
           secret:
-            secretName: {{ $values.tls.secretName }}
+            secretName: {{ $tlsSecret }}
             defaultMode: 0440
+            {{- if $.Values.pki.enabled }}
+            # ca.crt를 빼고 붙인다. 신뢰 기준은 ConfigMap olive-trust 하나다(templates/pki-trust.yaml).
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+            {{- end }}
+        {{- end }}
+        {{- if $trust }}
+        - name: trust
+          configMap:
+            name: olive-trust
+            defaultMode: 0444
         {{- end }}
         # 실행마다 빈 HOME·작업 공간을 만들 자리. 모델 CLI의 임시 사용량을 아직 몰라 512Mi [가정]이다. 넘으면 kubelet이 파드를 쫓아낸다.
         - name: tmp

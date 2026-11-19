@@ -1,0 +1,93 @@
+{{- /*
+올리브 전용 발급 기관.
+관리자가 정한 것(D-58): mTLS와 효과별 Ed25519 서명, 인증서는 클러스터 cert-manager의 올리브 전용 발급 기관이 낸다.
+이 선언이 고른 안(배포 PR에서 관리자가 본다): 키를 클러스터 안에서 만들어 Secret으로만 두고 저장소와 Infisical에 사본을 두지 않는다. 수명과 세대마다 발급 기관을 두는 구조도 안이다.
+kind: Secret을 선언하지 않는다.
+
+ClusterIssuer인 이유: 인증서가 세 네임스페이스에 필요하다. 네임스페이스별 Issuer는 발급 기관 키를 모델이 도는 실행기 네임스페이스마다
+복사해야 한다. CA Secret이 cert-manager 네임스페이스에 있는 이유: ClusterIssuer는 cluster resource namespace(기본 cert-manager)의 Secret만 읽는다.
+함정: 이 선언만으로는 발급 범위가 좁혀지지 않는다. ClusterIssuer는 어느 네임스페이스의 요청에도 서명하고, 기본 승인자는 요청을 모두 승인하며,
+요청한 SAN이 그 네임스페이스의 것인지 보지 않는다. 범위를 좁히는 방법을 고르고 이 main을 읽지 않는 독립된 시험 환경에서 확인하기 전에는 pki.enabled를 켜지 않는다.
+이 발급 기관으로 인증서를 받는 길은 셋이다.
+  직접 배포: Certificate를 선언한다. AppProject apps·data의 허용 목록에는 cert-manager.io가 없다. root와 AppProject platform의 Application,
+    Application을 고칠 수 있는 Argo CD owner 계정, 클러스터 관리자는 만들 수 있다. 외부 차트가 설치한 권한은 저장소에서 보이지 않는다.
+  간접: cert-manager의 ingress-shim이 Ingress 애너테이션(cluster-issuer, uri-sans, usages)을 읽어 Certificate를 대신 만든다. AppProject apps는 Ingress를 배포한다.
+    지금 앱 차트의 Ingress는 임의 애너테이션을 받지 않아 앱 값으로는 이 길이 열리지 않는다.
+  CertificateRequest 직접 생성: 만들 권한이 있는 주체가 CSR의 SAN과 요청의 용도·수명을 스스로 정한다.
+
+세대마다 ClusterIssuer를 따로 두는 이유: leaf의 issuerRef가 세대를 가리키면 activeGeneration을 바꾸는 것으로 leaf가 다시 발급된다.
+cert-manager는 Secret의 발급 기관 표시가 Certificate의 issuerRef와 다르면 CertificateRequest가 없어도 재발급한다.
+ClusterIssuer 하나의 secretName만 바꾸면 기존 leaf는 재발급되지 않는다.
+
+rotationPolicy Never인 이유: 이 CA 인증서는 cert-manager가 스스로 갱신한다. 갱신 때 키가 바뀌면 이미 나간 leaf와 고정한 신뢰 묶음이 한꺼번에
+어긋나 올리브 전체 연결이 끊긴다. 키를 바꾸려면 세대를 더해야 하고, 그 절차는 아직 없다(docs/runbooks-public/rotate.md 3i).
+함정: Never는 같은 이름의 Secret에 남은 키를 다시 쓴다. 세대 번호를 재사용하면 새 세대가 옛 키로 만들어진다.
+encoding PKCS8: Bun TLS 실측에 쓴 키 형식과 같다. 기본값 PKCS1(EC는 SEC1)은 재지 않았다. Ed25519 TLS 인증서도 재지 않아 ECDSA P-256을 쓴다.
+
+wave 0: leaf(wave 1)와 Deployment(wave 2)보다 먼저 Ready여야 한다. 이들을 Ready로 만드는 cert-manager는 root wave -7이라 교착이 없다.
+함정: cert-manager의 상태에 따라 실패 모양이 다르다.
+  CRD가 없으면 이 Application의 동기화가 실패하고 Deployment까지 적용되지 않는다. 재시도는 10번(homelab.retry, 약 40분)뿐이라 그 뒤에 CRD가 생기면 수동 sync로 다시 돌린다.
+  root에서 cert-manager만 끄면 자식 Application에 finalizer가 없어 컨트롤러와 CRD가 남는다. 끈 것이 발급을 멈추지 않는다.
+  CRD는 있고 컨트롤러만 멈추면 제출은 되지만 Certificate가 Ready가 되지 않는다. 이미 발급된 Secret과 떠 있는 파드는 그대로 남는다.
+함정: root에서 올리브를 끄는 것만으로는 이 파일의 리소스가 지워지지 않는다(자식 Application에 finalizer가 없다). 자체 서명 Issuer와 CA Certificate가 남은 채
+Secret을 지우면 cert-manager가 같은 세대 이름으로 새 키를 낼 수 있다. 이 파일의 리소스를 지워도 cert-manager가 만든 Secret은 남는다.
+발급하는 리소스가 사라진 것을 확인하는 폐기 절차는 아직 없다(docs/runbooks-public/rotate.md 3i).
+*/}}
+{{- if .Values.pki.enabled }}
+{{- include "olive.pki.validate" . }}
+{{- $ca := .Values.pki.ca }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: olive-ca-bootstrap
+  namespace: cert-manager
+  labels:
+    {{- include "olive.pki.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  selfSigned: {}
+{{- range $ca.generations }}
+{{- $name := printf "olive-internal-ca-g%d" (int .) }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}
+  namespace: cert-manager
+  labels:
+    {{- include "olive.pki.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  isCA: true
+  commonName: {{ $name }}
+  secretName: {{ $name }}
+  duration: {{ printf "%dh" (int $ca.durationHours) }}
+  renewBefore: {{ printf "%dh" (int $ca.renewBeforeHours) }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    encoding: PKCS8
+    rotationPolicy: Never
+  usages:
+    - cert sign
+    - crl sign
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: olive-ca-bootstrap
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ include "olive.pki.issuerName" . }}
+  labels:
+    {{- include "olive.pki.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  ca:
+    secretName: {{ $name }}
+{{- end }}
+{{- end }}
