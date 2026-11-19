@@ -69,7 +69,8 @@ groups:
       # 일부러 건 정지를 시작과 끝에 한 번씩 알린다. 네임스페이스 라벨을 없애 다섯 곳의 자물쇠가 메시지 하나로 묶인다.
       # 한 곳만 잠겨도 켜지므로 전체 차단을 뜻하지 않는다. 문구도 그만큼만 말한다.
       # 반복 간격은 alertmanager.yml의 이 경보 route가 정한다.
-      # keep_firing_for 5m: kube-state-metrics가 다시 뜨는 공백에 해소와 새 발생이 Telegram으로 나가지 않게 잇는다. 그래서 끝 알림은 자물쇠를 푼 뒤 5분 늦게 온다.
+      # keep_firing_for 5m: kube-state-metrics가 다시 뜨는 공백에 해소와 새 발생이 Telegram으로 나가지 않게 잇는다. 그래서 자물쇠를 푼 뒤 5분은 firing이 이어지고,
+      # Telegram 끝 알림은 그 뒤 Alertmanager가 이 그룹을 다음에 보낼 때 간다(이 route는 최상위 group_interval 5m을 따른다). 늦으면 10분 남짓 걸린다.
       # 시계열이 없으면 조용한 것이 맞다. 자물쇠가 없다는 뜻이다.
       - alert: OliveStopEngaged
         expr: |
