@@ -1,8 +1,10 @@
 # 올리브의 켜 둠·정지 경보. 감독이 내려가 있어도 알림이 나와야 하므로 클러스터 상태(kube-state-metrics)만으로 판단한다.
-# 정지 = 자물쇠: ResourceQuota olive-stop의 pods 한도가 0이다. status.hard를 읽으므로 quota 컨트롤러가 반영한 뒤에 보인다.
+# 정지 = 자물쇠: ResourceQuota olive-stop의 hard 자원이 pods 하나뿐이고 그 한도가 0이며, 소유 라벨이 다르다는 증거가 없다.
+# status.hard를 읽으므로 quota 컨트롤러가 반영한 뒤에 보인다. 세 경보의 자물쇠 조건은 같아야 한다(tools/ci/alerting.ts가 본다).
+# 소유 라벨은 kube_resourcequota_labels가 그 값 없이 나온 경우만 "다르다"로 친다. 지표가 아예 없을 때까지 다르다고 치면 정지 중인 감독에 꺼짐 경보가 운다.
 # 켜 둠 = 네임스페이스 annotation homelab.ukyi.app/olive-started="true"가 있고 자물쇠가 없다. homelab olive start가 남긴다.
-# 함정: 삭제 시각이 붙은 자물쇠를 지표로 가를 수 없다(kube_resourcequota에 그 값이 없다). 객체가 사라질 때까지 정지로 보인다.
-# 함정: 자물쇠의 scope와 라벨도 지표에 없다. 이름과 pods 한도 0만 본다.
+# 함정: kube-state-metrics v2.20.0의 ResourceQuota 지표에는 scope와 삭제 시각이 없다. 범위가 붙은 quota와 삭제 중인 자물쇠도 객체가 사라질 때까지 정지로 보인다.
+# 그 둘의 구별은 homelab olive stop status가 한다.
 #
 # olive_self 라벨은 이 파일의 경보만 단다. alertmanager.yml이 이 라벨로 Telegram으로만 보낸다(봇 receiver로 가지 않는다).
 # 대상(네임스페이스·Deployment)은 platform/olive/targets.yaml과 같아야 한다. tools/ci/alerting.ts가 대조한다.
@@ -19,7 +21,11 @@ groups:
             max by (namespace) (kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"})
             unless on (namespace) (max by (namespace) (kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}) > 0)
           )
-          unless on (namespace) (kube_resourcequota{resourcequota="olive-stop", resource="pods", type="hard"} == 0)
+          unless on (namespace) (
+            kube_resourcequota{resourcequota="olive-stop", resource="pods", type="hard"} == 0
+            unless on (namespace, resourcequota) kube_resourcequota{resourcequota="olive-stop", resource!="pods", type="hard"}
+            unless on (namespace, resourcequota) kube_resourcequota_labels{resourcequota="olive-stop", label_homelab_ukyi_app_olive_stop!="lock"}
+          )
         for: 15m
         labels:
           severity: warning
@@ -47,7 +53,11 @@ groups:
             )
             unless on (namespace, pod) (kube_pod_status_phase{phase=~"Succeeded|Failed"} == 1)
           )
-          and on (namespace) (kube_resourcequota{resourcequota="olive-stop", resource="pods", type="hard"} == 0)
+          and on (namespace) (
+            kube_resourcequota{resourcequota="olive-stop", resource="pods", type="hard"} == 0
+            unless on (namespace, resourcequota) kube_resourcequota{resourcequota="olive-stop", resource!="pods", type="hard"}
+            unless on (namespace, resourcequota) kube_resourcequota_labels{resourcequota="olive-stop", label_homelab_ukyi_app_olive_stop!="lock"}
+          )
         for: 3m
         labels:
           severity: critical
@@ -57,16 +67,21 @@ groups:
           description: "자물쇠는 새 파드만 막고 이미 뜬 파드는 내리지 못한다. homelab olive stop status로 상태를 보고 homelab olive stop on을 다시 실행한다. 강제 삭제는 쓰지 않는다."
 
       # 일부러 건 정지를 시작과 끝에 한 번씩 알린다. 네임스페이스 라벨을 없애 다섯 곳의 자물쇠가 메시지 하나로 묶인다.
+      # 한 곳만 잠겨도 켜지므로 전체 차단을 뜻하지 않는다. 문구도 그만큼만 말한다.
       # 반복 간격은 alertmanager.yml의 이 경보 route가 정한다.
       # keep_firing_for 5m: kube-state-metrics가 다시 뜨는 공백에 해소와 새 발생이 Telegram으로 나가지 않게 잇는다. 그래서 끝 알림은 자물쇠를 푼 뒤 5분 늦게 온다.
       # 시계열이 없으면 조용한 것이 맞다. 자물쇠가 없다는 뜻이다.
       - alert: OliveStopEngaged
         expr: |
-          count(kube_resourcequota{namespace=~"olive-control|olive-diagnosis|olive-reader|olive-session|sandbox", resourcequota="olive-stop", resource="pods", type="hard"} == 0) > 0
+          count(
+            kube_resourcequota{namespace=~"olive-control|olive-diagnosis|olive-reader|olive-session|sandbox", resourcequota="olive-stop", resource="pods", type="hard"} == 0
+            unless on (namespace, resourcequota) kube_resourcequota{resourcequota="olive-stop", resource!="pods", type="hard"}
+            unless on (namespace, resourcequota) kube_resourcequota_labels{resourcequota="olive-stop", label_homelab_ukyi_app_olive_stop!="lock"}
+          ) > 0
         keep_firing_for: 5m
         labels:
           severity: info
           olive_self: "true"
         annotations:
-          summary: 올리브 비상 정지가 걸려 있다
-          description: "실행 파드를 새로 띄우지 못한다. 풀려면 homelab olive stop off를 실행한다."
+          summary: 올리브 대상 네임스페이스 한 곳 이상에 정지 자물쇠가 걸렸다
+          description: "전체 차단과 파드 소멸은 homelab olive stop status로 확인한다. 풀려면 homelab olive stop off를 실행한다."

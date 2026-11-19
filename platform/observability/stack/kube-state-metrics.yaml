@@ -9,8 +9,7 @@ metadata:
   name: observability-kube-state-metrics
 rules:
   - apiGroups: [""]
-    # resourcequotas: 올리브 정지 자물쇠(olive-stop)를 경보가 읽는다(vmalert/rules/olive.yaml).
-    resources: ["nodes", "pods", "services", "persistentvolumeclaims", "persistentvolumes", "namespaces", "resourcequotas"]
+    resources: ["nodes", "pods", "services", "persistentvolumeclaims", "persistentvolumes", "namespaces"]
     verbs: ["list", "watch"]
   - apiGroups: ["apps"]
     resources: ["statefulsets", "daemonsets", "deployments", "replicasets"]
@@ -67,10 +66,7 @@ spec:
           args:
             - --port=8080
             - --telemetry-port=8081
-            - --resources=cronjobs,daemonsets,deployments,ingresses,jobs,namespaces,nodes,persistentvolumeclaims,persistentvolumes,pods,replicasets,resourcequotas,services,statefulsets
-            # 올리브 "켠 적 있음" 표식 하나만 지표로 낸다. 네임스페이스마다 kube_namespace_annotations 한 줄이 생기고, 표식이 없는 곳은
-            # annotation_ 라벨이 빠진 채로 나온다. 그래서 규칙은 값 "true"까지 맞춘다. 표식 이름을 바꾸면 vmalert/rules/olive.yaml도 함께 바꾼다.
-            - --metric-annotations-allowlist=namespaces=[homelab.ukyi.app/olive-started]
+            - --resources=cronjobs,daemonsets,deployments,ingresses,jobs,namespaces,nodes,persistentvolumeclaims,persistentvolumes,pods,replicasets,services,statefulsets
           env:
             - name: GOMEMLIMIT
               value: "72MiB"

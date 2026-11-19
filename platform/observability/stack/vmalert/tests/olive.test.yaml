@@ -28,7 +28,8 @@ tests:
         groupname: olive
         alertname: OliveDownWhileEnabled
         exp_alerts: []
-      - eval_time: 16m
+      # 첫 표본이 0분이라 정확히 15분에 울린다. for가 늘어나면 여기서 잡힌다.
+      - eval_time: 15m
         groupname: olive
         alertname: OliveDownWhileEnabled
         exp_alerts: &down-control
@@ -39,6 +40,10 @@ tests:
             exp_annotations:
               summary: 올리브 olive-control의 실행 파드가 켜 둔 상태인데 15분 넘게 준비되지 않았다
               description: kubectl -n olive-control get deploy,pods로 상태를 보고 파드 로그를 확인한다. 일부러 멈추려면 homelab olive stop on을 쓴다.
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: *down-control
 
   - name: 켜 둠이고 파드가 준비돼 있으면 울리지 않는다
     interval: 1m
@@ -243,7 +248,33 @@ tests:
         alertname: OliveStopEngaged
         exp_alerts: []
 
-  # 13분에 자물쇠를 풀면 마지막으로 걸려 있던 12분에서 keep_firing_for 5분 뒤 해소된다.
+  # 자물쇠와 표식 지표가 통째로 없고 나머지 kube-state-metrics 지표만 있는 상태다. 없는 지표로 우는 식(absent, or vector(0))이 끼면 여기서 잡힌다.
+  - name: 자물쇠와 표식 지표를 수집하지 않으면 감독이 꺼져 있거나 떠 있어도 세 경보가 조용하다
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "0x40"
+      - series: 'kube_pod_info{namespace="olive-control", pod="supervisor-6c9f7-x2k4p", created_by_kind="ReplicaSet", created_by_name="supervisor-6c9f7", uid="u1"}'
+        values: "1x40"
+      - series: 'kube_pod_status_phase{namespace="olive-control", pod="supervisor-6c9f7-x2k4p", phase="Running", uid="u1"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="sandbox", pod="worker-task-5f6c7-fghij", created_by_kind="ReplicaSet", created_by_name="worker-task-5f6c7", uid="u4"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+      - eval_time: 30m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+      - eval_time: 30m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: []
+
+  # 14분에 자물쇠가 사라지면 그 첫 빈 평가부터 keep_firing_for 5분을 세어 19분에 해소된다.
   - name: 정지 알림은 자물쇠가 있는 동안 켜지고 풀리면 꺼진다
     interval: 1m
     input_series:
@@ -262,8 +293,8 @@ tests:
               severity: info
               olive_self: "true"
             exp_annotations:
-              summary: 올리브 비상 정지가 걸려 있다
-              description: 실행 파드를 새로 띄우지 못한다. 풀려면 homelab olive stop off를 실행한다.
+              summary: 올리브 대상 네임스페이스 한 곳 이상에 정지 자물쇠가 걸렸다
+              description: 전체 차단과 파드 소멸은 homelab olive stop status로 확인한다. 풀려면 homelab olive stop off를 실행한다.
       - eval_time: 11m
         groupname: olive
         alertname: OliveStopEngaged
@@ -328,3 +359,130 @@ tests:
         groupname: olive
         alertname: OliveStopEngaged
         exp_alerts: []
+
+  # CLI는 hard 키가 pods 하나가 아닌 quota를 자물쇠로 인정하지 않는다. 정지로 치면 켜 둔 감독의 꺼짐이 가려진다.
+  - name: hard 자원이 더 있는 같은 이름의 quota는 자물쇠로 보지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x20"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "0x20"
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="limits.cpu", type="hard"}'
+        values: "1x20"
+      - series: 'kube_pod_info{namespace="olive-control", pod="supervisor-6c9f7-x2k4p", created_by_kind="ReplicaSet", created_by_name="supervisor-6c9f7", uid="u1"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: *down-control
+      - eval_time: 16m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: []
+
+  # 허용 목록에 든 라벨이 없는 quota도 kube_resourcequota_labels 한 줄이 라벨 없이 나온다.
+  - name: 소유 라벨이 없는 같은 이름의 quota는 자물쇠로 보지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x20"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "0x20"
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      - series: 'kube_resourcequota_labels{namespace="olive-control", resourcequota="olive-stop"}'
+        values: "1x20"
+      - series: 'kube_pod_info{namespace="olive-control", pod="supervisor-6c9f7-x2k4p", created_by_kind="ReplicaSet", created_by_name="supervisor-6c9f7", uid="u1"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: *down-control
+      - eval_time: 16m
+        groupname: olive
+        alertname: OlivePodsUpWhileStopped
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: []
+
+  - name: 소유 라벨 값이 다른 같은 이름의 quota는 자물쇠로 보지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      - series: 'kube_resourcequota_labels{namespace="olive-control", resourcequota="olive-stop", label_homelab_ukyi_app_olive_stop="other"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: []
+
+  - name: 소유 라벨이 맞는 자물쇠는 정지로 본다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x20"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "0x20"
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      - series: 'kube_resourcequota_labels{namespace="olive-control", resourcequota="olive-stop", label_homelab_ukyi_app_olive_stop="lock"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: *stop-engaged
+
+  # 소유 라벨 지표가 비는 동안 자물쇠를 못 알아보면 정지 중인 감독에 꺼짐이 거짓으로 운다.
+  - name: 소유 라벨 지표가 없으면 이름과 hard 자원으로 자물쇠를 본다
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_annotations{namespace="olive-control", annotation_homelab_ukyi_app_olive_started="true"}'
+        values: "1x20"
+      - series: 'kube_deployment_status_replicas_ready{namespace="olive-control", deployment="supervisor"}'
+        values: "0x20"
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveDownWhileEnabled
+        exp_alerts: []
+      - eval_time: 16m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: *stop-engaged
+
+  - name: 한 네임스페이스의 다른 quota가 다른 네임스페이스의 자물쇠를 가리지 않는다
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      - series: 'kube_resourcequota{namespace="olive-control", resourcequota="olive-stop", resource="limits.cpu", type="hard"}'
+        values: "1x20"
+      - series: 'kube_resourcequota{namespace="sandbox", resourcequota="olive-stop", resource="pods", type="hard"}'
+        values: "0x20"
+      - series: 'kube_resourcequota_labels{namespace="sandbox", resourcequota="olive-stop", label_homelab_ukyi_app_olive_stop="lock"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: olive
+        alertname: OliveStopEngaged
+        exp_alerts: *stop-engaged

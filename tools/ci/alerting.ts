@@ -14,15 +14,21 @@ const RUNBOOK_BASE = "https://github.com/ukyi-app/homelab/blob/main/";
 const OLIVE_RULE_FILE = `${RULES}/olive.yaml`;
 const OLIVE_ALERT_FIXTURES = "tools/ci/fixtures/alerting/*.yaml";
 const OLIVE_MARKER_LABEL = "annotation_homelab_ukyi_app_olive_started";
+const OLIVE_LOCK_NAME = "olive-stop";
+const OLIVE_LOCK_OWNER_LABEL = "label_homelab_ukyi_app_olive_stop";
+const OLIVE_LOCK_OWNER_VALUE = "lock";
 
 type Rule = { alert?: string; record?: string; expr?: string; labels?: Record<string, string>; annotations?: { runbook?: string } };
-type RuleFile = { groups?: { name: string; rules?: Rule[] }[] };
+type RuleFile = { groups?: { name: string; labels?: Record<string, string>; rules?: Rule[] }[] };
 type TestFile = { rule_files?: string[]; tests?: { alert_rule_test?: { alertname: string; exp_alerts?: unknown[] }[] }[] };
+type Matcher = { op: string; value: string };
 
-// 식에서 그 지표의 선택자마다 라벨을 읽는다.
-function selectors(expr: string, metric: string): Record<string, string>[] {
-  return [...expr.matchAll(new RegExp(`\\b${metric}\\{([^}]*)\\}`, "g"))].map((m) => Object.fromEntries([...m[1].matchAll(/([a-zA-Z_]+)=~?"([^"]*)"/g)].map((l) => [l[1], l[2]])));
+// 연산자까지 읽는다. =~가 =로 바뀌면 값은 같아 보여도 실제 파드 이름에 맞지 않아 경보가 조용해진다.
+function selectors(expr: string, metric: string): Record<string, Matcher>[] {
+  return [...expr.matchAll(new RegExp(`\\b${metric}\\{([^}]*)\\}`, "g"))].map((m) => Object.fromEntries([...m[1].matchAll(/([a-zA-Z_]+)(=~|!~|!=|=)"([^"]*)"/g)].map((l) => [l[1], { op: l[2], value: l[3] }])));
 }
+const val = (m?: Matcher) => m?.value ?? "";
+const is = (m: Matcher | undefined, op: string, value: string) => m?.op === op && m.value === value;
 
 // 경보의 대상과 targets.yaml이 어긋나면 정지·꺼짐을 놓치거나 정지 대상이 아닌 파드로 거짓 경보가 난다.
 export function checkOliveAlerts(oliveText: string, rawTargets: unknown, others: { file: string; text: string }[]): Violation[] {
@@ -41,6 +47,8 @@ export function checkOliveAlerts(oliveText: string, rawTargets: unknown, others:
   for (const r of rules) if (r.alert && r.labels?.olive_self !== "true") bad(`${r.alert}에 olive_self: "true" 라벨이 없다. 봇 receiver로 샌다`);
   for (const o of others) {
     for (const g of (parseAll(o.text)[0] as RuleFile).groups ?? []) {
+      // vmalert는 그룹 공통 라벨을 규칙마다 합친다. 그룹에 달아도 그 경보들이 봇 receiver를 건너뛴다.
+      if (g.labels?.olive_self !== undefined) out.push({ rule: "olive-alert-targets", where: o.file, message: `규칙 그룹 ${g.name}의 공통 olive_self 라벨은 쓸 수 없다. ${OLIVE_RULE_FILE}의 경보만 단다` });
       for (const r of g.rules ?? []) if (r.labels?.olive_self !== undefined) out.push({ rule: "olive-alert-targets", where: o.file, message: `${r.alert}의 olive_self 라벨은 ${OLIVE_RULE_FILE}의 경보만 단다` });
     }
   }
@@ -51,17 +59,33 @@ export function checkOliveAlerts(oliveText: string, rawTargets: unknown, others:
   const stoppable = targets.filter((t) => t.stop === true);
 
   const down = expr("OliveDownWhileEnabled");
-  same("OliveDownWhileEnabled의 켤 수 있는 대상", new Set(selectors(down, "kube_deployment_status_replicas_ready").map((s) => `${s.namespace}/${s.deployment}`)), new Set(startable.map(pair)));
+  const ready = selectors(down, "kube_deployment_status_replicas_ready");
+  same("OliveDownWhileEnabled의 켤 수 있는 대상", new Set(ready.map((s) => `${val(s.namespace)}/${val(s.deployment)}`)), new Set(startable.map(pair)));
+  for (const s of ready) if (s.namespace?.op !== "=" || s.deployment?.op !== "=") bad(`OliveDownWhileEnabled의 ${val(s.namespace)} 선택자는 네임스페이스와 Deployment를 =로 맞춰야 한다`);
   const markers = selectors(down, "kube_namespace_annotations");
-  same("OliveDownWhileEnabled의 표식 네임스페이스", new Set(markers.map((s) => s.namespace)), new Set(startable.map((t) => t.namespace)));
-  for (const m of markers) if (m[OLIVE_MARKER_LABEL] !== "true") bad(`OliveDownWhileEnabled의 표식 선택자(${m.namespace})는 ${OLIVE_MARKER_LABEL}="true"까지 맞춰야 한다`);
+  same("OliveDownWhileEnabled의 표식 네임스페이스", new Set(markers.map((s) => val(s.namespace))), new Set(startable.map((t) => t.namespace)));
+  for (const m of markers) {
+    if (!is(m[OLIVE_MARKER_LABEL], "=", "true")) bad(`OliveDownWhileEnabled의 표식 선택자(${val(m.namespace)})는 ${OLIVE_MARKER_LABEL}="true"까지 맞춰야 한다`);
+    if (m.namespace?.op !== "=") bad(`OliveDownWhileEnabled의 표식 선택자(${val(m.namespace)})는 네임스페이스를 =로 맞춰야 한다`);
+  }
 
   const pods = selectors(expr("OlivePodsUpWhileStopped"), "kube_pod_info");
-  for (const p of pods) if (p.created_by_kind !== "ReplicaSet" || !/^.+-\[a-z0-9\]\+$/.test(p.created_by_name ?? "")) bad(`OlivePodsUpWhileStopped의 ${p.namespace} 선택자는 ReplicaSet과 <Deployment>-[a-z0-9]+로 골라야 한다`);
-  same("OlivePodsUpWhileStopped의 정지 대상", new Set(pods.map((p) => `${p.namespace}/${(p.created_by_name ?? "").replace(/-\[a-z0-9\]\+$/, "")}`)), new Set(stoppable.map(pair)));
+  for (const p of pods) {
+    if (val(p.created_by_kind) !== "ReplicaSet" || !/^.+-\[a-z0-9\]\+$/.test(val(p.created_by_name))) bad(`OlivePodsUpWhileStopped의 ${val(p.namespace)} 선택자는 ReplicaSet과 <Deployment>-[a-z0-9]+로 골라야 한다`);
+    if (p.namespace?.op !== "=" || p.created_by_kind?.op !== "=" || p.created_by_name?.op !== "=~") bad(`OlivePodsUpWhileStopped의 ${val(p.namespace)} 선택자는 namespace·created_by_kind를 =로, created_by_name을 =~로 맞춰야 한다`);
+  }
+  same("OlivePodsUpWhileStopped의 정지 대상", new Set(pods.map((p) => `${val(p.namespace)}/${val(p.created_by_name).replace(/-\[a-z0-9\]\+$/, "")}`)), new Set(stoppable.map(pair)));
 
-  const locks = selectors(expr("OliveStopEngaged"), "kube_resourcequota");
-  same("OliveStopEngaged의 네임스페이스", new Set(locks.flatMap((l) => (l.namespace ?? "").split("|"))), new Set(stoppable.map((t) => t.namespace)));
+  const locks = selectors(expr("OliveStopEngaged"), "kube_resourcequota").filter((l) => is(l.resource, "=", "pods"));
+  same("OliveStopEngaged의 네임스페이스", new Set(locks.flatMap((l) => val(l.namespace).split("|"))), new Set(stoppable.map((t) => t.namespace)));
+  for (const l of locks) if (l.namespace?.op !== "=~") bad("OliveStopEngaged의 네임스페이스는 =~로 맞춰야 한다");
+
+  // 세 경보가 자물쇠를 같은 조건으로 봐야 한다. 하나만 넓으면 CLI가 자물쇠로 인정하지 않는 quota가 꺼짐을 가리거나 정지로 알려진다.
+  for (const name of ["OliveDownWhileEnabled", "OlivePodsUpWhileStopped", "OliveStopEngaged"]) {
+    const e = expr(name);
+    if (!selectors(e, "kube_resourcequota").some((s) => is(s.resourcequota, "=", OLIVE_LOCK_NAME) && is(s.resource, "!=", "pods") && is(s.type, "=", "hard"))) bad(`${name}의 자물쇠 판정은 pods 밖의 hard 자원이 있는 quota를 빼야 한다`);
+    if (!selectors(e, "kube_resourcequota_labels").some((s) => is(s.resourcequota, "=", OLIVE_LOCK_NAME) && is(s[OLIVE_LOCK_OWNER_LABEL], "!=", OLIVE_LOCK_OWNER_VALUE))) bad(`${name}의 자물쇠 판정은 소유 라벨이 다른 quota를 빼야 한다`);
+  }
   return out;
 }
 
