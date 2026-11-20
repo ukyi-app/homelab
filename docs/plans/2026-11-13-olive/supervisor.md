@@ -428,7 +428,7 @@ MCP 서버 이름은 `olive`다. 도구는 아래 열 개뿐이다. 입력·반�
 | `memory status`, `memory forget <참조>` | 보관 상태, 잊기(O18) |
 | 계정 명령 | `accounts.md` §7(O17) |
 
-[결정, D-91] 접수 영수증을 받은 뒤 모르게 된 실행을 관리자가 확인한 뒤 "실패로 끝남"으로 닫는 명령이 하나 더 있다(§3의 6). 그 명령의 이름과 확인 절차의 글자는 정하지 않았고, 아직 없다.
+[결정, D-91] 관리자가 접수 뒤 모르게 된 실행을 §3의 6에 따라 확인하고 ‘실패로 끝남’을 기록할 homelab CLI 명령 하나를 감독을 켜기 전에 구현한다. 명령은 아직 구현되지 않았고, 이름과 확인 절차의 문구는 미정이다.
 
 감독 파드 안 관리 진입점의 응답 모양: D-60은 접근 경로를 정했고, homelab #1329가 병합되어 감독의 `bun src/main/admin.ts status`는 CLI가 검사하는 `olive-supervisor-status/v1`의 여덟 칸(`schema`, `alive`, `queued`, `running`, `diagnosis`, `stop`, `stopGeneration`, `intakeOpen`)을 돌려줘야 한다 [확인, `cli/src/core/olive-admin.ts`]. 그 모양은 CLI 쪽이 낸 안이었고 병합으로 감독 쪽이 맞출 기준이 됐다. `queue`·`runs`·`watch`의 구체적인 모양은 정하지 않았다.
 
