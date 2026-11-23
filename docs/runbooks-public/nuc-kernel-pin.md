@@ -78,7 +78,7 @@ GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux 7.0.0-44-generic"
 
 - **보안 패치 지연:** 자동 업그레이드가 새 커널을 설치해도 고정을 옮기기 전에는 `7.0.0-44`로 부팅한다.
 - **`7.0.0-38`로 되돌리지 않는다:** CVE-2026-98432에 취약하다. 또 2026-11-06 14:38과 11-09 22:48에 부하 중 크래시했다(`list_del corruption`, `folio_lruvec_lock_irqsave` GPF). 원인은 확정되지 않았다. 덤프는 `/var/crash/202611061439`, `/var/crash/202611092248`에 있다. `7.0.0-44`에서 같은 크래시가 나는지는 아직 모르므로 전체 시험·변이·podman을 여러 작업자가 동시에 돌리지 않는다.
-- **덮개를 깐 뒤의 재부팅은 아직 없었다:** 부팅 때 `apparmor.service`(`sysinit.target` 앞)가 k3s보다 먼저 덮개를 올린다는 것은 유닛 순서에서 읽은 것이다. 다음 재부팅에서 위 "확인"으로 본다.
+- **덮개는 부팅 때 `apparmor.service`가 올린다:** 2026-11-23 11:12 재부팅에서 쟀다. `apparmor.service`가 11:12:13에 끝나고 k3s가 11:12:14에 시작했다. containerd의 `profile_load`는 없었고(덮개가 없던 10:05 부팅에는 k3s 시작 5초 뒤에 있었다), Postgres는 라벨 `cri-containerd.apparmor.d//&unconfined`로 뜬 채 10분 동안 시그널 차단 0건이었다. 이 서비스가 꺼지거나 파일이 빠지면 containerd가 규칙이 빠진 기본값을 올린다. `host/verify.sh`가 둘을 본다.
 
 ## 고정을 옮기거나 풀기
 
