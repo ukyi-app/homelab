@@ -1,4 +1,4 @@
-// Localhost 프로필(봇 작업 레인 worker, node-exporter)을 containerd 기본값(base/) + 아래 변경으로 만든다.
+// Localhost 프로필(봇 작업 레인 worker, node-exporter)과 containerd 기본 프로필의 덮개를 containerd 기본값(base/) + 아래 변경으로 만든다.
 //
 // 사용: bun tools/sandbox-profiles/generate.ts [--check] [--host-dir <host 경로>]
 //   인자 없음  host/sandbox-profiles/에 쓴다.
@@ -6,6 +6,7 @@
 //
 // 이 파일은 프로필마다 지금 버전 하나만 만든다. 내용을 바꾸면 그 버전을 올려 새 이름의 파일을 만들고 옛 파일은 그대로 둔다.
 // 도는 파드는 시작할 때 고른 이름을 참조하므로, 같은 이름을 덮으면 그 파드가 검증 안 된 규칙을 받는다.
+// containerd 기본 프로필의 덮개만 예외다. containerd가 정한 이름이라 버전을 붙일 수 없다.
 //
 // 변경은 바꿀 줄을 정확히 한 번씩 찾아 적용한다. containerd를 올려 기본값이 달라지면 조용히 어긋나지 않고 여기서 멈춘다.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,8 +16,10 @@ const VERSION = "v2";
 const SECCOMP_FILE = `sandbox-worker-${VERSION}.json`;
 const APPARMOR_NAME = `homelab-sandbox-worker-${VERSION}`;
 // worker와 따로 올린다. 한쪽 규칙이 바뀌어도 다른 쪽 파드가 참조하는 이름은 그대로다.
-const NODE_EXPORTER_VERSION = "v2";
+const NODE_EXPORTER_VERSION = "v3";
 const NODE_EXPORTER_APPARMOR_NAME = `homelab-sandbox-node-exporter-${NODE_EXPORTER_VERSION}`;
+// containerd가 프로필을 지정하지 않은 컨테이너에 붙이는 이름이다(CRI 플러그인의 상수). 다른 이름으로 올리면 덮이지 않는다.
+const CONTAINERD_DEFAULT_NAME = "cri-containerd.apparmor.d";
 const NAME_PLACEHOLDER = "@PROFILE_NAME@";
 
 const HERE = dirname(new URL(import.meta.url).pathname);
@@ -97,6 +100,25 @@ const APPARMOR_CHANGES: [string, string][] = [
   ],
 ];
 
+// userns를 쓰지 않는 파드의 겹친 라벨. worker의 STACKED_SIGNAL과 규칙은 같고 생기는 까닭이 다르다.
+const KERNEL_STACKED_SIGNAL = `  # 커널 7.0.0-42·7.0.0-44에서 컨테이너 프로세스의 라벨이 ${NAME_PLACEHOLDER}//&unconfined로 겹쳐 붙는다(실측).
+  # peer는 겹친 라벨 문자열 전체와 맞춰 보므로 이름만 쓴 위 규칙으로는 같은 컨테이너 안 시그널이 거부된다.
+  # *는 /를 넘지 못해 *이름*으로도 안 된다. **는 //& 구분자까지 넘는다.
+  # 거부되면 Postgres의 래치 깨우기(SIGURG)가 사라져 연결이 authentication에서 멈춘다(docs/runbooks-public/nuc-kernel-pin.md).
+  signal (send,receive) peer=**${NAME_PLACEHOLDER}**,
+`;
+
+const KERNEL_STACKED_CHANGES: [string, string][] = [
+  [
+    `  signal (send,receive) peer=${NAME_PLACEHOLDER},\n`,
+    `  signal (send,receive) peer=${NAME_PLACEHOLDER},\n${KERNEL_STACKED_SIGNAL}`,
+  ],
+  [
+    `  ptrace (trace,tracedby,read,readby) peer=${NAME_PLACEHOLDER},\n`,
+    `  ptrace (trace,tracedby,read,readby) peer=${NAME_PLACEHOLDER},\n  ptrace (trace,tracedby,read,readby) peer=**${NAME_PLACEHOLDER}**,\n`,
+  ],
+];
+
 const NODE_EXPORTER_HEADER = `#
 # 생성물이다. 손으로 고치지 않는다: tools/sandbox-profiles/generate.ts(containerd 기본값 + 변경).
 # 내용을 바꾸려면 이름의 버전을 올린다. 같은 이름에 apparmor_parser -r을 하면 도는 파드의 규칙이 그 자리에서 바뀐다.
@@ -105,7 +127,8 @@ const NODE_EXPORTER_HEADER = `#
 # SANDBOX_PROFILE_CONTAINERD 판이다. k3s·containerd를 올리면 다시 생성한다.
 #
 # 기본 프로필에는 dbus 규칙이 없어 시스템 버스가 Hello부터 거부한다. 그러면 node-exporter의 systemd 수집기가 실패하고
-# node_systemd_unit_state가 사라져 NodeSystemdUnitFailed가 울리지 못한다. 기본값에 더하는 것은 아래 dbus 규칙뿐이다.
+# node_systemd_unit_state가 사라져 NodeSystemdUnitFailed가 울리지 못한다. 기본값에 더하는 것은 아래 dbus 규칙과
+# 겹친 라벨의 signal·ptrace 규칙뿐이다.
 #
 `;
 
@@ -120,12 +143,36 @@ const NODE_EXPORTER_DBUS = `  # 시스템 버스 접속, 유닛 목록, Manager�
   deny dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=AddMatch peer=(name=org.freedesktop.DBus),
 `;
 
+// dbus 규칙은 겹친 라벨의 ptrace 줄 뒤에 붙인다. 앞의 변경이 만든 줄을 찾으므로 순서를 바꾸지 않는다.
 const NODE_EXPORTER_APPARMOR_CHANGES: [string, string][] = [
   ["\nabi <abi/3.0>,", `\n${NODE_EXPORTER_HEADER}abi <abi/3.0>,`],
+  ...KERNEL_STACKED_CHANGES,
   [
-    `  ptrace (trace,tracedby,read,readby) peer=${NAME_PLACEHOLDER},\n`,
-    `  ptrace (trace,tracedby,read,readby) peer=${NAME_PLACEHOLDER},\n\n${NODE_EXPORTER_DBUS}`,
+    `  ptrace (trace,tracedby,read,readby) peer=**${NAME_PLACEHOLDER}**,\n`,
+    `  ptrace (trace,tracedby,read,readby) peer=**${NAME_PLACEHOLDER}**,\n\n${NODE_EXPORTER_DBUS}`,
   ],
+];
+
+const CONTAINERD_DEFAULT_HEADER = `#
+# 생성물이다. 손으로 고치지 않는다: tools/sandbox-profiles/generate.ts(containerd 기본값 + 변경).
+#
+# containerd가 프로필을 지정하지 않은 모든 컨테이너에 붙이는 기본 프로필을 같은 이름으로 먼저 올려 덮는다.
+# containerd는 이 이름이 커널에 이미 있으면 자기 기본값을 올리지 않는다(contrib/apparmor의 LoadDefaultProfile).
+# 부팅 때는 apparmor.service가 k3s보다 먼저 이 파일을 올린다. 이 파일이 없으면 containerd가 규칙이 빠진 기본값을 올린다.
+#
+# containerd가 정한 이름이라 버전을 붙일 수 없다. 내용을 바꿔 install.sh --sandbox-profiles를 돌리면
+# apparmor_parser -r이 도는 모든 파드의 규칙을 그 자리에서 바꾼다.
+#
+# containerd 기본 프로필의 복사본이라 upstream 수정이 저절로 들어오지 않는다. 출발점은 host/versions.env의
+# SANDBOX_PROFILE_CONTAINERD 판이다. k3s·containerd를 올리면 다시 생성한다.
+#
+# 기본값에 더하는 것은 겹친 라벨의 signal·ptrace 규칙뿐이다.
+#
+`;
+
+const CONTAINERD_DEFAULT_APPARMOR_CHANGES: [string, string][] = [
+  ["\nabi <abi/3.0>,", `\n${CONTAINERD_DEFAULT_HEADER}abi <abi/3.0>,`],
+  ...KERNEL_STACKED_CHANGES,
 ];
 
 function replaceOnce(text: string, from: string, to: string): string {
@@ -158,6 +205,10 @@ function main(argv: string[]): number {
     [
       join(hostDir, "sandbox-profiles/apparmor", NODE_EXPORTER_APPARMOR_NAME),
       renderAppArmor(baseAppArmor, NODE_EXPORTER_APPARMOR_NAME, NODE_EXPORTER_APPARMOR_CHANGES),
+    ],
+    [
+      join(hostDir, "sandbox-profiles/apparmor-default", CONTAINERD_DEFAULT_NAME),
+      renderAppArmor(baseAppArmor, CONTAINERD_DEFAULT_NAME, CONTAINERD_DEFAULT_APPARMOR_CHANGES),
     ],
   ];
   let bad = 0;

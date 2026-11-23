@@ -136,7 +136,7 @@ KUBECONFIG=$HOME/.kube/homelab.yaml kubectl get configmap local-path-config -n k
 [확인] 진행 중 세션·nonce·receipt가 들어가며, 별도 `sandbox/codex-home` PVC도 nonce와 프로필에 따른 자격을 보존한다([platform/sandbox/templates/task-worker-pvc.yaml:2](../../platform/sandbox/templates/task-worker-pvc.yaml#L2), [platform/sandbox/templates/worker-pvc.yaml:1](../../platform/sandbox/templates/worker-pvc.yaml#L1)).
 
 **journald·kdump.** [확인] journald 목표는 persistent **512MiB**, 루트에 남기는 공간 **1GiB**, runtime **64MiB**다([host/etc/systemd/journald.conf.d/10-k3s-node.conf:5](../../host/etc/systemd/journald.conf.d/10-k3s-node.conf#L5)).
-커널 크래시 덤프는 `/var/crash`에 있고, 2026-11-06 크래시 원인은 미확정이라고 기록돼 있다([nuc-kernel-pin.md:51](nuc-kernel-pin.md#L51)).
+커널 크래시 덤프는 `/var/crash`에 있고, 2026-11-06 크래시 원인은 미확정이라고 기록돼 있다([nuc-kernel-pin.md:80](nuc-kernel-pin.md#L80)).
 위의 `du`는 할당 공간이다. 덤프 파일의 표시 크기만 보고 그만큼 회수된다고 계산하지 않는다.
 
 ### 홈 폴더: 관리자 계정으로 재기
@@ -251,7 +251,7 @@ bun pm cache
 ### 3.4 조사가 끝난 커널 덤프
 
 1. **지울 것:** 관리자가 조사를 종료했고 필요한 사본을 NUC 밖에 확인한 특정 덤프 디렉터리 하나.
-2. **먼저 확인:** 날짜가 오래됐다는 이유만으로 종료됐다고 판단하지 않는다. [확인] [nuc-kernel-pin.md:51](nuc-kernel-pin.md#L51)의 원인 미확정 크래시는 기본 보존 대상이다. 다른 날짜 덤프도 관리자가 조사 상태를 확인한다.
+2. **먼저 확인:** 날짜가 오래됐다는 이유만으로 종료됐다고 판단하지 않는다. [확인] [nuc-kernel-pin.md:80](nuc-kernel-pin.md#L80)의 원인 미확정 크래시는 기본 보존 대상이다. 다른 날짜 덤프도 관리자가 조사 상태를 확인한다.
 3. **명령:** 조회 `ls -l /var/crash`, `du -x -h --max-depth=1 /var/crash`는 실행 성공했다. 삭제는 **[미확인: 돌려 보지 않음]**, [GNU rm](https://www.gnu.org/software/coreutils/manual/html_node/rm-invocation.html)이 근거다.
 
    ```sh
@@ -324,7 +324,7 @@ worktree의 빌드 산출물·패키지 실행 파일·Podman 저장소를 그�
 - **삭제 원장:** `/mnt/bulk/homelab-bot/deletion-ledger`, `deletions.jsonl`, `ledger.json`, 해당 PV·PVC. 원장은 일반 앱 데이터 purge에도 넣지 않는다([확인] [data/homelab-bot/values.yaml:4](../../data/homelab-bot/values.yaml#L4), [restore.md:2011](restore.md#L2011)). 빈 원장 생성·과거 사본 덮어쓰기로 청소하지 않는다.
 - **작업 상태와 수집 위치:** `/var/lib/taskstate/volume.img`·`volume.uuid`, 진행 중 작업·nonce·receipt, `codex-home`, `/var/lib/vector`. 작업 상태는 재개에, Vector 체크포인트는 로그 재수집 방지에 필요하다([확인] [platform/sandbox/templates/task-worker-pvc.yaml:2](../../platform/sandbox/templates/task-worker-pvc.yaml#L2), [platform/observability/stack/vector.yaml:96](../../platform/observability/stack/vector.yaml#L96)).
 - **백업·복구 자산:** 로컬 런북·키·Terraform state·Infisical 암호화 내보내기·마지막 정상 사본. 보관 규칙은 [recovery-assets.md:5](recovery-assets.md#L5), [같은 파일:36](recovery-assets.md#L36)이다. [확인] R2 백업 보존 `14d`는 원격 base backup·WAL의 정책이다([platform/cnpg/cluster/templates/objectstore.yaml:14](../../platform/cnpg/cluster/templates/objectstore.yaml#L14)). 이를 줄여도 루트 디스크는 비워지지 않는다.
-- **조사 원본·고정 커널:** 원인 미확정 덤프·필요한 journal, 부팅에 쓰는 고정 커널. [확인] 커널과 덤프의 보존 이유는 [nuc-kernel-pin.md:41](nuc-kernel-pin.md#L41)이다. 디스크 청소에 무조건적인 커널 자동 제거를 끼워 넣지 않는다.
+- **조사 원본·고정 커널:** 원인 미확정 덤프·필요한 journal, 부팅에 쓰는 고정 커널. [확인] 커널과 덤프의 보존 이유는 [nuc-kernel-pin.md:70](nuc-kernel-pin.md#L70)이다. 디스크 청소에 무조건적인 커널 자동 제거를 끼워 넣지 않는다.
 
 ## 6. 끝난 뒤 확인
 

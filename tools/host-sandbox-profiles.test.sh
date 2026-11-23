@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 샌드박스 프로필의 시험. ci가 부른다. root·AppArmor·Go 없이 돈다.
 #   저장소 값: 생성 결과 = 커밋한 프로필(base/ 기준), 이름·peer 규칙, k3s·containerd·go.mod 짝, seccomp 차이.
-#   install.sh --sandbox-profiles: 첫 설치·재실행 멱등, 옛 버전 보존, 멈춰야 할 때 아무것도 바꾸지 않음, 적재 실패 판정.
+#   install.sh --sandbox-profiles: 첫 설치·재실행 멱등, 옛 버전 보존, 멈춰야 할 때 아무것도 바꾸지 않음, 적재 실패 판정,
+#     containerd 기본 프로필 덮개는 내용이 달라도 덮음.
 #   verify.sh check_sandbox_profiles: 통과, 해시·적재·판 차이, sudo 없을 때 미검증.
 # 가짜 apparmor_parser·systemctl과 임시 경로를 쓴다. "적재"는 가짜 파서가 상태 파일에 적는 것이다.
 # 실제 문법 검사와 containerd 기본값 재생성은 tools/sandbox-profiles/regen.sh --check, 실제 적재는 사람이 sudo로 본다.
@@ -21,6 +22,7 @@ ME="$(id -u):$(id -g)"
 PROFILES="$ROOT/host/sandbox-profiles"
 SECCOMP_NAME=sandbox-worker-v2.json
 APPARMOR_NAME=homelab-sandbox-worker-v2
+DEFAULT_NAME=cri-containerd.apparmor.d
 
 # ------------------------------------------------------------------------------ 저장소 값
 
@@ -37,6 +39,15 @@ if bun "$ROOT/tools/sandbox-profiles/generate.ts" --check --host-dir "$TMP/tampe
   fail "손으로 고친 프로필을 --check가 통과시켰다"
 else
   pass "손으로 고친 프로필을 --check가 잡는다"
+fi
+
+mkdir -p "$TMP/tampered-default"
+cp -r "$PROFILES" "$TMP/tampered-default/sandbox-profiles"
+printf '# 손으로 고침\n' >>"$TMP/tampered-default/sandbox-profiles/apparmor-default/$DEFAULT_NAME"
+if bun "$ROOT/tools/sandbox-profiles/generate.ts" --check --host-dir "$TMP/tampered-default" >"$TMP/gen.out" 2>&1; then
+  fail "손으로 고친 containerd 기본 프로필 덮개를 --check가 통과시켰다"
+else
+  pass "손으로 고친 containerd 기본 프로필 덮개를 --check가 잡는다"
 fi
 
 # base의 줄이 바뀌면 조용히 지나가지 않고 멈춰야 한다. generate.ts를 복사해 base만 바꾼 사본으로 돌린다.
@@ -71,7 +82,7 @@ for f in "$PROFILES"/apparmor/*; do
   others="$(grep -E '^[[:space:]]*(signal|ptrace) ' "$f" | grep -oE 'peer=[^,]*' \
     | grep -vE "^peer=(\*\*)?${n}(\*\*)?\$|^peer=(unconfined|runc|crun)\$" || true)"
   [ -z "$others" ] || bad_names+=" ${n}:peer(${others})"
-  # 겹친 라벨과 bwrap의 mount는 userns를 쓰는 worker에만 있다.
+  # bwrap의 mount는 userns를 쓰는 worker에만 있다. 겹친 라벨 규칙은 worker 전부와 아래에서 따로 보는 두 프로필에 있다.
   case "$n" in
     homelab-sandbox-worker-*)
       for rule in "signal (send,receive) peer=${n}," "signal (send,receive) peer=**${n}**," \
@@ -88,24 +99,45 @@ else
   fail "AppArmor 이름 규칙:${bad_names}"
 fi
 
+# 기본값과의 차이를 규칙 줄로 본다. 주석 줄과 빈 줄은 판정에서 뺀다.
+# removed·added <프로필 파일> <이름>: 기본값에서 빠진 줄, 기본값에 더한 줄.
+rules() { grep -vE '^[[:space:]]*(#|$)' "$1" | sed "s/@PROFILE_NAME@/$2/g" | LC_ALL=C sort; }
+removed() { LC_ALL=C comm -23 <(rules "$ROOT/tools/sandbox-profiles/base/apparmor.txt" "$2") <(rules "$1" "$2"); }
+added() { LC_ALL=C comm -13 <(rules "$ROOT/tools/sandbox-profiles/base/apparmor.txt" "$2") <(rules "$1" "$2"); }
+# 겹친 라벨(<이름>//&unconfined)의 signal·ptrace. 빠지면 같은 컨테이너 안 시그널이 거부돼 Postgres가 멈춘다.
+stacked_rules() {
+  printf '  ptrace (trace,tracedby,read,readby) peer=**%s**,\n  signal (send,receive) peer=**%s**,\n' "$1" "$1"
+}
+
 # node-exporter 프로필은 호스트 루트가 보이는 파드에 붙으므로 기본값보다 넓어지면 안 된다. 기본값의 줄은 하나도 빠지지 않고,
-# 더한 규칙은 시스템 버스의 읽기 호출 셋과 조용한 거부 하나뿐이어야 한다. 주석 줄과 빈 줄은 판정에서 뺀다.
-NE_NAME=homelab-sandbox-node-exporter-v2
+# 더한 규칙은 시스템 버스의 읽기 호출 셋, 조용한 거부 하나, 겹친 라벨의 signal·ptrace뿐이어야 한다.
+NE_NAME=homelab-sandbox-node-exporter-v3
 ne_file="$PROFILES/apparmor/$NE_NAME"
-ne_rules() { grep -vE '^[[:space:]]*(#|$)' "$1" | sed "s/@PROFILE_NAME@/${NE_NAME}/g" | LC_ALL=C sort; }
-ne_removed="$(LC_ALL=C comm -23 <(ne_rules "$ROOT/tools/sandbox-profiles/base/apparmor.txt") <(ne_rules "$ne_file"))"
-ne_added="$(LC_ALL=C comm -13 <(ne_rules "$ROOT/tools/sandbox-profiles/base/apparmor.txt") <(ne_rules "$ne_file"))"
-ne_want="$(LC_ALL=C sort <<'EOF'
+ne_removed="$(removed "$ne_file" "$NE_NAME")"
+ne_added="$(added "$ne_file" "$NE_NAME")"
+ne_dbus="$(cat <<'EOF'
   dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=Hello peer=(name=org.freedesktop.DBus),
   dbus send bus=system path=/org/freedesktop/systemd1 interface=org.freedesktop.systemd1.Manager member=ListUnits peer=(name=org.freedesktop.systemd1),
   dbus send bus=system path=/org/freedesktop/systemd1{,/unit/*} interface=org.freedesktop.DBus.Properties member=Get peer=(name=org.freedesktop.systemd1),
   deny dbus send bus=system path=/org/freedesktop/DBus interface=org.freedesktop.DBus member=AddMatch peer=(name=org.freedesktop.DBus),
 EOF
 )"
+ne_want="$({ printf '%s\n' "$ne_dbus"; stacked_rules "$NE_NAME"; } | LC_ALL=C sort)"
 if [ -z "$ne_removed" ] && [ "$ne_added" = "$ne_want" ]; then
-  pass "node-exporter AppArmor: 기본값에서 빠진 규칙이 없고 더한 것은 dbus 읽기 호출 셋과 조용한 거부 하나뿐이다"
+  pass "node-exporter AppArmor: 기본값에서 빠진 규칙이 없고 더한 것은 dbus 읽기 호출 셋, 조용한 거부 하나, 겹친 라벨 규칙뿐이다"
 else
   fail "node-exporter AppArmor 차이가 기대와 다르다. 빠짐: ${ne_removed:-없음} 더함: ${ne_added:-없음}"
+fi
+
+# containerd 기본 프로필의 덮개는 프로필을 지정하지 않은 모든 파드에 붙는다. 기본값과의 차이는 겹친 라벨 규칙 둘뿐이어야 한다.
+default_file="$PROFILES/apparmor-default/$DEFAULT_NAME"
+default_removed="$(removed "$default_file" "$DEFAULT_NAME")"
+default_added="$(added "$default_file" "$DEFAULT_NAME")"
+if grep -qF "profile ${DEFAULT_NAME} flags=" "$default_file" && [ -z "$default_removed" ] \
+  && [ "$default_added" = "$(stacked_rules "$DEFAULT_NAME" | LC_ALL=C sort)" ]; then
+  pass "containerd 기본 프로필 덮개: 기본값에서 빠진 규칙이 없고 더한 것은 겹친 라벨 규칙 둘뿐이다"
+else
+  fail "containerd 기본 프로필 덮개의 차이가 기대와 다르다. 빠짐: ${default_removed:-없음} 더함: ${default_added:-없음}"
 fi
 
 # 참조한 이름의 프로필이 노드에 없으면 파드가 뜨지 못하고 노드 지표가 모두 끊긴다. Git에 있는 이름만 참조해야 깔린다.
@@ -279,6 +311,24 @@ if [ -e "$D/kubelet/seccomp/homelab/sandbox-worker-v0.json" ] && [ -e "$D/apparm
 else
   fail "재실행: 옛 버전 파일이 사라졌다"
 fi
+
+# containerd 기본 프로필의 덮개: 첫 설치에 함께 깔리고, 깔린 내용이 달라도 멈추지 않고 덮어 다시 적재한다.
+DEFAULT_DEST="$D/apparmor.d/$DEFAULT_NAME"
+if cmp -s "$PROFILES/apparmor-default/$DEFAULT_NAME" "$DEFAULT_DEST" && [ "$(mode_of "$DEFAULT_DEST")" = 644 ]; then
+  pass "첫 설치: containerd 기본 프로필 덮개가 Git과 같고 0644다"
+else
+  fail "첫 설치: containerd 기본 프로필 덮개가 Git과 다르거나 없다"
+fi
+printf 'other\n' >"$DEFAULT_DEST"
+: >"$D/log"
+run_install "$D"
+expect "기본 프로필 덮개에 다른 내용: 멈추지 않고 덮어 다시 적재" "$D" rc:0 "out:    $DEFAULT_DEST" "!out:그대로 $DEFAULT_DEST" \
+  "log:apparmor_parser -Q -K -T $PROFILES/apparmor-default/$DEFAULT_NAME" "log:apparmor_parser -r $DEFAULT_DEST"
+if cmp -s "$PROFILES/apparmor-default/$DEFAULT_NAME" "$DEFAULT_DEST"; then
+  pass "기본 프로필 덮개에 다른 내용: 덮은 뒤 Git과 같다"
+else
+  fail "기본 프로필 덮개에 다른 내용: 덮지 않았다"
+fi
 FIRST="$D"
 
 D="$(new_case kubelet-absent)"
@@ -365,6 +415,17 @@ D="$(copy_case v-hash)"
 printf 'x\n' >>"$D/apparmor.d/$APPARMOR_NAME"
 run_verify "$D"
 expect "verify: AppArmor 파일 해시가 다르면 실패" "$D" rc:1 "out:$D/apparmor.d/$APPARMOR_NAME: sha256"
+
+D="$(copy_case v-default-hash)"
+printf 'x\n' >>"$D/apparmor.d/$DEFAULT_NAME"
+run_verify "$D"
+expect "verify: containerd 기본 프로필 덮개의 해시가 다르면 실패" "$D" rc:1 "out:$D/apparmor.d/$DEFAULT_NAME: sha256"
+
+# 커널에는 containerd가 올린 기본값이 같은 이름으로 있어 enforce 판정만으로는 덮개가 빠진 것을 못 본다. 파일로 잡는다.
+D="$(copy_case v-default-missing)"
+rm "$D/apparmor.d/$DEFAULT_NAME"
+run_verify "$D"
+expect "verify: containerd 기본 프로필 덮개 파일이 없으면 실패" "$D" rc:1 "out:$DEFAULT_NAME: 없음"
 
 D="$(copy_case v-seccomp)"
 rm "$D/kubelet/seccomp/homelab/$SECCOMP_NAME"

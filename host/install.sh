@@ -7,7 +7,7 @@
 #   sudo host/install.sh --cluster <이름> --k3s
 #   sudo host/install.sh --cluster <이름> --egress-off   (되돌리기: 파드 egress 규칙을 끄고 지운다)
 #   sudo host/install.sh --cluster <이름> --bulk-ssd     (삭제 원장 SSD 마운트와 원장 첫 초기화. 값이 빈 클러스터는 건너뜀)
-#   sudo host/install.sh --cluster <이름> --sandbox-profiles   (봇 작업 레인 worker와 node-exporter의 Localhost 프로필)
+#   sudo host/install.sh --cluster <이름> --sandbox-profiles   (봇 작업 레인 worker와 node-exporter의 Localhost 프로필, containerd 기본 프로필의 덮개)
 #   sudo host/install.sh --cluster <이름> --task-state-volume  (봇 작업 레인의 2GiB 고정 크기 볼륨. 있는 이미지는 다시 포맷하지 않음)
 #   sudo host/install.sh --cluster <이름> --tls-monitor  (tailnet TLS 인증서 감시 타이머. tailnet에 들지 않는 클러스터는 디렉터리만)
 #
@@ -865,17 +865,19 @@ bulk_ssd() {
 }
 
 # -------------------------------------------------------------------- --sandbox-profiles
-# 봇 작업 레인 worker의 Localhost seccomp·AppArmor 프로필과 node-exporter의 AppArmor 프로필. 만드는 법은 tools/sandbox-profiles/regen.sh다.
+# 봇 작업 레인 worker의 Localhost seccomp·AppArmor 프로필, node-exporter의 AppArmor 프로필, containerd 기본 AppArmor 프로필의 덮개.
+# 만드는 법은 tools/sandbox-profiles/regen.sh다.
 # Git에 있는 모든 버전을 깐다. 깔린 옛 버전은 지우지 않는다. 그 이름을 참조하는 파드가 있을 수 있다.
 
 # 깔린 파일이 Git과 다르면 덮지 않고 멈춘다. 내용을 바꿀 때는 이름의 버전을 올리는 것이 규칙이고, 같은 이름을 덮으면
 # apparmor_parser -r이 도는 파드의 규칙을 그 자리에서 바꾼다.
+# containerd 기본 프로필의 덮개(apparmor-default)는 이름을 바꿀 수 없어 내용이 달라도 덮는다. 프로필을 지정하지 않은 모든 파드에 닿는다.
 sandbox_check_targets() {
   local kind src dest profile
   while IFS=$'\t' read -r kind src dest; do
     case "$kind" in
       seccomp) jq -e . "$src" >/dev/null || die "${src}가 JSON이 아니다. 아무것도 바꾸지 않았다" ;;
-      apparmor)
+      apparmor | apparmor-default)
         # 문법만 본다(-Q 커널에 올리지 않음, -K -T 캐시 안 씀). 여기서 걸리면 아무것도 깔지 않는다.
         apparmor_parser -Q -K -T "$src" || die "apparmor_parser가 ${src}를 거부했다. 아무것도 바꾸지 않았다"
         profile="$(basename "$dest")"
@@ -884,6 +886,7 @@ sandbox_check_targets() {
         fi
         ;;
     esac
+    [ "$kind" != apparmor-default ] || continue
     if { [ -e "$dest" ] || [ -L "$dest" ]; } && ! cmp -s "$src" "$dest"; then
       die "${dest}가 Git과 다르다. 덮지 않고 멈춘다. 내용을 바꿀 때는 tools/sandbox-profiles/generate.ts의 VERSION을 올린다. 파일을 왜 고쳤는지 사람이 본다"
     fi
@@ -923,7 +926,7 @@ sandbox_profiles() {
 
   log "[2/3] AppArmor(${APPARMOR_DIR}, 부팅 때 apparmor.service가 다시 올린다)"
   while IFS=$'\t' read -r kind src dest; do
-    [ "$kind" = apparmor ] || continue
+    [ "$kind" != seccomp ] || continue
     sandbox_copy "$src" "$dest"
     # 깔린 파일을 올린다. 재부팅 뒤 커널에 올라갈 것과 지금 올라간 것이 같은 파일에서 온다.
     apparmor_parser -r "$dest" || die "apparmor_parser -r ${dest}가 실패했다. journalctl -k -g apparmor를 본다"
