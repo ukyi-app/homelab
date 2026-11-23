@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-store
+# match: 가 감독 인증서의 URI SAN spiffe://olive.internal/ns/olive-control/supervisor와 다르다
+# 읽기 실행기가 기대하는 감독 URI SAN을 다른 값으로 바꿨다. 실행기는 진짜 감독을 거부하거나, 다른 신원의 상대를 감독으로 믿는다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set: {env: [{name: OLIVE_SUPERVISOR_URI, value: "spiffe://olive.internal/ns/olive-control/not-supervisor"}, {name: OLIVE_STORE_DIR, value: /var/lib/olive-executor/store}]}

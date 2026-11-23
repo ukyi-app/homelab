@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-executor-store
+# match: PVC가 정확히 하나가 아니다(0개)
+# 진단 실행기의 상태 저장소 PVC를 뺐다. 파드는 없는 PVC를 기다려 Pending이고, 실행기는 저장소 없이 이어질 수 없다(D-75).
+patch:
+  - in: all
+    select: {kind: PersistentVolumeClaim, namespace: olive-diagnosis, name: executor-store}
+    drop: true

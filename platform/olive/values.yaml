@@ -104,6 +104,11 @@ pki:
 # 감독의 대기열이 깨져 둘이 함께 돌아도 합이 그 몫을 넘지 않는다. 가장 무거운 작성·검증(sandbox)은 이 차트 밖이다.
 # 옛 대화 작업자(Claude CLI 하나)의 실측 working set 최고는 약 163MiB였다(platform/sandbox worker 주석). 진단은 격리 셸이 더해진다.
 # 같은 값이 각 네임스페이스의 ResourceQuota(limits 합)가 된다.
+# store: 실행기 상태 저장소(D-75: 실행기 인스턴스마다 전용 로컬 PVC). 저장소 ID·정지 세대·실행 기록·영수증·nonce가 든다.
+# 잃으면 같은 실행기로 이어지지 못하고 다시 등록하기 전까지 배정이 0이다. templates/executor-pvc.yaml 머리 주석.
+#   storageClassName: 감독 장부와 같은 local-retain(values.schema.json이 이 값만 받는다. 올리브 격리 검사의 허용 클래스와 같다).
+#   size: 작은 메타데이터 파일과 nonce마다 빈 파일 하나라 MB 단위로 본다 [가정]. local-path는 크기를 강제하지 않는다.
+#   mountPath: 볼륨을 붙이는 곳. 실행기에 주는 저장소 경로(OLIVE_STORE_DIR)는 그 아래 store다(templates/executor-deployments.yaml).
 executors:
   diagnosis:
     resources:
@@ -116,6 +121,10 @@ executors:
     tls:
       secretName: ""
       mountPath: /run/olive/tls
+    store:
+      storageClassName: local-retain
+      size: 256Mi
+      mountPath: /var/lib/olive-executor
   reader:
     resources:
       requests:
@@ -127,6 +136,10 @@ executors:
     tls:
       secretName: ""
       mountPath: /run/olive/tls
+    store:
+      storageClassName: local-retain
+      size: 256Mi
+      mountPath: /var/lib/olive-executor
 
 # 복구 스위치(설계 C.6.4 "클러스터 유실 + Infisical 장애"). root가 cluster.restore.externalSecrets: false일 때만 false로 넘긴다.
 # 끄면 이 차트의 ExternalSecret과 Store를 내지 않는다. 같은 이름의 Secret은 사람이 손으로 만든다(restore.md 3절 U40).

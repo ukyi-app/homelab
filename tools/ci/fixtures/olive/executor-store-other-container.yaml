@@ -1,0 +1,13 @@
+# expect: fail
+# rule: olive-executor-store
+# match: 밖에 붙이지 않는다
+# 진단 실행기 파드에 역할 컨테이너(D-100)를 더하고 상태 저장소를 그쪽에도 붙였다. 다른 uid의 모델이 저장소 ID·nonce·영수증을 고칠 수 있다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    append:
+      spec.template.spec.containers:
+        name: role
+        image: x
+        securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+        volumeMounts: [{name: store, mountPath: /var/lib/olive-executor}]

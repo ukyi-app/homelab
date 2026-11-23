@@ -19,7 +19,7 @@ const TARGET_KINDS = new Set([...OLIVE_KINDS, "session", "writer"]);
 // ns·Deployment 이름은 CLI 정지 어댑터(cli/src/core/olive.ts LABEL)와 같은 DNS label이다. 다르면 CLI가 그 대상을 거부한다.
 const LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const REPLICAS_POINTER = ["/spec/replicas"];
-export const OLIVE_RULES = ["olive-targets", "olive-replicas", "olive-chart-targets", "olive-owner", "olive-ignore-differences", "olive-isolation"];
+export const OLIVE_RULES = ["olive-targets", "olive-replicas", "olive-chart-targets", "olive-owner", "olive-ignore-differences", "olive-isolation", "olive-executor-store"];
 
 // 격리 검사를 다른 검사에 맡기는 실행 네임스페이스. sandbox는 작업자 보안 예외까지 아는 policy.ts checkSandbox가 본다.
 // 여기 없는 대상 ns는 누가 선언하든(뒤 티켓이 다른 차트에 선언해도) 올리브 격리 검사를 받는다.
@@ -138,6 +138,86 @@ function annotationViolations(d: Doc, t: Target): Violation[] {
     where: id(d),
     message: `대상 ${t.id}의 Deployment에 Argo CD 주석 ${k}를 두지 않는다. 예외는 소유 Application의 ignoreDifferences에만 둔다`,
   }));
+}
+
+// 작업자 실행기의 상태 저장소와 감독 신원(D-75, D-100, platform/olive/templates/executor-pvc.yaml·executor-deployments.yaml).
+// platform/olive를 렌더한 곳(ci/*.yaml 렌더, 켠 root의 olive Application)마다 이 차트의 실행기 대상을 본다.
+//   - 실행기 ns의 PVC가 정확히 하나이고 local-retain이며 wave가 Deployment와 같고 Prune=false·Delete=false다. 둘이면 어느 것이
+//     저장소인지 렌더로 가를 수 없고, wave가 앞서면 첫 배포가 Pending PVC에서 멈추며, 보존 옵션이 없으면 저장소가 지워져 재등록이 필요하다.
+//   - 그 PVC를 가리키는 볼륨이 하나이고 실행기 컨테이너(이름으로 고른다)에만 붙는다. 다른 uid의 역할 컨테이너(D-100)에 붙으면
+//     모델이 저장소 ID·nonce·영수증을 고칠 수 있다. 컨테이너 순서는 보지 않는다.
+//   - OLIVE_STORE_DIR가 그 마운트 경로 아래이고, OLIVE_SUPERVISOR_URI가 같은 렌더의 감독 Certificate URI SAN과 같다.
+//     Certificate가 없는 렌더(pki 꺼짐)는 olive.pki.uri의 꼴(spiffe://olive.internal/ns/<감독 ns>/supervisor)과 견준다.
+const EXECUTOR_CONTAINER = "executor";
+const STORE_CLASS = "local-retain";
+function checkExecutorStore(targets: Target[], charts: Record<string, Doc[]>, deployed: Record<string, Doc[]>): Violation[] {
+  const out: Violation[] = [];
+  const push = (where: string, message: string) => out.push({ rule: "olive-executor-store", where, message });
+  const sup = targets.find((t) => t.kind === "supervisor" && t.declaredBy === OLIVE_CHART);
+  const executors = targets.filter((t) => t.kind === "executor" && t.declaredBy === OLIVE_CHART);
+  // 감독 줄이 없으면 checkTargetShape가 낸다.
+  if (!sup) return out;
+  const groups = new Map<string, Doc[]>();
+  // 켠 root 렌더에는 차트 ci 렌더도 들어 있다. 같은 출처가 두 번 세지지 않게 거기서는 배포되는 Application의 문서만 고른다.
+  const docs = [...expand(charts[OLIVE_CHART] ?? []), ...expand(deployed[FORCED] ?? []).filter((d) => deployedDoc(d) && sourceOf(d.origin).path === OLIVE_CHART)];
+  for (const d of docs) groups.set(d.origin, [...(groups.get(d.origin) ?? []), d]);
+  const wave = (d: Doc) => String(d.obj.metadata?.annotations?.["argocd.argoproj.io/sync-wave"] ?? "0");
+  for (const [origin, group] of groups) {
+    const certs = group.filter((d) => d.obj.kind === "Certificate" && nsOf(d) === sup.namespace);
+    let wantUri: string | undefined = `spiffe://olive.internal/ns/${sup.namespace}/supervisor`;
+    if (certs.length > 0) {
+      const uris = certs.map((d) => d.obj.spec?.uris);
+      wantUri = certs.length === 1 && Array.isArray(uris[0]) && uris[0].length === 1 && isString(uris[0][0]) ? uris[0][0] : undefined;
+      if (wantUri === undefined) push(origin, `감독 ns ${sup.namespace}의 Certificate URI SAN이 하나가 아니다(${JSON.stringify(uris)}). 실행기 env와 견줄 수 없다`);
+    }
+    for (const t of executors) {
+      const dep = group.find((d) => d.obj.kind === "Deployment" && nsOf(d) === t.namespace && d.obj.metadata?.name === t.deployment);
+      // 대상 Deployment가 없으면 olive-chart-targets가 낸다.
+      if (!dep) continue;
+      const where = id(dep);
+      const pvcs = group.filter((d) => d.obj.kind === "PersistentVolumeClaim" && nsOf(d) === t.namespace);
+      if (pvcs.length !== 1) {
+        push(where, `대상 ${t.id}의 네임스페이스 ${t.namespace}에 PVC가 정확히 하나가 아니다(${pvcs.length}개). 실행기 상태 저장소는 인스턴스마다 하나다(D-75)`);
+        continue;
+      }
+      const pvc = pvcs[0];
+      const pvcName = pvc.obj.metadata?.name;
+      if (pvc.obj.spec?.storageClassName !== STORE_CLASS) push(id(pvc), `실행기 저장소 PVC의 storageClassName이 ${STORE_CLASS}가 아니다(${JSON.stringify(pvc.obj.spec?.storageClassName)})`);
+      if (wave(pvc) !== wave(dep)) push(id(pvc), `실행기 저장소 PVC의 sync-wave ${wave(pvc)}가 Deployment의 ${wave(dep)}와 다르다(WaitForFirstConsumer라 앞 wave면 동기가 멈춘다)`);
+      const opts = String(pvc.obj.metadata?.annotations?.["argocd.argoproj.io/sync-options"] ?? "").split(",").map((s) => s.trim());
+      if (!opts.includes("Prune=false") || !opts.includes("Delete=false")) push(id(pvc), "실행기 저장소 PVC에 sync-options Prune=false,Delete=false가 없다(지워지면 재등록 전 배정이 0이다)");
+      const spec = podSpec(dep.obj) ?? {};
+      const vols = (spec.volumes ?? []).filter((v: any) => v?.persistentVolumeClaim?.claimName === pvcName);
+      if (vols.length !== 1) {
+        push(where, `대상 ${t.id}의 파드에 PVC ${pvcName}를 가리키는 볼륨이 정확히 하나가 아니다(${vols.length}개)`);
+        continue;
+      }
+      const vol = vols[0].name;
+      const mine = (spec.containers ?? []).filter((c: any) => c?.name === EXECUTOR_CONTAINER);
+      if (mine.length !== 1) {
+        push(where, `대상 ${t.id}의 파드에 실행기 컨테이너 ${EXECUTOR_CONTAINER}가 정확히 하나가 아니다(${mine.length}개)`);
+        continue;
+      }
+      const c = mine[0];
+      for (const other of [...(spec.initContainers ?? []), ...(spec.containers ?? []), ...(spec.ephemeralContainers ?? [])]) {
+        if (other !== c && (other?.volumeMounts ?? []).some((m: any) => m?.name === vol)) push(`${where} container ${other?.name}`, `저장소 볼륨(${vol})을 실행기 컨테이너 ${EXECUTOR_CONTAINER} 밖에 붙이지 않는다(역할 컨테이너가 저장소 ID·nonce·영수증을 고칠 수 있다, D-100)`);
+      }
+      const cw = `${where} container ${EXECUTOR_CONTAINER}`;
+      const mounts = (c.volumeMounts ?? []).filter((m: any) => m?.name === vol);
+      if (mounts.length !== 1 || mounts[0].readOnly === true || mounts[0].subPath !== undefined || !isString(mounts[0].mountPath)) {
+        push(cw, `저장소 볼륨(${vol})을 쓰기 가능하게 한 번(subPath 없이) 붙이지 않았다`);
+        continue;
+      }
+      const mp = String(mounts[0].mountPath).replace(/\/+$/, "");
+      const env = (name: string) => (c.env ?? []).filter((e: any) => e?.name === name);
+      const dir = env("OLIVE_STORE_DIR");
+      const dirValue = dir.length === 1 ? dir[0].value : undefined;
+      if (!isString(dirValue) || !(dirValue === mp || dirValue.startsWith(`${mp}/`))) push(cw, `OLIVE_STORE_DIR(${JSON.stringify(dir.map((e: any) => e.value))})가 저장소 마운트 경로 ${mp} 아래 하나가 아니다`);
+      const uri = env("OLIVE_SUPERVISOR_URI");
+      if (wantUri !== undefined && (uri.length !== 1 || uri[0].value !== wantUri)) push(cw, `OLIVE_SUPERVISOR_URI(${JSON.stringify(uri.map((e: any) => e.value))})가 감독 인증서의 URI SAN ${wantUri}와 다르다`);
+    }
+  }
+  return out;
 }
 
 const argoApps = (docs: Doc[]) => docs.filter((d) => d.obj.kind === "Application" && String(d.obj.apiVersion).startsWith("argoproj.io/") && deployedDoc(d));
@@ -299,6 +379,7 @@ export function checkOliveTargets(input: OliveInput): Violation[] {
   return [
     ...checkTargetShape(input.targets),
     ...checkChartTargets(targets, input.charts, input.chartRenders),
+    ...checkExecutorStore(targets, input.charts, input.deployed),
     ...checkDeployed(targets, input.deployed),
     ...checkIgnoreDifferences(targets, input.deployed),
     ...checkOliveIsolation(forcedApps, input.targets, input.host),
