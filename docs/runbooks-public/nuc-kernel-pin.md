@@ -70,7 +70,7 @@ kubectl -n database exec pg-1 -c postgres -- sh -c \
 GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux <버전>-generic"
 ```
 
-고정이 없으면 GRUB은 설치된 커널 중 가장 새 것으로 부팅한다(`/etc/default/grub`의 `GRUB_DEFAULT=0`). 지금은 `7.0.0-44`다. `7.0.0-43`도 설치돼 있지만 부팅해 본 적은 없다. `7.0.0-38` 패키지는 `apt-mark auto`로 되돌려 APT의 자동 제거 대상이다. 풀 때 옮겨 둔 고정 파일은 `/root/99-homelab-kernel.cfg.pinned-44`다.
+고정이 없으면 GRUB은 설치된 커널 중 가장 새 것으로 부팅한다(`/etc/default/grub`의 `GRUB_DEFAULT=0`). 지금은 `7.0.0-44`다(2026-11-23 15:26에 고정 없이 재부팅해 `7.0.0-44`로 뜨고 10분 동안 시그널 차단 0건인 것을 쟀다). `7.0.0-43`도 설치돼 있지만 부팅해 본 적은 없다. `7.0.0-38` 패키지는 `apt-mark auto`로 되돌려 APT의 자동 제거 대상이다. 풀 때 옮겨 둔 고정 파일은 `/root/99-homelab-kernel.cfg.pinned-44`다.
 
 **`host/install.sh`는 커널 고정을 관리하지 않는다.** 덮개는 `--sandbox-profiles`가 깔고 `host/verify.sh`가 파일 해시와 enforce 적재를 본다.
 
