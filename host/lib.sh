@@ -191,8 +191,9 @@ load_cluster() {
 
 # Git의 프로필을 "종류<TAB>원본<TAB>대상" 줄로 낸다. Git에 있는 옛 버전도 함께 깔고 확인한다(파드가 참조할 수 있다).
 # 종류마다 0건이면 성공으로 읽지 않고 멈춘다. AppArmor는 커널에 올라가는 이름이 파일 안의 선언에서 오므로 파일 이름과 맞춘다.
+# apparmor-default는 containerd 기본 프로필의 덮개다. containerd가 정한 이름이라 버전이 없고, 깔린 내용이 달라도 덮는다.
 sandbox_targets() {
-  local f b seccomp=0 apparmor=0
+  local f b seccomp=0 apparmor=0 apparmor_default=0
   for f in "$HOST_DIR"/sandbox-profiles/seccomp/*; do
     [ -e "$f" ] || continue
     b="$(basename "$f")"
@@ -208,8 +209,16 @@ sandbox_targets() {
     printf 'apparmor\t%s\t%s\n' "$f" "${APPARMOR_DIR}/${b}"
     apparmor=$((apparmor + 1))
   done
-  [ "$seccomp" -ge 1 ] && [ "$apparmor" -ge 1 ] \
-    || die "host/sandbox-profiles/에서 프로필을 찾지 못했다(seccomp ${seccomp}개, AppArmor ${apparmor}개)"
+  for f in "$HOST_DIR"/sandbox-profiles/apparmor-default/*; do
+    [ -e "$f" ] || continue
+    b="$(basename "$f")"
+    [ "$b" = cri-containerd.apparmor.d ] || die "containerd 기본 프로필의 이름이 아니다(cri-containerd.apparmor.d): ${f}"
+    grep -qE "^profile ${b//./\\.} flags=" "$f" || die "${f}의 프로필 선언이 파일 이름과 다르다"
+    printf 'apparmor-default\t%s\t%s\n' "$f" "${APPARMOR_DIR}/${b}"
+    apparmor_default=$((apparmor_default + 1))
+  done
+  [ "$seccomp" -ge 1 ] && [ "$apparmor" -ge 1 ] && [ "$apparmor_default" -eq 1 ] \
+    || die "host/sandbox-profiles/에서 프로필을 찾지 못했다(seccomp ${seccomp}개, AppArmor ${apparmor}개, 기본 프로필 덮개 ${apparmor_default}개)"
 }
 
 # 프로필이 기대는 호스트 조건을 본다. 문제를 한 줄씩 내고 빈 출력이 통과다.
@@ -243,7 +252,7 @@ sandbox_installed_problems() {
     git_sum="$(sha256sum -- "$src")"
     live_sum="$(as_root sha256sum -- "$dest" 2>/dev/null)" || live_sum=""
     [ "${live_sum%% *}" = "${git_sum%% *}" ] || printf '%s: sha256 %s (Git %s)\n' "$dest" "${live_sum%% *}" "${git_sum%% *}"
-    [ "$kind" = apparmor ] || continue
+    [ "$kind" != seccomp ] || continue
     profile="$(basename "$dest")"
     grep -qxF -- "${profile} (enforce)" <<<"$loaded" || printf 'AppArmor %s가 커널에 enforce로 올라와 있지 않다\n' "$profile"
     if [ -e "${APPARMOR_DIR}/disable/${profile}" ]; then

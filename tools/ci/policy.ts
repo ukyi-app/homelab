@@ -373,7 +373,7 @@ const SANDBOX_TASK_APPARMOR = "homelab-sandbox-worker-v1";
 const SANDBOX_TASK_VOLUME_MOUNT = "/var/lib/taskstate/mnt";
 const SANDBOX_TASK_VOLUME_SIZE = "2Gi";
 // 작업 레인 밖의 Localhost 프로필 예외는 하나다. node-exporter의 systemd 수집기는 containerd 기본 AppArmor가 시스템 버스를
-// 막아 실패해서, 기본값에 유닛 읽기 호출만 더한 AppArmor를 쓴다(host/sandbox-profiles/). seccomp Localhost는 받지 않는다.
+// 막아 실패해서, 기본값에 유닛 읽기 호출을 더한 AppArmor를 쓴다(host/sandbox-profiles/). seccomp Localhost는 받지 않는다.
 const NODE_EXPORTER = { ns: "observability", kind: "DaemonSet", name: "node-exporter", container: "node-exporter" };
 const NODE_EXPORTER_APPARMOR = /^homelab-sandbox-node-exporter-v\d+$/;
 const SANDBOX_TASK_VOLUME_BYTES = 2147483648;

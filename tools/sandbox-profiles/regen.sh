@@ -17,6 +17,7 @@
 #   4. git diff host/sandbox-profiles/. 내용이 바뀌었으면 generate.ts에서 그 프로필의 버전을 올려 새 이름으로 만들고, 옛 파일은 되돌린다.
 #      새 이름은 sudo host/install.sh --cluster <이름> --sandbox-profiles로 깔고, 다시 잰 뒤 참조를 옮긴다
 #      (worker는 platform/sandbox, node-exporter는 platform/observability/stack/node-exporter.yaml).
+#      apparmor-default/의 containerd 기본 프로필 덮개는 버전이 없다. 바뀐 내용을 그대로 두고 같은 install.sh로 덮는다.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,7 +63,7 @@ else
 fi
 
 # -Q: 커널에 올리지 않는다. -K -T: 캐시를 쓰지도 읽지도 않고 매번 컴파일한다.
-for f in "$ROOT"/host/sandbox-profiles/apparmor/*; do
+for f in "$ROOT"/host/sandbox-profiles/apparmor/* "$ROOT"/host/sandbox-profiles/apparmor-default/*; do
   if apparmor_parser -Q -K -T "$f"; then
     echo "ok   apparmor_parser 문법 ${f#"$ROOT"/}"
   else

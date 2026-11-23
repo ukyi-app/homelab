@@ -231,7 +231,7 @@ D-34·AC-27과 O11의 판정 조건을 다음처럼 적용한다. 등급은 **�
 | 자격 발급·회전·동기화·재시작 | Infisical → Secret → 실제 자격 → 앱 사용 순서. ExternalSecret 상태까지만 읽고 Secret 값·해시 비교도 하지 않음 | `docs/runbooks-public/rotate.md:10`, `:134`, `:184` |
 | 진행 중 Argo 작업 종료 | 옛 source 재시도인지와 반영 상태를 안내. 시도 중 작업을 끊지 않도록 런북 판정은 관리자가 수행 | `docs/runbooks-public/apps.md:53` |
 | 백업 생성·DB/Valkey 복원 | 복구 시점·손실 허용·임시 Cluster/Job·복원·정리는 관리자 판단. 백업이 오래됐다는 이유만으로 복원을 권하지 않음 | `docs/runbooks-public/restore.md:11`, `:462` |
-| 호스트 설정·디스크·커널 | sudo 적용·재부팅·fsck·재마운트·데이터 정리는 관리자 조치. 검증된 절차 없이 삭제 명령을 만들지 않음 | `docs/runbooks-public/bootstrap.md:100`, `docs/runbooks-public/nuc-kernel-pin.md:53`, `docs/runbooks-public/restore.md:2127` |
+| 호스트 설정·디스크·커널 | sudo 적용·재부팅·fsck·재마운트·데이터 정리는 관리자 조치. 검증된 절차 없이 삭제 명령을 만들지 않음 | `docs/runbooks-public/bootstrap.md:100`, `docs/runbooks-public/nuc-kernel-pin.md:83`, `docs/runbooks-public/restore.md:2127` |
 | Terraform·외부 서비스 설정 | 선언 오류는 PR 후보. apply·Cloudflare/Tailscale 콘솔·DNS/ACL 변경은 관리자 작업 | `docs/runbooks-public/github.md:66`, `platform/observability/stack/vmalert/rules/adguard.yaml:76` |
 
 [확인] 터널·Tailscale OAuth 등 회전 절차 일부는 아직 비어 있다(`docs/runbooks-public/rotate.md:304`). 인증서 경보 설명의 직접 로그 조회 안내는 올리브 권한 밖이고, Certificate 상태는 D-35로 읽을 수 있게 된다(`platform/observability/stack/vmalert/rules/platform.yaml:124`, `:170`). 없는 검증 절차를 지어내지 않고 관리자 확인 대상을 적는다.
