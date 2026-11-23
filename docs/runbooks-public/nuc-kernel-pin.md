@@ -1,13 +1,13 @@
 # NUC 커널 고정과 AppArmor 시그널 차단
 
-운영 NUC는 2026-11-23부터 커널 `7.0.0-44`로 고정돼 있다. `7.0.0-42`와 `7.0.0-44`에서는 AppArmor가 컨테이너 안 시그널을 막아 Postgres가 멈춘다. containerd 기본 프로필의 덮개가 깔려 있으면 막히지 않는다.
-이 문서는 증상 확인, 복구, 지금의 고정 상태, 고정을 옮기거나 푸는 절차다.
+운영 NUC의 커널 고정은 2026-11-23 14:28에 풀었고, 지금 커널은 `7.0.0-44`다. `7.0.0-42`와 `7.0.0-44`에서는 AppArmor가 컨테이너 안 시그널을 막아 Postgres가 멈춘다. containerd 기본 프로필의 덮개가 깔려 있으면 막히지 않는다.
+이 문서는 증상 확인, 복구, 지금의 고정 상태, 커널을 다시 고정하거나 푸는 절차다.
 
 ## 언제 쓰나
 
 - Postgres가 `too many clients`(`53300`)를 내고 백엔드 슬롯이 전부 `authentication`에서 멈췄을 때. DB를 쓰는 앱은 기다리다 `CrashLoopBackOff`가 된다.
 - 재부팅 뒤 DB가 이렇게 멈췄을 때. 대기 중이던 새 커널이 그 재부팅에서 처음 떴을 수 있다.
-- 고정을 풀거나 다른 버전으로 옮길 때.
+- 커널을 다시 고정하거나 고정을 풀 때.
 
 ## 확인
 
@@ -64,31 +64,31 @@ kubectl -n database exec pg-1 -c postgres -- sh -c \
 
 ## 지금의 고정 상태
 
-`/etc/default/grub.d/99-homelab-kernel.cfg`:
+지금은 고정이 없다(2026-11-23 14:28에 풀었다). 다시 고정할 때는 `/etc/default/grub.d/99-homelab-kernel.cfg`에 이 한 줄을 쓴다:
 
 ```sh
-GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux 7.0.0-44-generic"
+GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux <버전>-generic"
 ```
 
-`linux-image-7.0.0-38-generic`, `linux-modules-7.0.0-38-generic`, `linux-main-modules-zfs-7.0.0-38-generic`은 `apt-mark manual`로 남아 있다. `7.0.0-44`는 `linux-image-generic`이 지금 가리키는 버전이다.
+고정이 없으면 GRUB은 설치된 커널 중 가장 새 것으로 부팅한다(`/etc/default/grub`의 `GRUB_DEFAULT=0`). 지금은 `7.0.0-44`다. `7.0.0-43`도 설치돼 있지만 부팅해 본 적은 없다. `7.0.0-38` 패키지는 `apt-mark auto`로 되돌려 APT의 자동 제거 대상이다. 풀 때 옮겨 둔 고정 파일은 `/root/99-homelab-kernel.cfg.pinned-44`다.
 
-**`host/install.sh`는 이 고정을 관리하지 않는다.** 호스트 OS를 다시 설치하면 이 파일부터 다시 판단한다. 덮개는 `--sandbox-profiles`가 깔고 `host/verify.sh`가 파일 해시와 enforce 적재를 본다.
+**`host/install.sh`는 커널 고정을 관리하지 않는다.** 덮개는 `--sandbox-profiles`가 깔고 `host/verify.sh`가 파일 해시와 enforce 적재를 본다.
 
 **대가와 한계:**
 
-- **보안 패치 지연:** 자동 업그레이드가 새 커널을 설치해도 고정을 옮기기 전에는 `7.0.0-44`로 부팅한다.
+- **새 커널은 시험 없이 처음 뜬다:** 자동 업그레이드가 설치한 커널은 다음 재부팅에서 뜬다. 크래시 뒤의 재부팅도 그렇다(`7.0.0-42`가 그렇게 처음 떴다). 자동 재부팅 설정(`Unattended-Upgrade::Automatic-Reboot`)은 없다(2026-11-23 확인). 재부팅 뒤에는 위 "확인"을 돌린다. 덮개는 라벨이 `//&unconfined`로 겹치는 경우만 막는다.
 - **`7.0.0-38`로 되돌리지 않는다:** CVE-2026-98432에 취약하다. 또 2026-11-06 14:38과 11-09 22:48에 부하 중 크래시했다(`list_del corruption`, `folio_lruvec_lock_irqsave` GPF). 원인은 확정되지 않았다. 덤프는 `/var/crash/202611061439`, `/var/crash/202611092248`에 있다. `7.0.0-44`에서 같은 크래시가 나는지는 아직 모르므로 전체 시험·변이·podman을 여러 작업자가 동시에 돌리지 않는다.
 - **덮개는 부팅 때 `apparmor.service`가 올린다:** 2026-11-23 11:12 재부팅에서 쟀다. `apparmor.service`가 11:12:13에 끝나고 k3s가 11:12:14에 시작했다. containerd의 `profile_load`는 없었고(덮개가 없던 10:05 부팅에는 k3s 시작 5초 뒤에 있었다), Postgres는 라벨 `cri-containerd.apparmor.d//&unconfined`로 뜬 채 10분 동안 시그널 차단 0건이었다. 이 서비스가 꺼지거나 파일이 빠지면 containerd가 규칙이 빠진 기본값을 올린다. `host/verify.sh`가 둘을 본다.
 
 ## 고정을 옮기거나 풀기
 
-사람이 승인한 뒤 한다. 재부팅으로 DB와 앱이 끊기고, 새 커널에 같은 문제가 있으면 DB가 멈춘 채로 복구할 때까지 간다.
+새 커널에서 문제가 나 다른 버전에 머물러야 할 때 다시 고정한다. 사람이 승인한 뒤 한다. 재부팅으로 DB와 앱이 끊기고, 새 커널에 같은 문제가 있으면 DB가 멈춘 채로 복구할 때까지 간다.
 
 1. `host/verify.sh --cluster prod`로 덮개가 Git과 같고 enforce로 올라 있는지 본다.
 2. 올릴 버전이 부팅 메뉴에 있는지 본다(`sudo grep -c "Linux <버전>-generic" /boot/grub/grub.cfg`).
-3. 고정 파일의 버전을 고치고 `sudo update-grub`, `sudo systemctl reboot`.
+3. 고정 파일을 쓰고(이미 있으면 버전을 고치고) `sudo update-grub`, `sudo systemctl reboot`.
 4. 부팅 뒤 위 "확인" 명령을 돌린다. 덮개가 없던 `7.0.0-42`·`7.0.0-44`에서는 DB가 뜨자마자 쌓였으니 DB가 뜬 뒤 10분 동안 본다.
 5. `kubectl -n database get pod pg-1`, `kubectl get pods -A`, `kubectl get applications -A`로 복귀를 본다.
 6. **차단이 있으면** 위 "복구"를 한다. 차단 줄의 `profile=`이 `cri-containerd.apparmor.d`가 아니면 그 프로필에 같은 규칙이 없는 것이다(`host/sandbox-profiles/apparmor/`). 복구되지 않을 때만 고정 파일을 이전 버전으로 되돌리고 재부팅한다. SSH는 그 상태에서도 된다.
-7. **차단이 0건이고 며칠 무사하면** 고정 파일을 지우고 `sudo update-grub`, `apt-mark auto`로 옛 패키지 표시를 되돌린다.
+7. **차단이 0건이고 며칠 무사하면** 고정 파일을 지우고 `sudo update-grub`, `apt-mark auto`로 옛 패키지 표시를 되돌린다. 가장 새 커널이 고정하던 버전이면 재부팅은 필요 없다. 2026-11-23에는 며칠을 기다리지 않고 재부팅 3시간 뒤(차단 0건)에 풀었다.
 8. 시각과 결과를 승인 기록(approvals.md)에 남긴다.

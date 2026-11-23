@@ -259,7 +259,7 @@ bun pm cache
    ```
 
 4. **되돌리기:** 다른 사본이 없으면 조사 원본을 잃는다. 덤프에는 메모리의 민감한 내용이 있을 수 있으므로 공개 저장소·공개 이슈에 보관하지 않는다.
-5. **지우지 않을 것:** `/var/crash` 전체, 진행 중 조사 덤프, 날짜가 같은 주변 보고서·설정의 일괄 glob. 청소를 위해 kdump를 끄거나 고정 커널을 제거하지 않는다.
+5. **지우지 않을 것:** `/var/crash` 전체, 진행 중 조사 덤프, 날짜가 같은 주변 보고서·설정의 일괄 glob. 청소를 위해 kdump를 끄거나 부팅 중인 커널을 제거하지 않는다.
 
 ### 3.5 journald
 
@@ -324,7 +324,7 @@ worktree의 빌드 산출물·패키지 실행 파일·Podman 저장소를 그�
 - **삭제 원장:** `/mnt/bulk/homelab-bot/deletion-ledger`, `deletions.jsonl`, `ledger.json`, 해당 PV·PVC. 원장은 일반 앱 데이터 purge에도 넣지 않는다([확인] [data/homelab-bot/values.yaml:4](../../data/homelab-bot/values.yaml#L4), [restore.md:2011](restore.md#L2011)). 빈 원장 생성·과거 사본 덮어쓰기로 청소하지 않는다.
 - **작업 상태와 수집 위치:** `/var/lib/taskstate/volume.img`·`volume.uuid`, 진행 중 작업·nonce·receipt, `codex-home`, `/var/lib/vector`. 작업 상태는 재개에, Vector 체크포인트는 로그 재수집 방지에 필요하다([확인] [platform/sandbox/templates/task-worker-pvc.yaml:2](../../platform/sandbox/templates/task-worker-pvc.yaml#L2), [platform/observability/stack/vector.yaml:96](../../platform/observability/stack/vector.yaml#L96)).
 - **백업·복구 자산:** 로컬 런북·키·Terraform state·Infisical 암호화 내보내기·마지막 정상 사본. 보관 규칙은 [recovery-assets.md:5](recovery-assets.md#L5), [같은 파일:36](recovery-assets.md#L36)이다. [확인] R2 백업 보존 `14d`는 원격 base backup·WAL의 정책이다([platform/cnpg/cluster/templates/objectstore.yaml:14](../../platform/cnpg/cluster/templates/objectstore.yaml#L14)). 이를 줄여도 루트 디스크는 비워지지 않는다.
-- **조사 원본·고정 커널:** 원인 미확정 덤프·필요한 journal, 부팅에 쓰는 고정 커널. [확인] 커널과 덤프의 보존 이유는 [nuc-kernel-pin.md:70](nuc-kernel-pin.md#L70)이다. 디스크 청소에 무조건적인 커널 자동 제거를 끼워 넣지 않는다.
+- **조사 원본·부팅 커널:** 원인 미확정 덤프·필요한 journal, 부팅 중인 커널. [확인] 커널의 지금 상태는 [nuc-kernel-pin.md:73](nuc-kernel-pin.md#L73), 덤프의 보존 이유는 [nuc-kernel-pin.md:80](nuc-kernel-pin.md#L80)이다. 디스크 청소에 무조건적인 커널 자동 제거를 끼워 넣지 않는다.
 
 ## 6. 끝난 뒤 확인
 
