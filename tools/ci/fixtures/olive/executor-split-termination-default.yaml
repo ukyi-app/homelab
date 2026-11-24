@@ -1,0 +1,9 @@
+# expect: pass
+# 제어가 기본 종료 메시지 경로를 명시했다. 생략과 같으므로 위반 0건이어야 한다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set: {terminationMessagePath: /dev/termination-log}

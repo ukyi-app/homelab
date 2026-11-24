@@ -1,6 +1,6 @@
 # expect: fail
 # rule: olive-executor-split
-# match: terminationMessagePath("/opt/olive-generation/marker")가 세대 표식 마운트 /opt/olive-generation 아래다(executor
+# match: terminationMessagePath("/opt/olive-generation/marker")를 생략하거나 기본값 /dev/termination-log로 둔다(executor
 # 제어의 종료 메시지 파일을 세대 표식 경로에 두었다. kubelet이 그 자리에 빈 파일을 붙여 init이 쓴 표식을 가리고,
 # 제어는 빈 표식을 읽어 generation_malformed로 94를 반복한다.
 patch:

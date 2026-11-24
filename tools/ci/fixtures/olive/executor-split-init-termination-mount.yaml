@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: terminationMessagePath("/opt/olive-generation")를 생략하거나 기본값 /dev/termination-log로 둔다(olive-init
+# init의 종료 메시지 파일을 표식 마운트 경로 자체에 두었다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set: {terminationMessagePath: /opt/olive-generation}

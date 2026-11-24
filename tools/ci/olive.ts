@@ -324,6 +324,7 @@ const RECOVERY_RULES = [{ action: "RestartAllContainers", exitCodes: { operator:
 // 올리브 이미지의 작업 폴더(ukyi-app/olive Dockerfile의 WORKDIR). 다른 폴더면 bun이 상대 경로 진입점을 찾지 못한다.
 const IMAGE_WORKDIR = "/app";
 // 쿠버네티스의 기본 종료 메시지 경로.
+const DEFAULT_TERMINATION_PATH = "/dev/termination-log";
 const SECRET_VOLUME_TYPES = ["secret", "persistentVolumeClaim", "projected"];
 const OLIVE_IMAGE = /^ghcr\.io\/ukyi-app\/olive@sha256:[0-9a-f]{64}$/;
 const SECRET_FILE_MODE = 0o444;
@@ -553,17 +554,11 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: str
     }
     if (!same(c.command, rule.command)) push(cw(c), `command(${JSON.stringify(c.command)})가 ${rule.what} [${rule.command.join(", ")}] 하나가 아니다${c === role ? "(대리가 PID 1이어야 한다, D-102)" : ""}`);
     if (c.args !== undefined) push(cw(c), `args(${show(c.args)})를 두지 않는다(${who}의 명령은 표의 command 하나다)`);
-    // 함정: kubelet은 terminationMessagePath에 빈 종료 로그 파일을 따로 붙인다. 세대 표식 마운트 안의 경로면 init이 쓴 표식을 가린다.
-    // 표식 볼륨을 붙이는 컨테이너(init·executor)만 본다. role의 독립 경로는 정상이고, role에 표식 볼륨을 붙이는 것은 마운트 규칙이 막는다.
-    if (isString(c.terminationMessagePath)) {
-      const tmp = normPath(c.terminationMessagePath);
-      for (const m of c.volumeMounts ?? []) {
-        if (m?.name !== GENERATION_VOLUME || !isString(m.mountPath)) continue;
-        const mp = normPath(m.mountPath);
-        if (tmp === mp || tmp.startsWith(mp === "/" ? "/" : mp + "/")) {
-          push(cw(c), `terminationMessagePath(${show(c.terminationMessagePath)})가 세대 표식 마운트 ${mp} 아래다(${who}. kubelet이 그 경로에 빈 종료 로그 파일을 붙여 init이 쓴 표식을 가린다. 제어가 빈 표식을 읽어 94를 반복한다, D-104)`);
-        }
-      }
+    // 함정: kubelet은 terminationMessagePath에 빈 종료 로그 파일을 따로 붙이고, 상대 경로는 컨테이너 루트 기준으로 푼다.
+    // 표식 마운트 아래면 표식 폴더에 파일 마운트가 끼어든다. kubelet의 경로 해석을 흉내 내지 않고, 표식 볼륨을 붙이는 컨테이너(init·executor)는
+    // 생략 또는 기본값만 받는다. role의 독립 경로는 정상이고, role에 표식 볼륨을 붙이는 것은 마운트 규칙이 막는다.
+    if (c !== role && c.terminationMessagePath !== undefined && c.terminationMessagePath !== DEFAULT_TERMINATION_PATH) {
+      push(cw(c), `terminationMessagePath(${show(c.terminationMessagePath)})를 생략하거나 기본값 ${DEFAULT_TERMINATION_PATH}로 둔다(${who}. 세대 표식 볼륨 ${GENERATION_DIR}을 붙이는 컨테이너다. kubelet이 그 경로에 빈 종료 로그 파일을 따로 붙이고 상대 경로는 / 기준으로 풀므로, 표식 마운트 아래로 풀리는 값이면 표식 폴더 안에 파일 마운트가 생긴다. 경로마다 따지지 않고 기본값만 받는다, D-104)`);
     }
     const relative = rule.command.slice(1).filter((a) => !a.startsWith("/"));
     if (relative.length > 0 && c.workingDir !== undefined && c.workingDir !== IMAGE_WORKDIR) {
