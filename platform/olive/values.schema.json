@@ -33,12 +33,38 @@
         "mountPath": { "type": "string", "pattern": "^/run/" }
       }
     },
+    "summedResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": { "$ref": "#/definitions/resources/properties/requests" },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu", "memory"],
+          "properties": {
+            "cpu": { "type": "string", "pattern": "^[1-9][0-9]*m?$" },
+            "memory": { "type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi)$" }
+          }
+        }
+      }
+    },
+    "roleImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^([a-z0-9][a-z0-9._/:-]*)?$" },
+        "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" }
+      }
+    },
     "namespace": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" },
     "hours": { "type": "integer", "minimum": 1 }
   },
   "type": "object",
   "additionalProperties": false,
-  "required": ["infisical", "image", "supervisor", "pki", "executors", "externalSecrets"],
+  "required": ["infisical", "image", "roleImages", "supervisor", "pki", "executors", "externalSecrets"],
   "if": {
     "required": ["pki"],
     "properties": { "pki": { "required": ["enabled"], "properties": { "enabled": { "const": true } } } }
@@ -84,6 +110,11 @@
         "repository": { "const": "ghcr.io/ukyi-app/olive" },
         "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" }
       }
+    },
+    "roleImages": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z_]*$" },
+      "additionalProperties": { "$ref": "#/definitions/roleImage" }
     },
     "supervisor": {
       "type": "object",
@@ -177,9 +208,21 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["resources", "tls", "store"],
+        "required": ["resources", "role", "init", "tls", "store"],
         "properties": {
-          "resources": { "$ref": "#/definitions/resources" },
+          "resources": { "$ref": "#/definitions/summedResources" },
+          "role": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["resources"],
+            "properties": { "resources": { "$ref": "#/definitions/summedResources" } }
+          },
+          "init": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["resources"],
+            "properties": { "resources": { "$ref": "#/definitions/resources" } }
+          },
           "tls": { "$ref": "#/definitions/tls" },
           "store": {
             "type": "object",

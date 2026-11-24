@@ -4,8 +4,11 @@
 # 네임스페이스·Deployment 이름이 한 곳에서만 정해진다.
 #
 # 칸:
-#   id: 대상의 이름. 차트 값(values.yaml executors.<id>)과 실행기의 역할 env(OLIVE_ROLE)가 이 값을 쓴다.
+#   id: 대상의 이름. 차트 값(values.yaml executors.<id>)과 인증서 신원(URI SAN)이 이 값을 쓴다. 계약의 역할 이름이 아니다(roles).
 #   kind: supervisor 또는 executor. 차트가 어느 모양(감독, 작업자 실행기)으로 만들지 고른다.
+#   roles: kind executor인 줄에만 둔다. 그 대상이 맡는 계약 v1 역할 이름의 목록(D-64). 실행기 하나와 그 서명 키에는 역할 하나라
+#     지금은 하나만 적는다. 차트가 그 값을 실행기의 역할 env(OLIVE_ROLE)로 넘기고 역할 이미지(values.yaml roleImages)를 고른다.
+#     실행기는 대상 id를 역할로 옮기지 않는다. 같은 대상에 역할을 더하는 것(예: reader의 pr_review)은 별도 실행기 승인 뒤다.
 #   namespace, deployment: 실제 리소스 자리. 정지 확인은 namespace마다 ResourceQuota olive-stop을 조회한다.
 #   declaredBy: 그 Deployment를 Git에 선언한 곳. platform/olive인 줄만 이 차트가 만든다. 빈 값은 아직 아무도 선언하지 않았다는 뜻이다.
 #   stop: (가) 비상 정지와 소멸 확인의 대상인지. stop status와 stop verify는 true인 모든 줄을 조회한다. 아직 리소스가 없는 줄도 true로 둔다.
@@ -24,7 +27,7 @@ targets:
     declaredBy: platform/olive
     stop: true
     start: true
-  # 진단·읽기 실행기는 역할 프로필(O11·O12)이 채워지기 전에는 켜지 않는다. 지금 이미지의 실행기는 69(미구현)로 끝난다.
+  # 진단·읽기 실행기는 역할 프로필(O11·O12)이 채워지기 전에는 켜지 않는다. 지금 차트가 실행기 환경을 다 주지 않아 실행기는 감독에 붙기 전에 끝난다.
   - id: diagnosis
     kind: executor
     namespace: olive-diagnosis
@@ -32,6 +35,7 @@ targets:
     declaredBy: platform/olive
     stop: true
     start: false
+    roles: [diagnosis]
   - id: reader
     kind: executor
     namespace: olive-reader
@@ -39,6 +43,7 @@ targets:
     declaredBy: platform/olive
     stop: true
     start: false
+    roles: [isolated_reader]
   # 세션 파드(O10). 네임스페이스는 supervisor.md §1.1의 초안이고 Deployment 이름은 O10이 정한다. 그 PR이 이 줄을 고친다.
   # 정지는 리소스가 생기기 전부터 대상이다. 네임스페이스가 없으면 없음으로 보고한다. 세션 네임스페이스만 있고 Deployment가 없으면 파드를 식별할 수 없어 두 stop 조회는 1을 반환한다.
   - id: session

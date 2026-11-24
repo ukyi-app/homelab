@@ -27,9 +27,16 @@ fromYaml로 받는다. 모양이 틀리면 여기서 렌더를 멈춘다. CLI·C
 {{- $_ := set $namespaces $t.namespace true -}}
 {{- if eq $t.kind "supervisor" -}}
 {{- $supervisors = add1 $supervisors -}}
+{{- if hasKey $t "roles" -}}
+{{- fail (printf "targets.yaml: only executor targets take roles, not %s" $t.id) -}}
+{{- end -}}
 {{- else if eq $t.kind "executor" -}}
 {{- if not (hasKey $.Values.executors $t.id) -}}
 {{- fail (printf "values.yaml executors.%s is missing for targets.yaml executor %s" $t.id $t.id) -}}
+{{- end -}}
+{{- /* 실행기 하나에는 역할 하나다(D-64). 실행기의 env OLIVE_ROLE이 이 값이고 실행기는 대상 id를 역할로 옮기지 않는다. */ -}}
+{{- if not (and (kindIs "slice" $t.roles) (eq (len $t.roles) 1) (kindIs "string" (index $t.roles 0)) (index $t.roles 0)) -}}
+{{- fail (printf "targets.yaml: executor %s needs roles with exactly one v1 role name (one role per executor, D-64)" $t.id) -}}
 {{- end -}}
 {{- else -}}
 {{- fail (printf "targets.yaml: platform/olive declares only supervisor and executor, not %s (%s)" $t.kind $t.id) -}}
@@ -68,6 +75,28 @@ ImagePullBackOff로 Degraded가 되므로 렌더에서 막는다(모양은 value
 {{ .Values.image.repository }}@{{ $digest }}
 {{- end }}
 
+{{/*
+작업자 실행기 역할 컨테이너의 이미지(D-103 역할별 이미지). 받는 값: root, role(v1 역할 이름). olive.image와 같은 이유로 비면 렌더를 멈춘다.
+출처(누가 빌드하고 어떻게 서명을 확인하는지)는 아직 정하지 않았다. 정할 때의 조건은 values.yaml roleImages 주석에 있다.
+*/}}
+{{- define "olive.roleImage" -}}
+{{- $img := index .root.Values.roleImages .role | default dict -}}
+{{- $repo := required (printf "roleImages.%s.repository is required (role image for role %s; keep components.olive off until then)" .role .role) $img.repository -}}
+{{- $digest := required (printf "roleImages.%s.digest is required (sha256:<64 hex> of the role image for role %s; keep components.olive off until then)" .role .role) $img.digest -}}
+{{ $repo }}@{{ $digest }}
+{{- end }}
+
+{{/*
+수량을 더하려고 같은 단위로 바꾼다. 받는 값: 수량 문자열. CPU는 밀리코어, 메모리는 MiB 정수.
+values.schema.json이 실행기 limits를 이 꼴(CPU 정수 또는 m, 메모리 Mi·Gi)로만 받는다. 다른 꼴은 sprig int가 0으로 바꿔 합이 조용히 틀린다.
+*/}}
+{{- define "olive.cpuMilli" -}}
+{{- if hasSuffix "m" . -}}{{ trimSuffix "m" . | int }}{{- else -}}{{ mul (. | int) 1000 }}{{- end -}}
+{{- end }}
+{{- define "olive.memMebi" -}}
+{{- if hasSuffix "Gi" . -}}{{ mul (trimSuffix "Gi" . | int) 1024 }}{{- else -}}{{ trimSuffix "Mi" . | int }}{{- end -}}
+{{- end }}
+
 {{/* 선택자 라벨. 대상마다 네임스페이스가 따로라 kind로 충분하다. */}}
 {{- define "olive.selectorLabels" -}}
 app.kubernetes.io/name: olive
@@ -95,8 +124,12 @@ securityContext:
   runAsNonRoot: true
   runAsUser: 65532
   runAsGroup: 65532
+  {{- if eq .kind "supervisor" }}
   # Secret 볼륨(0440)을 그룹으로 읽게 한다. local-path PVC에는 적용되지 않는다(폴더가 0777로 만들어진다).
+  # 감독 파드에만 둔다. fsGroup은 파드의 모든 컨테이너에 보조 그룹으로 붙어, 실행기 파드에 두면 역할 컨테이너(uid·gid 10002)도
+  # 제어(65532)의 그룹이 된다(D-103). 실행기 파드는 대신 Secret을 0444로 붙인다(templates/executor-deployments.yaml).
   fsGroup: 65532
+  {{- end }}
   seccompProfile:
     type: RuntimeDefault
 {{- end }}

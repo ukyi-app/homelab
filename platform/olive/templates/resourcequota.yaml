@@ -9,9 +9,19 @@ CPU·메모리만 건다. PID 상한은 걸지 않는다(2026-11-18 관리자 �
 함정: limits.cpu를 세므로 이 ns의 모든 파드는 cpu limit이 있어야 한다. 없으면 생성이 거부된다(뒤에 이 ns에 파드를 더하는 티켓도 같다).
 B-07 전체(올리브 CPU 4개·메모리 8GB)는 네임스페이스를 넘는 합이라 이 한도로 강제되지 않는다. 감독의 동시 실행 상한(작업자 1)과 합친
 배분(values.yaml 주석)으로 지킨다.
+실행기 파드는 컨테이너 둘이라 한도는 제어(executors.<id>.resources)와 역할(executors.<id>.role.resources) limits의 합이다.
+init(olive-init)은 더하지 않는다. 쿠버네티스는 파드의 실효 limits를 max(일반 컨테이너 합, 가장 큰 init)로 세는데, init limits가
+합보다 작다(CI olive-executor-split이 이 한도가 실효 limits와 같은지 본다).
 */}}
 {{- range (include "olive.targets" . | fromYaml).items }}
 {{- $resources := include "olive.resources" (dict "root" $ "target" .) | fromYaml }}
+{{- $cpu := required (printf "resources.limits.cpu is required for %s" .id) $resources.limits.cpu }}
+{{- $memory := required (printf "resources.limits.memory is required for %s" .id) $resources.limits.memory }}
+{{- if eq .kind "executor" }}
+{{- $role := (index $.Values.executors .id).role.resources.limits }}
+{{- $cpu = printf "%dm" (add (include "olive.cpuMilli" $cpu | int) (include "olive.cpuMilli" $role.cpu | int)) }}
+{{- $memory = printf "%dMi" (add (include "olive.memMebi" $memory | int) (include "olive.memMebi" $role.memory | int)) }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ResourceQuota
@@ -22,6 +32,6 @@ metadata:
     {{- include "olive.labels" . | nindent 4 }}
 spec:
   hard:
-    limits.cpu: {{ required (printf "resources.limits.cpu is required for %s" .id) $resources.limits.cpu | quote }}
-    limits.memory: {{ required (printf "resources.limits.memory is required for %s" .id) $resources.limits.memory | quote }}
+    limits.cpu: {{ $cpu | quote }}
+    limits.memory: {{ $memory | quote }}
 {{- end }}

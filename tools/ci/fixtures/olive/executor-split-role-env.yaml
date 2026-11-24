@@ -1,0 +1,16 @@
+# expect: fail
+# rule: olive-executor-split
+# match: OLIVE_ROLE(["reader"])이 platform/olive/targets.yaml의 대상 reader roles
+# 읽기 실행기의 OLIVE_ROLE에 대상 id(reader)를 넘겼다. 실행기는 v1 역할 이름만 받아 감독에 붙기 전에 끝난다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set:
+          env:
+            - {name: OLIVE_ROLE, value: reader}
+            - {name: OLIVE_SUPERVISOR_URI, value: "spiffe://olive.internal/ns/olive-control/supervisor"}
+            - {name: OLIVE_STORE_DIR, value: /var/lib/olive-executor/store}
+            - {name: OLIVE_AGENT_SOCKET, value: /run/olive/agent/agent.sock}

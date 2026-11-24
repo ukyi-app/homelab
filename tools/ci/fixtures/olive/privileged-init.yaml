@@ -1,12 +1,12 @@
 # expect: fail
 # rule: olive-isolation
 # match: privileged를 쓰지 않는다
-# 진단 실행기에 privileged 초기화 컨테이너를 더했다. 주 컨테이너만 보면 놓친다.
+# 진단 실행기의 초기화 컨테이너(olive-init)를 privileged로 바꿨다. 주 컨테이너만 보면 놓친다.
 patch:
   - in: chart
     select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
-    append:
+    edit:
       spec.template.spec.initContainers:
-        name: prep
-        image: x
-        securityContext: {privileged: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+        match: {name: olive-init}
+        set:
+          securityContext: {privileged: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}

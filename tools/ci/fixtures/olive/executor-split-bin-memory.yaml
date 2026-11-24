@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 디스크 emptyDir가 아니다
+# agent-bin을 메모리 매체로 바꿨다. 대리(약 104MiB)가 파드의 메모리 상한에 든다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    edit:
+      spec.template.spec.volumes:
+        match: {name: agent-bin}
+        set: {emptyDir: {medium: Memory, sizeLimit: 256Mi}}

@@ -5,7 +5,8 @@
 import doc from "../../../platform/olive/targets.yaml";
 import { isArray } from "./intrinsics";
 
-export type OliveTarget = { id: string; kind: string; namespace: string; deployment: string; declaredBy: string; stop: boolean; start: boolean };
+// roles는 kind executor인 줄에만 있다(계약 v1 역할 이름, D-64). CLI는 쓰지 않고 목록과 같은 모양으로 들고만 있다.
+export type OliveTarget = { id: string; kind: string; namespace: string; deployment: string; declaredBy: string; stop: boolean; start: boolean; roles?: string[] };
 
 // core/olive.ts가 받는 이름 꼴과 같다.
 const LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
@@ -17,10 +18,13 @@ export function parseOliveTargets(raw: unknown): OliveTarget[] {
   const seen = new Set<string>();
   return list.map((t: any, i: number) => {
     const ok = isLabel(t?.id) && typeof t?.kind === "string" && isLabel(t?.namespace) && isLabel(t?.deployment) && typeof t?.declaredBy === "string" && typeof t?.stop === "boolean" && typeof t?.start === "boolean";
-    if (!ok) throw new Error(`올리브 대상 ${i + 1}번째 줄의 꼴이 다르다`);
+    const rolesOk = t?.roles === undefined || (isArray(t.roles) && t.roles.every((r: unknown) => typeof r === "string"));
+    if (!ok || !rolesOk) throw new Error(`올리브 대상 ${i + 1}번째 줄의 꼴이 다르다`);
     if (seen.has(t.id)) throw new Error(`올리브 대상 이름이 겹친다: ${t.id}`);
     seen.add(t.id);
-    return { id: t.id, kind: t.kind, namespace: t.namespace, deployment: t.deployment, declaredBy: t.declaredBy, stop: t.stop, start: t.start };
+    const target: OliveTarget = { id: t.id, kind: t.kind, namespace: t.namespace, deployment: t.deployment, declaredBy: t.declaredBy, stop: t.stop, start: t.start };
+    if (t.roles !== undefined) target.roles = [...t.roles];
+    return target;
   });
 }
 

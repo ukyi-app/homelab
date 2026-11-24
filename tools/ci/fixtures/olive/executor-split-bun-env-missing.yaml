@@ -1,0 +1,15 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 역할 컨테이너 env에 BUN_OPTIONS이 빈 값으로 한 번 있지 않다
+# 역할 컨테이너 env에서 BUN_OPTIONS 덮기를 뺐다. 역할 이미지 ENV의 BUN_OPTIONS(--preload 등)가 대리 코드보다 먼저 돈다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          env:
+            - {name: OLIVE_AGENT_SOCKET, value: /run/olive/agent/agent.sock}
+            - {name: BUN_BE_BUN, value: ""}
+            - {name: LD_PRELOAD, value: ""}

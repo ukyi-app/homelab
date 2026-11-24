@@ -15,7 +15,7 @@ describe("올리브 대상 목록", () => {
   });
 
   test("꼴이 다르면 빈 목록으로 넘어가지 않고 던진다", () => {
-    const bad: unknown[] = [null, {}, { targets: [] }, { targets: "x" }, { targets: [{ ...good, stop: "true" }] }, { targets: [{ ...good, namespace: "Bad_NS" }] }, { targets: [{ ...good, deployment: undefined }] }, { targets: [good, good] }];
+    const bad: unknown[] = [null, {}, { targets: [] }, { targets: "x" }, { targets: [{ ...good, stop: "true" }] }, { targets: [{ ...good, namespace: "Bad_NS" }] }, { targets: [{ ...good, deployment: undefined }] }, { targets: [good, good] }, { targets: [{ ...good, roles: "diagnosis" }] }, { targets: [{ ...good, roles: [1] }] }];
     for (const raw of bad) expect(() => parseOliveTargets(raw)).toThrow("올리브 대상");
   });
 });

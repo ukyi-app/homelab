@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 파드 구성이 일반 컨테이너 executor·role
+# 진단 실행기 파드에서 역할 컨테이너를 뺐다. 실행기 하나로 돌던 모양(모델이 제어와 같은 uid)으로 돌아간다(D-100).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    remove:
+      spec.template.spec.containers: {name: role}

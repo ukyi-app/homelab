@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-targets
+# match: roles는 계약 v1 역할 이름
+# also: olive-executor-split
+# 읽기 대상의 roles에 대상 id(reader)를 적었다. 계약 v1의 역할 이름이 아니라 실행기가 받지 않는다(D-64).
+# 렌더된 실행기의 OLIVE_ROLE(isolated_reader)이 목록과 어긋나 분할 검사도 잡는다.
+patch:
+  - in: targets
+    select: {id: reader}
+    set: {roles: [reader]}

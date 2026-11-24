@@ -1,0 +1,15 @@
+# expect: fail
+# rule: olive-executor-split
+# match: agent-link을 readOnly: true로
+# 역할 컨테이너에 agent-link를 쓰기 가능하게 붙였다. 모델이 제어의 소켓 파일을 지우거나 바꿔 놓을 수 있다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent, readOnly: true}
+            - {name: agent-link, mountPath: /run/olive/agent}
+            - {name: role-tmp, mountPath: /tmp}

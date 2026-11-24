@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 실효 runAsUser
+# 역할 컨테이너의 uid를 제어와 같은 65532로 바꿨다. 모델이 제어의 파일(키·저장소)을 같은 uid로 읽는다(D-73 조건).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set: {securityContext.runAsUser: 65532}

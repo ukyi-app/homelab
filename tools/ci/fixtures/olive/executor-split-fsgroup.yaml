@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 파드에 fsGroup(65532)을 두지 않는다
+# 진단 실행기 파드에 감독과 같은 fsGroup을 다시 넣었다. 역할 컨테이너가 제어의 그룹이 된다(D-103).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    set:
+      spec.template.spec.securityContext.fsGroup: 65532

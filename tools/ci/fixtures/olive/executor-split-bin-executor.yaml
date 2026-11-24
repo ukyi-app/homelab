@@ -1,0 +1,18 @@
+# expect: fail
+# rule: olive-executor-split
+# match: agent-bin을 executor에 붙이지 않는다
+# 제어 컨테이너에도 agent-bin을 붙였다. 대리는 역할 쪽 파일이고 제어가 쓸 이유가 없다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set:
+          volumeMounts:
+            - {name: tls, mountPath: /run/olive/tls, readOnly: true}
+            - {name: trust, mountPath: /run/olive/trust, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: agent-link, mountPath: /run/olive/agent}
+            - {name: store, mountPath: /var/lib/olive-executor}
+            - {name: agent-bin, mountPath: /opt/olive-agent, readOnly: true}

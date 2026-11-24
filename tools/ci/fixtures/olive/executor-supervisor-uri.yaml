@@ -8,4 +8,9 @@ patch:
     edit:
       spec.template.spec.containers:
         match: {name: executor}
-        set: {env: [{name: OLIVE_SUPERVISOR_URI, value: "spiffe://olive.internal/ns/olive-control/not-supervisor"}, {name: OLIVE_STORE_DIR, value: /var/lib/olive-executor/store}]}
+        set:
+          env:
+            - {name: OLIVE_ROLE, value: isolated_reader}
+            - {name: OLIVE_SUPERVISOR_URI, value: "spiffe://olive.internal/ns/olive-control/not-supervisor"}
+            - {name: OLIVE_STORE_DIR, value: /var/lib/olive-executor/store}
+            - {name: OLIVE_AGENT_SOCKET, value: /run/olive/agent/agent.sock}

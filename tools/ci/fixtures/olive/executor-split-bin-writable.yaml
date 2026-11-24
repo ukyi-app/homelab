@@ -1,0 +1,15 @@
+# expect: fail
+# rule: olive-executor-split
+# match: agent-bin을 readOnly: true로
+# 역할 컨테이너에 agent-bin을 쓰기 가능하게 붙였다. 모델이 대리 실행 파일을 바꿔치고, 재시작한 대리가 그 파일로 뜬다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent}
+            - {name: agent-link, mountPath: /run/olive/agent, readOnly: true}
+            - {name: role-tmp, mountPath: /tmp}

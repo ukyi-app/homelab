@@ -1,0 +1,15 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 역할 컨테이너만 붙이는 emptyDir가 아니다
+# 역할 컨테이너의 /tmp를 제어의 tmp 볼륨으로 바꿨다. 모델이 제어의 임시 파일을 읽거나 바꿀 수 있다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent, readOnly: true}
+            - {name: agent-link, mountPath: /run/olive/agent, readOnly: true}
+            - {name: tmp, mountPath: /tmp}

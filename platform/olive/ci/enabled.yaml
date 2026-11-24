@@ -5,6 +5,14 @@ infisical:
   environmentSlug: ci
 image:
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+# 역할 이미지도 가짜다(출처 미정). 역할마다 이름을 달리해 렌더에서 대상과 이미지의 대응이 보이게 한다.
+roleImages:
+  diagnosis:
+    repository: example.invalid/olive-role-diagnosis
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  isolated_reader:
+    repository: example.invalid/olive-role-isolated-reader
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
 supervisor:
   account:
     name: ci-account

@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: supplementalGroups
+# 진단 실행기 파드에 보조 그룹 65532를 넣었다. fsGroup과 같이 역할 컨테이너도 제어의 그룹이 된다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    set:
+      spec.template.spec.securityContext.supplementalGroups: [65532]
