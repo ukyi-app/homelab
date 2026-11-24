@@ -18,7 +18,7 @@
 
 옛 파일을 작업 트리에 풀지 않는 순서다. checkout을 쓰지 않으므로 옛 `AGENTS.md`, `CLAUDE.md`, `.claude/settings.json`(옛 PreToolUse 훅)이 `/home/ukyi/homelab`에 풀리지 않는다.
 
-1. 백업: `cp -a /home/ukyi/homelab/docs/plans <NUC 안 백업 경로>`. 백업 경로는 `/home/ukyi/homelab` 밖에 둔다. git 작업 중 실수로 덮어써도 되살리기 위해서다.
+1. 백업: `cp -a /home/ukyi/homelab/docs/plans <호스트 안 백업 경로>`. 백업 경로는 `/home/ukyi/homelab` 밖에 둔다. git 작업 중 실수로 덮어써도 되살리기 위해서다.
 2. 작업 사본을 만든다.
    - `git -C /home/ukyi/homelab init -b rebuild`
    - `git -C /home/ukyi/homelab remote add origin https://github.com/ukyi-app/homelab.git`
@@ -68,7 +68,7 @@
 
 ## 실행 기록
 
-- 2026-10-17. 백업 `/home/ukyi/homelab-plans-backup-2026-10-17`(NUC 안, 저장소 밖). `init -b rebuild`, `fetch --no-tags origin main`, `origin/main` = `2d2054aa294b3862de1b1af6eada88fb15e656e6` 확인, `update-ref`로 옛 파일 929개를 삭제로 잡았다. 작업 트리에는 옛 파일이 풀리지 않았다.
+- 2026-10-17. 백업 `/home/ukyi/homelab-plans-backup-2026-10-17`(호스트 안, 저장소 밖). `init -b rebuild`, `fetch --no-tags origin main`, `origin/main` = `2d2054aa294b3862de1b1af6eada88fb15e656e6` 확인, `update-ref`로 옛 파일 929개를 삭제로 잡았다. 작업 트리에는 옛 파일이 풀리지 않았다.
 - 커밋: `56eeb54`(삭제, 빈 트리), `53fc932`(docs/plans), `4bb61ef`(T01 기록).
 - push 전 시크릿 모양 문자열 검색 결과 없음. 2026-10-17 21:48 KST `git push -u origin refs/heads/rebuild:refs/heads/rebuild`.
 - push 뒤 검증 6개 통과: 추적 파일 깨끗함, 원격 `rebuild` = 로컬, 원격 main 불변, `docs/plans/`만 있음, `2d2054a`의 후손, 삭제 커밋이 빈 트리. Actions는 꺼져 있어 check run 0개.

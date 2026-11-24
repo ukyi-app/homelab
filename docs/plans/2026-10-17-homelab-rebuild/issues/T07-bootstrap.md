@@ -40,7 +40,7 @@ main을 새 구조로 바꾸고, 새 클러스터의 바닥을 세운다.
    - 병합 뒤 이후 티켓의 문서 변경은 PR로 main에 병합한다(명세 AC-X1, §12). 관리자 직접 push는 쓰지 않는다. 새 Argo CD가 main을 보기 시작하면 직접 push가 곧바로 배포된다.
 3. 설계 문서대로 호스트 설정을 Git에서 적용하고, 버전을 고정해 k3s를 설치한다. 순서는 설계 C.3.2다: `host/preflight.sh --cluster prod --before` → `sudo host/install.sh --cluster prod --host-config` → `host/preflight.sh --cluster prod --after` → `sudo host/install.sh --cluster prod --k3s` → `host/verify.sh --cluster prod`.
    - D-12가 OS 유지라 T06이 남긴 H4·H5 drop-in이 있다. `host/etc/`의 같은 이름 파일이 덮어쓴다. 노드 DNS는 공용 DNS 직접이고 `tailscale set --accept-dns=false`를 유지한다.
-   - OS를 다시 설치했다면(D-12에서는 보통 해당 없음) `tailscale up` 전에 Tailscale 콘솔에서 옛 NUC 기기를 지우고 다시 등록한다. 이름의 첫 라벨이 `prod.env`의 `NODE_NAME`과 같은지 확인한 뒤 키 만료를 해제한다(설계 C.3.2의 0).
+   - OS를 다시 설치했다면(D-12에서는 보통 해당 없음) `tailscale up` 전에 Tailscale 콘솔에서 옛 호스트 기기를 지우고 다시 등록한다. 이름의 첫 라벨이 `prod.env`의 `NODE_NAME`과 같은지 확인한 뒤 키 만료를 해제한다(설계 C.3.2의 0).
 4. Argo CD를 설치하고 `targetRevision: main`으로 자기 관리(self-manage)로 넘긴다. 병합 전에 main을 동기화하면 옛 트리가 새 클러스터에 깔릴 수 있어서 병합 뒤에 한다.
    - 설치 순서는 설계 C.3.3의 bootstrap 예시다. 이 티켓에서는 ESO 부트스트랩 Secret 단계(2번)를 건너뛴다. 그때 root에는 `argocd`·`namespaces`만 있고, ESO·Store와 부트스트랩 Secret은 T09가 더한다.
    - 공개 webhook은 두지 않는다. `argocd-cm`에 `timeout.reconciliation: 60s`와 `timeout.reconciliation.jitter: 0`을 둔다(확정(사용자 2026-10-18, T05)). jitter 기본값 1분이 남으면 실제 간격이 60~120초가 된다(설계 B.8 "E2").
@@ -53,7 +53,7 @@ main을 새 구조로 바꾸고, 새 클러스터의 바닥을 세운다.
 ## 필요한 자격
 
 - GitHub owner 계정(관리자): main 교체 PR의 관리자 bypass 병합, Actions 재활성화, `ci` ruleset. 기존 계정이다.
-- NUC sudo: 호스트 설정, k3s 설치.
+- 호스트 sudo: 호스트 설정, k3s 설치.
 - Tailscale 콘솔 로그인: OS를 다시 설치했을 때만(옛 기기 삭제, 키 만료 해제).
 - 새 외부 자격은 없다. 그래서 이 티켓을 위해 자격을 준비하는 앞 티켓이 없다.
 
@@ -70,7 +70,7 @@ main을 새 구조로 바꾸고, 새 클러스터의 바닥을 세운다.
 - main이 새 구조이고, Argo CD가 main을 동기화한다. `argocd`·`namespaces` Application이 Synced·Healthy다.
 - Argo CD가 공개 webhook 없이 60초 폴링(jitter 0)으로 main을 본다.
 - k3s가 고정 버전이고, 노드 DNS가 공용 DNS 직접이다.
-- NUC 재부팅 뒤 k3s와 Argo CD가 준비 상태로 돌아온다(시나리오 12의 이 범위).
+- 호스트 재부팅 뒤 k3s와 Argo CD가 준비 상태로 돌아온다(시나리오 12의 이 범위).
 - `bootstrap.md` 밖의 수동 단계가 없었다.
 - 저장소 Actions가 켜져 있고 새 워크플로만 있다.
 - main에 임시 ruleset `main-interim`과 필수 검사 `ci`가 함께 걸려 있다.

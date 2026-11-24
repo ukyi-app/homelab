@@ -5,9 +5,9 @@
 - 명세: [../spec.md](../spec.md) §4.2, §4.4
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4b, E.3, C.3.7, C.8
 - Blocked by: T08a, T09
-- 선행 결정: D-08 (확정(사용자 2026-10-18): Tailscale DNS (b′). 그래서 tailnet 출처 질의 1시간 0건 경보를 둔다), D-09 (확정(사용자 2026-10-18, T05): 옛 계열 최소 구성), D-10 (확정(사용자 2026-10-18, T05): homelab 알림용 Telegram 새 봇 + healthchecks.io 계정 재사용·새 체크), D-11 (확정(사용자 2026-10-18, T05): Tailscale ACL (a), 옛 healthchecks 체크는 새 체크가 초록이 된 뒤 삭제. 2026-10-20 U28 결과로 (c)(NUC `tag:nuc`)로 바뀜(사용자)), D-20 (확정(사용자 2026-10-18, T05): 모든 값 새로 발급, 옛 healthchecks ping URL은 `보류(D-10, T08b)`), 격리 작업 공간 기본 방식 (확정(사용자 2026-10-18, T05): 설계 C.8 기본값), D-14 (확정(사용자 2026-10-18, T15): 봇 전용 ChatGPT 구독 계정 + 작업자 전용 CODEX_HOME. 이 티켓에 주는 것은 인증 갱신본을 되쓰는 작업자 전용 영속 쓰기 공간(`CODEX_HOME`용 PVC 하나, 설계 C.8 변경)과 작업 직렬 1개다), D-15 (확정(사용자 2026-10-18, T15): 작업자는 `sandbox` ns 상주 파드 하나(동시성 1), 앱·작업자 포트 8080, 경보 수신 포트 8081, 라벨 `homelab-bot`(봇 값은 T16b가 `target`에 넣는다). 작업자 코드 읽기는 `codeload.github.com`만이고 egress에서 `github.com`·`api.github.com`·`gist.github.com`을 뺀다. 파드 방화벽(U13)이 안 되면 호스트 전용 UID + nft)
+- 선행 결정: D-08 (확정(사용자 2026-10-18): Tailscale DNS (b′). 그래서 tailnet 출처 질의 1시간 0건 경보를 둔다), D-09 (확정(사용자 2026-10-18, T05): 옛 계열 최소 구성), D-10 (확정(사용자 2026-10-18, T05): homelab 알림용 Telegram 새 봇 + healthchecks.io 계정 재사용·새 체크), D-11 (확정(사용자 2026-10-18, T05): Tailscale ACL (a), 옛 healthchecks 체크는 새 체크가 초록이 된 뒤 삭제. 2026-10-20 U28 결과로 (c)(호스트 `tag:nuc`)로 바뀜(사용자)), D-20 (확정(사용자 2026-10-18, T05): 모든 값 새로 발급, 옛 healthchecks ping URL은 `보류(D-10, T08b)`), 격리 작업 공간 기본 방식 (확정(사용자 2026-10-18, T05): 설계 C.8 기본값), D-14 (확정(사용자 2026-10-18, T15): 봇 전용 ChatGPT 구독 계정 + 작업자 전용 CODEX_HOME. 이 티켓에 주는 것은 인증 갱신본을 되쓰는 작업자 전용 영속 쓰기 공간(`CODEX_HOME`용 PVC 하나, 설계 C.8 변경)과 작업 직렬 1개다), D-15 (확정(사용자 2026-10-18, T15): 작업자는 `sandbox` ns 상주 파드 하나(동시성 1), 앱·작업자 포트 8080, 경보 수신 포트 8081, 라벨 `homelab-bot`(봇 값은 T16b가 `target`에 넣는다). 작업자 코드 읽기는 `codeload.github.com`만이고 egress에서 `github.com`·`api.github.com`·`gist.github.com`을 뺀다. 파드 방화벽(U13)이 안 되면 호스트 전용 UID + nft)
 - 연결 AC: AC-P6, AC-P10, AC-P11, AC-P12
-- 수행: 에이전트 + 사람 (healthchecks.io 새 체크와 옛 체크 삭제, 새 Telegram 봇의 수신 chat 확인, 시험 경보·장애 주입 승인, 이탈 시험의 sudo 임시 규칙, 시나리오 17의 NUC 현장 차단. 명세 §11)
+- 수행: 에이전트 + 사람 (healthchecks.io 새 체크와 옛 체크 삭제, 새 Telegram 봇의 수신 chat 확인, 시험 경보·장애 주입 승인, 이탈 시험의 sudo 임시 규칙, 시나리오 17의 호스트 현장 차단. 명세 §11)
 
 ## 목표
 
@@ -49,7 +49,7 @@
 ### 외부 생존 감시 (D-10, AC-P11)
 
 - 외부 생존 감시 (D-10, AC-P11). Alertmanager Watchdog → healthchecks.io 새 체크(Period 5분, Grace 5분). healthchecks.io 계정은 재사용하고 체크는 새로 만든다(D-10, D-20).
-- Watchdog 라우트는 `group_wait: 0s`, `group_interval: 1m`, `repeat_interval: 1m`이다. `repeat_interval`만 1m이면 기본 group_interval 5m이 실제 간격이 되어 여유가 Grace 5분뿐이다. receiver `healthchecks`는 `webhook_configs`의 `url_file`, `send_resolved: false`다. healthchecks.io 쪽 통지(이메일, Telegram)는 NUC를 거치지 않는다.
+- Watchdog 라우트는 `group_wait: 0s`, `group_interval: 1m`, `repeat_interval: 1m`이다. `repeat_interval`만 1m이면 기본 group_interval 5m이 실제 간격이 되어 여유가 Grace 5분뿐이다. receiver `healthchecks`는 `webhook_configs`의 `url_file`, `send_resolved: false`다. healthchecks.io 쪽 통지(이메일, Telegram)는 호스트를 거치지 않는다.
 - Alertmanager webhook이 ping URL로 직접 보내는 구성은 동작한다(U10 결과 2026-10-23: 새 체크 초록, relay 없음). 안 됐다면 옛 relay를 가드(연결 없이 반환하면 ping하지 않음)와 함께 작게 둔다. 옛 relay는 그 가드가 없어 dead-man이 영구 초록이 됐다.
 - 옛 healthchecks 체크 `homelab-watchdog`는 T06에서 일시 정지돼 있고 재사용하지 않는다. 새 체크가 초록인 것을 확인한 뒤 옛 체크를 지우고, T06 자격 폐기 표의 `보류(D-10, T08b)` 줄(옛 ping URL. 재분해 전 표시는 `보류(D-10, T08)`)을 닫고 [../approvals.md](../approvals.md)에 남긴다(D-10, D-11 표, D-20). **2026-10-19 실제:** 옛 체크는 T06 중에 사용자가 일시 정지 대신 지웠고, T06 표의 그 줄도 `삭제됨`으로 닫혔다(approvals). 이 티켓은 새 체크만 만든다.
 - 공개 경로 생존 확인용 두 번째 체크는 설계 C.3.7의 선택 항목이고 기본은 두지 않는다.
@@ -59,7 +59,7 @@
 - AdGuard Home이 tailnet에서 조용히 빠져도 공용 서버가 답해 증상이 없다. 관측 스택에 "tailnet 출처 질의가 1시간 0건이면 경보"를 둔다. 이 경보가 이탈을 잡는 유일한 장치라 실제 발화 시험을 완료 조건에 둔다.
 - 질의 로그를 세는 방식은 이 티켓에서 T08a의 U32 결과로 정한다(설계 C.3.7 제안: 작은 CronJob이 AdGuard API를 읽어 지표를 내거나 healthchecks 체크를 ping). T08a의 U32 결과(2026-10-21): 공유기 경유 LAN 질의는 `10.42.0.1`(노드 cni0), tailnet 질의는 svclb 파드 IP로 보인다. tailnet 질의는 "지금 svclb 파드 IP"(kube-system의 `svccontroller.k3s.cattle.io/svcname=adguard-dns` 라벨 파드 IP를 셀 때마다 API로 읽는다. 재시작마다 바뀐다)인 출처로 센다. "`10.42.0.1`이 아닌 출처"로 세면 AdGuard Service에 직접 묻는 클러스터 파드(10.42.0.x)도 tailnet으로 잡혀, tailnet 경로가 끊겨도 경보가 울리지 않는다(DNS ingress는 출처를 좁히지 않음). 대안은 tailnet 기기의 주기 시험 질의다. 노드 자신은 AdGuard에 묻지 않는다(T08a).
 - 경보는 1시간 무질의가 지난 뒤 다음 평가 주기에 울린다.
-- **AdGuard 정지 경보(AC-P6 한계 승인의 완화, T08a 2026-10-20):** 공유기가 보조 DNS로 넘어가지 않아 AdGuard Home이 멈추면 Tailscale 없는 LAN 기기의 DNS가 전부 끊긴다. 그래서 AdGuard Home Deployment의 사용 가능 replica가 1분 넘게 1 미만이거나(`kube_deployment_status_replicas_available{namespace="adguard",deployment="adguard"} < 1`) 그 시계열이 없으면(`absent(...)`) 경보하고, 경보 문구에 런북 `docs/runbooks-public/nuc-dns-outage.md`를 넣는다. Ready가 아닌 파드만 보는 조건은 파드가 아예 없을 때(`replicas: 0`, 시나리오 14에서 실제로 쓴 정지 방식, 잘못된 replica 설정) 시계열이 없어 발화하지 않는다. 핵심 룰의 KubePodNotReady(15분)로는 늦다. NUC 전체 정지는 외부 생존 감시가 잡는다. 발화 시험을 완료 조건에 둔다.
+- **AdGuard 정지 경보(AC-P6 한계 승인의 완화, T08a 2026-10-20):** 공유기가 보조 DNS로 넘어가지 않아 AdGuard Home이 멈추면 Tailscale 없는 LAN 기기의 DNS가 전부 끊긴다. 그래서 AdGuard Home Deployment의 사용 가능 replica가 1분 넘게 1 미만이거나(`kube_deployment_status_replicas_available{namespace="adguard",deployment="adguard"} < 1`) 그 시계열이 없으면(`absent(...)`) 경보하고, 경보 문구에 런북 `docs/runbooks-public/nuc-dns-outage.md`를 넣는다. Ready가 아닌 파드만 보는 조건은 파드가 아예 없을 때(`replicas: 0`, 시나리오 14에서 실제로 쓴 정지 방식, 잘못된 replica 설정) 시계열이 없어 발화하지 않는다. 핵심 룰의 KubePodNotReady(15분)로는 늦다. 호스트 전체 정지는 외부 생존 감시가 잡는다. 발화 시험을 완료 조건에 둔다.
 
 ### 읽기 전용 접근 셋 (AC-P12, 설계 C.8)
 
@@ -115,7 +115,7 @@
 
 - Grafana SA `bot-reader` 토큰은 준비 확인(`GET /api/search`, `POST /api/dashboards/db`)에 쓰고 이 티켓에서 만든다. 봇이 쓸 토큰의 보관 위치는 설계에 없다.
 - 옛 Telegram 봇 토큰은 쓰지 않는다(`보류(D-10, T22)`).
-- 사람: healthchecks.io 콘솔(새 체크, 옛 `homelab-watchdog` 삭제), NUC sudo(이탈 시험의 임시 규칙), NUC 현장 접근(시나리오 17).
+- 사람: healthchecks.io 콘솔(새 체크, 옛 `homelab-watchdog` 삭제), 호스트 sudo(이탈 시험의 임시 규칙), 호스트 현장 접근(시나리오 17).
 
 ## 제약
 
@@ -127,7 +127,7 @@
 
 ## 완료 조건
 
-- 시나리오 16(비AI 경보), 17(외부 감시)을 통과한다. **시나리오 16 통과**(2026-10-23 00:43, 봇 없이 Telegram 도착, 전송 카운터 0→1·실패 0, approvals 00:43 행). **시나리오 17은 대체 방식으로 통과**(사용자 결정 2026-10-23 01:06 "ping만 막기", approvals 01:06·01:09~01:29 행): NUC가 Wi-Fi이고 작업 세션이 NUC 위라 물리 차단 대신 파드에서 healthchecks ping 주소로 가는 443만 nft로 20분 막았다. 01:19 down 알림이 이메일·Telegram(NUC를 거치지 않는 healthchecks 연동) 둘 다 왔고, 해제 뒤 up 알림이 왔다. 이 대체 시험은 healthchecks.io의 판정과 NUC 밖 알림 경로만 보고, NUC 전원·네트워크를 실제로 잃었다가 돌아오는 경우는 보지 않는다. 그 물리 시험(AC-P11의 NUC 전체 중단)은 T13 시나리오 17이 본다(T13 할 일 1, 제약 "시나리오 12·17은 사람 승인 뒤"). 같은 질문에서 사용자는 "T13으로 미루기"(이 조건을 열어 둠) 대신 "ping만 막기"를 골라 이 티켓의 조건을 대체 시험으로 닫았다.
+- 시나리오 16(비AI 경보), 17(외부 감시)을 통과한다. **시나리오 16 통과**(2026-10-23 00:43, 봇 없이 Telegram 도착, 전송 카운터 0→1·실패 0, approvals 00:43 행). **시나리오 17은 대체 방식으로 통과**(사용자 결정 2026-10-23 01:06 "ping만 막기", approvals 01:06·01:09~01:29 행): 호스트가 Wi-Fi이고 작업 세션이 호스트 위라 물리 차단 대신 파드에서 healthchecks ping 주소로 가는 443만 nft로 20분 막았다. 01:19 down 알림이 이메일·Telegram(호스트를 거치지 않는 healthchecks 연동) 둘 다 왔고, 해제 뒤 up 알림이 왔다. 이 대체 시험은 healthchecks.io의 판정과 호스트 밖 알림 경로만 보고, 호스트 전원·네트워크를 실제로 잃었다가 돌아오는 경우는 보지 않는다. 그 물리 시험(AC-P11의 호스트 전체 중단)은 T13 시나리오 17이 본다(T13 할 일 1, 제약 "시나리오 12·17은 사람 승인 뒤"). 같은 질문에서 사용자는 "T13으로 미루기"(이 조건을 열어 둠) 대신 "ping만 막기"를 골라 이 티켓의 조건을 대체 시험으로 닫았다.
 - 시나리오 6·7의 경보 부분(T09가 넘긴 것)을 통과한다. **통과**(approvals 2026-10-23 01:06·01:12~01:27 행): 시나리오 6은 없는 키를 가리키는 시험 ExternalSecret으로 `ExternalSecretNotReady` Telegram 01:17:57. 시나리오 7은 부트스트랩 Secret의 client secret을 틀린 값으로 잠시 바꿔 같은 경보 Telegram 01:26:48. 원래 값으로 되돌린 뒤 store Ready, 해소 알림, 시험 ns 삭제(01:33:03). 장애는 시험용 두 번째 client secret을 발급·폐기하지 않고 부트스트랩 Secret에 틀린 값을 넣어 만들었다. lead가 고른 방식이고(사용자 수행) 아래 제약 "시험용 두 번째 client secret으로만"과 다르다. 사용자가 2026-10-23 09:3x에 기록하고 통과로 인정하기로 정했다(approvals 같은 시각 행). 근거: 이 티켓이 볼 것은 경보 부분이고, 두 번째 secret을 폐기했을 때의 동작은 T09(2026-10-20)와 T10(2026-10-21)이 확인했다. 제약의 목적인 운영 client secret 보존은 지켰다(폐기 없음, 원래 값으로 되돌린 뒤 store Ready).
 - "tailnet 출처 질의 1시간 0건" 경보의 실제 발화 시험을 통과했다(아래 검증). **통과**(approvals 2026-10-23 01:14:48·02:21~03:12 행): nft로 tailnet → 53만 막은 뒤 `AdGuardTailnetQueriesMissing` firing 02:21:30, Telegram 02:22:30. 타이머 해제(03:05:17) 뒤 질의가 돌아와 resolved 03:07:00, 해소 알림 03:12:30.
 - AdGuard 정지 경보(사용 가능 replica 1분 넘게 1 미만 또는 시계열 없음, 경보 문구에 런북 `docs/runbooks-public/nuc-dns-outage.md`)의 발화 시험을 두 방식으로 통과했다: `replicas: 0` PR(파드 없음)과 파드 NotReady. 정지는 LAN DNS 전체 장애라 시험 창을 짧게 잡는다(AC-P6 한계 승인, T08a 2026-10-20). **두 방식 모두 통과**(approvals 2026-10-23 00:45~00:48·00:53~00:56 행): `replicas: 0`(#837) → `AdGuardDown` firing·Telegram, 되돌림(#838) 뒤 해소. readiness 실패(#839) → firing 00:55:39·Telegram, 되돌림(#840) 뒤 해소. 알림에 런북 링크가 있다(Telegram이 `.md`를 도메인으로 링크해 전체 GitHub 주소로 바꿈, #841).
@@ -139,9 +139,9 @@
 ## 검증
 
 - 시나리오 16: 봇이 없는 이 시점에 `kubectl -n observability exec deploy/alertmanager -- amtool alert add alertname=PlatformTest severity=warning --alertmanager.url=http://localhost:9093`. 테스트 경보가 봇 없이 Telegram에 2분 안에 도착하는지와 수신 시각, `alertmanager_notifications_total{integration="telegram"}` 증가, `alertmanager_notifications_failed_total{integration="telegram"}` 불변을 확인한다(Grafana 또는 vmsingle API).
-- 시나리오 17: NUC 네트워크를 물리적으로 끊거나 전원을 끈다(원격 접속이 끊기므로 현장에서). T08b는 사용자 결정(2026-10-23)으로 파드에서 ping 주소로 가는 443 차단으로 대신했고, 물리 차단은 T13 시나리오 17에서 한다. Period + Grace(10분) 뒤 healthchecks.io가 down으로 바꾸고 NUC를 거치지 않는 경로(이메일, Telegram 연동)로 알리는지, 복구 뒤 up 알림이 오는지 대시보드와 이벤트 기록, 수신 시각으로 본다.
+- 시나리오 17: 호스트 네트워크를 물리적으로 끊거나 전원을 끈다(원격 접속이 끊기므로 현장에서). T08b는 사용자 결정(2026-10-23)으로 파드에서 ping 주소로 가는 443 차단으로 대신했고, 물리 차단은 T13 시나리오 17에서 한다. Period + Grace(10분) 뒤 healthchecks.io가 down으로 바꾸고 호스트를 거치지 않는 경로(이메일, Telegram 연동)로 알리는지, 복구 뒤 up 알림이 오는지 대시보드와 이벤트 기록, 수신 시각으로 본다.
 - 시나리오 6·7 경보 부분: 시험 ns에 없는 키를 가리키는 ExternalSecret을 두고, 또 T09의 시험용 client secret 장애 주입으로 ESO 인증을 잠시 끊어(승인 기록) ExternalSecretNotReady 경보가 Telegram에 도착하는지 본다. 부트스트랩 Secret을 원래 client secret으로 되돌린 뒤 resolved와 시험 ns 삭제를 확인한다.
-- 이탈 경보 발화 시험: AdGuard Home이 tailnet 질의를 받지 못하는 상태를 감시 방식(T08a의 U32 결과)에 맞춰 tailnet 경로만 끊어 만든다. D-11은 (c)라(2026-10-20) NUC는 `tag:nuc`이고 tailnet 기기의 53 접근은 `autogroup:member → tag:nuc:53` 규칙 하나다. 그래서 정책 사본을 남기고 그 규칙을 뺀 정책을 apply한다(승인 기록). ACL을 건드리지 않는 대안은 사람이 sudo로 nftables를 임시로 넣는 것이다: `tailscale0`에서 들어오는 udp·tcp 53을 prerouting priority -400(conntrack·NAT 전)에서 버리고 시험 뒤 지운다(T08a 2026-10-20 무응답 시험과 같은 방식, systemd 타이머로 자동 해제). 그 동안 Tailscale 기기는 공용 서버로 해석한다. 1시간 무질의 뒤 다음 평가 주기 안에 Telegram 경보가 오는지 확인하고, 규칙이나 정책을 되돌린 뒤 resolved를 확인한다. 룰 논리는 단위 시험으로 따로 본다.
+- 이탈 경보 발화 시험: AdGuard Home이 tailnet 질의를 받지 못하는 상태를 감시 방식(T08a의 U32 결과)에 맞춰 tailnet 경로만 끊어 만든다. D-11은 (c)라(2026-10-20) 호스트는 `tag:nuc`이고 tailnet 기기의 53 접근은 `autogroup:member → tag:nuc:53` 규칙 하나다. 그래서 정책 사본을 남기고 그 규칙을 뺀 정책을 apply한다(승인 기록). ACL을 건드리지 않는 대안은 사람이 sudo로 nftables를 임시로 넣는 것이다: `tailscale0`에서 들어오는 udp·tcp 53을 prerouting priority -400(conntrack·NAT 전)에서 버리고 시험 뒤 지운다(T08a 2026-10-20 무응답 시험과 같은 방식, systemd 타이머로 자동 해제). 그 동안 Tailscale 기기는 공용 서버로 해석한다. 1시간 무질의 뒤 다음 평가 주기 안에 Telegram 경보가 오는지 확인하고, 규칙이나 정책을 되돌린 뒤 resolved를 확인한다. 룰 논리는 단위 시험으로 따로 본다.
 - 핵심 룰: `vmalert-tool unittest`(U11 결과 2026-10-22: `bun run ci`가 돌린다).
 - 외부 생존 감시: 새 체크가 초록(up)인 것을 healthchecks.io에서 확인한 뒤 옛 `homelab-watchdog`를 지운다. (2026-10-19 T06 중 이미 지워졌다)
 - 읽기 전용 접근(설계 C.8): `kubectl auth can-i --as=system:serviceaccount:bot-slot-probe:bot-reader list pods -A` → yes, 같은 주체로 `get secrets -A`, `get pods --subresource=log -A`, `create deployments -n app-smoke` → no. `argocd admin settings rbac can bot-reader get applications '*/*'` → Yes, `sync` → No(argocd-rbac-cm 오프라인 평가). Grafana 토큰으로 `GET /api/search` → 200, `POST /api/dashboards/db` → 403.

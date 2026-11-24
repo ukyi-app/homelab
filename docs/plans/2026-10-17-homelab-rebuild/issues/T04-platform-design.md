@@ -16,7 +16,7 @@
 - 플랫폼 프롬프트 전체.
 - 이 명세 §1, §4.5, §5, §7(AC-P2, AC-P8, AC-P12), §10.
 - 옛 저장소: 커밋 `2d2054a`(`2d2054aa294b3862de1b1af6eada88fb15e656e6`)를 고정해 읽는다. `legacy` 태그가 생겼으면 같은 커밋인지 확인한다(`git ls-remote https://github.com/ukyi-app/homelab "refs/tags/legacy^{}"`). T02 뒤에는 `/home/ukyi/homelab`에도 이 커밋이 있다(`git -C /home/ukyi/homelab show 2d2054a:<경로>`). 옛 사본 `~/workspace/homelab`의 작업 트리는 옛 작업 브랜치라 읽지 않고, 옛 사본에서 fetch하지 않는다(T01).
-- NUC 로컬 전용 자료(옛 런북, `~/workspace/homelab-infra/`)는 읽지 않는다 (D-27 추천).
+- 호스트 로컬 전용 자료(옛 런북, `~/workspace/homelab-infra/`)는 읽지 않는다 (D-27 추천).
 
 ## 수행 방식 (추천)
 

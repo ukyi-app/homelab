@@ -17,7 +17,7 @@
 
 1. §2 "봇을 위한 여지": 공개 HTTPS webhook 수신 경로, Alertmanager 외부 webhook 수신자, 격리 작업 실행 공간, 비AI 알림 경로, 외부 생존 감시, Argo CD 배포 상태 읽기.
 2. §3 교훈 입력: 옛 `docs/traps.md`, `docs/traps-detail.md`, `docs/decisions/`, `docs/adr/`, `docs/bespoke-component-checklist.md`, `docs/memory-ledger.md`, `docs/runbooks-public/`, `CONTEXT.md`, 옛 AIOps 기록. 완료 기준 범위에 tests/, docs/, .github/actions/, 루트 설정 파일, 호스트 수준 구성을 더했다.
-3. §9 시나리오 16(봇 없이 비AI 경보 도착), 17(NUC 전체 중단을 외부에서 감지).
+3. §9 시나리오 16(봇 없이 비AI 경보 도착), 17(호스트 전체 중단을 외부에서 감지).
 4. §10-F에 D-10, D-11, D-12, D-18, D-20, D-21, D-22.
 5. 머리말 금지 목록에 원본의 "DB 변경, 시크릿 변경"과 "옛 클러스터·Argo CD·Cloudflare·Tailscale 설정 변경"을 넣었다.
 

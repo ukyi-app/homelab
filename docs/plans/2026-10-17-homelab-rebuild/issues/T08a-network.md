@@ -5,7 +5,7 @@
 - 명세: [../spec.md](../spec.md) §4.5
 - 설계: [../platform/design.md](../platform/design.md) E.1 E4a, E.3, C.3.4~C.3.6, C.3.8, C.3.9, C.8
 - Blocked by: T07, T09
-- 선행 결정: D-08 (확정(사용자 2026-10-18): 내부 UI `*.ts.net`, Tailscale DNS (b′)), D-11 (확정(사용자 2026-10-18, T05): 설계 F D-11 표 그대로. Tailscale ACL은 2026-10-20 U28 결과로 (c)(NUC `tag:nuc`, NUC → 사람 기기 규칙 없음)로 바뀜(사용자))), D-12 (확정(사용자 2026-10-18, T05): 노드 DNS drop-in은 T06이 남기고 T07이 덮어씀), D-28 (확정(사용자 2026-10-18): Terraform state 잠금 시험), 공개 DNS 방식·Argo CD 공개 webhook·백업 보존 (확정(사용자 2026-10-18, T05): 설계 F "추가 확인")
+- 선행 결정: D-08 (확정(사용자 2026-10-18): 내부 UI `*.ts.net`, Tailscale DNS (b′)), D-11 (확정(사용자 2026-10-18, T05): 설계 F D-11 표 그대로. Tailscale ACL은 2026-10-20 U28 결과로 (c)(호스트 `tag:nuc`, 호스트 → 사람 기기 규칙 없음)로 바뀜(사용자))), D-12 (확정(사용자 2026-10-18, T05): 노드 DNS drop-in은 T06이 남기고 T07이 덮어씀), D-28 (확정(사용자 2026-10-18): Terraform state 잠금 시험), 공개 DNS 방식·Argo CD 공개 webhook·백업 보존 (확정(사용자 2026-10-18, T05): 설계 F "추가 확인")
 - 연결 AC: AC-P6, AC-P12
 - 수행: 에이전트 + 사람 (Cloudflare·Tailscale 콘솔, Terraform apply(owner 로컬), Tailscale operator OAuth 발급, 집 Wi-Fi·셀룰러 기기 확인. 명세 §11)
 
@@ -17,7 +17,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 
 - T07: Argo CD가 main을 동기화하고, root에 이 티켓의 Application 자리가 있다. 노드 DNS가 공용 DNS 직접이다.
 - T09: Infisical과 ESO가 있어 터널 토큰과 operator OAuth를 ESO로 받는다. Terraform 자격 셋이 `homelab-admin`에 있다(아래 "필요한 자격").
-- 사람 작업(설계 E4a): Terraform apply(owner 로컬, `infisical run`), Tailscale operator OAuth client 발급, tailnet HTTPS 인증서 켜기, Tailscale DNS Terraform 첫 apply(콘솔의 현재 값을 기록 → 그대로 옮긴 HCL로 새 state에 import → plan 무변경 확인) 뒤 D-08 (b′) 값으로 바꾸는 PR과 apply, NUC 키 만료 해제 확인, AdGuard 내보내기 파일 제공.
+- 사람 작업(설계 E4a): Terraform apply(owner 로컬, `infisical run`), Tailscale operator OAuth client 발급, tailnet HTTPS 인증서 켜기, Tailscale DNS Terraform 첫 apply(콘솔의 현재 값을 기록 → 그대로 옮긴 HCL로 새 state에 import → plan 무변경 확인) 뒤 D-08 (b′) 값으로 바꾸는 PR과 apply, 호스트 키 만료 해제 확인, AdGuard 내보내기 파일 제공.
 
 ## 입력
 
@@ -51,21 +51,21 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 
 ### Tailscale ACL (D-11 (c), `infra/tailscale`)
 
-- 2026-10-20 16:30에 (a) 정책(태그 없는 NUC, self 규칙)을 적용했다. 같은 날 U28 결과로 D-11이 (c)로 바뀌었다(사용자). (c)는 2026-10-21에 아래 순서로 적용했다(결과).
-- **ACL PR 하나에 넣을 것(설계 C.3.5 예시):** tagOwners `tag:nuc`·`tag:k8s-go`, 공유기 경로 `autoApprovers`, `autogroup:owner`·`autogroup:admin` → `tag:nuc:22,6443`(mosh를 쓰면 그 UDP 범위도), `autogroup:member → tag:nuc:53`, `autogroup:member`·`tag:nuc` → `tag:k8s:443`, `autogroup:member → tag:k8s-go:80`(T08c), 공유기 관리 화면 grant(사용자가 콘솔에 넣은 것을 옮김. 지금 `infra/tailscale` plan은 이 grant를 지우는 드리프트라 그 전에는 apply하지 않는다), ssh `autogroup:owner`·`autogroup:admin` → `tag:nuc`(`accept`, nonroot + root. 태그 대상은 self처럼 소유자로 좁혀지지 않아 src를 운영자로 둔다. Owner는 `autogroup:admin`에 들지 않으므로 둘 다 적는다). ACL apply가 정책 오류로 거부되면 태그를 붙이지 않고 멈춘다. NUC → 사람 기기 규칙은 두지 않는다. self 규칙은 사람 기기끼리 쓰려고 남긴다.
-- **같은 PR:** `infra/tailscale-dns`의 precondition을 "기대 소유자의 태그 없는 기기"에서 "태그가 `tag:nuc` 하나"로 바꾸고 `nuc_expected_owner` 변수와 Infisical 키를 정리한다. `docs/runbooks-public/bootstrap.md`의 NUC 등록에 `--advertise-tags=tag:nuc`와 `--advertise-routes=192.168.117.1/32`를 넣고 키 만료 해제 단계를 확인으로 바꾼다(`autoApprovers`는 광고된 경로를 승인할 뿐 광고하지 않는다).
-- **적용 순서(집에서, LAN으로 NUC에 닿을 수 있을 때):** (0) NUC가 공유기 경로를 광고하는지 본다(`tailscale debug prefs`의 `AdvertiseRoutes`. 2026-10-20에는 광고 중). 없으면 `sudo tailscale set --advertise-routes=192.168.117.1/32` → (1) 정책 사본을 저장소 밖에 둔다 → (2) ACL plan·apply. 새 규칙이 먼저 생기고 NUC는 아직 사용자 기기라 기존 경로가 그대로다(네트워크 self 규칙을 남겨야 한다. Tailscale SSH를 쓰는 기기라면 ssh 규칙도 필요하지만, NUC는 Tailscale SSH를 켜지 않아(2026-10-21) sshd에 닿는 22 포트 규칙만 필요하다) → (3) 콘솔에서 NUC에 `tag:nuc`를 붙인다 → (4) 원격 기기에서 SSH(tailnet 주소의 sshd), kubectl, AdGuard DNS(`dig @<NUC tailnet 주소>`), 공유기 관리 화면, 내부 UI를 확인한다 → (5) `infra/tailscale-dns` plan·apply(값 무변경, precondition 통과) → (6) U28 재시험: 같은 시험 파드가 운영자 기기에 닿지 않아야 한다.
-- **되돌리기:** 정책 사본으로 ACL을 되돌리고, NUC를 사용자 기기로 다시 로그인한 뒤 키 만료를 끈다. `tailscale up`은 실행마다 바꾼 플래그를 모두 다시 줘야 하므로 전체로 적는다: `sudo tailscale up --force-reauth --hostname=<NODE_NAME> --accept-dns=false --advertise-routes=192.168.117.1/32 --advertise-tags=`(빈 값이 태그 제거). 브라우저 로그인이 필요하다.
-- D-08 (b′)에서 운영자 기기가 NUC의 AdGuard Home(`:53`)에 닿는 길은 `autogroup:member → tag:nuc:53`이다. 빠뜨려도 공용 서버가 답해 증상이 없으므로 적용 뒤 AdGuard 질의 로그로 본다.
-- 남는 위험: 사람 기기를 잃으면 그 기기에 있는 SSH 키로 비root 계정에 들어온다. NUC는 Tailscale SSH를 켜지 않아(사용자 2026-10-21) ACL의 ssh 규칙(root 포함)은 쓰이지 않고, sshd는 root 로그인을 막는다.
+- 2026-10-20 16:30에 (a) 정책(태그 없는 호스트, self 규칙)을 적용했다. 같은 날 U28 결과로 D-11이 (c)로 바뀌었다(사용자). (c)는 2026-10-21에 아래 순서로 적용했다(결과).
+- **ACL PR 하나에 넣을 것(설계 C.3.5 예시):** tagOwners `tag:nuc`·`tag:k8s-go`, 공유기 경로 `autoApprovers`, `autogroup:owner`·`autogroup:admin` → `tag:nuc:22,6443`(mosh를 쓰면 그 UDP 범위도), `autogroup:member → tag:nuc:53`, `autogroup:member`·`tag:nuc` → `tag:k8s:443`, `autogroup:member → tag:k8s-go:80`(T08c), 공유기 관리 화면 grant(사용자가 콘솔에 넣은 것을 옮김. 지금 `infra/tailscale` plan은 이 grant를 지우는 드리프트라 그 전에는 apply하지 않는다), ssh `autogroup:owner`·`autogroup:admin` → `tag:nuc`(`accept`, nonroot + root. 태그 대상은 self처럼 소유자로 좁혀지지 않아 src를 운영자로 둔다. Owner는 `autogroup:admin`에 들지 않으므로 둘 다 적는다). ACL apply가 정책 오류로 거부되면 태그를 붙이지 않고 멈춘다. 호스트 → 사람 기기 규칙은 두지 않는다. self 규칙은 사람 기기끼리 쓰려고 남긴다.
+- **같은 PR:** `infra/tailscale-dns`의 precondition을 "기대 소유자의 태그 없는 기기"에서 "태그가 `tag:nuc` 하나"로 바꾸고 `nuc_expected_owner` 변수와 Infisical 키를 정리한다. `docs/runbooks-public/bootstrap.md`의 호스트 등록에 `--advertise-tags=tag:nuc`와 `--advertise-routes=192.168.117.1/32`를 넣고 키 만료 해제 단계를 확인으로 바꾼다(`autoApprovers`는 광고된 경로를 승인할 뿐 광고하지 않는다).
+- **적용 순서(집에서, LAN으로 호스트에 닿을 수 있을 때):** (0) 호스트가 공유기 경로를 광고하는지 본다(`tailscale debug prefs`의 `AdvertiseRoutes`. 2026-10-20에는 광고 중). 없으면 `sudo tailscale set --advertise-routes=192.168.117.1/32` → (1) 정책 사본을 저장소 밖에 둔다 → (2) ACL plan·apply. 새 규칙이 먼저 생기고 호스트는 아직 사용자 기기라 기존 경로가 그대로다(네트워크 self 규칙을 남겨야 한다. Tailscale SSH를 쓰는 기기라면 ssh 규칙도 필요하지만, 호스트는 Tailscale SSH를 켜지 않아(2026-10-21) sshd에 닿는 22 포트 규칙만 필요하다) → (3) 콘솔에서 호스트에 `tag:nuc`를 붙인다 → (4) 원격 기기에서 SSH(tailnet 주소의 sshd), kubectl, AdGuard DNS(`dig @<호스트 tailnet 주소>`), 공유기 관리 화면, 내부 UI를 확인한다 → (5) `infra/tailscale-dns` plan·apply(값 무변경, precondition 통과) → (6) U28 재시험: 같은 시험 파드가 운영자 기기에 닿지 않아야 한다.
+- **되돌리기:** 정책 사본으로 ACL을 되돌리고, 호스트를 사용자 기기로 다시 로그인한 뒤 키 만료를 끈다. `tailscale up`은 실행마다 바꾼 플래그를 모두 다시 줘야 하므로 전체로 적는다: `sudo tailscale up --force-reauth --hostname=<NODE_NAME> --accept-dns=false --advertise-routes=192.168.117.1/32 --advertise-tags=`(빈 값이 태그 제거). 브라우저 로그인이 필요하다.
+- D-08 (b′)에서 운영자 기기가 호스트의 AdGuard Home(`:53`)에 닿는 길은 `autogroup:member → tag:nuc:53`이다. 빠뜨려도 공용 서버가 답해 증상이 없으므로 적용 뒤 AdGuard 질의 로그로 본다.
+- 남는 위험: 사람 기기를 잃으면 그 기기에 있는 SSH 키로 비root 계정에 들어온다. 호스트는 Tailscale SSH를 켜지 않아(사용자 2026-10-21) ACL의 ssh 규칙(root 포함)은 쓰이지 않고, sshd는 root 로그인을 막는다.
 
 ### Tailscale DNS (D-08, `infra/tailscale-dns`)
 
-- 목표 값: Override local DNS 켬, 전역 nameserver = [NUC Tailscale IP(AdGuard Home), `94.140.14.14`, `94.140.15.15`](AdGuard 공용 DNS, AdGuard Home 기본값과 같은 AdGuard DNS filter), C-05의 임시 Cloudflare 4개 삭제, MagicDNS 켬, HTTPS 켬, `use_with_exit_node` 기본 끔. 목적은 Tailscale을 켠 기기가 집 안팎 어디서든 차단을 받고, NUC 장애 때도 공용 서버가 차단하며 답하는 것이다. 대가 다섯은 명세 §4.5 "Tailscale DNS"에 있다.
+- 목표 값: Override local DNS 켬, 전역 nameserver = [호스트 Tailscale IP(AdGuard Home), `94.140.14.14`, `94.140.15.15`](AdGuard 공용 DNS, AdGuard Home 기본값과 같은 AdGuard DNS filter), C-05의 임시 Cloudflare 4개 삭제, MagicDNS 켬, HTTPS 켬, `use_with_exit_node` 기본 끔. 목적은 Tailscale을 켠 기기가 집 안팎 어디서든 차단을 받고, 호스트 장애 때도 공용 서버가 차단하며 답하는 것이다. 대가 다섯은 명세 §4.5 "Tailscale DNS"에 있다.
 - Terraform `tailscale_dns_configuration`(provider v0.29.2. 문서상 정식이나 Read가 `Alpha Resource` 경고, 동작은 U34로 확인)으로 관리한다. `data.tailscale_devices`로 hostname이 일치하는 기기를 받아 precondition을 건다: 정확히 1대, 태그 `tag:nuc` 하나(D-11 (c). 태그 기기는 사용자 소유가 아니라 소유자 검사를 두지 않는다), `key_expiry_disabled`. IPv4는 `100.` 대역으로 골라낸다. `tailscale_dns_nameservers`와 함께 쓰지 않는다. (a) 동안(2026-10-20)은 기대 소유자의 태그 없는 기기를 검사했고 그 값을 변수 `TF_VAR_nuc_expected_owner`(`homelab-admin`의 `/terraform/tailscale`)로 받았다. #787에서 변수를 지웠고 2026-10-21에 Infisical 키도 지웠다(이제 필요 없음).
 - 이 자원은 DNS 설정 전체를 소유한다. 첫 apply 전에 콘솔의 현재 값을 기록하고, 그 값을 그대로 옮긴 HCL로 새 state에 import한 뒤(import 블록, provider가 지원) plan 무변경을 확인하고 목표 값으로 바꾼다. import 없이 새 state로 plan하면 생성 계획이 나온다. 선언하지 않은 콘솔 값(nameserver, split DNS, search path)은 첫 apply에서 지워지고, `override_local_dns`를 빠뜨리면 기본 false라 기기가 로컬 DNS를 계속 쓴다(plan은 정상).
-- DNS는 ACL과 나눈 별도 root `infra/tailscale-dns`(state 키 `v2/tailscale-dns/terraform.tfstate`)에 두고 리소스에 `prevent_destroy`를 건다. NUC가 없을 때 precondition 오류가 ACL apply까지 막지 않게 하려는 것이다. 조건부(`count`)는 쓰지 않는다. NUC가 없는 동안 apply가 DNS 설정 전체의 삭제를 계획해 공용 폴백과 Override까지 사라지기 때문이다. NUC가 tailnet에 없는 동안은 이 root를 apply하지 않는다. Override를 켠 상태에서 AdGuard가 죽어도 공용 서버가 답하므로 Terraform 실행 기기의 DNS 문제는 작다.
-- NUC를 Tailscale에 다시 등록하면 키 만료가 기본값(켜짐)으로 돌아오고 Tailscale IP가 바뀔 수 있다. 키 만료를 해제한 뒤 apply하면 data source가 새 IP를 쓴다. 만료가 켜진 채면 precondition이 apply를 멈춘다.
+- DNS는 ACL과 나눈 별도 root `infra/tailscale-dns`(state 키 `v2/tailscale-dns/terraform.tfstate`)에 두고 리소스에 `prevent_destroy`를 건다. 호스트가 없을 때 precondition 오류가 ACL apply까지 막지 않게 하려는 것이다. 조건부(`count`)는 쓰지 않는다. 호스트가 없는 동안 apply가 DNS 설정 전체의 삭제를 계획해 공용 폴백과 Override까지 사라지기 때문이다. 호스트가 tailnet에 없는 동안은 이 root를 apply하지 않는다. Override를 켠 상태에서 AdGuard가 죽어도 공용 서버가 답하므로 Terraform 실행 기기의 DNS 문제는 작다.
+- 호스트를 Tailscale에 다시 등록하면 키 만료가 기본값(켜짐)으로 돌아오고 Tailscale IP가 바뀔 수 있다. 키 만료를 해제한 뒤 apply하면 data source가 새 IP를 쓴다. 만료가 켜진 채면 precondition이 apply를 멈춘다.
 - 이 HCL과 import는 U34로 확인했다(2026-10-20~21: import 무변경, 목표 apply, `tag:nuc` precondition. 결과 절). 이후 provider 버전에서 안 되면 콘솔에서 한 번 설정하고 `bootstrap.md`에 값의 출처와 확인 명령(`tailscale dns status --all`)을 적는 방식으로 돌아간다(IaC 밖, 드리프트는 사람 확인).
 
 ### AdGuard와 노드 DNS (`platform/adguard`)
@@ -108,8 +108,8 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 | AdGuard 관리자 자격 | `homelab` → ESO(init이 해시 주입) | `platform/adguard` | T09 |
 
 - Terraform 자격은 machine identity가 없는 `homelab-admin`에만 있어 ESO identity가 읽지 못한다. 클러스터에는 Cloudflare API 토큰을 두지 않는다.
-- 콘솔 작업(사람): Cloudflare, Tailscale(HTTPS 인증서 켜기, NUC 키 만료 해제 확인, ACL 적용 전 정책 사본, DNS 현재 값 기록). GitHub 저장소 관리자 권한으로 시험 webhook 하나를 걸고 지운다. 시험 수신기와 시험 webhook이 함께 쓸 HMAC 비밀의 보관 위치는 설계에 없다.
-- 시나리오 14는 NUC sudo(`sudo k3s crictl pull`)와 집 Wi-Fi·셀룰러의 Tailscale 기기가 필요하다.
+- 콘솔 작업(사람): Cloudflare, Tailscale(HTTPS 인증서 켜기, 호스트 키 만료 해제 확인, ACL 적용 전 정책 사본, DNS 현재 값 기록). GitHub 저장소 관리자 권한으로 시험 webhook 하나를 걸고 지운다. 시험 수신기와 시험 webhook이 함께 쓸 HMAC 비밀의 보관 위치는 설계에 없다.
+- 시나리오 14는 호스트 sudo(`sudo k3s crictl pull`)와 집 Wi-Fi·셀룰러의 Tailscale 기기가 필요하다.
 - 백업 버킷 토큰은 이 티켓이 쓰지 않는다(T11).
 
 ## 제약
@@ -125,7 +125,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - Tailscale DNS가 (b′)이고 DNS plan이 무변경이다.
 - 공개 시험 URL이 200, 없는 host가 404, cloudflared `/ready`가 200이다.
 - 내부 UI가 `*.ts.net`으로 열린다.
-- (c) ACL과 NUC 태그를 적용한 뒤 원격에서 NUC로 SSH(tailnet 주소의 sshd)·kubectl·AdGuard DNS·공유기 관리 화면이 되고, U28 재시험에서 시험 파드가 운영자 기기에 닿지 않는다.
+- (c) ACL과 호스트 태그를 적용한 뒤 원격에서 호스트로 SSH(tailnet 주소의 sshd)·kubectl·AdGuard DNS·공유기 관리 화면이 되고, U28 재시험에서 시험 파드가 운영자 기기에 닿지 않는다.
 - 설계 C.8의 공개 webhook 경로 준비 확인을 통과한다.
 - R2 잠금 동시 실행 시험(U02)을 한 번 했고 결과가 기록돼 있다. T10의 `infra/github` 첫 apply가 이것을 기다린다.
 
@@ -133,8 +133,8 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 
 - 공개 경로: `curl -sI https://<시험 host>.ukyi.app` → 200, `curl -sI https://nope.ukyi.app` → 404, cloudflared `/ready` → 200.
 - 내부 UI: tailnet 기기에서 `curl -sI https://argocd.<tailnet>.ts.net` → 200 또는 로그인 리다이렉트. tailnet 밖에서는 이름이 풀리지 않는다. operator Ingress의 `status.loadBalancer.ingress[0].hostname`이 `*.ts.net`이다.
-- 새 ACL을 적용한 뒤 원격에서 NUC tailnet 주소로 SSH(sshd, 키 인증) 접속이 되는지 확인한다(`ssh <NUC>`). NUC는 Tailscale SSH를 켜지 않는다(사용자 2026-10-21).
-- Tailscale DNS root에 콘솔 값을 옮겨 import한 뒤 첫 plan이 무변경인지 확인한다. (b′) apply 뒤 `tailscale dns status --all`에 nameserver 셋(NUC, AdGuard 공용 2개)이 있고 Cloudflare가 없다.
+- 새 ACL을 적용한 뒤 원격에서 호스트 tailnet 주소로 SSH(sshd, 키 인증) 접속이 되는지 확인한다(`ssh <호스트>`). 호스트는 Tailscale SSH를 켜지 않는다(사용자 2026-10-21).
+- Tailscale DNS root에 콘솔 값을 옮겨 import한 뒤 첫 plan이 무변경인지 확인한다. (b′) apply 뒤 `tailscale dns status --all`에 nameserver 셋(호스트, AdGuard 공용 2개)이 있고 Cloudflare가 없다.
 - `dig @192.168.117.15 example.com +short` → 응답.
 - AdGuard를 멈추고 LAN 기기, Tailscale 기기(집 Wi-Fi와 셀룰러), 노드 자신의 이름 해석을 각각 확인한다. Tailscale 기기에서는 광고 도메인이 차단되고 일반 도메인이 풀리는지 본다. 멈추기는 `platform/adguard` replicas 0 PR 병합으로 한다(selfHeal이 되돌리지 않게). 세부 명령은 설계 G 시나리오 14다:
   - LAN 기기에서 10초 간격 30회, 매번 고유 이름으로 `dig "am$(date +%s)-$i.example.com" +tries=1 +time=5`의 이름·`status`·`Query time`과 실패 수(시간 초과·SERVFAIL·REFUSED)를 기록한다(U19).
@@ -145,7 +145,7 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - svclb를 거친 질의의 출처 주소와 ratelimit 버킷 공유 여부를 확인한다(U32).
 - 같은 state로 Terraform을 동시에 두 번 실행해 하나가 잠금으로 멈추는지 확인한다(U02: 같은 root를 두 터미널에서 동시에 plan).
 - 공개 webhook 경로(설계 C.8): `curl -s -o /dev/null -w '%{http_code}' https://hooks.ukyi.app/github`(GET) → 403, 다른 경로 POST → 403(또는 404), 서명이 틀린 POST → 401, 한 저장소에 시험 webhook을 걸고 ping 전송 → Recent Deliveries 200.
-- U28: NetworkPolicy가 없는 시험 ns의 파드에서 운영자 기기의 시험 포트로 연결해 성공 여부와 출발 주소를 기록한다. (a)에서는 2026-10-20에 성공했고 출발 주소가 NUC의 Tailscale 주소였다(그래서 (c)). **(c) 적용 뒤 재시험의 기대 결과는 연결 실패다.** 성공하면 (c) 규칙을 다시 본다.
+- U28: NetworkPolicy가 없는 시험 ns의 파드에서 운영자 기기의 시험 포트로 연결해 성공 여부와 출발 주소를 기록한다. (a)에서는 2026-10-20에 성공했고 출발 주소가 호스트의 Tailscale 주소였다(그래서 (c)). **(c) 적용 뒤 재시험의 기대 결과는 연결 실패다.** 성공하면 (c) 규칙을 다시 본다.
 - 노드 DNS: `resolvectl status`에 `1.1.1.1 9.9.9.9`, `tailscale dns status` → "Tailscale DNS: disabled".
 - cert-manager: `kubectl -n cert-manager get deploy` Ready, 시험 Certificate Ready.
 - R2: `homelab-backups`의 lifecycle 규칙에 prefix `valkey/`가 적혀 있다.
@@ -157,28 +157,28 @@ CI/CD와 앱이 올라갈 네트워크 바닥을 세운다. 공개 경로(Cloudf
 - 공개 경로: `edge-probe.ukyi.app` 200, 없는 host 404, cloudflared 커넥터 4개, HSTS 헤더. **U01 통과**(원격 관리 터널이 와일드카드 hostname을 받음).
 - 공개 webhook 경로: `hooks.ukyi.app/github` GET 403, 다른 경로 POST 403, 틀린 서명 401, `ukyi-app/homelab` 시험 webhook ping 200(생성 뒤 바로 삭제). **AC-P12 이 자리 통과.**
 - 내부 UI: Argo CD·AdGuard가 tailnet 주소로 유효 인증서와 함께 열림. Tailscale IPv4를 바꾼 뒤에도 그대로 열림.
-- ACL: 새 정책 import·적용, 원격 기기에서 `tailscale ssh`로 NUC 접속(사람 확인).
-- Tailscale DNS: adopt import 무변경 → (b′) 목표 전환 apply, 직후 plan 무변경. 전역 nameserver = NUC 현재 IPv4 + `94.140.14.14` + `94.140.15.15`, Cloudflare 없음. **U34의 import·DNS 동작 통과**(provider는 Alpha Resource 경고. (a)의 소유자 precondition으로 실행했다). 2026-10-21 (c) 적용 뒤 `tag:nuc` precondition으로 plan 무변경(**U34 통과**, 값이 같아 apply는 하지 않음). 실패 쪽은 로컬 backend 사본의 plan으로 확인했다: 0대, 2대(기기 목록을 이어 붙인 흉내), 태그 다름(기대 태그를 바꾼 흉내)이 각각 해당 precondition에서 중단했고, 대조 사본은 통과했다.
+- ACL: 새 정책 import·적용, 원격 기기에서 `tailscale ssh`로 호스트 접속(사람 확인).
+- Tailscale DNS: adopt import 무변경 → (b′) 목표 전환 apply, 직후 plan 무변경. 전역 nameserver = 호스트 현재 IPv4 + `94.140.14.14` + `94.140.15.15`, Cloudflare 없음. **U34의 import·DNS 동작 통과**(provider는 Alpha Resource 경고. (a)의 소유자 precondition으로 실행했다). 2026-10-21 (c) 적용 뒤 `tag:nuc` precondition으로 plan 무변경(**U34 통과**, 값이 같아 apply는 하지 않음). 실패 쪽은 로컬 backend 사본의 plan으로 확인했다: 0대, 2대(기기 목록을 이어 붙인 흉내), 태그 다름(기대 태그를 바꾼 흉내)이 각각 해당 precondition에서 중단했고, 대조 사본은 통과했다.
 - AdGuard: LAN·tailnet 주소 모두 응답, 기본 목록 차단(`doubleclick.net` → `0.0.0.0`).
 - 시나리오 14:
-  - LAN(공유기 경유, 10초 간격 30회): 26회 시간 초과, 복구 뒤 4회 정상. **AC-P6 LAN 불합격, 사용자 한계 승인.** NUC 무응답 시험(nft DROP 150초)에서도 11회 모두 시간 초과라 공유기가 보조 DNS로 넘어가지 않는다(**U19**). 이 공유기는 DHCP DNS 지정과 DNS 프록시 끄기가 없다. 완화: 런북 `docs/runbooks-public/nuc-dns-outage.md`, T08b AdGuard 정지 경보.
-  - 셀룰러 Tailscale 기기(NUC AdGuard 무응답 중): `doubleclick.net` → `0.0.0.0`, `example.com` 정상. **U33 통과.**
-  - 노드: `resolvectl query example.com` 정상(AdGuard 정지 중). 이미지 받기는 정지 중 sudo 시간 초과로 못 해서, 19:25에 노드와 파드에서 NUC AdGuard(LAN·tailnet 주소 `:53`)로 가는 길만 막은 상태(LAN·tailnet 기기 영향 없음)에서 캐시 안 된 `busybox:1.36`을 받았다(성공). 노드는 AdGuard 없이 동작한다.
-  - 내부 UI: AdGuard 정지 중 NUC에서 Argo CD HTTPS 200.
+  - LAN(공유기 경유, 10초 간격 30회): 26회 시간 초과, 복구 뒤 4회 정상. **AC-P6 LAN 불합격, 사용자 한계 승인.** 호스트 무응답 시험(nft DROP 150초)에서도 11회 모두 시간 초과라 공유기가 보조 DNS로 넘어가지 않는다(**U19**). 이 공유기는 DHCP DNS 지정과 DNS 프록시 끄기가 없다. 완화: 런북 `docs/runbooks-public/nuc-dns-outage.md`, T08b AdGuard 정지 경보.
+  - 셀룰러 Tailscale 기기(호스트 AdGuard 무응답 중): `doubleclick.net` → `0.0.0.0`, `example.com` 정상. **U33 통과.**
+  - 노드: `resolvectl query example.com` 정상(AdGuard 정지 중). 이미지 받기는 정지 중 sudo 시간 초과로 못 해서, 19:25에 노드와 파드에서 호스트 AdGuard(LAN·tailnet 주소 `:53`)로 가는 길만 막은 상태(LAN·tailnet 기기 영향 없음)에서 캐시 안 된 `busybox:1.36`을 받았다(성공). 노드는 AdGuard 없이 동작한다.
+  - 내부 UI: AdGuard 정지 중 호스트에서 Argo CD HTTPS 200.
   - 사용자 규칙 적용률: 셀룰러 19/20, 집 Wi-Fi 20/20(2026-10-21, 맥이 집 LAN + Tailscale, `@100.100.100.100`). 시험 규칙은 사용자가 지웠다.
 - U02: 같은 root 동시 plan에서 하나가 `Error acquiring the state lock`(통과).
-- U28: NetworkPolicy 없는 시험 ns 파드가 운영자 맥의 Tailscale 주소 시험 포트에 연결 성공. 19:25 NUC `tailscale0` tcpdump에서 그 SYN의 출발 주소가 NUC의 Tailscale 주소였다(SNAT). 이 결과로 D-11을 (c)로 바꿨다(사용자). 2026-10-21 (c) 적용 뒤 재시험: 시험 파드 → 운영자 맥 시험 포트 3회 모두 실패, NUC 호스트에서도 실패. 대조로 같은 파드 → 인터넷과 다른 맥 → 그 시험 포트는 성공(**U28 해결**).
-- D-11 (c) 적용(2026-10-21, 집): (0) NUC가 `192.168.117.1/32`를 광고 중, `ip_forward` 1(k3s가 런타임에 켬. 지속 drop-in은 새로 설치할 때 `bootstrap.md`가 둔다) → (1) 정책 사본을 저장소 밖에 둠 → (2) #787 병합, `infra/tailscale` apply(1 changed, 공유기 grant 유지) → (3) 콘솔에서 NUC에 `tag:nuc`(소유가 태그로, 키 만료 꺼짐. 열린 SSH 세션 유지) → (4) 집 밖 맥에서 NUC tailnet 주소 22·6443 열림, 새 SSH 로그인 성공, AdGuard DNS 차단·정상, 공유기 관리 화면(Tailscale 경로) 200, Argo CD 200·AdGuard 302. NUC → `tag:k8s:443`도 됨(NUC는 tailnet DNS를 받지 않아 이름은 직접 지정) → (5) `infra/tailscale-dns` plan 무변경 → (6) U28 재시험 실패(위) → (7) 쓰지 않는 Infisical 키 `TF_VAR_nuc_expected_owner` 삭제(사람).
-  - NUC에서 사람 기기로 가는 tailnet 연결도 모두 막힌다(예: NUC에서 맥으로 ssh). LAN 주소로는 된다.
-  - NUC의 Tailscale SSH는 꺼져 있다(`tailscale debug prefs`의 `RunSSH` false. 2026-10-19에는 켜져 있었고 언제 꺼졌는지는 모른다). 원격 SSH는 tailnet 주소의 sshd(키 인증, root 로그인 금지)이고 ACL의 22 규칙이 그 길을 연다. 사용자가 끈 채로 두기로 했다(2026-10-21 "1번으로 해"). 그래서 `tag:nuc` 대상 ssh 규칙은 쓰이지 않고, `bootstrap.md`의 등록 명령에서 `--ssh`를 뺐다.
-- U32(2026-10-21, AdGuard `querylog.json`): 공유기 경유 질의(`adg-20261020-lan1`)는 `10.42.0.1`(노드 cni0), NUC tailnet 주소로 보낸 질의(`-tsn1`, 셀룰러 20회 포함)는 svclb 파드 IP로 보인다. 로그 전체의 출처도 이 둘뿐이다. 둘이 같은 /24라 `ratelimit: 100`, `ratelimit_subnet_len_ipv4: 24`에서 집 LAN과 tailnet 전체가 버킷 하나를 쓰고, 공유기 주소 예외(`192.168.117.1`)는 맞지 않는다. 약 9.5시간 로그에 초당 100건 이상인 초가 셋(tailnet 출처 100건 둘, LAN 출처 198건 하나)이고, 50건 이상인 초가 24개다. 제한에 걸려 버려진 질의가 있었는지는 로그로 확인하지 못했다. **ratelimit을 껐다**(사용자 2026-10-21 "1번으로 진행하자": 시드 `ratelimit: 0`, 라이브 설정은 관리 화면에서 사람이 바꿈. 파드 IP 예외는 재시작마다 바뀌어, hostNetwork는 PSA 예외와 공격면 때문에 제외). T08b 이탈 감시는 지금 svclb 파드 IP인 출처를 tailnet 질의로 센다("`10.42.0.1`이 아닌 출처"는 클러스터 파드의 직접 질의까지 잡아 쓰지 않는다).
+- U28: NetworkPolicy 없는 시험 ns 파드가 운영자 맥의 Tailscale 주소 시험 포트에 연결 성공. 19:25 호스트 `tailscale0` tcpdump에서 그 SYN의 출발 주소가 호스트의 Tailscale 주소였다(SNAT). 이 결과로 D-11을 (c)로 바꿨다(사용자). 2026-10-21 (c) 적용 뒤 재시험: 시험 파드 → 운영자 맥 시험 포트 3회 모두 실패, 호스트에서도 실패. 대조로 같은 파드 → 인터넷과 다른 맥 → 그 시험 포트는 성공(**U28 해결**).
+- D-11 (c) 적용(2026-10-21, 집): (0) 호스트가 `192.168.117.1/32`를 광고 중, `ip_forward` 1(k3s가 런타임에 켬. 지속 drop-in은 새로 설치할 때 `bootstrap.md`가 둔다) → (1) 정책 사본을 저장소 밖에 둠 → (2) #787 병합, `infra/tailscale` apply(1 changed, 공유기 grant 유지) → (3) 콘솔에서 호스트에 `tag:nuc`(소유가 태그로, 키 만료 꺼짐. 열린 SSH 세션 유지) → (4) 집 밖 맥에서 호스트 tailnet 주소 22·6443 열림, 새 SSH 로그인 성공, AdGuard DNS 차단·정상, 공유기 관리 화면(Tailscale 경로) 200, Argo CD 200·AdGuard 302. 호스트 → `tag:k8s:443`도 됨(호스트는 tailnet DNS를 받지 않아 이름은 직접 지정) → (5) `infra/tailscale-dns` plan 무변경 → (6) U28 재시험 실패(위) → (7) 쓰지 않는 Infisical 키 `TF_VAR_nuc_expected_owner` 삭제(사람).
+  - 호스트에서 사람 기기로 가는 tailnet 연결도 모두 막힌다(예: 호스트에서 맥으로 ssh). LAN 주소로는 된다.
+  - 호스트의 Tailscale SSH는 꺼져 있다(`tailscale debug prefs`의 `RunSSH` false. 2026-10-19에는 켜져 있었고 언제 꺼졌는지는 모른다). 원격 SSH는 tailnet 주소의 sshd(키 인증, root 로그인 금지)이고 ACL의 22 규칙이 그 길을 연다. 사용자가 끈 채로 두기로 했다(2026-10-21 "1번으로 해"). 그래서 `tag:nuc` 대상 ssh 규칙은 쓰이지 않고, `bootstrap.md`의 등록 명령에서 `--ssh`를 뺐다.
+- U32(2026-10-21, AdGuard `querylog.json`): 공유기 경유 질의(`adg-20261020-lan1`)는 `10.42.0.1`(노드 cni0), 호스트 tailnet 주소로 보낸 질의(`-tsn1`, 셀룰러 20회 포함)는 svclb 파드 IP로 보인다. 로그 전체의 출처도 이 둘뿐이다. 둘이 같은 /24라 `ratelimit: 100`, `ratelimit_subnet_len_ipv4: 24`에서 집 LAN과 tailnet 전체가 버킷 하나를 쓰고, 공유기 주소 예외(`192.168.117.1`)는 맞지 않는다. 약 9.5시간 로그에 초당 100건 이상인 초가 셋(tailnet 출처 100건 둘, LAN 출처 198건 하나)이고, 50건 이상인 초가 24개다. 제한에 걸려 버려진 질의가 있었는지는 로그로 확인하지 못했다. **ratelimit을 껐다**(사용자 2026-10-21 "1번으로 진행하자": 시드 `ratelimit: 0`, 라이브 설정은 관리 화면에서 사람이 바꿈. 파드 IP 예외는 재시작마다 바뀌어, hostNetwork는 PSA 예외와 공격면 때문에 제외). T08b 이탈 감시는 지금 svclb 파드 IP인 출처를 tailnet 질의로 센다("`10.42.0.1`이 아닌 출처"는 클러스터 파드의 직접 질의까지 잡아 쓰지 않는다).
 - 노드 DNS: `resolvectl` 전역 `1.1.1.1 9.9.9.9`, `tailscale dns status` "Tailscale DNS: disabled."
 - cert-manager: 세 Deployment Ready, 시험 ns의 selfSigned Certificate Ready(ns 삭제).
 - R2: `homelab-backups` lifecycle prefix `valkey/`, 14일, 켜짐. Cloudflare plan 드리프트 없음.
 
 ### 부록: 시나리오 14 원자료
 
-NUC에서 공유기(LAN 기기가 쓰는 DNS)로 물었다. 매번 처음 묻는 이름, `dig +tries=1 +time=5`, 질의 사이 10초 대기다(시간 초과 때 실제 간격은 15초). 줄 형식은 `시각 회차 이름 상태 응답시간`이다. AdGuard 정지는 18:13:12~18:19:47이라 27~30회는 복구 뒤다.
+호스트에서 공유기(LAN 기기가 쓰는 DNS)로 물었다. 매번 처음 묻는 이름, `dig +tries=1 +time=5`, 질의 사이 10초 대기다(시간 초과 때 실제 간격은 15초). 줄 형식은 `시각 회차 이름 상태 응답시간`이다. AdGuard 정지는 18:13:12~18:19:47이라 27~30회는 복구 뒤다.
 
 ```text
 # start 2026-10-20 18:13:26 router=192.168.117.1
@@ -215,7 +215,7 @@ NUC에서 공유기(LAN 기기가 쓰는 DNS)로 물었다. 매번 처음 묻는
 # end 2026-10-20 18:20:27 fail=26 slow_over_5s=0
 ```
 
-NUC 무응답 시험(nft DROP 18:52:39~18:55:09). 이 측정은 이름을 기록하지 않았다(이름 꼴 `ad<epoch>-<회차>.example.com`).
+호스트 무응답 시험(nft DROP 18:52:39~18:55:09). 이 측정은 이름을 기록하지 않았다(이름 꼴 `ad<epoch>-<회차>.example.com`).
 
 ```text
 # start 2026-10-20 18:52:39 router=192.168.117.1 mode=nuc-silent

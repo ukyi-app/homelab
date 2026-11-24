@@ -1,12 +1,12 @@
 # T20 봇 MEMORY_BRIEFING
 
 - 단계: P4 봇 V1
-- 상태: 완료 (2026-11-03. 실연동 2026-11-02~03: 원장(NUC SSD 계약 v1)·기동 장벽·기억 명령·일일 브리핑 운영 적용. MEM-01·BRIEF-01·DATA-02·AUTH-02(기억 명령 경로) live pass, fail 없음. DATA-02는 `homelab db restore`로 삭제 전 시각 복원 뒤 원장 재적용(homelab #1026·#1027), AUTH-02는 허용 밖 채널 `/memory-search`를 봇이 처리하지 않음. 미확인 칸의 해소 티켓: 브리핑 인증서·복원 검증 원본 T24, Codex 작업 상태·질문 대기 칸 T18, 기억을 모델 맥락에 넣는 경로(SEC-01)는 V1 코드에 없어 T21이 다시 확인. 결과표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T20 실연동 결과", HANDOFF는 private 운영 저장소 `handoffs/memory-briefing.md`. 시범 P-1 확장 진행 중(2026-11-03, 아래 "시범 운영"). 로컬·mock 구현은 2026-10-29 봇 PR #8 `82e2a45`)
+- 상태: 완료 (2026-11-03. 실연동 2026-11-02~03: 원장(호스트 SSD 계약 v1)·기동 장벽·기억 명령·일일 브리핑 운영 적용. MEM-01·BRIEF-01·DATA-02·AUTH-02(기억 명령 경로) live pass, fail 없음. DATA-02는 `homelab db restore`로 삭제 전 시각 복원 뒤 원장 재적용(homelab #1026·#1027), AUTH-02는 허용 밖 채널 `/memory-search`를 봇이 처리하지 않음. 미확인 칸의 해소 티켓: 브리핑 인증서·복원 검증 원본 T24, Codex 작업 상태·질문 대기 칸 T18, 기억을 모델 맥락에 넣는 경로(SEC-01)는 V1 코드에 없어 T21이 다시 확인. 결과표는 봇 저장소 `docs/ai-bot/VERIFICATION.md` "T20 실연동 결과", HANDOFF는 private 운영 저장소 `handoffs/memory-briefing.md`. 시범 P-1 확장 진행 중(2026-11-03, 아래 "시범 운영"). 로컬·mock 구현은 2026-10-29 봇 PR #8 `82e2a45`)
 - 명세: [../spec.md](../spec.md)
 - Blocked by: T16a(착수), T16b(완료)
   - 착수: [T16a](T16a-bot-foundation-local.md) 뒤. 이 티켓을 실제로 막는 FOUNDATION의 예약 기능을 T16a가 로컬·mock으로 만든다(V1 범위 조정 안 3).
   - 완료: [T16b](T16b-bot-foundation-deploy.md) 뒤. 브리핑을 실제 D-17 브리핑 채널로 보내는 시험(BRIEF-01 `authorized_external`)은 배포된 봇이 필요하다.
-- 선행 결정: D-17 (확정(사용자 2026-10-18, T15): 브리핑은 알림·리뷰·브리핑 채널. 브리핑 시각은 매일 08:50 Asia/Seoul(확정(사용자 2026-10-20, T16a))), D-12 T20 후속 (확정(사용자 2026-11-02): 삭제 원장은 NUC 두 번째 NVMe SSD, `LABEL=bulk-ssd` → `/mnt/bulk`)
+- 선행 결정: D-17 (확정(사용자 2026-10-18, T15): 브리핑은 알림·리뷰·브리핑 채널. 브리핑 시각은 매일 08:50 Asia/Seoul(확정(사용자 2026-10-20, T16a))), D-12 T20 후속 (확정(사용자 2026-11-02): 삭제 원장은 호스트 두 번째 NVMe SSD, `LABEL=bulk-ssd` → `/mnt/bulk`)
 - 연결 AC: AC-B7
 - 수행: 개발 에이전트 (`STAGE=MEMORY_BRIEFING`)
 
@@ -20,7 +20,7 @@
 
 DATA-02: 봇 DB는 공유 PostgreSQL 백업(14일 보존, spec §5.1 "설계 기본값")에 들어간다. 삭제한 기억도 14일 동안 백업에 남을 수 있으므로 삭제 표식은 복원 대상 밖의 삭제 원장에 두고, 원장 기록이 확인된 뒤에만 삭제 완료로 응답하며, 기동 때 원장의 삭제를 다시 적용한다. 기억 ID는 재사용되지 않는 값으로 두고 원장에 `created_at`을 함께 둔다 [가정: 봇 저장소 `ARCHITECTURE.md` §7 제안, PR #3 Codex 리뷰 반영].
 
-삭제 원장 위치(사용자 2026-11-02, spec D-12 "T20 후속"): NUC 두 번째 NVMe SSD(ext4, 라벨 `bulk-ssd`)의 파일 원장 `/mnt/bulk/homelab-bot/deletion-ledger/`(`deletions.jsonl` + 초기화 표식 `ledger.json`)다. R2 원장은 고르지 않았고 새 자격은 없다. 사람이 `sudo host/install.sh --cluster prod --bulk-ssd`로 마운트와 원장 첫 초기화를 한다. 봇은 파일을 만들지 않고, 파일·표식이 없으면 빈 원장으로 열지 않고 멈춘다. 게시 서버에만 PVC `deletion-ledger`로 붙이고 배포는 `Recreate`다(단일 작성자). 받아들인 위험: NUC 본체와 SSD를 함께 잃으면 R2에서 DB만 돌아와 지운 기억이 되살아날 수 있다. 평상시의 미마운트·파일 유실·잘못된 볼륨은 받아들이지 않는다(멈춤·경보).
+삭제 원장 위치(사용자 2026-11-02, spec D-12 "T20 후속"): 호스트 두 번째 NVMe SSD(ext4, 라벨 `bulk-ssd`)의 파일 원장 `/mnt/bulk/homelab-bot/deletion-ledger/`(`deletions.jsonl` + 초기화 표식 `ledger.json`)다. R2 원장은 고르지 않았고 새 자격은 없다. 사람이 `sudo host/install.sh --cluster prod --bulk-ssd`로 마운트와 원장 첫 초기화를 한다. 봇은 파일을 만들지 않고, 파일·표식이 없으면 빈 원장으로 열지 않고 멈춘다. 게시 서버에만 PVC `deletion-ledger`로 붙이고 배포는 `Recreate`다(단일 작성자). 받아들인 위험: 호스트 본체와 SSD를 함께 잃으면 R2에서 DB만 돌아와 지운 기억이 되살아날 수 있다. 평상시의 미마운트·파일 유실·잘못된 볼륨은 받아들이지 않는다(멈춤·경보).
 
 ## 할 일
 

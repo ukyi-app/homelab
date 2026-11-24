@@ -23,7 +23,7 @@ locals {
     override_local_dns = true
     magic_dns          = true
     nameservers = [
-      # NUC 주소는 apply 때 읽는다. 콘솔에서 NUC IPv4를 바꾸거나 재등록하면 이 root를 다시 apply해야 한다.
+      # 호스트 주소는 apply 때 읽는다. 콘솔에서 호스트 IPv4를 바꾸거나 재등록하면 이 root를 다시 apply해야 한다.
       # 옛 주소가 남아도 공용 서버가 답해 증상이 없고, tailnet 기기의 AdGuard Home 경로만 조용히 끊긴다.
       { address = try(local.nuc_ipv4[0], ""), use_with_exit_node = false },
       { address = "94.140.14.14", use_with_exit_node = false },
@@ -70,7 +70,7 @@ resource "tailscale_dns_configuration" "homelab" {
   }
 
   lifecycle {
-    # count로 NUC 부재를 표현하면 DNS 설정 전체를 지우는 계획이 나온다. 복구 중에는 이 root를 apply하지 않는다.
+    # count로 호스트 부재를 표현하면 DNS 설정 전체를 지우는 계획이 나온다. 복구 중에는 이 root를 apply하지 않는다.
     prevent_destroy = true
 
     precondition {
@@ -84,16 +84,16 @@ resource "tailscale_dns_configuration" "homelab" {
     precondition {
       # D-11 (c): 태그 기기는 사용자 소유가 아니라 소유자로 가리지 않는다. 태그가 tag:nuc 하나인지로 본다.
       condition     = try(length(local.nuc.tags) == 1 && contains(local.nuc.tags, "tag:nuc"), false)
-      error_message = "NUC는 태그가 tag:nuc 하나인 기기여야 한다(D-11 (c))."
+      error_message = "호스트는 태그가 tag:nuc 하나인 기기여야 한다(D-11 (c))."
     }
     precondition {
       # 태그 기기는 키 만료가 기본으로 꺼진다. 켜져 있으면 만료 때 tailnet 전역 DNS가 죽은 주소를 가리킨다.
       condition     = try(local.nuc.key_expiry_disabled == true, false)
-      error_message = "NUC 키 만료가 꺼져 있어야 한다."
+      error_message = "호스트 키 만료가 꺼져 있어야 한다."
     }
     precondition {
       condition     = length(local.nuc_ipv4) == 1
-      error_message = "NUC에는 100.으로 시작하는 IPv4가 정확히 1개 필요하다."
+      error_message = "호스트에는 100.으로 시작하는 IPv4가 정확히 1개 필요하다."
     }
   }
 }

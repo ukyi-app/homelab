@@ -11,7 +11,7 @@
 
 ## 목표
 
-옛 클러스터를 내리고, 새 Terraform과 충돌할 옛 외부 자원을 정리한다. 옛 자격을 폐기하고, NUC에 남은 옛 호스트 설정과 옛 데이터를 지운다.
+옛 클러스터를 내리고, 새 Terraform과 충돌할 옛 외부 자원을 정리한다. 옛 자격을 폐기하고, 호스트에 남은 옛 호스트 설정과 옛 데이터를 지운다.
 
 이 티켓이 만드는 것은 새 플랫폼이 아니다. 정리 목록·자격 폐기 표의 상태, [approvals.md](../approvals.md) 기록, GitHub 임시 ruleset `main-interim`(T10까지 main 보호. `gh api`로 만들고 T10이 Terraform으로 import)이다.
 
@@ -20,9 +20,9 @@
 여섯 항목이 모두 끝나야 할 일 2 이후를 시작한다.
 
 1. 최신 계획, 설계 문서(`platform/design.md`), T05 결정, 티켓이 원격 `rebuild` 브랜치에 push돼 있다.
-2. NUC 로컬 보존 범위(T05 할 일 9). 대상은 명세 §4.5의 "NUC 로컬 전용 자료"다. D-12(확정(사용자 2026-10-18, T05))가 OS 유지라서 NUC 디스크의 자료는 철거 뒤에도 남는다. 그래서 아래 "따로 보존" 두 가지만 저장소 밖·NUC 밖에 옮기고, 나머지는 디스크에 그대로 둔다. 이 티켓이 지우는 로컬 자료는 SOPS age 키(cluster), `/mnt/bulk/homelab-backups`(선행 확인 3), 내보낸 뒤의 AdGuard PVC(H8)다.
-   - **따로 보존: 옛 사본의 로컬 전용 git 작업.** D-12 결과와 무관하게 한다. 옛 사본(`~/workspace/homelab`)의 push 안 된 브랜치와 워크트리를 `git bundle`로 묶어 NUC 밖에 둔다. 예: `git -C ~/workspace/homelab bundle create ~/homelab-local-$(date +%F).bundle --all` 뒤 그 파일을 NUC 밖으로 옮긴다. 미커밋 변경은 번들에 들어가지 않는다. 어떻게 할지 사용자가 정한다. 2026-10-18 실측: 로컬 브랜치 20개 중 15개에 원격 추적 ref에 없는 커밋이 있고(합계 20개), 워크트리 10개(그중 3개 prunable), stash 0, 미커밋 파일 48개다. 마지막 fetch가 2026-09-23이라 원격 대비 판정은 바뀔 수 있다. gitignored인 `.scratch`(옛 사본 117G의 대부분)도 번들에 들어가지 않는다.
-   - **따로 보존: AdGuard 라이브 설정.** 비밀값을 빼고 내보내 T08a 입력으로 둔다(사람, sudo). 이 파일이 있는 경로는 할 일 2에서 지운다(H8). 파일은 `/var/lib/rancher/k3s-storage/internal/` 아래 AdGuard PVC(`…_edge_adguard-data`)의 `AdGuardHome.yaml`이다. 옛 저장소의 ConfigMap은 첫 부팅 시드라서 라이브 규칙·필터와 다를 수 있다. 사용자 비밀번호 해시와 API 키는 뺀다. LAN 기기 이름과 내부 재작성 규칙이 들어 있으므로 저장소에 커밋하지 않고, 저장소 밖이면서 NUC 밖인 비공개 위치에 둔다. 이 티켓에는 위치만 적는다. 내보낼 때 사용자 규칙·허용 목록·추가 필터 목록의 개수를 세어 D-08 (b′)의 대가 크기로 기록한다(설계 C.3.6).
+2. 호스트 로컬 보존 범위(T05 할 일 9). 대상은 명세 §4.5의 "호스트 로컬 전용 자료"다. D-12(확정(사용자 2026-10-18, T05))가 OS 유지라서 호스트 디스크의 자료는 철거 뒤에도 남는다. 그래서 아래 "따로 보존" 두 가지만 저장소 밖·호스트 밖에 옮기고, 나머지는 디스크에 그대로 둔다. 이 티켓이 지우는 로컬 자료는 SOPS age 키(cluster), `/mnt/bulk/homelab-backups`(선행 확인 3), 내보낸 뒤의 AdGuard PVC(H8)다.
+   - **따로 보존: 옛 사본의 로컬 전용 git 작업.** D-12 결과와 무관하게 한다. 옛 사본(`~/workspace/homelab`)의 push 안 된 브랜치와 워크트리를 `git bundle`로 묶어 호스트 밖에 둔다. 예: `git -C ~/workspace/homelab bundle create ~/homelab-local-$(date +%F).bundle --all` 뒤 그 파일을 호스트 밖으로 옮긴다. 미커밋 변경은 번들에 들어가지 않는다. 어떻게 할지 사용자가 정한다. 2026-10-18 실측: 로컬 브랜치 20개 중 15개에 원격 추적 ref에 없는 커밋이 있고(합계 20개), 워크트리 10개(그중 3개 prunable), stash 0, 미커밋 파일 48개다. 마지막 fetch가 2026-09-23이라 원격 대비 판정은 바뀔 수 있다. gitignored인 `.scratch`(옛 사본 117G의 대부분)도 번들에 들어가지 않는다.
+   - **따로 보존: AdGuard 라이브 설정.** 비밀값을 빼고 내보내 T08a 입력으로 둔다(사람, sudo). 이 파일이 있는 경로는 할 일 2에서 지운다(H8). 파일은 `/var/lib/rancher/k3s-storage/internal/` 아래 AdGuard PVC(`…_edge_adguard-data`)의 `AdGuardHome.yaml`이다. 옛 저장소의 ConfigMap은 첫 부팅 시드라서 라이브 규칙·필터와 다를 수 있다. 사용자 비밀번호 해시와 API 키는 뺀다. LAN 기기 이름과 내부 재작성 규칙이 들어 있으므로 저장소에 커밋하지 않고, 저장소 밖이면서 호스트 밖인 비공개 위치에 둔다. 이 티켓에는 위치만 적는다. 내보낼 때 사용자 규칙·허용 목록·추가 필터 목록의 개수를 세어 D-08 (b′)의 대가 크기로 기록한다(설계 C.3.6).
    - **그대로 두고 할 일 4와 자격 폐기가 끝날 때까지 지우지 않음:** 옛 사본의 `docs/runbooks/`, `.env.secrets`, `infra/{cloudflare,github,tailscale}/backend.hcl`, `infra/{cloudflare,github,tailscale}/terraform.tfvars`, `infra/tailscale/terraform.tfvars.pre-cutover.bak`, `infra/{cloudflare,github,tailscale}/.terraform/terraform.tfstate`(백엔드 설정 캐시, 0644, 자격 포함 추정). state 처리에 쓰는 자격 파일이거나 그 사본이다.
    - **보존하지 않음: SOPS age 키 `~/.config/sops/age`.** 새 구조에서 쓰지 않는다. 할 일 6의 다른 자격 폐기가 끝난 것을 확인한 뒤 지운다(D-20). 그 전에는 지우지 않는다.
    - **그대로 둠(따로 보존하지 않음):** 옛 인계·계획 문서 `~/workspace/homelab-infra/`(git 아님, 파일 77개: Markdown 41개와 macOS `._` 사이드카 36개), 원격 없는 다른 프로젝트(`~/workspace/polyrelay` 등), `~/.codex*`, `~/.claude*`, `~/.agents`, `~/.ssh`, `~/.config`, `~/.gnupg`. OS를 유지하므로 디스크에 남고, 이 티켓은 이 경로를 건드리지 않는다. OS 재설치 때만 필요했던 보존 목록이다.
@@ -37,13 +37,13 @@
 1. 아래 "정리 목록"과 "자격 폐기 표"를 채운다. 시크릿 값은 쓰지 않고 이름·ID만 쓴다. 2026-10-18에 실측을 마쳤다(아래 "할 일 1 결과"). "콘솔 확인"과 "확인 불가" 줄은 사람이 확인한 뒤 닫는다.
    - 목록 입력: `gh api`로 실측한 GitHub 상태, `legacy`의 `policy/credential-expiry.json` 전체 행, 옛 Terraform root 선언(`legacy`의 `infra/cloudflare`, `infra/github`, `infra/tailscale`). 로컬 런북(`token-inventory` 등)과 `~/workspace/homelab-infra/`도 D-27(확정(사용자 2026-10-18, T05))대로 읽기 전용 입력으로 쓴다. 이름·ID만 옮기고 값과 절차 원문은 옮기지 않는다. 공개 근거만으로는 코드 밖 자격(콘솔에서 만든 토큰 등)이 빠질 수 있어서다(설계 B.9).
    - 코드 밖 자원(Cloudflare Access 앱·정책 등)은 콘솔에서 다시 조회해 확인한다.
-2. 옛 Argo CD를 멈추고, k3s와 NUC 잔여물을 지운다.
+2. 옛 Argo CD를 멈추고, k3s와 호스트 잔여물을 지운다.
    - root 앱이 Application과 ApplicationSet을 selfHeal로 소유한다. 그래서 Application 단위로 자동 동기화를 끄는 것은 효과가 없다. 컨트롤러가 되돌린다.
    - 옛 사본의 kubeconfig(`~/workspace/homelab/infra/k3s-bootstrap/kubeconfig`, sudo 불필요)로 `argocd` 네임스페이스의 `argocd-application-controller`(StatefulSet)와 `argocd-applicationset-controller`(Deployment)를 0으로 줄인다. 두 컨트롤러의 파드가 없는지 확인한다.
    - application-controller를 먼저 줄인다. 옛 Argo CD는 자기 자신도 selfHeal로 관리하므로, application-controller가 살아 있으면 다른 컨트롤러의 축소를 되돌릴 수 있다(추측).
    - 그다음 D-12(OS 유지) 방식으로 k3s를 제거한다(H9). 이때 클러스터 안의 SealedSecrets 봉인 키가 사라진다(선행 확인 3). `k3s-uninstall.sh`는 `/var/lib/rancher/k3s-storage`를 남기므로 옛 데이터 경로는 따로 지운다. 이 스크립트는 `/usr/local/bin`의 `kubectl`·`crictl`·`ctr` 심링크도 지운다(2026-10-18 확인). 사용자 셸의 kubectl은 mise 설치본이라 남지만, `sudo`(secure_path)로는 철거 뒤 `kubectl`·`crictl`·`ctr`를 쓸 수 없다.
    - AdGuard 설정 내보내기(선행 확인 2)가 끝났는지 확인하고 옛 데이터 경로를 지운다(H8).
-   - NUC 호스트 잔여물 중 H1·H2·H3과, H7은 사용자 결정 범위만 지운다(아래 H7 줄. `/usr/local/share/ukyi-motd/`는 통째로 지우지 않는다). H3 유닛은 옛 사본을 옮기거나 지우기 전에 지운다. H4·H5 drop-in과 `accept-dns=false`는 남긴다(아래 "NUC 호스트 잔여물").
+   - 호스트 잔여물 중 H1·H2·H3과, H7은 사용자 결정 범위만 지운다(아래 H7 줄. `/usr/local/share/ukyi-motd/`는 통째로 지우지 않는다). H3 유닛은 옛 사본을 옮기거나 지우기 전에 지운다. H4·H5 drop-in과 `accept-dns=false`는 남긴다(아래 "호스트 잔여물").
    - `homelab-aiops-nft.service`에는 ExecStop이 없어서, 서비스를 멈춰도 nft table이 남는다(2026-10-18 실측). `sudo nft list tables`로 table 이름을 확인하고 따로 지운다.
 3. 외부 자원을 삭제한다(D-11). `prevent_destroy`가 걸린 버킷은 콘솔에서 지운다. GitHub 쪽(environment, 저장소 변수, 옛 App, ruleset, webhook)은 할 일 5의 순서로 한다.
 4. 옛 Terraform state를 처리한다.
@@ -89,10 +89,10 @@
 
 - tailnet: 유지(D-11).
 - tagged 기기 `homelab-1`, `pg-rw-1`: 삭제.
-- operator 기기 `homelab-operator`: 삭제. NUC에서는 ACL 때문에 보이지 않아 존재를 먼저 확인한다.
+- operator 기기 `homelab-operator`: 삭제. 호스트에서는 ACL 때문에 보이지 않아 존재를 먼저 확인한다.
 - OAuth 클라이언트 3종: 삭제. owner 부트스트랩(Terraform 밖, 쓰기 스코프), CI 읽기 전용, operator.
-- NUC 노드 키 만료 설정. 2026-10-17에는 만료가 해제돼 있다. D-12가 OS 유지라 NUC는 다시 등록하지 않고 지금 등록 그대로 남는다(설계 C.3.2). OS를 다시 설치하게 되면 만료가 기본값(켜짐)으로 돌아오고 Tailscale IP가 바뀔 수 있다. 그러면 만료를 다시 해제하고 전역 nameserver의 NUC 주소를 고친다. T08a의 Terraform(D-08)은 hostname으로 NUC를 찾아 새 IP를 쓰고, 만료 해제를 precondition으로 확인한다.
-- ACL·DNS: 옛 root를 apply도 destroy도 하지 않는다. 새 코드(T08a)가 덮어쓴다. DNS는 D-08(확정(사용자 2026-10-18))대로 Terraform `tailscale_dns_configuration`이 맡는다. 옛 "Override local DNS" 토글은 옛 코드 밖에서 콘솔로 켰다(`2d2054a:infra/tailscale/acl.tf:79-82`). CLI로는 상태가 보이지 않으므로 콘솔에서 확인한다. 새 ACL은 D-11 (a)(확정(사용자 2026-10-18, T05))다: NUC는 태그 없는 사용자 기기로 두고, 옛 `autogroup:self` 규칙과 ssh 규칙(`accept`, `autogroup:nonroot`·`root`)을 유지한다. 그래야 NUC 원격 접속이 끊기지 않는다. (c) `tag:nuc`로 바꿀지는 T08a가 U28 결과로 다시 본다.
+- 호스트 노드 키 만료 설정. 2026-10-17에는 만료가 해제돼 있다. D-12가 OS 유지라 호스트는 다시 등록하지 않고 지금 등록 그대로 남는다(설계 C.3.2). OS를 다시 설치하게 되면 만료가 기본값(켜짐)으로 돌아오고 Tailscale IP가 바뀔 수 있다. 그러면 만료를 다시 해제하고 전역 nameserver의 호스트 주소를 고친다. T08a의 Terraform(D-08)은 hostname으로 호스트를 찾아 새 IP를 쓰고, 만료 해제를 precondition으로 확인한다.
+- ACL·DNS: 옛 root를 apply도 destroy도 하지 않는다. 새 코드(T08a)가 덮어쓴다. DNS는 D-08(확정(사용자 2026-10-18))대로 Terraform `tailscale_dns_configuration`이 맡는다. 옛 "Override local DNS" 토글은 옛 코드 밖에서 콘솔로 켰다(`2d2054a:infra/tailscale/acl.tf:79-82`). CLI로는 상태가 보이지 않으므로 콘솔에서 확인한다. 새 ACL은 D-11 (a)(확정(사용자 2026-10-18, T05))다: 호스트는 태그 없는 사용자 기기로 두고, 옛 `autogroup:self` 규칙과 ssh 규칙(`accept`, `autogroup:nonroot`·`root`)을 유지한다. 그래야 호스트 원격 접속이 끊기지 않는다. (c) `tag:nuc`로 바꿀지는 T08a가 U28 결과로 다시 본다.
 
 ### GitHub
 
@@ -118,15 +118,15 @@
 ### 외부 감시·알림
 
 - healthchecks.io: 계정은 이어 쓰고 체크는 새로 만든다(D-10). 옛 체크 `homelab-watchdog`는 선행 확인 4에서 일시 정지하고, T08b가 새 체크의 초록을 확인한 뒤 지운다(D-11). 줄 상태는 `보류(D-10, T08b)`. 2026-10-19 실제: 사용자가 일시 정지 대신 지웠다(줄 상태 `삭제됨`, approvals).
-- Telegram 봇: homelab 알림용 새 봇은 T09가 만든다(D-10). 옛 봇과 토큰은 T22가 `mac-uptime-guard` 장치를 끌 때까지 그대로 둔다. 줄 상태는 `보류(D-10, T22)`. 토큰은 자격 폐기 표에 있다. 토큰 사본은 environment `homelab-main`, 클러스터 Secret 3개, `mac-uptime-guard`, NUC의 `~/workspace/mac-uptime-guard/config.env`, 옛 사본 `.scratch`의 입력 파일(토큰 모양 문자열, 추정)에 있다(2026-10-18 실측). T22가 토큰을 폐기하면 사본은 모두 무효가 된다.
+- Telegram 봇: homelab 알림용 새 봇은 T09가 만든다(D-10). 옛 봇과 토큰은 T22가 `mac-uptime-guard` 장치를 끌 때까지 그대로 둔다. 줄 상태는 `보류(D-10, T22)`. 토큰은 자격 폐기 표에 있다. 토큰 사본은 environment `homelab-main`, 클러스터 Secret 3개, `mac-uptime-guard`, 호스트의 `~/workspace/mac-uptime-guard/config.env`, 옛 사본 `.scratch`의 입력 파일(토큰 모양 문자열, 추정)에 있다(2026-10-18 실측). T22가 토큰을 폐기하면 사본은 모두 무효가 된다.
 
 ### 옛 AIOps 저장소
 
 - `ukyi-app/aiops`와 App `ukyi-homelab-aiops`: 제거(D-13 일부 확정, 2026-10-18. aiops는 쓰지 않는다). 실행은 T22라 줄 상태는 `보류(D-13, T22)`. 2026-10-19 실제: App은 이 티켓 중에 지웠다(할 일 5.7). `aiops` 저장소는 T22.
 - `ukyi-app/aiops-autodeploy-canary`: 공개하지 않고 private로 보관(D-29, 삭제도 가능). 실행은 T22라 줄 상태는 `보류(D-29, T22)`.
-- `mac-uptime-guard`(private, 옛 맥 미니용, 옛 Telegram 토큰 사용): 제거(D-29, 사용자 2026-10-18 17:46. 그 전에는 private 보관이었다). 실행은 T22다: 장치를 끄고 옛 Telegram 봇 토큰을 폐기한 뒤 저장소를 지운다. NUC에 원격 없는 로컬 클론(`~/workspace/mac-uptime-guard`)도 있다. 줄 상태는 `보류(담당 T22)`.
+- `mac-uptime-guard`(private, 옛 맥 미니용, 옛 Telegram 토큰 사용): 제거(D-29, 사용자 2026-10-18 17:46. 그 전에는 private 보관이었다). 실행은 T22다: 장치를 끄고 옛 Telegram 봇 토큰을 폐기한 뒤 저장소를 지운다. 호스트에 원격 없는 로컬 클론(`~/workspace/mac-uptime-guard`)도 있다. 줄 상태는 `보류(담당 T22)`.
 
-### NUC 호스트 잔여물 (D-12)
+### 호스트 잔여물 (D-12)
 
 D-12(확정(사용자 2026-10-18, T05))는 OS를 유지하고 설계 B.4의 H1·H2·H3·H7·H8·H9를 지운다. H4·H5는 남기고 T07의 새 호스트 설정이 같은 이름으로 덮어쓴다. 줄마다 B.4의 ID를 단다. H7은 2026-10-19 사용자 결정으로 범위를 좁혔다(아래 H7 줄).
 
@@ -184,7 +184,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | `github-tf-ci-pat` | CI 읽기용 fine-grained PAT `ukyi-app-tf-github-ci-readonly` | environment `homelab-main`(`TF_GITHUB_TOKEN`) | | 삭제됨(2026-10-19, 사용자. UI 이름 `ukyi-app-tf-github-ci-readonly`) |
 | `tailscale-ci-oauth-client` | Tailscale CI 읽기 전용 OAuth 클라이언트(설명 `homelab ci drift-tailscale readonly 20260819`) | environment `homelab-main`(`TF_TAILSCALE_OAUTH_*`), 비밀번호 관리자 백업 | owner 부트스트랩 OAuth와 별개 | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
 | `r2-terraform-state` | `homelab-tfstate` 접근 R2 키(토큰 `homelab-terraform-state-20260820`) | 옛 사본 `backend.hcl` 3개와 `.terraform/terraform.tfstate` 3개(자격 포함 추정), environment `homelab-main`(`R2_*`) | 할 일 4 뒤. 2026-08-20 회전 전 옛 토큰이 실제로 폐기됐는지 콘솔에서 확인 | 삭제됨(2026-10-19, 사용자가 R2 API 토큰 화면에서. 2026-08-20 회전 전 토큰 여부는 "완료" 보고에 포함) |
-| `ts-node-key-nuc` | NUC 노드 키(만료 해제) | 없음(기기 등록) | 폐기하면 NUC가 tailnet에서 빠져 Tailscale 경로의 원격 접속이 끊긴다. D-12가 OS 유지라 NUC는 지금 등록 그대로 tailnet에 남는다(설계 C.3.2). 2026-10-18 실측: 태그 없음, 만료 없음 | 유지(D-12) |
+| `ts-node-key-nuc` | 호스트 노드 키(만료 해제) | 없음(기기 등록) | 폐기하면 호스트가 tailnet에서 빠져 Tailscale 경로의 원격 접속이 끊긴다. D-12가 OS 유지라 호스트는 지금 등록 그대로 tailnet에 남는다(설계 C.3.2). 2026-10-18 실측: 태그 없음, 만료 없음 | 유지(D-12) |
 | `argocd-github-webhook` | webhook 647791528의 secret | 클러스터 `argocd-secret`, `.env.secrets` | webhook 삭제(할 일 5)와 함께. 새 구조에는 공개 webhook이 없다(60초 폴링) | 삭제됨(2026-10-19 13:27 webhook 삭제로 무효. 클러스터 사본은 k3s 제거로 사라짐) |
 | `github-dispatch-app` | App `ukyi-homelab-dispatch`(4178609) | 확인 불가(개인 키 개수는 App 설정 화면) | 2026-10-18 실측: 등록이 남아 있고 org 설치는 없다. 등록 삭제로 키도 무효 | 삭제됨(2026-10-19 App 등록 삭제로 무효, GET 404) |
 | `cf-tf-root-token` | Cloudflare 토큰 `homelab-terraform-cloudflare`(Account·Zone Edit) | `.env.secrets`, environment `homelab-main`(`TF_CLOUDFLARE_TOKEN`) | 할 일 4 뒤 | 삭제됨(2026-10-19, 사용자. Cloudflare API 토큰 화면에서) |
@@ -195,17 +195,17 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | Tailscale 부트스트랩 OAuth | owner 로컬용, Terraform 밖, 쓰기 스코프 | `.env.secrets` | | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
 | Tailscale operator OAuth | 옛 operator용(devices:core·auth_keys) | SOPS 파일(`platform/tailscale/prod/operator-oauth.enc.yaml`) | | 삭제됨(2026-10-19, 사용자가 Tailscale 콘솔에서 OAuth 클라이언트 3종 삭제) |
 | Cloudflare 터널 실행 토큰 | 터널 `homelab-prod`의 실행 토큰 | SOPS Secret `cloudflared-tunnel` | 터널 삭제(할 일 3)로 무효 | 삭제됨(2026-10-19 13:56 터널 삭제로 무효) |
-| Telegram 봇 토큰 | 옛 알림 봇 | 정리 목록 "Telegram 봇" 줄 | `mac-uptime-guard`도 이 봇을 쓴다. T22가 그 장치를 끈 뒤 폐기한다(위 예외) | 폐기(2026-11-02, T22. 장치는 이미 없어 사람이 BotFather에서 옛 봇을 지움. 사본이 있던 저장소·NUC 사본도 삭제) |
+| Telegram 봇 토큰 | 옛 알림 봇 | 정리 목록 "Telegram 봇" 줄 | `mac-uptime-guard`도 이 봇을 쓴다. T22가 그 장치를 끈 뒤 폐기한다(위 예외) | 폐기(2026-11-02, T22. 장치는 이미 없어 사람이 BotFather에서 옛 봇을 지움. 사본이 있던 저장소·호스트 사본도 삭제) |
 | healthchecks ping URL | `homelab-watchdog` 체크 | SOPS Secret 2개(`alerting-secrets`, `restore-drill-alerting`), `.env.secrets` | 옛 체크 삭제도 T08b(D-11)(위 예외) | 삭제됨(2026-10-19, 사용자가 체크를 지워 URL 무효. 계획은 T08b에서 새 체크 초록 뒤 삭제였다) |
-| `trip-mate-api` Google OAuth client | `trip-mate-api` 로그인용 Google OAuth 클라이언트 | 후보: NUC 로컬 클론 `~/workspace/trip-mate-api/.env.local` | 앱 삭제로 폐기(D-29). Google Cloud 콘솔에서 지운다 | 유지(없음 확인, 2026-10-19, 사용자) |
+| `trip-mate-api` Google OAuth client | `trip-mate-api` 로그인용 Google OAuth 클라이언트 | 후보: 호스트 로컬 클론 `~/workspace/trip-mate-api/.env.local` | 앱 삭제로 폐기(D-29). Google Cloud 콘솔에서 지운다 | 유지(없음 확인, 2026-10-19, 사용자) |
 | `trip-mate-api` OXR app id | `trip-mate-api`가 쓰던 OXR app id | 후보: 같은 `.env.local` | 앱 삭제로 폐기(D-29). 발급처 계정에서 폐기한다 | 유지(없음 확인, 2026-10-19, 사용자) |
 | `trip-mate-api` `BETTER_AUTH_SECRET` | `trip-mate-api`의 Better Auth 비밀값 | 후보: 같은 `.env.local` | 앱 삭제로 폐기(D-29). 외부 발급처가 없는 값이라, 이 값을 받던 앱이 없어졌는지(저장소·배포 삭제) 확인하고 닫는다 | 삭제됨(2026-10-19 확인: 저장소 404(2026-10-18 삭제), 배포는 k3s 제거로 사라짐) |
-| `page` admin token | `page` 관리자 토큰 | 후보: NUC 로컬 클론 `~/workspace/page/.env.local` | 앱 삭제로 폐기(D-29). 외부 발급처가 없는 값이라, 이 값을 받던 앱이 없어졌는지 확인하고 닫는다 | 삭제됨(2026-10-19 확인: 저장소 404(2026-10-18 삭제), 배포는 k3s 제거로 사라짐) |
+| `page` admin token | `page` 관리자 토큰 | 후보: 호스트 로컬 클론 `~/workspace/page/.env.local` | 앱 삭제로 폐기(D-29). 외부 발급처가 없는 값이라, 이 값을 받던 앱이 없어졌는지 확인하고 닫는다 | 삭제됨(2026-10-19 확인: 저장소 404(2026-10-18 삭제), 배포는 k3s 제거로 사라짐) |
 | `files` 앱 자격 | `FILES_ADMIN_TOKEN`, 클라이언트 키 `keys.json` | SealedSecret `files-keys`, `.env.secrets` | 발급처 없음. T22 재연결 때 새 값(D-20). 외부 클라이언트가 옛 키를 가졌는지는 저장소로 알 수 없다 | 삭제됨(2026-10-19 확인: 받던 배포가 k3s 제거로 사라짐. T22 재연결 때 새 값) |
 | 클러스터 내부 자기생성 비밀번호 | Grafana·AdGuard·Argo CD 관리자, CNPG superuser·앱 역할, 앱 DB·Valkey 자격 | SealedSecret·SOPS 파일, `.env.secrets`, 비밀번호 관리자(있으면) | 발급처 없음. 받던 클러스터가 k3s 제거·H8로 사라지면 닫는다 | 삭제됨(2026-10-19 13:20·13:21 k3s 제거와 H8로 받던 클러스터·데이터가 사라짐) |
-| AIOps 생산자 토큰 3개 | Argo CD 알림·관측 경로가 NUC `aiops-ingress`로 보내던 토큰 | 클러스터 Secret 3개(`argocd-notifications-secret`, 네임스페이스 둘의 `aiops-observation-auth`) | 발급처 없음. k3s 제거와 H1·H2 삭제로 양쪽이 사라진다 | 삭제됨(2026-10-19 k3s 제거와 2b의 H1·H2 삭제로 양쪽이 사라짐) |
-| `aiops-proxy` ChatGPT 구독 OAuth | 옛 AIOps CLIProxyAPI의 구독 로그인 | NUC `aiops-proxy` 저장 공간(H2): `/var/lib/homelab-aiops/cliproxy-auth`(파일 2개), `cliproxy-staging/<id>/auth`(1개)(2026-10-19 sudo 조회) | 파일은 H2 삭제로 지운다. OpenAI 계정 쪽 세션 해제는 사람이 한다. D-13 일부 확정은 aiops 저장소·App만 다루므로 D-20을 따른다 | 유지(사용자 결정 2026-10-19: OpenAI 전체 로그아웃은 사용자의 지금 세션까지 끊는다. 토큰 파일은 2b·2d로 지워 디스크에 남은 사본 없음) |
-| `aiops-engine` Codex ChatGPT 로그인 | 옛 AIOps 엔진 계정의 Codex CLI `auth.json`. 2026-10-19 키 이름만 봤다(값은 출력하지 않음): `OPENAI_API_KEY`는 null, `auth_mode`, `tokens`(`access_token`, `refresh_token`, `id_token`, `account_id`) | NUC `/var/lib/homelab-aiops/auth/auth.json`(H2, `aiops-engine` 홈. 2026-10-19 sudo 조회로 찾음) | 파일은 H2 삭제로 지운다. 갱신 토큰이 있으므로 `aiops-proxy` 줄과 함께 OpenAI 계정에서 세션을 해제한다 | 유지(사용자 결정 2026-10-19: 위 줄과 같음. `auth.json`은 `.img`와 함께 2b·2d로 지움) |
+| AIOps 생산자 토큰 3개 | Argo CD 알림·관측 경로가 호스트 `aiops-ingress`로 보내던 토큰 | 클러스터 Secret 3개(`argocd-notifications-secret`, 네임스페이스 둘의 `aiops-observation-auth`) | 발급처 없음. k3s 제거와 H1·H2 삭제로 양쪽이 사라진다 | 삭제됨(2026-10-19 k3s 제거와 2b의 H1·H2 삭제로 양쪽이 사라짐) |
+| `aiops-proxy` ChatGPT 구독 OAuth | 옛 AIOps CLIProxyAPI의 구독 로그인 | 호스트 `aiops-proxy` 저장 공간(H2): `/var/lib/homelab-aiops/cliproxy-auth`(파일 2개), `cliproxy-staging/<id>/auth`(1개)(2026-10-19 sudo 조회) | 파일은 H2 삭제로 지운다. OpenAI 계정 쪽 세션 해제는 사람이 한다. D-13 일부 확정은 aiops 저장소·App만 다루므로 D-20을 따른다 | 유지(사용자 결정 2026-10-19: OpenAI 전체 로그아웃은 사용자의 지금 세션까지 끊는다. 토큰 파일은 2b·2d로 지워 디스크에 남은 사본 없음) |
+| `aiops-engine` Codex ChatGPT 로그인 | 옛 AIOps 엔진 계정의 Codex CLI `auth.json`. 2026-10-19 키 이름만 봤다(값은 출력하지 않음): `OPENAI_API_KEY`는 null, `auth_mode`, `tokens`(`access_token`, `refresh_token`, `id_token`, `account_id`) | 호스트 `/var/lib/homelab-aiops/auth/auth.json`(H2, `aiops-engine` 홈. 2026-10-19 sudo 조회로 찾음) | 파일은 H2 삭제로 지운다. 갱신 토큰이 있으므로 `aiops-proxy` 줄과 함께 OpenAI 계정에서 세션을 해제한다 | 유지(사용자 결정 2026-10-19: 위 줄과 같음. `auth.json`은 `.img`와 함께 2b·2d로 지움) |
 | SealedSecrets 봉인 키 | 클러스터 안의 키는 k3s 제거로 사라진다 | `/mnt/bulk/homelab-backups/sealed-secrets`(1개, age로 암호화), 비밀번호 관리자 첨부(있으면) | 봉인본 10개(공개 히스토리 포함)를 풀 수 있는 키다. 디스크 사본은 H8 비우기로 지운다 | 삭제됨(2026-10-19 클러스터 키는 k3s 제거로, 디스크 사본 `/mnt/bulk/homelab-backups`는 2d로 사라짐. 비밀번호 관리자 첨부가 있으면 할 일 6에서 사람이 지운다) |
 | SOPS age 키(cluster) | `~/.config/sops/age` | 클러스터 Secret `sops-age` | 옛 `.sops.yaml`의 recipient 2개(cluster, recovery)는 확인했다. 이 파일이 cluster recipient와 맞는지는 사람이 `age-keygen -y`로 대조한다. 맞으면 공개 히스토리의 SOPS 파일 9개를 풀 수 있다. 새 구조에서 쓰지 않는다. 할 일 4와 이 표의 다른 폐기가 끝난 것을 확인한 뒤 지운다(보류 아님) | 삭제됨(2026-10-19 14:31, `age-keygen -y`로 cluster recipient와 대조 뒤 파일 삭제) |
 | SOPS age 키(recovery) | 비밀번호 관리자 항목 `homelab age recovery` | 비밀번호 관리자만(디스크 사본 없음, 런북) | 옛 SOPS 파일 9개와 봉인 키 백업을 모두 풀 수 있다. cluster 키와 같은 때 마지막에 사람이 지운다 | 유지(행방 모름, 2026-10-19 사용자 "현재 age 는 알수없는 상태야". 풀 수 있는 옛 SOPS 값은 이 표에서 모두 폐기·무효가 됐고(Telegram 봇 토큰은 2026-10-19 폐기하기로 함), 봉인 키 사본은 2d로 사라져 남아도 쓸 곳이 없다고 판단. 찾으면 지운다) |
@@ -215,7 +215,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 
 ## 할 일 1 결과 (2026-10-18 실측)
 
-읽기 전용으로 실측했다: `gh api` GET, `git show 2d2054a:…`(옛 코드 선언, `policy/credential-expiry.json` 11행), D-27대로 로컬 런북과 `~/workspace/homelab-infra/`(이름만), sudo 없는 NUC 조회(`systemctl`, `test -e`, `getent`, `findmnt <경로>`, `tailscale status`), 옛 Argo CD 워크로드 이름·replicas 조회(`kubectl get`만). 값, 이메일, tailnet 이름, Tailscale IP는 옮기지 않았다. Cloudflare·R2·Tailscale·healthchecks 콘솔은 에이전트가 볼 수 없어 "콘솔 확인"으로 남겼다.
+읽기 전용으로 실측했다: `gh api` GET, `git show 2d2054a:…`(옛 코드 선언, `policy/credential-expiry.json` 11행), D-27대로 로컬 런북과 `~/workspace/homelab-infra/`(이름만), sudo 없는 호스트 조회(`systemctl`, `test -e`, `getent`, `findmnt <경로>`, `tailscale status`), 옛 Argo CD 워크로드 이름·replicas 조회(`kubectl get`만). 값, 이메일, tailnet 이름, Tailscale IP는 옮기지 않았다. Cloudflare·R2·Tailscale·healthchecks 콘솔은 에이전트가 볼 수 없어 "콘솔 확인"으로 남겼다.
 
 **상태 규칙.** 실행 전 상태는 완료 조건의 네 상태로 이렇게 닫는다. `삭제 예정`·`폐기 예정`은 실행 뒤 `삭제됨`. `변경 예정`(`allow_auto_merge`)은 바꾼 뒤 `유지(false로 바꿈, D-07)`. `생성 예정`(`main-interim`)은 만든 뒤 `유지(T10까지, T10 import)`. `콘솔 확인`·`확인 불가`는 사람이 보고, 있으면 처리 방향대로 `삭제됨`, 없으면 `유지(없음 확인, 날짜)`. 아래 "실측으로 더한 줄"도 정리 목록에 들어가 완료 조건을 따른다. 정보 줄(H1 이스케이프 설명, `findmnt -T` 주의)은 상태 대상이 아니다. "기본값"이라고 쓴 유지는 지금 상태를 바꾸지 않는다는 뜻이고, 사용자가 다르게 정하면 고친다.
 
@@ -224,7 +224,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | # | 상태 | 근거 |
 |---|---|---|
 | 1 | 완료 | 원격 `rebuild` = `fdb7dfe`(2026-10-19 11:41 push). 선행 확인 2·3 결과까지 들어 있다. 할 일 2 전에 티켓을 더 고쳤으면 다시 push한다 |
-| 2 | 완료 | 2026-10-19: 번들 `homelab-local-2026-10-19.bundle` 생성·`bundle verify` 통과(ref 52개, fetch 없이). AdGuard 라이브 설정 내보내기 완료(PV `pvc-4b2e658f-16cc-440d-bd2d-739bdc373bf6`, 결과 sha256 `a7bc4239…990a2`, 비밀 키 3개 삭제). D-08 (b′) 대가: 사용자 규칙 0개, 허용 목록 0개, 추가 필터 목록 0개(AdGuard DNS filter 1개만 켜짐), 재작성 1개. 두 파일은 맥 `~/Documents`(iCloud 동기화 밖)에 복사하고 sha256을 대조했다(approvals). AdGuard NUC 사본은 순서표 9장까지 둔다. 로컬 런북·`homelab-infra` 점검은 완료 |
+| 2 | 완료 | 2026-10-19: 번들 `homelab-local-2026-10-19.bundle` 생성·`bundle verify` 통과(ref 52개, fetch 없이). AdGuard 라이브 설정 내보내기 완료(PV `pvc-4b2e658f-16cc-440d-bd2d-739bdc373bf6`, 결과 sha256 `a7bc4239…990a2`, 비밀 키 3개 삭제). D-08 (b′) 대가: 사용자 규칙 0개, 허용 목록 0개, 추가 필터 목록 0개(AdGuard DNS filter 1개만 켜짐), 재작성 1개. 두 파일은 맥 `~/Documents`(iCloud 동기화 밖)에 복사하고 sha256을 대조했다(approvals). AdGuard 호스트 사본은 순서표 9장까지 둔다. 로컬 런북·`homelab-infra` 점검은 완료 |
 | 3 | 완료 | 2026-10-19 11:40 사용자 확인(approvals). 봉인 키와 그 디스크 백업, 런북 암호화 사본, 옛 Postgres 데이터 사본 전부, 지표·로그, 외부 자원·자격 손실을 알렸다 |
 | 4 | 다르게 끝남(일시 정지 대신 삭제) | 2026-10-19 13:14 이전에 사용자가 콘솔에서 `homelab-watchdog`를 지웠다(approvals). 알림을 보낼 체크가 없으니 k3s 제거 뒤 down 알림도 없다. 2c 직전 사용자가 콘솔에서 다시 생기지 않았음을 확인했다("없음 진행") |
 | 5 | 완료 | `gh pr list -R ukyi-app/homelab --state open` → 0개 |
@@ -243,12 +243,12 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | R2 | `homelab-pg-backups-prod`, `homelab-media-prod` | 선언 있음, `prevent_destroy` | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 API 조회로 남은 버킷은 `homelab-tfstate` 하나) |
 | R2 | `homelab-cache-backups-prod` | 선언 있음 | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 API 조회로 남은 버킷은 `homelab-tfstate` 하나) |
 | R2 | `homelab-tfstate` | Terraform 밖 수동 생성, 옛 root 3개의 백엔드 | 유지(D-11). 2026-10-19 14:08 옛 키 3개 삭제(보관본 `~/t06-tfstate-archive`), 버킷은 비어 있음 |
-| Tailscale | tailnet | NUC 접속 중 | 유지(D-11) |
-| Tailscale | `homelab-1`, `pg-rw-1` | online, tagged | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 NUC `tailscale status`에서 안 보임) |
-| Tailscale | `homelab-operator` | NUC에서 안 보임(ACL 때문일 수 있음) | 삭제됨 또는 없음(2026-10-19 사용자 "완료" 보고. 있었는지는 기록 없음. NUC에서 안 보임) |
+| Tailscale | tailnet | 호스트 접속 중 | 유지(D-11) |
+| Tailscale | `homelab-1`, `pg-rw-1` | online, tagged | 삭제됨(2026-10-19, 사용자가 콘솔에서. 13:55 호스트 `tailscale status`에서 안 보임) |
+| Tailscale | `homelab-operator` | 호스트에서 안 보임(ACL 때문일 수 있음) | 삭제됨 또는 없음(2026-10-19 사용자 "완료" 보고. 있었는지는 기록 없음. 호스트에서 안 보임) |
 | Tailscale | OAuth 클라이언트 3종 | Terraform 선언은 operator 1개, 나머지 둘은 Terraform 밖 | 삭제됨(2026-10-19, 사용자가 콘솔에서) |
-| Tailscale | NUC 노드 키 만료 | 태그 없음, 만료 없음 | 유지(D-12) |
-| Tailscale | ACL·DNS | 전역 resolver 5개(NUC 1 + Cloudflare 4, C-05), 이 노드는 "Tailscale DNS: disabled" | 유지(옛 root 손대지 않음, T08a가 덮어씀) |
+| Tailscale | 호스트 노드 키 만료 | 태그 없음, 만료 없음 | 유지(D-12) |
+| Tailscale | ACL·DNS | 전역 resolver 5개(호스트 1 + Cloudflare 4, C-05), 이 노드는 "Tailscale DNS: disabled" | 유지(옛 root 손대지 않음, T08a가 덮어씀) |
 | GitHub | App reader(4043034), writer(4043080) | 등록·org 설치(`all`). writer는 새 저장소 `homelab-bot`·`homelab-bot-ops`에도 contents write가 닿는다 | 삭제됨(2026-10-19, 사람이 UI로. GET 404, org 설치 목록에 없음) |
 | GitHub | App aiops(4937062) | 등록·org 설치(`selected`). homelab 포함 여부는 API로 볼 수 없다 | 삭제됨(2026-10-19, 사용자 결정으로 T22에서 앞당김. 선택 저장소가 homelab 하나뿐이라 homelab만 뺄 수 없었다. GET 404. 설정 스냅숏 `~/t06-snapshot/github/`) |
 | GitHub | App dispatch(4178609) | 등록 남음, org 설치 없음 | 삭제됨(2026-10-19, 사람이 UI로. GET 404) |
@@ -270,15 +270,15 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | 외부 감시·알림 | Telegram 봇 | 사본 위치는 정리 목록 줄 | 폐기(2026-11-02, T22) |
 | 옛 AIOps | `aiops`와 App | private, secret 등 0. App은 GitHub 행 | 삭제(App 2026-10-19 이 티켓, 저장소 2026-11-02 T22) |
 | 옛 AIOps | `aiops-autodeploy-canary` | private | 보류(D-29, T22) |
-| 옛 AIOps | `mac-uptime-guard` | private, NUC 로컬 클론 있음 | 보류(담당 T22) |
-| NUC | H1 유닛 | nft 서비스·mount active, ingress·worker inactive | 삭제됨(2026-10-19 12:52 s2b, D-12. nft table 삭제, mount·loop 해제 확인) |
-| NUC | H2 파일·사용자·추가 잔여물 | 모두 있음. 2026-10-19 sudo 조회: nft table `inet homelab_aiops`, `/etc/nftables.d`에는 `homelab-aiops.nft` 1개뿐(패키지 소유 아님, `/etc/nftables.conf`가 include하지 않음), `/etc/homelab-aiops` 항목 39개(13G), `/var/tmp` 작업 디렉터리 125개(4.8G). 추가 잔여물은 H2 추가 줄 | 삭제됨(2026-10-19 12:52 s2b, D-12. `/etc/nftables.d`·`/nonexistent` 디렉터리째, `aiops-*` 사용자 8명·그룹 9개, `/var/tmp` 125개. `.img`는 H8) |
-| NUC | H3 유닛 | timer 둘 active, 옛 사본 스크립트 실행 | 삭제됨(2026-10-19 12:52 s2b, D-12) |
-| NUC | H4 drop-in | 셋 다 있음 | 유지(D-12, T07이 덮어씀) |
-| NUC | H5 노드 DNS | drop-in 있음, `/etc/resolv.conf`는 stub 아님, "Tailscale DNS: disabled" | 유지(D-12, T07이 맡음) |
-| NUC | H6 swap | fstab swap 항목 0개 | 유지(할 일 없음) |
-| NUC | H7 MOTD | motd-refresh timer active. 범위를 고쳤다(H7 줄) | 삭제됨(2026-10-19 12:52 s2b, D-12, 사용자 결정 2026-10-19: k3s 상태 표시만 지움. `00-ukyi` 원본 복원, 고양이 MOTD 유지) |
-| NUC | H9 `k3s.service` | active·enabled. 옛 Argo CD 워크로드 6개 모두 replicas 1 | 삭제됨(2026-10-19 13:20 s2c, D-12) |
+| 옛 AIOps | `mac-uptime-guard` | private, 호스트 로컬 클론 있음 | 보류(담당 T22) |
+| 호스트 | H1 유닛 | nft 서비스·mount active, ingress·worker inactive | 삭제됨(2026-10-19 12:52 s2b, D-12. nft table 삭제, mount·loop 해제 확인) |
+| 호스트 | H2 파일·사용자·추가 잔여물 | 모두 있음. 2026-10-19 sudo 조회: nft table `inet homelab_aiops`, `/etc/nftables.d`에는 `homelab-aiops.nft` 1개뿐(패키지 소유 아님, `/etc/nftables.conf`가 include하지 않음), `/etc/homelab-aiops` 항목 39개(13G), `/var/tmp` 작업 디렉터리 125개(4.8G). 추가 잔여물은 H2 추가 줄 | 삭제됨(2026-10-19 12:52 s2b, D-12. `/etc/nftables.d`·`/nonexistent` 디렉터리째, `aiops-*` 사용자 8명·그룹 9개, `/var/tmp` 125개. `.img`는 H8) |
+| 호스트 | H3 유닛 | timer 둘 active, 옛 사본 스크립트 실행 | 삭제됨(2026-10-19 12:52 s2b, D-12) |
+| 호스트 | H4 drop-in | 셋 다 있음 | 유지(D-12, T07이 덮어씀) |
+| 호스트 | H5 노드 DNS | drop-in 있음, `/etc/resolv.conf`는 stub 아님, "Tailscale DNS: disabled" | 유지(D-12, T07이 맡음) |
+| 호스트 | H6 swap | fstab swap 항목 0개 | 유지(할 일 없음) |
+| 호스트 | H7 MOTD | motd-refresh timer active. 범위를 고쳤다(H7 줄) | 삭제됨(2026-10-19 12:52 s2b, D-12, 사용자 결정 2026-10-19: k3s 상태 표시만 지움. `00-ukyi` 원본 복원, 고양이 MOTD 유지) |
+| 호스트 | H9 `k3s.service` | active·enabled. 옛 Argo CD 워크로드 6개 모두 replicas 1 | 삭제됨(2026-10-19 13:20 s2c, D-12) |
 | 옛 데이터 | `/var/lib/rancher/k3s-storage` | 있음. 2026-10-19 sudo 조회: `internal` 아래 PVC 4개(1.3G: AdGuard, `pg-1`, `pg-1-wal`, `trip-mate-data`) | 삭제됨(2026-10-19 13:21 s2d, H8. 항목 1402개. 빈 `/var/lib/rancher`도 지움) |
 | 옛 데이터 | `/mnt/bulk`와 fstab | ext4 마운트, 2.2G. 2026-10-19 sudo 조회: 항목 5개(옛 PVC 4개와 `homelab-backups`, 선행 확인 3), fstab 줄 1개 | 삭제됨(2026-10-19 13:21 s2d, H8. 항목 5273개, umount, fstab 줄 1개 삭제(백업 `/etc/fstab.t06-2026-10-19.bak`). 디스크·파일시스템과 빈 마운트 지점은 남김). 이후: 2026-11-02 T20 후속으로 원장 전용 재마운트(spec D-12, [T20](T20-bot-memory-briefing.md)) |
 | 옛 데이터 | `/mnt/bulk-new` | root 0700 디렉터리, 마운트 아님. 2026-10-19 sudo 조회: 비어 있음 | 삭제됨(2026-10-19 13:21 s2d, H8) |
@@ -295,9 +295,9 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 | GitHub | org 수준 secret·변수·runner | 모두 0 | 유지(정리할 것 없음) |
 | GitHub | org webhook | 조회 불가(`admin:org_hook` 범위 없음) | 유지(없음 확인, 2026-10-19, 사용자) |
 | GitHub | org fine-grained PAT 목록 | 조회 불가(GitHub App 토큰만 받는 API) | 유지(없음 확인, 2026-10-19, 사용자. owner 계정 PAT 목록은 할 일 6에서 본다) |
-| NUC | `/usr/local/bin/kubectl`·`crictl`·`ctr` | `k3s` 심링크 | 삭제됨(2026-10-19 13:20 s2c, `k3s-uninstall.sh`가 지움) |
-| NUC | `/etc/rancher/node` | 2026-10-19 s2c 뒤 남음. 옛 노드 비밀번호 파일(`k3s-uninstall.sh`가 지우지 않는다. 같은 노드로 다시 붙을 때 쓰려는 것으로 추측). 받던 옛 서버는 사라졌다 | 삭제됨(2026-10-19 14:48, 사용자 결정(에이전트 추천 수락). `password` 파일 1개(33 bytes)와 빈 `/etc/rancher`까지 지움) |
-| NUC | `/usr/local/bin/sops` | 일반 실행 파일 | 유지(기본값: 자격 아님, 새 구조와 충돌 없음. 지우기로 하면 할 일 6 뒤) |
+| 호스트 | `/usr/local/bin/kubectl`·`crictl`·`ctr` | `k3s` 심링크 | 삭제됨(2026-10-19 13:20 s2c, `k3s-uninstall.sh`가 지움) |
+| 호스트 | `/etc/rancher/node` | 2026-10-19 s2c 뒤 남음. 옛 노드 비밀번호 파일(`k3s-uninstall.sh`가 지우지 않는다. 같은 노드로 다시 붙을 때 쓰려는 것으로 추측). 받던 옛 서버는 사라졌다 | 삭제됨(2026-10-19 14:48, 사용자 결정(에이전트 추천 수락). `password` 파일 1개(33 bytes)와 빈 `/etc/rancher`까지 지움) |
+| 호스트 | `/usr/local/bin/sops` | 일반 실행 파일 | 유지(기본값: 자격 아님, 새 구조와 충돌 없음. 지우기로 하면 할 일 6 뒤) |
 | 옛 사본 | `.scratch`의 평문 자격(App PEM 3개, kubeconfig 사본 2개, 입력 파일) | 디렉터리 0700, 내용은 열지 않음 | 유지(기본값: 선행 확인 2대로 옛 사본은 디스크에 그대로 둠. reader·writer 키는 할 일 5.6, kubeconfig는 k3s 제거, aiops 키와 Telegram 토큰은 T22에 무효) |
 | 옛 사본 | `.scratch`의 CLIProxyAPI fixture | 토큰 필드가 있는 파일 72개. README는 합성 fixture라 적음 | 유지(합성으로 판단, 2026-10-19 형태 조회(값 미출력): 토큰 필드 JSON 99개(`accounts` 69, `ci-v176-commission-root` 30). access·refresh 토큰 모두 fake·test 같은 표식이 있고, id_token은 `iss` 없는 JWT 69개와 표식 있는 값 30개. OpenAI가 발급한 형태는 0개. 추론) |
 | GitHub | owner 계정 fine-grained PAT `homelab-aiops-collector` | 2026-10-19 사람 확인에서 처음 봄. 자격 표에 없던 옛 AIOps 수집기용, 무만료, 최근 2개월 안 사용 | 삭제됨(2026-10-19, 사용자. D-20, D-13) |
@@ -311,7 +311,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 - Tailscale: Machines의 `homelab-1`·`pg-rw-1`·`homelab-operator`, OAuth 클라이언트 개수·이름, "Override local DNS" 토글.
 - healthchecks.io: 체크 전체 목록(이름), 연결된 통합, 읽기 전용 API 키, 선행 확인 4의 일시 정지.
 - 비밀번호 관리자와 외장 매체: `homelab age recovery`, writer App 키 백업, 봉인 키 첨부, Tailscale CI OAuth 백업, 외장 SSD의 SOPS·App 키 사본.
-- NUC sudo(할 일 2 전·중): `/etc/nftables.d`와 nft table 이름, AdGuard PVC, `/mnt/bulk`·`/mnt/bulk-new`·`/var/backups/files-data`·`/var/tmp/homelab-aiops-*`·`/nonexistent` 내용, `aiops-proxy` OAuth 저장 위치. 2026-10-19 `s0-inspect.sh`와 `aiops-engine` `auth.json` 키 이름 조회로 마쳤다(결과는 위 표, 자격 폐기 표, approvals).
+- 호스트 sudo(할 일 2 전·중): `/etc/nftables.d`와 nft table 이름, AdGuard PVC, `/mnt/bulk`·`/mnt/bulk-new`·`/var/backups/files-data`·`/var/tmp/homelab-aiops-*`·`/nonexistent` 내용, `aiops-proxy` OAuth 저장 위치. 2026-10-19 `s0-inspect.sh`와 `aiops-engine` `auth.json` 키 이름 조회로 마쳤다(결과는 위 표, 자격 폐기 표, approvals).
 - 로컬 파일 키 이름만: `~/workspace/page`·`~/workspace/trip-mate-api`·`~/workspace/example-app`의 `.env.local`, 옛 사본 `infra/*/.terraform/terraform.tfstate` 3개, `~/workspace/mac-uptime-guard/config.env`, 옛 사본 `.env.secrets`. `~/.config/sops/age`의 공개키(`age-keygen -y`)와 옛 `.sops.yaml` cluster recipient 대조.
 - 옛 사본 `.scratch`의 CLIProxyAPI fixture 72개가 합성 값인지.
 - 번들 전에 옛 사본에서 fetch할지(원격 추적 ref가 2026-09-23 기준). 2026-10-19 번들은 fetch 없이 만들었다. 로컬 브랜치와 커밋은 fetch와 무관하게 모두 들어 있다.
@@ -327,7 +327,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 - GitHub owner 계정(`gh` 로그인, 저장소 관리자): 할 일 1의 실측, 할 일 5의 보호·ruleset·App 정리.
 - Cloudflare·R2·Tailscale·healthchecks.io 콘솔 로그인: 할 일 1의 재조회, 할 일 3의 삭제, 선행 확인 4의 일시 정지.
 - 자격 폐기 표의 발급처 콘솔(Google Cloud, OXR 등): 할 일 6.
-- NUC sudo: 할 일 2, 선행 확인 2의 AdGuard 내보내기.
+- 호스트 sudo: 할 일 2, 선행 확인 2의 AdGuard 내보내기.
 
 ## 제약
 
@@ -345,7 +345,7 @@ D-20(확정(사용자 2026-10-18, T05))에 따라 새 플랫폼은 모든 값을
 - 자격 폐기 표의 옛 Telegram 봇 토큰 줄은 `보류(D-10, T22)`, 옛 healthchecks ping URL 줄은 `보류(D-10, T08b)`다. 두 줄은 폐기하지 않는다. `ts-node-key-nuc`는 `유지(D-12)`, `ukyi-homelab-aiops` App 키는 `보류(D-13, T22)`다.
 - 설계 문서 0절 3항(옛 클러스터 정리), 4항(브랜치 보호와 ruleset 정리), 6항(옛 Terraform state 처리)이 "완료"다.
 - main에 `main-interim`만 active이고, 옛 브랜치 보호는 404이며, `allow_auto_merge`는 `false`다.
-- NUC에서 k3s와 H1·H2·H3의 유닛·파일이 없다. H7은 사용자 결정대로다: `motd-refresh` 유닛·drop-in과 `k3s-status.py`가 없고, `00-ukyi`는 2026-08-07 원본이다. H8 데이터 경로는 지웠고 `/mnt/bulk`는 비운 뒤 fstab 항목을 지웠다. H4·H5는 남아 있다.
+- 호스트에서 k3s와 H1·H2·H3의 유닛·파일이 없다. H7은 사용자 결정대로다: `motd-refresh` 유닛·drop-in과 `k3s-status.py`가 없고, `00-ukyi`는 2026-08-07 원본이다. H8 데이터 경로는 지웠고 `/mnt/bulk`는 비운 뒤 fstab 항목을 지웠다. H4·H5는 남아 있다.
 - 할 일 8의 커밋·push가 끝났다.
 
 ## 검증

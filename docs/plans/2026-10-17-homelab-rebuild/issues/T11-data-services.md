@@ -18,11 +18,11 @@
 
 ## 범위
 
-- 만들 것(설계 E6): `platform/cnpg`(operator, Barman Cloud Plugin, ObjectStore, Cluster `pg`, ScheduledBackup, NetworkPolicy), `platform/root/values-prod.yaml`의 CNPG 키(버킷, serverName. Cluster `pg`가 이 값으로 렌더된다), `platform/charts/app-data`와 태그 `data-chart-v1.0.0`, ApplicationSet `data`, 영속 Valkey 백업 CronJob 템플릿, `docs/runbooks-public/restore.md`(설계 C.5.6, C.5.7, C.6.4의 빈 NUC 복구 순서와 복구·정리 PR).
+- 만들 것(설계 E6): `platform/cnpg`(operator, Barman Cloud Plugin, ObjectStore, Cluster `pg`, ScheduledBackup, NetworkPolicy), `platform/root/values-prod.yaml`의 CNPG 키(버킷, serverName. Cluster `pg`가 이 값으로 렌더된다), `platform/charts/app-data`와 태그 `data-chart-v1.0.0`, ApplicationSet `data`, 영속 Valkey 백업 CronJob 템플릿, `docs/runbooks-public/restore.md`(설계 C.5.6, C.5.7, C.6.4의 빈 호스트 복구 순서와 복구·정리 PR).
 - CNPG 설치와 공유 인스턴스 (D-05, 확정(사용자 2026-10-18, T05)). DB·역할은 CNPG 선언형 기능으로 관리한다. 버전과 리소스 모양은 설계 C.5.3.
   - 공유 Cluster `pg` 하나에 앱마다 `Database`·`DatabaseRole`을 둔다(봇 포함). 역할 이름은 앱 이름이고 DB owner다. owner를 앱끼리 공유하지 않는다.
   - 전용 Cluster는 설계 C.5.2의 조건 넷 중 하나라도 걸릴 때만 둔다: (1) 독립 PITR이나 빠른 복원이 필요하다, (2) 데이터가 10GB를 넘거나 쓰기가 많다, (3) 다른 PostgreSQL major나 확장이 필요하다, (4) 다른 보존 기간이 필요하다.
-  - Cluster `pg`는 다른 플랫폼 구성 요소처럼 자동 동기화로 둔다. 빈 NUC 복구는 root apply 전 복구 PR → 복구 확인 → 정리 PR 순서다(설계 C.6.4). 복구 PR은 복구 원본(지금 Git의 serverName)을 넣고 serverName을 새 세대 `pg-<복구일>`로 바꾼다. 정리 PR은 복구 원본을 지워 렌더 결과를 `initdb`로 되돌린다. 수동 sync 대안(자동 동기화를 끈 별도 Application)은 고르지 않았다. 이 순서를 `restore.md`에 적는다.
+  - Cluster `pg`는 다른 플랫폼 구성 요소처럼 자동 동기화로 둔다. 빈 호스트 복구는 root apply 전 복구 PR → 복구 확인 → 정리 PR 순서다(설계 C.6.4). 복구 PR은 복구 원본(지금 Git의 serverName)을 넣고 serverName을 새 세대 `pg-<복구일>`로 바꾼다. 정리 PR은 복구 원본을 지워 렌더 결과를 `initdb`로 되돌린다. 수동 sync 대안(자동 동기화를 끈 별도 Application)은 고르지 않았다. 이 순서를 `restore.md`에 적는다.
 - R2 백업과 앱 단위 복원 절차. 보존은 확정(사용자 2026-10-18, T05)대로 PostgreSQL·Valkey 14일, 운영 버킷은 `homelab-backups` 하나다(설계 C.3.8).
   - PostgreSQL: Barman Cloud Plugin의 base backup + WAL 연속 아카이브. `homelab-backups`의 `pg/` prefix, serverName `pg-<YYYYMMDD>`. 매일 03:00 KST(ScheduledBackup은 UTC라 `0 0 18 * * *`), 14일(ObjectStore `retentionPolicy`).
   - 영속 Valkey: 같은 버킷 `valkey/<app>/`, 매일 03:30 KST, 14일(R2 lifecycle, prefix `valkey/` 명시. `prefix = ""`는 버킷 전체 만료다).

@@ -1,4 +1,4 @@
-# NUC 디스크 여유 확보
+# 호스트 디스크 여유 확보
 
 디스크가 차면 먼저 큰 경로를 재고, 다시 만들 수 있는 캐시·이미지부터 정리한다.
 PV·DB·삭제 원장은 파일을 직접 지워 공간을 만드는 대상이 아니다.
@@ -126,7 +126,7 @@ KUBECONFIG=$HOME/.kube/homelab.yaml kubectl get configmap local-path-config -n k
 
 **Postgres 데이터·WAL.** [확인] `database/pg-1` 요청량 **20Gi**, `database/pg-1-wal` **5Gi**이며 둘 다 `local-retain`이다.
 `archive_timeout: 5min`, `wal_compression: on`, `max_wal_size: 1GB`다([platform/cnpg/cluster/templates/cluster.yaml:28](../../platform/cnpg/cluster/templates/cluster.yaml#L28)).
-[추론] 별도 PVC여도 이 NUC에서는 같은 루트 파일시스템을 쓴다. 5Gi·1GB를 디스크 고갈 방지 상한으로 믿으면 안 된다.
+[추론] 별도 PVC여도 이 호스트에서는 같은 루트 파일시스템을 쓴다. 5Gi·1GB를 디스크 고갈 방지 상한으로 믿으면 안 된다.
 `max_wal_size`는 아카이브 실패 등에서 넘을 수 있는 소프트 한도다([PostgreSQL 공식 WAL 설정](https://www.postgresql.org/docs/18/runtime-config-wal.html#GUC-MAX-WAL-SIZE)).
 두 PVC를 각각 재고, WAL만 크게 늘면 아카이브·백업 상태 조사로 전환한다. `pg_wal`을 수동 삭제하지 않는다. 복구 절차는 [restore.md](restore.md) 2·3절이다.
 
@@ -250,7 +250,7 @@ bun pm cache
 
 ### 3.4 조사가 끝난 커널 덤프
 
-1. **지울 것:** 관리자가 조사를 종료했고 필요한 사본을 NUC 밖에 확인한 특정 덤프 디렉터리 하나.
+1. **지울 것:** 관리자가 조사를 종료했고 필요한 사본을 호스트 밖에 확인한 특정 덤프 디렉터리 하나.
 2. **먼저 확인:** 날짜가 오래됐다는 이유만으로 종료됐다고 판단하지 않는다. [확인] [nuc-kernel-pin.md:80](nuc-kernel-pin.md#L80)의 원인 미확정 크래시는 기본 보존 대상이다. 다른 날짜 덤프도 관리자가 조사 상태를 확인한다.
 3. **명령:** 조회 `ls -l /var/crash`, `du -x -h --max-depth=1 /var/crash`는 실행 성공했다. 삭제는 **[미확인: 돌려 보지 않음]**, [GNU rm](https://www.gnu.org/software/coreutils/manual/html_node/rm-invocation.html)이 근거다.
 
@@ -295,7 +295,7 @@ bun pm cache
 ### 3.7 개인 자료와 CLI 세션: 관리자 판단
 
 1. **지울 것:** 관리자가 보존 불필요를 확인한 개인 자료·종료 세션 파일만. 빌드 캐시로 취급하지 않는다.
-2. **먼저 확인:** 재개할 세션·작업 인계·조사 증거·원격 없는 소스인지 보고, 필요한 자료는 NUC 밖 사본을 확인한다. 개인 폴더 내용은 관리자만 검토한다.
+2. **먼저 확인:** 재개할 세션·작업 인계·조사 증거·원격 없는 소스인지 보고, 필요한 자료는 호스트 밖 사본을 확인한다. 개인 폴더 내용은 관리자만 검토한다.
 3. **명령:** **[미확인: 돌려 보지 않음]** `rm -i -- "$HOME/<관리자가 확인한 불필요 파일>"`. [GNU rm](https://www.gnu.org/software/coreutils/manual/html_node/rm-invocation.html)의 파일 하나 삭제만 제시한다. 세션 저장소가 인덱스·DB와 연결돼 있으면 CLI가 제공하는 정리 절차를 먼저 확인하고 수동 삭제를 보류한다.
 4. **되돌리기:** 사본이 없으면 기록·대화·재개 가능성을 잃는다. 설정만 복구해도 세션 내용은 돌아오지 않는다.
 5. **지우지 않을 것:** `~/.codex`·`~/.claude` 전체, 자격 파일·설정·진행 중 세션, 복구 자산·백업. 파일 이름·나이만으로 자동 삭제하지 않는다.
@@ -316,7 +316,7 @@ worktree의 빌드 산출물·패키지 실행 파일·Podman 저장소를 그�
 4. 이후 계속 쓰는 서비스라면 시작할 때 마운트 원본을 검증하고, SSD가 빠지면 **실패하며 멈추도록** 만든다. 단순 심링크·자동 디렉터리 생성은 이 조건을 대신하지 못한다. 시작 전 검사만으로 실행 중 SSD 장애까지 막지는 못한다.
 5. k3s data-dir·containerd·PV·Postgres·Podman graphroot 이관은 이 청소 절차에서 수행하지 않는다. 서비스 정지, 백업 검증, 런타임 경로 설정, PV 매핑, UID·권한, 부팅 순서, 복귀 시험을 포함한 별도 변경으로 다룬다. PVC의 크기나 provisioner 기본 경로를 바꿔도 기존 데이터가 이동하지 않는다.
 
-같은 NUC의 두 번째 SSD는 NUC 전체 유실에 대비한 백업이 아니다. 삭제 원장은 DB 백업보다 최신이어야 하고, SSD를 잃으면 지운 기억이 복구 DB에서 되살아날 수 있다([확인] [restore.md:1075](restore.md#L1075), [restore.md:2042](restore.md#L2042)).
+같은 호스트의 두 번째 SSD는 호스트 전체 유실에 대비한 백업이 아니다. 삭제 원장은 DB 백업보다 최신이어야 하고, SSD를 잃으면 지운 기억이 복구 DB에서 되살아날 수 있다([확인] [restore.md:1075](restore.md#L1075), [restore.md:2042](restore.md#L2042)).
 
 ## 5. 지우면 안 되는 것
 
