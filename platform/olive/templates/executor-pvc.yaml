@@ -1,0 +1,38 @@
+{{- /*
+작업자 실행기의 상태 저장소(D-75). targets.yaml의 kind executor인 줄마다 그 네임스페이스에 하나. 그 실행기 Deployment의
+실행기 컨테이너에만 붙는다(templates/executor-deployments.yaml).
+local-retain(노드 로컬, Retain): PVC가 지워져도 노드의 폴더가 남는다. 다시 붙이려면 PV를 손으로 다시 묶는다.
+새 PVC는 빈 폴더라 실행기가 새 저장소 ID를 만들고, D-75대로 다시 등록하기 전까지 배정이 0이다.
+함정: local-path 폴더는 0777이고 fsGroup도 걸리지 않아 uid가 달라도 붙인 컨테이너는 모두 쓴다. 역할 컨테이너(D-100)에는 붙이지 않는다.
+
+접근 모드 ReadWriteOnce: ReadWriteOncePod가 이 클러스터의 local-path(비 CSI)에서 강제되는지 확인하지 못했다.
+RWO는 같은 노드의 두 파드가 함께 붙이는 것을 막지 않는다. 한 번에 한 파드는 Recreate, replicas 0·1(관리자 CLI),
+ns의 ResourceQuota olive-limits(limits 합 = 파드 하나)로 지킨다. 그 밖의 경로로 같은 ns에 파드를 더하면 이 보증이 깨진다.
+*/}}
+{{- range (include "olive.targets" . | fromYaml).items }}
+{{- if eq .kind "executor" }}
+{{- $store := (index $.Values.executors .id).store }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: executor-store
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "olive.labels" . | nindent 4 }}
+  annotations:
+    # wave는 실행기 Deployment와 같아야 한다. WaitForFirstConsumer라 파드가 생겨야 Bound가 되고, 앞 wave에 두면 Argo CD가
+    # Pending인 PVC를 기다리며 Deployment wave로 넘어가지 않는다(templates/supervisor-pvc.yaml과 같은 이유).
+    argocd.argoproj.io/sync-wave: "2"
+    # Git replicas가 늘 0이라(D-38) CLI가 실행기를 켤 때까지 Pending이다. 이 리소스의 health만 Application 합산에서 뺀다.
+    argocd.argoproj.io/ignore-healthcheck: "true"
+    # 저장소를 잃으면 재등록 전 배정이 0이 된다(D-75). Application이 지워지거나 이 차트에서 빠져도 남긴다.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ $store.storageClassName }}
+  resources:
+    requests:
+      storage: {{ $store.size }}
+{{- end }}
+{{- end }}

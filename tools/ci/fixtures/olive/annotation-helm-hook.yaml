@@ -7,4 +7,5 @@ patch:
     select: {kind: Deployment, namespace: olive-reader, name: executor}
     set:
       metadata.annotations:
+        argocd.argoproj.io/sync-wave: "2"
         helm.sh/hook: post-install

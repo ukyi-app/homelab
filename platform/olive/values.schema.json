@@ -177,10 +177,20 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["resources", "tls"],
+        "required": ["resources", "tls", "store"],
         "properties": {
           "resources": { "$ref": "#/definitions/resources" },
-          "tls": { "$ref": "#/definitions/tls" }
+          "tls": { "$ref": "#/definitions/tls" },
+          "store": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["storageClassName", "size", "mountPath"],
+            "properties": {
+              "storageClassName": { "const": "local-retain" },
+              "size": { "type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi)$" },
+              "mountPath": { "type": "string", "pattern": "^/var/lib/[a-z0-9][-a-z0-9]*$" }
+            }
+          }
         }
       }
     },

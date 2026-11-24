@@ -48,6 +48,13 @@ spec:
             # 주소가 IP라 TLS에서 확인할 이름을 따로 준다. 감독 인증서의 이름과 같아야 한다(인증서 작업).
             - name: OLIVE_SUPERVISOR_SERVER_NAME
               value: {{ printf "supervisor.%s.svc" $sup.namespace | quote }}
+            # 감독 인증서의 URI SAN. 감독 Certificate와 같은 helper(olive.pki.uri)에서 읽어 값이 한 곳에서만 정해진다.
+            - name: OLIVE_SUPERVISOR_URI
+              value: {{ include "olive.pki.uri" $sup | quote }}
+            # 볼륨 바로 아래가 아니라 그 아래 store를 준다. local-path는 볼륨 폴더를 0777로 만들고, 실행기(ExecutorStore.open)는
+            # 없는 폴더만 0700으로 만든다. 이 경로를 바꾸면 빈 폴더라 새 저장소 ID가 생긴다(D-75 재등록).
+            - name: OLIVE_STORE_DIR
+              value: {{ printf "%s/store" $values.store.mountPath | quote }}
             {{- if $tlsSecret }}
             - name: OLIVE_TLS_DIR
               value: {{ $values.tls.mountPath | quote }}
@@ -73,6 +80,10 @@ spec:
             {{- end }}
             - name: tmp
               mountPath: /tmp
+            # 상태 저장소는 이 실행기(제어) 컨테이너에만 붙인다. D-100으로 다른 uid의 역할 컨테이너가 생겨도 그쪽에 붙이지 않는다
+            # (모델이 저장소 ID·nonce·영수증을 고치지 못하게). CI(tools/ci/olive.ts olive-executor-store)가 컨테이너 이름으로 본다.
+            - name: store
+              mountPath: {{ $values.store.mountPath }}
       volumes:
         {{- if $tlsSecret }}
         - name: tls
@@ -98,5 +109,8 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 512Mi
+        - name: store
+          persistentVolumeClaim:
+            claimName: executor-store
 {{- end }}
 {{- end }}
