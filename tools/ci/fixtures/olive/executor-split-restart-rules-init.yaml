@@ -1,0 +1,13 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 를 두지 않는다(olive-init. 94 → RestartAllContainers는
+# 대리 설치 init에도 94 재시작 규칙을 붙였다. 94는 작업자 제어 진입점 안에서만 다른 코드와 겹치지 않는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set:
+          restartPolicyRules:
+            - {action: RestartAllContainers, exitCodes: {operator: In, values: [94]}}

@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-executor-split
+# match: strategy("RollingUpdate")가 Recreate가 아니다
+# 실행기 Deployment를 RollingUpdate로 바꿨다. 교체 중 두 파드가 겹치면 새 파드의 init이 쓴 세대 표식이 옛 역할 컨테이너가 도는 동안
+# 그 실행을 닫는다(D-104).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    set:
+      spec.strategy: {type: RollingUpdate}

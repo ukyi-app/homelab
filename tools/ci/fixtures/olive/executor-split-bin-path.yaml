@@ -12,6 +12,7 @@ patch:
         set:
           volumeMounts:
             - {name: agent-bin, mountPath: /review-bin}
+            - {name: olive-generation, mountPath: /opt/olive-generation}
   - in: chart
     select: {kind: Deployment, namespace: olive-reader, name: executor}
     edit:

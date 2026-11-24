@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: restartPolicy(없음)가 표의 Always가 아니다(executor
+# 제어 컨테이너의 컨테이너 수준 restartPolicy를 뺐다(규칙은 남김). 규칙을 쓰면 이 값이 있어야 한다(없으면 API가 거부한다).
+# unset 경로의 0은 템플릿의 컨테이너 순서(executor가 첫째)다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    unset: [spec.template.spec.containers.0.restartPolicy]

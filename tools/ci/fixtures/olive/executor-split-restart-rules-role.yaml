@@ -1,0 +1,13 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 를 두지 않는다(role. 94 → RestartAllContainers는
+# 역할 컨테이너에도 94 재시작 규칙을 붙였다. 모델·도구가 94로 끝내 파드 전체를 다시 띄우고 새 세대 표식을 쓰게 할 수 있다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          restartPolicyRules:
+            - {action: RestartAllContainers, exitCodes: {operator: In, values: [94]}}

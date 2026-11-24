@@ -1,0 +1,13 @@
+# expect: fail
+# rule: olive-executor-split
+# match: olive-generation을 olive-init에 붙이지 않았다(표: /opt/olive-generation, 쓰기)
+# 대리 설치 init에서 세대 표식 볼륨을 뺐다. 표식을 쓰는 digest면 init이 대리를 놓은 뒤 95로 끝나 파드가 뜨지 않는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent}
