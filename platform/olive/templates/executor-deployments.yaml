@@ -14,8 +14,10 @@ env 이름은 ukyi-app/olive README "작업자 실행기 진입점"의 환경 �
 회복(D-104, olive README "회복의 차트"): 실행 중 대리 링크가 끊기면 제어가 94로 끝난다. 그 코드에만 파드의 모든 컨테이너를 다시 띄우고
 (RestartAllContainers), init이 olive-generation에 새 세대 표식을 써서 제어가 그 실행을 닫는다. 표식은 init 쓰기·제어 읽기 전용이고 역할에는
 붙이지 않는다. 교체가 겹치면 새 파드의 init이 쓴 표식이 옛 역할 컨테이너가 도는 동안 그 실행을 닫으므로 replicas는 0·1(CLI)과 Recreate다.
-함정: Recreate의 순서는 템플릿이 바뀐 롤아웃에만 적용된다. 파드 수동 삭제·노드 장애로 바뀔 때는 replicas 0으로 줄이고 옛 파드가 API에서
-사라진 것(강제 삭제 아님)을 확인한 뒤 1로 되돌린다.
+함정: Recreate의 순서는 템플릿이 바뀐 롤아웃에만 적용된다. 파드 수동 삭제·노드 장애로 바뀔 때는 replicas 0으로 줄이고 옛 컨테이너가
+실제로 끝난 것(kubelet이 정상 종료를 마침)을 확인한 뒤에만 1로 되돌린다. 파드가 API에서 사라진 것만으로는 확인이 아니다: 강제 삭제나,
+노드 장애 뒤 노드 객체가 지워져 PodGC가 유예 0으로 지운 경우에도 옛 kubelet의 컨테이너는 돌고 있을 수 있다. 확인할 수 없으면 0을 두고
+D-91(관리자 닫기)로 넘긴다.
 */}}
 {{- $sup := include "olive.supervisorTarget" . | fromYaml }}
 {{- $trust := include "olive.trustEnabled" . }}
@@ -76,8 +78,9 @@ spec:
           # 94(실행 중 대리 링크가 끊김)에만 파드 전체를 다시 띄운다. 다른 코드는 컨테이너 수준 Always로 제어만 다시 뜬다.
           # 규칙을 쓰면 컨테이너 수준 restartPolicy를 꼭 적어야 한다(파드 값과 같아도). 94는 이 제어 진입점 안에서만 다른 코드와 겹치지 않아
           # 감독·init·역할 컨테이너에는 이 규칙을 두지 않는다.
-          # 함정: 기능 게이트(ContainerRestartRules·RestartAllContainersOnContainerExits, 1.36 베타)가 꺼진 API 서버는 두 칸을 말없이 지운다.
-          # 렌더 검사로는 적용을 증명하지 못하므로 켜기 전에 API에 남았는지 본다.
+          # 함정: 기능 게이트(1.36 베타)가 꺼진 API 서버에서 새로 만드는 Deployment는 둘로 갈린다. ContainerRestartRules가 꺼지면
+          # 일반 컨테이너의 두 칸을 말없이 지우고, 그것만 켜지고 RestartAllContainersOnContainerExits가 꺼지면 이 action을 검증이 거부한다.
+          # (게이트를 끄기 전부터 그 칸을 쓰던 객체는 보존된다.) 렌더 검사로는 적용을 증명하지 못하므로 켜기 전에 API에 남았는지 본다.
           restartPolicy: Always
           restartPolicyRules:
             - action: RestartAllContainers

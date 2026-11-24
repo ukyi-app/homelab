@@ -1,0 +1,17 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 파드 볼륨 olive-generation이 2번 선언됐다
+# count: 1
+# 세대 표식 볼륨을 같은 이름으로 두 번 선언했다. 앞은 디스크 emptyDir, 마지막은 표와 같은 메모리 emptyDir라 마지막 항목만 보면 통과한다.
+# 쿠버네티스는 중복 이름을 거부해 실행기 Deployment를 적용하지 못한다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.volumes:
+        match: {name: olive-generation}
+        set: {emptyDir: {}}
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    append:
+      spec.template.spec.volumes: {name: olive-generation, emptyDir: {medium: Memory, sizeLimit: 1Mi}}

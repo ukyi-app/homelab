@@ -323,6 +323,8 @@ const GENERATION_DIR = "/opt/olive-generation";
 const RECOVERY_RULES = [{ action: "RestartAllContainers", exitCodes: { operator: "In", values: [94] } }];
 // 올리브 이미지의 작업 폴더(ukyi-app/olive Dockerfile의 WORKDIR). 다른 폴더면 bun이 상대 경로 진입점을 찾지 못한다.
 const IMAGE_WORKDIR = "/app";
+// 쿠버네티스의 기본 종료 메시지 경로.
+const TERMINATION_LOG = "/dev/termination-log";
 const SECRET_VOLUME_TYPES = ["secret", "persistentVolumeClaim", "projected"];
 const OLIVE_IMAGE = /^ghcr\.io\/ukyi-app\/olive@sha256:[0-9a-f]{64}$/;
 const SECRET_FILE_MODE = 0o444;
@@ -499,11 +501,17 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: str
   }
   if (spec.shareProcessNamespace === false) push(where, "shareProcessNamespace(false)를 두지 않는다. false는 PID 공간을 나누지 않지만 표에서는 이 필드를 생략한다");
   else if (spec.shareProcessNamespace !== undefined) push(where, "shareProcessNamespace를 두지 않는다. 역할 컨테이너가 제어 프로세스와 그 파일(/proc/<pid>/root)에 닿는다(D-102)");
-  const strategy = dep.obj.spec?.strategy?.type;
+  const strategySpec = dep.obj.spec?.strategy;
+  const strategy = strategySpec?.type;
   if (strategy !== "Recreate") push(where, `strategy(${show(strategy)})가 Recreate가 아니다(대상 ${t.id}. 교체가 겹치면 새 파드의 init이 쓴 세대 표식이 옛 역할 컨테이너가 도는 동안 그 실행을 닫고, 두 파드가 함께 olive-limits에 걸린다, D-104)`);
+  else if (!same(strategySpec, { type: "Recreate" })) push(where, `strategy(${show(strategySpec)})가 {"type":"Recreate"} 하나가 아니다(대상 ${t.id}. 쿠버네티스는 Recreate에 rollingUpdate가 있으면 Deployment를 거부해 동기화가 실패한다)`);
   if (spec.resources !== undefined) push(where, `파드 단위 resources(${show(spec.resources)})를 두지 않는다. 있으면 쿠버네티스가 컨테이너 합 대신 그 값을 파드의 limits로 써서 olive-limits 대조가 실제와 달라진다(한도는 컨테이너 단위로만 준다)`);
 
   // 볼륨.
+  // 함정: 아래 Map은 같은 이름의 앞 항목을 버려 마지막 항목만 본다. 쿠버네티스는 중복 이름을 거부하므로 합치기 전에 센다.
+  const volumeCount = new Map<string, number>();
+  for (const v of spec.volumes ?? []) volumeCount.set(String(v?.name), (volumeCount.get(String(v?.name)) ?? 0) + 1);
+  for (const [name, n] of volumeCount) if (n > 1) push(where, `파드 볼륨 ${name}이 ${n}번 선언됐다(이름마다 하나여야 한다. 쿠버네티스는 중복 이름을 거부해 이 Deployment를 적용하지 못한다)`);
   const volumes = new Map<string, any>((spec.volumes ?? []).map((v: any) => [String(v?.name), v]));
   const typeOf = (name: string) => Object.keys(volumes.get(name) ?? {}).filter((x) => x !== "name");
   for (const name of volumes.keys()) if (!Object.hasOwn(SPLIT_VOLUMES, name)) push(where, `파드 볼륨 ${name}은 표에 없다(표: ${Object.keys(SPLIT_VOLUMES).join("·")})`);
@@ -546,6 +554,10 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: str
     }
     if (!same(c.command, rule.command)) push(cw(c), `command(${JSON.stringify(c.command)})가 ${rule.what} [${rule.command.join(", ")}] 하나가 아니다${c === role ? "(대리가 PID 1이어야 한다, D-102)" : ""}`);
     if (c.args !== undefined) push(cw(c), `args(${show(c.args)})를 두지 않는다(${who}의 명령은 표의 command 하나다)`);
+    // 함정: kubelet은 terminationMessagePath에 빈 종료 로그 파일을 따로 붙인다. 마운트 안의 경로면 그 파일(세대 표식 등)을 가린다.
+    if (c.terminationMessagePath !== undefined && c.terminationMessagePath !== TERMINATION_LOG) {
+      push(cw(c), `terminationMessagePath(${show(c.terminationMessagePath)})가 생략도 기본 ${TERMINATION_LOG}도 아니다(${who}. kubelet이 그 경로에 빈 종료 로그 파일을 붙여 마운트 안의 파일을 가린다. 세대 표식이면 제어가 빈 표식을 읽어 94를 반복한다, D-104)`);
+    }
     const relative = rule.command.slice(1).filter((a) => !a.startsWith("/"));
     if (relative.length > 0 && c.workingDir !== undefined && c.workingDir !== IMAGE_WORKDIR) {
       push(cw(c), `workingDir(${show(c.workingDir)})가 생략도 이미지 작업 폴더 ${IMAGE_WORKDIR}도 아니다(${who}. command의 상대 경로 ${relative.join("·")}를 그 폴더에서 찾는다)`);
@@ -579,7 +591,9 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: str
         continue;
       }
       const m = ms[0];
-      if ((m.readOnly === true) !== mr.readOnly) push(cw(c), (mr.readOnly ? `${name}을 readOnly: true로 붙이지 않았다(${who})` : `${name}을 쓰기 가능하게 붙이지 않았다(${who})`) + (mr.why ? `. ${mr.why}` : ""));
+      // 함정: 따옴표 없는 yes·on은 Bun.YAML(1.2)이 문자열로, 쿠버네티스·Argo CD(sigs.k8s.io/yaml, YAML 1.1)가 true로 읽는다. 불리언만 받는다.
+      if (m.readOnly !== undefined && typeof m.readOnly !== "boolean") push(cw(c), `${name} 마운트의 readOnly(${show(m.readOnly)})가 불리언이 아니다(${who}. 쿠버네티스는 yes·on 같은 값을 true로 읽어 CI와 실제가 갈린다. 생략·true·false만 쓴다)`);
+      else if ((m.readOnly === true) !== mr.readOnly) push(cw(c), (mr.readOnly ? `${name}을 readOnly: true로 붙이지 않았다(${who})` : `${name}을 쓰기 가능하게 붙이지 않았다(${who})`) + (mr.why ? `. ${mr.why}` : ""));
       if (mr.path !== undefined && m.mountPath !== mr.path) push(cw(c), `${name}의 mountPath ${show(m.mountPath)}가 표의 고정 경로 ${mr.path}가 아니다(${who})`);
       for (const k of Object.keys(m)) if (!["name", "mountPath", "readOnly"].includes(k)) push(cw(c), `${name} 마운트에 ${k}(${show(m[k])})를 두지 않는다(${who}. 볼륨 폴더 전체를 붙여야 컨테이너끼리 같은 파일을 본다)`);
     }

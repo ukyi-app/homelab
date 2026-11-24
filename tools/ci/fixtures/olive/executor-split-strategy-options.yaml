@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 가 {"type":"Recreate"} 하나가 아니다(대상 reader. 쿠버네티스는 Recreate에 rollingUpdate가 있으면
+# Recreate에 rollingUpdate 옵션을 남겼다. type만 보면 통과하지만 쿠버네티스는 이 조합의 Deployment를 거부한다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    set:
+      spec.strategy: {type: Recreate, rollingUpdate: {maxSurge: 1}}
