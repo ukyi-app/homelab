@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-targets
+# match: roles는 계약 v1 역할 이름
+# 진단 대상에서 roles를 뺐다(role은 남는다). 대상이 맡을 수 있는 역할 목록이 없다.
+patch:
+  - in: targets
+    select: {id: diagnosis}
+    unset: [roles]

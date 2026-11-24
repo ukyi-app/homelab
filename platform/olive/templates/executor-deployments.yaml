@@ -18,7 +18,7 @@ env 이름은 ukyi-app/olive README "작업자 실행기 진입점"의 환경 �
 {{- $values := index $.Values.executors .id }}
 {{- $tlsSecret := include "olive.tlsSecretName" (dict "root" $ "tls" $values.tls) }}
 {{- if $tlsSecret }}
-{{- include "olive.executorTlsPath" (dict "id" .id "path" $values.tls.mountPath "store" $values.store.mountPath) }}
+{{- include "olive.executorTlsPath" (dict "id" .id "path" $values.tls.mountPath "store" $values.store.mountPath "trust" $trust) }}
 {{- end }}
 {{- $role := .role }}
 ---
@@ -156,7 +156,7 @@ spec:
         {{- if $tlsSecret }}
         # 0444: 실행기 파드에는 fsGroup이 없어 0440이면 uid 65532가 읽지 못한다. 넓어지는 것은 같은 컨테이너의 다른 uid뿐인데
         # 이 볼륨은 executor에만 붙고 그 안의 uid는 65532 하나다.
-        # 함정: 십진 292(= 8진 0444)로 적는다. 0444로 적으면 쿠버네티스(YAML 1.1)는 8진 292로, CI의 Bun 파서(YAML 1.2)는 십진 444로
+        # 함정: 십진 292(= 8진 0444)로 적는다. 0444로 적으면 쿠버네티스(YAML 1.1)는 8진 0444를 십진 292로, CI의 Bun 파서(YAML 1.2)는 십진 444로
         # 읽어 CI가 실제와 다른 모드를 본다. 292는 두 해석이 같고 API가 돌려주는 값과도 같다.
         - name: tls
           secret:

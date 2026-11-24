@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: supplementalGroups([])를 두지 않는다. 빈 목록은 그룹을 더하지 않지만 표에서는 이 필드를 생략한다
+# 진단 실행기 파드에 빈 보조 그룹 목록을 적었다. 그룹은 늘지 않지만 표는 필드 생략만 받는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    set:
+      spec.template.spec.securityContext.supplementalGroups: []

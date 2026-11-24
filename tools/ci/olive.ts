@@ -275,14 +275,19 @@ function checkExecutorStore(targets: Target[], charts: Record<string, Doc[]>, de
 //     함정: 켜는 PR이 실제 역할 이미지를 넣으면 켠 root 렌더가 그 값이 되어 이 대조(roleImageWanted)가 실패한다. 그 PR이 기대 값을 고친다.
 //   한도: 같은 ns의 ResourceQuota olive-limits가 파드의 실효 limits(max(일반 컨테이너 합, 가장 큰 init))와 같다. 작으면 파드가
 //     거부되고, 크면 두 번째 파드가 들어갈 자리가 생긴다(templates/resourcequota.yaml). 상시 실행 init(restartPolicy Always)은 이 식에
-//     맞지 않아 위 컨테이너 표가 거절한다.
-//   하나: 렌더마다 대상 Deployment와 olive-limits가 각각 하나다. 둘이면 CI는 첫 문서를, Argo CD는 마지막 문서를 고른다.
+//     맞지 않아 위 컨테이너 표가 거절한다. 파드 단위 spec.resources도 두지 않는다. 있으면 쿠버네티스가 컨테이너 합 대신 그 값을
+//     파드의 limits로 써서 이 식이 실제와 달라진다.
+//   작업 폴더: olive-init·executor의 command는 이미지 작업 폴더(IMAGE_WORKDIR) 기준 상대 경로라 workingDir는 생략하거나 그 폴더다.
+//   하나: 렌더마다 대상(감독 포함) Deployment와 olive-limits가 각각 정확히 하나다. 둘이면 CI는 첫 문서를, Argo CD는 마지막 문서를
+//     고른다. olive-limits가 없으면 그 네임스페이스의 총량 상한이 사라진다.
 //   감독: 실행기에서 뺀 fsGroup 65532가 감독 파드에는 있다. 감독은 0440 Secret(서명 키·계정·TLS)을 그 그룹으로 읽는다.
 const ROLE_CONTAINER = "role";
 const INIT_CONTAINER = "olive-init";
 const AGENT_DIR = "/opt/olive-agent";
 const AGENT_LINK_DIR = "/run/olive/agent";
 const AGENT_SOCKET = `${AGENT_LINK_DIR}/agent.sock`;
+// 올리브 이미지의 작업 폴더(ukyi-app/olive Dockerfile의 WORKDIR). 다른 폴더면 bun이 상대 경로 진입점을 찾지 못한다.
+const IMAGE_WORKDIR = "/app";
 const SECRET_VOLUME_TYPES = ["secret", "persistentVolumeClaim", "projected"];
 const OLIVE_IMAGE = /^ghcr\.io\/ukyi-app\/olive@sha256:[0-9a-f]{64}$/;
 const SECRET_FILE_MODE = 0o444;
@@ -366,8 +371,9 @@ function checkExecutorSplit(targets: Target[], charts: Record<string, Doc[]>, de
       const twice = "정확히 하나여야 한다(CI는 첫 문서를, Argo CD는 마지막 문서를 고른다)";
       if (deps.length > 1) push(origin, `대상 ${t.id}의 Deployment ${t.namespace}/${t.deployment}가 같은 렌더에 ${deps.length}개다. ${twice}`);
       if (quotas.length > 1) push(origin, `대상 ${t.id}의 ResourceQuota ${t.namespace}/olive-limits가 같은 렌더에 ${quotas.length}개다. ${twice}`);
+      if (quotas.length === 0) push(origin, `대상 ${t.id}의 네임스페이스 ${t.namespace}에 ResourceQuota olive-limits가 없다(그 네임스페이스의 총량 상한이 사라진다)`);
       // 대상 Deployment가 없으면 olive-chart-targets가 낸다.
-      if (deps.length !== 1 || quotas.length > 1) continue;
+      if (deps.length !== 1 || quotas.length !== 1) continue;
       if (t.kind === "supervisor") {
         const fsGroup = podSpec(deps[0].obj)?.securityContext?.fsGroup;
         if (fsGroup !== SUPERVISOR_FS_GROUP) push(id(deps[0]), `감독 파드의 fsGroup(${show(fsGroup)})이 ${SUPERVISOR_FS_GROUP}가 아니다. 감독은 0440 Secret(서명 키·계정·TLS)을 이 그룹으로 읽는다(실행기 파드에서만 뺐다, D-103)`);
@@ -378,7 +384,7 @@ function checkExecutorSplit(targets: Target[], charts: Record<string, Doc[]>, de
 }
 
 // 실행기 파드 하나를 위 경계 표와 대조한다.
-function executorPodViolations(t: Target, dep: Doc, quota: Doc | undefined): Violation[] {
+function executorPodViolations(t: Target, dep: Doc, quota: Doc): Violation[] {
   const out: Violation[] = [];
   const push = (where: string, message: string) => out.push({ rule: "olive-executor-split", where, message });
   const where = id(dep);
@@ -400,10 +406,15 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc | undefined): Vio
   for (const k of keysOf(podSc, SPLIT_POD_SECURITY)) {
     if (same(podSc[k], SPLIT_POD_SECURITY[k])) continue;
     if (k === "fsGroup") push(where, `파드에 fsGroup(${show(podSc.fsGroup)})을 두지 않는다. 역할 컨테이너도 그 그룹이 된다(D-103)`);
-    else if (k === "supplementalGroups") push(where, `파드에 supplementalGroups(${show(podSc.supplementalGroups)})를 두지 않는다. 역할 컨테이너도 그 그룹이 된다(D-103)`);
+    else if (k === "supplementalGroups") {
+      if (Array.isArray(podSc.supplementalGroups) && podSc.supplementalGroups.length === 0) push(where, "파드에 supplementalGroups([])를 두지 않는다. 빈 목록은 그룹을 더하지 않지만 표에서는 이 필드를 생략한다");
+      else push(where, `파드에 supplementalGroups(${show(podSc.supplementalGroups)})를 두지 않는다. 역할 컨테이너도 그 그룹이 된다(D-103)`);
+    }
     else push(where, `파드 securityContext.${k}(${show(podSc[k])})가 표의 값(${show(SPLIT_POD_SECURITY[k])})과 다르다`);
   }
-  if (spec.shareProcessNamespace !== undefined) push(where, "shareProcessNamespace를 두지 않는다. 역할 컨테이너가 제어 프로세스와 그 파일(/proc/<pid>/root)에 닿는다(D-102)");
+  if (spec.shareProcessNamespace === false) push(where, "shareProcessNamespace(false)를 두지 않는다. false는 PID 공간을 나누지 않지만 표에서는 이 필드를 생략한다");
+  else if (spec.shareProcessNamespace !== undefined) push(where, "shareProcessNamespace를 두지 않는다. 역할 컨테이너가 제어 프로세스와 그 파일(/proc/<pid>/root)에 닿는다(D-102)");
+  if (spec.resources !== undefined) push(where, `파드 단위 resources(${show(spec.resources)})를 두지 않는다. 있으면 쿠버네티스가 컨테이너 합 대신 그 값을 파드의 limits로 써서 olive-limits 대조가 실제와 달라진다(한도는 컨테이너 단위로만 준다)`);
 
   // 볼륨.
   const volumes = new Map<string, any>((spec.volumes ?? []).map((v: any) => [String(v?.name), v]));
@@ -442,6 +453,10 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc | undefined): Vio
     }
     if (!same(c.command, rule.command)) push(cw(c), `command(${JSON.stringify(c.command)})가 ${rule.what} [${rule.command.join(", ")}] 하나가 아니다${c === role ? "(대리가 PID 1이어야 한다, D-102)" : ""}`);
     if (c.args !== undefined) push(cw(c), `args(${show(c.args)})를 두지 않는다(${who}의 명령은 표의 command 하나다)`);
+    const relative = rule.command.slice(1).filter((a) => !a.startsWith("/"));
+    if (relative.length > 0 && c.workingDir !== undefined && c.workingDir !== IMAGE_WORKDIR) {
+      push(cw(c), `workingDir(${show(c.workingDir)})가 생략도 이미지 작업 폴더 ${IMAGE_WORKDIR}도 아니다(${who}. command의 상대 경로 ${relative.join("·")}를 그 폴더에서 찾는다)`);
+    }
     if (c.restartPolicy !== undefined) {
       push(cw(c), `restartPolicy(${show(c.restartPolicy)})를 두지 않는다(${who}. ${c === init ? "Always면 설치 뒤 끝나지 않는 상시 실행 init이라 실효 limits가 일반 컨테이너 합에 더해져 olive-limits를 넘는다" : "표에 없는 재시작 규칙이다"})`);
     }
@@ -483,9 +498,12 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc | undefined): Vio
       const tableEnv = rule.env;
       for (const [name, want] of Object.entries(tableEnv)) {
         const e = (c.env ?? []).filter((x: any) => x?.name === name);
-        if (e.length === 1 && e[0].valueFrom === undefined && (e[0].value ?? "") === want) continue;
-        if (name === "OLIVE_AGENT_SOCKET") push(cw(c), socketMessage(e));
-        else push(cw(c), `역할 컨테이너 env에 ${name}이 빈 값으로 한 번 있지 않다(${JSON.stringify(e.map((x: any) => x.value))}). 대리 안의 Bun·로더가 이미지 ENV를 대리 코드보다 먼저 읽는다`);
+        // valueFrom 항목은 위에서 따로 낸다(원인 하나에 위반 하나). 남은 값 항목만 표와 견준다.
+        const plain = e.filter((x: any) => x?.valueFrom === undefined);
+        if (plain.length === 0 && e.length > 0) continue;
+        if (plain.length === 1 && (plain[0].value ?? "") === want) continue;
+        if (name === "OLIVE_AGENT_SOCKET") push(cw(c), socketMessage(plain));
+        else push(cw(c), `역할 컨테이너 env에 ${name}이 빈 값으로 한 번 있지 않다(${JSON.stringify(plain.map((x: any) => x.value))}). 대리 안의 Bun·로더가 이미지 ENV를 대리 코드보다 먼저 읽는다`);
       }
       // valueFrom 항목은 위에서 따로 낸다(원인 하나에 위반 하나).
       const extra = [...new Set((c.env ?? []).filter((x: any) => x?.valueFrom === undefined).map((x: any) => String(x?.name)).filter((n: string) => !Object.hasOwn(tableEnv, n)))];
@@ -508,10 +526,6 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc | undefined): Vio
   else if (role.image !== wantImage) push(cw(role), `역할 컨테이너 이미지(${show(role.image)})가 대상 ${t.id}의 역할 ${String(t.role)} 이미지(${wantImage})가 아니다`);
 
   // 한도.
-  if (!quota) {
-    push(where, `대상 ${t.id}의 네임스페이스 ${t.namespace}에 ResourceQuota olive-limits가 없다`);
-    return out;
-  }
   for (const [k, parse] of [["limits.cpu", cpuMilli], ["limits.memory", memBytes]] as const) {
     const field = k.split(".")[1];
     const sum = containers.reduce((a, c) => a + parse(c?.resources?.limits?.[field]), 0);
@@ -1130,6 +1144,8 @@ function renderSelfTests(): string[] {
 
 // pki를 끄고 실행기 TLS Secret을 직접 줄 때 그 경로가 제어의 다른 마운트와 겹치면 렌더가 멈춘다(templates/_helpers.tpl olive.executorTlsPath).
 // fixture는 렌더가 끝난 문서를 고치므로 값 → 렌더 실패는 여기서만 본다. 겹치지 않는 경로는 렌더된다(막는 범위가 넓지 않다).
+// 신뢰 묶음 /run/olive/trust는 그 마운트가 생길 때(pki를 켜고 묶음을 줄 때)만 겹침 대상이다. pki를 켜면 스키마가 TLS 경로를
+// /run/olive/tls로 고정해 그 겹침은 렌더 전에 막힌다.
 function executorTlsPathTest(): string[] {
   const dir = tempDir("olive-tls-path");
   const values = (path: string) => {
@@ -1142,8 +1158,10 @@ function executorTlsPathTest(): string[] {
     const r = values(path);
     if (r.ok || !r.out.includes(`executors.reader.tls.mountPath ${path} overlaps the executor pod mount ${overlaps}`)) bad.push(`실행기 TLS 경로 ${path}가 ${overlaps}와 겹치는데 렌더가 그 이유로 멈추지 않았다: ${r.ok ? "렌더 성공" : r.out.trim()}`);
   }
-  const ok = values("/run/olive/ext-tls");
-  if (!ok.ok) bad.push(`겹치지 않는 실행기 TLS 경로 /run/olive/ext-tls가 렌더되지 않았다: ${ok.out.trim()}`);
+  for (const path of ["/run/olive/ext-tls", "/run/olive/trust/client"]) {
+    const ok = values(path);
+    if (!ok.ok) bad.push(`pki를 끈 실행기 TLS 경로 ${path}는 실제 마운트와 겹치지 않는데 렌더되지 않았다: ${ok.out.trim()}`);
+  }
   return bad;
 }
 

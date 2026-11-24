@@ -161,14 +161,20 @@ olive-tls
 {{- end }}
 
 {{/*
-실행기 TLS 마운트 경로 확인. 받는 값: id, path(executors.<id>.tls.mountPath), store(executors.<id>.store.mountPath).
+실행기 TLS 마운트 경로 확인. 받는 값: id, path(executors.<id>.tls.mountPath), store(executors.<id>.store.mountPath),
+trust(olive.trustEnabled 결과).
 pki를 끄고 Secret을 직접 줄 때 스키마는 /run/ 아래 아무 경로나 받는다. 제어 컨테이너의 다른 마운트(/tmp, 소켓 폴더, 신뢰 묶음,
 저장소)나 대리 폴더와 같으면 PodTemplate이 유효하지 않고, 한쪽이 다른 쪽 안이면 한쪽 파일이 가려지거나 읽기 전용 볼륨 안에
 마운트 지점을 만들지 못해 컨테이너가 뜨지 않는다.
 */}}
 {{- define "olive.executorTlsPath" -}}
 {{- $p := clean .path -}}
-{{- range $r := list "/tmp" "/run/olive/agent" "/run/olive/trust" "/opt/olive-agent" (clean .store) -}}
+{{- $mounts := list "/tmp" "/run/olive/agent" "/opt/olive-agent" (clean .store) -}}
+{{- /* 신뢰 묶음 마운트는 trust가 켜졌을 때만 생긴다. 없는 마운트와 견주면 겹치지 않는 기존 값까지 막는다. */ -}}
+{{- if .trust -}}
+{{- $mounts = append $mounts "/run/olive/trust" -}}
+{{- end -}}
+{{- range $r := $mounts -}}
 {{- if or (eq $p $r) (hasPrefix (printf "%s/" $r) $p) (hasPrefix (printf "%s/" (trimSuffix "/" $p)) $r) -}}
 {{- fail (printf "executors.%s.tls.mountPath %s overlaps the executor pod mount %s (pick a separate path under /run/)" $.id $p $r) -}}
 {{- end -}}
