@@ -1217,9 +1217,8 @@ export function oliveInput(): OliveInput {
 }
 const declaringCharts = (targets: any) =>
   [...new Set(targetList(targets).map((t) => t.declaredBy))].filter((d) => /^platform\/[a-z0-9-]+$/.test(d) && existsSync(join(ROOT, d, "Chart.yaml")));
-// restore: 켠 렌더에 얹을 cluster.restore(복구 스위치 회귀 시험, restoreOffTests).
-const forcedOptions = (declaring: string[], restore?: Record<string, unknown>): RenderOptions => ({
-  rootOverlay: { components: Object.fromEntries(declaring.map((d) => [basename(d), { enabled: true }])), ...(restore ? { cluster: { restore } } : {}) },
+const forcedOptions = (declaring: string[]): RenderOptions => ({
+  rootOverlay: { components: Object.fromEntries(declaring.map((d) => [basename(d), { enabled: true }])) },
   fill: renderFill(),
 });
 
@@ -1602,8 +1601,8 @@ function listShapeTests(base: OliveInput): string[] {
 // 원인이 둘 이상인 키 검사 사례(fixture는 위반 하나여야 해서 여기서 본다). 위반 목록이 기대와 개수까지 같아야 한다.
 // 켠 값에서 ExternalSecret 생성이 모두 빠져도 store 검사가 남는지, 복구 스위치를 끈 클러스터 렌더가 이 차트 store·ES 0개를 요구하고
 // 다른 출처의 store는 계속 보는지, 실제 차트를 끈 값으로 렌더한 출력이 통과하는지.
-// 입력의 vm 스위치가 켜졌든 꺼졌든(복구 PR) 같은 결과여야 한다. 그래서 각 사례가 전제(스위치 값, 남은 리소스)를 직접 만든다.
-// 스위치·감독 store·정규식 사례는 운영(prod) 클러스터 렌더에 얹는다(vm은 복구 PR에서 store가 0개다).
+// 입력의 운영·VM 스위치가 켜졌든 꺼졌든(복구 PR) 같은 결과여야 한다. 그래서 각 사례가 전제(스위치 값, 남은 리소스)를 직접 만든다.
+// 켠 store가 있어야 하는 사례(감독 store)는 클러스터 렌더가 아니라 합성 클러스터 ci에 차트 ci 렌더를 넣어 본다(아래 synthetic).
 const EXTRA_STORE = { apiVersion: "external-secrets.io/v1", kind: "ClusterSecretStore", metadata: { name: "ci-extra" }, spec: { conditions: [{ namespaces: ["olive-reader"] }], provider: { fake: { data: [{ key: "PUBLIC_MARKER", value: "public" }] } } } };
 function executorKeyTests(base: OliveInput): string[] {
   const bad: string[] = [];
@@ -1625,8 +1624,6 @@ function executorKeyTests(base: OliveInput): string[] {
   const leave = (input: OliveInput) => (residual ? input.deployed[FORCED].push({ origin: "olive[vm]:platform/olive", obj: structuredClone(residual.obj) }) : 0);
   const addVm = (input: OliveInput) => input.deployed[FORCED].push({ origin: "external-secrets-stores[vm]:platform/external-secrets", obj: structuredClone(EXTRA_STORE) });
   const STORES_PROD = "external-secrets-stores[prod]:platform/external-secrets";
-  const supProd = (input: OliveInput) => input.deployed[FORCED].filter((d) => d.origin === "olive[prod]:platform/olive" && d.obj.kind === "ClusterSecretStore" && d.obj.metadata?.name === SUPERVISOR_STORE);
-  const supOpen = `감독 store ${SUPERVISOR_STORE}의 conditions([{"namespaceRegexes":["^$"]}])가`;
   const posixOpen = (ns: string) => `store ci-posix-class가 실행기 ns ${ns}에 열려 있다(namespaceRegexes "[[:lower:]]": 이 검사가 풀지 않는 정규식 문법이다`;
   const cases: [string, PatchOp[], ((i: OliveInput) => unknown) | undefined, string[]][] = [
     ["켠 값에서 ExternalSecret이 0개", dropEs, undefined, noEs],
@@ -1652,18 +1649,6 @@ function executorKeyTests(base: OliveInput): string[] {
       ["platform/olive를 배포하는 Application이 0개다"],
     ],
     [
-      "다른 출처의 감독 store가 감독 ns를 막음(prod)",
-      [],
-      (i) => supProd(i).map((d) => ((d.origin = STORES_PROD), (d.obj.spec.conditions = [{ namespaceRegexes: ["^$"] }]))).length,
-      [supOpen],
-    ],
-    [
-      "감독 store가 두 출처에 하나씩(prod)",
-      [],
-      (i) => supProd(i).map((d) => i.deployed[FORCED].push({ origin: STORES_PROD, obj: structuredClone(d.obj) })).length,
-      [`감독 store ${SUPERVISOR_STORE}가 정확히 하나가 아니다(2개`],
-    ],
-    [
       "POSIX 문자 클래스 정규식 store(prod)",
       [],
       (i) =>
@@ -1674,6 +1659,13 @@ function executorKeyTests(base: OliveInput): string[] {
       executors.map((t) => posixOpen(t.namespace)),
     ],
   ];
+  const compare = (name: string, got: Violation[], want: string[]) => {
+    const unmatched = got.filter((v) => !(["olive-executor-key", "olive-ignore-differences"].includes(v.rule) && want.some((w) => v.message.includes(w))));
+    const counts = want.map((w) => got.filter((v) => v.message.includes(w)).length);
+    if (unmatched.length > 0 || counts.some((n) => n !== 1) || got.length !== want.length) {
+      bad.push(`${name}: 기대한 위반 ${want.length}개(각 1번)와 다르다. 걸린 것: ${got.map(fmt).join("; ") || "없음"}`);
+    }
+  };
   for (const [name, ops, prep, want] of cases) {
     const input = flatInput(base);
     const err = applyPatch(input, ops);
@@ -1685,12 +1677,7 @@ function executorKeyTests(base: OliveInput): string[] {
       bad.push(`${name}: ${FORCED} 렌더에 사례의 전제 문서(올리브 문서, 차트 store, 감독 store)가 없다`);
       continue;
     }
-    const got = allChecks(input);
-    const unmatched = got.filter((v) => !(["olive-executor-key", "olive-ignore-differences"].includes(v.rule) && want.some((w) => v.message.includes(w))));
-    const counts = want.map((w) => got.filter((v) => v.message.includes(w)).length);
-    if (unmatched.length > 0 || counts.some((n) => n !== 1) || got.length !== want.length) {
-      bad.push(`${name}: 기대한 위반 ${want.length}개(각 1번)와 다르다. 걸린 것: ${got.map(fmt).join("; ") || "없음"}`);
-    }
+    compare(name, allChecks(input), want);
   }
   // 실제 차트를 복구 스위치 끈 값으로 렌더한 출력. 이 차트 store·ES가 0개라 위반이 없어야 한다.
   const dir = tempDir("olive-key-off");
@@ -1704,7 +1691,56 @@ function executorKeyTests(base: OliveInput): string[] {
     const sup = targetList(base.targets).find((t) => t.kind === "supervisor" && t.declaredBy === OLIVE_CHART);
     const got = executorKeyViolations(unit, executors, sup);
     if (enabled || got.length > 0) bad.push(`복구 스위치 끈 값 렌더(스위치 ${enabled ? "켬" : "끔"}으로 읽음)가 통과하지 않았다: ${got.map(fmt).join("; ") || "없음"}`);
+    bad.push(...syntheticKeyTests(base, parseAll(r.out), residual, compare));
   }
+  return bad;
+}
+
+// 합성 클러스터 ci의 키 검사(checkExecutorKey: 클러스터별 렌더 단위 → 키 규칙, 다른 규칙은 보지 않는다). 실제 클러스터 값과 상관없다.
+// 켠 문서는 차트 ci 렌더(ci/enabled.yaml), 끈 문서는 같은 값에 externalSecrets.enabled: false를 얹은 렌더(offObjs)다.
+// 스위치 값은 실제 CI처럼 olive Application(지금 root 렌더의 것을 ci로 옮김)의 valuesObject에서 renderedKeySwitch로 읽는다.
+// 소유 Application이 없는 사례는 렌더 때 읽은 끔을 그대로 넘긴다. fixture가 Application을 지워도 입력의 keySwitch는 남기 때문이다.
+function syntheticKeyTests(base: OliveInput, offObjs: any[], residual: Doc | undefined, compare: (name: string, got: Violation[], want: string[]) => void): string[] {
+  const bad: string[] = [];
+  const targets = targetList(base.targets);
+  const executors = targets.filter((t) => t.kind === "executor" && t.declaredBy === OLIVE_CHART);
+  const ON = "chart:olive/ci/enabled.yaml";
+  const CI_OLIVE = "olive[ci]:platform/olive";
+  const CI_STORES = "external-secrets-stores[ci]:platform/external-secrets";
+  const onObjs = expand(base.charts[OLIVE_CHART] ?? []).filter((d) => d.origin === ON).map((d) => d.obj);
+  const app = argoApps(expand(base.deployed[FORCED] ?? [])).find((a) => effectiveSources(a.obj.spec).some((s) => sameRepo(s?.repoURL) && s?.path === OLIVE_CHART));
+  const isSup = (d: Doc) => d.obj.kind === "ClusterSecretStore" && d.obj.metadata?.name === SUPERVISOR_STORE;
+  if (!app || !app.obj.spec?.source || onObjs.length === 0 || !onObjs.some((obj) => isSup({ origin: ON, obj })) || !residual) {
+    return [`합성 클러스터 ci: 전제 문서(${FORCED}의 olive Application, ${ON} 렌더와 그 감독 store, 차트 store)가 없다`];
+  }
+  const appWith = (enabled: boolean): Doc => {
+    const a = structuredClone(app);
+    a.origin = a.origin.replace(/\[[^\]]+\]/, "[ci]");
+    a.obj.spec.source.helm = { ...a.obj.spec.source.helm, valuesObject: { ...a.obj.spec.source.helm?.valuesObject, externalSecrets: { enabled } } };
+    return a;
+  };
+  const olive = (objs: any[]): Doc[] => objs.map((obj) => ({ origin: CI_OLIVE, obj: structuredClone(obj) }));
+  const run = (name: string, docs: Doc[], want: string[], keySwitch = renderedKeySwitch(docs), expectSwitch?: boolean) => {
+    if (expectSwitch !== undefined && keySwitch.ci !== expectSwitch) return bad.push(`합성 ${name}: Application에서 읽은 스위치가 ${show(keySwitch.ci)}다(기대 ${expectSwitch})`);
+    compare(`합성 ${name}`, checkExecutorKey(targets, {}, { [FORCED]: docs }, keySwitch), want);
+  };
+  const off = [appWith(false), ...olive(offObjs)];
+  run("끔 + store·ES 0개", off, [], undefined, false);
+  run("끔 + 이 차트 store 하나 남음", [...off, ...olive([residual.obj])], ["복구 스위치(externalSecrets.enabled)를 끈 렌더에 이 차트의 store·ExternalSecret이 1개 있다"], undefined, false);
+  const noApp = off.slice(1);
+  if (renderedKeySwitch(noApp).ci !== undefined) bad.push("합성 소유 Application 없음: Application이 없는데 스위치 값이 읽혔다");
+  run("소유 Application 없음 + 렌더 때의 끔", noApp, [], renderedKeySwitch(off), false);
+  run("켬 + store·ES 0개", [appWith(true), ...olive(offObjs)], [
+    `감독 store ${SUPERVISOR_STORE}가 정확히 하나가 아니다(0개`,
+    ...executors.flatMap((t) => [`대상 ${t.id}의 ClusterSecretStore ${effectKeyStore(t)}가 정확히 하나가 아니다(0개)`, `대상 ${t.id}의 ns ${t.namespace}에 효과 서명 키 ExternalSecret(target ${EFFECT_KEY_SECRET})이 정확히 하나가 아니다(0개)`]),
+  ], undefined, true);
+  const on = [appWith(true), ...olive(onObjs)];
+  run("켬 정상", on, [], undefined, true);
+  // 감독 store가 다른 출처에서만 오고 감독 ns를 막음, 또 같은 이름이 두 출처에 하나씩. 출처와 상관없이 이름으로 모아야 잡힌다.
+  const moved = structuredClone(on);
+  for (const d of moved.filter(isSup)) ((d.origin = CI_STORES), (d.obj.spec.conditions = [{ namespaceRegexes: ["^$"] }]));
+  run("다른 출처의 감독 store가 감독 ns를 막음", moved, [`감독 store ${SUPERVISOR_STORE}의 conditions([{"namespaceRegexes":["^$"]}])가`], undefined, true);
+  run("감독 store가 두 출처에 하나씩", [...on, ...on.filter(isSup).map((d) => ({ origin: CI_STORES, obj: structuredClone(d.obj) }))], [`감독 store ${SUPERVISOR_STORE}가 정확히 하나가 아니다(2개`], undefined, true);
   return bad;
 }
 
@@ -1787,19 +1823,18 @@ export function checkOliveFixtures(base: OliveInput): Violation[] {
   const run = runFixtures(controls, fixtures);
   out.push(...run.out);
   for (const r of OLIVE_RULES) if (!run.covered.has(r)) out.push({ rule: "fixture", where: FIXTURE_DIR, message: `규칙 ${r}의 음성 fixture가 없다` });
-  for (const m of restoreOffTests(base, fixtures)) out.push({ rule: "fixture", where: "tools/ci/olive.ts restoreOffTests", message: m });
-  console.log(`olive fixture ${files.length}개 × 대조군 ${controls.length}개(${controls.map(([n]) => n).join("·")}), VM 복구 스위치 끔 입력에서 한 번 더`);
+  console.log(`olive fixture ${files.length}개 × 대조군 ${controls.length}개(${controls.map(([n]) => n).join("·")})`);
   return out;
 }
 
-// 대조군마다 fixture를 얹어 본다. tag는 위반 위치 뒤에 붙인다(복구 스위치 회귀 시험이 같은 fixture를 다른 입력에 돌린다).
-function runFixtures(controls: [string, OliveInput][], fixtures: Fixture[], tag = ""): { out: Violation[]; covered: Set<string> } {
+// 대조군마다 fixture를 얹어 본다.
+function runFixtures(controls: [string, OliveInput][], fixtures: Fixture[]): { out: Violation[]; covered: Set<string> } {
   const out: Violation[] = [];
   const covered = new Set<string>();
   for (const [name, control] of controls) {
-    const where = (f: string) => `${f} (대조군 ${name}${tag})`;
+    const where = (f: string) => `${f} (대조군 ${name})`;
     const hits = allChecks(control);
-    if (hits.length > 0) out.push({ rule: "fixture", where: `${FIXTURE_DIR} (대조군 ${name}${tag})`, message: `대조군이 걸렸다: ${hits.map(fmt).join("; ")}` });
+    if (hits.length > 0) out.push({ rule: "fixture", where: `${FIXTURE_DIR} (대조군 ${name})`, message: `대조군이 걸렸다: ${hits.map(fmt).join("; ")}` });
     for (const fx of fixtures) {
       const input = structuredClone(control);
       const err = applyPatch(input, fx.ops);
@@ -1823,35 +1858,6 @@ function runFixtures(controls: [string, OliveInput][], fixtures: Fixture[], tag 
     }
   }
   return { out, covered };
-}
-
-// 복구 스위치 회귀 시험. restore.md 3.1처럼 VM 값(values-vm.yaml)의 cluster.restore에 externalSecrets: false를 넣은 입력에서
-// 올리브 검사(olive targets)와 키 검사 사례, fixture 전부가 그대로 통과해야 한다. 복구 PR은 올리브가 꺼져 있어도 이 CI를 지나고,
-// 가장 급할 때 막히면 안 된다. 덧씌우기(rootOverlay)는 값 파일 위에 valuesObject로 합쳐져 그 줄을 넣은 것과 같은 값이 된다.
-// 덧씌우기는 모든 클러스터에 걸리므로 vm 출처의 문서만 끈 렌더에서 가져오고 나머지는 지금 입력 그대로 둔다(운영은 켠 채).
-function restoreOffInput(base: OliveInput): OliveInput | string {
-  const off = { externalSecrets: false };
-  const real = renderAll({ rootOverlay: { cluster: { restore: off } } });
-  const forced = renderAll(forcedOptions(declaringCharts(base.targets), off));
-  const vmViolations = [...real.violations, ...forced.violations].filter((v) => v.where.includes("[vm]") || v.where.includes("values-vm"));
-  if (vmViolations.length > 0) return `VM 스위치를 끈 렌더가 실패했다: ${vmViolations.map(fmt).join("; ")}`;
-  const vm = (d: Doc) => sourceOf(d.origin).cluster === "vm";
-  const input = structuredClone(base);
-  input.deployed[REAL] = [...input.deployed[REAL].filter((d) => !vm(d)), ...real.docs.filter(vm)];
-  input.deployed[FORCED] = [...input.deployed[FORCED].filter((d) => !vm(d)), ...forced.docs.filter(vm)];
-  input.keySwitch = renderedKeySwitch(input.deployed[FORCED]);
-  if (input.keySwitch.vm !== false) return `VM 스위치를 끈 렌더에서 올리브의 스위치가 ${input.keySwitch.vm === undefined ? "읽히지 않았다" : "켬이다"}`;
-  const left = expand(input.deployed[FORCED]).filter((d) => vm(d) && ["ClusterSecretStore", "ExternalSecret"].includes(d.obj.kind));
-  if (left.length > 0) return `VM 스위치를 끈 렌더에 store·ExternalSecret이 남았다: ${left.map(id).join(", ")}`;
-  return input;
-}
-function restoreOffTests(base: OliveInput, fixtures: Fixture[]): string[] {
-  const input = restoreOffInput(base);
-  if (typeof input === "string") return [input];
-  const bad = [...allChecks(input).map((v) => `올리브 검사가 걸렸다: ${fmt(v)}`), ...executorKeyTests(input)];
-  const { controls, errors } = buildControls(input, fixtures);
-  bad.push(...errors.map(fmt), ...runFixtures(controls, fixtures, ", VM 복구 스위치 끔").out.map(fmt));
-  return bad.map((m) => `VM 복구 스위치 끔(cluster.restore.externalSecrets: false): ${m}`);
 }
 
 // namespaceRegexOpens의 문법 경계. 기대 값은 Go regexp.MatchString(ESO가 쓰는 엔진)의 결과이고, undefined는 풀지 않는 문법이다.
