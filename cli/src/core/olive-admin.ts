@@ -1,13 +1,16 @@
 // 올리브 감독 파드의 고정 관리 진입점 어댑터. 관리자의 Kubernetes 인증으로 kubectl exec해 감독 상태를 읽는 것까지가 결정(D-60)이고,
-// 진입점 argv·schema·응답 칸은 CLI 쪽 제안이다. 감독의 진입점은 아직 없고 그쪽 작업이 이 상수에 맞춘다.
+// 같은 길로 시험 작업 한 줄을 넣는다(D-98·D-101). 진입점 argv·schema·응답 칸·stderr 사유 꼴은 감독 쪽(olive
+// src/supervisor/admin/protocol.ts·client.ts)과 같아야 한다. 감독 이미지와 CLI는 따로 배포되므로 모르는 꼴은 해석하지 않는다.
 // exec는 쓰기로 판정되므로(writes.ts) 읽기 문맥은 대상 파드와 표시용 argv만 내고, 실행은 쓰기 문맥에서 한 번만 한다.
-// ns·라벨·Deployment·컨테이너·진입점·schema는 여기 상수다. 명령이 넘기는 것은 동작 이름 하나라 다른 파드나 임의 argv로 갈 자리가 없다.
+// ns·라벨·Deployment·컨테이너·진입점·schema는 여기 상수다. 명령이 넘기는 것은 동작 이름과 시험 작업의 값 여섯뿐이라 다른 파드나 임의
+// kubectl 인자로 갈 자리가 없다(값은 꼴을 본 뒤 `--` 뒤에 진입점의 인자로만 들어간다).
 // 라벨은 같은 ns의 어느 파드든 붙일 수 있어 신원의 근거가 아니다. 파드 → ReplicaSet → Deployment의 제어 참조를 실제 객체의 UID로 대조한 파드만 대상이다.
-// 진입점의 출력과 kubectl의 stderr 원문은 밖으로 내지 않는다. 오류 문구에는 종료 코드만 넣는다.
-import type { OliveAdminAction, OliveAdminOutcome, OliveAdminRead, OliveAdminWrite, OliveSupervisorMissing, OliveSupervisorStatus } from "./command";
+// 진입점의 출력과 kubectl의 stderr 원문은 밖으로 내지 않는다. 오류 문구에는 종료 코드만, 결과에는 닫힌 목록의 사유 낱말만 넣는다.
+import type { OliveAdminAction, OliveAdminExit, OliveAdminOutcome, OliveAdminRead, OliveAdminReason, OliveAdminWrite, OliveSupervisorMissing, OliveSupervisorStatus, OliveSupervisorTarget, OliveTestJob, OliveTestJobOutcome } from "./command";
 import { ExecTimeout, type Exec, type ExecResult } from "./exec";
 import { entries, isArray, jsonParse } from "./intrinsics";
 import { kubectlArgv } from "./kubectl";
+import { OLIVE_TEST_JOB_FIELDS, oliveTestJobFits } from "./names";
 import { POD_UID } from "./olive";
 
 export const OLIVE_ADMIN_NS = "olive-control";
@@ -22,6 +25,7 @@ export const OLIVE_ADMIN_SELECTOR = entries(OLIVE_ADMIN_LABELS).map(([k, v]) => 
 export const OLIVE_ADMIN_ENTRY = ["bun", "src/main/admin.ts"];
 // 칸을 바꾸면 판을 올린다. 감독 이미지와 CLI는 따로 배포되므로 모르는 판은 해석하지 않고 거부한다.
 export const OLIVE_ADMIN_STATUS_SCHEMA = "olive-supervisor-status/v1";
+export const OLIVE_ADMIN_TEST_JOB_SCHEMA = "olive-test-job/v1";
 export const OLIVE_ADMIN_MAX_OUTPUT = 4_096;
 
 const REQUEST_TIMEOUT = "--request-timeout=20s";
@@ -29,7 +33,24 @@ const EXEC_TIMEOUT_MS = 30_000;
 const POD_NAME = /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/;
 const MAX_COUNT = 1_000_000;
 const STATUS_FIELDS = ["schema", "alive", "queued", "running", "diagnosis", "stop", "stopGeneration", "intakeOpen"];
-const ACTION_WORDS: Record<OliveAdminAction, string[]> = { status: ["status"] };
+const TEST_JOB_FIELDS = ["schema", "outcome", "ref"];
+const REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const ACTION_WORDS: Record<OliveAdminAction, string[]> = { status: ["status"], "test-job": ["test-job"] };
+// 진입점의 사유 낱말(olive protocol.ts의 REFUSED_REASONS·UNKNOWN_REASONS, client.ts의 AskOutcome). malformed는 두 갈래에 있어
+// 낱말만으로는 거절인지 답을 받지 못한 것인지 모른다. 그래서 갈래는 stderr 줄의 머리로 가른다.
+const REASON_WORDS: Record<OliveAdminReason["kind"], readonly string[]> = {
+  refused: ["malformed", "unknown_command", "busy", "disabled", "not_alive", "stopped", "intake_closed", "owner_inactive", "limit", "late", "conflict", "invariant_violation", "ledger_refused"],
+  unreached: ["no_socket", "not_listening", "connect_failed"],
+  "no-reply": ["timeout", "closed", "too_long", "malformed", "write_failed", "clock"],
+  unknown: ["restore_not_done", "ledger_unreadable", "stop_unrecorded", "clock_unavailable", "out_of_range", "read_threw", "random_unavailable", "write_unknown"],
+};
+// 진입점(olive client.ts exitFor)이 0이 아닐 때 stderr에 쓰는 한 줄. 문구가 바뀌면 사유는 null이 되고 종료 코드만으로 말한다.
+const REFUSED_LINE = /^olive admin: 감독이 요청을 거절했다\(([a-z_]+)\)$/;
+const UNKNOWN_LINE = /^olive admin: (?:상태|시험 작업) 모름: ([^()]*)\(([a-z_]+)\)$/;
+const UNREACHED_HEAD = "감독에 닿지 못했다";
+const NO_REPLY_HEAD = "감독의 답을 받지 못했다";
+// 진입점의 종료 코드: 0 완료, 1 실패, 3 복원 전(모름), 64 사용법. 3은 restore_not_done만 낸다.
+const WAITING_EXIT = 3;
 // kubectl이 API 서버에서 답을 받지 못해 끝난 경우의 stderr 마지막 줄. 진입점이 돌았는지 알 수 없으므로 실패가 아니라 결과 미상이다.
 const KUBECTL_TIMEOUT = /^(?:Error from server \((?:Timeout|ServerTimeout)\):|(?:Unable to connect to the server|Error from server|error): .*(?:Client\.Timeout|context deadline exceeded|request canceled|i\/o timeout|TLS handshake timeout))/;
 // exec.ts가 stderr를 앞에서부터 이 길이까지만 남긴다.
@@ -51,8 +72,18 @@ function timedOut(r: ExecResult): boolean {
 }
 
 function wordsOf(action: OliveAdminAction): string[] {
-  if (typeof action !== "string" || !Object.hasOwn(ACTION_WORDS, action)) throw new Error("감독 관리 동작은 status만");
+  if (typeof action !== "string" || !Object.hasOwn(ACTION_WORDS, action)) throw new Error("감독 관리 동작은 status, test-job만");
   return ACTION_WORDS[action];
+}
+
+// 진입점 뒤의 인자. status는 인자가 없고 test-job은 값 여섯을 정해진 차례로 옮긴다(받은 객체를 펼치지 않는다).
+// 꼴이 아니면 값을 되찍지 않고 던진다. 명령의 인자 검사를 지난 값만 오지만, argv는 이 파일이 만들므로 여기서도 본다.
+function entryArgs(action: OliveAdminAction, job: unknown): string[] {
+  const words = wordsOf(action);
+  if (action === "status") return words;
+  const values = typeof job === "object" && job !== null ? OLIVE_TEST_JOB_FIELDS.map((f) => (Object.hasOwn(job, f) ? (job as Record<string, unknown>)[f] : undefined)) : [];
+  if (!oliveTestJobFits(values as string[])) throw new Error("시험 작업 값이 정해진 꼴이 아니다");
+  return [...words, ...(values as string[])];
 }
 
 const failure = (r: ExecResult) => (r.errKind === "not-found" ? "kubectl이 없다" : r.errKind ?? r.signal ?? `exit ${r.code}`);
@@ -156,11 +187,40 @@ function findPod(exec: Exec): { state: "ready"; pod: string } | OliveSupervisorM
   return { state: "ready", pod: pod.metadata.name };
 }
 
-// pod는 findPod가 형식을 확인한 이름만 온다.
-function adminArgv(pod: string, action: OliveAdminAction): string[] {
+// pod는 findPod가 형식을 확인한 이름만, args는 entryArgs가 만든 것만 온다.
+function adminArgv(pod: string, args: string[]): string[] {
   // --request-timeout은 -- 앞에 둔다(뒤에 두면 진입점의 인자가 된다).
-  return ["kubectl", "-n", OLIVE_ADMIN_NS, "exec", pod, "-c", OLIVE_ADMIN_CONTAINER, REQUEST_TIMEOUT, "--", ...OLIVE_ADMIN_ENTRY, ...wordsOf(action)];
+  return ["kubectl", "-n", OLIVE_ADMIN_NS, "exec", pod, "-c", OLIVE_ADMIN_CONTAINER, REQUEST_TIMEOUT, "--", ...OLIVE_ADMIN_ENTRY, ...args];
 }
+
+// 원격 명령이 0이 아닌 코드로 끝난 것을 kubectl의 끝 줄로 확인했을 때만 그 코드다. 시간 초과 판정은 timedOut이 먼저 한다.
+function remoteCode(r: ExecResult): number | null {
+  if (r.code === null || r.code === 0 || r.errKind !== undefined || r.signal) return null;
+  const end = endLine(r);
+  return end !== null && end.endsWith(`command terminated with exit code ${r.code}`) ? r.code : null;
+}
+
+// 사유는 stderr가 진입점의 한 줄과 kubectl의 끝 줄, 꼭 두 줄일 때만 읽는다. 앞에 다른 줄이 있거나 잘렸으면 null이다.
+// 낱말은 그 갈래의 닫힌 목록에 있고 코드와 맞아야 한다(3은 restore_not_done뿐, 나머지는 1).
+function reasonOf(r: ExecResult, code: number): OliveAdminReason | null {
+  const lines = r.stderr.split("\n");
+  if (lines.length !== 2 || lines[1] !== `command terminated with exit code ${code}`) return null;
+  const line = lines[0] as string;
+  let reason: OliveAdminReason | null = null;
+  const refused = REFUSED_LINE.exec(line);
+  const unknown = UNKNOWN_LINE.exec(line);
+  if (refused) reason = { kind: "refused", word: refused[1] as string };
+  else if (unknown) {
+    const head = (unknown[1] as string).trim();
+    const kind = head === UNREACHED_HEAD ? "unreached" : head === NO_REPLY_HEAD ? "no-reply" : "unknown";
+    reason = { kind, word: unknown[2] as string };
+  }
+  if (reason === null || !REASON_WORDS[reason.kind].includes(reason.word)) return null;
+  const wants = reason.word === "restore_not_done" ? WAITING_EXIT : 1;
+  return wants === code ? reason : null;
+}
+
+const exitOf = (pod: string, r: ExecResult, code: number): OliveAdminExit => ({ state: "exit", pod, code, reason: reasonOf(r, code) });
 
 const MEMBER = /[ \t\r]*("(?:[^"\\]|\\.)*")[ \t\r]*:[ \t\r]*(?:"(?:[^"\\]|\\.)*"|true|false|0|[1-9][0-9]*)[ \t\r]*([,}])/y;
 
@@ -214,27 +274,48 @@ export function parseStatus(stdout: string): OliveSupervisorStatus {
   return { alive: doc.alive, queued: doc.queued, running: doc.running, diagnosis: doc.diagnosis, stop: doc.stop, stopGeneration: doc.stopGeneration, intakeOpen: doc.intakeOpen };
 }
 
+// 시험 작업 한 줄(olive-test-job/v1). 칸 셋만, ref는 감독이 만든 소문자 UUID만 받는다.
+export function parseTestJob(stdout: string): { outcome: "created" | "existing"; ref: string } {
+  const fail = () => new Error("감독 관리 진입점 출력이 정해진 꼴이 아니다");
+  if (Buffer.byteLength(stdout) > OLIVE_ADMIN_MAX_OUTPUT) throw fail();
+  const line = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
+  if (line === "" || line.includes("\n")) throw fail();
+  let doc: any;
+  try {
+    if (!flatDocument(line)) throw fail();
+    doc = jsonParse(line);
+  } catch {
+    throw fail();
+  }
+  const keys = Object.keys(doc);
+  if (keys.length !== TEST_JOB_FIELDS.length || !TEST_JOB_FIELDS.every((k) => Object.hasOwn(doc, k))) throw fail();
+  if (doc.schema !== OLIVE_ADMIN_TEST_JOB_SCHEMA || (doc.outcome !== "created" && doc.outcome !== "existing") || typeof doc.ref !== "string" || !REF.test(doc.ref)) throw fail();
+  return { outcome: doc.outcome, ref: doc.ref };
+}
+
+function targetOf(readExec: Exec, action: OliveAdminAction, job: unknown): OliveSupervisorTarget {
+  const args = entryArgs(action, job);
+  const found = findPod(readExec);
+  return found.state === "ready" ? { ...found, argv: adminArgv(found.pod, args) } : found;
+}
+
 export function oliveAdminRead(readExec: Exec): OliveAdminRead {
   return {
-    target(action) {
-      wordsOf(action);
-      const found = findPod(readExec);
-      return found.state === "ready" ? { ...found, argv: adminArgv(found.pod, action) } : found;
-    },
+    target: (action: OliveAdminAction, job?: OliveTestJob) => targetOf(readExec, action, job),
   };
 }
 
 // alive: 끝난 apply의 쓰기 문맥이면 던진다. target은 읽기 exec만 쓰고 run도 파드 조회 뒤에야 쓰기 exec의 막기에 닿으므로 두 입구에서 먼저 본다.
 export function oliveAdminWrite(exec: Exec, readExec: Exec, alive: () => void): OliveAdminWrite {
-  const read = oliveAdminRead(readExec);
   return {
-    target(action) {
+    target(action: OliveAdminAction, job?: OliveTestJob) {
       alive();
-      return read.target(action);
+      return targetOf(readExec, action, job);
     },
     run(action): OliveAdminOutcome {
       alive();
-      wordsOf(action);
+      if (wordsOf(action) !== ACTION_WORDS.status) throw new Error("감독 관리 동작 run은 status만");
+      const args = entryArgs(action, undefined);
       let target: ReturnType<typeof findPod>;
       try {
         target = findPod(readExec);
@@ -244,10 +325,31 @@ export function oliveAdminWrite(exec: Exec, readExec: Exec, alive: () => void): 
       }
       if (target.state !== "ready") return { state: "no-target", target };
       // 함정: kubectl exec에는 UID 조건이 없어 대조와 실행 사이에 같은 이름의 파드로 바뀌는 경쟁은 남는다.
-      const r = exec(adminArgv(target.pod, action), { timeoutMs: EXEC_TIMEOUT_MS });
+      const r = exec(adminArgv(target.pod, args), { timeoutMs: EXEC_TIMEOUT_MS });
       if (timedOut(r)) return { state: "unknown" };
+      const code = remoteCode(r);
+      if (code !== null) return exitOf(target.pod, r, code);
       if (r.code !== 0) throw new Error(`감독 관리 진입점이 실패했다(${failure(r)})`);
       return { state: "reported", pod: target.pod, status: parseStatus(r.stdout) };
+    },
+    // 실행 전 실패(파드 목록·소유 사슬을 읽지 못함, 그 시간 초과)는 던진다: 아무것도 보내지 않았다.
+    // 실행 뒤 결과를 확인하지 못하면 unknown이다: 감독이 장부에 적었을 수 있다.
+    testJob(job: OliveTestJob): OliveTestJobOutcome {
+      alive();
+      const args = entryArgs("test-job", job);
+      const target = findPod(readExec);
+      if (target.state !== "ready") return { state: "no-target", target };
+      // 함정: kubectl exec에는 UID 조건이 없어 대조와 실행 사이에 같은 이름의 파드로 바뀌는 경쟁은 남는다.
+      const r = exec(adminArgv(target.pod, args), { timeoutMs: EXEC_TIMEOUT_MS });
+      if (timedOut(r)) return { state: "unknown", pod: target.pod };
+      const code = remoteCode(r);
+      if (code !== null) return exitOf(target.pod, r, code);
+      if (r.code !== 0) return { state: "unknown", pod: target.pod };
+      try {
+        return { state: "accepted", pod: target.pod, ...parseTestJob(r.stdout) };
+      } catch {
+        return { state: "unknown", pod: target.pod };
+      }
     },
   };
 }

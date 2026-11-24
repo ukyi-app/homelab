@@ -320,6 +320,28 @@ describe("status", () => {
     expect(unknown.json.body).not.toContain("꺼져 있음");
   }, 30_000);
 
+  test("status --apply: 감독 진입점의 종료 코드를 CLI 공통 규칙으로 옮긴다(3 모름은 대기, 1·64는 실패)", async () => {
+    const entryExit = (code: number, line: string): Resp => ({ code, stderr: `${line}\ncommand terminated with exit code ${code}\n` });
+    const rows: [string, Resp, number, string, string][] = [
+      ["3 restore_not_done", entryExit(3, "olive admin: 상태 모름: 감독이 복원을 마치지 않았다(restore_not_done)"), 3, "감독: 상태 모름(복원 전, restore_not_done)", "감독이 복원을 마친 뒤 다시: homelab olive status --apply"],
+      ["1 no_socket", entryExit(1, "olive admin: 상태 모름: 감독에 닿지 못했다(no_socket)"), 1, "감독: 닿지 못함(no_socket)", "homelab olive status --verbose로 대상별 상태를 본다"],
+      ["1 timeout", entryExit(1, "olive admin: 상태 모름: 감독의 답을 받지 못했다(timeout)"), 1, "감독: 답을 받지 못함(timeout)", "homelab olive status --verbose로 대상별 상태를 본다"],
+      ["1 ledger_unreadable", entryExit(1, "olive admin: 상태 모름: 감독이 상태를 읽지 못했다(ledger_unreadable)"), 1, "감독: 상태를 읽지 못함(ledger_unreadable)", "homelab olive status --verbose로 대상별 상태를 본다"],
+      ["1 busy", entryExit(1, "olive admin: 감독이 요청을 거절했다(busy)"), 1, "감독: 요청 거절(busy)", "homelab olive status --verbose로 대상별 상태를 본다"],
+      ["1 사유 꼴이 다름", entryExit(1, "olive admin: canary-raw-output-7f3a"), 1, "감독: 관리 진입점이 실패했다(종료 코드 1)", "homelab olive status --verbose로 대상별 상태를 본다"],
+      ["64 사용법", entryExit(64, "olive admin: 사용법: bun src/main/admin.ts status | test-job"), 1, "감독: 관리 진입점이 요청을 받지 않았다(종료 코드 64, CLI와 감독 이미지의 판이 다를 수 있다)", "homelab olive status --verbose로 대상별 상태를 본다"],
+      ["5 모르는 코드", entryExit(5, "olive admin: 감독이 요청을 거절했다(busy)"), 1, "감독: 관리 진입점이 실패했다(종료 코드 5)", "homelab olive status --verbose로 대상별 상태를 본다"],
+    ];
+    for (const [name, resp, code, sup, next] of rows) {
+      const r = await runCli(["olive", "status", "--apply", "--json"], world(supervisor(resp)));
+      expect([name, r.code]).toEqual([name, code]);
+      expect([name, r.json.body.split("\n")[0].endsWith(sup)]).toEqual([name, true]);
+      expect([name, r.json.next]).toEqual([name, next]);
+      expect([name, execCalls(r).length]).toEqual([name, 1]);
+      expect([name, `${r.stdout}${r.stderr}`.includes("canary-raw-output-7f3a")]).toEqual([name, false]);
+    }
+  }, 60_000);
+
   test("status: 없는 대상은 없음이고 실패가 아니다", async () => {
     const r = await runCli(["olive", "status", "--verbose", "--json"], world({ noNs: ["olive-session", "olive-reader"], noDep: ["writer"] }));
     expect(r.code).toBe(0);
