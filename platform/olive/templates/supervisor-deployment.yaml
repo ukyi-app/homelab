@@ -1,6 +1,7 @@
 {{- /*
 감독(D-37, supervisor.md §1.1·§8). 모델이 아닌 프로세스이고 hc·Kubernetes 자격이 없다. 장부(SQLite)를 혼자 쓴다.
-env 이름은 이 차트가 정한 자리다. ukyi-app/olive의 감독 코드가 같은 이름을 읽는다(아직 코드가 없어 이미지는 69로 끝난다).
+env 이름·꼴·파일 이름은 ukyi-app/olive의 감독 진입점(src/main/supervisor.ts, README "감독 진입점 › 환경")이 정한다. 진입점은 열한 개가
+모두 있고 비지 않아야 뜬다(없거나 틀리면 91). 이름과 값은 CI(tools/ci/olive.ts olive-supervisor-env)가 절대 값 표와 대조한다.
 */}}
 {{- $t := include "olive.supervisorTarget" . | fromYaml }}
 {{- $tls := .Values.supervisor.tls }}
@@ -49,7 +50,7 @@ spec:
             # 장부 디렉터리(PVC). DB 오류나 디스크 부족이면 새 실행은 0건이다(§8).
             - name: OLIVE_LEDGER_DIR
               value: {{ .Values.supervisor.ledger.mountPath | quote }}
-            # 지시 서명 키 파일이 든 디렉터리(파일 이름 = Infisical 키 이름).
+            # 지시 서명 키 파일이 든 디렉터리. 파일 이름은 진입점이 supervisor-signing.key로 정해 아래 signing 볼륨의 items가 맞춘다.
             - name: OLIVE_SIGNING_KEY_DIR
               value: /run/olive/signing
             # 계정 묶음 디렉터리. 계정마다 하위 디렉터리 <별칭>/<키 이름> 파일이다(지금은 고정 계정 하나).
@@ -59,14 +60,24 @@ spec:
             # 현관(apps/homelab-bot)도 같은 값을 받아야 하는데 그 차트에는 아직 자리가 없다. 그 자리와 CI 대조는 현관 차트 PR이 더한다.
             - name: OLIVE_POLICY_REVISION
               value: {{ include "olive.policyRevision" . | quote }}
-            {{- if $tlsSecret }}
+            # TLS·신뢰 폴더는 볼륨이 없어도 늘 준다. 진입점에는 필수라 빼면 91이고, 주면 파일이 없어 92로 끝난다(재료가 없다는 원인이 코드에 남는다).
             - name: OLIVE_TLS_DIR
               value: {{ $tls.mountPath | quote }}
-            {{- end }}
-            {{- if $trust }}
             - name: OLIVE_TRUST_DIR
               value: /run/olive/trust
-            {{- end }}
+            # 실행기 등록표(D-63·D-70) 문서 파일. Infisical 키를 registry 볼륨의 items가 이 이름으로 붙인다.
+            - name: OLIVE_REGISTRY_FILE
+              value: /run/olive/registry/registry.json
+            # 등록표 문서의 environment와 글자 그대로 같아야 한다. 다르면 등록표 전체가 거절돼 기동이 93으로 끝난다.
+            - name: OLIVE_ENVIRONMENT
+              value: {{ required "supervisor.registry.environment is required (cluster name the registry document's environment must equal; keep components.olive off until then)" .Values.supervisor.registry.environment | quote }}
+            # 등록표와 배정이 함께 쓰는 대상 표. targets.yaml의 kind executor 줄에서만 만든다(olive.supervisorTargetsJson).
+            - name: OLIVE_TARGETS
+              value: {{ include "olive.supervisorTargetsJson" . | quote }}
+            # 결과 보관 폴더. 진입점은 마지막 경로 요소만 lstat으로 보고 만들지 않는다. 그래서 장부 PVC의 하위 폴더를 subPath로
+            # 따로 붙인다: kubelet이 없으면 만들고, 마운트 자리라 링크가 아니며, 상위(/var/lib)는 이미지의 폴더다.
+            - name: OLIVE_RESULT_DIR
+              value: /var/lib/olive-results
           # 프로브는 두지 않는다. 건강 확인 포트는 아직 정하지 않았다(spec.md §5.3 "같은 파드의 공유 통로"). 감독 코드가 생긴 뒤 더한다.
           {{- include "olive.containerSecurity" . | nindent 10 }}
           resources:
@@ -74,6 +85,14 @@ spec:
           volumeMounts:
             - name: ledger
               mountPath: {{ .Values.supervisor.ledger.mountPath }}
+            # 같은 PVC의 하위 폴더 results를 따로 붙인다(장부 폴더 안의 폴더지만 장부는 자기 파일 이름만 본다, olive src/ledger/ledger.md).
+            # 함정: 장부 PVC를 잃으면 결과 본문도 함께 잃는다(같은 볼륨). 볼륨을 나눌지는 정하지 않았다(D-78이 보관소의 자리를 정하지 않음).
+            - name: ledger
+              mountPath: /var/lib/olive-results
+              subPath: results
+            - name: registry
+              mountPath: /run/olive/registry
+              readOnly: true
             - name: signing
               mountPath: /run/olive/signing
               readOnly: true
@@ -102,6 +121,17 @@ spec:
           secret:
             secretName: olive-signing-key
             defaultMode: 0440
+            # Secret 키(= Infisical 키 이름)와 진입점이 읽는 파일 이름이 달라 여기서 잇는다.
+            items:
+              - key: {{ .Values.supervisor.signingKey.key }}
+                path: supervisor-signing.key
+        - name: registry
+          secret:
+            secretName: olive-registry
+            defaultMode: 0440
+            items:
+              - key: {{ required "supervisor.registry.key is required (Infisical key name of the executor registry under /olive/supervisor, D-63; keep components.olive off until then)" .Values.supervisor.registry.key }}
+                path: registry.json
         - name: account
           secret:
             secretName: olive-account-{{ $account }}

@@ -127,7 +127,7 @@
     "supervisor": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["port", "clusterIP", "resources", "ledger", "signingKey", "account", "extraClientNamespaces", "tls"],
+      "required": ["port", "clusterIP", "resources", "ledger", "signingKey", "account", "registry", "extraClientNamespaces", "tls"],
       "properties": {
         "port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
         "clusterIP": {
@@ -157,6 +157,15 @@
               "pattern": "^(-----BEGIN PUBLIC KEY-----\\n[\\s\\S]*-----END PUBLIC KEY-----\\n?)?$",
               "not": { "pattern": "PRIVATE KEY" }
             }
+          }
+        },
+        "registry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key", "environment"],
+          "properties": {
+            "key": { "type": "string", "pattern": "^([A-Z][A-Z0-9_]*)?$" },
+            "environment": { "type": "string", "pattern": "^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$" }
           }
         },
         "account": {

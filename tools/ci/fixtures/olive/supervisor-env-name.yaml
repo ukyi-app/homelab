@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 빠짐 ["OLIVE_REGISTRY_FILE"], 표 밖 ["OLIVE_REGISTRY_PATH"]
+# 등록표 env의 이름만 틀리게 바꿨다. 값과 마운트는 그대로지만 진입점은 그 이름을 읽지 않아 91로 끝난다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_REGISTRY_FILE}
+        set: {name: OLIVE_REGISTRY_PATH}
