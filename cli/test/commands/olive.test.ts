@@ -323,7 +323,7 @@ describe("status", () => {
   test("status --apply: 감독 진입점의 종료 코드를 CLI 공통 규칙으로 옮긴다(3 모름은 대기, 1·64는 실패)", async () => {
     const entryExit = (code: number, line: string): Resp => ({ code, stderr: `${line}\ncommand terminated with exit code ${code}\n` });
     const rows: [string, Resp, number, string, string][] = [
-      ["3 restore_not_done", entryExit(3, "olive admin: 상태 모름: 감독이 복원을 마치지 않았다(restore_not_done)"), 3, "감독: 상태 모름(복원 전, restore_not_done)", "감독이 복원을 마친 뒤 다시: homelab olive status --apply"],
+      ["3 restore_not_done", entryExit(3, "olive admin: 상태 모름: 감독이 복원을 마치지 않았다(restore_not_done)"), 3, "감독: 상태 모름(복원 전, restore_not_done)", "현관(O08)이 붙기 전에는 감독이 복원을 마치지 않아 다시 불러도 3이다. 현관이 붙은 뒤 다시: homelab olive status --apply"],
       ["1 no_socket", entryExit(1, "olive admin: 상태 모름: 감독에 닿지 못했다(no_socket)"), 1, "감독: 닿지 못함(no_socket)", "homelab olive status --verbose로 대상별 상태를 본다"],
       ["1 timeout", entryExit(1, "olive admin: 상태 모름: 감독의 답을 받지 못했다(timeout)"), 1, "감독: 답을 받지 못함(timeout)", "homelab olive status --verbose로 대상별 상태를 본다"],
       ["1 ledger_unreadable", entryExit(1, "olive admin: 상태 모름: 감독이 상태를 읽지 못했다(ledger_unreadable)"), 1, "감독: 상태를 읽지 못함(ledger_unreadable)", "homelab olive status --verbose로 대상별 상태를 본다"],

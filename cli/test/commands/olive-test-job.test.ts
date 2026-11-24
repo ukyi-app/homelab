@@ -10,7 +10,7 @@ const POD_UID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const SELECTOR = "app.kubernetes.io/name=olive,app.kubernetes.io/component=supervisor,homelab.ukyi.app/olive-target=supervisor";
 const CANARY = "canary-raw-output-7f3a";
 const REF = "0f0f0f0f-0000-4000-8000-000000000001";
-const VALUES = ["8afa2150-81af-4018-9753-0183509606ad", "retry-1", "reader", "smoke_check", "input/1b5d2dd3-e830-49fd-bb90-4e93022446e8", "a".repeat(64)];
+const VALUES = ["8afa2150-81af-4018-9753-0183509606ad", "retry-1", "isolated_reader", "smoke_check", "input/1b5d2dd3-e830-49fd-bb90-4e93022446e8", "a".repeat(64)];
 const EXEC = ["kubectl", "-n", "olive-control", "exec", POD, "-c", "supervisor", "--request-timeout=20s", "--", "bun", "src/main/admin.ts", "test-job", ...VALUES];
 const CHECK_QUEUE = "같은 키로 다시 부르기 전에 homelab olive status --apply의 대기 수를 본다";
 
@@ -60,7 +60,7 @@ describe("apply: 감독 진입점의 종료 코드 옮기기", () => {
   const rows: [string, Resp, number, string, string | null][] = [
     ["0 created", created(), 0, `시험 작업: 새로 넣음(참조 ${REF})`, null],
     ["0 existing", created("existing"), 0, `시험 작업: 같은 키·내용의 부탁이 이미 있다(참조 ${REF})`, null],
-    ["3 restore_not_done", jobUnknown("감독이 복원을 마치지 않았다", "restore_not_done", 3), 3, "시험 작업: 넣지 않았다. 감독이 복원을 마치지 않았다(restore_not_done)", "감독이 복원을 마친 뒤 같은 명령을 다시 실행한다"],
+    ["3 restore_not_done", jobUnknown("감독이 복원을 마치지 않았다", "restore_not_done", 3), 3, "시험 작업: 넣지 않았다. 감독이 복원을 마치지 않았다(restore_not_done)", "현관(O08)이 붙기 전에는 감독이 복원을 마치지 않아 다시 불러도 3이다. 현관이 붙은 뒤 같은 명령을 다시 실행한다"],
     ["1 disabled", refused("disabled"), 1, "시험 작업 거절(disabled): 이 감독은 시험 작업 넣기가 꺼져 있다. 적힌 것 없음", "시험 클러스터의 감독에서만 쓴다(운영 값은 늘 꺼짐)"],
     ["1 conflict", refused("conflict"), 1, "시험 작업 거절(conflict): 같은 키에 다른 내용의 부탁이 있다. 적힌 것 없음", "다른 키를 쓴다"],
     ["1 limit", refused("limit"), 1, "시험 작업 거절(limit): 배정될 수 있는 대기 한도에 닿았다. 적힌 것 없음", "homelab olive status --apply의 대기 수가 줄면 다시"],
@@ -123,7 +123,7 @@ describe("apply: 감독 진입점의 종료 코드 옮기기", () => {
 });
 
 describe("인자 거르기", () => {
-  test("빈 값·공백·제어 문자·따옴표·긴 값·요청 한 줄 초과·인자 수가 틀리면 64이고 아무것도 부르지 않는다", async () => {
+  test("빈 값·공백·제어 문자·따옴표·셸 특수 글자·긴 값·요청 한 줄 초과·인자 수가 틀리면 64이고 아무것도 부르지 않는다", async () => {
     const at = (i: number, v: string) => VALUES.map((x, j) => (j === i ? v : x));
     const cases: [string, string[]][] = [
       ["빈 값", at(1, "")],
@@ -132,6 +132,11 @@ describe("인자 거르기", () => {
       ["줄바꿈", at(3, `a\n${CANARY}`)],
       ["따옴표", at(1, 'a"b')],
       ["역슬래시", at(1, "a\\b")],
+      ["명령 치환", at(1, "$(id)")],
+      ["백틱", at(1, "`id`")],
+      ["세미콜론", at(3, "a;id")],
+      ["작은따옴표", at(1, "a'b")],
+      ["셸 글자", at(1, "a*b|c&d>e")],
       ["ASCII 밖", at(2, "역할")],
       ["201자", at(1, "k".repeat(201))],
       ["요청 한 줄 초과", ["o".repeat(200), "k".repeat(200), "r".repeat(200), "p".repeat(200), "s".repeat(200), "d".repeat(64)]],

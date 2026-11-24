@@ -24,9 +24,10 @@ const REASON_WORD: Record<OliveAdminReason["kind"], string> = { refused: "요청
 
 // 감독 진입점의 종료 코드를 CLI 공통 규칙(D-61: 0 완료, 1 실패, 3 대기, 64 사용법)으로 옮긴다.
 // 3은 감독이 답했지만 복원 전이라 상태를 모르는 것이라 대기(3)다. 꺼짐·실패로 읽지 않는다.
+// 함정: 현관(O08)이 붙기 전에는 감독이 복원 1단계를 되풀이해 3이 풀리지 않는다. 3을 기다려 되풀이하는 스크립트는 끝나지 않는다.
 // 진입점의 64는 이 CLI가 만든 argv를 감독이 받지 않은 것이다. 사람의 사용법 오류가 아니라 판 어긋남일 수 있어 실패(1)다.
 function exited(r: OliveAdminExit): Supervisor {
-  if (r.code === 3) return { line: `감독: 상태 모름(복원 전, ${r.reason?.word ?? "종료 코드 3"})`, status: "waiting", next: "감독이 복원을 마친 뒤 다시: homelab olive status --apply" };
+  if (r.code === 3) return { line: `감독: 상태 모름(복원 전, ${r.reason?.word ?? "종료 코드 3"})`, status: "waiting", next: "현관(O08)이 붙기 전에는 감독이 복원을 마치지 않아 다시 불러도 3이다. 현관이 붙은 뒤 다시: homelab olive status --apply" };
   if (r.code === 64) return { line: "감독: 관리 진입점이 요청을 받지 않았다(종료 코드 64, CLI와 감독 이미지의 판이 다를 수 있다)", status: "failed" };
   if (r.reason !== null) return { line: `감독: ${REASON_WORD[r.reason.kind]}(${r.reason.word})`, status: "failed" };
   return { line: `감독: 관리 진입점이 실패했다(종료 코드 ${r.code})`, status: "failed" };

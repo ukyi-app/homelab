@@ -719,7 +719,7 @@ describe("진입점의 종료 코드와 사유", () => {
 });
 
 describe("시험 작업 넣기", () => {
-  const JOB = { owner: "8afa2150-81af-4018-9753-0183509606ad", key: "retry-1", role: "reader", purpose: "smoke_check", sourceRef: "input/1b5d2dd3-e830-49fd-bb90-4e93022446e8", inputDigest: "a".repeat(64) };
+  const JOB = { owner: "8afa2150-81af-4018-9753-0183509606ad", key: "retry-1", role: "isolated_reader", purpose: "smoke_check", sourceRef: "input/1b5d2dd3-e830-49fd-bb90-4e93022446e8", inputDigest: "a".repeat(64) };
   const VALUES = [JOB.owner, JOB.key, JOB.role, JOB.purpose, JOB.sourceRef, JOB.inputDigest];
   const jobArgv = (p = POD) => ["kubectl", "-n", "olive-control", "exec", p, "-c", "supervisor", "--request-timeout=20s", "--", "bun", "src/main/admin.ts", "test-job", ...VALUES];
   const REF = "0f0f0f0f-0000-4000-8000-000000000001";

@@ -12,7 +12,7 @@ type Outcome = { status: Status; label: string; headline: string; lines: string[
 const CHECK_QUEUE = "같은 키로 다시 부르기 전에 homelab olive status --apply의 대기 수를 본다";
 
 const REFUSED: Record<string, { why: string; next?: string }> = {
-  malformed: { why: "값의 꼴이 감독 규칙에 맞지 않다", next: "값의 꼴(UUID 소문자, 키 문자, 해시 64자 등)을 고친 뒤 다시" },
+  malformed: { why: "값의 꼴이 감독 규칙에 맞지 않다", next: "값의 꼴(소유자 UUID 소문자, 역할 diagnosis·isolated_reader·code_author·pr_review·memory_curator, 해시 64자 등)을 고친 뒤 다시" },
   unknown_command: { why: "감독이 이 명령을 모른다(CLI와 감독 이미지의 판이 다를 수 있다)" },
   busy: { why: "감독의 관리 연결이 가득 찼다", next: "잠시 뒤 같은 명령을 다시 실행한다" },
   disabled: { why: "이 감독은 시험 작업 넣기가 꺼져 있다", next: "시험 클러스터의 감독에서만 쓴다(운영 값은 늘 꺼짐)" },
@@ -50,7 +50,7 @@ const notWritten = (why: string, lines: string[], next?: string): Outcome => ({ 
 // 사람의 사용법 오류가 아니다(판 어긋남일 수 있다). 사유를 읽지 못한 1과 모르는 코드는 적혔을 수 있다.
 function exited(r: OliveAdminExit, verbose: boolean): Outcome {
   const lines = verbose ? [`감독 파드 ${r.pod}`, `진입점 종료 코드 ${r.code}`, `사유 ${r.reason ? `${r.reason.kind} ${r.reason.word}` : "읽지 못함"}`] : [];
-  if (r.code === 3) return { status: "waiting", label: "감독 복원 전", headline: `시험 작업: 넣지 않았다. 감독이 복원을 마치지 않았다(${r.reason?.word ?? "종료 코드 3"})`, lines, next: "감독이 복원을 마친 뒤 같은 명령을 다시 실행한다" };
+  if (r.code === 3) return { status: "waiting", label: "감독 복원 전", headline: `시험 작업: 넣지 않았다. 감독이 복원을 마치지 않았다(${r.reason?.word ?? "종료 코드 3"})`, lines, next: "현관(O08)이 붙기 전에는 감독이 복원을 마치지 않아 다시 불러도 3이다. 현관이 붙은 뒤 같은 명령을 다시 실행한다" };
   if (r.code === 64) return notWritten("감독 진입점이 요청을 받지 않았다(종료 코드 64, CLI와 감독 이미지의 판이 다를 수 있다)", lines);
   const reason = r.code === 1 ? r.reason : null;
   if (reason === null) return notSure(`감독 진입점이 종료 코드 ${r.code}로 끝났다`, lines);
@@ -64,6 +64,9 @@ function exited(r: OliveAdminExit, verbose: boolean): Outcome {
   return notWritten(`감독이 쓰기 전에 멈췄다(${reason.word})`, lines);
 }
 
+// plan의 "실행:" 줄은 사람이 복사해 붙일 수 있어 셸 인용 꼴로 보인다. 실제 실행은 셸 없이 argv 배열로 간다.
+const shellWord = (t: string) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(t) ? t : `'${t.replaceAll("'", `'\\''`)}'`);
+
 function planned(c: ReadCtx, job: OliveTestJob): Outcome {
   let t: OliveSupervisorTarget;
   try {
@@ -72,7 +75,7 @@ function planned(c: ReadCtx, job: OliveTestJob): Outcome {
     return { status: "failed", label: "읽지 못함", headline: "시험 작업: 감독 파드를 읽지 못했다", lines: [], next: "kubectl 접속을 확인한 뒤 다시 실행한다" };
   }
   if (t.state !== "ready") return missing(t);
-  return { status: "pending", label: "넣을 예정", headline: `시험 작업: --apply로 넣는다. 대상 파드 ${t.pod}`, lines: [`실행: ${t.argv.join(" ")}`] };
+  return { status: "pending", label: "넣을 예정", headline: `시험 작업: --apply로 넣는다. 대상 파드 ${t.pod}`, lines: [`실행: ${t.argv.map(shellWord).join(" ")}`] };
 }
 
 function applied(w: WriteCtx, job: OliveTestJob, verbose: boolean): Outcome {
@@ -123,9 +126,9 @@ export function makeOliveTestJob() {
     summary: "올리브 시험 작업 넣기(시험 클러스터)",
     help: {
       about:
-        "시험 클러스터의 올리브 감독에 배정 대기 시험 작업 한 줄을 넣습니다. 감독이 시험 작업 넣기를 켠 때만 받고, 운영 클러스터의 감독은 꺼진 설정이라 늘 거절(disabled)합니다. 계획은 대상 파드와 실행할 명령만 보이고, --apply에서 감독 파드에 kubectl exec합니다. 예의 대문자 자리는 실제 값으로 바꿉니다. 값은 꼴(빈 값·공백·제어 문자·길이)만 보고 뜻은 감독이 봅니다. 종료 코드는 0 넣음·이미 있음, 1 거절·실패·결과 모름, 3 대기(감독이 복원 전·준비 전), 64 사용법입니다. 결과 모름이면 장부에 적혔을 수 있으니 같은 키로 다시 부르기 전에 status --apply의 대기 수를 봅니다.",
+        "시험 클러스터의 올리브 감독에 배정 대기 시험 작업 한 줄을 넣습니다. 감독이 시험 작업 넣기를 켠 때만 받고, 운영 클러스터의 감독은 꺼진 설정이라 늘 거절(disabled)합니다. 계획은 대상 파드와 실행할 명령만 보이고, --apply에서 감독 파드에 kubectl exec합니다. 예의 대문자 자리는 실제 값으로 바꿉니다. 값은 꼴(영문·숫자와 ._:/@+=- 1~200자, 요청 한 줄 길이)만 보고 뜻은 감독이 봅니다. 역할은 diagnosis·isolated_reader·code_author·pr_review·memory_curator 가운데 하나입니다. 종료 코드는 0 넣음·이미 있음, 1 거절·실패·결과 모름, 3 대기(감독이 복원 전·준비 전. 복원 전은 현관(O08)이 붙기 전에는 풀리지 않습니다), 64 사용법입니다. 결과 모름이면 장부에 적혔을 수 있으니 같은 키로 다시 부르기 전에 status --apply의 대기 수를 봅니다.",
       // 실제 값(UUID·64자 해시)은 80칸 한 줄에 들지 않아 대문자 자리로 적는다.
-      examples: ["homelab olive test-job OWNER-ID retry-1 reader smoke_check SOURCE-REF DIGEST"],
+      examples: ["homelab olive test-job OWNER retry-1 isolated_reader smoke_check REF DIGEST"],
       related: ["olive"],
     },
     // --apply에서 감독 파드에 exec해서(쓰기로 판정) --apply를 받아야 한다.
