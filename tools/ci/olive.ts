@@ -606,67 +606,151 @@ const socketMessage = (e: any[]) =>
 
 // 작업자 실행기의 효과 서명 키 비밀 연결(D-73·D-100, templates/clustersecretstore.yaml·executor-externalsecrets.yaml).
 // Free 플랜에는 Infisical 경로 권한이 없어 store의 secretsPath는 경계가 아니다. 절대 키(/로 시작)는 secretsPath를 무시하고 감독 폴더
-// (/olive/supervisor)나 계정 폴더까지 읽는다(앱 store의 같은 함정은 data.ts checkSecretPaths). 그래서 경계는 store의 conditions(ns 하나)와
-// Git의 ExternalSecret이고, 이 검사가 둘을 렌더에서 본다. platform/olive를 렌더한 곳마다, 복구 스위치가 켜진 렌더(ExternalSecret이 있는 렌더)에서:
-//   - 실행기마다 store infisical-olive-executor-<인스턴스>가 정확히 하나, conditions는 [{namespaces: [그 ns]}] 그대로,
-//     secretsPath는 /olive/executors/<인스턴스>다(인스턴스 = 대상 id, templates/_helpers.tpl olive.instance).
-//   - 실행기 ns에 열린 store는 그 실행기의 store뿐이다. conditions가 없는 store는 모든 ns가 쓰고, namespaceSelector·namespaceRegexes는
-//     렌더로 풀 수 없어 열린 것으로 본다(감독 ns용 비밀 연결을 실행기에 열지 않는다).
-//   - 실행기 ns의 ExternalSecret은 모두 그 store(kind ClusterSecretStore)를 쓰고, data·dataFrom의 키가 /로 시작하지 않는다.
-//   - 효과 키 ExternalSecret(target olive-effect-signing-key)이 정확히 하나이고 data는 EFFECT_SIGNING_KEY → EFFECT_SIGNING_KEY 하나다
-//     (파일 이름 = Secret 키 = Infisical 키. OLIVE_SIGNING_KEY_FILE과 볼륨 items는 olive-executor-split이 본다).
-// 복구 스위치가 끈 렌더는 Secret을 손으로 만드므로 이 검사를 건너뛴다. 볼륨은 스위치와 상관없이 olive-executor-split이 본다.
+// (/olive/supervisor)나 계정 폴더까지 읽는다(앱 store의 같은 함정은 data.ts checkSecretPaths). 상대 키도 폴더 성분(../)을 붙이면 provider가
+// 기본 폴더와 합쳐 정규화하므로 글자만 봐서는 폴더 안인지 알 수 없다. 그래서 경계는 실행기 ns에 열린 store와 그 ns의 ExternalSecret
+// 목록 자체이고, 이 검사가 렌더 단위(keyUnits)마다 둘을 본다:
+//   - 실행기 ns에 열린 store는 켠 렌더에서 그 실행기의 store 하나, 끈 렌더에서 0개다. 같은 클러스터의 모든 배포 출처를 본다
+//     (ClusterSecretStore는 어느 차트가 만들든 클러스터 전체에 하나다). conditions가 없으면 모든 ns가 쓰고, namespaceRegexes는
+//     실행기 ns 이름과 실제로 맞춰 본다(ESO는 앞뒤를 고정하지 않는 MatchString이다). JS로 읽을 수 없는 정규식과 namespaceSelector는
+//     렌더로 풀 수 없어 열린 것으로 본다.
+//   - 켠 렌더: 실행기마다 store infisical-olive-executor-<인스턴스>가 정확히 하나, conditions는 [{namespaces: [그 ns]}] 그대로,
+//     secretsPath는 /olive/executors/<인스턴스>다(인스턴스 = 대상 id, templates/_helpers.tpl olive.instance). 감독 store는 감독 ns 하나다.
+//   - 켠 렌더의 실행기 ns ExternalSecret은 효과 키 ExternalSecret(target olive-effect-signing-key) 하나뿐이다. 자기 store
+//     (kind ClusterSecretStore)를 쓰고 data는 EFFECT_SIGNING_KEY → EFFECT_SIGNING_KEY 하나, dataFrom은 없다(파일 이름 = Secret 키 =
+//     Infisical 키. OLIVE_SIGNING_KEY_FILE과 볼륨 items는 olive-executor-split이 본다). 다른 Secret이 필요한 계약이 생기면
+//     그 대상·store·키를 여기에 명시해 늘린다. 이름만 다른 ExternalSecret을 허용하면 위 정규화 함정으로 폴더 경계가 사라진다.
+//   - 끈 렌더(복구 스위치 externalSecrets.enabled=false): 이 차트의 store·ExternalSecret이 0개, 실행기 ns의 ExternalSecret도 0개다.
+//     같은 이름 Secret은 사람이 손으로 만든다(restore.md 3절 U40). 볼륨은 스위치와 상관없이 olive-executor-split이 본다.
+// 켬·끔은 문서 개수가 아니라 렌더에 넣은 값으로 정한다. 문서로 정하면 ExternalSecret 생성이 빠진 렌더가 store 검사까지 건너뛴다.
 function checkExecutorKey(targets: Target[], charts: Record<string, Doc[]>, deployed: Record<string, Doc[]>): Violation[] {
+  const executors = targets.filter((t) => t.kind === "executor" && t.declaredBy === OLIVE_CHART);
+  const sup = targets.find((t) => t.kind === "supervisor" && t.declaredBy === OLIVE_CHART);
+  return keyUnits(charts, deployed).flatMap((u) => executorKeyViolations(u, executors, sup));
+}
+
+// 키 검사의 렌더 단위. docs: 그 렌더의 문서 전부, owned: 이 차트가 낸 문서인지, enabled: 그 렌더에 넣은 복구 스위치 값.
+type KeyUnit = { where: string; docs: Doc[]; owned: (d: Doc) => boolean; enabled: boolean };
+const SUPERVISOR_STORE = "infisical-olive";
+
+// 차트 ci 렌더는 값 파일마다 하나(문서가 모두 이 차트 것), 배포 렌더는 켠 root 렌더의 클러스터마다 하나(모든 배포 출처).
+// 켠 root 렌더는 지금 root 렌더에 olive를 켠 것이라 다른 출처를 빠짐없이 담는다. 지금 root 렌더를 따로 보면 같은 store가 두 번 걸린다.
+function keyUnits(charts: Record<string, Doc[]>, deployed: Record<string, Doc[]>): KeyUnit[] {
+  const units: KeyUnit[] = [];
+  const base = valueLayers(`${OLIVE_CHART}/values.yaml`);
+  const byOrigin = new Map<string, Doc[]>();
+  for (const d of expand(charts[OLIVE_CHART] ?? [])) byOrigin.set(d.origin, [...(byOrigin.get(d.origin) ?? []), d]);
+  for (const [origin, docs] of byOrigin) {
+    const m = origin.match(/^chart:olive\/(ci\/.+)$/);
+    units.push({ where: origin, docs, owned: () => true, enabled: switchOn([...base, ...(m ? valueLayers(`${OLIVE_CHART}/${m[1]}`) : [])]) });
+  }
+  const forced = expand(deployed[FORCED] ?? []).filter(deployedDoc);
+  for (const cluster of [...new Set(forced.map((d) => sourceOf(d.origin).cluster!))]) {
+    const docs = forced.filter((d) => sourceOf(d.origin).cluster === cluster);
+    // root는 platform/olive에 valuesObject만 넘긴다(platform/root/templates/olive.yaml). valueFiles가 생겨도 같은 순서로 쌓는다.
+    // 같은 차트를 내는 Application이 여럿이거나 없으면 olive-owner가 낸다. 여기서는 하나라도 켰으면 켠 것으로, 없으면 차트 기본값으로 본다.
+    const apps = argoApps(docs).flatMap((a) => effectiveSources(a.obj.spec).filter((s) => sameRepo(s?.repoURL) && s?.path === OLIVE_CHART));
+    const enabled = apps.length === 0 ? switchOn(base) : apps.some((s) => switchOn([...base, ...(s?.helm?.valueFiles ?? []).flatMap((f: unknown) => (isString(f) ? valueLayers(posix.join(OLIVE_CHART, f)) : [])), s?.helm?.valuesObject]));
+    units.push({ where: `${FORCED}[${cluster}]`, docs, owned: (d) => sourceOf(d.origin).path === OLIVE_CHART, enabled });
+  }
+  return units;
+}
+function valueLayers(path: string): unknown[] {
+  if (!existsSync(join(ROOT, path))) return [];
+  const v = Bun.YAML.parse(readText(path));
+  return Array.isArray(v) ? v : [v];
+}
+// Helm처럼 뒤 층이 이긴다. 비어 있으면 Helm의 if처럼 꺼짐이다.
+function switchOn(layers: unknown[]): boolean {
+  let v: unknown;
+  for (const l of layers) {
+    const x = (l as any)?.externalSecrets?.enabled;
+    if (x !== undefined) v = x;
+  }
+  return !(v === false || v === null || v === 0 || v === "");
+}
+
+// store의 conditions가 ns에 열리는 이유. 닫혀 있으면 undefined.
+function storeOpensTo(conds: unknown, ns: string): string | undefined {
+  if (!Array.isArray(conds) || conds.length === 0) return "conditions 없음: 모든 ns가 쓴다";
+  for (const c of conds as any[]) {
+    if (c?.namespaceSelector !== undefined) return `namespaceSelector ${JSON.stringify(c.namespaceSelector)}: 렌더로 풀 수 없다`;
+    if (Array.isArray(c?.namespaces) && c.namespaces.includes(ns)) return `conditions namespaces에 ${ns}가 있다`;
+    for (const re of Array.isArray(c?.namespaceRegexes) ? c.namespaceRegexes : c?.namespaceRegexes === undefined ? [] : [c.namespaceRegexes]) {
+      let hit: boolean;
+      try {
+        hit = isString(re) && new RegExp(re).test(ns);
+      } catch {
+        return `namespaceRegexes ${JSON.stringify(re)}: 읽을 수 없는 정규식`;
+      }
+      if (!isString(re)) return `namespaceRegexes ${JSON.stringify(re)}: 문자열이 아니다`;
+      if (hit) return `namespaceRegexes ${JSON.stringify(re)}가 ${ns}에 맞는다`;
+    }
+  }
+  return undefined;
+}
+
+function executorKeyViolations(u: KeyUnit, executors: Target[], sup: Target | undefined): Violation[] {
   const out: Violation[] = [];
   const push = (where: string, message: string) => out.push({ rule: "olive-executor-key", where, message });
-  const executors = targets.filter((t) => t.kind === "executor" && t.declaredBy === OLIVE_CHART);
-  for (const [origin, group] of oliveChartGroups(charts, deployed)) {
-    if (!group.some((d) => d.obj.kind === "ExternalSecret")) continue;
-    const stores = group.filter((d) => d.obj.kind === "ClusterSecretStore");
-    for (const t of executors) {
-      const want = effectKeyStore(t);
+  const stores = u.docs.filter((d) => d.obj.kind === "ClusterSecretStore");
+  const esTarget = (d: Doc) => d.obj.spec?.target?.name ?? d.obj.metadata?.name;
+  if (!u.enabled) {
+    const left = u.docs.filter((d) => u.owned(d) && (d.obj.kind === "ClusterSecretStore" || d.obj.kind === "ExternalSecret"));
+    if (left.length > 0) push(u.where, `복구 스위치(externalSecrets.enabled)를 끈 렌더에 이 차트의 store·ExternalSecret이 ${left.length}개 있다(${left.map(id).join(", ")}). 끄면 0개다(같은 이름 Secret은 사람이 만든다)`);
+  } else if (sup) {
+    // 실행기 ns에 열린 경우는 아래 실행기별 검사가 낸다(원인 하나에 위반 하나).
+    for (const s of stores.filter((d) => d.obj.metadata?.name === SUPERVISOR_STORE && u.owned(d))) {
+      const conds = s.obj.spec?.conditions;
+      if (!same(conds, [{ namespaces: [sup.namespace] }]) && !executors.some((t) => storeOpensTo(conds, t.namespace))) {
+        push(id(s), `감독 store ${SUPERVISOR_STORE}의 conditions(${show(conds)})가 [{namespaces: [${sup.namespace}]}]가 아니다(감독 ns 하나만 계정·서명 키 폴더를 읽는다)`);
+      }
+    }
+  }
+  for (const t of executors) {
+    const want = effectKeyStore(t);
+    if (u.enabled) {
       const own = stores.filter((d) => d.obj.metadata?.name === want);
-      if (own.length !== 1) push(origin, `대상 ${t.id}의 ClusterSecretStore ${want}가 정확히 하나가 아니다(${own.length}개). 실행기 ns마다 전용 store 하나다(D-73)`);
+      if (own.length !== 1) push(u.where, `대상 ${t.id}의 ClusterSecretStore ${want}가 정확히 하나가 아니다(${own.length}개). 실행기 ns마다 전용 store 하나다(D-73)`);
       else {
         const conds = own[0].obj.spec?.conditions;
         if (!same(conds, [{ namespaces: [t.namespace] }])) push(id(own[0]), `store ${want}의 conditions(${show(conds)})가 [{namespaces: [${t.namespace}]}]가 아니다(그 실행기 ns 하나만 이 store를 쓴다)`);
         const path = own[0].obj.spec?.provider?.infisical?.secretsScope?.secretsPath;
         if (path !== effectKeyPath(t)) push(id(own[0]), `store ${want}의 secretsPath(${show(path)})가 ${effectKeyPath(t)}가 아니다(인스턴스 이름 = 대상 id의 폴더)`);
       }
-      for (const s of stores) {
-        if (s.obj.metadata?.name === want) continue;
-        const conds = s.obj.spec?.conditions;
-        const open = !Array.isArray(conds) || conds.length === 0;
-        const fuzzy = !open && conds.some((c: any) => c?.namespaceSelector !== undefined || c?.namespaceRegexes !== undefined);
-        const listed = !open && conds.some((c: any) => Array.isArray(c?.namespaces) && c.namespaces.includes(t.namespace));
-        if (open || fuzzy || listed) {
-          push(id(s), `store ${s.obj.metadata?.name}가 실행기 ns ${t.namespace}에 열려 있다(${open ? "conditions 없음: 모든 ns가 쓴다" : `conditions ${JSON.stringify(conds)}`}). 실행기 ns에 열린 store는 ${want} 하나다(감독 ns용 비밀 연결을 실행기에 열지 않는다, D-73)`);
-        }
-      }
-      const ess = group.filter((d) => d.obj.kind === "ExternalSecret" && nsOf(d) === t.namespace);
-      const absolute = new Set<Doc>();
-      for (const es of ess) {
-        const ref = es.obj.spec?.secretStoreRef ?? {};
-        if (ref.kind !== "ClusterSecretStore" || ref.name !== want) push(id(es), `실행기 ns ${t.namespace}의 ExternalSecret이 자기 store(ClusterSecretStore ${want})가 아닌 ${show(ref.kind)} ${show(ref.name)}를 쓴다`);
-        const keys: unknown[] = [
-          ...(es.obj.spec?.data ?? []).map((x: any) => x?.remoteRef?.key),
-          ...(es.obj.spec?.dataFrom ?? []).flatMap((x: any) => [x?.extract?.key, x?.find?.path]),
-        ];
-        for (const k of keys) {
-          if (!isString(k) || !k.startsWith("/")) continue;
-          absolute.add(es);
-          push(id(es), `실행기 ns ${t.namespace}의 ExternalSecret이 절대 키 ${k}를 쓴다(secretsPath를 무시하고 감독·계정 폴더까지 읽는다. Free 플랜에는 경로 권한이 없다)`);
-        }
-      }
-      const effect = ess.filter((d) => d.obj.spec?.target?.name === EFFECT_KEY_SECRET);
-      if (effect.length !== 1) push(origin, `대상 ${t.id}의 ns ${t.namespace}에 효과 서명 키 ExternalSecret(target ${EFFECT_KEY_SECRET})이 정확히 하나가 아니다(${effect.length}개)`);
-      // 절대 키는 위에서 따로 낸다(원인 하나에 위반 하나).
-      else if (!absolute.has(effect[0])) {
-        const spec = effect[0].obj.spec ?? {};
-        if (!same(spec.data, [{ secretKey: EFFECT_KEY, remoteRef: { key: EFFECT_KEY } }]) || spec.dataFrom !== undefined) {
-          push(id(effect[0]), `효과 서명 키 ExternalSecret의 data(${show(spec.data)}${spec.dataFrom !== undefined ? `, dataFrom ${show(spec.dataFrom)}` : ""})가 ${EFFECT_KEY} → ${EFFECT_KEY} 하나가 아니다(파일 이름 = Secret 키 = Infisical 키)`);
-        }
-      }
+    }
+    for (const s of stores) {
+      // 켠 렌더의 자기 store는 위에서, 끈 렌더의 이 차트 store는 스위치 검사가 낸다.
+      if (u.enabled ? s.obj.metadata?.name === want : u.owned(s)) continue;
+      const why = storeOpensTo(s.obj.spec?.conditions, t.namespace);
+      if (why) push(id(s), `store ${s.obj.metadata?.name}가 실행기 ns ${t.namespace}에 열려 있다(${why}). 실행기 ns에 열린 store는 ${u.enabled ? want : "없다(복구 스위치 끔)"}${u.enabled ? " 하나다" : ""}(감독 ns용 비밀 연결을 실행기에 열지 않는다, D-73)`);
+    }
+    const ess = u.docs.filter((d) => d.obj.kind === "ExternalSecret" && nsOf(d) === t.namespace);
+    if (!u.enabled) {
+      for (const es of ess.filter((d) => !u.owned(d))) push(id(es), `복구 스위치를 끈 렌더의 실행기 ns ${t.namespace}에 ExternalSecret이 있다. 끄면 그 ns의 ExternalSecret은 0개다`);
+      continue;
+    }
+    for (const es of ess.filter((d) => esTarget(d) !== EFFECT_KEY_SECRET)) {
+      push(id(es), `실행기 ns ${t.namespace}의 ExternalSecret(target ${show(esTarget(es))})은 허용 목록 밖이다. 실행기 ns의 ExternalSecret은 효과 서명 키(target ${EFFECT_KEY_SECRET}) 하나다(상대 키의 폴더 성분과 dataFrom이 기본 폴더 밖을 읽는다. 늘리려면 대상·store·키를 이 검사에 명시한다)`);
+    }
+    const effect = ess.filter((d) => esTarget(d) === EFFECT_KEY_SECRET);
+    if (effect.length !== 1) {
+      push(u.where, `대상 ${t.id}의 ns ${t.namespace}에 효과 서명 키 ExternalSecret(target ${EFFECT_KEY_SECRET})이 정확히 하나가 아니다(${effect.length}개)`);
+      continue;
+    }
+    const es = effect[0];
+    const ref = es.obj.spec?.secretStoreRef ?? {};
+    if (ref.kind !== "ClusterSecretStore" || ref.name !== want) push(id(es), `실행기 ns ${t.namespace}의 ExternalSecret이 자기 store(ClusterSecretStore ${want})가 아닌 ${show(ref.kind)} ${show(ref.name)}를 쓴다`);
+    const keys: unknown[] = [
+      ...(es.obj.spec?.data ?? []).map((x: any) => x?.remoteRef?.key),
+      ...(es.obj.spec?.dataFrom ?? []).flatMap((x: any) => [x?.extract?.key, x?.find?.path]),
+    ];
+    const absolute = keys.filter((k): k is string => isString(k) && k.startsWith("/"));
+    for (const k of absolute) push(id(es), `실행기 ns ${t.namespace}의 ExternalSecret이 절대 키 ${k}를 쓴다(secretsPath를 무시하고 감독·계정 폴더까지 읽는다. Free 플랜에는 경로 권한이 없다)`);
+    // 절대 키는 위에서 따로 낸다(원인 하나에 위반 하나).
+    if (absolute.length > 0) continue;
+    const spec = es.obj.spec ?? {};
+    if (!same(spec.data, [{ secretKey: EFFECT_KEY, remoteRef: { key: EFFECT_KEY } }]) || spec.dataFrom !== undefined) {
+      push(id(es), `효과 서명 키 ExternalSecret의 data(${show(spec.data)}${spec.dataFrom !== undefined ? `, dataFrom ${show(spec.dataFrom)}` : ""})가 ${EFFECT_KEY} → ${EFFECT_KEY} 하나가 아니다(파일 이름 = Secret 키 = Infisical 키)`);
     }
   }
   return out;
@@ -1317,8 +1401,21 @@ function policyRevisionRenderTest(): string[] {
     const r = render(name, v);
     if (r.ok || !/policy\.revision|\/policy\/revision/.test(r.out)) bad.push(`policy.revision ${JSON.stringify(v)}는 계약 v1 꼴이 아닌데 스키마가 그 자리로 거절하지 않았다: ${r.ok ? "렌더 성공" : r.out.trim()}`);
   }
-  const ok = render("ok", "2026-11-24.1_a");
-  if (!ok.ok) bad.push(`policy.revision "2026-11-24.1_a"는 꼴이 맞는데 렌더되지 않았다: ${ok.out.trim()}`);
+  // 렌더 성공만 보면 helper가 입력을 버리고 고정 값을 내도 통과한다. 감독·두 실행기 env가 입력 문자열 그대로인지 본다.
+  // ci/enabled.yaml의 값(ci-policy)과 다른 값이어야 그 고정을 가려낸다.
+  const want = "2026-11-24.1_a";
+  const ok = render("ok", want);
+  if (!ok.ok) bad.push(`policy.revision ${JSON.stringify(want)}는 꼴이 맞는데 렌더되지 않았다: ${ok.out.trim()}`);
+  else {
+    const docs = parseAll(ok.out);
+    for (const t of targetList(readOliveTargets()).filter((x) => x.declaredBy === OLIVE_CHART && OLIVE_KINDS.has(x.kind))) {
+      const name = t.kind === "supervisor" ? SUPERVISOR_CONTAINER : EXECUTOR_CONTAINER;
+      const deps = docs.filter((d) => d?.kind === "Deployment" && d.metadata?.namespace === t.namespace && d.metadata?.name === t.deployment);
+      const c = deps.length === 1 ? (podSpec(deps[0])?.containers ?? []).find((x: any) => x?.name === name) : undefined;
+      const got = envOf(c, "OLIVE_POLICY_REVISION");
+      if (plainOne(got) !== want) bad.push(`policy.revision ${JSON.stringify(want)}로 렌더한 대상 ${t.id}(${t.namespace}/${t.deployment} container ${name})의 OLIVE_POLICY_REVISION이 입력 그대로가 아니다(Deployment ${deps.length}개, env ${envValues(got)})`);
+    }
+  }
   return bad;
 }
 
@@ -1412,6 +1509,73 @@ function listShapeTests(base: OliveInput): string[] {
   return bad;
 }
 
+// 원인이 둘 이상인 키 검사 사례(fixture는 위반 하나여야 해서 여기서 본다). 위반 목록이 기대와 개수까지 같아야 한다.
+// 켠 값에서 ExternalSecret 생성이 모두 빠져도 store 검사가 남는지, 복구 스위치를 끈 클러스터 렌더가 이 차트 store·ES 0개를 요구하고
+// 다른 출처의 store는 계속 보는지, 실제 차트를 끈 값으로 렌더한 출력이 통과하는지.
+const EXTRA_STORE = { apiVersion: "external-secrets.io/v1", kind: "ClusterSecretStore", metadata: { name: "ci-extra" }, spec: { conditions: [{ namespaces: ["olive-reader"] }], provider: { fake: { data: [{ key: "PUBLIC_MARKER", value: "public" }] } } } };
+function executorKeyTests(base: OliveInput): string[] {
+  const bad: string[] = [];
+  const executors = targetList(base.targets).filter((t) => t.kind === "executor" && t.declaredBy === OLIVE_CHART);
+  const noEs = executors.map((t) => `대상 ${t.id}의 ns ${t.namespace}에 효과 서명 키 ExternalSecret(target ${EFFECT_KEY_SECRET})이 정확히 하나가 아니다(0개)`);
+  const dropEs: PatchOp[] = [{ in: "chart", select: { kind: "ExternalSecret" }, drop: true }];
+  const extraOpen = "store ci-extra가 실행기 ns olive-reader에 열려 있다";
+  // 복구 스위치를 끈 클러스터(vm): root가 넘기는 값처럼 olive Application valuesObject에 externalSecrets.enabled=false를 넣는다.
+  const switchOff = (input: OliveInput, dropOwned: boolean) => {
+    const docs = input.deployed[FORCED];
+    const vm = (d: Doc) => sourceOf(d.origin).cluster === "vm";
+    const apps = argoApps(docs.filter(vm)).filter((a) => effectiveSources(a.obj.spec).some((s) => s?.path === OLIVE_CHART));
+    for (const a of apps) setPath(a.obj, "spec.source.helm.valuesObject.externalSecrets", { enabled: false });
+    if (dropOwned) input.deployed[FORCED] = docs.filter((d) => !(vm(d) && sourceOf(d.origin).path === OLIVE_CHART && ["ClusterSecretStore", "ExternalSecret"].includes(d.obj.kind)));
+    return apps.length;
+  };
+  const addVm = (input: OliveInput) => input.deployed[FORCED].push({ origin: "external-secrets-stores[vm]:platform/external-secrets", obj: structuredClone(EXTRA_STORE) });
+  const cases: [string, PatchOp[], ((i: OliveInput) => unknown) | undefined, string[]][] = [
+    ["켠 값에서 ExternalSecret이 0개", dropEs, undefined, noEs],
+    ["켠 값에서 ExternalSecret이 0개 + 실행기 ns에 열린 store", [...dropEs, { in: "chart", add: EXTRA_STORE }], undefined, [...noEs, extraOpen]],
+    [
+      "켠 값에서 ExternalSecret이 0개 + 전용 store 폴더가 하위 폴더",
+      [...dropEs, { in: "chart", select: { kind: "ClusterSecretStore", name: "infisical-olive-executor-reader" }, set: { "spec.provider.infisical.secretsScope.secretsPath": "/olive/executors/reader/ci" } }],
+      undefined,
+      [...noEs, `store infisical-olive-executor-reader의 secretsPath("/olive/executors/reader/ci")가 /olive/executors/reader가 아니다`],
+    ],
+    ["끈 값(vm)인데 이 차트 store·ES가 남음", [], (i) => switchOff(i, false), ["복구 스위치(externalSecrets.enabled)를 끈 렌더에 이 차트의 store·ExternalSecret이"]],
+    ["끈 값(vm)의 정상 렌더", [], (i) => switchOff(i, true), []],
+    ["끈 값(vm) + 다른 차트 store가 실행기 ns에 열림", [], (i) => (addVm(i), switchOff(i, true)), [`${extraOpen}(conditions namespaces에 olive-reader가 있다). 실행기 ns에 열린 store는 없다(복구 스위치 끔)`]],
+  ];
+  for (const [name, ops, prep, want] of cases) {
+    const input = flatInput(base);
+    const err = applyPatch(input, ops);
+    if (err) {
+      bad.push(`${name}: ${err}`);
+      continue;
+    }
+    if (prep && prep(input) === 0) {
+      bad.push(`${name}: ${FORCED} 렌더의 vm 클러스터에 olive Application이 없다`);
+      continue;
+    }
+    const got = allChecks(input);
+    const unmatched = got.filter((v) => !(v.rule === "olive-executor-key" && want.some((w) => v.message.includes(w))));
+    const counts = want.map((w) => got.filter((v) => v.message.includes(w)).length);
+    if (unmatched.length > 0 || counts.some((n) => n !== 1) || got.length !== want.length) {
+      bad.push(`${name}: 기대한 위반 ${want.length}개(각 1번)와 다르다. 걸린 것: ${got.map(fmt).join("; ") || "없음"}`);
+    }
+  }
+  // 실제 차트를 복구 스위치 끈 값으로 렌더한 출력. 이 차트 store·ES가 0개라 위반이 없어야 한다.
+  const dir = tempDir("olive-key-off");
+  const off = join(dir, "off.yaml");
+  writeFileSync(off, "externalSecrets:\n  enabled: false\n");
+  const r = helmTemplate("olive", OLIVE_CHART, "app-olive", [`${OLIVE_CHART}/ci/enabled.yaml`, off]);
+  const enabled = switchOn([...valueLayers(`${OLIVE_CHART}/values.yaml`), ...valueLayers(`${OLIVE_CHART}/ci/enabled.yaml`), { externalSecrets: { enabled: false } }]);
+  if (!r.ok) bad.push(`복구 스위치 끈 값 렌더 실패: ${r.out.trim()}`);
+  else {
+    const unit = { where: "chart:olive/ci/enabled.yaml+off", docs: parseAll(r.out).map((obj) => ({ origin: "chart:olive/ci/enabled.yaml+off", obj })), owned: () => true, enabled };
+    const sup = targetList(base.targets).find((t) => t.kind === "supervisor" && t.declaredBy === OLIVE_CHART);
+    const got = executorKeyViolations(unit, executors, sup);
+    if (enabled || got.length > 0) bad.push(`복구 스위치 끈 값 렌더(스위치 ${enabled ? "켬" : "끔"}으로 읽음)가 통과하지 않았다: ${got.map(fmt).join("; ") || "없음"}`);
+  }
+  return bad;
+}
+
 // 대조군과 fixture는 정책이 보는 모양(한 겹 목록을 편 문서, 출처·destination 유지)의 기존 입력에서 문서를 고른다(select·drop·from).
 // 원본 모양 그대로면 다른 차트가 DeploymentList로 낸 세션을 O10 대조군이 지우지 못해 정상 전환이 소유 충돌로 깨진다.
 // fixture가 새로 넣는 목록은 펴지 않고 정책에 넘긴다(목록 전개의 회귀를 그 사례가 잡는다).
@@ -1474,6 +1638,7 @@ export function checkOliveFixtures(base: OliveInput): Violation[] {
   const out: Violation[] = [];
   for (const m of renderSelfTests()) out.push({ rule: "fixture", where: "tools/ci/olive.ts renderSelfTests", message: m });
   for (const m of listShapeTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts listShapeTests", message: m });
+  for (const m of executorKeyTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts executorKeyTests", message: m });
   const files = gitFiles(`${FIXTURE_DIR}/*.yaml`);
   const fixtures: Fixture[] = [];
   for (const f of files) {

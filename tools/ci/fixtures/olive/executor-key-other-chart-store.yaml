@@ -1,0 +1,18 @@
+# expect: fail
+# rule: olive-executor-key
+# match: store ci-other-chart가 실행기 ns olive-reader에 열려 있다(conditions namespaces에 olive-reader가 있다)
+# 다른 차트(platform/external-secrets)가 운영 클러스터에 읽기 실행기 ns를 연 store를 더했다. ClusterSecretStore는 어느 차트가
+# 만들든 클러스터 전체의 것이라, 올리브 차트 렌더만 보면 놓친다. 클러스터별 켠 root 렌더 전체에서 걸려야 한다.
+patch:
+  - in: render
+    render: root+켬
+    origin: external-secrets-stores[prod]:platform/external-secrets
+    add:
+      apiVersion: external-secrets.io/v1
+      kind: ClusterSecretStore
+      metadata: {name: ci-other-chart}
+      spec:
+        conditions: [{namespaces: [olive-reader]}]
+        provider:
+          fake:
+            data: [{key: PUBLIC_MARKER, value: public}]
