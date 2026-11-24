@@ -1,0 +1,16 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 세대 표식 볼륨 olive-generation을 role에 붙이지 않는다
+# 역할 컨테이너에 세대 표식 볼륨을 읽기 전용으로 붙였다. 표식은 init·제어만 본다(역할 쪽에서 쓸 수 있게 바뀌면 회복이 거짓으로 닫힌다).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent, readOnly: true}
+            - {name: agent-link, mountPath: /run/olive/agent, readOnly: true}
+            - {name: role-tmp, mountPath: /tmp}
+            - {name: olive-generation, mountPath: /opt/olive-generation, readOnly: true}

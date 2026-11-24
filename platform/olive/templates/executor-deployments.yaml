@@ -10,6 +10,14 @@
 그 파일의 경계 표(SPLIT_*: 컨테이너별 명령·uid·보안 문맥·마운트·env, 볼륨 매체·상한, Secret 모드)와 그대로 대조한다. 여기 값을 바꾸면 표도 함께 고친다.
 env 이름은 ukyi-app/olive README "작업자 실행기 진입점"의 환경 표와 같다. 이 차트가 아직 역할 프로필(OLIVE_PROFILE_FILE, O11·O12)을
 주지 않아 실행기는 감독에 붙기 전에 정한 코드(81)로 끝난다.
+
+회복(D-104, olive README "회복의 차트"): 실행 중 대리 링크가 끊기면 제어가 94로 끝난다. 그 코드에만 파드의 모든 컨테이너를 다시 띄우고
+(RestartAllContainers), init이 olive-generation에 새 세대 표식을 써서 제어가 그 실행을 닫는다. 표식은 init 쓰기·제어 읽기 전용이고 역할에는
+붙이지 않는다. 교체가 겹치면 새 파드의 init이 쓴 표식이 옛 역할 컨테이너가 도는 동안 그 실행을 닫으므로 replicas는 0·1(CLI)과 Recreate다.
+함정: Recreate의 순서는 템플릿이 바뀐 롤아웃에만 적용된다. 파드 수동 삭제·노드 장애로 바뀔 때는 replicas 0으로 줄이고 옛 컨테이너가
+실제로 끝난 것(kubelet이 정상 종료를 마침)을 확인한 뒤에만 1로 되돌린다. 파드가 API에서 사라진 것만으로는 확인이 아니다: 강제 삭제나,
+노드 장애 뒤 노드 객체가 지워져 PodGC가 유예 0으로 지운 경우에도 옛 kubelet의 컨테이너는 돌고 있을 수 있다. 확인할 수 없으면 0을 두고
+D-91(관리자 닫기)로 넘긴다.
 */}}
 {{- $sup := include "olive.supervisorTarget" . | fromYaml }}
 {{- $trust := include "olive.trustEnabled" . }}
@@ -34,7 +42,7 @@ metadata:
 spec:
   # Git 값은 늘 0이다(D-38, 감독과 같은 이유). 켜는 것은 CLI이고 targets.yaml의 start가 true인 대상만 켠다.
   replicas: 0
-  # 한 파드씩(B-07 작업자 1). RollingUpdate면 교체 중 두 파드가 함께 떠 olive-limits ResourceQuota에 걸린다.
+  # 한 파드씩(B-07 작업자 1). RollingUpdate면 교체 중 두 파드가 함께 떠 olive-limits ResourceQuota에 걸리고, 세대 표식(D-104)이 겹친다.
   strategy:
     type: Recreate
   selector:
@@ -59,10 +67,26 @@ spec:
           volumeMounts:
             - name: agent-bin
               mountPath: /opt/olive-agent
+            # 세대 표식(marker)을 기동마다 새로 쓴다. 경로는 올리브 코드의 상수(agent-install.ts GENERATION_TARGET)라 옮길 수 없다.
+            # 함정: 표식을 쓰는 olive digest에서 이 마운트가 없으면 init이 대리를 놓은 뒤 95로 끝나 파드가 뜨지 않는다.
+            - name: olive-generation
+              mountPath: /opt/olive-generation
       containers:
         - name: executor
           image: {{ include "olive.image" $ }}
           command: ["bun", "src/main/executor.ts"]
+          # 94(실행 중 대리 링크가 끊김)에만 파드 전체를 다시 띄운다. 다른 코드는 컨테이너 수준 Always로 제어만 다시 뜬다.
+          # 규칙을 쓰면 컨테이너 수준 restartPolicy를 꼭 적어야 한다(파드 값과 같아도). 94는 이 제어 진입점 안에서만 다른 코드와 겹치지 않아
+          # 감독·init·역할 컨테이너에는 이 규칙을 두지 않는다.
+          # 함정: 기능 게이트(1.36 베타)가 꺼진 API 서버에서 새로 만드는 Deployment는 둘로 갈린다. ContainerRestartRules가 꺼지면
+          # 일반 컨테이너의 두 칸을 말없이 지우고, 그것만 켜지고 RestartAllContainersOnContainerExits가 꺼지면 이 action을 검증이 거부한다.
+          # (게이트를 끄기 전부터 그 칸을 쓰던 객체는 보존된다.) 렌더 검사로는 적용을 증명하지 못하므로 켜기 전에 API에 남았는지 본다.
+          restartPolicy: Always
+          restartPolicyRules:
+            - action: RestartAllContainers
+              exitCodes:
+                operator: In
+                values: [94]
           env:
             # v1 역할 이름이다. 대상 id(reader 등)를 넘기면 실행기가 81로 끝난다.
             - name: OLIVE_ROLE
@@ -128,6 +152,10 @@ spec:
             # (모델이 저장소 ID·nonce·영수증을 고치지 못하게). CI(tools/ci/olive.ts olive-executor-store)가 컨테이너 이름으로 본다.
             - name: store
               mountPath: {{ $values.store.mountPath }}
+            # init이 쓴 세대 표식을 읽기만 한다. 경로가 init과 다르면 표식이 늘 "모름"이라 회복이 실행을 닫지 못한다.
+            - name: olive-generation
+              mountPath: /opt/olive-generation
+              readOnly: true
         # 역할 컨테이너. 프로브·lifecycle·ports를 두지 않는다(D-74: kubelet이 이 컨테이너 안에서 무엇도 실행하지 않게).
         # 함정: 대리는 Bun 런타임째 컴파일한 glibc 동적 링크 파일이라 역할 이미지는 glibc 계열이어야 한다(D-107). musl 이미지면 exec부터 실패한다.
         - name: role
@@ -217,6 +245,11 @@ spec:
             sizeLimit: 256Mi
         # 소켓 파일 하나만 두는 자리.
         - name: agent-link
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # 세대 표식 파일 하나만 두는 자리. 역할 컨테이너에는 붙이지 않는다: 역할 쪽이 표식을 바꾸면 제어가 회복을 거짓으로 닫는다.
+        - name: olive-generation
           emptyDir:
             medium: Memory
             sizeLimit: 1Mi

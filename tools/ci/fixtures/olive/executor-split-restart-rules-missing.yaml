@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-executor-split
+# match: restartPolicyRules(없음)가 표의
+# 제어 컨테이너의 재시작 규칙을 뺐다(컨테이너 수준 Always는 남김). 대리 링크가 끊겨 94로 끝나도 제어만 다시 떠 94를 되풀이하고
+# 그 실행이 닫히지 않는다(D-104).
+# unset 경로의 0은 템플릿의 컨테이너 순서(executor가 첫째)다. 순서가 바뀌면 이 patch가 "지울 경로가 없다"로 멈춘다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    unset: [spec.template.spec.containers.0.restartPolicyRules]

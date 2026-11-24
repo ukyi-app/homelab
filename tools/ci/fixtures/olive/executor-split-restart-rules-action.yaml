@@ -1,0 +1,13 @@
+# expect: fail
+# rule: olive-executor-split
+# match: "action":"Restart","exitCodes"
+# 94의 동작을 RestartAllContainers가 아닌 Restart로 적었다. 제어 컨테이너만 다시 떠 init이 새 세대 표식을 쓰지 않는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set:
+          restartPolicyRules:
+            - {action: Restart, exitCodes: {operator: In, values: [94]}}

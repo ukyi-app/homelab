@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: terminationMessagePath("/tmp/x")를 생략하거나 기본값 /dev/termination-log로 둔다(executor
+# 표식과 무관해 보이는 경로도 받지 않는다. 표식 볼륨을 붙이는 컨테이너는 생략 또는 기본값만 쓴다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set: {terminationMessagePath: /tmp/x}

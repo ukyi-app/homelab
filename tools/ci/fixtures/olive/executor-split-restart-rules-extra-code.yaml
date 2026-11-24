@@ -1,0 +1,13 @@
+# expect: fail
+# rule: olive-executor-split
+# match: "values":[94,81]}}])가 표의
+# 재시작 규칙에 94 말고 81(설정 오류)을 더했다. 표의 규칙은 94 하나이고 다른 코드에는 파드 전체 재시작을 걸지 않는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set:
+          restartPolicyRules:
+            - {action: RestartAllContainers, exitCodes: {operator: In, values: [94, 81]}}

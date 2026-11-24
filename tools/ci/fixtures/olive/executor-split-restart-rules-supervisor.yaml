@@ -1,0 +1,14 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 를 두지 않는다(감독. 94 → RestartAllContainers는
+# 감독 컨테이너에 실행기의 회복 규칙을 옮겨 적었다. 감독 진입점도 94를 쓸 수 있어 다른 뜻의 종료에 파드 전체가 다시 뜬다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: supervisor}
+        set:
+          restartPolicy: Always
+          restartPolicyRules:
+            - {action: RestartAllContainers, exitCodes: {operator: In, values: [94]}}

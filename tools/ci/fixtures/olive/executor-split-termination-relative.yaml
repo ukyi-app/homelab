@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: terminationMessagePath("opt/olive-generation/status")를 생략하거나 기본값 /dev/termination-log로 둔다(executor
+# 제어의 상대 경로. kubelet은 이를 / 기준으로 풀어 /opt/olive-generation/status, 표식 마운트 아래로 붙인다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set: {terminationMessagePath: opt/olive-generation/status}

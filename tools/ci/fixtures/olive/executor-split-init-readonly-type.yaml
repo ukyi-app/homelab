@@ -1,0 +1,15 @@
+# expect: fail
+# rule: olive-executor-split
+# match: olive-generation 마운트의 readOnly("yes")가 불리언이 아니다(olive-init
+# init의 세대 표식 마운트에 따옴표 없는 readOnly: yes를 넣었다. Bun은 문자열 "yes"로 읽지만 쿠버네티스는 true로 읽어
+# init이 읽기 전용 폴더에 표식을 쓰지 못하고 96으로 끝난다. 아래 yes는 일부러 따옴표 없이 둔다(렌더 원문과 같은 꼴).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent}
+            - {name: olive-generation, mountPath: /opt/olive-generation, readOnly: yes}

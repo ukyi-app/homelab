@@ -1,0 +1,19 @@
+# expect: fail
+# rule: olive-executor-split
+# match: olive-generation을 readOnly: true로 붙이지 않았다(executor)
+# 제어 컨테이너에 세대 표식 볼륨을 쓰기 가능하게 붙였다. 표식은 init만 쓴다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set:
+          volumeMounts:
+            - {name: tls, mountPath: /run/olive/tls, readOnly: true}
+            - {name: trust, mountPath: /run/olive/trust, readOnly: true}
+            - {name: effect-signing, mountPath: /run/olive/effect-signing, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: agent-link, mountPath: /run/olive/agent}
+            - {name: store, mountPath: /var/lib/olive-executor}
+            - {name: olive-generation, mountPath: /opt/olive-generation}

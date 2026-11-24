@@ -1,0 +1,30 @@
+# expect: fail
+# rule: olive-executor-split
+# match: olive-generation의 mountPath "/opt/olive-gen"가 표의 고정 경로
+# count: 2
+# init과 제어의 세대 표식 마운트를 함께 /opt/olive-gen으로 옮겼다. 서로는 맞지만 경로는 올리브 코드의 상수(/opt/olive-generation/marker)라
+# init은 95로 끝나고 제어는 표식을 읽지 못한다. 두 자리(init, 제어)가 각각 걸린다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent}
+            - {name: olive-generation, mountPath: /opt/olive-gen}
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set:
+          volumeMounts:
+            - {name: tls, mountPath: /run/olive/tls, readOnly: true}
+            - {name: trust, mountPath: /run/olive/trust, readOnly: true}
+            - {name: effect-signing, mountPath: /run/olive/effect-signing, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: agent-link, mountPath: /run/olive/agent}
+            - {name: store, mountPath: /var/lib/olive-executor}
+            - {name: olive-generation, mountPath: /opt/olive-gen, readOnly: true}

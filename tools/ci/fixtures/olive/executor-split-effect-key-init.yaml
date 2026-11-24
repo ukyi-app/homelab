@@ -11,4 +11,5 @@ patch:
         set:
           volumeMounts:
             - {name: agent-bin, mountPath: /opt/olive-agent}
+            - {name: olive-generation, mountPath: /opt/olive-generation}
             - {name: effect-signing, mountPath: /run/olive/effect-signing, readOnly: true}

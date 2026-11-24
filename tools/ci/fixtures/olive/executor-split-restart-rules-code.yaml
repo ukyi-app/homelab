@@ -1,0 +1,13 @@
+# expect: fail
+# rule: olive-executor-split
+# match: "values":[95]}}])가 표의
+# 재시작 규칙의 코드를 94가 아닌 95로 바꿨다. 제어는 링크를 잃으면 94로 끝나므로 규칙이 걸리지 않는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set:
+          restartPolicyRules:
+            - {action: RestartAllContainers, exitCodes: {operator: In, values: [95]}}
