@@ -28,7 +28,7 @@
         "secretName": {
           "type": "string",
           "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$",
-          "not": { "pattern": "^(olive-signing-key$|olive-account-)" }
+          "not": { "pattern": "^(olive-signing-key$|olive-effect-signing-key$|olive-account-)" }
         },
         "mountPath": { "type": "string", "pattern": "^/run/" }
       }
@@ -64,7 +64,7 @@
   },
   "type": "object",
   "additionalProperties": false,
-  "required": ["infisical", "image", "roleImages", "supervisor", "pki", "executors", "externalSecrets"],
+  "required": ["infisical", "image", "roleImages", "policy", "supervisor", "pki", "executors", "externalSecrets"],
   "if": {
     "required": ["pki"],
     "properties": { "pki": { "required": ["enabled"], "properties": { "enabled": { "const": true } } } }
@@ -115,6 +115,14 @@
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][a-z_]*$" },
       "additionalProperties": { "$ref": "#/definitions/roleImage" }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision"],
+      "properties": {
+        "revision": { "type": "string", "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]{0,63})?$" }
+      }
     },
     "supervisor": {
       "type": "object",

@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-executor-key
+# match: store infisical-olive가 실행기 ns olive-reader에 열려 있다
+# 감독 store의 conditions에 읽기 실행기 ns를 더했다. 실행기 ns에서 감독 폴더의 비밀을 옮길 연결이 생긴다(D-73).
+patch:
+  - in: chart
+    select: {kind: ClusterSecretStore, name: infisical-olive}
+    set:
+      spec.conditions:
+        - namespaces: [olive-control, olive-reader]

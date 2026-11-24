@@ -8,8 +8,8 @@
 경계는 마운트와 PID 공간이다. 비밀·PVC 볼륨은 executor에만 붙이고 shareProcessNamespace를 두지 않는다. 한 파드라 네트워크 공간은
 같다: 역할 쪽에서도 감독 주소에 닿지만 mTLS 키가 executor에만 있어 감독이 받지 않는다. CI(tools/ci/olive.ts olive-executor-split)가 렌더를
 그 파일의 경계 표(SPLIT_*: 컨테이너별 명령·uid·보안 문맥·마운트·env, 볼륨 매체·상한, Secret 모드)와 그대로 대조한다. 여기 값을 바꾸면 표도 함께 고친다.
-env 이름은 ukyi-app/olive README "작업자 실행기 진입점"의 환경 표와 같다. 이 차트가 아직 그 환경을 다 주지 않아(효과 서명 키,
-역할 프로필, 인스턴스, 정책 revision) 실행기는 감독에 붙기 전에 정한 코드로 끝난다.
+env 이름은 ukyi-app/olive README "작업자 실행기 진입점"의 환경 표와 같다. 이 차트가 아직 역할 프로필(OLIVE_PROFILE_FILE, O11·O12)을
+주지 않아 실행기는 감독에 붙기 전에 정한 코드(81)로 끝난다.
 */}}
 {{- $sup := include "olive.supervisorTarget" . | fromYaml }}
 {{- $trust := include "olive.trustEnabled" . }}
@@ -67,6 +67,15 @@ spec:
             # v1 역할 이름이다. 대상 id(reader 등)를 넘기면 실행기가 81로 끝난다.
             - name: OLIVE_ROLE
               value: {{ $role | quote }}
+            # 실행기 이름의 인스턴스 칸(templates/_helpers.tpl olive.instance: 대상 id). 감독 등록표의 행과 글자 그대로 맞아야 배정된다.
+            - name: OLIVE_INSTANCE
+              value: {{ include "olive.instance" . | quote }}
+            # 감독과 같은 값 하나(values.yaml policy.revision). 다르면 감독이 이 실행기에 새 일을 배정하지 않고 실행기도 그 시작을 거절한다.
+            - name: OLIVE_POLICY_REVISION
+              value: {{ include "olive.policyRevision" $ | quote }}
+            # 효과 서명 개인 키 파일. 아래 effect-signing 마운트 안의 Secret 키 이름이다. 환경에는 경로만 둔다.
+            - name: OLIVE_SIGNING_KEY_FILE
+              value: {{ printf "%s/%s" (include "olive.effectKey.dir" .) (include "olive.effectKey.key" .) | quote }}
             # 감독의 고정 Service 주소. DNS 없이 붙는다(templates/networkpolicy-executors.yaml).
             - name: OLIVE_SUPERVISOR_ADDR
               value: {{ printf "%s:%d" $.Values.supervisor.clusterIP (int $.Values.supervisor.port) | quote }}
@@ -106,6 +115,10 @@ spec:
               mountPath: /run/olive/trust
               readOnly: true
             {{- end }}
+            # 효과 서명 키는 이 제어 컨테이너에만 붙인다(D-73·D-100). 역할 컨테이너에서 도는 모델·도구가 실행기 행세를 하지 못하게.
+            - name: effect-signing
+              mountPath: {{ include "olive.effectKey.dir" . }}
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             # 실행기가 소켓을 만드는 자리라 쓰기다(지난 기동의 소켓을 지우고 새로 bind한다).
@@ -178,6 +191,16 @@ spec:
             name: olive-trust
             defaultMode: 292
         {{- end }}
+        # 효과 서명 키(templates/executor-externalsecrets.yaml). 292의 이유는 위 tls와 같다. 경계는 마운트다(executor에만).
+        # 복구 스위치로 ExternalSecret을 꺼도 이 볼륨은 남는다. 같은 이름 Secret을 손으로 만들어야 파드가 뜬다.
+        # items로 키 하나만 붙인다. 그 키가 없으면 FailedMount로 컨테이너 생성 전에 멈춰 원인이 이벤트에 바로 보인다.
+        - name: effect-signing
+          secret:
+            secretName: {{ include "olive.effectKey.secretName" . }}
+            defaultMode: 292
+            items:
+              - key: {{ include "olive.effectKey.key" . }}
+                path: {{ include "olive.effectKey.key" . }}
         # 제어 컨테이너의 /tmp. 실행마다의 HOME·작업 공간은 역할 쪽(role-tmp)이라 작게 둔다 [가정].
         - name: tmp
           emptyDir:

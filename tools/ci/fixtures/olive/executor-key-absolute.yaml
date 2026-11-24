@@ -1,0 +1,12 @@
+# expect: fail
+# rule: olive-executor-key
+# match: 절대 키 /olive/supervisor/INSTRUCTION_SIGNING_KEY를 쓴다
+# 읽기 실행기 ns의 ExternalSecret이 절대 키로 감독의 지시 서명 키를 읽는다. 자기 store를 쓰지만 절대 키는 secretsPath를 무시한다
+# (Free 플랜에는 경로 권한이 없다).
+patch:
+  - in: chart
+    select: {kind: ExternalSecret, namespace: olive-reader, name: olive-effect-signing-key}
+    edit:
+      spec.data:
+        match: {secretKey: EFFECT_SIGNING_KEY}
+        set: {remoteRef.key: /olive/supervisor/INSTRUCTION_SIGNING_KEY}

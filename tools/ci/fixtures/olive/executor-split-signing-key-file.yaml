@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: OLIVE_SIGNING_KEY_FILE(["/run/olive/tls/tls.key"])이 표의 /run/olive/effect-signing/EFFECT_SIGNING_KEY
+# 효과 서명 키 경로를 mTLS 개인 키 파일로 바꿨다. 파일은 있어 기동하지만 효과 서명 키가 TLS 키와 같아진다(D-73: TLS 갱신은 교체 사유가 아니다).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_SIGNING_KEY_FILE}
+        set: {value: /run/olive/tls/tls.key}

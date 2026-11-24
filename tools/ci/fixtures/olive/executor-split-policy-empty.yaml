@@ -1,0 +1,24 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 이 계약 v1 revision 꼴(^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)의 값 하나가 아니다
+# 감독과 두 실행기의 OLIVE_POLICY_REVISION을 모두 빈 값으로 렌더했다. 세 값은 서로 같지만 진입점이 81로 끝난다. 값 파일의 빈 값은
+# 렌더가 먼저 멈춘다(olive.ts policyRevisionRenderTest). 이 fixture는 렌더를 거치지 않은 모양도 CI가 잡는지 본다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_POLICY_REVISION}
+        set: {value: ""}
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    edit:
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_POLICY_REVISION}
+        set: {value: ""}
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_POLICY_REVISION}
+        set: {value: ""}
