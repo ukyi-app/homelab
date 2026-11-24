@@ -50,7 +50,7 @@
 
 ## 결과
 
-- 봇 PR #113(`feat/colleague-c26-github-io`, 결과 head `9ae002d`), 병합 `1ef5843`(2026-11-10). 첫 작업자는 2026-11-09 22:48 NUC 커널 크래시로 최종 답 없이 끊겼고, 이어받은 작업자가 커밋 6개를 티켓과 대조해 코드 추가 없이 완료 검사만 했다.
+- 봇 PR #113(`feat/colleague-c26-github-io`, 결과 head `9ae002d`), 병합 `1ef5843`(2026-11-10). 첫 작업자는 2026-11-09 22:48 호스트 커널 크래시로 최종 답 없이 끊겼고, 이어받은 작업자가 커밋 6개를 티켓과 대조해 코드 추가 없이 완료 검사만 했다.
 - 구현: `src/github-writer.ts` `GitHubWriterPort.fastForwardBranch`(ROUTES에 자기 변경 브랜치 `PATCH git/refs` 한 줄, body는 `sha`·`force:false`만, 부모 불일치는 `not_sent(not_fast_forward)`, 유실·409·422는 ref 재조회 대조만). `src/github-review-io.ts` `discussion.read`(리뷰·리뷰 댓글·대화 댓글, 작성자 ID·association, 상한·truncated, 다른 PR·저장소 거부)와 `guidance.post`·`guidance.find`(COMMENT·RIGHT 인라인, `guidanceMarker` 회수, 재전송 없음). `src/github-app.ts` ALLOWED에 GET 두 줄.
 - 완료 조건 근거: `test/github-writer.test.ts` "C26 writer:" 6건, `test/github-review-app.test.ts` "PR 자료 읽기:" 4건·"안내 리뷰 게시:" 3건·허용 경로 1건. 부르는 곳: `src`에서 두 파일 밖 사용 0(grep).
 - 검사: 작업자 관련 시험 372 pass·0 fail·0 skip(실제 PG 포함). 통합 담당 전체 검사(`9ae002d`, node 24.22.0, 실제 PG, 잠금): 2176 tests / 2154 pass / 0 fail / 22 skip(SEC02_IMAGE). Codex 코드·보안 지적 없음, `build / test` 통과.

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-NUC 한 대의 k3s 홈랩을 Git으로 운영하는 공개(public) 저장소다. main에 들어간 커밋은 Argo CD가 곧 클러스터에 적용한다.
+단일 노드 k3s 홈랩을 Git으로 운영하는 공개(public) 저장소다. main에 들어간 커밋은 Argo CD가 곧 클러스터에 적용한다.
 
 ## 먼저 읽을 것
 

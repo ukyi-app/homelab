@@ -24,7 +24,7 @@
 
 1. `01` §3의 질문 7개를 조사한다.
    - 진행 메모: 조사했다(2026-10-18). 답은 공개 초안 `DISCOVERY.md`에, 내부 경로와 실측 세부는 운영 초안(`DISCOVERY-internal.md`, evidence)에 있다.
-2. 능력표를 실측한다: Discord, Codex(NUC에 codex-cli 0.163.0), herdr(0.9.5), GitHub App.
+2. 능력표를 실측한다: Discord, Codex(호스트에 codex-cli 0.163.0), herdr(0.9.5), GitHub App.
    - 진행 메모: 읽기 전용 실측(`--help`·버전, `gh api` GET, 패키지 로드)으로 `VERIFICATION.md` 초안을 채웠다. 모델 호출, 봇 계정 로그인, App 설치, 게시는 하지 않았다. 플랫폼이 필요한 항목은 `blocked`다(할 일 7).
 3. D-16 대안은 Codex Connector로 실측한다. 트리거, 게시 방식, 설치 범위, 결과를 Discord로 가져올 수 있는지를 본다. 기존 PR 기록을 읽기 전용으로 조회해 확인하고(예: homelab PR #752의 리뷰 기록), 시험 PR이 더 필요하면 사람에게 요청한다.
    - 진행 메모: 기존 PR 기록을 읽기 전용 `gh api` GET으로 조회했다. 사람이 연 PR에는 자동 리뷰가 달렸고, 봇 App이 연 PR 1건에는 달리지 않았다(표본 1건). 결과는 `DECISIONS.md` D-16 근거와 `VERIFICATION.md`에 있다. D-16은 대안이 아니라 기본안으로 정했다(할 일 4).
@@ -32,7 +32,7 @@
    - 진행 메모: 확정(사용자 2026-10-18, T15). 사용자가 2026-10-18 16:29에 T15 질문에 답했다. 에이전트의 추천과 근거는 `DECISIONS.md` 초안에 있다.
      - D-14: 봇 전용 ChatGPT 구독 계정 + 작업자 전용 CODEX_HOME. 권장안(OpenAI API 프로젝트 키)이 아니라 사용자가 골랐다. 함께 지킬 조건은 다섯이다. 개인 `~/.codex*` 사용·복사 금지. 한도·인증 만료 때 다른 계정·인증으로 자동 전환하지 않고 대기. 작업 직렬 1개(동시성 1). 인증 갱신본 되쓰기를 위한 작업자 전용 영속 쓰기 공간(설계 C.8 변경, T08b·T16b 반영). 옛 구독 OAuth 프록시·다계정 순회 재사용 금지.
      - D-14 남은 위험: 공식 CI/CD 인증 안내가 구독 무인 실행을 고급 경로로 두고 "public or open-source repositories"에 쓰지 말라고 적는다 [확인: https://learn.chatgpt.com/docs/auth/ci-cd-auth , 2026-10-18]. 봇의 리뷰 대상은 public 저장소다. 이 문구의 적용 범위는 [미확인]이고 OpenAI 확인 항목으로 남긴다(spec §10).
-     - D-15: NUC 클러스터 안. 게시 서버는 ns `app-homelab-bot`, 작업자는 `sandbox` ns의 상주 파드(동시성 1). 라벨 `homelab-bot`, 앱·작업자 포트 8080, 경보 수신 포트 8081. 작업자의 코드 읽기는 `codeload.github.com` 압축본만이다(작업자 egress에서 `github.com`·`api.github.com`·gist 제외, 작업자에 GitHub 자격 없음). 받은 코드는 작업자가 `git init`으로 한 번 커밋해 `codex exec`의 Git 저장소 요구를 맞추고, diff는 base·head 압축본으로 만든다. push와 PR 생성은 게시 서버가 D-24 App으로 한다. 파드 방화벽(U13)이 안 되면 호스트 전용 UID + nft로 물러난다. 사용자는 에이전트 설명(D-14 구독 인증 파일이 작업자에 있어 GitHub를 허용하면 남의 토큰으로 gist·push 유출이 가능하다)을 듣고 골랐다.
+     - D-15: 호스트 클러스터 안. 게시 서버는 ns `app-homelab-bot`, 작업자는 `sandbox` ns의 상주 파드(동시성 1). 라벨 `homelab-bot`, 앱·작업자 포트 8080, 경보 수신 포트 8081. 작업자의 코드 읽기는 `codeload.github.com` 압축본만이다(작업자 egress에서 `github.com`·`api.github.com`·gist 제외, 작업자에 GitHub 자격 없음). 받은 코드는 작업자가 `git init`으로 한 번 커밋해 `codex exec`의 Git 저장소 요구를 맞추고, diff는 base·head 압축본으로 만든다. push와 PR 생성은 게시 서버가 D-24 App으로 한다. 파드 방화벽(U13)이 안 되면 호스트 전용 UID + nft로 물러난다. 사용자는 에이전트 설명(D-14 구독 인증 파일이 작업자에 있어 GitHub를 허용하면 남의 토큰으로 gist·push 유출이 가능하다)을 듣고 골랐다.
      - D-16: 기본안(전용 리뷰 App + 격리 리뷰어 + 제한 게시 서버). 봇이 리뷰하는 저장소는 저장소별 Codex 설정에서 Codex 자동 리뷰를 끈다(사람 작업, 수동 `@codex review`는 남김). Codex Connector 설치 범위는 선택 저장소로 줄이고 private 운영 저장소 `homelab-bot-ops`는 뺀다(사람 작업, D-26 연계).
      - D-16 Connector 축소 시점(확정(사용자 2026-10-18, T15), 위 결정 뒤 따로 받은 답): 사람이 이 티켓에서 `homelab-bot-ops`에 운영 산출물을 처음 올리기 전에 한다. 남길 저장소 후보는 public 저장소(`homelab`, `homelab-app-template`, `files`, `homelab-bot`)이고, `homelab-bot-ops`와 private 저장소(제거 예정 `aiops`·`mac-uptime-guard`, 보관 `aiops-autodeploy-canary`)는 뺀다. 최종 목록은 사람이 고른다. T17은 축소가 됐는지 확인만 한다.
      - D-16 Connector 축소 실행: 완료(사람 2026-10-18 17:45, [../approvals.md](../approvals.md)). `repository_selection` = `selected`는 `gh api` GET으로 확인했다. 남긴 저장소는 사용자 보고로 위 public 4개다. 저장소 목록은 `read:user` 권한이 없어 API로 확인하지 못했다.

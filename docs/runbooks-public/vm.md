@@ -1,8 +1,8 @@
-# NUC 임시 VM: 시나리오 13 검증 클러스터 만들기와 지우기
+# 호스트 임시 VM: 시나리오 13 검증 클러스터 만들기와 지우기
 
-시나리오 13(빈 환경 재구축 + DB 복구)의 `vm` 클러스터를 운영 NUC 안의 임시 KVM VM으로 세우고, 시험 뒤 흔적 없이 지운다. 결정은 사용자(2026-10-26, NUC 임시 VM, tailnet 밖, 시험 뒤 삭제)와 lead(2026-10-26, libvirt NAT, NUC 본체 브리지 변경 없음, 운영자 확인은 NUC에서)다. 근거는 설계 E8 "VM 격리"와 F D-12다.
+시나리오 13(빈 환경 재구축 + DB 복구)의 `vm` 클러스터를 운영 호스트 안의 임시 KVM VM으로 세우고, 시험 뒤 흔적 없이 지운다. 결정은 사용자(2026-10-26, 호스트 임시 VM, tailnet 밖, 시험 뒤 삭제)와 lead(2026-10-26, libvirt NAT, 호스트 본체 브리지 변경 없음, 운영자 확인은 호스트에서)다. 근거는 설계 E8 "VM 격리"와 F D-12다.
 
-모든 단계는 사람이 한다. NUC에서 sudo가 필요한 단계(1·6절)와 VM 안에서 sudo가 필요한 단계(2절)가 있다. 블록은 bootstrap.md 0.0처럼 `bash -euo pipefail`로 돌리고, 실패하면 다음 블록으로 가지 않는다. 명령은 NUC의 작업 사본(저장소 루트)에서 한다.
+모든 단계는 사람이 한다. 호스트에서 sudo가 필요한 단계(1·6절)와 VM 안에서 sudo가 필요한 단계(2절)가 있다. 블록은 bootstrap.md 0.0처럼 `bash -euo pipefail`로 돌리고, 실패하면 다음 블록으로 가지 않는다. 명령은 호스트의 작업 사본(저장소 루트)에서 한다.
 
 ## 0. 값과 근거
 
@@ -10,39 +10,39 @@
 |---|---|---|
 | libvirt 도메인(VM) | `homelab-vm` | 1·6절 |
 | libvirt 네트워크 | `homelab-vm`, 브리지 `virbr-hlvm`, 192.168.122.0/24, NAT 출구 = `prod.env`의 `NODE_IFACE` | 1·6절 |
-| 격리 nft 표(NUC) | `inet homelab_vm`(VM 동안만, NUC 재부팅하면 사라진다) | 1.2, 6절 |
-| 파드 egress nft 표(VM 안) | `inet homelab_egress`(vm.env 값, `homelab-egress.service`). NUC의 운영 표와 이름만 같다 | 2절 |
+| 격리 nft 표(호스트) | `inet homelab_vm`(VM 동안만, 호스트 재부팅하면 사라진다) | 1.2, 6절 |
+| 파드 egress nft 표(VM 안) | `inet homelab_egress`(vm.env 값, `homelab-egress.service`). 호스트의 운영 표와 이름만 같다 | 2절 |
 | VM MAC → 주소 | `52:54:00:13:00:10` → `192.168.122.10`(DHCP 예약) | `vm.env`의 `NODE_IP` |
 | VM 노드 이름·인터페이스 | `vm-node`, `enp1s0` | `vm.env`의 `NODE_NAME`·`NODE_IFACE` |
 | 크기 | vCPU 4, 메모리 16 GiB, 디스크 80 GiB(qcow2, 쓴 만큼만 찬다) | 1.4 |
 | 디스크·seed | `/var/lib/libvirt/images/homelab-vm.qcow2`, `homelab-vm-seed.iso` | 1.3, 6절 |
 | 이미지 | Ubuntu 26.04 클라우드 이미지 `release-20261016`, sha256 `5645d031…7eb5`(1.3에 전체) | 1.3 |
-| NUC 쪽 상태 | `~/.local/state/homelab-vm/`(새로 깐 패키지 목록, VM SSH known_hosts). 저장소 밖 | 1·6절 |
-| VM kubeconfig(NUC) | `~/.kube/homelab-vm.yaml`, context `homelab-vm` | 3·4절 |
+| 호스트 쪽 상태 | `~/.local/state/homelab-vm/`(새로 깐 패키지 목록, VM SSH known_hosts). 저장소 밖 | 1·6절 |
+| VM kubeconfig(호스트) | `~/.kube/homelab-vm.yaml`, context `homelab-vm` | 3·4절 |
 
-**크기 근거(2026-10-26 NUC 실측).** NUC는 14코어(Core Ultra 5 225H, 하이퍼스레딩 없음), 메모리 60 GiB에 MemAvailable 46 GiB, 부하 평균 1.4~2.7이다. 운영 노드 요청은 CPU 1065m(7%), 메모리 3302Mi이고 메모리 limit 합은 8554Mi다.
+**크기 근거(2026-10-26 호스트 실측).** 호스트는 14코어(하이퍼스레딩 없음), 메모리 60 GiB에 MemAvailable 46 GiB, 부하 평균 1.4~2.7이다. 운영 노드 요청은 CPU 1065m(7%), 메모리 3302Mi이고 메모리 limit 합은 8554Mi다.
 
 - **vCPU 4:** VM이 다 써도 운영에 10코어가 남는다. 단일 노드 k3s와 복구 Job에는 충분하다.
 - **메모리 16 GiB:** VM 안 워크로드가 운영과 같으므로 운영 limit 합 8.5 GiB에 kubelet 예약 1 GiB(`system-reserved`), 축출 여유 0.5 GiB, OS를 더하고 남게 잡았다. 만들 때 MemAvailable이 32 GiB 이상인지 본다. 그러면 VM을 띄운 뒤에도 운영에 16 GiB 이상 남는다.
-- **디스크 80 GiB:** 운영 PV 요청 합이 58 GiB다. local-path는 크기를 강제하지 않아 실제 사용은 더 작고, qcow2는 쓴 블록만 NUC 디스크(여유 512 GiB)를 쓴다.
+- **디스크 80 GiB:** 운영 PV 요청 합이 58 GiB다. local-path는 크기를 강제하지 않아 실제 사용은 더 작고, qcow2는 쓴 블록만 호스트 디스크(여유 512 GiB)를 쓴다.
 
 **네트워크 근거.**
 
-- **NAT라 NUC 본체 설정을 바꾸지 않는다.** 라우팅 NAT라 Wi-Fi(`wlo1`)에서도 되고 브리지를 만들지 않는다. libvirt NAT는 밖에서 VM으로 새 연결을 넘기지 않아 VM은 NUC에서만 닿는다. 그래서 운영자 기기의 LAN 접근 대신 NUC에서 SSH·kubeconfig·port-forward로 확인한다(설계 E8 VM 위치).
-- **VM에서 나가는 길은 공개 인터넷 하나다.** VM에는 운영 DB 사본과 시험 자격이 올라간다. 그 VM이 운영 NUC(SSH 22, k3s API 6443 등), LAN, tailnet에 닿으면 E8 VM 격리 4번이 막으려는 길이 NUC 안에서 다시 열린다. 막는 장치는 둘이다.
-  - **NAT 출구를 NUC의 LAN 인터페이스로 묶는다(`<forward mode='nat' dev=…>`).** 묶지 않으면 VM이 100.64.0.0/10으로 보낸 패킷이 NUC의 tailscale0로 라우팅되고(NUC의 `lookup 52`는 forward 패킷에도 걸린다), libvirt masquerade가 출발지를 NUC의 tailnet 주소로 바꾼다. 그러면 VM이 tailnet에서 NUC(`tag:nuc`)로 보이고, ACL의 `tag:nuc → tag:k8s:443`으로 운영 내부 UI에 닿는다.
-  - **격리 nft 표 `inet homelab_vm`(1.2).** `dev`는 다른 인터페이스로 넘기는 forward만 묶는다. VM에서 NUC 자신(브리지 주소, LAN 주소, tailnet 주소)으로 가는 연결은 호스트 INPUT이라 그대로 닿는다(libvirt NAT는 호스트와 게스트 사이를 막지 않는다). 공유기와 LAN 기기는 그 LAN 인터페이스로 나가므로 NAT로 허용된다. 그래서 `virbr-hlvm`에서 들어온 것은 INPUT에서 DHCP(udp 68→67)와 NUC가 시작한 연결의 응답만 받고, forward에서는 사설 대역·100.64.0.0/10·169.254.0.0/16과 IPv6를 버린다. 남는 것은 공개 인터넷(apt, GitHub, ghcr, R2, Infisical, Tailscale 제어·DERP, Cloudflare)이다. NUC에서 VM으로 여는 관리 연결(SSH, kubectl, port-forward)은 NUC의 OUTPUT과 그 응답이라 막히지 않는다.
-  - 표는 `host/`가 아니라 이 런북이 VM을 만들 때 올리고 지울 때 내린다. 운영 영구 설정이 아니라서 NUC가 재부팅되면 사라진다. 그때는 VM을 켜기 전에 다시 올린다(1.5).
-- **운영 nftables(P4)와 겹치지 않는다.** NUC의 운영 파드 egress 표(`inet homelab_egress`, prod 값)는 forward·input에서 출발지 10.42.0.0/16만 거른다. VM 트래픽은 VM 안 flannel이 파드 주소를 VM 노드 주소로 바꾼 뒤 나오므로 NUC에서 출발지가 192.168.122.10이라 그 규칙에 걸리지 않는다. `homelab_vm`과 libvirt 규칙은 `virbr-hlvm`에서 들어온 패킷만 보므로 운영 파드 트래픽(cni0 → wlo1)에 닿지 않는다. VM 파드는 VM 커널에 따로 올린 같은 이름의 표(2절, vm 값)가 먼저 거른다.
-- **192.168.122.0/24를 공개 저장소에 적어도 된다.** libvirt가 모든 호스트에 같은 값으로 까는 기본 NAT 대역이고 NUC 안에서만 쓰인다. LAN·tailnet 주소가 아니라 위치나 신원을 드러내지 않는다(D-23). MAC 접두 52:54:00은 QEMU 기본이다.
+- **NAT라 호스트 본체 설정을 바꾸지 않는다.** 라우팅 NAT라 Wi-Fi(`wlo1`)에서도 되고 브리지를 만들지 않는다. libvirt NAT는 밖에서 VM으로 새 연결을 넘기지 않아 VM은 호스트에서만 닿는다. 그래서 운영자 기기의 LAN 접근 대신 호스트에서 SSH·kubeconfig·port-forward로 확인한다(설계 E8 VM 위치).
+- **VM에서 나가는 길은 공개 인터넷 하나다.** VM에는 운영 DB 사본과 시험 자격이 올라간다. 그 VM이 운영 호스트(SSH 22, k3s API 6443 등), LAN, tailnet에 닿으면 E8 VM 격리 4번이 막으려는 길이 호스트 안에서 다시 열린다. 막는 장치는 둘이다.
+  - **NAT 출구를 호스트의 LAN 인터페이스로 묶는다(`<forward mode='nat' dev=…>`).** 묶지 않으면 VM이 100.64.0.0/10으로 보낸 패킷이 호스트의 tailscale0로 라우팅되고(호스트의 `lookup 52`는 forward 패킷에도 걸린다), libvirt masquerade가 출발지를 호스트의 tailnet 주소로 바꾼다. 그러면 VM이 tailnet에서 호스트(`tag:nuc`)로 보이고, ACL의 `tag:nuc → tag:k8s:443`으로 운영 내부 UI에 닿는다.
+  - **격리 nft 표 `inet homelab_vm`(1.2).** `dev`는 다른 인터페이스로 넘기는 forward만 묶는다. VM에서 호스트 자신(브리지 주소, LAN 주소, tailnet 주소)으로 가는 연결은 호스트 INPUT이라 그대로 닿는다(libvirt NAT는 호스트와 게스트 사이를 막지 않는다). 공유기와 LAN 기기는 그 LAN 인터페이스로 나가므로 NAT로 허용된다. 그래서 `virbr-hlvm`에서 들어온 것은 INPUT에서 DHCP(udp 68→67)와 호스트가 시작한 연결의 응답만 받고, forward에서는 사설 대역·100.64.0.0/10·169.254.0.0/16과 IPv6를 버린다. 남는 것은 공개 인터넷(apt, GitHub, ghcr, R2, Infisical, Tailscale 제어·DERP, Cloudflare)이다. 호스트에서 VM으로 여는 관리 연결(SSH, kubectl, port-forward)은 호스트의 OUTPUT과 그 응답이라 막히지 않는다.
+  - 표는 `host/`가 아니라 이 런북이 VM을 만들 때 올리고 지울 때 내린다. 운영 영구 설정이 아니라서 호스트가 재부팅되면 사라진다. 그때는 VM을 켜기 전에 다시 올린다(1.5).
+- **운영 nftables(P4)와 겹치지 않는다.** 호스트의 운영 파드 egress 표(`inet homelab_egress`, prod 값)는 forward·input에서 출발지 10.42.0.0/16만 거른다. VM 트래픽은 VM 안 flannel이 파드 주소를 VM 노드 주소로 바꾼 뒤 나오므로 호스트에서 출발지가 192.168.122.10이라 그 규칙에 걸리지 않는다. `homelab_vm`과 libvirt 규칙은 `virbr-hlvm`에서 들어온 패킷만 보므로 운영 파드 트래픽(cni0 → wlo1)에 닿지 않는다. VM 파드는 VM 커널에 따로 올린 같은 이름의 표(2절, vm 값)가 먼저 거른다.
+- **192.168.122.0/24를 공개 저장소에 적어도 된다.** libvirt가 모든 호스트에 같은 값으로 까는 기본 NAT 대역이고 호스트 안에서만 쓰인다. LAN·tailnet 주소가 아니라 위치나 신원을 드러내지 않는다(D-23). MAC 접두 52:54:00은 QEMU 기본이다.
 - 같은 대역을 쓰는 libvirt `default` 네트워크는 1.2에서 내리고 지운다. 둘이 함께 뜨지 못한다.
-- **VM은 첫 부팅부터 공용 DNS(`host/versions.env`의 `NODE_UPSTREAM_DNS`)를 쓴다(1.3).** DHCP가 주는 192.168.122.1은 쓰지 않는다. NUC의 servicelb(AdGuard LoadBalancer)가 노드의 :53을 목적지 가림 없이 AdGuard 파드로 DNAT하므로, 그 주소로 보낸 질의는 dnsmasq가 아니라 `virbr-hlvm → cni0` forward가 되고 libvirt 출구 제한과 격리 표가 버린다. 그러면 host-config 전의 apt·git이 이름 해석에서 멈춘다.
+- **VM은 첫 부팅부터 공용 DNS(`host/versions.env`의 `NODE_UPSTREAM_DNS`)를 쓴다(1.3).** DHCP가 주는 192.168.122.1은 쓰지 않는다. 호스트의 servicelb(AdGuard LoadBalancer)가 노드의 :53을 목적지 가림 없이 AdGuard 파드로 DNAT하므로, 그 주소로 보낸 질의는 dnsmasq가 아니라 `virbr-hlvm → cni0` forward가 되고 libvirt 출구 제한과 격리 표가 버린다. 그러면 host-config 전의 apt·git이 이름 해석에서 멈춘다.
 
-## 1. 만들기 (NUC, sudo)
+## 1. 만들기 (호스트, sudo)
 
 ### 1.1 확인과 패키지
 
-시험 전에 NUC에 가상화 패키지가 없어야 한다. 6절은 이 블록이 새로 깐 패키지만 정확히 지워 NUC를 시험 전 상태로 돌린다(D-12: NUC에 가상화 구성 요소를 남기지 않는다).
+시험 전에 호스트에 가상화 패키지가 없어야 한다. 6절은 이 블록이 새로 깐 패키지만 정확히 지워 호스트를 시험 전 상태로 돌린다(D-12: 호스트에 가상화 구성 요소를 남기지 않는다).
 
 ```bash
 bash -euo pipefail <<'EOF'
@@ -55,7 +55,7 @@ done
 test -c /dev/kvm || { echo "/dev/kvm이 없다(BIOS의 VT-x를 본다)"; exit 1; }
 # VM에 16 GiB를 주고도 운영에 16 GiB 이상 남아야 한다(0절 크기 근거)
 awk '/^MemAvailable:/ { exit !($2 >= 32 * 1024 * 1024) }' /proc/meminfo || { echo "MemAvailable이 32 GiB보다 작다"; exit 1; }
-# 패키지를 깔면 libvirt가 default 네트워크의 dnsmasq를 root로 띄운다. NUC의 inotify 인스턴스 한도가 host-config 값보다
+# 패키지를 깔면 libvirt가 default 네트워크의 dnsmasq를 root로 띄운다. 호스트의 inotify 인스턴스 한도가 host-config 값보다
 # 낮으면 dnsmasq가 "failed to create inotify"로 뜨지 못하고 libvirtd가 virsh에 답하지 않는다(2026-10-27)
 want="$(sed -n 's/^fs\.inotify\.max_user_instances = //p' host/etc/sysctl.d/60-inotify.conf)"
 test "$(cat /proc/sys/fs/inotify/max_user_instances)" -ge "$want" \
@@ -105,8 +105,8 @@ if info="$(sudo virsh net-info default 2>/dev/null)"; then
   sudo virsh net-undefine default
 fi
 xml="$(mktemp)"; trap 'rm -f "$xml"' EXIT
-# dev: NAT 출구를 NUC의 LAN 인터페이스로만 묶는다. 없으면 VM이 tailscale0로 나가 NUC의 tailnet 신원을 쓴다(0절)
-# autostart는 켜지 않는다. 임시 VM이라 NUC가 재부팅되면 사람이 다시 켠다(1.5)
+# dev: NAT 출구를 호스트의 LAN 인터페이스로만 묶는다. 없으면 VM이 tailscale0로 나가 호스트의 tailnet 신원을 쓴다(0절)
+# autostart는 켜지 않는다. 임시 VM이라 호스트가 재부팅되면 사람이 다시 켠다(1.5)
 cat >"$xml" <<XML
 <network>
   <name>homelab-vm</name>
@@ -128,7 +128,7 @@ EOF
 
 `<host>`가 DHCP 예약이다. k3s의 node-ip는 설치 때만 정해지므로 VM 주소가 바뀌면 k3s가 뜨지 못한다. 예약 주소는 범위(`.100`~`.254`) 밖에 두어 다른 임대와 겹치지 않는다.
 
-다음은 격리 표다(근거는 0절). 다시 실행해도 같은 표 하나로 바뀐다. NUC가 재부팅된 뒤 VM을 켜기 전에도 이 블록을 다시 돌린다.
+다음은 격리 표다(근거는 0절). 다시 실행해도 같은 표 하나로 바뀐다. 호스트가 재부팅된 뒤 VM을 켜기 전에도 이 블록을 다시 돌린다.
 
 ```bash
 bash -euo pipefail <<'EOF'
@@ -144,7 +144,7 @@ table inet homelab_vm {
 		flags interval
 		elements = { 10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 }
 	}
-	# VM → NUC 자신. DHCP와 NUC가 연 관리 연결의 응답만 받는다. 브리지·LAN·tailnet 주소 모두 여기로 온다
+	# VM → 호스트 자신. DHCP와 호스트가 연 관리 연결의 응답만 받는다. 브리지·LAN·tailnet 주소 모두 여기로 온다
 	chain input {
 		type filter hook input priority filter - 10; policy accept;
 		iifname != "virbr-hlvm" return
@@ -237,11 +237,11 @@ seed는 VM을 지울 때까지 붙여 둔다. 떼면 다음 부팅에 cloud-init
 
 ```bash
 bash -euo pipefail <<'EOF'
-# 격리 표 없이 VM을 켜면 VM이 첫 부팅부터 NUC·LAN·tailnet에 닿는다
+# 격리 표 없이 VM을 켜면 VM이 첫 부팅부터 호스트·LAN·tailnet에 닿는다
 sudo nft list table inet homelab_vm >/dev/null 2>&1 || { echo "격리 표 inet homelab_vm이 없다. 1.2의 표 블록을 먼저 돌린다"; exit 1; }
 # osinfo-db(0.20250606)에 ubuntu26.04가 없어 24.04에서 파생된 일반 항목 linux2024를 쓴다.
 # q35 + virtio NIC라 인터페이스가 enp1s0이고, network-config가 MAC으로 같은 이름을 고정한다.
-# --autostart를 주지 않는다. 임시 VM이 NUC 재부팅 뒤 저절로 자원을 쓰지 않게 한다
+# --autostart를 주지 않는다. 임시 VM이 호스트 재부팅 뒤 저절로 자원을 쓰지 않게 한다
 sudo virt-install --name homelab-vm --osinfo linux2024 --machine q35 --cpu host-passthrough \
   --vcpus 4 --memory 16384 \
   --disk path=/var/lib/libvirt/images/homelab-vm.qcow2,format=qcow2,bus=virtio \
@@ -254,7 +254,7 @@ EOF
 
 ### 1.5 접속과 격리 확인
 
-VM SSH는 NUC 전용 known_hosts를 쓴다. 6절이 상태 디렉터리째 지우므로 `~/.ssh/known_hosts`에 흔적이 남지 않는다. 이 NAT 대역은 NUC 밖에서 닿지 않아 첫 접속의 호스트 키를 그대로 받아도 끼어들 자리가 NUC root뿐이다. 새 셸마다 이 함수를 먼저 정의한다.
+VM SSH는 호스트 전용 known_hosts를 쓴다. 6절이 상태 디렉터리째 지우므로 `~/.ssh/known_hosts`에 흔적이 남지 않는다. 이 NAT 대역은 호스트 밖에서 닿지 않아 첫 접속의 호스트 키를 그대로 받아도 끼어들 자리가 호스트 root뿐이다. 새 셸마다 이 함수를 먼저 정의한다.
 
 ```bash
 vmssh() { ssh -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" -o StrictHostKeyChecking=accept-new ubuntu@192.168.122.10 "$@"; }
@@ -304,7 +304,7 @@ echo "VM 준비 통과"
 EOF
 ```
 
-**격리 확인.** VM에서 NUC 자신(SSH 22, k3s API 6443을 브리지·LAN·tailnet 주소로), LAN(공유기), tailnet(운영 `tag:k8s` 기기, MagicDNS 주소)이 모두 막히고 공개 인터넷만 열려야 한다. 대상마다 먼저 NUC에서 열리는지(기준선) 본다. NUC에서도 닫혀 있으면 VM에서 닫힌 것이 차단 때문인지 가를 수 없어 멈춘다. tailnet 주소는 화면에 내지 않는다(작업 기록에 남지 않게). VM을 다시 켤 때마다 돌린다.
+**격리 확인.** VM에서 호스트 자신(SSH 22, k3s API 6443을 브리지·LAN·tailnet 주소로), LAN(공유기), tailnet(운영 `tag:k8s` 기기, MagicDNS 주소)이 모두 막히고 공개 인터넷만 열려야 한다. 대상마다 먼저 호스트에서 열리는지(기준선) 본다. 호스트에서도 닫혀 있으면 VM에서 닫힌 것이 차단 때문인지 가를 수 없어 멈춘다. tailnet 주소는 화면에 내지 않는다(작업 기록에 남지 않게). VM을 다시 켤 때마다 돌린다.
 
 ```bash
 bash -euo pipefail <<'EOF'
@@ -312,17 +312,17 @@ vmssh() { ssh -n -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_host
 nuc_ip="$(. host/clusters/prod.env && echo "$NODE_IP")"
 gw="$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "via") print $(i + 1) }' | head -n 1)"
 ts_self="$(tailscale ip -4 | head -n 1)"
-# ACL이 tag:nuc → tag:k8s:443을 연다. 격리가 없으면 VM이 NUC 신원으로 닿는 바로 그 길이다
+# ACL이 tag:nuc → tag:k8s:443을 연다. 격리가 없으면 VM이 호스트 신원으로 닿는 바로 그 길이다
 ts_k8s="$(tailscale status --json | jq -r '[.Peer[] | select(.Online and ((.Tags // []) | index("tag:k8s"))) | .TailscaleIPs[] | select(startswith("100."))][0] // empty')"
 [ -n "$gw" ] && [ -n "$ts_self" ] && [ -n "$ts_k8s" ] || { echo "공유기나 tailnet 시험 대상을 찾지 못했다"; exit 1; }
-names=("NUC 브리지 SSH" "NUC 브리지 k3s API" "NUC LAN SSH" "NUC LAN k3s API" "NUC tailnet SSH"
+names=("호스트 브리지 SSH" "호스트 브리지 k3s API" "호스트 LAN SSH" "호스트 LAN k3s API" "호스트 tailnet SSH"
   "LAN 공유기" "tailnet tag:k8s 기기" "MagicDNS 주소")
 addrs=("192.168.122.1:22" "192.168.122.1:6443" "${nuc_ip}:22" "${nuc_ip}:6443" "${ts_self}:22"
   "${gw}:80" "${ts_k8s}:443" "100.100.100.100:53")
 for i in "${!addrs[@]}"; do
   a="${addrs[$i]}"
   timeout 5 bash -c "</dev/tcp/${a%:*}/${a##*:}" 2>/dev/null \
-    || { echo "기준선 실패: NUC에서도 '${names[$i]}'에 닿지 않아 차단을 가를 수 없다"; exit 1; }
+    || { echo "기준선 실패: 호스트에서도 '${names[$i]}'에 닿지 않아 차단을 가를 수 없다"; exit 1; }
 done
 # VM 쪽은 SSH 한 번으로 모두 본다. 막힌 대상은 버려지므로 각 5초 뒤 closed다. SSH가 실패하면 여기서 멈춘다
 out="$(ssh -o UserKnownHostsFile="$HOME/.local/state/homelab-vm/known_hosts" ubuntu@192.168.122.10 bash -s -- "${addrs[@]}" <<'R'
@@ -346,7 +346,7 @@ EOF
 ```
 
 - **콘솔:** `sudo virsh console homelab-vm`(나가기 `Ctrl+]`), 사용자 `ubuntu`와 1.3의 비밀번호.
-- **NUC가 재부팅됐으면:** 격리 표가 사라졌다. 1.2의 격리 표 블록 → `sudo virsh net-start homelab-vm && sudo virsh start homelab-vm` → 위 격리 확인 순서로 한다. 네트워크와 VM은 autostart가 꺼져 있다.
+- **호스트가 재부팅됐으면:** 격리 표가 사라졌다. 1.2의 격리 표 블록 → `sudo virsh net-start homelab-vm && sudo virsh start homelab-vm` → 위 격리 확인 순서로 한다. 네트워크와 VM은 autostart가 꺼져 있다.
 
 ## 2. VM 안 호스트 단계
 
@@ -365,16 +365,16 @@ host/preflight.sh --cluster vm --before \
 ```
 
 - `--host-config`가 `enp1s0`을 다시 구성하는 약 2초 동안 SSH가 멈췄다 돌아온다. DHCP 예약이라 주소는 그대로다. 돌아오지 않으면 콘솔로 본다.
-- **`--egress`는 VM 커널에 파드 egress 표 `inet homelab_egress`를 vm.env 값으로 올린다**(노드 `192.168.122.10`, 파드 `10.42.0.0/16`, 서비스 `10.43.0.0/16`, DNS는 `host/versions.env`의 `NODE_UPSTREAM_DNS`). NUC에는 이름이 같은 운영 표(prod 값)와 격리 표 `inet homelab_vm`(1.2)이 따로 있다. 그래서 VM의 egress 확인(`verify`, `sudo nft list table inet homelab_egress`)은 VM 안에서 한다. NUC에서 같은 이름을 보면 운영 표다.
+- **`--egress`는 VM 커널에 파드 egress 표 `inet homelab_egress`를 vm.env 값으로 올린다**(노드 `192.168.122.10`, 파드 `10.42.0.0/16`, 서비스 `10.43.0.0/16`, DNS는 `host/versions.env`의 `NODE_UPSTREAM_DNS`). 호스트에는 이름이 같은 운영 표(prod 값)와 격리 표 `inet homelab_vm`(1.2)이 따로 있다. 그래서 VM의 egress 확인(`verify`, `sudo nft list table inet homelab_egress`)은 VM 안에서 한다. 호스트에서 같은 이름을 보면 운영 표다.
 - **`TAILNET_JOIN=false`는 `--egress`에 영향이 없다.** `--egress`는 이 값으로 갈리지 않고 Tailscale도 부르지 않는다. 규칙은 운영과 같고 값만 다르다. tailnet 대역 `100.64.0.0/10`은 그대로 `nonpublic`이라 VM 파드도 tailnet 주소로 나가지 못하고, VM의 Tailscale 프록시(`vm-*`)는 운영처럼 DERP 443으로만 붙는다. VM이 tailnet에 들어가 있으면 멈추는 확인은 앞뒤의 `--host-config`·`--k3s`가 한다.
 - **끝의 `verify`는 0이어야 한다.** 커널 표를 `sudo -n nft`로 읽으므로 `--k3s`의 sudo 자격이 남은 같은 터미널에서 돈다. 2(미검증)로 끝나면 `sudo -v && host/verify.sh --cluster vm`을 다시 돌린다(bootstrap.md 1절).
-- **NUC에서 `--cluster vm --egress-off`를 돌리지 않는다.** `--egress-off`는 어느 호스트인지 보지 않아(`--egress`는 노드 IP가 `enp1s0`에 없어 멈춘다) NUC의 운영 표와 유닛(이름이 같다)을 지운다. VM의 표는 6절에서 VM과 함께 사라지므로 따로 끌 일이 없다.
-- bootstrap.md 1.1의 "시작 즉시 연결하는 시험 파드" 블록은 VM에서 대조 첫 대상 `LAN_GW`(= `192.168.122.1`, NUC 브리지)에서 "대조 실패"로 멈춘다. NUC 격리 표가 VM → NUC를 막아서이고 VM egress 고장이 아니다. VM의 egress는 위 `verify`의 커널 표 판정으로 본다.
+- **호스트에서 `--cluster vm --egress-off`를 돌리지 않는다.** `--egress-off`는 어느 호스트인지 보지 않아(`--egress`는 노드 IP가 `enp1s0`에 없어 멈춘다) 호스트의 운영 표와 유닛(이름이 같다)을 지운다. VM의 표는 6절에서 VM과 함께 사라지므로 따로 끌 일이 없다.
+- bootstrap.md 1.1의 "시작 즉시 연결하는 시험 파드" 블록은 VM에서 대조 첫 대상 `LAN_GW`(= `192.168.122.1`, 호스트 브리지)에서 "대조 실패"로 멈춘다. 호스트 격리 표가 VM → 호스트를 막아서이고 VM egress 고장이 아니다. VM의 egress는 위 `verify`의 커널 표 판정으로 본다.
 - `install.sh`가 VM 안 `~/.kube/homelab-vm.yaml`(context `homelab-vm`, server 127.0.0.1)을 쓴다.
 
-## 3. kubeconfig를 NUC로
+## 3. kubeconfig를 호스트로
 
-운영자 확인과 4절은 NUC에서 한다. VM kubeconfig는 운영 파일과 **다른 파일**(`~/.kube/homelab-vm.yaml`)로 둔다. 운영 파일과 콜론으로 합치지 않는다. 합치면 current-context가 앞 파일의 것이 되어 `--context` 없이 부른 명령이 다른 클러스터로 간다(B.8 E2). VM 블록은 모두 첫 두 줄에서 `KUBECONFIG`를 이 파일로 고정하고 정체성(context `homelab-vm`, 노드 `vm-node` 하나)을 본다.
+운영자 확인과 4절은 호스트에서 한다. VM kubeconfig는 운영 파일과 **다른 파일**(`~/.kube/homelab-vm.yaml`)로 둔다. 운영 파일과 콜론으로 합치지 않는다. 합치면 current-context가 앞 파일의 것이 되어 `--context` 없이 부른 명령이 다른 클러스터로 간다(B.8 E2). VM 블록은 모두 첫 두 줄에서 `KUBECONFIG`를 이 파일로 고정하고 정체성(context `homelab-vm`, 노드 `vm-node` 하나)을 본다.
 
 ```bash
 bash -euo pipefail <<'EOF'
@@ -383,7 +383,7 @@ tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
 vmssh 'cat .kube/homelab-vm.yaml' >"$tmp"
 # install.sh가 각인한 파일인지 본다. 다른 클러스터의 파일이면 여기서 멈춘다
 test "$(KUBECONFIG="$tmp" kubectl config current-context)" = homelab-vm
-# VM 안 server는 127.0.0.1이다. NUC에서는 VM의 NAT 주소로 간다(vm.env NODE_IP, k3s TLS SAN에 있다)
+# VM 안 server는 127.0.0.1이다. 호스트에서는 VM의 NAT 주소로 간다(vm.env NODE_IP, k3s TLS SAN에 있다)
 KUBECONFIG="$tmp" kubectl config set-cluster homelab-vm --server=https://192.168.122.10:6443 >/dev/null
 install -m 0600 "$tmp" "$HOME/.kube/homelab-vm.yaml"
 export KUBECONFIG="$HOME/.kube/homelab-vm.yaml"
@@ -391,9 +391,9 @@ host/verify.sh --cluster vm --identity
 EOF
 ```
 
-## 4. Argo CD와 root (NUC)
+## 4. Argo CD와 root (호스트)
 
-NUC 작업 사본이 main과 같은지 bootstrap.md 0.0의 두 번째 블록으로 본 뒤, 같은 셸에서 대상을 VM으로 고정한다.
+호스트 작업 사본이 main과 같은지 bootstrap.md 0.0의 두 번째 블록으로 본 뒤, 같은 셸에서 대상을 VM으로 고정한다.
 
 ```bash
 export KUBECONFIG=~/.kube/homelab-vm.yaml && host/verify.sh --cluster vm --identity
@@ -403,12 +403,12 @@ export KUBECONFIG=~/.kube/homelab-vm.yaml && host/verify.sh --cluster vm --ident
 
 ## 5. 확인
 
-- VM 안(`vmssh`)에서 bootstrap.md 3절 블록을 `<이름>` = `vm`, `<KUBE_CONTEXT>` = `homelab-vm`으로 돌린다. `host/preflight.sh`가 VM 호스트를 보므로 NUC에서 돌리지 않는다.
-- 공개 경로·시험 터널(설계 E8 VM 격리 5번)과 복구 확인(restore.md 3절)은 NUC에서 `KUBECONFIG=~/.kube/homelab-vm.yaml`로 한다. port-forward도 NUC의 127.0.0.1에 열린다.
+- VM 안(`vmssh`)에서 bootstrap.md 3절 블록을 `<이름>` = `vm`, `<KUBE_CONTEXT>` = `homelab-vm`으로 돌린다. `host/preflight.sh`가 VM 호스트를 보므로 호스트에서 돌리지 않는다.
+- 공개 경로·시험 터널(설계 E8 VM 격리 5번)과 복구 확인(restore.md 3절)은 호스트에서 `KUBECONFIG=~/.kube/homelab-vm.yaml`로 한다. port-forward도 호스트의 127.0.0.1에 열린다.
 
-## 6. 지우기 (NUC, sudo)
+## 6. 지우기 (호스트, sudo)
 
-VM 밖 자원은 설계 E8 "되돌리는 방법"을 따른다. 이 절은 NUC에 남는 것을 0으로 만든다. VM 밖 정리는 이 순서로 한다(2026-10-29 U40):
+VM 밖 자원은 설계 E8 "되돌리는 방법"을 따른다. 이 절은 호스트에 남는 것을 0으로 만든다. VM 밖 정리는 이 순서로 한다(2026-10-29 U40):
 
 1. Tailscale: VM operator OAuth client는 콘솔에 삭제가 없고 **Revoke**만 있다. Revoke해도 기기는 남으므로 `vm-*` 기기(VM operator·프록시)를 따로 **Remove**한다. VM을 먼저 지우면 VM operator가 기기를 정리하지 못하므로 콘솔에서 지운다.
 2. R2: VM 전용 버킷을 비우고 지운 뒤, 그 버킷 토큰과 운영 버킷 읽기 전용 토큰을 폐기한다.
@@ -421,7 +421,7 @@ VM 준비 자산 중 Infisical 밖 값(ESO client secret, 운영 버킷 읽기 �
 
 VM은 운영 DB 사본을 담고 있다. 지운 뒤에는 되돌릴 수 없다. 남길 증거(결과표, 로그)를 먼저 옮긴다.
 
-VM 안의 파드 egress 표(2절)는 VM과 함께 사라진다. NUC에서 `--egress-off`를 돌리지 않는다(운영 표가 지워진다, 2절).
+VM 안의 파드 egress 표(2절)는 VM과 함께 사라진다. 호스트에서 `--egress-off`를 돌리지 않는다(운영 표가 지워진다, 2절).
 
 ### 6.1 VM·디스크·네트워크
 
@@ -436,7 +436,7 @@ if info="$(sudo virsh net-info homelab-vm 2>/dev/null)"; then
   if grep -Eq '^Active:[[:space:]]+yes' <<<"$info"; then sudo virsh net-destroy homelab-vm; fi
   sudo virsh net-undefine homelab-vm
 fi
-# 격리 표는 VM이 없어진 뒤에 내린다(먼저 내리면 그사이 VM이 NUC·LAN·tailnet에 닿는다)
+# 격리 표는 VM이 없어진 뒤에 내린다(먼저 내리면 그사이 VM이 호스트·LAN·tailnet에 닿는다)
 if sudo nft list table inet homelab_vm >/dev/null 2>&1; then sudo nft delete table inet homelab_vm; fi
 rm -f "$HOME/.kube/homelab-vm.yaml"
 EOF

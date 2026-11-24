@@ -31,7 +31,7 @@ cluster:
   # CNPG 아카이브 세대와 복구 원본(platform/cnpg/cluster, 설계 C.6.4).
   # serverName은 s3://<bucket>/pg/<serverName>/을 정한다. 클러스터를 다시 만들거나 복구할 때마다 새 값 pg-<YYYYMMDD>.
   # 두 primary가 같은 값이면 타임라인이 섞이고 R2에 버저닝이 없어 되돌릴 수 없다.
-  # 빈 NUC 복구 PR만 recoverySource.serverName(지금 이 serverName)을 더하고 serverName을 pg-<복구일>로 바꾼다.
+  # 빈 호스트 복구 PR만 recoverySource.serverName(지금 이 serverName)을 더하고 serverName을 pg-<복구일>로 바꾼다.
   # 복구 확인 뒤 정리 PR이 recoverySource를 지운다(남기면 볼륨 유실 때 낡은 아카이브에서 조용히 복구된다).
   cnpg:
     serverName: pg-20261023
@@ -72,7 +72,7 @@ cluster:
 
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈추는 값(values-vm.yaml의 같은 블록에 쓰는 법).
   # 운영은 비워 둔다. 빈 값이면 root가 ApplicationSet에 넘기지 않아 렌더가 이 블록이 없을 때와 같다.
-  # 빈 NUC 복구는 지금 restore.md 3절 1단계대로 apps/·data/ values를 쓴다(운영이 곧 복구 대상이라).
+  # 빈 호스트 복구는 지금 restore.md 3절 1단계대로 apps/·data/ values를 쓴다(운영이 곧 복구 대상이라).
   restore:
     suspendedApps: []
     valkey: {}

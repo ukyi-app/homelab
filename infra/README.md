@@ -11,10 +11,10 @@ GitHub 보호 설정 root `infra/github`는 이 문서의 `tf` 함수가 아니�
 ## 1. 준비와 자격
 
 `mise install`로 `.tool-versions`의 Terraform 1.17.2와 Infisical CLI 0.45.8을 설치하고, `infisical login`으로 owner 계정에 로그인한다.
-브라우저가 없는 호스트(NUC)에서는 출력된 주소를 다른 기기에서 열고, 받은 토큰을 `Paste your browser token here:` 칸에 붙여 넣는다(Email 칸이 아니다. 그 칸은 입력이 화면에 보인다).
+브라우저가 없는 호스트에서는 출력된 주소를 다른 기기에서 열고, 받은 토큰을 `Paste your browser token here:` 칸에 붙여 넣는다(Email 칸이 아니다. 그 칸은 입력이 화면에 보인다).
 
 **키링이 없는 호스트의 함정:** Secret Service가 없는 서버에서는 CLI가 `vaultBackendType: file`로 바꿔 로그인 세션 토큰을 `~/infisical-keyring/`에 저장한다.
-그 파일의 암호 문구는 `~/.infisical/infisical-config.json`에 함께 있어 디스크에서는 평문과 다를 바 없다(2026-10-20 NUC에서 확인).
+그 파일의 암호 문구는 `~/.infisical/infisical-config.json`에 함께 있어 디스크에서는 평문과 다를 바 없다(2026-10-20 호스트에서 확인).
 그래서 이 런북의 Terraform 작업이 끝나면 같은 날 `infisical reset`으로 로그인·보관소·설정을 지우고, 다음 작업 때 다시 로그인한다.
 OS 키링이 있는 운영자 기기에서 실행하면 이 문제가 없다.
 Provider는 Cloudflare 5.28.0, Tailscale 0.29.2와 root별 `.terraform.lock.hcl`로 고정한다.
@@ -152,7 +152,7 @@ ACL·DNS도 `cloudflare` 부분을 각 root 이름으로 바꿔 백업한다.
 1. 승인 기록을 남긴다. Cloudflare 콘솔에서 옛 터널·DNS·동일 phase WAF가 정리됐는지 확인한다.
    남은 자원이 있으면 생성 충돌을 강행하지 말고 소유권과 import 필요성을 검토한다.
 2. Tailscale 콘솔 **Access controls**에서 현재 정책 전체를 저장소 밖 사본으로 보존한다.
-   실제 사용자·기기 정보가 들어갈 수 있어 Git에 붙이지 않는다. NUC의 LAN/물리 복구 경로를 확보한다.
+   실제 사용자·기기 정보가 들어갈 수 있어 Git에 붙이지 않는다. 호스트의 LAN/물리 복구 경로를 확보한다.
 3. 아래 plan을 검토하고 사람이 apply한다. `-auto-approve`는 쓰지 않는다.
 
 ```bash
@@ -163,7 +163,7 @@ tf cloudflare plan -input=false -detailed-exitcode -lock-timeout=0s
 tf tailscale plan -input=false -lock-timeout=0s
 tf tailscale apply -lock-timeout=0s
 tf tailscale plan -input=false -detailed-exitcode -lock-timeout=0s
-ssh nuc-15-pro  # tailnet 경로의 sshd. NUC는 Tailscale SSH를 켜지 않는다
+ssh nuc-15-pro  # tailnet 경로의 sshd. 호스트는 Tailscale SSH를 켜지 않는다
 ```
 
 Apply 후 plan의 exit 0이 무변경이다. Exit 1은 오류, 2는 변경이 남았다는 뜻이다.
@@ -178,7 +178,7 @@ ACL root는 기존 정책을 import 블록으로 먼저 state에 가져온다. �
 change의 diff가 저장소 밖 사본(현재 정책)에서 `policy.hujson`으로 바뀌는 내용이다. diff를 읽고 apply한다.
 `overwrite_existing_content`는 diff 없이 덮어써 쓰지 않는다.
 ACL 적용 후 원격 SSH 성공과 `tag:k8s-operator` 선언을 확인한다. operator OAuth client는 이 태그가 tagOwners에 있으면 발급할 수 있다.
-DNS 목표 전환은 AdGuard가 NUC의 tailnet 주소에서 TCP/UDP 53으로 응답하는 것을 확인한 뒤 한다.
+DNS 목표 전환은 AdGuard가 호스트의 tailnet 주소에서 TCP/UDP 53으로 응답하는 것을 확인한 뒤 한다.
 
 ### U02: R2 잠금 동시 실행
 
@@ -198,7 +198,7 @@ Lock ID와 성공/오류·종료 코드만 비공개 실행 기록에 남기고,
 ## 4. Tailscale DNS: 현재 값 인수 후 목표 전환
 
 이 root는 DNS 전체를 소유한다. 다른 `tailscale_dns_*` 자원과 함께 관리하지 않는다.
-NUC가 없거나 재등록 중이면 실행하지 않는다. 재등록 후에는 태그가 `tag:nuc` 하나이고 키 만료가 꺼져 있는지 확인한다(D-11 (c)).
+호스트가 없거나 재등록 중이면 실행하지 않는다. 재등록 후에는 태그가 `tag:nuc` 하나이고 키 만료가 꺼져 있는지 확인한다(D-11 (c)).
 `prevent_destroy`는 선언이 남아 있을 때의 삭제를 막는다. root/리소스 선언을 지우는 방식으로 우회하지 않는다.
 
 ### (a) 현재 설정 그대로 import
@@ -249,7 +249,7 @@ CLI만으로 Override 상태를 확정하지 않는다. 콘솔에서 다음을 �
 ```
 
 사용자 split DNS와 search path가 **실제로 없으면** 각각 `[]`다.
-NUC는 정확히 1대, 태그 `tag:nuc` 하나, 키 만료 꺼짐, `100.`으로 시작하는 IPv4 1개여야 한다(D-11 (c)).
+호스트는 정확히 1대, 태그 `tag:nuc` 하나, 키 만료 꺼짐, `100.`으로 시작하는 IPv4 1개여야 한다(D-11 (c)).
 2026-10-20 adopt 때는 (a)라 기대 소유자 변수 `TF_VAR_nuc_expected_owner`를 썼다. (c) 적용 뒤 2026-10-21에 그 키를 Infisical에서 지웠다.
 IPv6가 주소 목록 첫 항목이어도 HCL은 IPv4만 고른다.
 
@@ -280,7 +280,7 @@ Apply가 다시 보여 주는 계획도 **import와 값이 그대로인 표시 �
 단계 (a)의 무변경 확인, U02 통과, AdGuard 준비와 승인 기록 후,
 **별도 PR에서** `dns_phase = "target"`으로 한 줄을 바꾼다.
 목표 선언은 이미 같은 파일에 있다:
-Override·MagicDNS 켬, NUC IPv4 + `94.140.14.14` + `94.140.15.15`,
+Override·MagicDNS 켬, 호스트 IPv4 + `94.140.14.14` + `94.140.15.15`,
 세 서버 모두 `use_with_exit_node = false`.
 전역 C-05 Cloudflare 4개는 이 교체로 제거한다.
 사용자 split DNS·search path는 인수 사본대로 보존하며, 별도 변경이 필요하면 별도 검토한다.
@@ -296,13 +296,13 @@ tailscale dns status --all
 
 Plan이 `0 to add, 1 to change, 0 to destroy`이고 의도한 전환인지 검토한다.
 값이 sensitive라 plan에서 nameserver 주소가 가려질 수 있다. 그래서 적용 후 exit 0과 함께
-`tailscale dns status --all`로 전역 서버 셋(NUC의 현재 Tailscale IPv4, AdGuard 공용 둘)과 Cloudflare 부재를 확인한다.
+`tailscale dns status --all`로 전역 서버 셋(호스트의 현재 Tailscale IPv4, AdGuard 공용 둘)과 Cloudflare 부재를 확인한다.
 
-**NUC 주소가 바뀌면 다시 apply한다.** 콘솔에서 NUC IPv4를 바꾸거나 NUC를 재등록하면
+**호스트 주소가 바뀌면 다시 apply한다.** 콘솔에서 호스트 IPv4를 바꾸거나 호스트를 재등록하면
 전역 nameserver가 옛 주소를 가리킨다. 공용 서버가 답해 이름은 계속 풀리지만 tailnet 기기의 AdGuard Home 경로만 끊긴다.
-NUC에서 `tailscale ip -4`의 주소가 `tailscale dns status --all`의 전역 서버에 있는지 보고, 없으면 이 root를 plan·apply한다.
-DNS 실환경 검증 U34는 시나리오 14의 집 Wi-Fi·셀룰러·NUC 장애 시험까지 거쳐 2026-10-21 통과로 기록했다(T08a 결과 절).
-NUC 자신은 `accept-dns=false`를 유지한다.
+호스트에서 `tailscale ip -4`의 주소가 `tailscale dns status --all`의 전역 서버에 있는지 보고, 없으면 이 root를 plan·apply한다.
+DNS 실환경 검증 U34는 시나리오 14의 집 Wi-Fi·셀룰러·호스트 장애 시험까지 거쳐 2026-10-21 통과로 기록했다(T08a 결과 절).
+호스트 자신은 `accept-dns=false`를 유지한다.
 
 **Provider 주의:** 설계는 v0.29.2를 정식이라고 적었지만,
 [고정 버전 소스의 Read](https://github.com/tailscale/terraform-provider-tailscale/blob/v0.29.2/tailscale/resource_dns_configuration.go)는
@@ -371,7 +371,7 @@ pre-commit run --files .tool-versions infra/README.md \
 현재 gitleaks pre-commit 훅은 파일 인수를 무시하고 staged diff만 검사한다.
 아직 stage하지 않은 작업은 별도로 `gitleaks dir infra --redact --config .gitleaks.toml`로 검사한다.
 Mock 시험은 v0.29.2의 `devices` 중첩 블록이 `override_data`로 채워지지 않아 채택하지 않았다.
-실제 NUC로 precondition 통과를 확인했다(U34, 2026-10-20 (a) 소유자, 2026-10-21 `tag:nuc`).
+실제 호스트로 precondition 통과를 확인했다(U34, 2026-10-20 (a) 소유자, 2026-10-21 `tag:nuc`).
 실패 쪽은 2026-10-21 `backend.tf`를 뺀 사본에서 plan만 해 확인했다(R2 state·잠금을 쓰지 않음).
 hostname을 없는 이름으로(0대), 기기 목록을 두 번 이어 붙여(2대), 기대 태그를 바꿔(태그 다름) 돌리면
 각각 해당 precondition 오류로 중단하고, 바꾸지 않은 대조 사본은 통과한다. 2대와 태그 다름은 식을 바꾼 흉내다.

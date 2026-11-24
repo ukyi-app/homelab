@@ -83,7 +83,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
-              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 호스트 주소, svclb 파드를 본다.
 
   - name: svclb 재시작 직후 새 IP 항목이 없으면 svclb 시작 시각을 기준으로 삼는다
     interval: 1m
@@ -110,7 +110,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
-              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 호스트 주소, svclb 파드를 본다.
 
   - name: svclb 파드가 없으면 발화한다
     interval: 1m
@@ -126,7 +126,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
-              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 호스트 주소, svclb 파드를 본다.
 
   - name: 리더가 없으면 이탈 경보 대신 리더 경보가 발화한다
     interval: 1m
@@ -170,7 +170,7 @@ tests:
         alertname: AdGuardTailnetQueriesMissing
         exp_alerts: []
 
-  # NUC 재부팅(시나리오 17): 파드 객체는 이름·시작 시각 그대로이고 샌드박스만 새로 만들어 IP가 바뀐다.
+  # 호스트 재부팅(시나리오 17): 파드 객체는 이름·시작 시각 그대로이고 샌드박스만 새로 만들어 IP가 바뀐다.
   # 파드 시작 시각만 보면 새 IP 항목이 파일에 쓰일 때까지 오경보가 난다. 컨테이너는 다시 시작하므로 그 시각이 기준이다.
   - name: 재부팅으로 같은 svclb 파드가 새 IP를 받으면 컨테이너 시작 시각을 기준으로 삼는다. 이탈은 여전히 울린다
     interval: 1m
@@ -201,7 +201,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
-              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 호스트 주소, svclb 파드를 본다.
 
   # 파일이 멈추면 첫째 조건의 두 값이 함께 멈춘다. 벽시계 6시간 안전망이 잡는다.
   - name: 파일이 멈춰도 벽시계 6시간이 지나면 발화한다
@@ -228,4 +228,4 @@ tests:
               severity: critical
             exp_annotations:
               summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
-              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다.
+              description: 파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 호스트 주소, svclb 파드를 본다.

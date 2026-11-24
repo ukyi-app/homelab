@@ -29,7 +29,7 @@ groups:
       # svclb가 옛 IP를 다시 받아도 그 옛 항목으로 비교하지 않는다. svclb 파드 정보가 아예 없으면 0이라 울린다(svclb가 없으면
       # tailnet 경로도 없다). 리더가 없으면 AdGuardQuerylogReaderDown이 본다.
       #
-      # 컨테이너 시작 시각이 필요한 이유: NUC 재부팅 뒤에는 파드 객체가 그대로라 kube_pod_start_time이 재부팅 전 값이다.
+      # 컨테이너 시작 시각이 필요한 이유: 호스트 재부팅 뒤에는 파드 객체가 그대로라 kube_pod_start_time이 재부팅 전 값이다.
       # 샌드박스만 새로 만들어 IP가 바뀌고 컨테이너는 다시 시작한다. 파드 시작만 보면 새 IP 항목이 파일에 쓰일 때까지
       # (시나리오 17에서 약 2분) 오경보가 난다. 파드 시작 시각은 컨테이너 지표가 없을 때(실행 중이 아님)의 기준으로 남긴다.
       # 함정: svclb 컨테이너가 계속 재시작하면 기준이 계속 밀려 이 경보가 늦는다. 그 경우는 KubePodCrashLooping(5분)이 본다.
@@ -73,7 +73,7 @@ groups:
           severity: critical
         annotations:
           summary: AdGuard Home 질의 로그에 1시간 넘게 tailnet 출처 질의가 없다. tailnet DNS에서 빠졌을 수 있다
-          description: "파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 NUC 주소, svclb 파드를 본다."
+          description: "파일 기준 1시간 또는 벽시계 기준 6시간. Tailscale 기기는 공용 서버로 해석 중이라 증상이 없다. ACL의 tag:nuc:53 규칙, Tailscale DNS 설정의 호스트 주소, svclb 파드를 본다."
 
       - alert: AdGuardQuerylogReaderDown
         expr: absent(up{job="adguard-querylog"} == 1)

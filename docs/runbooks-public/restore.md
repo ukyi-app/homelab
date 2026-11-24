@@ -1,4 +1,4 @@
-# 복원: 영속 Valkey, 한 앱의 DB, 빈 NUC
+# 복원: 영속 Valkey, 한 앱의 DB, 빈 호스트
 
 데이터를 되돌리는 순서다. 근거는 설계 [C.5.6](../plans/2026-10-17-homelab-rebuild/platform/design.md)(Valkey), C.5.7(공유 PostgreSQL에서 한 앱만 복원), C.6.4(최초 연결과 재해 복구)다. CLI(`homelab db restore` 등, T12)가 생기기 전에는 사람이 이 문서를 따른다.
 
@@ -1080,7 +1080,7 @@ YAML
 - 원장 PVC `deletion-ledger`에 복원 라벨(`homelab.ukyi.app/restore`)을 붙이지 않는다. 6단계 정리가 그 라벨로 PVC를 지운다. 원장 PV·PVC는 이 절차의 정리 대상이 아니다.
 - 원장 파일 내용(기억 ID·시각)을 출력하거나 기록에 옮기지 않는다. 아래 확인은 개수·상태만 본다.
 
-**3단계(앱 멈춤) 뒤, 4단계 전에 원장을 본다.** 멈춤으로 원장을 쓰는 파드가 없다. NUC에서 SSD 마운트와 원장 파일·표식이 계약 v1인지 본다. 원장 항목이 하나라도 FAIL이면 DB를 지우기 전에 멈추고 4절로 간다.
+**3단계(앱 멈춤) 뒤, 4단계 전에 원장을 본다.** 멈춤으로 원장을 쓰는 파드가 없다. 호스트에서 SSD 마운트와 원장 파일·표식이 계약 v1인지 본다. 원장 항목이 하나라도 FAIL이면 DB를 지우기 전에 멈추고 4절로 간다.
 
 ```bash
 sudo -v && host/verify.sh --cluster prod     # 삭제 원장 SSD 항목이 모두 ok여야 한다(파일 모드·표식은 sudo 자격이 있어야 본다)
@@ -1126,7 +1126,7 @@ sudo -v && host/verify.sh --cluster prod     # 삭제 원장 SSD 항목이 모�
 3. **확인:** 재개 뒤 봇 로그의 `external_task_fence`를 본다. 첫 줄의 `fenced`가 닫힌 연결 수이고, 다시 기동하면 0이다. owner가 `/attach-list`로 스레드마다 활성 연결이 없는지 본다.
 4. **다시 연결:** 닫힌 연결은 되살리지 않는다. owner가 기기마다 `/attach`로 새 연결을 만들고 helper 설정(연결 ID, seed)을 바꾼다.
 
-**전체 복구는 다르다.** 3절 빈 NUC 복구는 CNPG 물리 복구라 timeline이 올라가 봇이 스스로 모든 연결을 닫는다. 세대를 올리지 않아도 되고, 4단계의 다시 연결만 한다(Postgres·봇 시험 기준, 이 절차로는 실측 전).
+**전체 복구는 다르다.** 3절 빈 호스트 복구는 CNPG 물리 복구라 timeline이 올라가 봇이 스스로 모든 연결을 닫는다. 세대를 올리지 않아도 되고, 4단계의 다시 연결만 한다(Postgres·봇 시험 기준, 이 절차로는 실측 전).
 
 **VM 복원 시험에서는 올리지 않는다.** `apps/homelab-bot/values.yaml`은 운영과 VM이 함께 읽어, VM 시험 PR에 넣으면 운영 봇이 재기동하며 운영 연결이 모두 닫힌다. 같은 이유로 VM kubeconfig로 `homelab db restore homelab-bot`을 돌리지 않는다. 앱 멈춤 PR부터 운영 봇을 멈추고 재개 PR이 세대를 올린다. VM에는 지킬 연결도 없다. `cluster.r08.enabled`가 꺼져 수신 경로가 없고 봇 파드도 Pending이다(4절 머리).
 
@@ -1171,7 +1171,7 @@ kubectl -n database get cluster pg -o jsonpath='{.metadata.annotations.homelab\.
 - 기록은 CLI가 쓴 것이다. `database` ns에 쓰기 권한이 있는 사람이 손으로 바꿀 수 있고, 봇은 모양·`cluster` uid·미래 시각만 거른다. 그래서 브리핑은 "CLI 기록 기준"이라고 적는다. 손으로 쓰지 않는다.
 - Ready 시간 초과처럼 중간에 멈춘 시도는 기록하지 않는다. 다음 `--abort`가 `aborted`로 남긴다. `missing_db`·`no_db`로 멈춘 시험은 `--abort`가 그 실패 기록을 덮지 않아 이유가 남는다. 다만 `at`은 실패한 시각이고 정리한 시각이 아니다. 원인은 `--abort` 전에 남은 임시 Cluster에서 본다.
 - 이 런북을 손으로 따라 한 복원 시험은 기록을 남기지 않는다.
-- `pg`를 새로 만들면(빈 NUC 복구, 3절) 두 키도 없어진다. 봇은 다음 통과 전까지 "기록 없음"으로 본다.
+- `pg`를 새로 만들면(빈 호스트 복구, 3절) 두 키도 없어진다. 봇은 다음 통과 전까지 "기록 없음"으로 본다.
 - `at`은 CLI를 돌린 기기의 시계다.
 
 ## 2a. 악성 스키마 복원 시험 (로컬)
@@ -1226,15 +1226,15 @@ podman rm -f pgm
 - 3단계: replicas 0 + 완료된 `<앱>-migrate` 파드만 있으면 통과, replicas 1이거나 앱 라벨의 실행 중 파드가 있으면 멈춤.
 - 고치기 전 모양 `( set -e ... ) && touch`와 `! grep`은 실패를 찍은 뒤에도 다음 줄로 넘어갔다. `&&`·`||`의 왼쪽과 `!` 뒤에는 `set -e`가 듣지 않기 때문이다(0.1의 규칙).
 
-## 3. 빈 NUC 복구 (설계 C.6.4)
+## 3. 빈 호스트 복구 (설계 C.6.4)
 
 클러스터를 잃었을 때의 전체 순서는 설계 C.6.4 "복구 순서" 표다. 여기는 데이터에 해당하는 두 PR과 확인만 적는다.
 
-VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점은 단계마다 "VM 시험" 줄에 있다: 값 파일은 `values-vm.yaml`만 고치고, 운영 아카이브는 손으로 넣는 읽기 전용 자격(`r2-source-readonly`)으로만 읽는다. VM 블록은 NUC에서 VM kubeconfig(`~/.kube/homelab-vm.yaml`)로 돌고, 운영 kubeconfig로 새지 않게 블록마다 처음에 `KUBECONFIG`를 고정하고 `host/verify.sh --cluster vm --identity`로 대상을 확인한다.
+VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점은 단계마다 "VM 시험" 줄에 있다: 값 파일은 `values-vm.yaml`만 고치고, 운영 아카이브는 손으로 넣는 읽기 전용 자격(`r2-source-readonly`)으로만 읽는다. VM 블록은 호스트에서 VM kubeconfig(`~/.kube/homelab-vm.yaml`)로 돌고, 운영 kubeconfig로 새지 않게 블록마다 처음에 `KUBECONFIG`를 고정하고 `host/verify.sh --cluster vm --identity`로 대상을 확인한다.
 
 **복구 PR을 root apply보다 먼저 병합한다.** Git이 평상시 값(`initdb`)인 채 root를 apply하면 Argo CD가 빈 Cluster `pg`를 먼저 만들고, bootstrap은 초기화 때만 읽혀 나중에 Git을 고쳐도 떠 있는 클러스터는 바뀌지 않는다. Cluster에는 보호 주석이 있어 Argo CD가 지우지도 않는다.
 
-1. **복구 PR:** 실제 빈 NUC 복구는 `platform/root/values-prod.yaml`의 `cluster.cnpg`에서(VM 시험은 아래 VM 줄)
+1. **복구 PR:** 실제 빈 호스트 복구는 `platform/root/values-prod.yaml`의 `cluster.cnpg`에서(VM 시험은 아래 VM 줄)
    - `recoverySource.serverName`에 지금 Git의 `serverName`을 옮겨 적고,
    - `serverName`을 새 세대 `pg-<복구일 YYYYMMDD>`로 바꾼다.
    - 영속 Valkey가 있는 앱마다 `data/<앱>/values.yaml`에 `valkey.running: false`, `apps/<앱>/values.yaml`에 `suspended: true`(앱 차트 1.1.0 이상)를 같은 PR에 넣는다. root apply가 ApplicationSet을 바로 동기화하므로, 넣지 않으면 빈 PVC 위의 Valkey와 앱이 먼저 떠 빈 큐로 돌거나 새로 쓴 데이터가 RDB 복원에서 사라진다.
@@ -1259,12 +1259,12 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
 
    렌더 결과는 `bootstrap.recovery` + 원본 전용 ObjectStore `r2-source`(옛 serverName) + 아카이브 plugin(새 serverName)이다. 새 serverName을 빠뜨리면 렌더가 실패한다(같은 prefix에 두 세대가 섞이면 되돌릴 수 없다). `cnpg.io/skipEmptyWalArchiveCheck` 주석은 쓰지 않는다.
 
-2. **분기: 실제 빈 NUC 복구 / VM 시험(시나리오 13)**
-   - 실제 빈 NUC 복구: Tailscale 콘솔에서 잃은 클러스터의 operator·프록시 기기(`tag:k8s-operator`, `tag:k8s`, `tag:k8s-go`, `tag:k8s-r08`)를 지운다. `tag:k8s-r08` 기기가 남으면 새 프록시 이름에 `-1`이 붙어 helper 주소가 어긋난다. OS를 다시 깔았으면 `tailscale up` 전에 옛 NUC 호스트 기기도 지운다(남아 있으면 새 이름에 `-1`이 붙고 되돌아가지 않는다).
+2. **분기: 실제 빈 호스트 복구 / VM 시험(시나리오 13)**
+   - 실제 빈 호스트 복구: Tailscale 콘솔에서 잃은 클러스터의 operator·프록시 기기(`tag:k8s-operator`, `tag:k8s`, `tag:k8s-go`, `tag:k8s-r08`)를 지운다. `tag:k8s-r08` 기기가 남으면 새 프록시 이름에 `-1`이 붙어 helper 주소가 어긋난다. OS를 다시 깔았으면 `tailscale up` 전에 옛 호스트 기기도 지운다(남아 있으면 새 이름에 `-1`이 붙고 되돌아가지 않는다).
    - VM 시험: 이 단계를 건너뛴다. 그 기기들은 살아 있는 운영 클러스터의 것이다. 시험 뒤 `vm-*` 기기만 지운다.
 3. [bootstrap.md](bootstrap.md) 순서로 host → k3s → Argo CD → ESO 부트스트랩 Secret → root apply.
 
-   **실제 빈 NUC 복구에서 삭제 원장 SSD가 살아 있으면** host 단계(bootstrap.md 1절 사슬의 `--bulk-ssd`)가 포맷 없이 다시 마운트하고 기존 원장을 그대로 둔다. 확인과 봇 재개 순서는 4.1이다. VM은 SSD가 없어 그 단계를 건너뛴다.
+   **실제 빈 호스트 복구에서 삭제 원장 SSD가 살아 있으면** host 단계(bootstrap.md 1절 사슬의 `--bulk-ssd`)가 포맷 없이 다시 마운트하고 기존 원장을 그대로 둔다. 확인과 봇 재개 순서는 4.1이다. VM은 SSD가 없어 그 단계를 건너뛴다.
 
    **VM 시험: root apply 전에 복구 원본 자격을 넣고 쓰기 거부를 본다.** bootstrap.md 2.2 vm 분기 3단계와 같은 블록이다(한쪽을 고치면 다른 쪽도). root가 먼저 뜨면 cnpg-cluster(wave -3)가 자격 없는 `r2-source`로 복구를 시작하므로 root apply보다 앞에 둔다. `database` ns는 namespaces(wave -9)가 나중에 PSA 라벨을 붙여 넘겨받는다. 값은 복구 자산의 읽기 전용 토큰에서 `export`로 넣고 출력하지 않는다. 명령행 인자로 넘기지 않는다(`ps`·`/proc`로 보인다).
 
@@ -1553,8 +1553,8 @@ VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점�
 
 **블록 공통.**
 
-- 블록은 NUC 작업 사본의 뿌리에서 돌린다(`host/verify.sh`와 `tools/ci/render.ts`를 상대 경로로 부른다). age는 `.tool-versions`의 버전이다.
-- 먼저 `export U40_DIR=<저장소 밖 0700 폴더>`를 한 번 한다(NUC의 상태 폴더 아래 등. 실제 경로는 기록에 남기지 않는다). 지도, 내보내기, 스냅숏, 기대 해시가 여기 생긴다. 지도에는 값이 없다. 스냅숏의 UID·해시는 실행 기록에만 두고 저장소에 옮기지 않는다(값 공간이 작은 키는 해시로 거꾸로 찾을 수 있다).
+- 블록은 호스트 작업 사본의 뿌리에서 돌린다(`host/verify.sh`와 `tools/ci/render.ts`를 상대 경로로 부른다). age는 `.tool-versions`의 버전이다.
+- 먼저 `export U40_DIR=<저장소 밖 0700 폴더>`를 한 번 한다(호스트의 상태 폴더 아래 등. 실제 경로는 기록에 남기지 않는다). 지도, 내보내기, 스냅숏, 기대 해시가 여기 생긴다. 지도에는 값이 없다. 스냅숏의 UID·해시는 실행 기록에만 두고 저장소에 옮기지 않는다(값 공간이 작은 키는 해시로 거꾸로 찾을 수 있다).
 - `CLUSTER`는 `prod`(실제 복구) 또는 `vm`(VM 시험)이다. 클러스터에 쓰는 블록은 이 값으로 kubeconfig(`~/.kube/homelab.yaml` 또는 `~/.kube/homelab-vm.yaml`, bootstrap.md 1절)를 고정하고 `host/verify.sh --cluster "$CLUSTER" --identity`로 대상을 본다. **2026-10-29에 실행한 것은 `vm` 경로다.** `prod` 경로는 같은 블록의 값만 바꾼 것이고 실행하지 않았다. 살아 있는 운영에서 잘못 돌리면 손 Secret 블록은 Owner 대상이 이미 있어 쓰기 전에 멈춘다.
 - 값은 파이프 안에만 있다. 평문 파일·명령행 인자·화면 출력이 없다. jq·kubectl 오류 문구는 값 조각을 담을 수 있어 버리고 종료 코드로만 멈춘다. 디버깅하려고 이 리다이렉트를 빼지 않는다. 필요하면 키 이름만 내는 jq로 따로 본다.
 
@@ -1607,7 +1607,7 @@ EOF
 
 **2) 암호화 내보내기.** 장애 전에 있어야 한다(복구 자산 "Infisical 암호화 내보내기", [recovery-assets.md](recovery-assets.md)). 형식은 `{project, env, at, secrets: {"<Infisical 경로>": "<값>"}}` JSON을 age 암호문구로 암호화한 파일 하나다. 아래 블록이 지도의 키만 담아 `$U40_DIR/<프로젝트>-export.age`로 만든다. 4)의 손 Secret 블록은 지도의 경로만 읽으므로 같은 형식에 키가 더 있는 내보내기도 그대로 쓴다. 실제 장애에서는 복구 자산의 최신 사본을 `$U40_DIR/homelab-export.age`로 둔다.
 
-- 사람이 `infisical login`한 NUC에서 돌린다(Infisical CLI는 NUC의 mise에만 있다). 암호문구는 터미널로만 넣는다(만들 때 두 번, 이름 대조 때 한 번). **암호문구는 비워 두지 않는다.** 비우면 age가 만든 암호문구를 화면에 찍는다.
+- 사람이 `infisical login`한 호스트에서 돌린다(Infisical CLI는 호스트의 mise에만 있다). 암호문구는 터미널로만 넣는다(만들 때 두 번, 이름 대조 때 한 번). **암호문구는 비워 두지 않는다.** 비우면 age가 만든 암호문구를 화면에 찍는다.
 - 암호문구는 비밀번호 관리자에 둔다. 암호화된 메모도 된다. 시험용이면 시험 뒤 지운다.
 - 로그인 사용자의 Infisical CLI 0.45.8이 읽은 값을 `~/.infisical/secrets-backup/`에 남기는 문제는 bootstrap.md 2.2 vm 1단계와 같은 잠금으로 막는다.
 - **H2(봇 작업자 자격) 전에 뜬 내보내기는 4)에서 못 쓴다.** sandbox가 실제 작업자로 바뀐 뒤(T16b S11)부터 지도의 sandbox 항목은 `sandbox/worker-credential-claude-subscription`이고 키는 `/apps/homelab-bot/worker/CLAUDE_CODE_OAUTH_TOKEN`이다(전에는 `sandbox/worker-seed`의 시험 키 `WORKER_PROBE`). 그 전 내보내기에는 이 경로가 없어 4)의 손 Secret 블록이 `missing`으로 멈춘다. H2 뒤 운영(`homelab`/`prod`)과 VM(`homelab-dev`/`dev`) 내보내기를 이 블록으로 새로 뜬다. Infisical에 키가 아직 없으면 이 블록도 `missing`으로 멈춘다. VM의 값은 실제 토큰이 아니라 작업자가 받는 모양의 가짜 문자열이다(`platform/root/templates/sandbox.yaml` 머리 주석). 실행기 프로필(`platform/sandbox/values.yaml`의 `worker.profile`)을 바꾸면 이 Secret 이름과 키가 함께 바뀌므로 그 뒤에도 내보내기를 새로 뜬다.
@@ -1656,7 +1656,7 @@ EOF
 **3) Argo CD와 ESO 부트스트랩 Secret.** 3절 3단계 순서(host → k3s → Argo CD → ESO 부트스트랩 Secret)대로 하고 root apply 앞에서 멈춘다. 장애 중이라 Store는 아직 없지만 부트스트랩 Secret은 켜는 PR 때 필요하니 지금 넣는다(값은 복구 자산에서 오고 Infisical이 없어도 된다).
 
 - VM 시험: 3절 3단계의 복구 원본 자격(`r2-source-readonly`)과 쓰기 거부 시험도 root apply 전이다. 2026-10-29 순서는 Argo CD → ESO 부트스트랩 Secret → 복구 원본 자격 → 쓰기 거부 → 4) 손 Secret → 손 Secret 점검 → root apply였다.
-- VM 시험: ESO 부트스트랩 Secret을 넣기 전에 NUC에서 그 자격으로 로그인해 볼 수 있다(bootstrap.md 2.2 vm 2단계의 선택 단계). 막는 것은 VM 클러스터 DNS뿐이라 NUC에서는 Infisical에 닿는다.
+- VM 시험: ESO 부트스트랩 Secret을 넣기 전에 호스트에서 그 자격으로 로그인해 볼 수 있다(bootstrap.md 2.2 vm 2단계의 선택 단계). 막는 것은 VM 클러스터 DNS뿐이라 호스트에서는 Infisical에 닿는다.
 
 **4) 손 Secret(root apply 전).** `argocd-secret`이 있어야 두 키를 합칠 수 있어 Argo CD 설치 뒤, 첫 소비자보다 먼저 있어야 해서 root apply 전이다. 대상 ns는 이 블록이 먼저 만든다. root의 namespaces(wave -9)가 나중에 PSA 라벨을 붙여 넘겨받는다(3절 3단계의 `database`와 같은 방식). root apply 뒤에 넣으면 첫 소비자(wave -5: cloudflared·tailscale·adguard)가 `CreateContainerConfigError`·볼륨 대기에 들고, Deployment는 `progressDeadlineSeconds`(이 저장소는 모두 기본 600초) 뒤 Degraded가 된다. 그때 root가 sync를 실패로 끝내고 재시도하는지는 확인하지 않았다. 먼저 넣으면 이 경합이 없다.
 
@@ -2011,7 +2011,7 @@ EOF
 - 원장 파일·표식을 손으로 고치거나 만들지 않는다(4.4의 빈 파일 하나 지우기만 예외). 권한을 고치려고 chown·chmod하지 않는다. 원인(예: 파드 fsGroup)을 모른 채 고치면 같은 사고를 덮는다.
 - **VM:** VM에는 SSD가 없어 원장 PV·StorageClass가 없다(`values-vm.yaml` `deletionLedger: {}`). 공용 `data/homelab-bot`의 PVC와 봇 파드는 VM에서 Pending이고 `homelab-bot`·`homelab-bot-data` Application은 Progressing이다. 의도된 상태다. 원장 경보는 원장 PV가 있는 클러스터에서만 SSD를 기대해 VM에서 울리지 않는다. VM에서 봇을 띄우려면 VM 디스크에 합성 원장을 준비하고 `values-vm.yaml`에 노드·경로를 넣는다(그 준비 절차는 아직 없다).
 
-### 4.1 빈 NUC 복구에서 SSD가 살아 있을 때
+### 4.1 빈 호스트 복구에서 SSD가 살아 있을 때
 
 1. **복구 PR에 봇 멈춤.** 3절 1단계의 복구 PR에 `apps/homelab-bot/values.yaml`의 `suspended: true`를 넣는다. root apply 뒤 원장을 확인하기 전에 봇이 원장을 열지 않게 한다.
 2. **SSD 다시 마운트(포맷 없이).** host 단계에서 사람이 돌린다. bootstrap.md 1절 사슬에 이미 있다.
@@ -2022,7 +2022,7 @@ EOF
    sudo -v && host/verify.sh --cluster prod             # 삭제 원장 SSD 항목이 모두 ok
    ```
 
-   - 출력에 "원장이 이미 있다. 내용을 그대로 둔다"가 나와야 한다. 새 NUC에서 장치 번호가 바뀌어도 라벨로 찾는다.
+   - 출력에 "원장이 이미 있다. 내용을 그대로 둔다"가 나와야 한다. 새 호스트에서 장치 번호가 바뀌어도 라벨로 찾는다.
    - **"첫 초기화"가 나오면 봇을 재개하지 않는다.** 살아 있어야 할 원장 디렉터리가 비어 있었다는 뜻이다(다른 디스크·잘못된 장치). 복구한 DB에 원장 세대 행이 없을 때(봇이 원장을 연 적이 없음, 4.4 1의 조회)만 정상으로 보고 4단계로 간다. 행이 있으면 4.2의 판단으로 간다. 새로 생긴 빈 원장은 그대로 둔다.
    - 설치기가 멈추면(라벨 장치 0개·2개, ext4 아님, 루트 쪽 `/mnt/bulk` 잔여물, 원장 일부 없음) 그 메시지대로 사람이 확인한다. `mkfs`·`tune2fs -L`·`wipefs`는 치지 않는다. 원장 일부 없음은 4.4다.
 3. **클러스터 객체.** root apply 뒤 Argo CD가 StorageClass·PV(`bot-slot`)와 PVC(`homelab-bot-data`)를 다시 만든다. Kubernetes UID는 새것이고 원장 경로는 같다. PV의 노드 고정 값은 `values-prod.yaml`의 `deletionLedger.nodeName`(= `host/clusters/prod.env`의 `NODE_NAME`, ci가 대조)이라 k3s 노드 이름이 이 값이어야 봇 파드가 스케줄된다.
@@ -2039,7 +2039,7 @@ EOF
 
 ### 4.2 SSD를 잃었을 때 (받아들인 위험)
 
-NUC 본체와 함께, 또는 SSD만 고장 나 원장을 되살릴 수 없을 때다. 원장 사본은 따로 없다(사용자 결정 2026-11-02). R2에서 돌아온 DB에는 그 뒤 지운 기억 행이 있을 수 있고, 새 원장에는 그 삭제가 없어 **지운 기억이 되살아날 수 있다.** 사용자가 받아들인 위험이다. 그래도 조용히 넘어가지 않는다.
+호스트 본체와 함께, 또는 SSD만 고장 나 원장을 되살릴 수 없을 때다. 원장 사본은 따로 없다(사용자 결정 2026-11-02). R2에서 돌아온 DB에는 그 뒤 지운 기억 행이 있을 수 있고, 새 원장에는 그 삭제가 없어 **지운 기억이 되살아날 수 있다.** 사용자가 받아들인 위험이다. 그래도 조용히 넘어가지 않는다.
 
 - **증상:** `install.sh --bulk-ssd`가 라벨 장치 0개로 멈춤, `HomelabBotLedgerDiskNotMounted`, 봇 원장 `failed`(사유 `missing`).
 - **기본은 그대로 멈춤·경보다.** 봇은 Ready이고 기억 경로만 닫혀 있다. 빈 원장을 만들어 경보를 끄지 않는다.
