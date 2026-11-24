@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 대상 supervisor의 네임스페이스 olive-control에 ResourceQuota olive-limits가 없다
+# 감독 네임스페이스의 한도만 뺐다. 감독 Deployment는 그대로라 감독 분기만 보면 지나간다.
+patch:
+  - in: chart
+    select: {kind: ResourceQuota, namespace: olive-control, name: olive-limits}
+    drop: true

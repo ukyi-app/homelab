@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: restartPolicy("Always")를 두지 않는다(olive-init
+# 대리 설치 init에 restartPolicy: Always를 줬다. 상시 실행 init이라 실효 limits가 1500m/2304Mi가 되어 olive-limits(1000m/2048Mi)에 걸린다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set: {restartPolicy: Always}

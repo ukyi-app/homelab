@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 안의 대리 [/opt/olive-agent/olive-agent] 하나가 아니다
+# 역할 컨테이너의 명령을 셸로 바꿨다. 대리가 PID 1이 아니라 남은 프로세스를 세고 거둘 수 없다(D-102).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set: {command: ["/bin/sh", "-c", "/opt/olive-agent/olive-agent"]}

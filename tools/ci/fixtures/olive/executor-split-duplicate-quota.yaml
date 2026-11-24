@@ -1,0 +1,12 @@
+# expect: fail
+# rule: olive-executor-split
+# match: ResourceQuota olive-reader/olive-limits가 같은 렌더에 2개다
+# 읽기 네임스페이스에 같은 이름의 한도를 하나 더 냈다(CPU 999m). CI는 첫 문서를, Argo CD는 마지막 문서를 적용해 서로 다른 한도를 본다.
+patch:
+  - in: chart
+    add:
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata: {name: olive-limits, namespace: olive-reader}
+      spec:
+        hard: {limits.cpu: 999m, limits.memory: 2048Mi}

@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-targets
+# match: roles는 kind executor인 줄에만 둔다
+# 감독 줄에 roles를 적었다. 감독은 계약 역할을 맡지 않고 이 칸을 읽는 곳도 없다.
+patch:
+  - in: targets
+    select: {id: supervisor}
+    set: {roles: [diagnosis]}

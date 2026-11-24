@@ -1,0 +1,12 @@
+# expect: fail
+# rule: olive-executor-split
+# match: securityContext.readOnlyRootFilesystem(없음)가 표의 값(true)과 다르다(role)
+# 역할 컨테이너의 보안 문맥에서 readOnlyRootFilesystem을 뺐다. 모델이 이미지 루트에 쓸 수 있다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          securityContext: {runAsUser: 10002, runAsGroup: 10002, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}

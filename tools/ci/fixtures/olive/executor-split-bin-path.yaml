@@ -1,0 +1,25 @@
+# expect: fail
+# rule: olive-executor-split
+# match: /review-bin
+# 양쪽 agent-bin 마운트와 역할 명령을 함께 /review-bin으로 옮겼다. 서로는 맞지만 설치기는 고정 경로 /opt/olive-agent에 쓰므로
+# 그 경로에 볼륨이 없고 역할 컨테이너가 찾는 대리도 없다. 세 자리(init 마운트, 역할 마운트, 역할 명령)가 각각 걸린다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /review-bin}
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          command: [/review-bin/olive-agent]
+          volumeMounts:
+            - {name: agent-bin, mountPath: /review-bin, readOnly: true}
+            - {name: agent-link, mountPath: /run/olive/agent, readOnly: true}
+            - {name: role-tmp, mountPath: /tmp}

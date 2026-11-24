@@ -1,0 +1,14 @@
+# expect: fail
+# rule: olive-executor-split
+# match: trust을 olive-init에 붙이지 않는다(표 밖의 볼륨이다
+# 대리 설치 init에 신뢰 묶음 ConfigMap을 읽기 전용으로 더 붙였다. init이 붙이는 것은 agent-bin 하나다(볼륨 종류 금지 목록만 보면 놓친다).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent}
+            - {name: trust, mountPath: /review-public-trust, readOnly: true}

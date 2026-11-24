@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 대리와 실행기는 같은 판이어야 한다
+# 대리 설치 init의 olive 이미지를 다른 digest로 바꿨다. 대리와 실행기의 링크 계약이 다른 커밋에서 온다(D-103).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set: {image: "ghcr.io/ukyi-app/olive@sha256:2222222222222222222222222222222222222222222222222222222222222222"}

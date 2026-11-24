@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 역할 컨테이너에 livenessProbe를 두지 않는다
+# 역할 컨테이너에 exec 프로브를 넣었다. kubelet이 모델이 도는 컨테이너 안에서 명령을 돌린다(D-74).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set: {livenessProbe: {exec: {command: ["true"]}}}

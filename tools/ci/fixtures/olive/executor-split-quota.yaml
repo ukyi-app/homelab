@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: ResourceQuota limits.memory
+# 진단 네임스페이스의 한도 메모리를 파드 실효 limits(제어+역할 2048Mi)의 두 배로 올렸다. 두 번째 파드가 들어갈 자리가 생긴다.
+patch:
+  - in: chart
+    select: {kind: ResourceQuota, namespace: olive-diagnosis, name: olive-limits}
+    set:
+      spec.hard: {limits.cpu: "1", limits.memory: 4Gi}

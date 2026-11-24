@@ -1,0 +1,27 @@
+# expect: fail
+# rule: olive-executor-split
+# match: OLIVE_AGENT_SOCKET(["/tmp/agent.sock"])이 표의 /run/olive/agent/agent.sock 하나가 아니다
+# 두 컨테이너의 소켓을 같은 /tmp 경로로 바꿨다. 값은 같아도 /tmp는 컨테이너마다 다른 볼륨이라 대리가 제어의 소켓을 보지 못한다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          env:
+            - {name: OLIVE_AGENT_SOCKET, value: /tmp/agent.sock}
+            - {name: BUN_OPTIONS, value: ""}
+            - {name: BUN_BE_BUN, value: ""}
+            - {name: LD_PRELOAD, value: ""}
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set:
+          env:
+            - {name: OLIVE_ROLE, value: isolated_reader}
+            - {name: OLIVE_SUPERVISOR_URI, value: "spiffe://olive.internal/ns/olive-control/supervisor"}
+            - {name: OLIVE_STORE_DIR, value: /var/lib/olive-executor/store}
+            - {name: OLIVE_AGENT_SOCKET, value: /tmp/agent.sock}

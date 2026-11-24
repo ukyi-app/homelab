@@ -1,0 +1,12 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 파드 구성이 일반 컨테이너 executor·role
+# 진단 실행기 파드 선언에 임시 컨테이너를 넣었다. 세 번째 컨테이너는 분할 검사가 보는 둘 밖이다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    set:
+      spec.template.spec.ephemeralContainers:
+        - name: debug
+          image: x
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}

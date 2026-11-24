@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 파드 단위 resources
+# 읽기 실행기 파드에 파드 단위 CPU 한도 1500m만 더했다. 컨테이너 합(1000m)과 quota는 그대로지만 쿠버네티스는 파드 한도를 실효 limits로 써서 quota를 넘는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    set:
+      spec.template.spec.resources: {limits: {cpu: 1500m}}

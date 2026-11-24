@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-targets
+# match: role은 roles 안의 계약 v1 역할 이름 하나다
+# also: olive-executor-split
+# 진단 실행기에서 배정한 역할(role)을 뺐다. 차트가 OLIVE_ROLE과 역할 이미지를 고를 값이 없다.
+patch:
+  - in: targets
+    select: {id: diagnosis}
+    unset: [role]

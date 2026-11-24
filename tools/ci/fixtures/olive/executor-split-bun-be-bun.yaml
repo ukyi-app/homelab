@@ -1,0 +1,16 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 역할 컨테이너 env에 BUN_BE_BUN이 빈 값으로 한 번 있지 않다
+# 역할 컨테이너 env의 BUN_BE_BUN을 1로 바꿨다. 대리 대신 내장 bun이 돌아 hello가 오지 않는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          env:
+            - {name: OLIVE_AGENT_SOCKET, value: /run/olive/agent/agent.sock}
+            - {name: BUN_OPTIONS, value: ""}
+            - {name: BUN_BE_BUN, value: "1"}
+            - {name: LD_PRELOAD, value: ""}

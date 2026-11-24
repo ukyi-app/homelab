@@ -1,0 +1,15 @@
+# expect: fail
+# rule: olive-executor-split
+# match: agent-link 마운트에 subPathExpr("review-dir")를 두지 않는다(role
+# 역할 컨테이너의 agent-link 마운트에 subPathExpr를 더했다. 경로 문자열은 같아도 폴더 안의 다른 디렉터리라 제어의 소켓을 보지 못한다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent, readOnly: true}
+            - {name: agent-link, mountPath: /run/olive/agent, readOnly: true, subPathExpr: review-dir}
+            - {name: role-tmp, mountPath: /tmp}

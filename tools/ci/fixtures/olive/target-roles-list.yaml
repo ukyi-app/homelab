@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-targets
+# match: roles는 계약 v1 역할 이름
+# 읽기 대상의 역할 목록(roles)에 대상 id(reader)를 더했다. 목록도 계약 v1의 역할 이름만 받는다(D-64). 배정한 역할(role)은 그대로라
+# 차트 렌더는 바뀌지 않는다.
+patch:
+  - in: targets
+    select: {id: reader}
+    set: {roles: [isolated_reader, reader]}

@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: shareProcessNamespace(false)를 두지 않는다. false는 PID 공간을 나누지 않지만 표에서는 이 필드를 생략한다
+# 진단 실행기 파드에 shareProcessNamespace: false를 적었다. 격리는 그대로지만 표는 필드 생략만 받는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    set:
+      spec.template.spec.shareProcessNamespace: false

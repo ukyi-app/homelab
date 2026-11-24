@@ -1,0 +1,7 @@
+# expect: pass
+# 읽기 대상이 맡을 수 있는 역할 목록(roles)에 리뷰 역할을 더했다. 한 대상에 여러 역할이 붙을 수 있어(D-64 등록표) 통과한다.
+# 이 실행기에 배정한 역할(role)은 그대로 하나다. 리뷰로 도는 실행기는 별도 실행기 승인 뒤에 생긴다.
+patch:
+  - in: targets
+    select: {id: reader}
+    set: {roles: [isolated_reader, pr_review]}

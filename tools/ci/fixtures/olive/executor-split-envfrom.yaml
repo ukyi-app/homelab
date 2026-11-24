@@ -1,0 +1,12 @@
+# expect: fail
+# rule: olive-executor-split
+# match: envFrom을 두지 않는다
+# 역할 컨테이너에 TLS Secret을 envFrom으로 넣었다. 볼륨이 없어도 키가 모델의 환경에 들어간다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          envFrom: [{secretRef: {name: olive-tls}}]

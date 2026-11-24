@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 가 대상 reader의 역할 isolated_reader 이미지
+# 읽기 실행기의 역할 컨테이너에 진단 역할의 이미지를 줬다. 대상과 역할 이미지의 대응이 어긋난다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set: {image: "example.invalid/olive-role-diagnosis@sha256:1111111111111111111111111111111111111111111111111111111111111111"}

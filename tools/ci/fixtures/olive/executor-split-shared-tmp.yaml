@@ -1,0 +1,16 @@
+# expect: fail
+# rule: olive-executor-split
+# match: tmp을 role에 붙이지 않는다(표 밖의 볼륨이다
+# 역할 컨테이너에 제어의 tmp 볼륨을 더 붙였다. 모델이 제어의 임시 파일을 읽거나 바꿀 수 있다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent, readOnly: true}
+            - {name: agent-link, mountPath: /run/olive/agent, readOnly: true}
+            - {name: role-tmp, mountPath: /tmp}
+            - {name: tmp, mountPath: /review-tmp}

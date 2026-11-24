@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 유효 모드 0440(십진 288)가 표의 0444가 아니다
+# 읽기 실행기의 TLS Secret 모드를 감독과 같은 0440으로 좁혔다. 실행기 파드에는 fsGroup이 없어 uid 65532가 키를 읽지 못한다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.volumes:
+        match: {name: tls}
+        set: {secret.defaultMode: 288}
