@@ -43,7 +43,7 @@
 | 저장소 | `ukyi-app/homelab`을 그대로 쓰고 내용을 교체. 옛 코드는 참고용으로만 읽는다(읽는 곳은 §3). 저장소 히스토리는 유지한다(D-03, 확정: `legacy` 태그 + 교체 커밋). rebuild → main은 squash 병합이라 옛 main은 새 main의 조상으로 남고, rebuild 중간 커밋은 PR 기록에 남는다(D-25) | 확정 (C-01). 병합 방식: D-25 확정(사용자 2026-10-18, T05) |
 | GitHub 요금제·공개 범위 | org `ukyi-app`은 Free 플랜, `homelab`은 public. Free에서 브랜치 보호·ruleset은 public 저장소에서만 동작한다. 앱 저장소는 public만 허용하고, 앱이 아닌 저장소는 공개하지 않는다 | 사실 (2026-10-17 실측). public 유지 확정 (D-23). 저장소 공개 정책: D-29 확정(사용자 2026-10-18) |
 | 데이터 | 옛 PostgreSQL·Valkey 데이터, R2 `homelab-pg-backups-prod`·`homelab-cache-backups-prod`·`homelab-media-prod`, files 서비스 데이터 **모두 폐기** | 확정 (C-02, C-03) |
-| 하드웨어 | 같은 NUC 한 대(`nuc-15-pro`, LAN `192.168.117.15`), k3s 새로 설치. 옛 클러스터와 동시에 돌릴 수 없어 구축 기간에는 홈랩 서비스가 멈춘다. 철거 방식은 OS 유지 + k3s 제거 + 호스트 정리다(설계 문서 F D-12) | 확정 (C-07 단일 서버. 철거 방식은 D-12 확정(사용자 2026-10-18, T05). 사실은 spec §1·§4.5) |
+| 하드웨어 | 같은 호스트 한 대(`nuc-15-pro`, LAN `192.168.117.15`), k3s 새로 설치. 옛 클러스터와 동시에 돌릴 수 없어 구축 기간에는 홈랩 서비스가 멈춘다. 철거 방식은 OS 유지 + k3s 제거 + 호스트 정리다(설계 문서 F D-12) | 확정 (C-07 단일 서버. 철거 방식은 D-12 확정(사용자 2026-10-18, T05). 사실은 spec §1·§4.5) |
 | 이어 쓰는 외부 자산 | Cloudflare zone(apex 도메인), Tailscale tailnet, R2 state 버킷 `homelab-tfstate`(새 state 키 접두 `v2/`), GitHub org `ukyi-app`, 저장소 `homelab-app-template`(내용 교체). healthchecks.io는 계정만 재사용하고 체크는 새로 만든다(옛 `homelab-watchdog`는 새 체크가 초록이 된 뒤 삭제). Telegram은 homelab 알림용 새 봇을 쓰고, 옛 봇·토큰은 `mac-uptime-guard`를 처리하는 T22까지 그대로 둔다. 나머지 옛 외부 자원은 새로 정의하고, 하나뿐인 설정(Tailscale ACL·DNS)은 덮어쓴다. zone 설정 9개는 새 Terraform으로 가져온다 | zone·tailnet·`homelab-tfstate`·나머지 처리: D-11 확정(사용자 2026-10-18, T05). `ukyi-app` org: 확정 (C-01). `homelab-app-template` 재사용: D-21 확정(사용자 2026-10-18, T05). healthchecks.io 계정 재사용·새 체크, Telegram 새 봇: D-10·D-11 확정(사용자 2026-10-18, T05) |
 | 시크릿 | 원본은 Infisical(§7). 값은 새로 발급해 Infisical에 등록하고, 옛 SOPS 파일과 SealedSecrets의 값은 가져오지 않는다. 옛 자격은 T06에서 폐기한다(옛 Telegram 봇 토큰은 T22, 옛 healthchecks ping URL은 T08b까지 보류). Kubernetes 전달 계층은 ESO v2.13.x다 | Infisical 원본: 확정 (C-07). 새로 발급·옛 값 미사용: D-20 확정(사용자 2026-10-18, T05). ESO: 확정(사용자 2026-10-18, T05) |
 | 첫 실제 앱 | 홈랩 Discord AI 봇. 봇 코드 저장소는 `ukyi-app/homelab-bot`(public)이고, 앱 이름도 `homelab-bot`이다. 봇 문서는 그 저장소의 `docs/ai-bot/prompts/`에 있는 `00-start.md`~`04-audit-handoff.md`(이 문서에서는 `00`~`04`)다. 2026-10-18에 봇 저장소 생성·하드닝 뒤 homelab `bot/`에서 PR로 옮겼다(T14). 봇 기능 설계는 범위 밖(§2) | 확정 (D-01). 봇 저장소 이름과 봇 문서 위치: D-13 확정(사용자 2026-10-18, T14) |
@@ -62,9 +62,9 @@
 
 1. **옛 저장소 GitHub Actions 비활성화.** 옛 `tf-reconcile`·`iac`는 Cloudflare root를 무인 apply해서, 손으로 바꾼 Cloudflare 설정을 옛 코드대로 되돌렸다(일정은 30분마다, 실측은 몇 시간 간격). GitHub·Tailscale root는 plan만 돌려 드리프트를 Telegram으로 알렸다. 자동 병합과 Renovate(Actions 일정으로 도는 self-hosted 방식) 등 다른 옛 자동화도 Actions 위에서 돌았다. 2026-10-17에 저장소 Actions를 비활성화해 모두 멈췄다(C-06). 되살릴 때는 `enabled=true`, `allowed_actions=all`이다. main을 교체하기 전에 되살리면 옛 자동화가 다시 돈다.
 2. **옛 코드를 `legacy` 태그로 보관.** 2026-10-17 기준 아직 만들지 않았다(T01). 완료 기준은 annotated `legacy` 태그가 가리키는 커밋(`legacy^{}`)이 동결 당시 main SHA(`2d2054a`)와 같은 것이다(spec AC-P1).
-3. **옛 클러스터 정리.** 옛 Argo CD는 이 저장소 main을 `prune`·`selfHeal` 자동 동기화로 따라가므로, main을 교체하기 전에 멈춰야 한다. root 앱이 Application과 ApplicationSet을 selfHeal로 소유해서, Application 단위로 auto-sync를 끄면 되돌려진다. 정지는 컨트롤러 축소(`argocd-application-controller`와 `argocd-applicationset-controller`를 0으로) 또는 k3s 제거로 한다(T06, 사람 작업). 2026-10-17 기준 옛 클러스터는 가동 중이다(NUC `nuc-15-pro`에서 k3s active). 그래서 새 작업은 `rebuild` 브랜치에 두고, main은 철거 뒤에 바꾼다. 철거 시점은 T05 결정 뒤, 부트스트랩 직전이다(D-02, 확정). 철거 방식은 OS 유지 + k3s 제거 + 호스트 정리다(D-12 확정(사용자 2026-10-18, T05), 설계 문서 F D-12).
+3. **옛 클러스터 정리.** 옛 Argo CD는 이 저장소 main을 `prune`·`selfHeal` 자동 동기화로 따라가므로, main을 교체하기 전에 멈춰야 한다. root 앱이 Application과 ApplicationSet을 selfHeal로 소유해서, Application 단위로 auto-sync를 끄면 되돌려진다. 정지는 컨트롤러 축소(`argocd-application-controller`와 `argocd-applicationset-controller`를 0으로) 또는 k3s 제거로 한다(T06, 사람 작업). 2026-10-17 기준 옛 클러스터는 가동 중이다(호스트 `nuc-15-pro`에서 k3s active). 그래서 새 작업은 `rebuild` 브랜치에 두고, main은 철거 뒤에 바꾼다. 철거 시점은 T05 결정 뒤, 부트스트랩 직전이다(D-02, 확정). 철거 방식은 OS 유지 + k3s 제거 + 호스트 정리다(D-12 확정(사용자 2026-10-18, T05), 설계 문서 F D-12).
 4. **브랜치 보호와 ruleset 정리.** 필수 검사 `gate`만이 아니라 main push 제한(writer App)과 writer 전용 ruleset 2개도 정리 대상이다. ruleset은 `bump-poll-writer-only`(`bump-poll/**`)와 `mutation-branches-writer-only`(`bump/**`·`create-app/**`·`create-database/**`·`create-cache/**`·`update-secrets/**`)다. main 교체 PR에서 `gate` 워크플로가 사라지면 그 검사는 끝없이 대기한다. 두 ruleset은 writer App만 우회할 수 있어서, writer App을 지우면 그 접두사 브랜치는 아무도 만들 수 없다. 새 CLI·CI가 옛 접두사를 다시 쓰면 push가 거부된다.
-5. **Tailscale DNS 폴백.** tailnet 전역 nameserver가 NUC의 Tailscale IP(AdGuard)뿐이고 Override DNS servers가 켜져 있으면, AdGuard가 없는 동안 Tailscale을 켠 기기는 이름 해석이 끊긴다. 2026-10-17에 Cloudflare Public DNS를 전역 nameserver에 손으로 추가했다(C-05). 이 설정은 옛 `infra/tailscale` 코드와 다르므로, 옛 tailscale root를 apply하면 폴백이 사라진다. 지금은 병렬 질의(§4 DNS) 때문에 Tailscale 기기의 광고 차단과 `*.home.ukyi.app` 내부 이름이 불안정하다. 철거 기간에는 감수한다. D-08 확정(사용자 2026-10-18)으로 T08a에서 전역 nameserver를 NUC(AdGuard Home)와 AdGuard 공용 DNS 2개로 바꾸고 C-05의 Cloudflare 항목을 지운다(§4 DNS).
+5. **Tailscale DNS 폴백.** tailnet 전역 nameserver가 호스트의 Tailscale IP(AdGuard)뿐이고 Override DNS servers가 켜져 있으면, AdGuard가 없는 동안 Tailscale을 켠 기기는 이름 해석이 끊긴다. 2026-10-17에 Cloudflare Public DNS를 전역 nameserver에 손으로 추가했다(C-05). 이 설정은 옛 `infra/tailscale` 코드와 다르므로, 옛 tailscale root를 apply하면 폴백이 사라진다. 지금은 병렬 질의(§4 DNS) 때문에 Tailscale 기기의 광고 차단과 `*.home.ukyi.app` 내부 이름이 불안정하다. 철거 기간에는 감수한다. D-08 확정(사용자 2026-10-18)으로 T08a에서 전역 nameserver를 호스트(AdGuard Home)와 AdGuard 공용 DNS 2개로 바꾸고 C-05의 Cloudflare 항목을 지운다(§4 DNS).
 6. **옛 Terraform state 처리.** 옛 github root의 `github_repository.homelab`과 `github_repository.app_template`(`homelab-app-template`) 둘 다 삭제 방지가 없어서, 그 root를 destroy하면 두 저장소가 지워진다. 옛 state에는 평문 자격도 들어 있다. state는 destroy 대신 폐기하거나 새 코드로 import한다. 새 root는 옛 state 키(`<root>/prod/terraform.tfstate`)를 쓰지 않는다(새 키 접두는 `v2/`, D-11). 같은 키를 쓰면 옛 state를 물려받아 plan이 옛 자원 삭제를 제안한다. GitHub 잔여는 옛 코드가 아니라 `gh api` 실측 목록(App, environment, webhook, ruleset, GHCR)을 기준으로 한다. webhook처럼 옛 코드에 선언되지 않은 설정도 있다. Cloudflare에 남은 터널·DNS·WAF·캐시 규칙은 새 Terraform에서 import하거나 수동 삭제해야 이름·phase 충돌이 없다(D-11 확정(사용자 2026-10-18, T05): E1에서 삭제하고 E4a에서 새로 정의). `homelab-pg-backups-prod`와 `homelab-media-prod`는 `prevent_destroy`가 걸려 있어 수동으로 지운다. 정리 목록 초안은 `docs/plans/2026-10-17-homelab-rebuild/issues/T06-teardown.md`에 있다.
 
 **확인 경로:** 이 머신에 있는 자격 안에서만 확인한다. 옛 클러스터는 설계 기간 내내 돌아야 하므로(D-02) 클러스터 자격을 쓰지 않는다.
@@ -104,7 +104,7 @@
 | 경보 외부 수신자 | Alertmanager의 외부 webhook 수신자로 경보를 봇에 넘긴다. 관측 스택은 Alertmanager를 포함한 옛 계열 최소 구성이다(D-09 확정(사용자 2026-10-18, T05)) | R07 (`01`), V2-04 (`02`) |
 | 격리 작업 실행 공간 | Codex 작업자가 운영·게시 자격(kubeconfig, GitHub 쓰기 키, Discord 토큰, SSH, 호스트 소켓)과 운영 네트워크(LAN, 클러스터 내부, Kubernetes API, tailnet, Infisical)에 닿지 못하는 실행 공간. 모델 자격만 작업 단위 별도 시크릿 범위로 받고, egress는 허용 목록(모델 API, 코드 저장소 읽기, 패키지 레지스트리)으로 제한한다. 같은 봇 앱 안에서도 게시 서버와 작업자의 시크릿 범위를 나눈다. worktree는 보안 샌드박스가 아니다(`00` §6). 기본 방식은 설계 문서 C.8 기본값으로 확정(사용자 2026-10-18, T05)이다. D-15 확정(사용자 2026-10-18, T15): 작업자는 ns `sandbox`의 상주 파드(동시성 1), 라벨 `homelab-bot`, 포트는 앱·작업자 8080과 경보 수신 8081. 코드 읽기는 `codeload.github.com` 압축본만이고, 작업자 egress에서 `github.com`·`api.github.com`·gist를 빼며 작업자에는 GitHub 자격이 없다. 파드 방화벽(U13)이 안 되면 호스트 전용 UID + nft. 모델 자격은 D-14 확정(사용자 2026-10-18, T15): 봇 전용 ChatGPT 구독 계정의 작업자 전용 CODEX_HOME이고, 갱신된 인증 파일을 되쓰는 작업자 전용 영속 쓰기 공간을 둔다(설계 문서 C.8 변경, T08b·T16b) | F03, R10, R13 (`01`) |
 | 비AI 알림 경로 | 봇과 독립된 알림 경로. 봇이 죽어도 경보가 사람에게 온다. 채널은 homelab 알림용 Telegram 새 봇이다(D-10 확정(사용자 2026-10-18, T05)). 옛 Telegram 봇·토큰은 `mac-uptime-guard`를 처리하는 T22까지 그대로 둔다 | F06 (`01`), OPS-02 (`04`) |
-| 외부 생존 감시 | NUC 밖에서 홈랩 전체 중단을 감지하고, NUC를 거치지 않는 경로로 사람에게 알린다. healthchecks.io 데드맨 스위치(Alertmanager Watchdog → ping, 설계 문서 C.3.7)를 쓴다. 계정은 재사용하고 체크는 새로 만들며, 옛 `homelab-watchdog`는 새 체크가 초록이 된 뒤 지운다(D-10·D-11 확정(사용자 2026-10-18, T05)) | `04` §2 "운영 복구" |
+| 외부 생존 감시 | 호스트 밖에서 홈랩 전체 중단을 감지하고, 호스트를 거치지 않는 경로로 사람에게 알린다. healthchecks.io 데드맨 스위치(Alertmanager Watchdog → ping, 설계 문서 C.3.7)를 쓴다. 계정은 재사용하고 체크는 새로 만들며, 옛 `homelab-watchdog`는 새 체크가 초록이 된 뒤 지운다(D-10·D-11 확정(사용자 2026-10-18, T05)) | `04` §2 "운영 복구" |
 
 자리별 AC는 spec §4.4를 따른다. 비AI 알림 경로와 외부 생존 감시는 AC-P11, 병합 조건 공개와 봇 변경 PR 작성 자격(자동 병합 차단)은 AC-P8, 나머지 다섯 자리는 AC-P12다.
 
@@ -125,7 +125,7 @@
 - 실패했을 때 원인과 다음 행동을 알 수 있는가?
 - 앱을 삭제해도 데이터를 실수로 잃지 않는가?
 - 특수한 내부 규칙을 기억하지 않아도 되는가?
-- 빈 NUC에서 문서만 보고 다시 세울 수 있는가?
+- 빈 호스트에서 문서만 보고 다시 세울 수 있는가?
 
 사람이 편집하는 원본과 자동 생성 결과물을 명확히 구분한다. CLI는 표준 리소스 생성과 기존 도구 호출을 잇는 얇은 계층으로 둔다. GitHub·Argo CD·CNPG·ESO가 이미 제공하는 기능은 그 기능을 쓴다. 안전 검증은 실제 사고를 막는 것만 두고, 검증 체계 자체를 유지하기 위한 추상화와 수동 원장(ledger)은 두지 않는다.
 
@@ -170,7 +170,7 @@ ADR과 주석은 설계 의도와 함정을 알려주는 근거로 쓰고, 새 �
 - **디렉터리:** `infra/`, `platform/`, `apps/`, `tools/`, `ops/`, `policy/`, `scripts/`, `tests/`, `docs/`, 그리고 `.github/` 전체(`workflows/`, `actions/`, `actionlint.yaml` 포함). `tests/` 아래 전역 검사(`tests/gates`, `tests/posture`)는 조사 항목 7의 핵심 대상이다.
 - **루트 파일:** 설정 파일만이 아니라 루트의 모든 파일 16개. `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `README.md`, `CONTEXT.md`, `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `.env.secrets.example`, `.gitignore`, `.sops.yaml`, `.pre-commit-config.yaml`, `.gitleaks.toml`, `renovate.json`, `justfile`.
 - **`.claude/`(에이전트 훅·스킬):** 표에 넣을지 판단하고, 그 판단과 이유를 표에 적는다.
-- **호스트 수준 구성:** 저장소 안의 `infra/k3s-bootstrap/`의 `host-config.sh`, `host-config/`, `motd/`와, 저장소 밖 NUC에 남은 옛 구성. 철거 방식은 OS 유지라서(D-12 확정(사용자 2026-10-18, T05)) 아래가 모두 남으므로, 각각 철거 범위에 넣을지 판정한다. 확정된 범위는 설계 문서 B.4의 H1·H2·H3·H7·H8·H9 철거다. H4·H5 drop-in은 남겨 E2가 덮어쓰고, `/mnt/bulk`는 비우고 fstab 항목을 지운다(설계 문서 F D-12).
+- **호스트 수준 구성:** 저장소 안의 `infra/k3s-bootstrap/`의 `host-config.sh`, `host-config/`, `motd/`와, 저장소 밖 호스트에 남은 옛 구성. 철거 방식은 OS 유지라서(D-12 확정(사용자 2026-10-18, T05)) 아래가 모두 남으므로, 각각 철거 범위에 넣을지 판정한다. 확정된 범위는 설계 문서 B.4의 H1·H2·H3·H7·H8·H9 철거다. H4·H5 drop-in은 남겨 E2가 덮어쓰고, `/mnt/bulk`는 비우고 fstab 항목을 지운다(설계 문서 F D-12).
   - `host-config.sh --apply`가 바꾼 것 전체(유닛, drop-in, `accept-dns`, `resolv.conf`, fstab)와 motd 유닛.
   - 옛 사본 경로(`~/workspace/homelab/scripts/`)를 실행하는 유닛: `files-data-backup`, `systemd-failed-sweep`, `unit-failure-notify@`. 옛 사본을 옮기거나 지우면 이 유닛이 실패한다.
   - 옛 AIOps 잔여물. 유닛 4종(`aiops-ingress.service`, `aiops-worker.service`·`.timer`, `homelab-aiops-nft.service`, `var-lib-homelab\x2daiops.mount`)과 nft 규칙, 그리고 유닛 밖의 `/opt/homelab-aiops`, `/etc/homelab-aiops`, 시스템 사용자 8개 등(전체 목록은 T06). mount 유닛 이름의 `\x2d`는 systemd 경로 이스케이프다. 셸에서는 작은따옴표로 감싸거나 `systemctl status /var/lib/homelab-aiops`처럼 경로로 지정한다. 이스케이프하지 않은 이름으로 조회하면 not-found가 나와 이미 없다고 오판한다. 이 mount는 2026-10-17에 active다.
@@ -182,11 +182,11 @@ ADR과 주석은 설계 의도와 함정을 알려주는 근거로 쓰고, 새 �
 
 CI/CD가 올라갈 바닥이다. 필요한 최소 구성만 고르고, 각 구성 요소에 선택·버전 고정 방식·부트스트랩 순서·준비 상태 확인 방법을 정한다.
 
-- **호스트·k3s:** 빈 NUC에서 재현되는 부트스트랩 절차, k3s 버전 고정, 호스트 설정의 Git 관리. 하드웨어 사실: 디스크는 루트 LV 913G와 별도 1.8T `/mnt/bulk`(옛 files 데이터)이고, 네트워크는 무선 `wlo1`이다.
+- **호스트·k3s:** 빈 호스트에서 재현되는 부트스트랩 절차, k3s 버전 고정, 호스트 설정의 Git 관리. 하드웨어 사실: 디스크는 루트 LV 913G와 별도 1.8T `/mnt/bulk`(옛 files 데이터)이고, 네트워크는 무선 `wlo1`이다.
 - **Argo CD:** 최초 설치와 이후 자기 관리(self-manage)의 경계. 공개 webhook은 두지 않고 60초 폴링으로 한다(`timeout.reconciliation: 60s`, `timeout.reconciliation.jitter: 0`. 확정(사용자 2026-10-18, T05), 설계 문서 A.4 3번).
 - **외부 공개:** Cloudflare 터널과 인그레스. §2의 공개 HTTPS webhook 수신 경로를 포함한다. `ukyi.app` zone에 HSTS(includeSubDomains, 180일)가 걸려 있어서, 한 번 접속한 브라우저는 `*.home.ukyi.app` 내부 UI도 HTTPS로만 연다. 그래서 내부 UI도 처음부터 유효한 인증서의 HTTPS여야 한다. 부트스트랩 중 평문 HTTP나 자체 서명 인증서는 브라우저가 열어 주지 않는다. zone 설정 9개(HSTS 포함)는 새 Terraform으로 가져온다(D-11 확정(사용자 2026-10-18, T05)). 공개 DNS는 와일드카드 레코드 하나로 하고, 원격 관리 터널에서 안 되면 host별 Terraform 레코드로 한다(확정(사용자 2026-10-18, T05), 설계 문서 C.3.4).
-- **내부 접근:** Tailscale. 새 ACL은 옛 ACL의 `autogroup:self` 규칙을 사람 기기끼리 쓰려고 유지한다. NUC는 `tag:nuc` 태그 기기라(D-11 (c), 2026-10-20) self 규칙이 적용되지 않으므로, 운영자의 원격 경로는 `tag:nuc` 대상 포트 규칙(SSH·kubectl은 Owner·Admin, AdGuard DNS는 member)이 보장한다. NUC는 Tailscale SSH를 켜지 않는다(사용자 2026-10-21). 원격 SSH는 tailnet 주소의 sshd(키 인증, root 로그인 금지, H4)이고 22 포트 규칙이 그 길을 연다. 이 포트 규칙이 빠지면 default-deny ACL이 운영자의 원격 SSH 경로를 끊는다(옛 `infra/tailscale/acl.tf` 주석과 같은 이유).
-- **DNS(AdGuard):** 공유기는 주 DNS `192.168.117.15`(NUC), 보조 `1.1.1.1`로 설정돼 있고, 이 설정은 바꾸지 않는다(C-04). 새 AdGuard도 같은 LAN IP의 `:53`으로 서빙해 공유기 설정을 그대로 쓰는 것이 기본값이다. Tailscale은 모든 DNS를 대신 처리할 때 등록된 nameserver에 동시에 묻고 가장 빠른 답을 쓴다(Tailscale DNS 문서). 그래서 AdGuard와 공용 DNS를 함께 두면 Tailscale 기기의 광고 차단과 내부 이름 재작성이 안정적으로 동작하지 않는다. 폴백과 차단 중 무엇을 우선할지 정한다. D-08 확정(사용자 2026-10-18): Override local DNS를 켜고 전역 nameserver를 NUC Tailscale IP(AdGuard Home)와 AdGuard 공용 DNS 2개로 두는 (b′)다. 내부 UI는 `<서비스>.<tailnet>.ts.net`이라 내부 이름 재작성을 두지 않는다(spec §5.1, 설계 문서 F D-08). NUC를 Tailscale에 다시 등록하면 Tailscale IP가 바뀔 수 있으니 nameserver 설정과 함께 관리한다. NUC는 `tag:nuc` 태그 기기라(D-11 (c)) 태그를 붙여 재등록하면 노드 키 만료가 기본으로 꺼진다. 재등록 뒤에는 태그와 만료 꺼짐을 확인한다(태그 없이 등록하면 만료가 켜진 기본값으로 돌아온다). NUC가 전역 nameserver 노드라서, 키가 만료되면 tailnet 전역 이름 해석이 멈춘다(옛 `infra/tailscale/acl.tf` 주석). 노드 자신의 DNS 함정은 두 갈래다. Tailscale 쪽: k3s 노드 자신은 tailnet 전역 nameserver를 받지 않게 한다(옛 `infra/tailscale/acl.tf` 주석에 기록된 실측 함정). LAN 쪽: 공유기 주 DNS가 노드 위 AdGuard라서, 노드가 DHCP DNS를 쓰면 노드 → 공유기 → AdGuard 순환이 생긴다. 콜드스타트 때 AdGuard가 아직 없으면 이름 해석이 막히고 이미지 pull까지 막힌다(옛 resolved drop-in 주석의 실측 함정). 옛 host-config는 resolved drop-in(공용 DNS 직접 사용)과 `tailscale set --accept-dns=false`로 둘 다 막았다.
+- **내부 접근:** Tailscale. 새 ACL은 옛 ACL의 `autogroup:self` 규칙을 사람 기기끼리 쓰려고 유지한다. 호스트는 `tag:nuc` 태그 기기라(D-11 (c), 2026-10-20) self 규칙이 적용되지 않으므로, 운영자의 원격 경로는 `tag:nuc` 대상 포트 규칙(SSH·kubectl은 Owner·Admin, AdGuard DNS는 member)이 보장한다. 호스트는 Tailscale SSH를 켜지 않는다(사용자 2026-10-21). 원격 SSH는 tailnet 주소의 sshd(키 인증, root 로그인 금지, H4)이고 22 포트 규칙이 그 길을 연다. 이 포트 규칙이 빠지면 default-deny ACL이 운영자의 원격 SSH 경로를 끊는다(옛 `infra/tailscale/acl.tf` 주석과 같은 이유).
+- **DNS(AdGuard):** 공유기는 주 DNS `192.168.117.15`(호스트), 보조 `1.1.1.1`로 설정돼 있고, 이 설정은 바꾸지 않는다(C-04). 새 AdGuard도 같은 LAN IP의 `:53`으로 서빙해 공유기 설정을 그대로 쓰는 것이 기본값이다. Tailscale은 모든 DNS를 대신 처리할 때 등록된 nameserver에 동시에 묻고 가장 빠른 답을 쓴다(Tailscale DNS 문서). 그래서 AdGuard와 공용 DNS를 함께 두면 Tailscale 기기의 광고 차단과 내부 이름 재작성이 안정적으로 동작하지 않는다. 폴백과 차단 중 무엇을 우선할지 정한다. D-08 확정(사용자 2026-10-18): Override local DNS를 켜고 전역 nameserver를 호스트 Tailscale IP(AdGuard Home)와 AdGuard 공용 DNS 2개로 두는 (b′)다. 내부 UI는 `<서비스>.<tailnet>.ts.net`이라 내부 이름 재작성을 두지 않는다(spec §5.1, 설계 문서 F D-08). 호스트를 Tailscale에 다시 등록하면 Tailscale IP가 바뀔 수 있으니 nameserver 설정과 함께 관리한다. 호스트는 `tag:nuc` 태그 기기라(D-11 (c)) 태그를 붙여 재등록하면 노드 키 만료가 기본으로 꺼진다. 재등록 뒤에는 태그와 만료 꺼짐을 확인한다(태그 없이 등록하면 만료가 켜진 기본값으로 돌아온다). 호스트가 전역 nameserver 노드라서, 키가 만료되면 tailnet 전역 이름 해석이 멈춘다(옛 `infra/tailscale/acl.tf` 주석). 노드 자신의 DNS 함정은 두 갈래다. Tailscale 쪽: k3s 노드 자신은 tailnet 전역 nameserver를 받지 않게 한다(옛 `infra/tailscale/acl.tf` 주석에 기록된 실측 함정). LAN 쪽: 공유기 주 DNS가 노드 위 AdGuard라서, 노드가 DHCP DNS를 쓰면 노드 → 공유기 → AdGuard 순환이 생긴다. 콜드스타트 때 AdGuard가 아직 없으면 이름 해석이 막히고 이미지 pull까지 막힌다(옛 resolved drop-in 주석의 실측 함정). 옛 host-config는 resolved drop-in(공용 DNS 직접 사용)과 `tailscale set --accept-dns=false`로 둘 다 막았다.
 - **관측:** 메트릭·로그·알림의 최소 구성. D-09 확정(사용자 2026-10-18, T05): VictoriaMetrics single, vmalert, Alertmanager, Grafana, VictoriaLogs single + vector, node-exporter, kube-state-metrics. vmagent와 보조 수집기 4개는 두지 않고, 핵심 룰 15개 안팎과 단위 시험을 둔다(설계 문서 F D-09). 나중에 봇이 읽을 대상이다. §2의 읽기 전용 접근, 경보 외부 수신자, 비AI 알림 경로(D-10 확정(사용자 2026-10-18, T05): homelab 알림용 Telegram 새 봇 + healthchecks.io 새 체크), 외부 생존 감시를 여기서 함께 설계한다.
 - **백업:** PostgreSQL → R2. 버킷은 `homelab-backups` 하나, 보존은 PostgreSQL·Valkey 14일이다(확정(사용자 2026-10-18, T05), 설계 문서 C.3.8).
 
@@ -237,7 +237,7 @@ CI/CD가 올라갈 바닥이다. 필요한 최소 구성만 고르고, 각 구�
 
 ### PostgreSQL
 
-CloudNativePG(CNPG)를 쓴다(C-07). 작은 앱은 공유 인스턴스 안에 앱 전용 DB·계정을 두는 것을 기본 후보로 하고, 중요한 데이터·독립 복원·버전/자원 격리가 필요한 앱은 전용 CNPG 인스턴스를 선택지로 둔다. 둘을 운영 편의성, 장애 범위, 특정 앱만 복원하는 절차로 비교한다(D-05 확정(사용자 2026-10-18, T05): 공유 인스턴스 + 앱별 DB·역할(봇 포함). 전용 Cluster는 설계 문서 C.5.2의 조건 넷 중 하나라도 걸릴 때만 둔다. Cluster `pg`는 자동 동기화로 두고, 빈 NUC 복구는 root apply 전 복구 PR → 복구 확인 → 정리 PR이다(설계 문서 C.6.4, F D-05)).
+CloudNativePG(CNPG)를 쓴다(C-07). 작은 앱은 공유 인스턴스 안에 앱 전용 DB·계정을 두는 것을 기본 후보로 하고, 중요한 데이터·독립 복원·버전/자원 격리가 필요한 앱은 전용 CNPG 인스턴스를 선택지로 둔다. 둘을 운영 편의성, 장애 범위, 특정 앱만 복원하는 절차로 비교한다(D-05 확정(사용자 2026-10-18, T05): 공유 인스턴스 + 앱별 DB·역할(봇 포함). 전용 Cluster는 설계 문서 C.5.2의 조건 넷 중 하나라도 걸릴 때만 둔다. Cluster `pg`는 자동 동기화로 두고, 빈 호스트 복구는 root apply 전 복구 PR → 복구 확인 → 정리 PR이다(설계 문서 C.6.4, F D-05)).
 
 DB·계정은 CNPG의 선언형 기능으로 관리한다. 설치할 CNPG 버전을 정하고, DB·역할 선언 기능의 지원 여부를 그 버전의 공식 문서로 확인한다. 확인되지 않은 기능은 미검증으로 표시한다.
 
@@ -303,7 +303,7 @@ Infisical Cloud → ESO → Kubernetes Secret → 앱·CNPG·Valkey
 
 ESO가 Infisical에 처음 접속하기 위한 자격증명과 필수 복구 자산만 별도 암호화 보관한다(SOPS+age 등에서 선택). 일반 앱 시크릿은 Infisical에만 둔다.
 
-Infisical 장애·계정 잠김·클러스터 유실 상황에서 필요한 복구 자산과 순서를 명시한다. 이 목록은 빈 NUC 재구축(§9 시나리오 13)의 입력이다. 저장소가 public이면 복구 자산 목록은 저장소 밖에 두고(D-23), design.md에는 자산의 종류와 복구 순서만 쓴다.
+Infisical 장애·계정 잠김·클러스터 유실 상황에서 필요한 복구 자산과 순서를 명시한다. 이 목록은 빈 호스트 재구축(§9 시나리오 13)의 입력이다. 저장소가 public이면 복구 자산 목록은 저장소 밖에 두고(D-23), design.md에는 자산의 종류와 복구 순서만 쓴다.
 
 이 머신에는 SOPS age 개인 키가 있다. 옛 공개 히스토리에는 SOPS 암호화 파일이 남아 있어서, 이 키가 그 recipient와 맞으면 옛 값을 풀 수 있다(일치 여부는 확인하지 않았다. 확인도 §1의 금지 경로다). 이 키는 새 구조에서 쓰지 않으므로 T06 자격 폐기 완료를 확인한 뒤 삭제한다(D-20 확정(사용자 2026-10-18, T05)).
 
@@ -372,12 +372,12 @@ Git과 Infisical 등 여러 시스템의 변경은 하나의 원자적 트랜잭
 9. 앱을 삭제해도 DB·영속 데이터는 보존된다.
 10. 공유 PostgreSQL에서 특정 앱만 복원한다.
 11. 빌드 완료 순서가 바뀌어도 과거 이미지로 배포되지 않는다.
-12. NUC 재부팅 후 의존 서비스가 정상적으로 준비된다.
-13. 빈 NUC에서 문서 절차만으로 플랫폼을 재구축하고 테스트 앱까지 배포된다.
+12. 호스트 재부팅 후 의존 서비스가 정상적으로 준비된다.
+13. 빈 호스트에서 문서 절차만으로 플랫폼을 재구축하고 테스트 앱까지 배포된다.
 14. AdGuard가 멈췄을 때 LAN 기기와 Tailscale 기기의 이름 해석이 설계대로 동작한다.
 15. 자동 병합 조건 밖의 PR(예: 공통 차트 변경)은 사람 승인 후에만 병합된다.
 16. 봇이 없거나 멈춘 상태에서도 테스트 경보가 비AI 알림 경로로 사람에게 도착한다.
-17. NUC 전체가 멈추면(전원 또는 네트워크 차단) 외부 생존 감시가 이를 감지해 알린다.
+17. 호스트 전체가 멈추면(전원 또는 네트워크 차단) 외부 생존 감시가 이를 감지해 알린다.
 
 서로 다른 Argo CD Application 사이의 의존 순서는 sync-wave만으로 보장되지 않는다. 실제 준비 상태와 접속 가능 여부를 완료 조건에 넣는다.
 
@@ -426,15 +426,15 @@ Git과 Infisical 등 여러 시스템의 변경은 하나의 원자적 트랜잭
 - AdGuard 재구축 방식과 Tailscale DNS 폴백(D-08). 확정(사용자 2026-10-18): 내부 UI는 `*.ts.net`, Tailscale DNS는 (b′).
 - 관측 스택 구성(D-09). 확정(사용자 2026-10-18, T05): 옛 계열 최소 구성(vmagent와 보조 수집기 4개 없음, 핵심 룰 15개 안팎 + 단위 시험).
 - 비AI 알림 채널과 외부 생존 감시(D-10). 옛 Telegram 봇과 healthchecks.io 데드맨 스위치의 재사용 여부를 포함한다. 확정(사용자 2026-10-18, T05): homelab 알림용 Telegram 새 봇 + healthchecks.io(계정 재사용, 체크 새로). 옛 봇·토큰은 T22까지 그대로 두고, 옛 토큰 재발급 대안은 고르지 않았다.
-- 옛 외부 자원(Cloudflare, R2, Tailscale, GitHub 설정, healthchecks.io)의 import 또는 삭제(D-11). §1 6항의 자원과 Cloudflare zone 설정(HSTS 포함)을 포함한다. org 저장소 처리는 D-11이 아니라 D-13·D-21·T22가 맡는다(§3 조사 항목 9). 확정(사용자 2026-10-18, T05): 설계 문서 F D-11 표대로(zone·tailnet·R2 state 버킷만 이어 쓰고 나머지는 새로, state 키 접두 `v2/`, zone 설정 9개는 새 Terraform). Tailscale ACL은 (c)다: NUC는 `tag:nuc` 태그 기기이고, SSH·kubectl은 운영자(`autogroup:owner`·`autogroup:admin`)만, AdGuard DNS는 member에게 열며, NUC → 사람 기기 규칙은 두지 않는다. ssh는 accept(nonroot와 root)다. (이력: 2026-10-18~2026-10-20에는 (a)(태그 없는 사용자 기기, self 규칙)였고, 2026-10-20 E4a의 U28 결과로 사용자가 (c)로 바꿨다.)
-- 철거 방식과 빈 NUC 검증 방식(D-12). 철거 범위에 §3의 호스트 수준 잔여 구성과 옛 데이터 경로를 넣을지, 시나리오 13을 어떤 환경에서 실행할지를 포함한다. 확정(사용자 2026-10-18, T05): OS 유지 + k3s 제거 + 호스트 정리(설계 문서 B.4의 H1·H2·H3·H7·H8·H9. H4·H5 drop-in은 남기고 E2가 덮어씀), `/mnt/bulk`는 비우고 fstab 항목 삭제. 빈 NUC 검증은 VM(E8 격리 조건 여섯, VM 호스트는 tailnet 밖). T20 후속(사용자 2026-11-02): 비운 SSD를 T20 삭제 원장 전용으로 다시 마운트한다(설계 F D-12 "T20 후속").
+- 옛 외부 자원(Cloudflare, R2, Tailscale, GitHub 설정, healthchecks.io)의 import 또는 삭제(D-11). §1 6항의 자원과 Cloudflare zone 설정(HSTS 포함)을 포함한다. org 저장소 처리는 D-11이 아니라 D-13·D-21·T22가 맡는다(§3 조사 항목 9). 확정(사용자 2026-10-18, T05): 설계 문서 F D-11 표대로(zone·tailnet·R2 state 버킷만 이어 쓰고 나머지는 새로, state 키 접두 `v2/`, zone 설정 9개는 새 Terraform). Tailscale ACL은 (c)다: 호스트는 `tag:nuc` 태그 기기이고, SSH·kubectl은 운영자(`autogroup:owner`·`autogroup:admin`)만, AdGuard DNS는 member에게 열며, 호스트 → 사람 기기 규칙은 두지 않는다. ssh는 accept(nonroot와 root)다. (이력: 2026-10-18~2026-10-20에는 (a)(태그 없는 사용자 기기, self 규칙)였고, 2026-10-20 E4a의 U28 결과로 사용자가 (c)로 바꿨다.)
+- 철거 방식과 빈 호스트 검증 방식(D-12). 철거 범위에 §3의 호스트 수준 잔여 구성과 옛 데이터 경로를 넣을지, 시나리오 13을 어떤 환경에서 실행할지를 포함한다. 확정(사용자 2026-10-18, T05): OS 유지 + k3s 제거 + 호스트 정리(설계 문서 B.4의 H1·H2·H3·H7·H8·H9. H4·H5 drop-in은 남기고 E2가 덮어씀), `/mnt/bulk`는 비우고 fstab 항목 삭제. 빈 호스트 검증은 VM(E8 격리 조건 여섯, VM 호스트는 tailnet 밖). T20 후속(사용자 2026-11-02): 비운 SSD를 T20 삭제 원장 전용으로 다시 마운트한다(설계 F D-12 "T20 후속").
 - 시크릿 새로 발급·옛 값 미사용(D-20), `homelab-app-template` 재사용(D-21). §0의 시크릿·이어 쓰는 외부 자산 줄이다. 둘 다 확정(사용자 2026-10-18, T05): 모든 값을 새로 발급하고 옛 자격은 T06에서 폐기한다(옛 Telegram 봇 토큰은 T22, 옛 healthchecks ping URL은 T08b까지 보류). SOPS age 개인 키는 T06 자격 폐기 완료 확인 뒤 삭제한다. `homelab-app-template`은 저장소·이름을 재사용하고 내용을 교체한다(설계 문서 F D-21).
 - 새 플랫폼의 의존성 업데이트 방식(D-18). 옛 저장소는 Renovate를 썼고, 봇 V1 필수 기능 7이 "Renovate 작성 PR"을 리뷰 범위에 넣는다(`00` §3). 확정(사용자 2026-10-18, T05): 호스팅형 Renovate App을 저장소별로 설치하고 자동 병합은 모두 끈다.
 - 앱 DB 마이그레이션 방식(D-22). §6의 앱 시작 시 self-migration과 migration Job 비교 결과다. 확정(사용자 2026-10-18, T05): Argo CD Sync 단계 hook Job + `pg-rw` 직결, expand/contract 필수(§6).
 - Kubernetes 시크릿 전달 계층. spec C-07은 "Infisical이 원본, 전달 계층은 ESO 우선 검토"다(§2, 사용자 원본 프롬프트와 같음). §7 비교에서 ESO가 아닌 쪽을 권하면 이 항목에 이유와 함께 올린다. 확정(사용자 2026-10-18, T05): ESO v2.13.x.
 - rebuild → main 병합 방식(D-25). 저장소는 squash 병합만 허용하고 병합 뒤 브랜치를 자동 삭제한다(spec §1). 확정(사용자 2026-10-18, T05): squash 병합. 옛 main은 새 main의 조상으로 남아 히스토리가 유지되고, rebuild 중간 커밋은 PR 기록에 남는다(§0 저장소 줄의 D-03 문구도 맞췄다).
 - ChatGPT Codex Connector App 처리(D-26). §5 인증 격리 점검 결과를 근거로 유지·설치 범위 축소·제거 중 하나를 권한다. 봇 PR 리뷰와의 관계는 D-16(T15)이다. 확정(사용자 2026-10-18, T05): 유지 + 설계 문서 F D-26의 조건 넷. 설치 범위는 D-16 확정(사용자 2026-10-18, T15): 선택 저장소로 줄이고 `homelab-bot-ops`는 빼며(2026-10-18 17:45 사람이 실행), 봇이 리뷰하는 저장소의 Codex 자동 리뷰는 저장소별 Codex 설정에서 끈다(수동 `@codex review`는 남김).
-- NUC 로컬 전용 자료를 T06 입력으로 쓸지(D-27). T04는 이 자료를 읽지 않으므로, 교훈 표나 정리 목록에서 이 자료 없이는 판정할 수 없는 곳만 표시한다. 확정(사용자 2026-10-18, T05): T06 목록 작성에만 읽기 전용으로 쓰고, 값·절차 원문은 저장소 문서에 옮기지 않는다.
+- 호스트 로컬 전용 자료를 T06 입력으로 쓸지(D-27). T04는 이 자료를 읽지 않으므로, 교훈 표나 정리 목록에서 이 자료 없이는 판정할 수 없는 곳만 표시한다. 확정(사용자 2026-10-18, T05): T06 목록 작성에만 읽기 전용으로 쓰고, 값·절차 원문은 저장소 문서에 옮기지 않는다.
 - GitHub 보호 설정 관리 방식(D-28). 2026-10-18에 새로 생긴 결정이다. 확정(사용자 2026-10-18): Terraform root `infra/github`(저장소·시크릿 리소스 없음, guard, owner 로컬 래퍼만, CI는 plan 없음). 세부는 설계 문서 F D-28.
 - 저장소 공개 정책(D-29). 2026-10-18에 새로 생긴 결정이다. 확정(사용자 2026-10-18): 앱 저장소는 public만 허용하고, 앱이 아닌 저장소는 공개하지 않는다. 비앱 저장소는 `aiops`·`mac-uptime-guard` 제거, `aiops-autodeploy-canary` private 보관이다(실행 T22). 봇 코드 저장소 `ukyi-app/homelab-bot`은 public이고, 운영 산출물은 봇 저장소에 두지 않는다(개발 산출물은 private 저장소 `ukyi-app/homelab-bot-ops`, 봇이 실행 중 읽는 값은 Infisical `/apps/homelab-bot/`. D-13 확정(사용자 2026-10-18, T14)). `page`·`trip-mate-api`는 저장소와 GHCR 패키지를 삭제했다. 세부는 설계 문서 F D-29.
 - 내부 UI 짧은 주소(D-30). 2026-10-20에 새로 생긴 결정이다. 확정(사용자 2026-10-20): D-08의 `*.ts.net`은 그대로 두고 tailnet 전용 리다이렉터 `go`(`go/<이름>` → `https://<이름>.<tailnet>.ts.net`, HTTP 80만, 인증서·DNS 쓰기 자격·공개 DNS 없음)를 둔다. `*.lab.ukyi.app` 등은 검토 후 제외. 세부는 설계 문서 F D-30, 실행은 T08c.
@@ -461,4 +461,4 @@ Git과 Infisical 등 여러 시스템의 변경은 하나의 원자적 트랜잭
 
 최종 성공 기준:
 
-**"빈 NUC에서 문서만 보고 홈랩을 다시 세울 수 있고, 작은 앱을 추가하고 DB·Valkey·시크릿을 연결할 때 내부 예외를 기억할 필요가 없고, 재실행은 안전하며, 일상적인 시크릿 원본은 Infisical 한곳에서 관리하고, 앱을 삭제해도 데이터는 의도한 정책대로 보존되는가?"**
+**"빈 호스트에서 문서만 보고 홈랩을 다시 세울 수 있고, 작은 앱을 추가하고 DB·Valkey·시크릿을 연결할 때 내부 예외를 기억할 필요가 없고, 재실행은 안전하며, 일상적인 시크릿 원본은 Infisical 한곳에서 관리하고, 앱을 삭제해도 데이터는 의도한 정책대로 보존되는가?"**

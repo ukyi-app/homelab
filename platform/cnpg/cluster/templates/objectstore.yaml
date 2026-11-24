@@ -31,7 +31,7 @@ spec:
 {{- fail "cnpg.recoverySource.serverName must differ from cnpg.serverName (same prefix mixes timelines, design C.6.4)" }}
 {{- end }}
 ---
-# 복구 원본(읽기 전용으로만 쓴다). 빈 NUC 복구 PR에서만 렌더하고 정리 PR에서 지운다(설계 C.6.4).
+# 복구 원본(읽기 전용으로만 쓴다). 빈 호스트 복구 PR에서만 렌더하고 정리 PR에서 지운다(설계 C.6.4).
 # 한 클러스터가 같은 ObjectStore를 백업과 복구에 함께 쓰지 않는다는 CNPG 권고대로 따로 둔다.
 # retentionPolicy를 두지 않는다. 두면 plugin이 이 원본 prefix의 옛 백업을 지운다.
 apiVersion: barmancloud.cnpg.io/v1

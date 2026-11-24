@@ -1,6 +1,6 @@
 # 부트스트랩: 빈 호스트에서 k3s와 Argo CD까지
 
-새 호스트(또는 k3s를 지운 호스트)에 클러스터를 세우는 순서다. 운영 NUC는 2026-10-19 T07에서 이 순서로 세웠다. 시나리오 13(VM에서 다시 세우기)의 입력이기도 하다. 근거는 설계 [C.3.2](../plans/2026-10-17-homelab-rebuild/platform/design.md)(호스트·k3s)와 C.3.3(Argo CD)이다.
+새 호스트(또는 k3s를 지운 호스트)에 클러스터를 세우는 순서다. 운영 호스트는 2026-10-19 T07에서 이 순서로 세웠다. 시나리오 13(VM에서 다시 세우기)의 입력이기도 하다. 근거는 설계 [C.3.2](../plans/2026-10-17-homelab-rebuild/platform/design.md)(호스트·k3s)와 C.3.3(Argo CD)이다.
 
 이 문서 밖의 수동 단계를 두지 않는다. 실행하다 문서와 다르게 한 것이 있으면 이 문서를 먼저 고친다.
 
@@ -8,14 +8,14 @@
 
 | 클러스터 | 이름 | 호스트 값 | 클러스터 값 | root 파일 |
 |---|---|---|---|---|
-| 운영 NUC | `prod` | `host/clusters/prod.env` | `platform/root/values-prod.yaml` | `platform/root/root-prod.yaml` |
+| 운영 호스트 | `prod` | `host/clusters/prod.env` | `platform/root/values-prod.yaml` | `platform/root/root-prod.yaml` |
 | 시나리오 13 VM | `vm` | `host/clusters/vm.env` | `platform/root/values-vm.yaml` | `platform/root/root-vm.yaml` |
 
 아래 `<이름>`은 이 이름 하나다. 스크립트와 매니페스트에는 클러스터 이름 분기가 없고, 값 파일만 바뀐다.
 
-- VM은 NUC 안의 임시 KVM VM이다(사용자 2026-10-26). 만들기·지우기와 `vm.env` 값의 근거는 [vm.md](vm.md)다. env 파일에 `CHANGE_ME`가 남아 있으면 host 스크립트가 멈춘다.
+- VM은 호스트 안의 임시 KVM VM이다(사용자 2026-10-26). 만들기·지우기와 `vm.env` 값의 근거는 [vm.md](vm.md)다. env 파일에 `CHANGE_ME`가 남아 있으면 host 스크립트가 멈춘다.
 - `values-vm.yaml`은 ci가 VM 프로필로 단언한다(`platform/root/templates/cluster-check.yaml`): 접두 `vm-`, Infisical `homelab-dev`/`dev`, 버킷과 serverName이 운영과 다름. 하나라도 어긋나면 root-vm 렌더가 실패해 ci와 Argo CD sync가 멈춘다. 복구 원본(`recoverySource`)은 [restore.md](restore.md) 3절의 VM 복구 PR이 넣는다. 그 PR이 main에 병합되기 전에는 `root-vm.yaml`을 apply하지 않는다.
-- VM 호스트는 tailnet에 넣지 않는다(`TAILNET_JOIN=false`). VM은 libvirt NAT 뒤라 NUC에서만 닿는다. 접근은 NUC에서 `vm.env`의 노드 IP(SSH)나 `virsh console`로 한다.
+- VM 호스트는 tailnet에 넣지 않는다(`TAILNET_JOIN=false`). VM은 libvirt NAT 뒤라 호스트에서만 닿는다. 접근은 호스트에서 `vm.env`의 노드 IP(SSH)나 `virsh console`로 한다.
 
 ### 0.0 작업 사본과 필요한 패키지
 
@@ -42,11 +42,11 @@ echo "main과 같음"
 EOF
 ```
 
-### 0.1 운영 NUC를 OS부터 다시 설치했을 때만
+### 0.1 운영 호스트를 OS부터 다시 설치했을 때만
 
 tailnet에 이미 있으면 건너뛴다.
 
-1. Tailscale 콘솔에서 옛 NUC 기기를 먼저 지운다. 남아 있으면 새 이름에 `-1`이 붙고, 나중에 지워도 이름이 돌아오지 않는다.
+1. Tailscale 콘솔에서 옛 호스트 기기를 먼저 지운다. 남아 있으면 새 이름에 `-1`이 붙고, 나중에 지워도 이름이 돌아오지 않는다.
 2. Tailscale을 서명된 apt 저장소에서 깔고 등록한다. 설치 스크립트를 `curl | sh`로 돌리지 않는다. 배포 경로가 침해되면 그 스크립트가 root로 무엇이든 실행하고, 이어서 sudo로 도는 `host/install.sh`까지 바꿀 수 있기 때문이다. 대신 저장소 서명 키를 지문으로 확인하고, 패키지는 그 키로 서명된 저장소에서만 받는다.
 
    ```bash
@@ -55,7 +55,7 @@ tailnet에 이미 있으면 건너뛴다.
    key="$(mktemp)"
    curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${codename}.noarmor.gpg" -o "$key"
    # signed-by에 키링 파일을 주면 APT는 그 안의 모든 키를 서명자로 믿는다. 그래서 첫 키만 보지 않고,
-   # 기본 키가 정확히 하나이고 그 지문이 Tailscale 저장소 서명 키(2026-10-19 확인, 운영 NUC 설치본과 같음)인지 본다
+   # 기본 키가 정확히 하나이고 그 지문이 Tailscale 저장소 서명 키(2026-10-19 확인, 운영 호스트 설치본과 같음)인지 본다
    pubs="$(gpg --show-keys --with-colons "$key" | awk -F: '/^pub/ { n++ } END { print n + 0 }')"
    fpr="$(gpg --show-keys --with-colons "$key" | awk -F: '/^pub/ { getline; print $10; exit }')"
    test "$pubs" = 1 && test "$fpr" = 2596A99EAAB33821893C0A79458CA832957F5868 \
@@ -72,7 +72,7 @@ tailnet에 이미 있으면 건너뛴다.
    # --accept-dns=false: 등록 순간부터 노드 DNS를 tailnet(AdGuard)과 떼어 둔다(H5)
    # --ssh는 주지 않는다: 원격 접속은 tailnet 주소의 sshd(키 인증, root 로그인 금지, H4)다(D-11, 사용자 2026-10-21).
    # 켜면 tailnet 22번을 Tailscale SSH가 가로채 ACL의 ssh 규칙만으로(키 없이 root까지) 들어온다
-   # --advertise-tags: NUC는 tag:nuc다(D-11 (c)). 태그 규칙이 ACL에 먼저 있어야 등록 뒤 원격 접속이 된다
+   # --advertise-tags: 호스트는 tag:nuc다(D-11 (c)). 태그 규칙이 ACL에 먼저 있어야 등록 뒤 원격 접속이 된다
    # --advertise-routes: 공유기 관리 화면(ACL grant와 autoApprovers가 짝이다)
    sudo tailscale up --hostname=<prod.env의 TAILNET_DEVICE_NAME(비면 NODE_NAME)> --accept-dns=false \
      --advertise-tags=tag:nuc --advertise-routes=192.168.117.1/32
@@ -88,9 +88,9 @@ tailnet에 이미 있으면 건너뛴다.
 
    전체 이름은 tailnet 이름을 담으므로 공개 저장소에 적지 않는다.
 4. Tailscale 콘솔에서 이 기기의 태그가 `tag:nuc` 하나이고 키 만료가 꺼져 있는지 확인한다(태그 기기는 기본으로 꺼진다). 공유기 경로가 승인됐는지도 본다.
-   이미 가입한 NUC(이 절을 건너뛴 경우)는 `tailscale debug prefs`의 `AdvertiseRoutes`에 `192.168.117.1/32`가 있는지 보고, 없으면 `sudo tailscale set --advertise-routes=192.168.117.1/32`로 광고한다. 같은 출력의 `RunSSH`가 true면 `sudo tailscale set --ssh=false`로 끄고 false인지 다시 본다(D-11: 원격 SSH는 sshd다. `--ssh`를 빼고 다시 등록해도 기존 설정은 꺼지지 않는다). `autoApprovers`는 광고된 경로를 승인할 뿐 광고하지 않는다.
+   이미 가입한 호스트(이 절을 건너뛴 경우)는 `tailscale debug prefs`의 `AdvertiseRoutes`에 `192.168.117.1/32`가 있는지 보고, 없으면 `sudo tailscale set --advertise-routes=192.168.117.1/32`로 광고한다. 같은 출력의 `RunSSH`가 true면 `sudo tailscale set --ssh=false`로 끄고 false인지 다시 본다(D-11: 원격 SSH는 sshd다. `--ssh`를 빼고 다시 등록해도 기존 설정은 꺼지지 않는다). `autoApprovers`는 광고된 경로를 승인할 뿐 광고하지 않는다.
    경로를 넘기려면 IP 포워딩이 영구로 켜져 있어야 한다. `/etc/sysctl.d/99-tailscale-subnet.conf`(`net.ipv4.ip_forward = 1`)가 없으면 위 블록의 두 줄로 만든다. 지금은 k3s가 실행 중에만 켜 둔다.
-5. Tailscale IP가 바뀌었으면 DNS Terraform(`infra/tailscale-dns`, T08a 이후)을 apply해 전역 nameserver의 NUC 주소를 갱신한다.
+5. Tailscale IP가 바뀌었으면 DNS Terraform(`infra/tailscale-dns`, T08a 이후)을 apply해 전역 nameserver의 호스트 주소를 갱신한다.
 
 ### 0.2 사람 확인
 
@@ -194,7 +194,7 @@ sudo install -m 0600 -o root -g root /var/lib/homelab/backup/k3s-config.<시각>
   && sudo systemctl restart k3s
 ```
 
-그다음 운영자 기기 kubeconfig의 `server`를 `https://<새 MagicDNS 이름>:6443`으로 바꾼다. `--k3s`를 다시 돌리기 전에 급히 붙어야 하면 같은 cluster 항목에 `tls-server-name: <NODE_NAME>`(인증서에 있는 이름, prod는 `nuc-15-pro`)을 더하면 통과한다(2026-10-26 NUC에서 tailnet 주소로 `/readyz` 확인). SAN을 맞춘 뒤에는 지운다(둬도 동작한다).
+그다음 운영자 기기 kubeconfig의 `server`를 `https://<새 MagicDNS 이름>:6443`으로 바꾼다. `--k3s`를 다시 돌리기 전에 급히 붙어야 하면 같은 cluster 항목에 `tls-server-name: <NODE_NAME>`(인증서에 있는 이름, prod는 `nuc-15-pro`)을 더하면 통과한다(2026-10-26 호스트에서 tailnet 주소로 `/readyz` 확인). SAN을 맞춘 뒤에는 지운다(둬도 동작한다).
 
 ### 1.1 파드 egress 규칙(노드 nftables)
 
@@ -392,7 +392,7 @@ EOF
 
 **vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). 위의 일반 ESO 블록 대신 아래 2단계 블록을 쓰고, 2.3 대신 4단계 블록을 쓴다.
 
-NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있고 VM에는 없다. NUC에는 운영 kubeconfig도 있으므로 VM에 쓰는 블록은 모두 첫 두 줄에서 `KUBECONFIG`를 VM 파일로 고정하고 정체성(context `homelab-vm`, `vm.env`의 노드 이름 하나)을 본다. VM kubeconfig를 NUC에 두는 방법은 [vm.md](vm.md) 3절이다. **운영 kubeconfig로 2단계를 돌리면 운영 ESO 자격이 dev identity로 바뀌어 운영의 모든 ExternalSecret 갱신이 멈춘다.**
+호스트의 작업 사본에서 한다. Infisical CLI와 yq는 호스트의 mise에만 있고 VM에는 없다. 호스트에는 운영 kubeconfig도 있으므로 VM에 쓰는 블록은 모두 첫 두 줄에서 `KUBECONFIG`를 VM 파일로 고정하고 정체성(context `homelab-vm`, `vm.env`의 노드 이름 하나)을 본다. VM kubeconfig를 호스트에 두는 방법은 [vm.md](vm.md) 3절이다. **운영 kubeconfig로 2단계를 돌리면 운영 ESO 자격이 dev identity로 바뀌어 운영의 모든 ExternalSecret 갱신이 멈춘다.**
 
 1. **ESO Secret 전에 키를 대조한다.** 운영 클러스터(main을 동기화한 결과)의 ExternalSecret이 읽는 키를 Infisical 경로로 바꾸고, `homelab-dev`/`dev`의 같은 폴더 키 이름과 `comm -23`으로 대조한다(설계 E8 VM 격리 2번). 운영 클러스터는 읽기만 한다. 값은 출력하지 않고, 빠진 키가 하나라도 있으면 그 이름만 내고 멈춘다. `infisical login`(사람 계정)을 먼저 한다. `homelab-smoke` 키는 시나리오 2·3 뒤에 생기므로 그 뒤의 대조에 들어간다.
 
@@ -447,7 +447,7 @@ NUC의 작업 사본에서 한다. Infisical CLI와 yq는 NUC의 mise에만 있�
 
 2. **ESO Secret의 값은 `eso-homelab-dev`이다.** VM 준비 자산의 client ID·secret을 대화형 셸에서 `read -rs ESO_CLIENT_ID`, `read -rs ESO_CLIENT_SECRET`로 받고 `export ESO_CLIENT_ID ESO_CLIENT_SECRET`한 뒤 돌린다. 운영 자격을 잘못 넣으면 그 identity가 `homelab-dev`에 없어 Store가 Ready가 되지 않는다(조용히 운영 값을 읽지 않는다).
 
-   **선택: 넣기 전에 NUC에서 로그인해 본다.** 같은 셸에서 [rotate.md](rotate.md) 1절 2단계 블록을 돌려 200인지 본다(토큰은 버리고 응답 코드만). Client ID 자리에 identity ID를 넣는 실수(T09에서 401 두 번, approvals 2026-10-19 20:55 행)를 Store가 Ready가 안 되는 것으로 VM에서 처음 알게 되는 대신 여기서 잡는다. U40 시험(2026-10-29)에서도 했다(200). VM 클러스터 DNS만 막은 시험이라 NUC에서는 Infisical에 닿는다.
+   **선택: 넣기 전에 호스트에서 로그인해 본다.** 같은 셸에서 [rotate.md](rotate.md) 1절 2단계 블록을 돌려 200인지 본다(토큰은 버리고 응답 코드만). Client ID 자리에 identity ID를 넣는 실수(T09에서 401 두 번, approvals 2026-10-19 20:55 행)를 Store가 Ready가 안 되는 것으로 VM에서 처음 알게 되는 대신 여기서 잡는다. U40 시험(2026-10-29)에서도 했다(200). VM 클러스터 DNS만 막은 시험이라 호스트에서는 Infisical에 닿는다.
 
    ```bash
    bash -euo pipefail <<'EOF'

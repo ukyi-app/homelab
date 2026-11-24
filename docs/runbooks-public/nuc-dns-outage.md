@@ -1,9 +1,9 @@
-# NUC·AdGuard 장애 때 집 LAN DNS
+# 호스트·AdGuard 장애 때 집 LAN DNS
 
-공유기(Netgear Orbi RBR350)는 주 DNS(NUC `192.168.117.15`)가 응답하지 않아도 보조 DNS로 넘어가지 않는다.
+공유기(Netgear Orbi RBR350)는 주 DNS(호스트 `192.168.117.15`)가 응답하지 않아도 보조 DNS로 넘어가지 않는다.
 2026-10-20 시나리오 14 실측에서 AdGuard를 멈춘 6분 35초 동안 공유기 경유 질의 26회가 모두 시간 초과였고,
-NUC가 아예 응답하지 않게 만든 2분 30초 시험에서도 11회가 모두 시간 초과였다.
-그래서 AdGuard Home이나 NUC가 멈추면 Tailscale을 쓰지 않는 집 기기의 DNS가 전부 끊긴다.
+호스트가 아예 응답하지 않게 만든 2분 30초 시험에서도 11회가 모두 시간 초과였다.
+그래서 AdGuard Home이나 호스트가 멈추면 Tailscale을 쓰지 않는 집 기기의 DNS가 전부 끊긴다.
 Tailscale을 켠 기기는 AdGuard 공용 DNS가 답해 영향이 없다(D-08 (b′)).
 
 이 공유기에는 기기에 나눠 줄 DNS를 바꾸는 설정과 DNS 프록시를 끄는 설정이 없다.
@@ -12,7 +12,7 @@ Tailscale을 켠 기기는 AdGuard 공용 DNS가 답해 영향이 없다(D-08 (b
 
 ## 언제 쓰나
 
-- AdGuard 정지 경보가 5분 넘게 풀리지 않을 때, 또는 NUC가 꺼져 곧 되살릴 수 없을 때.
+- AdGuard 정지 경보가 5분 넘게 풀리지 않을 때, 또는 호스트가 꺼져 곧 되살릴 수 없을 때.
 - AdGuard 업데이트처럼 수십 초 안에 끝나는 정지에는 쓰지 않는다.
 
 ## 임시 전환
@@ -25,8 +25,8 @@ Tailscale을 켠 기기는 AdGuard 공용 DNS가 답해 영향이 없다(D-08 (b
 
 ## 되돌리기
 
-1. AdGuard가 Ready이고 NUC에서 `dig @192.168.117.15 example.com +short`가 답하는지 확인한다.
+1. AdGuard가 Ready이고 호스트에서 `dig @192.168.117.15 example.com +short`가 답하는지 확인한다.
 2. 공유기 DNS를 주 `192.168.117.15`, 보조 `1.1.1.1`(C-04 값)로 되돌린다.
-3. NUC에서 처음 묻는 이름 하나를 공유기로 묻는다(`dig @192.168.117.1 "rbk-$(date +%s).example.com"`). AdGuard 관리 화면의 쿼리 로그에 그 이름이 보이면 공유기가 로컬 AdGuard로 돌아온 것이다.
+3. 호스트에서 처음 묻는 이름 하나를 공유기로 묻는다(`dig @192.168.117.1 "rbk-$(date +%s).example.com"`). AdGuard 관리 화면의 쿼리 로그에 그 이름이 보이면 공유기가 로컬 AdGuard로 돌아온 것이다.
    `doubleclick.net` 차단은 확인으로 쓰지 않는다. 임시로 넣은 AdGuard 공용 DNS도 같은 답(`0.0.0.0`)을 줘서, 되돌리기가 실패해도 통과처럼 보인다.
 4. 승인 기록에 되돌린 시각을 남긴다.
