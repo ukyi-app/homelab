@@ -8,7 +8,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, posix, relative } from "node:path";
 import { type Doc, type Violation, ROOT, effectiveSources, fmt, gitFiles, parseAll, readText, sameRepo, tempDir } from "./lib";
 import { WORKLOAD_KINDS, context, expand, id, podSpec } from "./policy";
-import { type RenderOptions, fillEmpty, filledValuesObject, helmTemplate, listShapeErrors, listedArgoApps, parseRendered, renderAll } from "./render";
+import { type RenderOptions, clusterRestore, fillEmpty, filledValuesObject, helmTemplate, listShapeErrors, listedArgoApps, parseRendered, renderAll } from "./render";
 
 export const OLIVE_TARGETS_FILE = "platform/olive/targets.yaml";
 const OLIVE_CHART = "platform/olive";
@@ -988,7 +988,31 @@ function checkIgnoreDifferences(targets: Target[], deployed: Record<string, Doc[
   return out;
 }
 
+// olive targets 단계. 규칙 검사에 더해 값 파일의 복구 스위치가 올리브 Application까지 전달됐는지 본다.
+// 배선 검사는 저장소의 값 파일을 읽으므로 fixture·합성 사례가 쓰는 oliveChecks(allChecks)에는 넣지 않는다.
 export function checkOliveTargets(input: OliveInput): Violation[] {
+  return [...oliveChecks(input), ...checkKeySwitchWiring(input.keySwitch, restoreOffClusters())];
+}
+
+// 값 파일(platform/root/values-<클러스터>.yaml)에서 cluster.restore.externalSecrets를 bool false로 끈 클러스터(복구 PR).
+function restoreOffClusters(): string[] {
+  return gitFiles("platform/root/values-*.yaml")
+    .filter((f) => clusterRestore(f).externalSecretsOff)
+    .map((f) => f.replace(/^platform\/root\/values-/, "").replace(/\.yaml$/, ""));
+}
+// 끈 클러스터는 켠 렌더(FORCED)의 olive Application이 받은 스위치도 끔이어야 한다. root가 값을 넘기지 않으면 차트 기본값(켬)으로
+// 렌더되어 실행기 store·ES가 생기는데, 키 검사는 그 켬을 그대로 믿어 통과시킨다. 값이 읽히지 않은 경우(Application 없음)도 막는다.
+function checkKeySwitchWiring(keySwitch: Record<string, boolean>, offClusters: string[]): Violation[] {
+  return offClusters
+    .filter((c) => keySwitch[c] !== false)
+    .map((c) => ({
+      rule: "olive-executor-key",
+      where: `${FORCED}[${c}]`,
+      message: `값 파일(platform/root/values-${c}.yaml)이 복구 스위치(cluster.restore.externalSecrets)를 껐는데 olive Application이 받은 externalSecrets.enabled가 ${keySwitch[c] === undefined ? "읽히지 않았다" : "켬이다"}(root가 값을 넘기는지 본다)`,
+    }));
+}
+
+function oliveChecks(input: OliveInput): Violation[] {
   const targets = targetList(input.targets);
   // 실제 값으로 켠 렌더에도 격리 검사를 건다. render 단계는 지금 root(꺼진 구성 요소 없음)와 ci/*.yaml 렌더만 본다.
   const forcedApps = (input.deployed[FORCED] ?? []).filter(deployedDoc);
@@ -1402,7 +1426,7 @@ export function applyPatch(input: OliveInput, ops: PatchOp[]): string | undefine
 
 // render 단계는 지금 root 전체 렌더(차트 ci 렌더 포함)에 checkOliveIsolation을 건다. 여기서는 대상 차트 ci 렌더로 그 몫을 대신한다.
 // 호스트 매니페스트의 몫은 checkOliveTargets 안의 호출이 한 번 본다.
-export const allChecks = (input: OliveInput) => [...checkOliveTargets(input), ...checkOliveIsolation(Object.values(input.charts).flat(), input.targets, null)];
+export const allChecks = (input: OliveInput) => [...oliveChecks(input), ...checkOliveIsolation(Object.values(input.charts).flat(), input.targets, null)];
 
 // 대조군. "지금"은 patch 없는 입력(이 PR의 sandbox CI 값 포함), 나머지는 정상 전환을 그린 양성 fixture를 얹은 입력이다.
 // fixture 묶음 전체가 대조군마다 같은 결과여야 한다. 한 대조군에서만 맞는 음성 fixture는 정상 전환 PR을 막거나 그 뒤 아무것도 증명하지 않는다.
@@ -1693,6 +1717,17 @@ function executorKeyTests(base: OliveInput): string[] {
     if (enabled || got.length > 0) bad.push(`복구 스위치 끈 값 렌더(스위치 ${enabled ? "켬" : "끔"}으로 읽음)가 통과하지 않았다: ${got.map(fmt).join("; ") || "없음"}`);
     bad.push(...syntheticKeyTests(base, parseAll(r.out), residual, compare));
   }
+  // 배선 검사(checkKeySwitchWiring). 값 파일에서 끈 클러스터만 보고, Application이 받은 값이 끔이 아니거나 없으면 한 건이다.
+  const wiring: [string, Record<string, boolean>, string[], number][] = [
+    ["끈 클러스터가 끔을 받음", { vm: false, prod: true }, ["vm"], 0],
+    ["끈 클러스터가 켬을 받음", { vm: true, prod: true }, ["vm"], 1],
+    ["끈 클러스터의 값이 없음", { prod: true }, ["vm"], 1],
+    ["끈 클러스터 없음", { vm: true, prod: true }, [], 0],
+  ];
+  for (const [name, ks, offs, n] of wiring) {
+    const got = checkKeySwitchWiring(ks, offs);
+    if (got.length !== n || got.some((v) => v.rule !== "olive-executor-key")) bad.push(`배선 ${name}: 위반 ${n}건이어야 하는데 ${got.length}건이다: ${got.map(fmt).join("; ") || "없음"}`);
+  }
   return bad;
 }
 
@@ -1710,13 +1745,16 @@ function syntheticKeyTests(base: OliveInput, offObjs: any[], residual: Doc | und
   const onObjs = expand(base.charts[OLIVE_CHART] ?? []).filter((d) => d.origin === ON).map((d) => d.obj);
   const app = argoApps(expand(base.deployed[FORCED] ?? [])).find((a) => effectiveSources(a.obj.spec).some((s) => sameRepo(s?.repoURL) && s?.path === OLIVE_CHART));
   const isSup = (d: Doc) => d.obj.kind === "ClusterSecretStore" && d.obj.metadata?.name === SUPERVISOR_STORE;
-  if (!app || !app.obj.spec?.source || onObjs.length === 0 || !onObjs.some((obj) => isSup({ origin: ON, obj })) || !residual) {
+  if (!app || onObjs.length === 0 || !onObjs.some((obj) => isSup({ origin: ON, obj })) || !residual) {
     return [`합성 클러스터 ci: 전제 문서(${FORCED}의 olive Application, ${ON} 렌더와 그 감독 store, 차트 store)가 없다`];
   }
+  // 값은 유효 소스(단수 source든 배열 sources든) 중 이 저장소의 platform/olive 소스에만 넣는다. 다른 소스(값 ref 등)는 그대로 둔다.
   const appWith = (enabled: boolean): Doc => {
     const a = structuredClone(app);
     a.origin = a.origin.replace(/\[[^\]]+\]/, "[ci]");
-    a.obj.spec.source.helm = { ...a.obj.spec.source.helm, valuesObject: { ...a.obj.spec.source.helm?.valuesObject, externalSecrets: { enabled } } };
+    for (const s of effectiveSources(a.obj.spec).filter((s) => sameRepo(s?.repoURL) && s?.path === OLIVE_CHART)) {
+      s.helm = { ...s.helm, valuesObject: { ...s.helm?.valuesObject, externalSecrets: { enabled } } };
+    }
     return a;
   };
   const olive = (objs: any[]): Doc[] => objs.map((obj) => ({ origin: CI_OLIVE, obj: structuredClone(obj) }));
