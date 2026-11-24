@@ -22,6 +22,9 @@ patch:
         set:
           env:
             - {name: OLIVE_ROLE, value: isolated_reader}
+            - {name: OLIVE_INSTANCE, value: reader}
+            - {name: OLIVE_POLICY_REVISION, value: ci-policy}
+            - {name: OLIVE_SIGNING_KEY_FILE, value: /run/olive/effect-signing/EFFECT_SIGNING_KEY}
             - {name: OLIVE_SUPERVISOR_URI, value: "spiffe://olive.internal/ns/olive-control/supervisor"}
             - {name: OLIVE_STORE_DIR, value: /var/lib/olive-executor/store}
             - {name: OLIVE_AGENT_SOCKET, value: /run/olive/agent/.}

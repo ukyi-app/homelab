@@ -103,6 +103,60 @@ values.schema.json이 실행기 limits를 이 꼴(CPU 정수 또는 m, 메모리
 {{- if hasSuffix "Gi" . -}}{{ mul (trimSuffix "Gi" . | int) 1024 }}{{- else -}}{{ trimSuffix "Mi" . | int }}{{- end -}}
 {{- end }}
 
+{{/*
+정책 판 번호(D-72·D-108). 감독과 모든 작업자 실행기가 이 값 하나를 env OLIVE_POLICY_REVISION으로 받는다. 세 곳(감독·실행기·현관)은
+값의 뜻을 보지 않고 글자 그대로 같은지만 보며, 어긋나면 새 일과 풀기가 막힌다(닫히는 쪽). 비면 렌더를 멈춘다(꼴은 values.schema.json).
+*/}}
+{{- define "olive.policyRevision" -}}
+{{- required "policy.revision is required (the policy revision every olive process compares, D-108; keep components.olive off until then)" .Values.policy.revision -}}
+{{- end }}
+
+{{/*
+실행기 이름(executor/<역할>/<인스턴스>/<저장소 ID>)의 인스턴스 칸. 받는 값: 대상 한 줄. 대상 id를 그대로 쓴다.
+대상 id 꼴(DNS label)은 계약의 인스턴스 칸 꼴([a-z0-9][a-z0-9-]{0,62})에 들고, 감독 등록표는 활성 인스턴스 이름이 표 전체에서
+하나여야 하는데 targets.yaml의 id는 서로 다르다.
+함정: 대상 하나에 실행기가 하나일 때만 맞다. 같은 대상에 실행기를 더하는 PR은 그 실행기에만 다른 이름을 준다. 같은 이름이면
+등록표 전체가 거절된다. 이름을 바꾸면 등록표 행을 새로 적기 전까지 그 실행기의 배정이 0이다.
+*/}}
+{{- define "olive.instance" -}}
+{{ .id }}
+{{- end }}
+
+{{/*
+작업자 실행기의 효과 서명 개인 키(D-73·D-100). Infisical 폴더 /olive/executors/<인스턴스>의 키 하나를 실행기 ns마다 전용 store로 옮긴다.
+키 이름 = Secret 키 = 마운트한 파일 이름이라 OLIVE_SIGNING_KEY_FILE은 <dir>/<key>다. 받는 값: 대상 한 줄(store·path만).
+*/}}
+{{- define "olive.effectKey.key" -}}EFFECT_SIGNING_KEY{{- end }}
+{{- define "olive.effectKey.secretName" -}}olive-effect-signing-key{{- end }}
+{{- define "olive.effectKey.dir" -}}/run/olive/effect-signing{{- end }}
+{{- define "olive.effectKey.store" -}}infisical-olive-executor-{{ include "olive.instance" . }}{{- end }}
+{{- define "olive.effectKey.path" -}}/olive/executors/{{ include "olive.instance" . }}{{- end }}
+
+{{/*
+ClusterSecretStore의 provider 블록. 받는 값: projectSlug, environmentSlug, path(secretsPath). 감독 store와 실행기 store가 함께 쓴다.
+platform/sandbox/templates/_helpers.tpl sandbox.storeProvider와 같은 모양이다(차트가 달라 helper를 함께 쓰지 못한다).
+그쪽(hostAPI, 부트스트랩 Secret, expandSecretReferences)을 바꾸면 여기도 바꾼다.
+*/}}
+{{- define "olive.storeProvider" -}}
+infisical:
+  hostAPI: https://app.infisical.com
+  auth:
+    universalAuthCredentials:
+      clientId:
+        name: infisical-universal-auth
+        namespace: external-secrets
+        key: clientId
+      clientSecret:
+        name: infisical-universal-auth
+        namespace: external-secrets
+        key: clientSecret
+  secretsScope:
+    projectSlug: {{ .projectSlug | quote }}
+    environmentSlug: {{ .environmentSlug | quote }}
+    secretsPath: {{ .path }}
+    expandSecretReferences: false
+{{- end }}
+
 {{/* 선택자 라벨. 대상마다 네임스페이스가 따로라 kind로 충분하다. */}}
 {{- define "olive.selectorLabels" -}}
 app.kubernetes.io/name: olive
@@ -164,12 +218,12 @@ olive-tls
 실행기 TLS 마운트 경로 확인. 받는 값: id, path(executors.<id>.tls.mountPath), store(executors.<id>.store.mountPath),
 trust(olive.trustEnabled 결과).
 pki를 끄고 Secret을 직접 줄 때 스키마는 /run/ 아래 아무 경로나 받는다. 제어 컨테이너의 다른 마운트(/tmp, 소켓 폴더, 신뢰 묶음,
-저장소)나 대리 폴더와 같으면 PodTemplate이 유효하지 않고, 한쪽이 다른 쪽 안이면 한쪽 파일이 가려지거나 읽기 전용 볼륨 안에
+저장소, 효과 서명 키)나 대리 폴더와 같으면 PodTemplate이 유효하지 않고, 한쪽이 다른 쪽 안이면 한쪽 파일이 가려지거나 읽기 전용 볼륨 안에
 마운트 지점을 만들지 못해 컨테이너가 뜨지 않는다.
 */}}
 {{- define "olive.executorTlsPath" -}}
 {{- $p := clean .path -}}
-{{- $mounts := list "/tmp" "/run/olive/agent" "/opt/olive-agent" (clean .store) -}}
+{{- $mounts := list "/tmp" "/run/olive/agent" "/opt/olive-agent" (clean .store) (include "olive.effectKey.dir" .) -}}
 {{- /* 신뢰 묶음 마운트는 trust가 켜졌을 때만 생긴다. 없는 마운트와 견주면 겹치지 않는 기존 값까지 막는다. */ -}}
 {{- if .trust -}}
 {{- $mounts = append $mounts "/run/olive/trust" -}}

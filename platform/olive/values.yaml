@@ -31,6 +31,15 @@ roleImages:
     repository: ""
     digest: ""
 
+# 정책 판 번호(D-72·D-108). 감독과 모든 작업자 실행기의 env OLIVE_POLICY_REVISION이 이 값 하나에서 렌더된다. 사람 PR로만 바꾼다.
+# 비면 렌더가 실패한다(templates/_helpers.tpl olive.policyRevision). 켜는 PR이 값을 넣고, 그 전에는 root에서 꺼 둔다.
+# 꼴은 계약 v1 revision(^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, values.schema.json). 시험 값은 ci/enabled.yaml과 tools/ci/olive.ts RENDER_FILL의 가짜다.
+# 무엇의 변경이 판 번호를 올리는지는 정하지 않았다(켜기 전 점검표).
+# 함정: 현관(apps/homelab-bot)도 같은 값을 받아야 하는데 그 차트에는 아직 자리가 없다. 그 자리와 두 값의 CI 대조는 현관 차트 PR이 더한다.
+# 함정: 켠 뒤 값을 바꾸면 감독·실행기 파드가 다시 뜨고, 현관이 같은 값을 받을 때까지 새 일이 멈춘다(어긋나면 닫히는 쪽).
+policy:
+  revision: ""
+
 # 감독(ns olive-control). 장부·계정·지시 서명 키를 쥐고 hc와 Kubernetes 자격이 없다(D-37).
 supervisor:
   # 실행기가 붙는 포트(D-55: 실행기가 감독에 먼저 붙어 연결을 유지한다). mTLS 연결이라 HTTPS 관례의 8443을 쓴다.
@@ -133,7 +142,9 @@ pki:
 #   size: 작은 메타데이터 파일과 nonce마다 빈 파일 하나라 MB 단위로 본다 [가정]. local-path는 크기를 강제하지 않는다.
 #   mountPath: 볼륨을 붙이는 곳. 실행기에 주는 저장소 경로(OLIVE_STORE_DIR)는 그 아래 store다(templates/executor-deployments.yaml).
 # tls: 감독 tls와 같다. pki를 끄고 Secret을 직접 줄 때 mountPath가 제어의 다른 마운트(/tmp, /run/olive/agent, /run/olive/trust,
-#   store.mountPath)나 /opt/olive-agent와 같거나 포개지면 렌더가 멈춘다(templates/_helpers.tpl olive.executorTlsPath).
+#   /run/olive/effect-signing, store.mountPath)나 /opt/olive-agent와 같거나 포개지면 렌더가 멈춘다(templates/_helpers.tpl olive.executorTlsPath).
+# 효과 서명 키·인스턴스 이름은 값이 아니다. 인스턴스는 대상 id, 키는 Infisical /olive/executors/<인스턴스>/EFFECT_SIGNING_KEY다
+# (templates/_helpers.tpl olive.instance·olive.effectKey.*).
 executors:
   diagnosis:
     resources:

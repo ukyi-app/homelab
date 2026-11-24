@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: OLIVE_INSTANCE(["diagnosis"])이 대상 id reader 하나가 아니다
+# 읽기 실행기의 인스턴스 이름을 다른 대상의 id로 바꿨다. 활성 인스턴스 이름이 겹쳐 감독 등록표 전체가 거절된다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_INSTANCE}
+        set: {value: diagnosis}

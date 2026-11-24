@@ -1,0 +1,14 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 비밀·PVC 볼륨 effect-signing(secret)을 executor 밖에 붙이지 않는다
+# 효과 서명 키 Secret을 대리 설치 init에도 붙였다. init은 역할 컨테이너가 읽는 agent-bin에 쓸 수 있어 키를 옮길 수 있다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent}
+            - {name: effect-signing, mountPath: /run/olive/effect-signing, readOnly: true}

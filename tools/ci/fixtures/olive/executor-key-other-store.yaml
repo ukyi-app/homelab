@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-executor-key
+# match: 자기 store(ClusterSecretStore infisical-olive-executor-reader)가 아닌
+# 읽기 실행기 ns의 효과 키 ExternalSecret이 진단 실행기의 store를 쓴다. 그 store의 conditions가 막지만 Git에서 먼저 막는다.
+patch:
+  - in: chart
+    select: {kind: ExternalSecret, namespace: olive-reader, name: olive-effect-signing-key}
+    set: {spec.secretStoreRef.name: infisical-olive-executor-diagnosis}

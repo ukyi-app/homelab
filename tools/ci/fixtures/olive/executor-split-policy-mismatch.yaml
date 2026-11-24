@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: OLIVE_POLICY_REVISION("ci-policy-2")이 감독의 값("ci-policy")과 다르다
+# 읽기 실행기의 정책 판 번호만 다른 값으로 바꿨다. 꼴은 맞지만 감독이 배정을 보류해 그 실행기에는 새 일이 0이다(D-108).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_POLICY_REVISION}
+        set: {value: ci-policy-2}

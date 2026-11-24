@@ -1,0 +1,19 @@
+# expect: fail
+# rule: olive-executor-key
+# match: 실행기 ns olive-reader의 ExternalSecret(target "ci-extra")은 허용 목록 밖이다
+# 읽기 실행기 ns에 효과 키가 아닌 ExternalSecret을 더했다. 자기 store를 쓰고 키가 /로 시작하지 않아도, 폴더 성분(../)이 든 상대 키와
+# dataFrom은 provider가 기본 폴더와 합친 뒤 고르므로 폴더 경계를 보장하지 못한다. 실행기 ns의 ExternalSecret은 효과 키 하나다.
+patch:
+  - in: chart
+    add:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata: {name: ci-extra, namespace: olive-reader}
+      spec:
+        secretStoreRef: {kind: ClusterSecretStore, name: infisical-olive-executor-reader}
+        target: {name: ci-extra, creationPolicy: None}
+        data:
+          - secretKey: marker
+            remoteRef: {key: ci/../PUBLIC_MARKER}
+        dataFrom:
+          - find: {name: {regexp: "^PUBLIC_MARKER$"}}

@@ -13,6 +13,9 @@ roleImages:
   isolated_reader:
     repository: example.invalid/olive-role-isolated-reader
     digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+# 정책 판 번호도 가짜다(실제 값은 켜는 PR이 정한다).
+policy:
+  revision: ci-policy
 supervisor:
   account:
     name: ci-account

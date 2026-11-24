@@ -1,0 +1,18 @@
+# expect: fail
+# rule: olive-executor-key
+# match: store ci-other-regex가 실행기 ns olive-reader에 열려 있다(namespaceRegexes "-reader$"가 olive-reader에 맞는다)
+# 다른 차트의 store가 앞을 고정하지 않은 정규식으로 읽기 실행기 ns까지 연다(ESO는 MatchString이라 부분 일치다).
+# 앱 store(infisical-apps)의 ^app-[a-z0-9-]+$는 실행기 ns에 맞지 않아 대조군이 통과한다.
+patch:
+  - in: render
+    render: root+켬
+    origin: external-secrets-stores[prod]:platform/external-secrets
+    add:
+      apiVersion: external-secrets.io/v1
+      kind: ClusterSecretStore
+      metadata: {name: ci-other-regex}
+      spec:
+        conditions: [{namespaceRegexes: ["-reader$"]}]
+        provider:
+          fake:
+            data: [{key: PUBLIC_MARKER, value: public}]

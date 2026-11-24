@@ -1,0 +1,16 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 비밀·PVC 볼륨 effect-signing(secret)을 executor 밖에 붙이지 않는다
+# 효과 서명 키 Secret을 역할 컨테이너에도 붙였다. 모델·도구가 실행기 행세로 효과에 서명한다(D-73·D-100).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent, readOnly: true}
+            - {name: agent-link, mountPath: /run/olive/agent, readOnly: true}
+            - {name: role-tmp, mountPath: /tmp}
+            - {name: effect-signing, mountPath: /run/olive/effect-signing, readOnly: true}

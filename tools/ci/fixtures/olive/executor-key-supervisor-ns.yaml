@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-executor-key
+# match: 감독 store infisical-olive의 conditions
+# 감독 store를 실행기가 아닌 다른 ns에도 열었다. 감독 폴더(계정 묶음·지시 서명 키)를 읽는 ns는 감독 ns 하나다.
+patch:
+  - in: chart
+    select: {kind: ClusterSecretStore, name: infisical-olive}
+    set:
+      spec.conditions:
+        - namespaces: [olive-control, default]
