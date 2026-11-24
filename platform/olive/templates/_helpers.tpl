@@ -27,16 +27,22 @@ fromYaml로 받는다. 모양이 틀리면 여기서 렌더를 멈춘다. CLI·C
 {{- $_ := set $namespaces $t.namespace true -}}
 {{- if eq $t.kind "supervisor" -}}
 {{- $supervisors = add1 $supervisors -}}
-{{- if hasKey $t "roles" -}}
-{{- fail (printf "targets.yaml: only executor targets take roles, not %s" $t.id) -}}
+{{- if or (hasKey $t "roles") (hasKey $t "role") -}}
+{{- fail (printf "targets.yaml: only executor targets take roles and role, not %s" $t.id) -}}
 {{- end -}}
 {{- else if eq $t.kind "executor" -}}
 {{- if not (hasKey $.Values.executors $t.id) -}}
 {{- fail (printf "values.yaml executors.%s is missing for targets.yaml executor %s" $t.id $t.id) -}}
 {{- end -}}
-{{- /* 실행기 하나에는 역할 하나다(D-64). 실행기의 env OLIVE_ROLE이 이 값이고 실행기는 대상 id를 역할로 옮기지 않는다. */ -}}
-{{- if not (and (kindIs "slice" $t.roles) (eq (len $t.roles) 1) (kindIs "string" (index $t.roles 0)) (index $t.roles 0)) -}}
-{{- fail (printf "targets.yaml: executor %s needs roles with exactly one v1 role name (one role per executor, D-64)" $t.id) -}}
+{{- /*
+roles는 대상이 맡을 수 있는 역할 목록(D-64 등록표)이라 길이를 막지 않는다. role은 이 실행기(와 그 서명 키)에 배정한 역할 하나로
+env OLIVE_ROLE과 역할 이미지가 이 값을 쓴다. 실행기는 대상 id를 역할로 옮기지 않는다. v1 역할 이름인지는 CI(olive-targets)가 본다.
+*/ -}}
+{{- if not (and (kindIs "slice" $t.roles) $t.roles) -}}
+{{- fail (printf "targets.yaml: executor %s needs roles (the v1 role names this target may take, D-64)" $t.id) -}}
+{{- end -}}
+{{- if not (and (kindIs "string" $t.role) $t.role (has $t.role $t.roles)) -}}
+{{- fail (printf "targets.yaml: executor %s needs role, one v1 role name from its roles (the role assigned to this executor, D-64)" $t.id) -}}
 {{- end -}}
 {{- else -}}
 {{- fail (printf "targets.yaml: platform/olive declares only supervisor and executor, not %s (%s)" $t.kind $t.id) -}}
@@ -151,6 +157,21 @@ securityContext:
 olive-tls
 {{- else -}}
 {{ .tls.secretName }}
+{{- end -}}
+{{- end }}
+
+{{/*
+실행기 TLS 마운트 경로 확인. 받는 값: id, path(executors.<id>.tls.mountPath), store(executors.<id>.store.mountPath).
+pki를 끄고 Secret을 직접 줄 때 스키마는 /run/ 아래 아무 경로나 받는다. 제어 컨테이너의 다른 마운트(/tmp, 소켓 폴더, 신뢰 묶음,
+저장소)나 대리 폴더와 같으면 PodTemplate이 유효하지 않고, 한쪽이 다른 쪽 안이면 한쪽 파일이 가려지거나 읽기 전용 볼륨 안에
+마운트 지점을 만들지 못해 컨테이너가 뜨지 않는다.
+*/}}
+{{- define "olive.executorTlsPath" -}}
+{{- $p := clean .path -}}
+{{- range $r := list "/tmp" "/run/olive/agent" "/run/olive/trust" "/opt/olive-agent" (clean .store) -}}
+{{- if or (eq $p $r) (hasPrefix (printf "%s/" $r) $p) (hasPrefix (printf "%s/" (trimSuffix "/" $p)) $r) -}}
+{{- fail (printf "executors.%s.tls.mountPath %s overlaps the executor pod mount %s (pick a separate path under /run/)" $.id $p $r) -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 

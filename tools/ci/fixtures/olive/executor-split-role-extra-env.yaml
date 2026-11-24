@@ -1,0 +1,17 @@
+# expect: fail
+# rule: olive-executor-split
+# match: env에 표 밖의 이름 OLIVE_STORE_DIR를 두지 않는다(role의 표
+# 역할 컨테이너 env에 일반 값(OLIVE_STORE_DIR)을 더했다. 대리는 OLIVE_AGENT_SOCKET만 읽고, 나머지는 모델이 도는 환경에 그대로 남는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          env:
+            - {name: OLIVE_AGENT_SOCKET, value: /run/olive/agent/agent.sock}
+            - {name: BUN_OPTIONS, value: ""}
+            - {name: BUN_BE_BUN, value: ""}
+            - {name: LD_PRELOAD, value: ""}
+            - {name: OLIVE_STORE_DIR, value: /review-placeholder}

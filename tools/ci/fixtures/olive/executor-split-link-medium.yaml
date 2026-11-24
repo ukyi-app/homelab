@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 볼륨 agent-link이 표의 메모리 emptyDir(sizeLimit 1Mi)가 아니다
+# 소켓 폴더 agent-link를 매체·상한 없는 emptyDir로 바꿨다. 노드 디스크에 상한 없이 쓸 수 있는 공유 폴더가 된다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.volumes:
+        match: {name: agent-link}
+        set: {emptyDir: {}}

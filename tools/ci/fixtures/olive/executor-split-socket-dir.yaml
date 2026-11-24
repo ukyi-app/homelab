@@ -1,6 +1,6 @@
 # expect: fail
 # rule: olive-executor-split
-# match: 마운트(/run/olive/agent) 바로 아래 절대 경로 하나가 아니다
+# match: OLIVE_AGENT_SOCKET(["/tmp/agent.sock"])이 표의 /run/olive/agent/agent.sock 하나가 아니다
 # 두 컨테이너의 소켓을 같은 /tmp 경로로 바꿨다. 값은 같아도 /tmp는 컨테이너마다 다른 볼륨이라 대리가 제어의 소켓을 보지 못한다.
 patch:
   - in: chart

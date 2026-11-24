@@ -1,6 +1,6 @@
 # expect: fail
 # rule: olive-executor-split
-# match: 디스크 emptyDir가 아니다
+# match: 볼륨 agent-bin이 표의 디스크 emptyDir(sizeLimit 256Mi)가 아니다
 # agent-bin을 메모리 매체로 바꿨다. 대리(약 104MiB)가 파드의 메모리 상한에 든다.
 patch:
   - in: chart

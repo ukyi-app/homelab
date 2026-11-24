@@ -1,6 +1,6 @@
 # expect: fail
 # rule: olive-executor-split
-# match: OLIVE_AGENT_SOCKET이 두 컨테이너에서 다르다
+# match: OLIVE_AGENT_SOCKET(["/run/olive/agent/other.sock"])이 표의 /run/olive/agent/agent.sock 하나가 아니다
 # 역할 컨테이너의 소켓 경로를 같은 폴더의 다른 이름으로 바꿨다. 대리가 붙지 못해 제어가 hello를 기다리다 끝난다.
 patch:
   - in: chart

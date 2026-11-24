@@ -1,0 +1,18 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 마운트 경로가 겹친다: tls(/run/olive/agent)와 agent-link(/run/olive/agent)
+# 직접 준 TLS Secret의 경로를 소켓 폴더와 같게 했다(pki를 끄면 값이 /run/ 아래 아무 경로나 받는다). 같은 경로 두 마운트라 PodTemplate이
+# 유효하지 않다. 값으로는 렌더가 먼저 멈춘다(olive.ts executorTlsPathTest). 이 fixture는 렌더를 거치지 않은 모양도 CI가 잡는지 본다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: executor}
+        set:
+          volumeMounts:
+            - {name: tls, mountPath: /run/olive/agent, readOnly: true}
+            - {name: trust, mountPath: /run/olive/trust, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: agent-link, mountPath: /run/olive/agent}
+            - {name: store, mountPath: /var/lib/olive-executor}

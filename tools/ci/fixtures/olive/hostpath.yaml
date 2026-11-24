@@ -1,7 +1,9 @@
 # expect: fail
 # rule: olive-isolation
 # match: hostPath 볼륨 hc을 쓰지 않는다
+# also: olive-executor-split
 # 진단 실행기에 호스트 경로(hc 소켓 자리)를 붙였다. 작업자 파드에는 hc가 없다(D-37).
+# 실행기 파드의 볼륨 집합은 분할 검사의 경계 표에도 있어 그 검사도 잡는다.
 patch:
   - in: chart
     select: {kind: Deployment, namespace: olive-diagnosis, name: executor}

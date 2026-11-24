@@ -7,14 +7,15 @@ infisical:
 # ukyi-app/olive main 빌드(app-build)가 GHCR에 올린 digest만 쓰고 사람 PR로만 바꾼다. 실행기는 모델 자격을 받으므로
 # apps/의 digest 자동 병합 경로에 넣지 않는다(설계 C.4.4·C.4.7, platform/sandbox worker.image와 같은 이유).
 # 빈 값이면 렌더가 실패한다(templates/_helpers.tpl olive.image). 켜는 PR이 실제 digest를 넣고, 그 전에는 root에서 꺼 둔다.
-# 이미지 계약(ukyi-app/olive README "이미지 계약"): 비root uid·gid 65532, 루트 파일시스템 읽기 전용 전제, 쓰기는 /tmp와
-# init의 /opt/olive-agent(대리 설치)만, 듣는 포트를 이미지에 적지 않음, 역할을 고르지 않으면 64·아직 구현되지 않은 역할은 69로 끝남.
+# 이미지 계약(ukyi-app/olive README "이미지 계약"): 비root uid·gid 65532, 루트 파일시스템 읽기 전용 전제, 듣는 포트를 이미지에
+# 적지 않음, 역할을 고르지 않으면 64·아직 구현되지 않은 역할은 69로 끝남. 루트가 읽기 전용이라 쓰기는 컨테이너마다 붙인 볼륨에만
+# 한다: 감독은 /tmp와 장부 PVC, 실행기 제어는 /tmp·소켓 폴더(agent-link)·저장소 PVC, init은 /opt/olive-agent(대리 설치).
 # 작업자 실행기의 init(olive-init)도 이 이미지다. 이 이미지에 든 대리(/opt/olive/olive-agent)를 역할 컨테이너에 놓는다(D-103).
 image:
   repository: ghcr.io/ukyi-app/olive
   digest: ""
 
-# 작업자 실행기 역할 컨테이너의 이미지(D-103 역할별 이미지). 키는 v1 역할 이름(targets.yaml roles)이다. 대상 id가 아니다.
+# 작업자 실행기 역할 컨테이너의 이미지(D-103 역할별 이미지). 키는 v1 역할 이름(targets.yaml role)이다. 대상 id가 아니다.
 # 출처(누가 빌드하고 서명을 어떻게 확인하는지)는 정하지 않았다. 빈 값이면 렌더가 실패한다(templates/_helpers.tpl olive.roleImage).
 # 켜는 PR이 실제 값을 넣고, 그 전에는 root에서 꺼 둔다. 시험 값은 ci/enabled.yaml과 tools/ci/olive.ts RENDER_FILL의 가짜다.
 # 고를 때의 조건(차트 CI는 렌더만 봐서 이미지 안은 확인하지 못한다. 고르는 PR이 이미지 설정을 확인해 PR에 적는다):
@@ -131,6 +132,8 @@ pki:
 #   storageClassName: 감독 장부와 같은 local-retain(values.schema.json이 이 값만 받는다. 올리브 격리 검사의 허용 클래스와 같다).
 #   size: 작은 메타데이터 파일과 nonce마다 빈 파일 하나라 MB 단위로 본다 [가정]. local-path는 크기를 강제하지 않는다.
 #   mountPath: 볼륨을 붙이는 곳. 실행기에 주는 저장소 경로(OLIVE_STORE_DIR)는 그 아래 store다(templates/executor-deployments.yaml).
+# tls: 감독 tls와 같다. pki를 끄고 Secret을 직접 줄 때 mountPath가 제어의 다른 마운트(/tmp, /run/olive/agent, /run/olive/trust,
+#   store.mountPath)나 /opt/olive-agent와 같거나 포개지면 렌더가 멈춘다(templates/_helpers.tpl olive.executorTlsPath).
 executors:
   diagnosis:
     resources:

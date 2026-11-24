@@ -5,7 +5,7 @@
 // 호스트가 설치하는 매니페스트(host/k3s-manifests)를 함께 본다.
 // CLI의 올리브 명령은 아직 없다. 생기면 대상을 이 파일에서 읽어야 하고, 손으로 적은 목록을 두면 이 검사가 그 목록을 보지 못한다.
 import { existsSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, posix, relative } from "node:path";
 import { type Doc, type Violation, ROOT, effectiveSources, fmt, gitFiles, parseAll, readText, sameRepo, tempDir } from "./lib";
 import { WORKLOAD_KINDS, context, expand, id, podSpec } from "./policy";
 import { fillEmpty, filledValuesObject, helmTemplate, listShapeErrors, listedArgoApps, parseRendered, renderAll } from "./render";
@@ -19,9 +19,10 @@ const TARGET_KINDS = new Set([...OLIVE_KINDS, "session", "writer"]);
 // ns·Deployment 이름은 CLI 정지 어댑터(cli/src/core/olive.ts LABEL)와 같은 DNS label이다. 다르면 CLI가 그 대상을 거부한다.
 const LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const REPLICAS_POINTER = ["/spec/replicas"];
-// kind executor인 줄의 roles(D-64). 값은 ukyi-app/olive 계약 v1의 역할 이름(src/contract/v1/role.ts ROLES)과 같아야 한다.
-// 실행기는 이 밖의 값을 받지 않아 감독에 붙기 전에 끝난다. 계약의 판이 바뀌면 함께 고친다.
-const TARGET_OPTIONAL_KEYS = ["roles"];
+// kind executor인 줄의 roles(대상이 맡을 수 있는 역할 목록, D-64 등록표)와 role(이 실행기에 배정한 역할 하나). 값은 ukyi-app/olive
+// 계약 v1의 역할 이름(src/contract/v1/role.ts ROLES)과 같아야 한다. 실행기는 이 밖의 값을 받지 않아 감독에 붙기 전에 끝난다.
+// 계약의 판이 바뀌면 함께 고친다.
+const TARGET_OPTIONAL_KEYS = ["roles", "role"];
 const V1_ROLES = new Set(["diagnosis", "isolated_reader", "code_author", "pr_review", "memory_curator"]);
 export const OLIVE_RULES = ["olive-targets", "olive-replicas", "olive-chart-targets", "olive-owner", "olive-ignore-differences", "olive-isolation", "olive-executor-store", "olive-executor-split"];
 
@@ -33,7 +34,7 @@ const ISOLATION_DELEGATED: Record<string, string> = { sandbox: "policy.ts checkS
 const REAL = "root";
 const FORCED = "root+켬";
 
-export type Target = { id: string; kind: string; namespace: string; deployment: string; declaredBy: string; stop: unknown; start: unknown; roles?: unknown };
+export type Target = { id: string; kind: string; namespace: string; deployment: string; declaredBy: string; stop: unknown; start: unknown; roles?: unknown; role?: unknown };
 // targets: targets.yaml의 파싱 결과 그대로. charts: declaredBy → 켠 값 파일 렌더, chartRenders: 그 렌더 호출의 출처(문서가 0개여도 남는다).
 // deployed: REAL·FORCED → 전체 렌더 문서(출처는 render.ts의 `<Application>[<클러스터>]:<source path>` 등).
 // host: 호스트가 설치하는 매니페스트(host/k3s-manifests). 격리 검사의 PV·StorageClass 입력이다.
@@ -101,14 +102,17 @@ function checkTargetShape(raw: any): Violation[] {
     for (const k of ["stop", "start"]) if (k in t && typeof t[k] !== "boolean") bad(w, `${k}는 true·false다: ${JSON.stringify(t[k])}`);
     if (t.stop === false) bad(w, `stop이 true가 아니다(start: ${JSON.stringify(t.start)}). 실행 대상은 켤 수 있는지와 상관없이 비상 정지·소멸 확인이 덮는다`);
     if (t.start === true && t.declaredBy === "") bad(w, "declaredBy가 빈 대상은 start: true일 수 없다(선언되지 않은 Deployment를 켜지 않는다)");
-    // 실행기 하나에 역할 하나(D-64)라 지금 차트는 하나만 받는다. 둘을 받으려면 차트가 역할마다 실행기를 만드는 PR이 함께 바꾼다.
+    // roles는 길이를 막지 않는다(한 대상에 여러 역할, D-64). 실행기 하나와 그 서명 키에는 역할 하나라 배정은 role 하나다.
+    // roles가 틀리면 role이 그 안인지는 보지 않는다(원인 하나에 위반 하나).
     // 다른 kind는 역할을 이 칸으로 받지 않는다(세션·작성의 역할은 그 티켓이 정한다).
     if (t.kind === "executor") {
       const r = t.roles;
-      if (!Array.isArray(r) || r.length !== 1 || !r.every((x) => isString(x) && V1_ROLES.has(x))) {
-        bad(w, `roles는 계약 v1 역할 이름(${[...V1_ROLES].join("·")}) 하나의 목록이다(실행기 하나에 역할 하나, D-64): ${JSON.stringify(r)}`);
+      const rolesOk = Array.isArray(r) && r.length > 0 && r.every((x) => isString(x) && V1_ROLES.has(x)) && new Set(r).size === r.length;
+      if (!rolesOk) bad(w, `roles는 계약 v1 역할 이름(${[...V1_ROLES].join("·")})이 겹치지 않는 목록이다(이 대상이 맡을 수 있는 역할, D-64): ${JSON.stringify(r)}`);
+      if (!(isString(t.role) && V1_ROLES.has(t.role) && (!rolesOk || r.includes(t.role)))) {
+        bad(w, `role은 roles 안의 계약 v1 역할 이름 하나다(이 실행기에 배정한 역할. 차트가 OLIVE_ROLE과 역할 이미지를 이 값으로 고른다, D-64): role ${JSON.stringify(t.role)}, roles ${JSON.stringify(r)}`);
       }
-    } else if ("roles" in t) bad(w, `roles는 kind executor인 줄에만 둔다(kind ${JSON.stringify(t.kind)})`);
+    } else for (const k of ["roles는", "role은"]) if (k.slice(0, -1) in t) bad(w, `${k} kind executor인 줄에만 둔다(kind ${JSON.stringify(t.kind)})`);
   });
   const list = targetList(raw);
   const dup = (keyOf: (t: any) => string, what: string) => {
@@ -238,31 +242,109 @@ function checkExecutorStore(targets: Target[], charts: Record<string, Doc[]>, de
 }
 
 // 작업자 실행기 파드의 제어·역할 분할(D-100·D-102·D-103·D-107, platform/olive/templates/executor-deployments.yaml 머리 주석).
-// 역할 컨테이너에서는 모델과 도구가 돈다. 아래 하나라도 어기면 모델이 TLS·서명 키나 저장소에 닿거나, 제어 프로세스를 들여다보거나,
-// 대리를 바꿔칠 수 있다. platform/olive를 렌더한 곳마다 이 차트의 실행기 대상 Deployment를 본다.
-//   - 구성: 일반 컨테이너는 executor·role 둘, init은 olive-init 하나, 임시 컨테이너 없음. 어긋나면 나머지는 보지 않는다.
-//   - uid: role의 실효 runAsUser·runAsGroup(컨테이너 값, 없으면 파드 값)이 executor와 다르다. 파드에 fsGroup·supplementalGroups가 없다
-//     (둘 다 모든 컨테이너에 보조 그룹으로 붙어 역할이 제어의 그룹이 된다).
-//   - 비밀: secret·PVC·projected 볼륨은 executor에만 붙는다. executor 밖 컨테이너에 envFrom·env valueFrom이 없다(볼륨 없이도 Secret이 들어간다).
-//   - 공유 폴더: agent-bin은 디스크 emptyDir이고 olive-init에만 쓰기, role에는 읽기 전용, executor에는 없다. role의 command가 그 안의 대리다.
-//     agent-link는 emptyDir이고 executor에는 쓰기, role에는 읽기 전용이다. 그 밖에 role이 붙이는 것은 다른 컨테이너가 붙이지 않는 emptyDir뿐이다
-//     (제어의 /tmp를 나누지 않는다).
-//   - OLIVE_AGENT_SOCKET: 두 컨테이너에서 같은 절대 경로이고 각자의 agent-link 마운트 바로 아래다.
-//   - PID 공간: shareProcessNamespace가 true가 아니다(D-102. 같으면 /proc/<pid>/root로 제어의 파일에 닿는다).
-//   - role: 프로브·lifecycle·ports가 없다(D-74, kubelet이 그 안에서 명령을 돌리지 않게).
-//   - 같은 판: olive-init 이미지가 executor 이미지와 같다(대리와 실행기의 링크 계약이 같은 커밋이다).
-//   - 한도: 같은 ns의 ResourceQuota olive-limits가 파드의 실효 limits(max(일반 컨테이너 합, 가장 큰 init))와 같다. 작으면 파드가
-//     거부되고, 크면 두 번째 파드가 들어갈 자리가 생긴다(templates/resourcequota.yaml).
-//   - Bun 환경: role env에 BUN_OPTIONS·BUN_BE_BUN·LD_PRELOAD가 빈 값으로 한 번씩 있다. 대리 안의 Bun·로더가 대리 코드보다 먼저 읽고
-//     이미지 ENV가 물려 들어오므로 덮어야 한다. 이미지 ENV 자체(BUN_JSC_* 등)는 렌더로 볼 수 없다(values.yaml roleImages 주석).
-//   - 역할: executor의 OLIVE_ROLE이 targets.yaml roles의 값이다(실행기는 대상 id를 역할로 받지 않는다).
+// 역할 컨테이너에서는 모델과 도구가 돈다. 경계를 어기면 모델이 TLS 개인 키나 저장소에 닿거나, 제어 프로세스를 들여다보거나,
+// 대리를 바꿔칠 수 있다. 상대 비교(두 uid가 다르다, 두 경로가 같다)는 둘이 함께 틀리면 통과하므로 아래 경계 표의 절대 값과 렌더를
+// 그대로 대조한다. 템플릿 값을 바꾸는 PR은 이 표를 함께 고친다. platform/olive를 렌더한 곳(ci/*.yaml 렌더, 켠 root의 olive
+// Application)마다 이 차트의 대상을 본다. 위반 하나는 메시지 하나로 낸다(fixture가 원인을 하나씩 확인한다).
+//
+// 경계 표(실행기 줄마다 같은 모양. 값은 아래 SPLIT_* 상수):
+//   파드: 일반 컨테이너 executor·role, init olive-init 하나, 임시 컨테이너 없음(어긋나면 나머지는 보지 않는다).
+//     securityContext는 SPLIT_POD_SECURITY 그대로(runAsNonRoot, 65532:65532, seccomp RuntimeDefault). fsGroup·supplementalGroups가
+//     없다(둘 다 모든 컨테이너에 보조 그룹으로 붙어 역할이 제어의 그룹이 된다). shareProcessNamespace가 없다(D-102. 있으면
+//     /proc/<pid>/root로 제어의 파일에 닿는다).
+//   컨테이너(SPLIT_CONTAINERS): 실효 uid·gid(컨테이너 값, 없으면 파드 값), 나머지 securityContext(SPLIT_CONTAINER_SECURITY, restricted),
+//     command(args·restartPolicy 없음), 마운트 집합(이름, 고정 경로, readOnly. subPath·subPathExpr 등 다른 칸 없음), env.
+//       olive-init  65532:65532  ["bun", "src/main/agent-install.ts"]  agent-bin /opt/olive-agent 쓰기 하나. env 없음
+//       executor    65532:65532  ["bun", "src/main/executor.ts"]       tmp /tmp, agent-link /run/olive/agent, store(값 경로) 쓰기.
+//                                                                     tls(값 경로)·trust /run/olive/trust는 있으면 읽기 전용.
+//                                                                     env는 OLIVE_ROLE = targets.yaml role, OLIVE_AGENT_SOCKET만 본다
+//       role        10002:10002  ["/opt/olive-agent/olive-agent"]     agent-bin /opt/olive-agent, agent-link /run/olive/agent 읽기 전용,
+//                                (대리가 PID 1, D-102)                 role-tmp /tmp 쓰기. env는 정확히 OLIVE_AGENT_SOCKET과 빈 BUN_OPTIONS·
+//                                                                     BUN_BE_BUN·LD_PRELOAD(대리 안의 Bun·로더가 이미지 ENV를 대리 코드보다
+//                                                                     먼저 읽는다. 이미지 ENV 자체는 렌더로 볼 수 없다, values.yaml roleImages)
+//     /opt/olive-agent와 대리 파일 이름은 올리브 설치기(src/main/agent-install.ts)의 고정 경로다. 마운트만 옮기면 설치한 대리가 없다.
+//     소켓은 /run/olive/agent/agent.sock 하나다. 두 컨테이너가 같은 폴더 전체를 붙이고 그 바로 아래 같은 파일 이름이어야 같은 파일이다.
+//   볼륨(SPLIT_VOLUMES): agent-bin 디스크 256Mi, agent-link 메모리 1Mi, role-tmp 디스크 512Mi, tmp 디스크 64Mi, store PVC
+//     (olive-executor-store가 본다). tls Secret·trust ConfigMap(있으면)은 파일마다 유효 모드 0444(fsGroup 없이 65532가 읽는다).
+//   비밀: secret·PVC·projected 볼륨은 executor에만 붙는다. executor 밖 컨테이너에 envFrom·env valueFrom이 없다(볼륨 없이도 Secret이 들어간다).
+//   겹침: 한 컨테이너 안의 마운트 경로는 같거나 포개지지 않는다(값이 정하는 tls·store 경로 포함. 같으면 PodTemplate이 무효이고 포개면
+//     한쪽 파일이 가려진다).
+//   role: 프로브·lifecycle·ports가 없다(D-74, kubelet이 그 안에서 명령을 돌리지 않게).
+//   이미지: olive-init = executor = ghcr.io/ukyi-app/olive@sha256(대리와 실행기의 링크 계약이 같은 커밋이다). role은 대상 role의
+//     역할 이미지다. 시험 값(RENDER_FILL = ci/enabled.yaml)이 역할마다 다른 가짜 참조라 대상↔이미지 대응이 렌더에 보인다.
+//     함정: 켜는 PR이 실제 역할 이미지를 넣으면 켠 root 렌더가 그 값이 되어 이 대조(roleImageWanted)가 실패한다. 그 PR이 기대 값을 고친다.
+//   한도: 같은 ns의 ResourceQuota olive-limits가 파드의 실효 limits(max(일반 컨테이너 합, 가장 큰 init))와 같다. 작으면 파드가
+//     거부되고, 크면 두 번째 파드가 들어갈 자리가 생긴다(templates/resourcequota.yaml). 상시 실행 init(restartPolicy Always)은 이 식에
+//     맞지 않아 위 컨테이너 표가 거절한다.
+//   하나: 렌더마다 대상 Deployment와 olive-limits가 각각 하나다. 둘이면 CI는 첫 문서를, Argo CD는 마지막 문서를 고른다.
+//   감독: 실행기에서 뺀 fsGroup 65532가 감독 파드에는 있다. 감독은 0440 Secret(서명 키·계정·TLS)을 그 그룹으로 읽는다.
 const ROLE_CONTAINER = "role";
 const INIT_CONTAINER = "olive-init";
-const AGENT_BIN = "agent-bin";
-const AGENT_LINK = "agent-link";
-const AGENT_FILE = "olive-agent";
+const AGENT_DIR = "/opt/olive-agent";
+const AGENT_LINK_DIR = "/run/olive/agent";
+const AGENT_SOCKET = `${AGENT_LINK_DIR}/agent.sock`;
 const SECRET_VOLUME_TYPES = ["secret", "persistentVolumeClaim", "projected"];
-const ROLE_BLANK_ENV = ["BUN_OPTIONS", "BUN_BE_BUN", "LD_PRELOAD"];
+const OLIVE_IMAGE = /^ghcr\.io\/ukyi-app\/olive@sha256:[0-9a-f]{64}$/;
+const SECRET_FILE_MODE = 0o444;
+const SUPERVISOR_FS_GROUP = 65532;
+const SPLIT_POD_SECURITY: Record<string, unknown> = { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: "RuntimeDefault" } };
+const SPLIT_CONTAINER_SECURITY: Record<string, unknown> = { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } };
+// path가 없으면 값 파일이 정하는 경로다(겹침만 본다). optional은 값에 따라 생기는 마운트다(pki, 직접 준 TLS Secret).
+type MountRule = { path?: string; readOnly: boolean; optional?: boolean };
+type ContainerRule = { uid: number; gid: number; command: string[]; what: string; mounts: Record<string, MountRule>; env?: Record<string, string> };
+const SPLIT_CONTAINERS: Record<string, ContainerRule> = {
+  [INIT_CONTAINER]: { uid: 65532, gid: 65532, command: ["bun", "src/main/agent-install.ts"], what: "대리 설치기", mounts: { "agent-bin": { path: AGENT_DIR, readOnly: false } }, env: {} },
+  [EXECUTOR_CONTAINER]: {
+    uid: 65532,
+    gid: 65532,
+    command: ["bun", "src/main/executor.ts"],
+    what: "실행기 진입점",
+    mounts: { tmp: { path: "/tmp", readOnly: false }, "agent-link": { path: AGENT_LINK_DIR, readOnly: false }, store: { readOnly: false }, tls: { readOnly: true, optional: true }, trust: { path: "/run/olive/trust", readOnly: true, optional: true } },
+  },
+  [ROLE_CONTAINER]: {
+    uid: 10002,
+    gid: 10002,
+    command: [`${AGENT_DIR}/olive-agent`],
+    what: "agent-bin 안의 대리",
+    mounts: { "agent-bin": { path: AGENT_DIR, readOnly: true }, "agent-link": { path: AGENT_LINK_DIR, readOnly: true }, "role-tmp": { path: "/tmp", readOnly: false } },
+    env: { OLIVE_AGENT_SOCKET: AGENT_SOCKET, BUN_OPTIONS: "", BUN_BE_BUN: "", LD_PRELOAD: "" },
+  },
+};
+// emptyDir는 칸까지 그대로 본다. mode는 파일마다 유효 모드 0444를 본다.
+type VolumeRule = { type: string; emptyDir?: Record<string, string>; what?: string; why?: string; optional?: boolean; mode?: boolean };
+const SPLIT_VOLUMES: Record<string, VolumeRule> = {
+  "agent-bin": { type: "emptyDir", emptyDir: { sizeLimit: "256Mi" }, what: "디스크 emptyDir(sizeLimit 256Mi)", why: "메모리 매체면 대리(약 104MiB)가 메모리 상한에 든다" },
+  "agent-link": { type: "emptyDir", emptyDir: { medium: "Memory", sizeLimit: "1Mi" }, what: "메모리 emptyDir(sizeLimit 1Mi)", why: "소켓 파일 하나만 두는 자리다" },
+  "role-tmp": { type: "emptyDir", emptyDir: { sizeLimit: "512Mi" }, what: "디스크 emptyDir(sizeLimit 512Mi)", why: "역할 전용 /tmp의 상한이다(넘으면 kubelet이 파드를 쫓아낸다)" },
+  tmp: { type: "emptyDir", emptyDir: { sizeLimit: "64Mi" }, what: "디스크 emptyDir(sizeLimit 64Mi)", why: "제어 전용 /tmp의 상한이다" },
+  store: { type: "persistentVolumeClaim" },
+  tls: { type: "secret", optional: true, mode: true },
+  trust: { type: "configMap", optional: true, mode: true },
+};
+const show = (v: unknown) => (v === undefined ? "없음" : JSON.stringify(v));
+const sortKeys = (v: any): any => (Array.isArray(v) ? v.map(sortKeys) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])])) : v);
+const same = (a: unknown, b: unknown) => JSON.stringify(sortKeys(a)) === JSON.stringify(sortKeys(b));
+const keysOf = (a: any, b: Record<string, unknown>) => [...new Set([...Object.keys(a ?? {}), ...Object.keys(b)])];
+// 쿠버네티스 Secret·ConfigMap 볼륨의 파일별 유효 모드: items[].mode, 없으면 defaultMode, 없으면 0644.
+// 함정: 렌더 원문의 0444는 쿠버네티스(YAML 1.1)가 8진으로, Bun.YAML(1.2)이 십진 444로 읽는다. 차트는 두 해석이 같은 십진 292로 적고,
+// 이 검사는 Bun이 읽은 수를 그대로 0o444와 견준다. 0444로 적힌 렌더는 444로 읽혀 실패한다(실제와 다른 값을 통과시키지 않는다).
+const fileModes = (src: any): [string, unknown][] => {
+  const def = src?.defaultMode ?? 0o644;
+  return Array.isArray(src?.items) && src.items.length > 0 ? src.items.map((it: any) => [String(it?.path), it?.mode ?? def]) : [["(모든 키)", def]];
+};
+const modeText = (m: unknown) => (typeof m === "number" && Number.isInteger(m) ? `0${m.toString(8)}(십진 ${m})` : show(m));
+const normPath = (p: string) => {
+  const n = posix.normalize(p);
+  return n.length > 1 ? n.replace(/\/+$/, "") : n;
+};
+const under = (a: string, b: string) => a === b || a.startsWith(b === "/" ? "/" : `${b}/`);
+// 켠 root 렌더와 차트 시험 렌더가 쓰는 역할 이미지(RENDER_FILL). 위 표 "이미지"의 함정을 본다.
+const roleImageWanted = (role: unknown): string | undefined => {
+  const fill = RENDER_FILL[OLIVE_CHART];
+  const repo = fill[`roleImages.${String(role)}.repository`];
+  const digest = fill[`roleImages.${String(role)}.digest`];
+  return isString(role) && repo && digest ? `${repo}@${digest}` : undefined;
+};
 // 수량을 밀리코어·바이트로. 모르는 꼴은 NaN이라 비교가 실패로 드러난다.
 const cpuMilli = (q: unknown): number => {
   const m = String(q ?? "").match(/^([0-9]+(?:\.[0-9]+)?)(m?)$/);
@@ -276,109 +358,171 @@ const memBytes = (q: unknown): number => {
 function checkExecutorSplit(targets: Target[], charts: Record<string, Doc[]>, deployed: Record<string, Doc[]>): Violation[] {
   const out: Violation[] = [];
   const push = (where: string, message: string) => out.push({ rule: "olive-executor-split", where, message });
-  const executors = targets.filter((t) => t.kind === "executor" && t.declaredBy === OLIVE_CHART);
-  for (const [, group] of oliveChartGroups(charts, deployed)) {
-    for (const t of executors) {
-      const dep = group.find((d) => d.obj.kind === "Deployment" && nsOf(d) === t.namespace && d.obj.metadata?.name === t.deployment);
+  const mine = targets.filter((t) => t.declaredBy === OLIVE_CHART && OLIVE_KINDS.has(t.kind));
+  for (const [origin, group] of oliveChartGroups(charts, deployed)) {
+    for (const t of mine) {
+      const deps = group.filter((d) => d.obj.kind === "Deployment" && nsOf(d) === t.namespace && d.obj.metadata?.name === t.deployment);
+      const quotas = group.filter((d) => d.obj.kind === "ResourceQuota" && nsOf(d) === t.namespace && d.obj.metadata?.name === "olive-limits");
+      const twice = "정확히 하나여야 한다(CI는 첫 문서를, Argo CD는 마지막 문서를 고른다)";
+      if (deps.length > 1) push(origin, `대상 ${t.id}의 Deployment ${t.namespace}/${t.deployment}가 같은 렌더에 ${deps.length}개다. ${twice}`);
+      if (quotas.length > 1) push(origin, `대상 ${t.id}의 ResourceQuota ${t.namespace}/olive-limits가 같은 렌더에 ${quotas.length}개다. ${twice}`);
       // 대상 Deployment가 없으면 olive-chart-targets가 낸다.
-      if (!dep) continue;
-      const where = id(dep);
-      const spec = podSpec(dep.obj) ?? {};
-      const containers: any[] = spec.containers ?? [];
-      const inits: any[] = spec.initContainers ?? [];
-      const names = (list: any[]) => list.map((c) => String(c?.name)).sort();
-      if (JSON.stringify(names(containers)) !== JSON.stringify([EXECUTOR_CONTAINER, ROLE_CONTAINER]) || JSON.stringify(names(inits)) !== JSON.stringify([INIT_CONTAINER]) || (spec.ephemeralContainers ?? []).length > 0) {
-        push(where, `대상 ${t.id}의 파드 구성이 일반 컨테이너 ${EXECUTOR_CONTAINER}·${ROLE_CONTAINER}, init ${INIT_CONTAINER} 하나가 아니다(일반 ${JSON.stringify(names(containers))}, init ${JSON.stringify(names(inits))}, 임시 ${(spec.ephemeralContainers ?? []).length}개)`);
-        continue;
-      }
-      const exec = containers.find((c) => c.name === EXECUTOR_CONTAINER);
-      const role = containers.find((c) => c.name === ROLE_CONTAINER);
-      const init = inits[0];
-      const cw = (c: any) => `${where} container ${c?.name}`;
-      const podSc = spec.securityContext ?? {};
-      if (podSc.fsGroup !== undefined) push(where, `파드에 fsGroup(${JSON.stringify(podSc.fsGroup)})을 두지 않는다. 역할 컨테이너도 그 그룹이 된다(D-103)`);
-      if ((podSc.supplementalGroups ?? []).length > 0) push(where, `파드에 supplementalGroups(${JSON.stringify(podSc.supplementalGroups)})를 두지 않는다. 역할 컨테이너도 그 그룹이 된다(D-103)`);
-      for (const k of ["runAsUser", "runAsGroup"]) {
-        const eff = (c: any) => c?.securityContext?.[k] ?? podSc[k];
-        if (eff(role) === undefined || eff(role) === eff(exec)) push(cw(role), `역할 컨테이너의 실효 ${k}(${JSON.stringify(eff(role))})가 ${EXECUTOR_CONTAINER}(${JSON.stringify(eff(exec))})와 달라야 한다(D-100·D-103 uid 분리)`);
-      }
-      const volumes = new Map<string, any>((spec.volumes ?? []).map((v: any) => [String(v?.name), v]));
-      const typeOf = (name: string) => Object.keys(volumes.get(name) ?? {}).filter((x) => x !== "name");
-      const mountsOf = (c: any, name: string) => (c?.volumeMounts ?? []).filter((m: any) => m?.name === name);
-      for (const c of [...inits, ...containers]) {
-        if (c === exec) continue;
-        for (const m of c?.volumeMounts ?? []) {
-          if (typeOf(String(m?.name)).some((x) => SECRET_VOLUME_TYPES.includes(x))) push(cw(c), `비밀·PVC 볼륨 ${m.name}(${typeOf(String(m.name)).join(",")})을 ${EXECUTOR_CONTAINER} 밖에 붙이지 않는다(모델이 키·저장소에 닿는다, D-73·D-100)`);
-        }
-        if ((c?.envFrom ?? []).length > 0) push(cw(c), `envFrom을 두지 않는다(볼륨 없이도 Secret·ConfigMap 값이 ${EXECUTOR_CONTAINER} 밖으로 들어간다)`);
-        for (const e of c?.env ?? []) if (e?.valueFrom !== undefined) push(cw(c), `env ${e.name}에 valueFrom을 두지 않는다(볼륨 없이도 Secret 값이 ${EXECUTOR_CONTAINER} 밖으로 들어간다)`);
-      }
-      // 공유 폴더 두 개.
-      const bin = volumes.get(AGENT_BIN);
-      if (!bin || JSON.stringify(typeOf(AGENT_BIN)) !== JSON.stringify(["emptyDir"]) || bin.emptyDir?.medium === "Memory" || bin.emptyDir?.sizeLimit === undefined) {
-        push(where, `볼륨 ${AGENT_BIN}이 sizeLimit 있는 디스크 emptyDir가 아니다(${JSON.stringify(bin ?? null)}). 메모리 매체면 대리 크기가 메모리 상한에 든다`);
-      }
-      const link = volumes.get(AGENT_LINK);
-      if (!link || JSON.stringify(typeOf(AGENT_LINK)) !== JSON.stringify(["emptyDir"])) push(where, `볼륨 ${AGENT_LINK}이 emptyDir가 아니다(${JSON.stringify(link ?? null)})`);
-      const one = (c: any, name: string, writable: boolean) => {
-        const ms = mountsOf(c, name);
-        const ok = ms.length === 1 && isString(ms[0].mountPath) && ms[0].subPath === undefined && (writable ? ms[0].readOnly !== true : ms[0].readOnly === true);
-        if (!ok) push(cw(c), `${name}을 ${writable ? "쓰기 가능하게" : "readOnly: true로"} 한 번(subPath 없이) 붙이지 않았다`);
-        return ok ? String(ms[0].mountPath).replace(/\/+$/, "") : undefined;
-      };
-      const initBin = one(init, AGENT_BIN, true);
-      const roleBin = one(role, AGENT_BIN, false);
-      const execLink = one(exec, AGENT_LINK, true);
-      const roleLink = one(role, AGENT_LINK, false);
-      if (mountsOf(exec, AGENT_BIN).length > 0) push(cw(exec), `${AGENT_BIN}을 ${EXECUTOR_CONTAINER}에 붙이지 않는다(대리는 역할 쪽 파일이다)`);
-      if (mountsOf(init, AGENT_LINK).length > 0) push(cw(init), `${AGENT_LINK}을 ${INIT_CONTAINER}에 붙이지 않는다`);
-      if (initBin !== undefined && roleBin !== undefined && initBin !== roleBin) push(cw(role), `${AGENT_BIN} 마운트 경로가 ${INIT_CONTAINER}(${initBin})와 다르다(${roleBin}). 설치한 대리를 찾지 못한다`);
-      if (roleBin !== undefined && JSON.stringify(role.command) !== JSON.stringify([`${roleBin}/${AGENT_FILE}`])) push(cw(role), `command(${JSON.stringify(role.command)})가 ${AGENT_BIN} 안의 대리 [${roleBin}/${AGENT_FILE}] 하나가 아니다(대리가 PID 1이어야 한다, D-102)`);
-      const othersMount = (name: string) => [...inits, ...containers].some((c) => c !== role && mountsOf(c, name).length > 0);
-      for (const m of role.volumeMounts ?? []) {
-        const name = String(m?.name);
-        if (name === AGENT_BIN || name === AGENT_LINK || typeOf(name).some((x) => SECRET_VOLUME_TYPES.includes(x))) continue;
-        if (JSON.stringify(typeOf(name)) !== JSON.stringify(["emptyDir"]) || othersMount(name)) push(cw(role), `볼륨 ${name}은 역할 컨테이너만 붙이는 emptyDir가 아니다(제어와 /tmp 등을 나누지 않는다)`);
-      }
-      // 소켓 경로.
-      const socket = (c: any, dir: string | undefined) => {
-        const e = (c.env ?? []).filter((x: any) => x?.name === "OLIVE_AGENT_SOCKET");
-        const v = e.length === 1 ? e[0].value : undefined;
-        if (!isString(v) || !v.startsWith("/") || (dir !== undefined && dirname(v) !== dir)) push(cw(c), `OLIVE_AGENT_SOCKET(${JSON.stringify(e.map((x: any) => x.value))})이 ${AGENT_LINK} 마운트(${dir}) 바로 아래 절대 경로 하나가 아니다`);
-        return v;
-      };
-      const sockExec = socket(exec, execLink);
-      const sockRole = socket(role, roleLink);
-      if (isString(sockExec) && isString(sockRole) && sockExec !== sockRole) push(cw(role), `OLIVE_AGENT_SOCKET이 두 컨테이너에서 다르다(${EXECUTOR_CONTAINER} ${sockExec}, ${ROLE_CONTAINER} ${sockRole})`);
-      if (spec.shareProcessNamespace === true) push(where, "shareProcessNamespace를 두지 않는다. 역할 컨테이너가 제어 프로세스와 그 파일(/proc/<pid>/root)에 닿는다(D-102)");
-      for (const k of ["livenessProbe", "readinessProbe", "startupProbe", "lifecycle", "ports"]) {
-        if (role[k] !== undefined) push(cw(role), `역할 컨테이너에 ${k}를 두지 않는다(D-74: kubelet이 그 안에서 명령을 돌리지 않게)`);
-      }
-      if (init.image !== exec.image) push(cw(init), `${INIT_CONTAINER} 이미지(${init.image})가 ${EXECUTOR_CONTAINER} 이미지(${exec.image})와 다르다. 대리와 실행기는 같은 판이어야 한다(D-103)`);
-      for (const name of ROLE_BLANK_ENV) {
-        const e = (role.env ?? []).filter((x: any) => x?.name === name);
-        if (e.length !== 1 || e[0].valueFrom !== undefined || !(e[0].value === undefined || e[0].value === "")) push(cw(role), `역할 컨테이너 env에 ${name}이 빈 값으로 한 번 있지 않다(${JSON.stringify(e.map((x: any) => x.value))}). 대리 안의 Bun·로더가 이미지 ENV를 대리 코드보다 먼저 읽는다`);
-      }
-      const roleEnv = (exec.env ?? []).filter((x: any) => x?.name === "OLIVE_ROLE");
-      const wantRoles: unknown[] = Array.isArray(t.roles) ? t.roles : [];
-      if (roleEnv.length !== 1 || !wantRoles.includes(roleEnv[0].value)) push(cw(exec), `OLIVE_ROLE(${JSON.stringify(roleEnv.map((x: any) => x.value))})이 ${OLIVE_TARGETS_FILE}의 대상 ${t.id} roles(${JSON.stringify(t.roles)})의 값 하나가 아니다(실행기는 대상 id를 역할로 받지 않는다)`);
-      // 한도.
-      const quota = group.find((d) => d.obj.kind === "ResourceQuota" && nsOf(d) === t.namespace && d.obj.metadata?.name === "olive-limits");
-      if (!quota) {
-        push(where, `대상 ${t.id}의 네임스페이스 ${t.namespace}에 ResourceQuota olive-limits가 없다`);
-        continue;
-      }
-      for (const [k, parse] of [["limits.cpu", cpuMilli], ["limits.memory", memBytes]] as const) {
-        const field = k.split(".")[1];
-        const sum = containers.reduce((a, c) => a + parse(c?.resources?.limits?.[field]), 0);
-        const want = Math.max(sum, ...inits.map((c) => parse(c?.resources?.limits?.[field])));
-        const have = parse(quota.obj.spec?.hard?.[k]);
-        if (!(Number.isFinite(want) && have === want)) push(id(quota), `ResourceQuota ${k}(${JSON.stringify(quota.obj.spec?.hard?.[k])})가 대상 ${t.id} 파드의 실효 limits(${Number.isFinite(want) ? want : "읽을 수 없음"}, 일반 컨테이너 합과 가장 큰 init 중 큰 값)와 같지 않다`);
-      }
+      if (deps.length !== 1 || quotas.length > 1) continue;
+      if (t.kind === "supervisor") {
+        const fsGroup = podSpec(deps[0].obj)?.securityContext?.fsGroup;
+        if (fsGroup !== SUPERVISOR_FS_GROUP) push(id(deps[0]), `감독 파드의 fsGroup(${show(fsGroup)})이 ${SUPERVISOR_FS_GROUP}가 아니다. 감독은 0440 Secret(서명 키·계정·TLS)을 이 그룹으로 읽는다(실행기 파드에서만 뺐다, D-103)`);
+      } else out.push(...executorPodViolations(t, deps[0], quotas[0]));
     }
   }
   return out;
 }
+
+// 실행기 파드 하나를 위 경계 표와 대조한다.
+function executorPodViolations(t: Target, dep: Doc, quota: Doc | undefined): Violation[] {
+  const out: Violation[] = [];
+  const push = (where: string, message: string) => out.push({ rule: "olive-executor-split", where, message });
+  const where = id(dep);
+  const spec = podSpec(dep.obj) ?? {};
+  const containers: any[] = spec.containers ?? [];
+  const inits: any[] = spec.initContainers ?? [];
+  const names = (list: any[]) => list.map((c) => String(c?.name)).sort();
+  if (JSON.stringify(names(containers)) !== JSON.stringify([EXECUTOR_CONTAINER, ROLE_CONTAINER]) || JSON.stringify(names(inits)) !== JSON.stringify([INIT_CONTAINER]) || (spec.ephemeralContainers ?? []).length > 0) {
+    push(where, `대상 ${t.id}의 파드 구성이 일반 컨테이너 ${EXECUTOR_CONTAINER}·${ROLE_CONTAINER}, init ${INIT_CONTAINER} 하나가 아니다(일반 ${JSON.stringify(names(containers))}, init ${JSON.stringify(names(inits))}, 임시 ${(spec.ephemeralContainers ?? []).length}개)`);
+    return out;
+  }
+  const exec = containers.find((c) => c.name === EXECUTOR_CONTAINER);
+  const role = containers.find((c) => c.name === ROLE_CONTAINER);
+  const init = inits[0];
+  const cw = (c: any) => `${where} container ${c?.name}`;
+
+  // 파드.
+  const podSc = spec.securityContext ?? {};
+  for (const k of keysOf(podSc, SPLIT_POD_SECURITY)) {
+    if (same(podSc[k], SPLIT_POD_SECURITY[k])) continue;
+    if (k === "fsGroup") push(where, `파드에 fsGroup(${show(podSc.fsGroup)})을 두지 않는다. 역할 컨테이너도 그 그룹이 된다(D-103)`);
+    else if (k === "supplementalGroups") push(where, `파드에 supplementalGroups(${show(podSc.supplementalGroups)})를 두지 않는다. 역할 컨테이너도 그 그룹이 된다(D-103)`);
+    else push(where, `파드 securityContext.${k}(${show(podSc[k])})가 표의 값(${show(SPLIT_POD_SECURITY[k])})과 다르다`);
+  }
+  if (spec.shareProcessNamespace !== undefined) push(where, "shareProcessNamespace를 두지 않는다. 역할 컨테이너가 제어 프로세스와 그 파일(/proc/<pid>/root)에 닿는다(D-102)");
+
+  // 볼륨.
+  const volumes = new Map<string, any>((spec.volumes ?? []).map((v: any) => [String(v?.name), v]));
+  const typeOf = (name: string) => Object.keys(volumes.get(name) ?? {}).filter((x) => x !== "name");
+  for (const name of volumes.keys()) if (!Object.hasOwn(SPLIT_VOLUMES, name)) push(where, `파드 볼륨 ${name}은 표에 없다(표: ${Object.keys(SPLIT_VOLUMES).join("·")})`);
+  for (const [name, vr] of Object.entries(SPLIT_VOLUMES)) {
+    const v = volumes.get(name);
+    if (!v) {
+      if (!vr.optional) push(where, `파드 볼륨 ${name}이 없다(표: ${vr.what ?? vr.type})`);
+      continue;
+    }
+    const types = typeOf(name);
+    if (vr.emptyDir) {
+      if (types.length !== 1 || types[0] !== "emptyDir" || !same(v.emptyDir ?? {}, vr.emptyDir)) push(where, `볼륨 ${name}이 표의 ${vr.what}가 아니다(${JSON.stringify({ ...v, name: undefined })}). ${vr.why}`);
+    } else if (types.length !== 1 || types[0] !== vr.type) push(where, `볼륨 ${name}이 표의 ${vr.type}가 아니다(${types.join(",")})`);
+    else if (vr.mode) {
+      for (const [file, mode] of fileModes(v[vr.type])) {
+        if (mode !== SECRET_FILE_MODE) push(where, `볼륨 ${name}의 파일 ${file} 유효 모드 ${modeText(mode)}가 표의 0444가 아니다. 파드에 fsGroup이 없어 uid 65532는 기타 읽기 권한으로 읽는다`);
+      }
+    }
+  }
+
+  // 컨테이너.
+  for (const c of [init, exec, role]) {
+    const rule = SPLIT_CONTAINERS[c.name];
+    const who = String(c.name);
+    const sc = c.securityContext ?? {};
+    for (const [k, want] of [["runAsUser", rule.uid], ["runAsGroup", rule.gid]] as const) {
+      const eff = sc[k] ?? podSc[k];
+      if (eff === want) continue;
+      if (c === role) push(cw(c), `역할 컨테이너의 실효 ${k}(${show(eff)})가 표의 ${want}가 아니다. 제어(${SPLIT_CONTAINERS[EXECUTOR_CONTAINER].uid})와 다른 uid·gid여야 모델이 제어의 파일을 읽지 못한다(D-100·D-103)`);
+      else push(cw(c), `${who}의 실효 ${k}(${show(eff)})가 표의 ${want}가 아니다`);
+    }
+    for (const k of keysOf(sc, SPLIT_CONTAINER_SECURITY)) {
+      if (k !== "runAsUser" && k !== "runAsGroup" && !same(sc[k], SPLIT_CONTAINER_SECURITY[k])) push(cw(c), `securityContext.${k}(${show(sc[k])})가 표의 값(${show(SPLIT_CONTAINER_SECURITY[k])})과 다르다(${who})`);
+    }
+    if (!same(c.command, rule.command)) push(cw(c), `command(${JSON.stringify(c.command)})가 ${rule.what} [${rule.command.join(", ")}] 하나가 아니다${c === role ? "(대리가 PID 1이어야 한다, D-102)" : ""}`);
+    if (c.args !== undefined) push(cw(c), `args(${show(c.args)})를 두지 않는다(${who}의 명령은 표의 command 하나다)`);
+    if (c.restartPolicy !== undefined) {
+      push(cw(c), `restartPolicy(${show(c.restartPolicy)})를 두지 않는다(${who}. ${c === init ? "Always면 설치 뒤 끝나지 않는 상시 실행 init이라 실효 limits가 일반 컨테이너 합에 더해져 olive-limits를 넘는다" : "표에 없는 재시작 규칙이다"})`);
+    }
+    // 마운트: 표 밖의 것, 표의 것(한 번, readOnly, 고정 경로, 다른 칸 없음), 겹침.
+    const mounts: any[] = c.volumeMounts ?? [];
+    for (const m of mounts) {
+      const name = String(m?.name);
+      if (Object.hasOwn(rule.mounts, name)) continue;
+      if (c !== exec && typeOf(name).some((x) => SECRET_VOLUME_TYPES.includes(x))) push(cw(c), `비밀·PVC 볼륨 ${name}(${typeOf(name).join(",")})을 ${EXECUTOR_CONTAINER} 밖에 붙이지 않는다(모델이 키·저장소에 닿는다, D-73·D-100)`);
+      else push(cw(c), `${name}을 ${who}에 붙이지 않는다(표 밖의 볼륨이다. ${who}의 표: ${Object.keys(rule.mounts).join("·")})`);
+    }
+    for (const [name, mr] of Object.entries(rule.mounts)) {
+      const ms = mounts.filter((m) => m?.name === name);
+      if (ms.length === 0) {
+        if (!mr.optional) push(cw(c), `${name}을 ${who}에 붙이지 않았다(표: ${mr.path ?? "값 파일의 경로"}, ${mr.readOnly ? "읽기 전용" : "쓰기"})`);
+        continue;
+      }
+      if (ms.length > 1) {
+        push(cw(c), `${name}을 ${who}에 한 번 붙이지 않았다(${ms.length}번)`);
+        continue;
+      }
+      const m = ms[0];
+      if ((m.readOnly === true) !== mr.readOnly) push(cw(c), mr.readOnly ? `${name}을 readOnly: true로 붙이지 않았다(${who})` : `${name}을 쓰기 가능하게 붙이지 않았다(${who})`);
+      if (mr.path !== undefined && m.mountPath !== mr.path) push(cw(c), `${name}의 mountPath ${show(m.mountPath)}가 표의 고정 경로 ${mr.path}가 아니다(${who})`);
+      for (const k of Object.keys(m)) if (!["name", "mountPath", "readOnly"].includes(k)) push(cw(c), `${name} 마운트에 ${k}(${show(m[k])})를 두지 않는다(${who}. 볼륨 폴더 전체를 붙여야 컨테이너끼리 같은 파일을 본다)`);
+    }
+    const paths: [string, string][] = mounts.filter((m) => isString(m?.mountPath)).map((m) => [String(m.name), normPath(m.mountPath)]);
+    for (const [i, [a, pa]] of paths.entries()) {
+      for (const [b, pb] of paths.slice(i + 1)) {
+        if (under(pa, pb) || under(pb, pa)) push(cw(c), `마운트 경로가 겹친다: ${a}(${pa})와 ${b}(${pb})(${who}. 같으면 PodTemplate이 유효하지 않고, 한쪽이 다른 쪽 안이면 그 파일이 가려진다)`);
+      }
+    }
+    // env: executor 밖에는 Secret을 넣는 칸이 없고, 표가 있는 컨테이너는 이름 집합과 값이 표와 같다.
+    if (c !== exec) {
+      if ((c.envFrom ?? []).length > 0) push(cw(c), `envFrom을 두지 않는다(볼륨 없이도 Secret·ConfigMap 값이 ${EXECUTOR_CONTAINER} 밖으로 들어간다)`);
+      for (const e of c.env ?? []) if (e?.valueFrom !== undefined) push(cw(c), `env ${e.name}에 valueFrom을 두지 않는다(볼륨 없이도 Secret 값이 ${EXECUTOR_CONTAINER} 밖으로 들어간다)`);
+    }
+    if (rule.env) {
+      const tableEnv = rule.env;
+      for (const [name, want] of Object.entries(tableEnv)) {
+        const e = (c.env ?? []).filter((x: any) => x?.name === name);
+        if (e.length === 1 && e[0].valueFrom === undefined && (e[0].value ?? "") === want) continue;
+        if (name === "OLIVE_AGENT_SOCKET") push(cw(c), socketMessage(e));
+        else push(cw(c), `역할 컨테이너 env에 ${name}이 빈 값으로 한 번 있지 않다(${JSON.stringify(e.map((x: any) => x.value))}). 대리 안의 Bun·로더가 이미지 ENV를 대리 코드보다 먼저 읽는다`);
+      }
+      // valueFrom 항목은 위에서 따로 낸다(원인 하나에 위반 하나).
+      const extra = [...new Set((c.env ?? []).filter((x: any) => x?.valueFrom === undefined).map((x: any) => String(x?.name)).filter((n: string) => !Object.hasOwn(tableEnv, n)))];
+      if (extra.length > 0) push(cw(c), `env에 표 밖의 이름 ${extra.join("·")}를 두지 않는다(${who}의 표: ${Object.keys(tableEnv).join("·") || "없음"}. 모델이 도는 환경과 설치기에 들어가는 값은 표의 것뿐이다)`);
+    }
+  }
+  const execSocket = (exec.env ?? []).filter((x: any) => x?.name === "OLIVE_AGENT_SOCKET");
+  if (!(execSocket.length === 1 && execSocket[0].valueFrom === undefined && execSocket[0].value === AGENT_SOCKET)) push(cw(exec), socketMessage(execSocket));
+  const roleEnv = (exec.env ?? []).filter((x: any) => x?.name === "OLIVE_ROLE");
+  if (roleEnv.length !== 1 || roleEnv[0].value !== t.role) push(cw(exec), `OLIVE_ROLE(${JSON.stringify(roleEnv.map((x: any) => x.value))})이 ${OLIVE_TARGETS_FILE}의 대상 ${t.id} role(${show(t.role)})과 같은 값 하나가 아니다(실행기는 배정한 v1 역할 하나만 받는다)`);
+  for (const k of ["livenessProbe", "readinessProbe", "startupProbe", "lifecycle", "ports"]) {
+    if (role[k] !== undefined) push(cw(role), `역할 컨테이너에 ${k}를 두지 않는다(D-74: kubelet이 그 안에서 명령을 돌리지 않게)`);
+  }
+
+  // 이미지.
+  if (!isString(exec.image) || !OLIVE_IMAGE.test(exec.image)) push(cw(exec), `이미지(${show(exec.image)})가 ghcr.io/ukyi-app/olive@sha256:<64 hex>가 아니다`);
+  if (init.image !== exec.image) push(cw(init), `${INIT_CONTAINER} 이미지(${init.image})가 ${EXECUTOR_CONTAINER} 이미지(${exec.image})와 다르다. 대리와 실행기는 같은 판이어야 한다(D-103)`);
+  const wantImage = roleImageWanted(t.role);
+  if (wantImage === undefined) push(cw(role), `대상 ${t.id}의 role(${show(t.role)})에 표의 역할 이미지가 없다(RENDER_FILL roleImages)`);
+  else if (role.image !== wantImage) push(cw(role), `역할 컨테이너 이미지(${show(role.image)})가 대상 ${t.id}의 역할 ${String(t.role)} 이미지(${wantImage})가 아니다`);
+
+  // 한도.
+  if (!quota) {
+    push(where, `대상 ${t.id}의 네임스페이스 ${t.namespace}에 ResourceQuota olive-limits가 없다`);
+    return out;
+  }
+  for (const [k, parse] of [["limits.cpu", cpuMilli], ["limits.memory", memBytes]] as const) {
+    const field = k.split(".")[1];
+    const sum = containers.reduce((a, c) => a + parse(c?.resources?.limits?.[field]), 0);
+    const want = Math.max(sum, ...inits.map((c) => parse(c?.resources?.limits?.[field])));
+    const have = parse(quota.obj.spec?.hard?.[k]);
+    if (!(Number.isFinite(want) && have === want)) push(id(quota), `ResourceQuota ${k}(${JSON.stringify(quota.obj.spec?.hard?.[k])})가 대상 ${t.id} 파드의 실효 limits(${Number.isFinite(want) ? want : "읽을 수 없음"}, 일반 컨테이너 합과 가장 큰 init 중 큰 값)와 같지 않다`);
+  }
+  return out;
+}
+const socketMessage = (e: any[]) =>
+  `OLIVE_AGENT_SOCKET(${JSON.stringify(e.map((x: any) => x.value))})이 표의 ${AGENT_SOCKET} 하나가 아니다(agent-link 마운트 ${AGENT_LINK_DIR} 바로 아래 정상 파일 이름이어야 두 컨테이너가 같은 파일을 본다)`;
 
 const argoApps = (docs: Doc[]) => docs.filter((d) => d.obj.kind === "Application" && String(d.obj.apiVersion).startsWith("argoproj.io/") && deployedDoc(d));
 const deployersOf = (apps: Doc[], cluster: string, chart: string) =>
@@ -980,7 +1124,26 @@ function renderSelfTests(): string[] {
   for (const [name, layers, vo, want] of cases) if (digest(layers, vo) !== want) bad.push(`fillEmpty(${name}): ${JSON.stringify(digest(layers, vo))}, 기대 ${JSON.stringify(want)}`);
   const c = collectChartRenders("platform/x", ["platform/x/ci/a.yaml", "platform/x/ci/empty.yaml"], (f) => ({ ok: true, out: f.endsWith("a.yaml") ? "kind: ConfigMap\n" : "" }));
   if (JSON.stringify(c.origins) !== JSON.stringify(["chart:x/ci/a.yaml", "chart:x/ci/empty.yaml"]) || c.docs.length !== 1) bad.push(`collectChartRenders가 문서 0개인 렌더의 출처를 남기지 않았다: ${JSON.stringify(c.origins)}`);
-  bad.push(...listedAppTests(), ...multiDocValuesTest(), ...hostScopeTest());
+  bad.push(...listedAppTests(), ...multiDocValuesTest(), ...hostScopeTest(), ...executorTlsPathTest());
+  return bad;
+}
+
+// pki를 끄고 실행기 TLS Secret을 직접 줄 때 그 경로가 제어의 다른 마운트와 겹치면 렌더가 멈춘다(templates/_helpers.tpl olive.executorTlsPath).
+// fixture는 렌더가 끝난 문서를 고치므로 값 → 렌더 실패는 여기서만 본다. 겹치지 않는 경로는 렌더된다(막는 범위가 넓지 않다).
+function executorTlsPathTest(): string[] {
+  const dir = tempDir("olive-tls-path");
+  const values = (path: string) => {
+    const f = join(dir, `${path.replaceAll("/", "_")}.yaml`);
+    writeFileSync(f, `pki:\n  enabled: false\nexecutors:\n  reader:\n    tls:\n      secretName: ci-example\n      mountPath: ${path}\n`);
+    return helmTemplate("olive", OLIVE_CHART, "app-olive", [`${OLIVE_CHART}/ci/enabled.yaml`, f]);
+  };
+  const bad: string[] = [];
+  for (const [path, overlaps] of [["/run/olive/agent", "/run/olive/agent"], ["/run/olive", "/run/olive/agent"], ["/run/olive/agent/tls", "/run/olive/agent"]]) {
+    const r = values(path);
+    if (r.ok || !r.out.includes(`executors.reader.tls.mountPath ${path} overlaps the executor pod mount ${overlaps}`)) bad.push(`실행기 TLS 경로 ${path}가 ${overlaps}와 겹치는데 렌더가 그 이유로 멈추지 않았다: ${r.ok ? "렌더 성공" : r.out.trim()}`);
+  }
+  const ok = values("/run/olive/ext-tls");
+  if (!ok.ok) bad.push(`겹치지 않는 실행기 TLS 경로 /run/olive/ext-tls가 렌더되지 않았다: ${ok.out.trim()}`);
   return bad;
 }
 

@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 가 대리 설치기 [bun, src/main/agent-install.ts] 하나가 아니다
+# 대리 설치 init의 명령을 bun --version으로 바꿨다. 이미지와 마운트는 그대로라 대리가 놓이지 않은 채 역할 컨테이너가 뜬다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set: {command: [bun, --version]}

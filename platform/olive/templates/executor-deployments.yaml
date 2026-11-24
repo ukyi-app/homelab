@@ -1,12 +1,13 @@
 {{- /*
 역할별 작업자 실행기(D-37, supervisor.md §9.2). targets.yaml의 kind executor인 줄마다 하나. 실행기는 감독에 먼저 붙어
 연결을 유지하고(D-55) 듣는 포트가 없다. 모델 자격 Secret을 붙이지 않는다. 자격은 실행마다 감독이 그 연결로 하나만 넘긴다.
-명령·이미지·볼륨·argv·환경을 지시에서 받지 않으므로 역할은 이 파드의 env OLIVE_ROLE(targets.yaml roles)로만 정해진다.
+명령·이미지·볼륨·argv·환경을 지시에서 받지 않으므로 역할은 이 파드의 env OLIVE_ROLE(targets.yaml role)로만 정해진다.
 
 파드는 컨테이너 둘이다(D-100). 제어 executor(uid 65532)가 TLS·저장소·대리 소켓을 쥐고, 역할 role(uid·gid 10002, D-103)은
 대리(olive-agent)가 PID 1이라 그 아래에서 역할 프로그램을 띄운다(D-102). 둘 사이의 길은 agent-link 폴더의 경로 유닉스 소켓 하나다.
 경계는 마운트와 PID 공간이다. 비밀·PVC 볼륨은 executor에만 붙이고 shareProcessNamespace를 두지 않는다. 한 파드라 네트워크 공간은
-같다: 역할 쪽에서도 감독 주소에 닿지만 mTLS 키가 executor에만 있어 감독이 받지 않는다. CI(tools/ci/olive.ts olive-executor-split)가 렌더에서 본다.
+같다: 역할 쪽에서도 감독 주소에 닿지만 mTLS 키가 executor에만 있어 감독이 받지 않는다. CI(tools/ci/olive.ts olive-executor-split)가 렌더를
+그 파일의 경계 표(SPLIT_*: 컨테이너별 명령·uid·보안 문맥·마운트·env, 볼륨 매체·상한, Secret 모드)와 그대로 대조한다. 여기 값을 바꾸면 표도 함께 고친다.
 env 이름은 ukyi-app/olive README "작업자 실행기 진입점"의 환경 표와 같다. 이 차트가 아직 그 환경을 다 주지 않아(효과 서명 키,
 역할 프로필, 인스턴스, 정책 revision) 실행기는 감독에 붙기 전에 정한 코드로 끝난다.
 */}}
@@ -16,7 +17,10 @@ env 이름은 ukyi-app/olive README "작업자 실행기 진입점"의 환경 �
 {{- if eq .kind "executor" }}
 {{- $values := index $.Values.executors .id }}
 {{- $tlsSecret := include "olive.tlsSecretName" (dict "root" $ "tls" $values.tls) }}
-{{- $role := index .roles 0 }}
+{{- if $tlsSecret }}
+{{- include "olive.executorTlsPath" (dict "id" .id "path" $values.tls.mountPath "store" $values.store.mountPath) }}
+{{- end }}
+{{- $role := .role }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -152,10 +156,12 @@ spec:
         {{- if $tlsSecret }}
         # 0444: 실행기 파드에는 fsGroup이 없어 0440이면 uid 65532가 읽지 못한다. 넓어지는 것은 같은 컨테이너의 다른 uid뿐인데
         # 이 볼륨은 executor에만 붙고 그 안의 uid는 65532 하나다.
+        # 함정: 십진 292(= 8진 0444)로 적는다. 0444로 적으면 쿠버네티스(YAML 1.1)는 8진 292로, CI의 Bun 파서(YAML 1.2)는 십진 444로
+        # 읽어 CI가 실제와 다른 모드를 본다. 292는 두 해석이 같고 API가 돌려주는 값과도 같다.
         - name: tls
           secret:
             secretName: {{ $tlsSecret }}
-            defaultMode: 0444
+            defaultMode: 292
             {{- if $.Values.pki.enabled }}
             # ca.crt를 빼고 붙인다. 신뢰 기준은 ConfigMap olive-trust 하나다(templates/pki-trust.yaml).
             items:
@@ -166,10 +172,11 @@ spec:
             {{- end }}
         {{- end }}
         {{- if $trust }}
+        # 신뢰 묶음도 fsGroup 없이 기타 읽기로 읽는다. 292의 이유는 위 tls와 같다.
         - name: trust
           configMap:
             name: olive-trust
-            defaultMode: 0444
+            defaultMode: 292
         {{- end }}
         # 제어 컨테이너의 /tmp. 실행마다의 HOME·작업 공간은 역할 쪽(role-tmp)이라 작게 둔다 [가정].
         - name: tmp

@@ -1,0 +1,14 @@
+# expect: fail
+# rule: olive-executor-split
+# match: role-tmp을 role에 붙이지 않았다
+# 역할 컨테이너에서 전용 /tmp(role-tmp)를 뺐다. 루트가 읽기 전용이라 모델 CLI가 임시 파일·HOME을 만들 자리가 없다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          volumeMounts:
+            - {name: agent-bin, mountPath: /opt/olive-agent, readOnly: true}
+            - {name: agent-link, mountPath: /run/olive/agent, readOnly: true}

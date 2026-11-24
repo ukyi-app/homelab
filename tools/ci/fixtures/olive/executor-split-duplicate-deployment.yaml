@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: Deployment olive-reader/executor가 같은 렌더에 2개다
+# 켠 root의 olive 렌더에 읽기 실행기 Deployment를 한 번 더 냈다. 검사가 첫 문서만 보면 Argo CD가 남기는 마지막 문서의 경계를 보지 못한다.
+patch:
+  - in: render
+    render: root+켬
+    from: root+켬
+    select: {kind: Deployment, namespace: olive-reader, name: executor}

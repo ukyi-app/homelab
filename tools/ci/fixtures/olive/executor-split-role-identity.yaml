@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: 가 표의 10002가 아니다
+# 역할 컨테이너의 uid·gid를 10003으로 바꿨다. 제어와는 여전히 달라 상대 비교는 통과하지만 역할 이미지·소켓 권한이 기대하는 값이 아니다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set: {securityContext.runAsUser: 10003, securityContext.runAsGroup: 10003}
