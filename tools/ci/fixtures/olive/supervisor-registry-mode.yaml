@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 볼륨 registry(
+# 등록표 Secret 모드만 0444(십진 292)로 바꿨다. 감독 Secret은 fsGroup 65532로 읽는 0440이 표다(기타 사용자 읽기를 열지 않는다).
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.volumes:
+        match: {name: registry}
+        set: {secret.defaultMode: 292}

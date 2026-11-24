@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: env OLIVE_ENVIRONMENT("ci")이 표의 값 "prod-x"과 다르다
+# 켠 root 렌더의 olive Application 값만 클러스터 이름 prod-x로 바꾸고 렌더는 그대로 뒀다. 감독이 다른 클러스터 이름을 받으면
+# 등록표 전체가 거절돼 기동이 93으로 끝난다.
+patch:
+  - in: apps
+    render: root+켬
+    select: {kind: Application, name: olive}
+    set:
+      spec.source.helm.valuesObject.supervisor.registry.environment: prod-x

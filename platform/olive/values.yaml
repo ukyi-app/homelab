@@ -67,6 +67,7 @@ supervisor:
     # 장부에는 원문과 자격 값을 넣지 않는다(§8). 실행·계정·장애 색인의 메타데이터라 MB 단위로 본다. WAL 여유를 둔 1Gi다.
     # local-path는 크기를 강제하지 않는다. 실제 상한은 노드 루트 파일시스템이다.
     size: 1Gi
+    # 결과 폴더 /var/lib/olive-results는 예약이다. 그 자리나 아래면 렌더가 멈춘다(같은 mountPath 둘은 쿠버네티스가 거부한다).
     mountPath: /var/lib/olive
   # 지시 서명 키(Ed25519 개인 키, PEM). Infisical 폴더 /olive/supervisor의 키 이름 = Secret 키다. 감독이 읽는 파일 이름은
   # 진입점이 정한 supervisor-signing.key이고 볼륨 items가 잇는다(templates/supervisor-deployment.yaml).
@@ -86,7 +87,9 @@ supervisor:
   # 실행기 등록표(D-63·D-70). key: Infisical /olive/supervisor 아래 문서의 키 이름. environment: 그 문서의 environment와 같아야 하는
   # 클러스터 이름(env OLIVE_ENVIRONMENT). 둘 다 비면 렌더가 실패한다. 키 이름은 정하지 않았고, environment는 클러스터마다 달라
   # root(values-<클러스터>.yaml)가 넘겨야 한다. 켜는 PR이 둘을 넣는다. 시험 값은 ci/enabled.yaml과 tools/ci/olive.ts RENDER_FILL의 가짜다.
-  # 함정: 등록표 적용이 한 번 실패하면 더 높은 판 번호의 문서를 낼 때까지 감독이 아무 실행기도 믿지 않는다(D-88).
+  # 함정: 감독은 등록표·키 파일을 기동 때 한 번 읽는다. ESO가 Secret을 갱신해도 재기동 전에는 기동 때의 명단과 재료를 쓰고,
+  # 재기동하면 판 상태도 새로 시작한다(D-88의 "마지막 적용 판"은 한 프로세스 안의 것이다). 적용이 실패한 프로세스는 더 높은 판 번호의
+  # 문서를 받을 때까지 아무 실행기도 믿지 않는다.
   registry:
     key: ""
     environment: ""

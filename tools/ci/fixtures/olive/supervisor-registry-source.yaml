@@ -1,0 +1,12 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 볼륨 registry(
+# 등록표 볼륨의 secretName만 생산자(ExternalSecret olive-registry의 target)와 다른 이름으로 바꿨다. 그 이름의 Secret이 없으면
+# 감독은 마운트 단계에서 멈춰 프로세스가 시작되지 않는다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.volumes:
+        match: {name: registry}
+        set: {secret.secretName: review-missing-registry}

@@ -1071,64 +1071,163 @@ function checkKeySwitchWiring(keySwitch: Record<string, boolean>, offClusters: s
     }));
 }
 
-// 감독 env 표(D-37). 이름 집합은 ukyi-app/olive src/main/supervisor.ts의 SUPERVISOR_ENV(README "감독 진입점 › 환경")와 같아야 한다:
-// 진입점은 열한 개가 모두 있고 비지 않아야 뜨며(91), 표 밖 이름은 읽지 않으니 오타가 조용히 남는다. 그래서 이름은 집합 전체를 견준다.
-// 값은 켠 렌더(ci/enabled.yaml·RENDER_FILL)의 절대 값이고 글자 그대로 견준다. 경로를 풀어 보거나 정규식으로 맞추지 않는다.
-//   mount: 그 env 경로를 내는 마운트. 볼륨 이름·subPath가 같은 마운트가 정확히 하나이고 mountPath가 표와 같아야 한다.
-//     optional: 볼륨이 파드에 없으면 마운트도 없어도 된다(pki를 끈 렌더의 TLS·신뢰. 그때 진입점은 92로 끝난다).
-//     items: 그 Secret 볼륨의 items가 표와 같아야 한다(path = 진입점이 정한 파일 이름, key = Secret 키 = Infisical 키 이름).
-//   OLIVE_TARGETS도 절대 값이다(targets.yaml의 kind executor 줄, 차트 olive.supervisorTargetsJson의 키 차례). targets.yaml의 실행기 줄을
-//     바꾸는 PR은 이 값을 함께 고친다. 목록에서 계산하지 않는 이유: fixture는 targets만 고치고 렌더는 그대로라 계산 값이 렌더와 갈라진다.
-//   OLIVE_POLICY_REVISION의 값은 olive-executor-split이 본다(감독·실행기 값 대조). 여기서는 이름만 센다.
-type SupMount = { volume: string; mountPath: string; subPath?: string; optional?: true; items?: { key: string; path: string }[] };
-const SUP_ENV: Record<string, { value?: string; mount?: SupMount }> = {
-  OLIVE_SUPERVISOR_PORT: { value: "8443" },
-  OLIVE_LEDGER_DIR: { value: "/var/lib/olive", mount: { volume: "ledger", mountPath: "/var/lib/olive" } },
-  OLIVE_SIGNING_KEY_DIR: {
-    value: "/run/olive/signing",
-    mount: { volume: "signing", mountPath: "/run/olive/signing", items: [{ key: "INSTRUCTION_SIGNING_KEY", path: "supervisor-signing.key" }] },
-  },
-  OLIVE_ACCOUNTS_DIR: { value: "/run/olive/accounts", mount: { volume: "account", mountPath: "/run/olive/accounts/ci-account" } },
-  OLIVE_TLS_DIR: { value: "/run/olive/tls", mount: { volume: "tls", mountPath: "/run/olive/tls", optional: true } },
-  OLIVE_TRUST_DIR: { value: "/run/olive/trust", mount: { volume: "trust", mountPath: "/run/olive/trust", optional: true } },
-  OLIVE_REGISTRY_FILE: {
-    value: "/run/olive/registry/registry.json",
-    mount: { volume: "registry", mountPath: "/run/olive/registry", items: [{ key: "CI_REGISTRY", path: "registry.json" }] },
-  },
-  OLIVE_ENVIRONMENT: { value: "ci" },
-  OLIVE_TARGETS: {
-    value: JSON.stringify([
-      { namespace: "olive-diagnosis", roles: ["diagnosis"], target: "diagnosis" },
-      { namespace: "olive-reader", roles: ["isolated_reader"], target: "reader" },
-    ]),
-  },
-  OLIVE_POLICY_REVISION: {},
-  OLIVE_RESULT_DIR: { value: "/var/lib/olive-results", mount: { volume: "ledger", subPath: "results", mountPath: "/var/lib/olive-results" } },
-};
-function checkSupervisorEnv(targets: Target[], charts: Record<string, Doc[]>, deployed: Record<string, Doc[]>): Violation[] {
+// 감독 파드 표(D-37). 감독 진입점(ukyi-app/olive src/main/supervisor.ts SUPERVISOR_ENV, README "감독 진입점 › 환경")이 읽는 env와
+// 그 env가 가리키는 파일을 내는 마운트·볼륨·생산자(ExternalSecret)를 렌더마다 정확한 표로 대조한다. 경로를 풀어 보거나 정규식으로 맞추지 않는다.
+//   파드: 일반 컨테이너 supervisor 하나, init·임시 컨테이너 없음(감독 전용 Secret을 받는 컨테이너는 감독 하나다). 어긋나면 나머지는 보지 않는다.
+//   env: 이름 집합이 열한 개 그대로(진입점은 모두 있고 비지 않아야 뜬다, 없으면 91. 표 밖 이름은 읽지 않아 오타가 조용히 남는다), 값은 표 그대로.
+//     OLIVE_POLICY_REVISION의 값은 olive-executor-split이 본다(감독·실행기 값 대조). OLIVE_TARGETS는 targets.yaml의 실행기 줄이고
+//     차트 olive.supervisorTargetsJson의 키 차례다. 그 줄을 바꾸는 PR은 이 값을 함께 고친다(fixture는 targets만 고치고 렌더는 그대로라 계산하지 않는다).
+//   마운트: 목록 전체가 표와 같다. 항목의 칸은 name·mountPath·readOnly(생략은 false)뿐이고 subPath는 결과 마운트의 results만 받는다
+//     (subPathExpr 등은 폴더 자리를 파일 하나로 바꾸거나 필수 파일을 가린다).
+//   볼륨: 이름마다 하나이고 내용이 표와 같다. Secret 모드는 십진 288(0440, fsGroup 65532로 읽는다), 신뢰 ConfigMap은 292(0444).
+//   생산자: 복구 스위치가 켠 렌더에서 감독 ns의 ExternalSecret이 표의 셋과 같다(store infisical-olive, target 이름 = 볼륨의 secretName,
+//     data의 Secret 키 = 볼륨 items의 key). 끈 렌더의 0개는 olive-executor-key가 본다(같은 이름 Secret은 사람이 만든다).
+// 렌더마다 다른 칸(등록표 키, 클러스터 이름, 계정 별칭, pki 켬, 신뢰 묶음, 직접 준 TLS Secret)은 그 렌더에 넣은 값에서 얻는다:
+// 차트 ci 렌더는 values.yaml + ci 파일, 켠 root 렌더는 values.yaml + Application의 valueFiles·valuesObject + RENDER_FILL(빈 칸만).
+// TLS 볼륨·마운트는 값이 TLS Secret을 정할 때(pki 켬이면 olive-tls, 끄면 supervisor.tls.secretName), 신뢰는 pki 켬과 묶음이 있을 때 있어야 한다.
+const SUP_LEDGER_DIR = "/var/lib/olive";
+const SUP_RESULT_DIR = "/var/lib/olive-results";
+const SUP_TLS_DIR = "/run/olive/tls";
+const SUP_TRUST_DIR = "/run/olive/trust";
+const SUP_SECRET_MODE = 0o440;
+const SUP_TRUST_MODE = 0o444;
+const SUP_STORE_REF = { kind: "ClusterSecretStore", name: SUPERVISOR_STORE };
+const SUP_TARGETS_JSON = JSON.stringify([
+  { namespace: "olive-diagnosis", roles: ["diagnosis"], target: "diagnosis" },
+  { namespace: "olive-reader", roles: ["isolated_reader"], target: "reader" },
+]);
+const SUP_MOUNT_KEYS = ["name", "mountPath", "readOnly", "subPath"];
+type SupValues = { registryKey: unknown; environment: unknown; account: unknown; accountKey: unknown; signingKey: unknown; pki: boolean; trust: boolean; tlsSecret: unknown; externalSecrets: boolean };
+// 렌더(출처)에 넣은 값. 켠 root 렌더에 소유 Application이 없으면 undefined다(olive-owner·olive-ignore-differences가 낸다).
+function supervisorValues(origin: string, deployed: Record<string, Doc[]>, keySwitch: Record<string, boolean>): SupValues | undefined {
+  const base = valueLayers(`${OLIVE_CHART}/values.yaml`);
+  let layers: unknown[];
+  let fill: Record<string, string> = {};
+  let switchValue: boolean | undefined;
+  const m = origin.match(/^chart:olive\/(ci\/.+)$/);
+  if (m) layers = [...base, ...valueLayers(`${OLIVE_CHART}/${m[1]}`)];
+  else {
+    const cluster = sourceOf(origin).cluster;
+    if (cluster === undefined) return undefined;
+    const docs = expand(deployed[FORCED] ?? []).filter((d) => deployedDoc(d) && sourceOf(d.origin).cluster === cluster);
+    const s = argoApps(docs).flatMap((a) => effectiveSources(a.obj.spec)).find((x) => sameRepo(x?.repoURL) && x?.path === OLIVE_CHART);
+    if (!s) return undefined;
+    layers = [...base, ...(s?.helm?.valueFiles ?? []).flatMap((f: unknown) => (isString(f) ? valueLayers(posix.join(OLIVE_CHART, f)) : [])), s?.helm?.valuesObject];
+    fill = RENDER_FILL[OLIVE_CHART];
+    // 복구 스위치는 olive-executor-key와 같은 값(렌더 때 정한 keySwitch)을 쓴다.
+    switchValue = keySwitch[cluster];
+  }
+  // Helm처럼 뒤 층이 이긴다. 빈 값("", null)만 RENDER_FILL이 채운다(render.ts fillEmpty).
+  const get = (p: string) => {
+    let v: unknown;
+    for (const l of layers) {
+      const x = getPath(l, p);
+      if (x !== undefined) v = x;
+    }
+    return (v === undefined || v === null || v === "") && fill[p] !== undefined ? fill[p] : v;
+  };
+  const on = (v: unknown) => !(v === undefined || v === null || v === false || v === 0 || v === "");
+  const pki = on(get("pki.enabled"));
+  return {
+    registryKey: get("supervisor.registry.key"),
+    environment: get("supervisor.registry.environment"),
+    account: get("supervisor.account.name"),
+    accountKey: get("supervisor.account.key"),
+    signingKey: get("supervisor.signingKey.key"),
+    pki,
+    trust: pki && on(get("pki.trustBundlePem")),
+    tlsSecret: pki ? "olive-tls" : get("supervisor.tls.secretName") || undefined,
+    externalSecrets: switchValue ?? switchOn(layers),
+  };
+}
+function supervisorTable(v: SupValues) {
+  const env: Record<string, string | undefined> = {
+    OLIVE_SUPERVISOR_PORT: "8443",
+    OLIVE_LEDGER_DIR: SUP_LEDGER_DIR,
+    OLIVE_SIGNING_KEY_DIR: "/run/olive/signing",
+    OLIVE_ACCOUNTS_DIR: "/run/olive/accounts",
+    OLIVE_TLS_DIR: SUP_TLS_DIR,
+    OLIVE_TRUST_DIR: SUP_TRUST_DIR,
+    OLIVE_REGISTRY_FILE: "/run/olive/registry/registry.json",
+    OLIVE_ENVIRONMENT: String(v.environment),
+    OLIVE_TARGETS: SUP_TARGETS_JSON,
+    OLIVE_POLICY_REVISION: undefined,
+    OLIVE_RESULT_DIR: SUP_RESULT_DIR,
+  };
+  const mounts: Record<string, unknown>[] = [
+    { name: "ledger", mountPath: SUP_LEDGER_DIR, readOnly: false },
+    { name: "ledger", mountPath: SUP_RESULT_DIR, readOnly: false, subPath: "results" },
+    { name: "registry", mountPath: "/run/olive/registry", readOnly: true },
+    { name: "signing", mountPath: "/run/olive/signing", readOnly: true },
+    { name: "account", mountPath: `/run/olive/accounts/${v.account}`, readOnly: true },
+    ...(v.tlsSecret ? [{ name: "tls", mountPath: SUP_TLS_DIR, readOnly: true }] : []),
+    ...(v.trust ? [{ name: "trust", mountPath: SUP_TRUST_DIR, readOnly: true }] : []),
+    { name: "tmp", mountPath: "/tmp", readOnly: false },
+  ];
+  const tlsItems = v.pki ? { items: [{ key: "tls.crt", path: "tls.crt" }, { key: "tls.key", path: "tls.key" }] } : {};
+  const volumes: Record<string, unknown>[] = [
+    { name: "ledger", persistentVolumeClaim: { claimName: "ledger" } },
+    { name: "signing", secret: { secretName: "olive-signing-key", defaultMode: SUP_SECRET_MODE, items: [{ key: v.signingKey, path: "supervisor-signing.key" }] } },
+    { name: "registry", secret: { secretName: "olive-registry", defaultMode: SUP_SECRET_MODE, items: [{ key: v.registryKey, path: "registry.json" }] } },
+    { name: "account", secret: { secretName: `olive-account-${v.account}`, defaultMode: SUP_SECRET_MODE } },
+    ...(v.tlsSecret ? [{ name: "tls", secret: { secretName: v.tlsSecret, defaultMode: SUP_SECRET_MODE, ...tlsItems } }] : []),
+    ...(v.trust ? [{ name: "trust", configMap: { name: "olive-trust", defaultMode: SUP_TRUST_MODE } }] : []),
+    { name: "tmp", emptyDir: { sizeLimit: "256Mi" } },
+  ];
+  const data = (secretKey: unknown, key: unknown) => [{ secretKey, remoteRef: { key } }];
+  const externalSecrets: Record<string, unknown> = {
+    "olive-signing-key": { store: SUP_STORE_REF, target: "olive-signing-key", data: data(v.signingKey, v.signingKey) },
+    "olive-registry": { store: SUP_STORE_REF, target: "olive-registry", data: data(v.registryKey, v.registryKey) },
+    [`olive-account-${v.account}`]: { store: SUP_STORE_REF, target: `olive-account-${v.account}`, data: data(v.accountKey, `/bot-accounts/${v.account}/${v.accountKey}`) },
+  };
+  return { env, mounts, volumes, externalSecrets };
+}
+// 두 목록(JSON 문자열)의 차이. 중복도 센다.
+function listDiff(got: string[], want: string[]): { missing: string[]; extra: string[] } {
+  const rest = [...got];
+  const missing: string[] = [];
+  for (const w of want) {
+    const i = rest.indexOf(w);
+    if (i >= 0) rest.splice(i, 1);
+    else missing.push(w);
+  }
+  return { missing, extra: rest };
+}
+function checkSupervisorEnv(targets: Target[], charts: Record<string, Doc[]>, deployed: Record<string, Doc[]>, keySwitch: Record<string, boolean>): Violation[] {
   const out: Violation[] = [];
   const sup = targets.find((t) => t.kind === "supervisor" && t.declaredBy === OLIVE_CHART);
   if (!sup) return out;
-  for (const [, group] of oliveChartGroups(charts, deployed)) {
+  for (const [origin, group] of oliveChartGroups(charts, deployed)) {
     const deps = group.filter((d) => d.obj.kind === "Deployment" && nsOf(d) === sup.namespace && d.obj.metadata?.name === sup.deployment);
     // 없거나 둘 이상이면 olive-chart-targets·olive-executor-split이 낸다.
     if (deps.length !== 1) continue;
+    const podWhere = id(deps[0]);
+    const values = supervisorValues(origin, deployed, keySwitch);
+    if (!values) continue;
+    const want = supervisorTable(values);
     const spec = podSpec(deps[0].obj) ?? {};
-    const c = (spec.containers ?? []).find((x: any) => x?.name === SUPERVISOR_CONTAINER);
-    if (!c) continue;
-    const where = `${id(deps[0])} container ${SUPERVISOR_CONTAINER}`;
-    const push = (message: string) => out.push({ rule: "olive-supervisor-env", where, message });
-    if (c.envFrom !== undefined) push(`envFrom(${show(c.envFrom)})이 있다. 감독 env는 표의 이름만 값으로 받는다`);
-    const names: string[] = (c.env ?? []).map((x: any) => x?.name);
-    const want = Object.keys(SUP_ENV);
-    const missing = want.filter((n) => !names.includes(n));
-    const extra = [...new Set(names.filter((n) => !want.includes(n)))];
-    if (missing.length > 0 || extra.length > 0) {
-      push(`env 이름이 감독 진입점의 표(olive SUPERVISOR_ENV 열한 개)와 다르다: 빠짐 ${JSON.stringify(missing)}, 표 밖 ${JSON.stringify(extra)}`);
+    const names = (list: any[] | undefined) => (list ?? []).map((c) => String(c?.name));
+    if (JSON.stringify(names(spec.containers)) !== JSON.stringify([SUPERVISOR_CONTAINER]) || (spec.initContainers ?? []).length > 0 || (spec.ephemeralContainers ?? []).length > 0) {
+      out.push({
+        rule: "olive-supervisor-env",
+        where: podWhere,
+        message: `감독 파드 구성이 일반 컨테이너 ${SUPERVISOR_CONTAINER} 하나(init·임시 컨테이너 없음)가 아니다(일반 ${JSON.stringify(names(spec.containers))}, init ${JSON.stringify(names(spec.initContainers))}, 임시 ${(spec.ephemeralContainers ?? []).length}개). 감독 전용 Secret(서명 키·계정·등록표·TLS)을 받는 컨테이너는 감독 하나다`,
+      });
+      continue;
     }
-    const mounts: any[] = c.volumeMounts ?? [];
-    const volumes: any[] = spec.volumes ?? [];
-    for (const [name, rule] of Object.entries(SUP_ENV)) {
+    const c = spec.containers[0];
+    const where = `${podWhere} container ${SUPERVISOR_CONTAINER}`;
+    const push = (message: string) => out.push({ rule: "olive-supervisor-env", where, message });
+    // env.
+    if (c.envFrom !== undefined) push(`envFrom(${show(c.envFrom)})이 있다. 감독 env는 표의 이름만 값으로 받는다`);
+    const envNames: string[] = (c.env ?? []).map((x: any) => x?.name);
+    const wantNames = Object.keys(want.env);
+    const missingEnv = wantNames.filter((n) => !envNames.includes(n));
+    const extraEnv = [...new Set(envNames.filter((n) => !wantNames.includes(n)))];
+    if (missingEnv.length > 0 || extraEnv.length > 0) {
+      push(`env 이름이 감독 진입점의 표(olive SUPERVISOR_ENV 열한 개)와 다르다: 빠짐 ${JSON.stringify(missingEnv)}, 표 밖 ${JSON.stringify(extraEnv)}`);
+    }
+    for (const [name, wantValue] of Object.entries(want.env)) {
       const list = envOf(c, name);
       if (list.length === 0) continue;
       if (list.length > 1) {
@@ -1136,24 +1235,48 @@ function checkSupervisorEnv(targets: Target[], charts: Record<string, Doc[]>, de
         continue;
       }
       const v = plainOne(list);
-      if (v === undefined) {
-        push(`env ${name}이 valueFrom 없는 문자열 값이 아니다(${show(list[0])})`);
-        continue;
+      if (v === undefined) push(`env ${name}이 valueFrom 없는 문자열 값이 아니다(${show(list[0])})`);
+      else if (wantValue !== undefined && v !== wantValue) push(`env ${name}(${show(v)})이 표의 값 ${show(wantValue)}과 다르다(이 렌더에 넣은 값에서 얻은 기대 값이다)`);
+    }
+    // 볼륨. 같은 이름이 둘이면 쿠버네티스가 거부하므로 합치기 전에 센다. 빠진 볼륨의 마운트는 볼륨 쪽 위반 하나로 낸다(원인 하나에 위반 하나).
+    const vols: any[] = spec.volumes ?? [];
+    const volDiff = listDiff(names(vols), want.volumes.map((v) => String(v.name)));
+    if (volDiff.missing.length > 0 || volDiff.extra.length > 0) {
+      push(`볼륨 이름이 감독 표와 다르다: 빠짐 ${JSON.stringify(volDiff.missing)}, 표 밖 또는 중복 ${JSON.stringify(volDiff.extra)}(TLS는 pki 켬 또는 supervisor.tls.secretName, 신뢰는 pki 켬과 묶음이 있을 때 필요하다)`);
+    }
+    for (const w of want.volumes) {
+      const got = vols.filter((v) => v?.name === w.name);
+      if (got.length === 1 && !same(got[0], w)) {
+        push(`볼륨 ${w.name}(${show(got[0])})이 표의 ${show(w)}와 다르다(Secret 이름은 생산자 ExternalSecret의 target, items의 key는 그 Secret 키, path는 진입점이 읽는 파일 이름, 모드는 십진 표기다. 장부는 PVC ledger다)`);
       }
-      if (rule.value !== undefined && v !== rule.value) push(`env ${name}(${show(v)})이 표의 값 ${show(rule.value)}과 다르다`);
-      const m = rule.mount;
-      if (!m) continue;
-      const vols = volumes.filter((x: any) => x?.name === m.volume);
-      const hits = mounts.filter((x: any) => x?.name === m.volume && x?.subPath === m.subPath);
-      const label = `볼륨 ${m.volume}${m.subPath === undefined ? "" : ` subPath ${m.subPath}`}`;
-      if (m.optional && vols.length === 0 && hits.length === 0) continue;
-      if (hits.length !== 1) {
-        push(`env ${name}의 마운트(${label})가 ${hits.length}개다. 표의 ${m.mountPath} 하나여야 한다`);
-        continue;
+    }
+    // 마운트.
+    const mounts: any[] = c.volumeMounts ?? [];
+    for (const m of mounts) {
+      for (const k of Object.keys(m ?? {})) {
+        if (!SUP_MOUNT_KEYS.includes(k)) push(`마운트 ${String(m?.name)}(${show(m?.mountPath)})에 ${k}(${show(m[k])})를 두지 않는다(허용 칸: name·mountPath·readOnly, subPath는 결과 마운트의 results만. 다른 칸은 폴더 자리를 바꾸거나 필수 파일을 가린다)`);
       }
-      if (hits[0].mountPath !== m.mountPath) push(`env ${name}의 마운트(${label})의 mountPath(${show(hits[0].mountPath)})가 표의 ${m.mountPath}와 다르다`);
-      if (m.items !== undefined && (vols.length !== 1 || !same(vols[0]?.secret?.items, m.items))) {
-        push(`env ${name}의 ${label} items(${show(vols.map((x: any) => x?.secret?.items))})가 표의 ${show(m.items)}와 다르다(진입점이 읽는 파일 이름)`);
+      if (m?.readOnly !== undefined && typeof m.readOnly !== "boolean") push(`마운트 ${String(m?.name)}의 readOnly(${show(m.readOnly)})가 불리언이 아니다(쿠버네티스는 yes·on 같은 값을 true로 읽어 CI와 실제가 갈린다)`);
+    }
+    const canon = (m: any) => JSON.stringify(sortKeys({ name: m?.name, mountPath: m?.mountPath, readOnly: m?.readOnly === undefined ? false : m.readOnly, ...(m?.subPath === undefined ? {} : { subPath: m.subPath }) }));
+    const skip = new Set(volDiff.missing);
+    const mountDiff = listDiff(mounts.filter((m) => !skip.has(String(m?.name))).map(canon), want.mounts.filter((m) => !skip.has(String(m.name))).map(canon));
+    if (mountDiff.missing.length > 0 || mountDiff.extra.length > 0) {
+      push(`마운트가 감독 표와 다르다: 빠짐 [${mountDiff.missing.join(", ")}], 표 밖 [${mountDiff.extra.join(", ")}](readOnly 생략은 false다. 결과 폴더는 쓰기, Secret·신뢰는 읽기 전용이다)`);
+    }
+    // 생산자.
+    if (values.externalSecrets) {
+      const ess = group.filter((d) => d.obj.kind === "ExternalSecret" && nsOf(d) === sup.namespace);
+      const esDiff = listDiff(ess.map((d) => String(d.obj.metadata?.name)), Object.keys(want.externalSecrets));
+      if (esDiff.missing.length > 0 || esDiff.extra.length > 0) {
+        out.push({ rule: "olive-supervisor-env", where: podWhere, message: `ns ${sup.namespace}의 ExternalSecret이 감독 표와 다르다: 빠짐 ${JSON.stringify(esDiff.missing)}, 표 밖 또는 중복 ${JSON.stringify(esDiff.extra)}` });
+      }
+      for (const [name, w] of Object.entries(want.externalSecrets)) {
+        const got = ess.filter((d) => d.obj.metadata?.name === name);
+        if (got.length !== 1) continue;
+        const s = got[0].obj.spec ?? {};
+        const g = { store: s.secretStoreRef, target: s.target?.name, data: s.data, dataFrom: s.dataFrom };
+        if (!same(g, w)) out.push({ rule: "olive-supervisor-env", where: id(got[0]), message: `ExternalSecret ${name}의 store·target·data(${show(g)})가 표의 ${show(w)}와 다르다(감독 볼륨이 읽는 Secret 이름·키와 생산자가 어긋나면 그 Secret이 없어 감독이 마운트 단계에서 멈춘다)` });
       }
     }
   }
@@ -1170,7 +1293,7 @@ function oliveChecks(input: OliveInput): Violation[] {
     ...checkExecutorStore(targets, input.charts, input.deployed),
     ...checkExecutorSplit(targets, input.charts, input.deployed),
     ...checkExecutorKey(targets, input.charts, input.deployed, input.keySwitch),
-    ...checkSupervisorEnv(targets, input.charts, input.deployed),
+    ...checkSupervisorEnv(targets, input.charts, input.deployed, input.keySwitch),
     ...checkDeployed(targets, input.deployed),
     ...checkIgnoreDifferences(targets, input.deployed),
     ...checkOliveIsolation(forcedApps, input.targets, input.host),
@@ -1622,7 +1745,7 @@ function renderSelfTests(): string[] {
   for (const [name, layers, vo, want] of cases) if (digest(layers, vo) !== want) bad.push(`fillEmpty(${name}): ${JSON.stringify(digest(layers, vo))}, 기대 ${JSON.stringify(want)}`);
   const c = collectChartRenders("platform/x", ["platform/x/ci/a.yaml", "platform/x/ci/empty.yaml"], (f) => ({ ok: true, out: f.endsWith("a.yaml") ? "kind: ConfigMap\n" : "" }));
   if (JSON.stringify(c.origins) !== JSON.stringify(["chart:x/ci/a.yaml", "chart:x/ci/empty.yaml"]) || c.docs.length !== 1) bad.push(`collectChartRenders가 문서 0개인 렌더의 출처를 남기지 않았다: ${JSON.stringify(c.origins)}`);
-  bad.push(...listedAppTests(), ...multiDocValuesTest(), ...hostScopeTest(), ...executorTlsPathTest(), ...policyRevisionRenderTest(), ...registryRenderTest());
+  bad.push(...listedAppTests(), ...multiDocValuesTest(), ...hostScopeTest(), ...executorTlsPathTest(), ...policyRevisionRenderTest(), ...registryRenderTest(), ...ledgerResultPathTest());
   return bad;
 }
 
@@ -1680,6 +1803,37 @@ function registryRenderTest(): string[] {
   if (!same(vol.map((v: any) => v?.secret?.items), [[{ key: "EXECUTOR_REGISTRY_X", path: "registry.json" }]])) bad.push(`supervisor.registry.key로 렌더한 registry 볼륨 items가 입력 그대로가 아니다(${show(vol)})`);
   const es = docs.filter((d) => d?.kind === "ExternalSecret" && d.metadata?.name === "olive-registry");
   if (!same(es.map((d: any) => d.spec?.data), [[{ secretKey: "EXECUTOR_REGISTRY_X", remoteRef: { key: "EXECUTOR_REGISTRY_X" } }]])) bad.push(`supervisor.registry.key로 렌더한 ExternalSecret olive-registry의 data가 입력 그대로가 아니다(${show(es.map((d: any) => d.spec?.data))})`);
+  // 스키마 꼴에 맞는 TRUE·NULL은 따옴표 없이 렌더하면 YAML 불리언·null이 되어 두 리소스가 스키마 검사에서 떨어진다. 파싱 뒤에도 같은 글자인지 본다.
+  for (const key of ["TRUE", "NULL"]) {
+    const r = render(`reserved-${key}`, key, "ci");
+    if (!r.ok) {
+      bad.push(`supervisor.registry.key ${key}가 렌더되지 않았다: ${r.out.trim()}`);
+      continue;
+    }
+    const ds = parseAll(r.out);
+    const items = ds.filter((d) => d?.kind === "Deployment" && d.metadata?.name === "supervisor").map((d) => (podSpec(d)?.volumes ?? []).find((v: any) => v?.name === "registry")?.secret?.items);
+    const data = ds.filter((d) => d?.kind === "ExternalSecret" && d.metadata?.name === "olive-registry").map((d) => d.spec?.data);
+    if (!same(items, [[{ key, path: "registry.json" }]]) || !same(data, [[{ secretKey: key, remoteRef: { key } }]])) bad.push(`supervisor.registry.key ${key}가 문자열로 남지 않았다(items ${show(items)}, data ${show(data)})`);
+  }
+  return bad;
+}
+
+// 결과 폴더 자리(/var/lib/olive-results)는 예약이다. 장부를 그 자리나 아래에 두면 렌더가 멈추고, 다른 /var/lib/ 경로는 렌더된다.
+function ledgerResultPathTest(): string[] {
+  const dir = tempDir("olive-ledger-path");
+  const bad: string[] = [];
+  for (const [name, path, fails] of [
+    ["same", "/var/lib/olive-results", true],
+    ["slash", "/var/lib/olive-results/", true],
+    ["under", "/var/lib/olive-results/ledger", true],
+    ["sibling", "/var/lib/olive-ledger", false],
+  ] as const) {
+    const f = join(dir, `${name}.yaml`);
+    writeFileSync(f, `supervisor:\n  ledger:\n    mountPath: ${JSON.stringify(path)}\n`);
+    const r = helmTemplate("olive", OLIVE_CHART, "app-olive", [`${OLIVE_CHART}/ci/enabled.yaml`, f]);
+    if (fails && (r.ok || !r.out.includes("collides with the reserved result directory"))) bad.push(`supervisor.ledger.mountPath ${path}의 렌더가 결과 폴더 예약으로 멈추지 않았다: ${r.ok ? "렌더 성공" : r.out.trim()}`);
+    if (!fails && !r.ok) bad.push(`supervisor.ledger.mountPath ${path}가 렌더되지 않았다: ${r.out.trim()}`);
+  }
   return bad;
 }
 
@@ -1817,6 +1971,8 @@ function executorKeyTests(base: OliveInput): string[] {
   const bad: string[] = [];
   const executors = targetList(base.targets).filter((t) => t.kind === "executor" && t.declaredBy === OLIVE_CHART);
   const noEs = executors.map((t) => `대상 ${t.id}의 ns ${t.namespace}에 효과 서명 키 ExternalSecret(target ${EFFECT_KEY_SECRET})이 정확히 하나가 아니다(0개)`);
+  // 감독 ns의 생산자 셋도 함께 빠진다(olive-supervisor-env).
+  const noSupEs = 'ns olive-control의 ExternalSecret이 감독 표와 다르다: 빠짐 ["olive-signing-key","olive-registry","olive-account-ci-account"]';
   const dropEs: PatchOp[] = [{ in: "chart", select: { kind: "ExternalSecret" }, drop: true }];
   const extraOpen = "store ci-extra가 실행기 ns olive-reader에 열려 있다";
   // 복구 스위치를 끈 클러스터(vm): 렌더 때 정한 스위치 값(keySwitch)을 끔으로 두고, dropOwned면 이 차트의 store·ES를 뺀다.
@@ -1835,13 +1991,13 @@ function executorKeyTests(base: OliveInput): string[] {
   const STORES_PROD = "external-secrets-stores[prod]:platform/external-secrets";
   const posixOpen = (ns: string) => `store ci-posix-class가 실행기 ns ${ns}에 열려 있다(namespaceRegexes "[[:lower:]]": 이 검사가 풀지 않는 정규식 문법이다`;
   const cases: [string, PatchOp[], ((i: OliveInput) => unknown) | undefined, string[]][] = [
-    ["켠 값에서 ExternalSecret이 0개", dropEs, undefined, noEs],
-    ["켠 값에서 ExternalSecret이 0개 + 실행기 ns에 열린 store", [...dropEs, { in: "chart", add: EXTRA_STORE }], undefined, [...noEs, extraOpen]],
+    ["켠 값에서 ExternalSecret이 0개", dropEs, undefined, [...noEs, noSupEs]],
+    ["켠 값에서 ExternalSecret이 0개 + 실행기 ns에 열린 store", [...dropEs, { in: "chart", add: EXTRA_STORE }], undefined, [...noEs, noSupEs, extraOpen]],
     [
       "켠 값에서 ExternalSecret이 0개 + 전용 store 폴더가 하위 폴더",
       [...dropEs, { in: "chart", select: { kind: "ClusterSecretStore", name: "infisical-olive-executor-reader" }, set: { "spec.provider.infisical.secretsScope.secretsPath": "/olive/executors/reader/ci" } }],
       undefined,
-      [...noEs, `store infisical-olive-executor-reader의 secretsPath("/olive/executors/reader/ci")가 /olive/executors/reader가 아니다`],
+      [...noEs, noSupEs, `store infisical-olive-executor-reader의 secretsPath("/olive/executors/reader/ci")가 /olive/executors/reader가 아니다`],
     ],
     ["끈 값(vm)인데 이 차트 store가 남음", [], (i) => switchOff(i, true) && leave(i), ["복구 스위치(externalSecrets.enabled)를 끈 렌더에 이 차트의 store·ExternalSecret이 1개 있다"]],
     ["끈 값(vm)의 정상 렌더", [], (i) => switchOff(i, true), []],
@@ -1869,7 +2025,7 @@ function executorKeyTests(base: OliveInput): string[] {
     ],
   ];
   const compare = (name: string, got: Violation[], want: string[]) => {
-    const unmatched = got.filter((v) => !(["olive-executor-key", "olive-ignore-differences"].includes(v.rule) && want.some((w) => v.message.includes(w))));
+    const unmatched = got.filter((v) => !(["olive-executor-key", "olive-ignore-differences", "olive-supervisor-env"].includes(v.rule) && want.some((w) => v.message.includes(w))));
     const counts = want.map((w) => got.filter((v) => v.message.includes(w)).length);
     if (unmatched.length > 0 || counts.some((n) => n !== 1) || got.length !== want.length) {
       bad.push(`${name}: 기대한 위반 ${want.length}개(각 1번)와 다르다. 걸린 것: ${got.map(fmt).join("; ") || "없음"}`);

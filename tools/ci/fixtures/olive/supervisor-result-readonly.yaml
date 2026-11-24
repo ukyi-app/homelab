@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 마운트가 감독 표와 다르다
+# 결과 폴더 마운트에 readOnly: true만 넣었다. 진입점의 폴더 검사는 통과하지만 결과 쓰기가 막힌다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.containers.0.volumeMounts:
+        match: {name: ledger, subPath: results}
+        set: {readOnly: true}

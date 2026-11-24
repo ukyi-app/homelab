@@ -1,0 +1,8 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: ExternalSecret olive-registry의 store·target·data
+# 생산자 쪽 target 이름만 바꿨다. 볼륨이 읽는 olive-registry를 아무도 만들지 않아 감독이 마운트 단계에서 멈춘다.
+patch:
+  - in: all
+    select: {kind: ExternalSecret, namespace: olive-control, name: olive-registry}
+    set: {spec.target.name: review-other-registry}

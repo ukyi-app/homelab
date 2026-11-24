@@ -1,0 +1,10 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 볼륨 이름이 감독 표와 다르다: 빠짐 ["tls"]
+# pki를 켠 차트 ci 렌더(인증서를 낸다)에서 감독의 TLS 볼륨과 마운트만 뺐다. 진입점은 /run/olive/tls/tls.crt를 읽지 못해 92로 끝난다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    remove:
+      spec.template.spec.volumes: {name: tls}
+      spec.template.spec.containers.0.volumeMounts: {name: tls}
