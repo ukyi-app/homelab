@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: terminationMessagePath("/opt/olive-generation/termination-log")가 세대 표식 마운트 /opt/olive-generation 아래다(olive-init
+# init의 종료 메시지 파일을 세대 표식 폴더 안에 두었다. kubelet이 그 자리에 빈 파일을 따로 붙여 init이 쓰는 표식 폴더를 덮는다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.initContainers:
+        match: {name: olive-init}
+        set: {terminationMessagePath: /opt/olive-generation/termination-log}

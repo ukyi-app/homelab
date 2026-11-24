@@ -1,0 +1,10 @@
+# expect: pass
+# role의 독립 종료 메시지 경로. role은 세대 표식 볼륨을 붙이지 않으므로 kubelet이 붙이는 빈 파일이 표식을 가릴 수 없다.
+# 이 모양은 위반 0건이어야 한다. executor-split-termination-path.yaml이 표식 경로를 가리는 음성 사례다.
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set: {terminationMessagePath: /dev/role-termination-log}
