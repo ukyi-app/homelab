@@ -8,7 +8,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, posix, relative } from "node:path";
 import { type Doc, type Violation, ROOT, effectiveSources, fmt, gitFiles, parseAll, readText, sameRepo, tempDir } from "./lib";
 import { WORKLOAD_KINDS, context, expand, id, podSpec } from "./policy";
-import { type RenderOptions, clusterRestore, fillEmpty, filledValuesObject, helmTemplate, listShapeErrors, listedArgoApps, parseRendered, renderAll } from "./render";
+import { type RenderOptions, clusterRestore, fillEmpty, filledValuesObject, helmTemplate, listShapeErrors, listedArgoApps, loadValues, parseRendered, renderAll } from "./render";
 
 export const OLIVE_TARGETS_FILE = "platform/olive/targets.yaml";
 const OLIVE_CHART = "platform/olive";
@@ -1050,7 +1050,7 @@ function checkIgnoreDifferences(targets: Target[], deployed: Record<string, Doc[
 // olive targets 단계. 규칙 검사에 더해 값 파일의 복구 스위치가 올리브 Application까지 전달됐는지 본다.
 // 배선 검사는 저장소의 값 파일을 읽으므로 fixture·합성 사례가 쓰는 oliveChecks(allChecks)에는 넣지 않는다.
 export function checkOliveTargets(input: OliveInput): Violation[] {
-  return [...oliveChecks(input), ...checkKeySwitchWiring(input.keySwitch, restoreOffClusters())];
+  return [...oliveChecks(input), ...checkKeySwitchWiring(input.keySwitch, restoreOffClusters()), ...checkClusterEnable(input.deployed[REAL] ?? [], targetList(input.targets), clusterNames())];
 }
 
 // 값 파일(platform/root/values-<클러스터>.yaml)에서 cluster.restore.externalSecrets를 bool false로 끈 클러스터(복구 PR).
@@ -1069,6 +1069,165 @@ function checkKeySwitchWiring(keySwitch: Record<string, boolean>, offClusters: s
       where: `${FORCED}[${c}]`,
       message: `값 파일(platform/root/values-${c}.yaml)이 복구 스위치(cluster.restore.externalSecrets)를 껐는데 olive Application이 받은 externalSecrets.enabled가 ${keySwitch[c] === undefined ? "읽히지 않았다" : "켬이다"}(root가 값을 넘기는지 본다)`,
     }));
+}
+
+// 클러스터마다 올리브와 내부 인증서가 켜졌는지(D-116). 지금 root 렌더(REAL)가 이 표와 정확히 같아야 한다.
+// 값 파일(platform/root/values-<클러스터>.yaml cluster.olive)이 아니라 이 표가 기준인 이유: 켜짐을 바꾸는 PR이 값 파일 한 줄만 고쳐도
+// Argo CD는 그 렌더를 곧 적용한다. 표도 함께 고쳐야 CI가 통과하므로 어느 클러스터가 켜지는지가 검토에 드러난다.
+// 줄을 true로 바꾸는 것은 그 클러스터의 켜기 PR이다(관리자 승인). 운영 줄은 운영 켜기 결정 뒤에만 바꾼다.
+// 보는 것(클러스터마다, 목록 문서는 펴서):
+//   올리브: platform/olive를 source로 하는 Application, 그 출처의 문서, 올리브 대상 네임스페이스(targets.yaml에서 declaredBy가
+//     platform/olive인 줄)의 문서와 그 Namespace. 꺼짐이면 모두 0개, 켬이면 Application이 꼭 하나다. 출처를 묻지 않는 이유: 다른 차트가
+//     그 네임스페이스에 낸 문서도 꺼 둔 클러스터에 올리브 자리를 만든다.
+//   인증서: cert-manager.io 문서 가운데 올리브 pki 라벨(part-of olive, component pki)이 있거나 이름이 olive-로 시작하는 것. 꺼짐이면 0개,
+//     켬이면 하나 이상. 신뢰 묶음 ConfigMap은 발급이 아니라 클러스터 값 trustBundlePem을 따르므로 세지 않는다.
+// 값 파일의 cluster.olive.enabled·pki.enabled도 표와 같아야 한다. 공용 스위치(components.olive.enabled)가 꺼진 동안에는 값 파일만 켜도
+// 렌더가 그대로라, 나중에 공용 스위치를 켜는 PR이 표에 없는 클러스터까지 켠다.
+// 차트 기본값 pki.enabled도 false여야 한다. root는 클러스터 값이 true일 때만 넘기므로(platform/root/templates/olive.yaml) 기본값이 true면
+// 클러스터 값이 false인 곳에서도 켜진다. 꺼 둔 클러스터의 렌더에는 그 차이가 나타나지 않아 렌더 대조만으로는 못 잡는다.
+export const OLIVE_CLUSTER_STATE: Record<string, { olive: boolean; pki: boolean }> = {
+  prod: { olive: false, pki: false },
+  vm: { olive: false, pki: false },
+};
+const OLIVE_CLUSTER_RULE = "olive-cluster-enable";
+const OLIVE_CLUSTER_TABLE = "tools/ci/olive.ts OLIVE_CLUSTER_STATE";
+const isOlivePki = (d: Doc) => {
+  const labels = d.obj.metadata?.labels ?? {};
+  return String(d.obj.apiVersion ?? "").startsWith("cert-manager.io/") && ((labels["app.kubernetes.io/part-of"] === "olive" && labels["app.kubernetes.io/component"] === "pki") || String(d.obj.metadata?.name ?? "").startsWith("olive-"));
+};
+export function checkClusterEnable(
+  docs: Doc[],
+  targets: Target[],
+  clusters: string[],
+  state: Record<string, { olive: boolean; pki: boolean }> = OLIVE_CLUSTER_STATE,
+  chartValues: unknown = loadValues(readText(`${OLIVE_CHART}/values.yaml`)),
+  clusterValues: Record<string, unknown> = Object.fromEntries(clusters.map((c) => [c, loadValues(readText(`platform/root/values-${c}.yaml`))])),
+): Violation[] {
+  const out: Violation[] = [];
+  const push = (where: string, message: string) => out.push({ rule: OLIVE_CLUSTER_RULE, where, message });
+  for (const c of clusters) if (!(c in state)) push(OLIVE_CLUSTER_TABLE, `클러스터 ${c}의 줄이 없다(platform/root/values-${c}.yaml이 있다). 켜짐을 정해 적는다`);
+  for (const c of Object.keys(state)) if (!clusters.includes(c)) push(OLIVE_CLUSTER_TABLE, `값 파일이 없는 클러스터 ${c}의 줄이 있다`);
+  for (const [c, s] of Object.entries(state)) if (s.pki && !s.olive) push(OLIVE_CLUSTER_TABLE, `${c}: pki만 켬이다. 인증서는 올리브를 켠 클러스터에만 생긴다`);
+  const chartPki = getPath(chartValues, "pki.enabled");
+  if (chartPki !== false) push(`${OLIVE_CHART}/values.yaml`, `pki.enabled 기본값은 false다(지금 ${show(chartPki)}). root는 클러스터 값이 true일 때만 넘겨, 기본값이 true면 꺼 둔 클러스터에도 발급 기관이 생긴다`);
+  const oliveNs = new Set(targets.filter((t) => t.declaredBy === OLIVE_CHART).map((t) => t.namespace));
+  const all = expand(docs).filter(deployedDoc);
+  const label = (d: Doc) => `${d.obj.kind}/${nsOf(d) ? `${nsOf(d)}/` : ""}${d.obj.metadata?.name}(${d.origin})`;
+  const list = (ds: Doc[]) => ds.slice(0, 5).map(label).join(", ") + (ds.length > 5 ? ` 외 ${ds.length - 5}개` : "");
+  for (const c of clusters) {
+    const s = state[c];
+    if (!s) continue;
+    const mine = all.filter((d) => sourceOf(d.origin).cluster === c);
+    const apps = deployersOf(argoApps(mine), c, OLIVE_CHART);
+    const placed = mine.filter((d) => sourceOf(d.origin).path === OLIVE_CHART || oliveNs.has(nsOf(d) ?? "") || (d.obj.kind === "Namespace" && oliveNs.has(d.obj.metadata?.name)));
+    const pki = mine.filter(isOlivePki);
+    for (const [path, want] of [["cluster.olive.enabled", s.olive], ["cluster.olive.pki.enabled", s.pki]] as const) {
+      const v = getPath(clusterValues[c], path);
+      if (v !== want) push(`platform/root/values-${c}.yaml`, `${path}(지금 ${show(v)})가 표(${want})와 다르다. 켜짐을 바꾸는 PR은 값 파일과 ${OLIVE_CLUSTER_TABLE}를 함께 고친다`);
+    }
+    const where = `${REAL}[${c}]`;
+    if (!s.olive && apps.length + placed.length > 0) push(where, `올리브가 꺼짐인데 root 렌더에 있다: ${list([...apps, ...placed])} (${OLIVE_CLUSTER_TABLE})`);
+    if (s.olive && apps.length !== 1) push(where, `올리브가 켬인데 platform/olive를 배포하는 Application이 ${apps.length}개다(하나여야 한다, ${OLIVE_CLUSTER_TABLE})`);
+    if (!s.pki && pki.length > 0) push(where, `인증서(pki)가 꺼짐인데 root 렌더에 발급 리소스가 있다: ${list(pki)} (${OLIVE_CLUSTER_TABLE})`);
+    if (s.pki && pki.length === 0) push(where, `인증서(pki)가 켬인데 root 렌더에 발급 리소스가 없다(${OLIVE_CLUSTER_TABLE})`);
+  }
+  return out;
+}
+
+// checkClusterEnable의 음성 사례. 값 파일을 읽는 배선 검사라 fixture(대조군 셋) 대신 지금 root 렌더에 문서를 더해 직접 부른다.
+function clusterEnableTests(base: OliveInput): string[] {
+  const bad: string[] = [];
+  const targets = targetList(base.targets);
+  const clusters = clusterNames();
+  const real = base.deployed[REAL] ?? [];
+  const off = { pki: { enabled: false } };
+  // 값 파일 자리는 표와 같은 합성 값이다. 실제 값 파일의 어긋남은 olive targets 단계의 실제 검사가 한 번만 낸다.
+  const files: Record<string, unknown> = Object.fromEntries(clusters.map((c) => [c, { cluster: { olive: { enabled: OLIVE_CLUSTER_STATE[c]?.olive, pki: { enabled: OLIVE_CLUSTER_STATE[c]?.pki } } } }]));
+  const expectHits = (name: string, got: Violation[], want: string[]) => {
+    if (got.length !== want.length || want.some((w, i) => !got[i].message.includes(w))) bad.push(`${name}: 기대 ${JSON.stringify(want)}, 실제 ${JSON.stringify(got.map(fmt))}`);
+  };
+  expectHits("지금 root 렌더와 지금 표", checkClusterEnable(real, targets, clusters, OLIVE_CLUSTER_STATE, off, files), []);
+  const prodOlive = (base.deployed[FORCED] ?? []).filter((d) => sourceOf(d.origin).cluster === "prod" && (sourceOf(d.origin).path === OLIVE_CHART || deployersOf(argoApps([d]), "prod", OLIVE_CHART).length > 0));
+  if (deployersOf(argoApps(prodOlive), "prod", OLIVE_CHART).length !== 1 || prodOlive.length < 2) bad.push(`켠 root 렌더에서 운영의 olive Application과 그 문서를 찾지 못했다(${prodOlive.length}개)`);
+  expectHits("운영에 올리브를 켠 렌더", checkClusterEnable([...real, ...prodOlive], targets, clusters, OLIVE_CLUSTER_STATE, off, files), ["올리브가 꺼짐인데 root 렌더에 있다: Application/argocd/olive"]);
+  const ns: Doc = { origin: "adguard[prod]:platform/adguard", obj: { apiVersion: "v1", kind: "Namespace", metadata: { name: "olive-control" } } };
+  expectHits("다른 출처가 운영에 올리브 네임스페이스를 낸 렌더", checkClusterEnable([...real, ns], targets, clusters, OLIVE_CLUSTER_STATE, off, files), ["올리브가 꺼짐인데 root 렌더에 있다: Namespace/olive-control"]);
+  const issuer: Doc = {
+    origin: "cert-manager[prod]:platform/cert-manager",
+    obj: { apiVersion: "cert-manager.io/v1", kind: "ClusterIssuer", metadata: { name: "ci-issuer", labels: { "app.kubernetes.io/part-of": "olive", "app.kubernetes.io/component": "pki" } } },
+  };
+  expectHits("운영에 올리브 발급 기관만 있는 렌더", checkClusterEnable([...real, issuer], targets, clusters, OLIVE_CLUSTER_STATE, off, files), ["인증서(pki)가 꺼짐인데"]);
+  const vmOn = { ...OLIVE_CLUSTER_STATE, vm: { olive: true, pki: true } };
+  const vmValuesOn = { ...files, vm: { cluster: { olive: { enabled: true, pki: { enabled: true } } } } };
+  expectHits("표와 값 파일만 vm 켬으로 바꾼 렌더", checkClusterEnable(real, targets, clusters, vmOn, off, vmValuesOn), ["올리브가 켬인데", "인증서(pki)가 켬인데"]);
+  expectHits("표만 vm 켬으로 바꾼 렌더", checkClusterEnable(real, targets, clusters, vmOn, off, files), ["cluster.olive.enabled(지금 false)가 표(true)와 다르다", "cluster.olive.pki.enabled(지금 false)가 표(true)와 다르다", "올리브가 켬인데", "인증서(pki)가 켬인데"]);
+  const prodValueOn = { ...files, prod: { cluster: { olive: { enabled: true, pki: { enabled: false } } } } };
+  expectHits("값 파일만 운영 켬(공용 스위치가 꺼져 렌더는 그대로)", checkClusterEnable(real, targets, clusters, OLIVE_CLUSTER_STATE, off, prodValueOn), ["cluster.olive.enabled(지금 true)가 표(false)와 다르다"]);
+  expectHits("vm 줄이 없는 표", checkClusterEnable(real, targets, clusters, { prod: OLIVE_CLUSTER_STATE.prod }, off, files), ["클러스터 vm의 줄이 없다"]);
+  expectHits("pki만 켠 표", checkClusterEnable(real, targets, clusters, { ...OLIVE_CLUSTER_STATE, vm: { olive: false, pki: true } }, off, files), ["vm: pki만 켬이다", "cluster.olive.pki.enabled(지금 false)가 표(true)와 다르다", "인증서(pki)가 켬인데"]);
+  expectHits("차트 기본값 pki.enabled가 true", checkClusterEnable(real, targets, clusters, OLIVE_CLUSTER_STATE, { pki: { enabled: true } }, files), ["pki.enabled 기본값은 false다"]);
+  return bad;
+}
+
+// 클러스터 값의 분리(D-116): 한 클러스터만 켠 렌더에서 다른 클러스터의 렌더는 지금 root와 문서 하나까지 같고, 켠 클러스터도 올리브 문서를
+// 빼면 같으며, 켠 클러스터의 olive Application에는 그 클러스터 값(인증서 켜짐·세대)이 들어간다. 클러스터마다 한 번씩 본다.
+// 공용 스위치(components.olive.enabled)는 두 root 모두 켠다. 클러스터 값만으로 갈라지는지 보기 위해서다. 켜지 않는 클러스터의 켜짐은
+// 표(OLIVE_CLUSTER_STATE) 값으로 둔다. 값 파일과 표가 다른 것은 olive-cluster-enable이 따로 낸다(원인 하나에 진단 하나).
+// 세대는 차트 기본값([1], 1)과 다른 값([1, 2], 2)을 넣어 root가 차트 기본값이 아니라 클러스터 값을 넘기는지 본다.
+function clusterWiringTests(base: OliveInput): string[] {
+  const bad: string[] = [];
+  const real = base.deployed[REAL] ?? [];
+  const clusters = clusterNames();
+  const key = (d: Doc) => JSON.stringify(sortKeys({ origin: d.origin, ns: d.ns ?? null, obj: d.obj }));
+  const ofCluster = (docs: Doc[], c: string) => docs.filter((d) => sourceOf(d.origin).cluster === c);
+  const isOlive = (d: Doc, c: string) => sourceOf(d.origin).path === OLIVE_CHART || deployersOf(argoApps([d]), c, OLIVE_CHART).length > 0;
+  const firstDiff = (got: string[], want: string[]) => {
+    const i = got.findIndex((g, k) => g !== want[k]);
+    const at = i < 0 ? Math.min(got.length, want.length) : i;
+    const origin = (s: string | undefined) => (s === undefined ? "없음" : JSON.parse(s).origin);
+    return `문서 ${got.length}개(기대 ${want.length}개), 첫 차이 ${at}번째: ${origin(got[at])} / 기대 ${origin(want[at])}`;
+  };
+  const pkiWant = { enabled: true, ca: { generations: [1, 2], activeGeneration: 2 } };
+  for (const on of clusters) {
+    const tag = `${on}만 켠 렌더`;
+    const r = renderAll({
+      rootOverlay: { components: { olive: { enabled: true } } },
+      clusterOverlay: Object.fromEntries(
+        clusters.map((c) => [c, { cluster: { olive: c === on ? { enabled: true, pki: { enabled: true, generations: [1, 2], activeGeneration: 2 } } : { enabled: OLIVE_CLUSTER_STATE[c]?.olive ?? false } } }]),
+      ),
+      fill: renderFill(),
+    });
+    if (r.violations.length > 0) {
+      bad.push(`${tag}가 실패했다: ${r.violations.map(fmt).join("; ")}`);
+      continue;
+    }
+    for (const c of clusters) {
+      const got = ofCluster(r.docs, c).filter((d) => c !== on || !isOlive(d, c)).map(key);
+      const want = ofCluster(real, c).map(key);
+      if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(`${tag}: ${c} 렌더가 지금 root와 다르다${c === on ? "(올리브 문서를 뺀 나머지)" : ""}. ${firstDiff(got, want)}`);
+    }
+    const mine = ofCluster(r.docs, on);
+    const apps = deployersOf(argoApps(mine), on, OLIVE_CHART);
+    const src = apps.length === 1 ? effectiveSources(apps[0].obj.spec).find((s) => sameRepo(s?.repoURL) && s?.path === OLIVE_CHART) : undefined;
+    const pki = src?.helm?.valuesObject?.pki;
+    if (apps.length !== 1 || !same(pki, pkiWant)) bad.push(`${tag}: olive Application(${apps.length}개)이 받은 pki가 클러스터 값과 다르다: ${show(pki)}, 기대 ${show(pkiWant)}`);
+    const issuers = mine.filter((d) => d.obj.kind === "ClusterIssuer" && isOlivePki(d)).map((d) => d.obj.metadata?.name).sort();
+    if (!same(issuers, ["olive-internal-g1", "olive-internal-g2"])) bad.push(`${tag}: 올리브 ClusterIssuer가 세대 [1, 2]의 둘이 아니다: ${show(issuers)}`);
+    const leaf = mine.filter((d) => d.obj.kind === "Certificate" && d.obj.metadata?.name === "olive-tls").map((d) => d.obj.spec?.issuerRef?.name);
+    if (leaf.length === 0 || leaf.some((n) => n !== "olive-internal-g2")) bad.push(`${tag}: leaf olive-tls가 세대 2의 발급 기관을 가리키지 않는다: ${show(leaf)}`);
+  }
+  // 켜짐 값이 문자열이면 root 렌더가 멈춘다(templates/cluster-check.yaml). templates/olive.yaml은 참·거짓으로만 읽어 "false"가 켬이 된다.
+  const dir = tempDir("olive-cluster-bool");
+  for (const [path, overlay] of [
+    ["enabled", { cluster: { olive: { enabled: "false" } } }],
+    ["pki.enabled", { cluster: { olive: { pki: { enabled: "false" } } } }],
+  ] as const) {
+    const vfile = join(dir, `${path}.json`);
+    writeFileSync(vfile, JSON.stringify(overlay));
+    const r = helmTemplate("root-prod", "platform/root", "argocd", ["platform/root/values-prod.yaml", vfile]);
+    if (r.ok || !r.out.includes(`cluster.olive.${path}는 true 또는 false다`)) bad.push(`문자열 "false"인 cluster.olive.${path}를 root 렌더가 막지 않았다: ${r.ok ? "렌더됨" : r.out.trim().slice(0, 300)}`);
+  }
+  return bad;
 }
 
 // 감독 파드 표(D-37). 감독 진입점(ukyi-app/olive src/main/supervisor.ts SUPERVISOR_ENV, README "감독 진입점 › 환경")이 읽는 env와
@@ -1516,7 +1675,12 @@ export function oliveInput(): OliveInput {
 const declaringCharts = (targets: any) =>
   [...new Set(targetList(targets).map((t) => t.declaredBy))].filter((d) => /^platform\/[a-z0-9-]+$/.test(d) && existsSync(join(ROOT, d, "Chart.yaml")));
 const forcedOptions = (declaring: string[]): RenderOptions => ({
-  rootOverlay: { components: Object.fromEntries(declaring.map((d) => [basename(d), { enabled: true }])) },
+  rootOverlay: {
+    components: Object.fromEntries(declaring.map((d) => [basename(d), { enabled: true }])),
+    // 올리브는 클러스터 값 cluster.olive.enabled도 켜야 Application이 나온다(platform/root/templates/olive.yaml, D-116).
+    // 인증서 켜짐·세대는 덮지 않아 값 파일 그대로다.
+    ...(declaring.includes(OLIVE_CHART) ? { cluster: { olive: { enabled: true } } } : {}),
+  },
   fill: renderFill(),
 });
 
@@ -2187,6 +2351,8 @@ export function checkOliveFixtures(base: OliveInput): Violation[] {
   for (const m of listShapeTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts listShapeTests", message: m });
   for (const m of namespaceRegexTests()) out.push({ rule: "fixture", where: "tools/ci/olive.ts namespaceRegexTests", message: m });
   for (const m of executorKeyTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts executorKeyTests", message: m });
+  for (const m of clusterEnableTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts clusterEnableTests", message: m });
+  for (const m of clusterWiringTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts clusterWiringTests", message: m });
   const files = gitFiles(`${FIXTURE_DIR}/*.yaml`);
   const fixtures: Fixture[] = [];
   for (const f of files) {

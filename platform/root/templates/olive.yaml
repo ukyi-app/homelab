@@ -2,17 +2,21 @@
 olive: 올리브의 감독과 역할별 작업자 실행기(ns olive-control, olive-diagnosis, olive-reader, D-37). wave 1.
 세 ns에 걸쳐 destination.namespace를 비운다. 리소스마다 metadata.namespace를 적고, ns와 PSA 라벨도 차트가 만든다
 (platform/olive/templates/namespaces.yaml: 꺼 둔 동안 빈 ns가 생기지 않게).
-켜기: values.yaml의 components.olive.enabled. 클러스터 값은 cluster.infisical(감독 전용 store infisical-olive)과
-cluster.olive(발급 기관과 지시 서명 키가 클러스터마다 달라 함께 쓸 수 없는 공개 값 둘)를 받는다. 빈 값은 넘기지 않는다.
+켜기: values.yaml의 components.olive.enabled와 클러스터 값 cluster.olive.enabled가 모두 true일 때만 낸다(D-116).
+클러스터 값은 cluster.infisical(감독 전용 store infisical-olive)과 cluster.olive를 받는다. cluster.olive에는 그 클러스터의
+켜짐, 내부 인증서의 켜짐·세대(pki), 발급 기관과 지시 서명 키가 클러스터마다 달라 함께 쓸 수 없는 공개 값 둘이 있다. 빈 값은 넘기지 않는다.
+pki.enabled는 true일 때만 넘긴다(bot-slot의 r08과 같다). 차트 기본값이 false라야 클러스터 값이 그대로 남는다(tools/ci/olive.ts가 본다).
+세대 값은 늘 넘긴다. 차트 기본값을 두 클러스터가 함께 읽으면 한 클러스터의 세대를 옮기는 PR이 다른 클러스터의 leaf도 다시 발급한다.
 
 wave 1(맨 뒤, 봇 자리·go와 같다): 올리브에 기대는 구성 요소가 없다. root sync는 마지막 wave의 health를 기다리지 않으므로
 올리브의 Degraded(Infisical 키 누락, 이미지 문제)가 플랫폼·앱 wave를 막지 않는다(설계 C.3.1). 앞에 두면 그 실패로 root가
 appset-apps(0)·bot-slot(1)에 닿지 못한다. 필요한 앞 wave는 ESO(-8)·store(-7)와 인증서 작업이 쓸 cert-manager(-7)뿐이다.
 함정: 이 Application보다 뒤 wave를 더하지 않는다(ci checkBotSlotLastWave는 bot-slot보다 뒤만 본다. 같은 wave는 된다).
 */}}
-{{- if .Values.components.olive.enabled }}
-{{- $infisical := .Values.cluster.infisical | default dict }}
 {{- $olive := .Values.cluster.olive | default dict }}
+{{- if and .Values.components.olive.enabled $olive.enabled }}
+{{- $infisical := .Values.cluster.infisical | default dict }}
+{{- $pki := $olive.pki | default dict }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -31,10 +35,16 @@ spec:
         infisical:
           projectSlug: {{ required "cluster.infisical.projectSlug is missing in values-<cluster>.yaml" $infisical.projectSlug | quote }}
           environmentSlug: {{ required "cluster.infisical.environmentSlug is missing in values-<cluster>.yaml" $infisical.environmentSlug | quote }}
-        {{- with $olive.trustBundlePem }}
         pki:
+          {{- if $pki.enabled }}
+          enabled: true
+          {{- end }}
+          ca:
+            generations: {{ required "cluster.olive.pki.generations is missing in values-<cluster>.yaml" $pki.generations | toJson }}
+            activeGeneration: {{ required "cluster.olive.pki.activeGeneration is missing in values-<cluster>.yaml" $pki.activeGeneration }}
+          {{- with $olive.trustBundlePem }}
           trustBundlePem: {{ . | quote }}
-        {{- end }}
+          {{- end }}
         {{- with $olive.supervisorSigningPublicKeyPem }}
         supervisor:
           signingKey:

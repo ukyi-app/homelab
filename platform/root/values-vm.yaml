@@ -46,8 +46,15 @@ cluster:
   r08:
     enabled: false
 
-  # 올리브 내부 인증서의 공개 값(values-prod.yaml 주석). VM 발급 기관과 VM 감독 키에서 읽은 값만 넣는다. 운영 값을 옮겨 적지 않는다.
+  # 올리브(values-prod.yaml 주석, D-116). VM이 먼저 켜고 인증서를 처음 발급하는 클러스터다. 켜는 것은 이 파일의 뒤 PR이고
+  # 그 PR이 tools/ci/olive.ts OLIVE_CLUSTER_STATE의 vm 줄도 함께 고친다. 세대 번호는 운영과 따로 센다.
+  # 공개 값 둘은 VM 발급 기관과 VM 감독 키에서 읽은 값만 넣는다. 운영 값을 옮겨 적지 않는다.
   olive:
+    enabled: false
+    pki:
+      enabled: false
+      generations: [1]
+      activeGeneration: 1
     trustBundlePem: ""
     supervisorSigningPublicKeyPem: ""
 
