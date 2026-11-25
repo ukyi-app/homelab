@@ -1,0 +1,25 @@
+# expect: pass
+# 켠 root 렌더의 olive Application이 등록표 키와 클러스터 이름을 CI 값과 다르게 넘기고, 렌더도 그 값인 정상 모양이다.
+# 감독 표의 가변 칸은 그 렌더에 넣은 값에서 얻으므로 통과해야 한다(켜는 PR이 실제 값을 넣어도 막히지 않는다).
+patch:
+  - in: apps
+    render: root+켬
+    select: {kind: Application, name: olive}
+    set:
+      spec.source.helm.valuesObject.supervisor.registry.key: EXECUTOR_REGISTRY_X
+      spec.source.helm.valuesObject.supervisor.registry.environment: prod-x
+  - in: render
+    render: root+켬
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_ENVIRONMENT}
+        set: {value: prod-x}
+      spec.template.spec.volumes:
+        match: {name: registry}
+        set: {secret.items: [{key: EXECUTOR_REGISTRY_X, path: registry.json}]}
+  - in: render
+    render: root+켬
+    select: {kind: ExternalSecret, namespace: olive-control, name: olive-registry}
+    set:
+      spec.data: [{secretKey: EXECUTOR_REGISTRY_X, remoteRef: {key: EXECUTOR_REGISTRY_X}}]

@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 볼륨 ledger(
+# 장부 볼륨을 PVC 대신 빈 emptyDir로 바꿨다. 장부가 비어 기동이 94로 끝나고, 파드가 지워지면 장부도 사라진다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    remove:
+      spec.template.spec.volumes: {name: ledger}
+    append:
+      spec.template.spec.volumes: {name: ledger, emptyDir: {}}

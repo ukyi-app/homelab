@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 빠짐 ["OLIVE_RESULT_DIR"], 표 밖 []
+# 감독의 OLIVE_RESULT_DIR 한 줄만 뺐다. 진입점은 열한 개가 모두 있어야 뜨므로 91로 끝난다(olive src/main/supervisor.ts SUPERVISOR_ENV).
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    remove:
+      spec.template.spec.containers.0.env: {name: OLIVE_RESULT_DIR}

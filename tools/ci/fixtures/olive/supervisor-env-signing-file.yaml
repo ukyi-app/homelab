@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 볼륨 signing(
+# 서명 키 볼륨에서 items를 뺐다. 파일 이름이 Secret 키(INSTRUCTION_SIGNING_KEY)가 되어 진입점이 읽는 supervisor-signing.key가 없다(92).
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.volumes:
+        match: {name: signing}
+        set: {secret.items: null}

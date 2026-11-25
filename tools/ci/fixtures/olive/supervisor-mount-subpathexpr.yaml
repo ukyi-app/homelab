@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 마운트 registry("/run/olive/registry")에 subPathExpr
+# 등록표 마운트에 subPathExpr만 더했다. 마운트 자리가 파일 하나가 되어 진입점이 /run/olive/registry/registry.json을 읽지 못한다(93).
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.containers.0.volumeMounts:
+        match: {name: registry}
+        set: {subPathExpr: registry.json}

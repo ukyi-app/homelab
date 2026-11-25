@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 마운트가 감독 표와 다르다
+# 결과 폴더 마운트 자리만 옮겼다. env는 그대로라 진입점이 본 자리에는 마운트가 없다(이미지의 폴더가 없으면 94, 있으면 쓰기 실패).
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    edit:
+      spec.template.spec.containers.0.volumeMounts:
+        match: {name: ledger, subPath: results}
+        set: {mountPath: /var/lib/olive-result}

@@ -1,0 +1,16 @@
+# expect: fail
+# rule: olive-supervisor-env
+# match: 감독 파드 구성이 일반 컨테이너 supervisor 하나
+# 감독 파드에 등록표 마운트를 가진 무동작 컨테이너를 더했다. 감독 전용 Secret의 소비자가 둘이 된다.
+patch:
+  - in: all
+    select: {kind: Deployment, namespace: olive-control, name: supervisor}
+    append:
+      spec.template.spec.containers:
+        name: review-metadata
+        image: ghcr.io/ukyi-app/olive@sha256:0000000000000000000000000000000000000000000000000000000000000000
+        command: ["true"]
+        resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {cpu: 10m, memory: 16Mi}}
+        securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+        volumeMounts:
+          - {name: registry, mountPath: /run/olive/registry, readOnly: true}

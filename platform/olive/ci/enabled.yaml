@@ -19,6 +19,10 @@ policy:
 supervisor:
   account:
     name: ci-account
+  # 등록표 키 이름과 클러스터 이름도 가짜다.
+  registry:
+    key: CI_REGISTRY
+    environment: ci
   # 모양만 맞춘 자리표시다. 실제 키가 아니다.
   signingKey:
     publicKeyPem: |

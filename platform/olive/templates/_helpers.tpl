@@ -56,6 +56,21 @@ env OLIVE_ROLE과 역할 이미지가 이 값을 쓴다. 실행기는 대상 id�
 {{- toYaml (dict "items" $items) -}}
 {{- end }}
 
+{{/*
+감독 env OLIVE_TARGETS(등록표·배정의 대상 표). 받는 값: root. targets.yaml의 kind executor 줄마다 {target, namespace, roles}이고
+target은 대상 id다(인스턴스 이름과 같은 값, olive.instance). 같은 파일에서 만들어 실행기 Deployment와 따로 적은 목록이 없다.
+toJson은 키를 정렬한다(namespace, roles, target). CI가 같은 차례의 문자열과 그대로 견준다.
+*/}}
+{{- define "olive.supervisorTargetsJson" -}}
+{{- $rows := list -}}
+{{- range (include "olive.targets" . | fromYaml).items -}}
+{{- if eq .kind "executor" -}}
+{{- $rows = append $rows (dict "target" .id "namespace" .namespace "roles" .roles) -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $rows -}}
+{{- end }}
+
 {{/* 감독 대상 한 줄. */}}
 {{- define "olive.supervisorTarget" -}}
 {{- range (include "olive.targets" . | fromYaml).items -}}
