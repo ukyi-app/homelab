@@ -1174,6 +1174,8 @@ function clusterEnableTests(base: OliveInput): string[] {
 // 공용 스위치(components.olive.enabled)는 두 root 모두 켠다. 클러스터 값만으로 갈라지는지 보기 위해서다. 켜지 않는 클러스터의 켜짐은
 // 표(OLIVE_CLUSTER_STATE) 값으로 둔다. 값 파일과 표가 다른 것은 olive-cluster-enable이 따로 낸다(원인 하나에 진단 하나).
 // 세대는 차트 기본값([1], 1)과 다른 값([1, 2], 2)을 넣어 root가 차트 기본값이 아니라 클러스터 값을 넘기는지 본다.
+// 신뢰 묶음(cluster.olive.trustBundlePem)은 root가 비지 않을 때만 넘기므로 기대 pki도 그때만 그 칸을 둔다. 첫 클러스터에는 시험 값을
+// 얹어 root가 넘기는지 보고, 나머지는 값 파일 그대로를 기대한다. 발급 뒤 값 파일에 묶음을 넣는 PR이 정확 비교에서 거짓 실패하지 않게 하려는 것이다.
 function clusterWiringTests(base: OliveInput): string[] {
   const bad: string[] = [];
   const real = base.deployed[REAL] ?? [];
@@ -1187,14 +1189,15 @@ function clusterWiringTests(base: OliveInput): string[] {
     const origin = (s: string | undefined) => (s === undefined ? "없음" : JSON.parse(s).origin);
     return `문서 ${got.length}개(기대 ${want.length}개), 첫 차이 ${at}번째: ${origin(got[at])} / 기대 ${origin(want[at])}`;
   };
-  const pkiWant = { enabled: true, ca: { generations: [1, 2], activeGeneration: 2 } };
-  for (const on of clusters) {
+  const testTrust = "-----BEGIN CERTIFICATE-----\nY2ktdHJ1c3QtYnVuZGxl\n-----END CERTIFICATE-----\n";
+  for (const [i, on] of clusters.entries()) {
     const tag = `${on}만 켠 렌더`;
+    const trust = i === 0 ? testTrust : getPath(loadValues(readText(`platform/root/values-${on}.yaml`)), "cluster.olive.trustBundlePem");
+    const pkiWant = { enabled: true, ca: { generations: [1, 2], activeGeneration: 2 }, ...(trust === undefined || trust === null || trust === "" ? {} : { trustBundlePem: trust }) };
+    const onValues = { enabled: true, pki: { enabled: true, generations: [1, 2], activeGeneration: 2 }, ...(i === 0 ? { trustBundlePem: testTrust } : {}) };
     const r = renderAll({
       rootOverlay: { components: { olive: { enabled: true } } },
-      clusterOverlay: Object.fromEntries(
-        clusters.map((c) => [c, { cluster: { olive: c === on ? { enabled: true, pki: { enabled: true, generations: [1, 2], activeGeneration: 2 } } : { enabled: OLIVE_CLUSTER_STATE[c]?.olive ?? false } } }]),
-      ),
+      clusterOverlay: Object.fromEntries(clusters.map((c) => [c, { cluster: { olive: c === on ? onValues : { enabled: OLIVE_CLUSTER_STATE[c]?.olive ?? false } } }])),
       fill: renderFill(),
     });
     if (r.violations.length > 0) {
