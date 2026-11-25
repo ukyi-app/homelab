@@ -28,6 +28,15 @@
 {{- if not (kindIs "bool" $r08) }}
 {{- fail (printf "cluster.r08.enabled는 true 또는 false다(지금 %v, %s). 따옴표를 붙이면 문자열 \"false\"도 켬으로 읽힌다" $r08 (kindOf $r08)) }}
 {{- end }}
+{{- /* templates/olive.yaml도 참·거짓으로만 읽어 문자열 "false"가 올리브나 발급 기관을 켠다(D-116). 그래서 bool만 받는다. */}}
+{{- $oliveOn := dig "olive" "enabled" false $cluster }}
+{{- if not (kindIs "bool" $oliveOn) }}
+{{- fail (printf "cluster.olive.enabled는 true 또는 false다(지금 %v, %s). 따옴표를 붙이면 문자열 \"false\"도 켬으로 읽힌다" $oliveOn (kindOf $oliveOn)) }}
+{{- end }}
+{{- $pkiOn := dig "olive" "pki" "enabled" false $cluster }}
+{{- if not (kindIs "bool" $pkiOn) }}
+{{- fail (printf "cluster.olive.pki.enabled는 true 또는 false다(지금 %v, %s). 따옴표를 붙이면 문자열 \"false\"도 켬으로 읽힌다" $pkiOn (kindOf $pkiOn)) }}
+{{- end }}
 {{- if ne $name "prod" }}
 {{- /* 사용자 승인(2026-11-06)이 운영뿐이다. 봇 env는 클러스터 공용이라 VM 경로를 열면 서명 환경 값도 운영(prod)과 같다. */}}
 {{- if $r08 }}

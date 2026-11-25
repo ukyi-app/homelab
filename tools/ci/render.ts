@@ -152,12 +152,26 @@ export function clusterRestore(vf: string, overlay?: RootOverlay): Restore {
 
 // 끈 렌더(tools/ci/switch.ts). root 값 위에 얹는 값과, 로컬 차트 시험 values 위에 얹는 값이다.
 // 덧씌우기가 있으면 3.(남은 kustomization) build는 건너뛴다. 배포되지 않는 디렉터리라 스위치와 상관없고, 켠 렌더가 이미 본다.
-// components는 꺼 둔 구성 요소를 켠 렌더(tools/ci/olive.ts)가 쓴다.
-export type RootOverlay = { cluster?: { restore?: Record<string, unknown> }; components?: Record<string, { enabled: boolean }> };
+// components와 cluster.olive는 꺼 둔 구성 요소를 켠 렌더(tools/ci/olive.ts)가 쓴다.
+export type RootOverlay = { cluster?: { restore?: Record<string, unknown>; olive?: Record<string, unknown> }; components?: Record<string, { enabled: boolean }> };
 // fill: source path → 최종 값이 비었을 때만 채울 값. 배포 전이라 비어 있는 필수 입력(digest 등)을 보충해 실제 Application 값으로
 // 렌더한다(tools/ci/olive.ts RENDER_FILL). 최종 값은 Helm과 같은 순서(차트 values.yaml → valueFiles → valuesObject)로 합친 것이다.
 // rootText: 시험용. root 파일 경로 → 저장소 파일 대신 읽을 내용(tools/ci/olive.ts renderSelfTests가 root 파일 자체의 목록을 넣는다).
-export type RenderOptions = { rootOverlay?: RootOverlay; chartOverlay?: Record<string, unknown>; fill?: Record<string, Record<string, unknown>>; rootText?: Record<string, string> };
+// clusterOverlay: 시험용. 클러스터 이름 → 그 클러스터의 root에만 rootOverlay 위에 더 얹는 값(tools/ci/olive.ts 클러스터 배선 시험이
+// 한 클러스터만 켠 렌더를 만든다). rootOverlay는 모든 root에 같은 값을 얹으므로 클러스터 값의 분리를 보이지 못한다.
+export type RenderOptions = { rootOverlay?: RootOverlay; clusterOverlay?: Record<string, RootOverlay>; chartOverlay?: Record<string, unknown>; fill?: Record<string, Record<string, unknown>>; rootText?: Record<string, string> };
+
+// 그 클러스터의 root에 얹을 값. Helm 값 합치기처럼 맵은 깊게, 나머지는 뒤 값이 이긴다.
+function rootOverlayFor(opts: RenderOptions, cluster: string): RootOverlay | undefined {
+  const extra = opts.clusterOverlay?.[cluster];
+  if (!extra) return opts.rootOverlay;
+  const merge = (a: Record<string, unknown>, b: Record<string, unknown>): Record<string, unknown> => {
+    const out = { ...a };
+    for (const [k, v] of Object.entries(b)) out[k] = isMap(v) && isMap(out[k]) ? merge(out[k] as Record<string, unknown>, v) : v;
+    return out;
+  };
+  return merge(structuredClone(opts.rootOverlay ?? {}), structuredClone(extra)) as RootOverlay;
+}
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const isEmptyValue = (v: unknown) => v === undefined || v === null || v === "";
@@ -413,7 +427,7 @@ const cache = new Map<string, { ok: boolean; out: string }>();
 let defaultResult: RenderResult | undefined;
 
 export function renderAll(opts: RenderOptions = {}): RenderResult {
-  const plain = !opts.rootOverlay && !opts.chartOverlay && !opts.fill && !opts.rootText;
+  const plain = !opts.rootOverlay && !opts.clusterOverlay && !opts.chartOverlay && !opts.fill && !opts.rootText;
   if (plain && defaultResult) return defaultResult;
   const res: RenderResult = { targets: [], docs: [], violations: [], skipped: [] };
   const tmp = tempDir("render");
@@ -557,14 +571,15 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     valueFiles.delete(`platform/root/${want}`);
     clusterFiles.push(`platform/root/${want}`);
     // 덧씌우기는 valuesObject로 넘긴다. Argo CD와 같이 valueFiles 위에 합쳐진다(renderSource). root 파일 검사는 위에서 끝났다.
-    const out = renderSource(roots[0], cluster, opts.rootOverlay ? { ...src, helm: { ...src.helm, valuesObject: opts.rootOverlay } } : src);
+    const overlay = rootOverlayFor(opts, cluster);
+    const out = renderSource(roots[0], cluster, overlay ? { ...src, helm: { ...src.helm, valuesObject: overlay } } : src);
     if (out === undefined) continue;
     // 2. root가 만든 Application의 자기 저장소 source. 렌더 결과에 다시 Application이 있으면(app-of-apps) 그것도 따라간다.
     // 목록 안 Application·ApplicationSet은 add(parseRendered)가 거절한다. 여기서는 최상위 문서만 따라간다.
     const visit = (text: string, depth: number) => {
       // ApplicationSet이 만드는 Application도 검사해야 한다. 어느 단계에서 나오든 여기서 전개하는 것만 받는다(아래 5.).
       for (const set of parseAll(text).filter((d) => d?.kind === "ApplicationSet")) {
-        const ok = APPSET_RENDERERS[set.metadata?.name]?.(set, clusterRestore(`platform/root/values-${cluster}.yaml`, opts.rootOverlay));
+        const ok = APPSET_RENDERERS[set.metadata?.name]?.(set, clusterRestore(`platform/root/values-${cluster}.yaml`, overlay));
         if (ok !== true) fail(`${set.metadata?.name}[${cluster}]`, `ApplicationSet ${set.metadata?.name}: ${ok ?? "render.ts가 전개하지 않는 ApplicationSet이다"}`);
       }
       for (const app of parseAll(text).filter((d) => d?.kind === "Application")) {
@@ -663,7 +678,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     const app = basename(dirname(vf));
     for (const [cluster, prefix] of clusterPrefixes(clusterFiles)) {
       const where = `app:${app}[${cluster}]`;
-      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`, opts.rootOverlay);
+      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`, rootOverlayFor(opts, cluster));
       try {
         // ApplicationSet은 path·values를 생성기 변수로 덮고 tailnetPrefix는 클러스터 값으로 덮는다. 사람이 적은 같은 키는
         // 조용히 사라지므로(예: probe 경로를 최상위 path로 적음) 지우지 않고 실패로 둔다. 두 파일의 키도 서로 겹치지 않는다.
@@ -705,7 +720,7 @@ export function renderAll(opts: RenderOptions = {}): RenderResult {
     const app = basename(dirname(vf));
     for (const [cluster, bucket] of clusterBuckets(clusterFiles)) {
       const where = `data:${app}[${cluster}]`;
-      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`, opts.rootOverlay);
+      const restore = clusterRestore(`platform/root/values-${cluster}.yaml`, rootOverlayFor(opts, cluster));
       try {
         const human = (Bun.YAML.parse(readFileSync(join(ROOT, vf), "utf8")) ?? {}) as Record<string, any>;
         // valkeyServer·global은 차트 내부 값(공식 valkey 차트로 내려간다)이다. backup은 클러스터 값이라 ApplicationSet이 덮는다.

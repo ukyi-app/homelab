@@ -105,17 +105,18 @@ supervisor:
     mountPath: /run/olive/tls
 
 # 올리브 내부 인증서(D-58, templates/pki-ca.yaml·pki-leaf.yaml·pki-trust.yaml). 아래 수명·보관 자리·신원 규칙은 관리자가 배포 PR에서 고르는 안이다.
-# 기본이 false인 이유: 안이 정해지기 전에 root에서 올리브를 켜도 발급 기관이 생기지 않게 하고, 켜는 PR이 이 값을 직접 바꾸게 한다.
+# 켜짐과 세대 값은 클러스터마다 root가 넘긴다(platform/root/values-<클러스터>.yaml cluster.olive.pki, D-116). 아래 값은 차트만 렌더할 때(ci/*.yaml)의 기본값이다.
+# 기본이 false인 이유: root는 그 클러스터 값이 true일 때만 enabled: true를 넘긴다. 여기를 true로 바꾸면 클러스터 값이 false인 곳에서도
+# 발급 기관이 생기므로 CI(tools/ci/olive.ts의 olive-cluster-enable)가 거절한다.
 # 함정: false로 root에서 켜면 파드에 신뢰 묶음이 없고, tls.secretName도 비어 있으면 인증서도 없다. 감독·실행기 코드는 그 상태에서 시작을 거부해야 한다.
 # 함정: true면 cert-manager가 세 네임스페이스의 Secret olive-tls에 쓴다. 같은 이름의 Secret을 다른 주체가 공급하고 있으면 둘이 같은 Secret을 덮어쓴다.
 pki:
   enabled: false
   ca:
-    # 살아 있는 발급 기관의 세대 목록과 지금 서명하는 세대.
-    # 함정: 이 두 값은 모든 클러스터가 함께 읽는다. 한 클러스터의 세대를 옮기는 PR이 다른 클러스터의 leaf도 그 번호의 발급 기관으로 다시 발급하고,
-    # 목록에서 뺀 세대의 발급 리소스도 함께 지운다.
-    # 함정: 운영과 VM의 root는 같은 main과 같은 스위치를 읽는다. 클러스터마다 켜짐과 세대 값을 따로 줄 수 있다는 것을 두 root의 렌더로 보이기 전까지
-    # 이 main을 읽는 root에서 pki.enabled를 켜지 않는다. 최초 발급의 검증은 이 main을 읽지 않는 독립된 시험 환경에서 하고, 켜는 일은 그 뒤의 활성화 PR이 맡는다.
+    # 살아 있는 발급 기관의 세대 목록과 지금 서명하는 세대. root가 클러스터마다 늘 넘겨 이 값을 덮는다(values-<클러스터>.yaml cluster.olive.pki).
+    # 함정: 세대를 옮기면 그 클러스터의 leaf가 그 번호의 발급 기관으로 다시 발급되고, 목록에서 뺀 세대의 발급 리소스도 함께 지워진다.
+    # 클러스터마다 따로 넘기므로 다른 클러스터에는 번지지 않는다. 켜지 않은 클러스터의 렌더가 그대로인지는 CI(tools/ci/olive.ts)가 두 root 렌더로 본다.
+    # 최초 발급은 VM에서 먼저 하고(D-116), 운영은 그 뒤의 운영 켜기 PR이 맡는다. 발급 범위의 조건은 templates/pki-ca.yaml 머리 주석이다.
     # 함정: 한 번 쓴 세대 번호를 다시 쓰지 않는다. 남은 Secret의 키가 재사용된다(templates/pki-ca.yaml).
     generations: [1]
     activeGeneration: 1
