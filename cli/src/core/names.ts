@@ -77,6 +77,22 @@ export const BOT_UNSET = "unset";
 // 비밀이 아닌 고정 값의 sha256 앞 12자(Secret·볼륨 지문과 같은 꼴).
 export const publicHash = (value: string) => new Bun.CryptoHasher("sha256").update(value).digest("hex").slice(0, 12);
 
+// 올리브 시험 작업 넣기(homelab olive test-job)의 값 여섯. 차례는 감독 관리 진입점의 argv 차례와 같다(olive src/supervisor/admin/protocol.ts).
+export const OLIVE_TEST_JOB_FIELDS = ["owner", "key", "role", "purpose", "sourceRef", "inputDigest"] as const;
+// 값의 꼴만 본다: 감독 장부의 REF 글자 집합(영문·숫자와 ._:/@+=-) 1~200자(감독 규칙에서 가장 긴 칸인 key의 상한).
+// 이 집합이 감독의 칸 꼴(UUID, REF, 역할 이름, 목적 코드, 원본 참조, SHA-256)을 모두 덮어, 감독이 받을 값을 CLI가 막지 않는다.
+// 뜻(UUID, 역할 이름, 해시 꼴)은 감독이 장부 규칙으로 본다. 셸 특수 글자($·;·백틱·따옴표)가 없어 plan의 "실행:" 줄을
+// 복사해 붙여도 값이 로컬 셸에서 해석되지 않고, JSON 이스케이프가 없어 요청 한 줄의 길이가 값 길이의 합으로 정해진다.
+export const OLIVE_TEST_JOB_VALUE = /[A-Za-z0-9._:\/@+=-]{1,200}/;
+// 감독은 요청 한 줄(줄바꿈 포함)을 1,024바이트까지만 받고, 진입점은 넘는 argv를 사용법(64)으로 끝낸다. 그 전에 CLI가 거른다.
+const OLIVE_TEST_JOB_REQUEST_MAX = 1_024;
+export function oliveTestJobFits(values: readonly string[]): boolean {
+  if (values.length !== OLIVE_TEST_JOB_FIELDS.length || !values.every((v) => typeof v === "string" && fullMatch(OLIVE_TEST_JOB_VALUE, v))) return false;
+  const body: Record<string, string> = { command: "test-job" };
+  OLIVE_TEST_JOB_FIELDS.forEach((f, i) => (body[f] = values[i] as string));
+  return jsonStringify(body).length + 1 <= OLIVE_TEST_JOB_REQUEST_MAX;
+}
+
 export function newRunId(now: Date = new Date()): string {
   const stamp = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
   const rand = [...crypto.getRandomValues(new Uint8Array(3))].map((b) => b.toString(16).padStart(2, "0")).join("");

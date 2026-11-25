@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { OliveSupervisorTarget } from "../../src/core/command";
 import { PLAN_WRITE_BLOCKED, ExecTimeout, makeExec } from "../../src/core/exec";
 import { kubectlArgv } from "../../src/core/kubectl";
-import { OLIVE_ADMIN_CONTAINER, OLIVE_ADMIN_DEPLOYMENT, OLIVE_ADMIN_LABELS, OLIVE_ADMIN_MAX_OUTPUT, OLIVE_ADMIN_NS, OLIVE_ADMIN_SELECTOR, OLIVE_ADMIN_STATUS_SCHEMA, parseStatus } from "../../src/core/olive-admin";
+import { OLIVE_ADMIN_CONTAINER, OLIVE_ADMIN_DEPLOYMENT, OLIVE_ADMIN_LABELS, OLIVE_ADMIN_MAX_OUTPUT, OLIVE_ADMIN_NS, OLIVE_ADMIN_SELECTOR, OLIVE_ADMIN_STATUS_SCHEMA, OLIVE_ADMIN_TEST_JOB_SCHEMA, parseStatus, parseTestJob } from "../../src/core/olive-admin";
 import { classify } from "../../src/core/writes";
 import { applyWith, rule, stubSandbox, testCtx, type Resp } from "../harness";
 
@@ -84,7 +84,7 @@ describe("감독 관리 진입점 argv", () => {
   test("argv: ns·컨테이너·진입점이 고정이고 동작은 타입으로 좁힌 값만 들어간다", () => {
     const { ctx, calls } = testCtx("plan", owned(list(pod())));
     for (const bad of ["queue", "runs", "watch", "account", "diagnosis", "status --all", "--help", "-h", "status\n", "status\nqueue", "", " status", "toString", "__proto__", "constructor", null, undefined, 1, ["status"], { name: "status" }]) {
-      expect(() => ctx.oliveAdmin.target(bad as any)).toThrow("감독 관리 동작은 status만");
+      expect(() => ctx.oliveAdmin.target(bad as any)).toThrow("감독 관리 동작은 status, test-job만");
     }
     expect(calls().calls).toEqual([]);
     expect(ctx.oliveAdmin.target("status")).toEqual({ state: "ready", pod: POD, argv: ["kubectl", "-n", "olive-control", "exec", POD, "-c", "supervisor", "--request-timeout=20s", "--", "bun", "src/main/admin.ts", "status"] });
@@ -448,13 +448,15 @@ describe("쓰기 문맥의 실행", () => {
       { code: 7, stdout: `${forged}\n`, stderr: remoteExit },
       { code: 7, stderr: `${forged}\n${remoteExit}` },
       { code: 7, stderr: `Error from server (Timeout): ${CANARY}\n${remoteExit}` },
-      // 잘린 stderr의 끝 줄이 kubectl 오류처럼 보여도 진짜 끝 줄을 알 수 없다.
-      { code: 7, stderr: `${"x".repeat(2_000 - forged.length - 1)}\n${forged}\n${"y".repeat(100)}\n${remoteExit}` },
     ];
+    // 잘린 stderr의 끝 줄이 kubectl 오류처럼 보여도 진짜 끝 줄을 알 수 없다. 원격 코드도 확인하지 못해 원문 없이 던진다.
+    const truncated = testCtx("apply", [...owned(list(pod())), rule(execArgv(), { code: 7, stderr: `${"x".repeat(2_000 - forged.length - 1)}\n${forged}\n${"y".repeat(100)}\n${remoteExit}` })]);
+    expect((await failed(truncated.ctx))?.message).toBe("감독 관리 진입점이 실패했다(exit 7)");
+    expect(execs(truncated.calls())).toEqual([execArgv()]);
     for (const resp of cases) {
       const { ctx, calls } = testCtx("apply", [...owned(list(pod())), rule(execArgv(), resp)]);
-      const err = await failed(ctx);
-      expect(err?.message).toBe("감독 관리 진입점이 실패했다(exit 7)");
+      const { value } = await applyWith(ctx, (w) => w.oliveAdmin.run("status"));
+      expect(value).toEqual({ state: "exit", pod: POD, code: 7, reason: null });
       expect(execs(calls())).toEqual([execArgv()]);
     }
   });
@@ -469,8 +471,8 @@ describe("쓰기 문맥의 실행", () => {
     ];
     for (const [code, stderr] of cases) {
       const { ctx, calls } = testCtx("apply", [...owned(list(pod())), rule(execArgv(), { code, stderr })]);
-      const err = await failed(ctx);
-      expect(err?.message).toBe(`감독 관리 진입점이 실패했다(exit ${code})`);
+      const { value } = await applyWith(ctx, (w) => w.oliveAdmin.run("status"));
+      expect(value).toEqual({ state: "exit", pod: POD, code, reason: null });
       expect(execs(calls())).toEqual([execArgv()]);
     }
   });
@@ -533,7 +535,8 @@ describe("쓰기 문맥의 실행", () => {
 
   test("exec: 모르는 동작은 어떤 호출도 하기 전에 거부한다", async () => {
     const { ctx, calls } = testCtx("apply", owned(list(pod())));
-    await expect(applyWith(ctx, (w) => w.oliveAdmin.run("queue" as any))).rejects.toThrow("감독 관리 동작은 status만");
+    await expect(applyWith(ctx, (w) => w.oliveAdmin.run("queue" as any))).rejects.toThrow("감독 관리 동작은 status, test-job만");
+    await expect(applyWith(ctx, (w) => w.oliveAdmin.run("test-job" as any))).rejects.toThrow("감독 관리 동작 run은 status만");
     expect(calls().calls).toEqual([]);
   });
 
@@ -664,5 +667,159 @@ describe("감독 상태 문서", () => {
     ]);
     const spaced = ` \t{ "schema" : "${OLIVE_ADMIN_STATUS_SCHEMA}" , "alive" : true , "queued" : 2 , "running" : 1 , "diagnosis" : "active" , "stop" : "none" , "stopGeneration" : 3 , "intakeOpen" : true } \r\n`;
     expect(parseStatus(spaced)).toEqual(GOOD_VALUE as any);
+  });
+});
+
+describe("진입점의 종료 코드와 사유", () => {
+  // 진입점(olive client.ts exitFor)이 0이 아닐 때 쓰는 stderr 한 줄. kubectl이 그 뒤에 원격 종료 코드 줄을 붙인다.
+  const entryExit = (code: number, line: string): Resp => ({ code, stderr: `${line}\ncommand terminated with exit code ${code}\n` });
+  const runStatus = async (resp: Resp) => {
+    const { ctx, calls } = testCtx("apply", [...owned(list(pod())), rule(execArgv(), resp)]);
+    const { value } = await applyWith(ctx, (w) => w.oliveAdmin.run("status"));
+    expect(calls().calls.filter((x) => x.argv.includes("exec")).length).toBe(1);
+    return value;
+  };
+
+  test("사유 낱말은 갈래와 코드가 맞을 때만 읽고, 원문은 싣지 않는다", async () => {
+    const cases: [Resp, unknown][] = [
+      [entryExit(3, "olive admin: 상태 모름: 감독이 복원을 마치지 않았다(restore_not_done)"), { kind: "unknown", word: "restore_not_done" }],
+      [entryExit(1, "olive admin: 상태 모름: 감독에 닿지 못했다(no_socket)"), { kind: "unreached", word: "no_socket" }],
+      [entryExit(1, "olive admin: 상태 모름: 감독에 닿지 못했다(not_listening)"), { kind: "unreached", word: "not_listening" }],
+      [entryExit(1, "olive admin: 상태 모름: 감독의 답을 받지 못했다(timeout)"), { kind: "no-reply", word: "timeout" }],
+      [entryExit(1, "olive admin: 상태 모름: 감독의 답을 받지 못했다(malformed)"), { kind: "no-reply", word: "malformed" }],
+      [entryExit(1, "olive admin: 감독이 요청을 거절했다(malformed)"), { kind: "refused", word: "malformed" }],
+      [entryExit(1, "olive admin: 감독이 요청을 거절했다(busy)"), { kind: "refused", word: "busy" }],
+      [entryExit(1, "olive admin: 상태 모름: 감독이 상태를 읽지 못했다(ledger_unreadable)"), { kind: "unknown", word: "ledger_unreadable" }],
+      [entryExit(1, "olive admin: 시험 작업 모름: 장부에 적혔는지 모른다(write_unknown)"), { kind: "unknown", word: "write_unknown" }],
+      // 코드와 맞지 않는 낱말, 갈래에 없는 낱말, 모르는 꼴, 앞에 다른 줄이 있는 stderr는 사유가 없다.
+      [entryExit(1, "olive admin: 상태 모름: 감독이 복원을 마치지 않았다(restore_not_done)"), null],
+      [entryExit(3, "olive admin: 상태 모름: 감독이 상태를 읽지 못했다(ledger_unreadable)"), null],
+      [entryExit(1, "olive admin: 감독이 요청을 거절했다(timeout)"), null],
+      [entryExit(1, "olive admin: 상태 모름: 감독에 닿지 못했다(busy)"), null],
+      [entryExit(1, `olive admin: 감독이 요청을 거절했다(${CANARY})`), null],
+      [entryExit(1, `olive admin: 감독이 요청을 거절했다(busy) ${CANARY}`), null],
+      [{ code: 1, stderr: `${CANARY}\nolive admin: 감독이 요청을 거절했다(busy)\ncommand terminated with exit code 1\n` }, null],
+      [entryExit(64, "olive admin: 사용법: bun src/main/admin.ts status | test-job"), null],
+    ];
+    for (const [resp, reason] of cases) {
+      const value = await runStatus(resp);
+      expect([resp.stderr, value]).toEqual([resp.stderr, { state: "exit", pod: POD, code: resp.code, reason } as any]);
+      expect(JSON.stringify(value)).not.toContain(CANARY);
+    }
+  }, 60_000);
+
+  test("원격 코드가 확인되지 않은 kubectl 실패는 지금처럼 원문 없이 던진다", async () => {
+    const { ctx } = testCtx("apply", [...owned(list(pod())), rule(execArgv(), { code: 1, stderr: `Error from server (Forbidden): ${CANARY}\n` })]);
+    const err = await applyWith(ctx, (w) => w.oliveAdmin.run("status")).then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(err?.message).toBe("감독 관리 진입점이 실패했다(exit 1)");
+  });
+});
+
+describe("시험 작업 넣기", () => {
+  const JOB = { owner: "8afa2150-81af-4018-9753-0183509606ad", key: "retry-1", role: "isolated_reader", purpose: "smoke_check", sourceRef: "input/1b5d2dd3-e830-49fd-bb90-4e93022446e8", inputDigest: "a".repeat(64) };
+  const VALUES = [JOB.owner, JOB.key, JOB.role, JOB.purpose, JOB.sourceRef, JOB.inputDigest];
+  const jobArgv = (p = POD) => ["kubectl", "-n", "olive-control", "exec", p, "-c", "supervisor", "--request-timeout=20s", "--", "bun", "src/main/admin.ts", "test-job", ...VALUES];
+  const REF = "0f0f0f0f-0000-4000-8000-000000000001";
+  const line = (o: Record<string, unknown>) => ({ stdout: `${JSON.stringify({ schema: OLIVE_ADMIN_TEST_JOB_SCHEMA, outcome: "created", ref: REF, ...o })}\n` });
+  const execs = (c: ReturnType<ReturnType<typeof testCtx>["calls"]>) => c.calls.filter((x) => x.argv.includes("exec")).map((x) => x.argv);
+  const runJob = async (resp: Resp | Resp[], pods: Resp = list(pod())) => {
+    const { ctx, calls } = testCtx("apply", [...owned(pods), rule(jobArgv(), resp)]);
+    const { value } = await applyWith(ctx, (w) => w.oliveAdmin.testJob(JOB));
+    return { value, execs: execs(calls()) };
+  };
+
+  test("plan: 대상 파드와 값 여섯이 정해진 차례로 든 argv만 내고 실행하지 않는다", () => {
+    const { ctx, calls } = testCtx("plan", owned(list(pod())));
+    expect(ctx.oliveAdmin.target("test-job", JOB)).toEqual({ state: "ready", pod: POD, argv: jobArgv() });
+    // 받은 객체를 펼치지 않는다: 다른 칸은 argv에 실리지 않는다.
+    expect(ctx.oliveAdmin.target("test-job", { ...JOB, extra: "--all" } as any)).toEqual({ state: "ready", pod: POD, argv: jobArgv() });
+    expect(execs(calls())).toEqual([]);
+    expect(classify(jobArgv())).toEqual(classify(execArgv()));
+  });
+
+  test("꼴이 아닌 값은 어떤 호출도 하기 전에 값을 되찍지 않고 거부한다", async () => {
+    const bad: unknown[] = [
+      undefined,
+      null,
+      "status",
+      { ...JOB, key: "" },
+      { ...JOB, key: "a b" },
+      { ...JOB, key: "a\tb" },
+      { ...JOB, key: "a\nb" },
+      { ...JOB, key: `${CANARY}\u0000` },
+      { ...JOB, key: 'a"b' },
+      { ...JOB, key: "a\\b" },
+      { ...JOB, key: "키" },
+      { ...JOB, key: "k".repeat(201) },
+      { ...JOB, purpose: 7 },
+      { owner: JOB.owner, key: JOB.key, role: JOB.role, purpose: JOB.purpose, sourceRef: JOB.sourceRef },
+      // 값마다는 200자 안이지만 요청 한 줄이 1,024바이트를 넘는다.
+      { ...JOB, owner: "o".repeat(200), key: "k".repeat(200), role: "r".repeat(200), purpose: "p".repeat(200), sourceRef: "s".repeat(200) },
+    ];
+    for (const job of bad) {
+      const plan = testCtx("plan", owned(list(pod())));
+      const e = thrown(() => plan.ctx.oliveAdmin.target("test-job", job as any));
+      expect([job, e.message]).toEqual([job, "시험 작업 값이 정해진 꼴이 아니다"]);
+      expect(e.message).not.toContain(CANARY);
+      expect(plan.calls().calls).toEqual([]);
+      const apply = testCtx("apply", owned(list(pod())));
+      await expect(applyWith(apply.ctx, (w) => w.oliveAdmin.testJob(job as any))).rejects.toThrow("시험 작업 값이 정해진 꼴이 아니다");
+      expect(apply.calls().calls).toEqual([]);
+    }
+    // 경계: 요청 한 줄(값 밖의 글자 98바이트 + 값 926바이트)이 1,024바이트 정각이면 받고, 한 글자 더하면 거부한다.
+    const edge = { ...JOB, owner: "o".repeat(62), key: "k".repeat(200), role: "r".repeat(200), purpose: "p".repeat(200), sourceRef: "s".repeat(200) };
+    const plan = testCtx("plan", owned(list(pod())));
+    expect(plan.ctx.oliveAdmin.target("test-job", edge).state).toBe("ready");
+    expect(thrown(() => plan.ctx.oliveAdmin.target("test-job", { ...edge, owner: "o".repeat(63) })).message).toBe("시험 작업 값이 정해진 꼴이 아니다");
+  }, 60_000);
+
+  test("apply: 감독의 한 줄을 created·existing과 참조로 옮긴다", async () => {
+    expect((await runJob(line({}))).value).toEqual({ state: "accepted", pod: POD, outcome: "created", ref: REF });
+    const existing = await runJob(line({ outcome: "existing" }));
+    expect(existing.value).toEqual({ state: "accepted", pod: POD, outcome: "existing", ref: REF });
+    expect(existing.execs).toEqual([jobArgv()]);
+  });
+
+  test("apply: 실행 뒤 확인하지 못한 결과는 unknown이고 다시 실행하지 않는다", async () => {
+    const cases: Resp[] = [
+      line({ ref: REF.toUpperCase() }),
+      line({ outcome: "queued" }),
+      line({ note: CANARY }),
+      line({ schema: "olive-test-job/v2" }),
+      { stdout: CANARY },
+      { stdout: "" },
+      { code: 1, stderr: `Error from server (Forbidden): ${CANARY}\n` },
+      { code: 1, stderr: "Unable to connect to the server: net/http: TLS handshake timeout\n" },
+    ];
+    for (const resp of cases) {
+      const r = await runJob(resp);
+      expect([resp, r.value]).toEqual([resp, { state: "unknown", pod: POD }]);
+      expect(r.execs).toEqual([jobArgv()]);
+    }
+  }, 60_000);
+
+  test("apply: 진입점의 종료 코드와 사유를 그대로 돌려준다", async () => {
+    const r = await runJob({ code: 1, stderr: "olive admin: 감독이 요청을 거절했다(conflict)\ncommand terminated with exit code 1\n" });
+    expect(r.value).toEqual({ state: "exit", pod: POD, code: 1, reason: { kind: "refused", word: "conflict" } });
+    const w = await runJob({ code: 1, stderr: "olive admin: 시험 작업 모름: 장부에 적혔는지 모른다(write_unknown)\ncommand terminated with exit code 1\n" });
+    expect(w.value).toEqual({ state: "exit", pod: POD, code: 1, reason: { kind: "unknown", word: "write_unknown" } });
+  });
+
+  test("apply: 대상이 없으면 실행하지 않고, 파드를 읽지 못하면 실행 전에 던진다", async () => {
+    expect((await runJob(line({}), list())).value).toEqual({ state: "no-target", target: { state: "absent", pods: 0 } });
+    const { ctx, calls } = testCtx("apply", [rule(podsArgv, { code: 1, stderr: "Unable to connect to the server: context deadline exceeded\n" })]);
+    await expect(applyWith(ctx, (w) => w.oliveAdmin.testJob(JOB))).rejects.toBeInstanceOf(ExecTimeout);
+    expect(execs(calls())).toEqual([]);
+  });
+
+  test("parseTestJob: 출력 상한을 넘거나 두 줄이면 받지 않는다", () => {
+    const ok = JSON.stringify({ schema: OLIVE_ADMIN_TEST_JOB_SCHEMA, outcome: "created", ref: REF });
+    expect(parseTestJob(`${ok}\n`)).toEqual({ outcome: "created", ref: REF });
+    expect(() => parseTestJob(`${ok}\n${ok}\n`)).toThrow(FIXED_REPORT_ERROR);
+    expect(() => parseTestJob(`${ok}${" ".repeat(OLIVE_ADMIN_MAX_OUTPUT)}`)).toThrow(FIXED_REPORT_ERROR);
+    expect(() => parseTestJob(ok.replace('"outcome":"created"', '"outcome":"created","outcome":"existing"'))).toThrow(FIXED_REPORT_ERROR);
   });
 });

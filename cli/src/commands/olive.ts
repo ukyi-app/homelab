@@ -1,7 +1,7 @@
 // homelab olive: 올리브의 상태와 비상 정지 상태를 읽기만 한다(supervisor.md 7·10절).
 // 대상 목록은 빌드할 때 실행 파일에 들어가 GitHub·네트워크에 기대지 않는다.
 // 감독 상태는 kubectl exec로 읽어 쓰기로 판정되므로 --apply에서만 나온다.
-import { defineCommand, type OliveAdminOutcome, type OliveSupervisorMissing, type OliveSupervisorTarget, type ReadCtx, type WriteCtx } from "../core/command";
+import { defineCommand, type OliveAdminExit, type OliveAdminOutcome, type OliveAdminReason, type OliveSupervisorMissing, type OliveSupervisorTarget, type ReadCtx, type WriteCtx } from "../core/command";
 import { oliveTargets } from "../core/names";
 import { UsageError } from "../core/result";
 import { countPods, lockSummary, podWords, readAll, readFailed, replicasWords, runAction, targetLine, type Action, type Outcome, type TargetView } from "./olive-state";
@@ -15,9 +15,23 @@ const MISSING_WORD: Record<OliveSupervisorMissing["state"], string> = {
   multiple: "파드가 여럿이라 고르지 않았다",
 };
 
-const UNSUPPORTED = "이 CLI가 지원하는 동작은 status, stop status, stop verify입니다. 켜기, 정지 걸기·풀기, 노드 확인, 런타임 대조는 아직 지원하지 않습니다.";
+const UNSUPPORTED = "이 CLI가 지원하는 동작은 status, stop status, stop verify와 시험 클러스터 전용 test-job입니다. 켜기, 정지 걸기·풀기, 노드 확인, 런타임 대조는 아직 지원하지 않습니다.";
 
-type Supervisor = { line: string; status: "ok" | "waiting" | "failed" };
+// next: 감독 줄이 정한 다음 행동. 없으면 상태마다의 기본이다.
+type Supervisor = { line: string; status: "ok" | "waiting" | "failed"; next?: string };
+
+const REASON_WORD: Record<OliveAdminReason["kind"], string> = { refused: "요청 거절", unreached: "닿지 못함", "no-reply": "답을 받지 못함", unknown: "상태를 읽지 못함" };
+
+// 감독 진입점의 종료 코드를 CLI 공통 규칙(D-61: 0 완료, 1 실패, 3 대기, 64 사용법)으로 옮긴다.
+// 3은 감독이 답했지만 복원 전이라 상태를 모르는 것이라 대기(3)다. 꺼짐·실패로 읽지 않는다.
+// 함정: 현관(O08)이 붙기 전에는 감독이 복원 1단계를 되풀이해 3이 풀리지 않는다. 3을 기다려 되풀이하는 스크립트는 끝나지 않는다.
+// 진입점의 64는 이 CLI가 만든 argv를 감독이 받지 않은 것이다. 사람의 사용법 오류가 아니라 판 어긋남일 수 있어 실패(1)다.
+function exited(r: OliveAdminExit): Supervisor {
+  if (r.code === 3) return { line: `감독: 상태 모름(복원 전, ${r.reason?.word ?? "종료 코드 3"})`, status: "waiting", next: "현관(O08)이 붙기 전에는 감독이 복원을 마치지 않아 다시 불러도 3이다. 현관이 붙은 뒤 다시: homelab olive status --apply" };
+  if (r.code === 64) return { line: "감독: 관리 진입점이 요청을 받지 않았다(종료 코드 64, CLI와 감독 이미지의 판이 다를 수 있다)", status: "failed" };
+  if (r.reason !== null) return { line: `감독: ${REASON_WORD[r.reason.kind]}(${r.reason.word})`, status: "failed" };
+  return { line: `감독: 관리 진입점이 실패했다(종료 코드 ${r.code})`, status: "failed" };
+}
 
 function missing(t: OliveSupervisorMissing): Supervisor {
   const status = t.state === "absent" ? "ok" : t.state === "not-owned" ? "failed" : "waiting";
@@ -43,6 +57,7 @@ function reportedSupervisor(w: WriteCtx): Supervisor {
   }
   if (r.state === "unknown") return { line: "감독: 결과 미상(시간 초과. 꺼짐으로 읽지 않는다)", status: "failed" };
   if (r.state === "no-target") return missing(r.target);
+  if (r.state === "exit") return exited(r);
   const s = r.status;
   return { line: `감독: ${s.alive ? "살아 있음" : "응답했지만 살아 있지 않음"}, 대기 ${s.queued}, 실행 ${s.running}, 자동 진단 ${s.diagnosis === "active" ? "켜짐" : "멈춤"}, 정지 ${s.stop}(세대 ${s.stopGeneration}), 접수 ${s.intakeOpen ? "열림" : "닫힘"}`, status: "ok" };
 }
@@ -54,7 +69,7 @@ function statusOutcome(views: TargetView[], sup: Supervisor, verbose: boolean, p
   const summary = `${locks.words}, ${podWords(countPods(views))}`;
   if (readFailed(views)) return { status: "failed", label: "읽지 못함", headline: `확인 실패: 읽지 못한 대상이 있다. ${summary}`, lines: [sup.line, replicasWords(views), ...views.map(targetLine)], next: "kubectl 접속을 확인한 뒤 다시: homelab olive status" };
   if (sup.status === "failed") return { status: "failed", label: "감독 확인 실패", headline: `${state}: ${summary}. ${sup.line}`, lines, next: "homelab olive status --verbose로 대상별 상태를 본다" };
-  if (sup.status === "waiting") return { status: "waiting", label: "감독 대기", headline: `${state}: ${summary}. ${sup.line}`, lines, next: "잠시 뒤 다시: homelab olive status --apply" };
+  if (sup.status === "waiting") return { status: "waiting", label: "감독 대기", headline: `${state}: ${summary}. ${sup.line}`, lines, next: sup.next ?? "잠시 뒤 다시: homelab olive status --apply" };
   return { status: planned ? "pending" : "done", label: state, headline: `${state}: ${summary}`, lines, ...(planned ? {} : { next: null }) };
 }
 
@@ -75,7 +90,7 @@ export function makeOlive() {
     summary: "올리브 상태와 정지 상태 보기",
     help: {
       about:
-        "올리브의 상태와 비상 정지 상태를 읽어 보여 줍니다. 정지를 걸거나 푸는 명령은 이 CLI에 아직 없습니다. stop verify는 밖에서 실제로 걸린 자물쇠만 판독합니다. 기본 status도 감독 파드 탐색 결과를 표시합니다. 준비된 파드에서는 예정 명령도 표시하며, 감독 프로세스의 상태 응답은 status --apply에서 조회합니다. 종료 코드는 1 실패·차단 미완, 3 대기, 64 사용법이고, 0의 뜻은 동작마다 다릅니다: status·stop status는 읽은 상태를 보고했다, stop verify는 Kubernetes에서 자물쇠와 파드 소멸까지 확인했다(정지됨, 노드 미확인).",
+        "올리브의 상태와 비상 정지 상태를 읽어 보여 줍니다. 정지를 걸거나 푸는 명령은 이 CLI에 아직 없습니다. stop verify는 밖에서 실제로 걸린 자물쇠만 판독합니다. 기본 status도 감독 파드 탐색 결과를 표시합니다. 준비된 파드에서는 예정 명령도 표시하며, 감독 프로세스의 상태 응답은 status --apply에서 조회합니다. 종료 코드는 1 실패·차단 미완, 3 대기(status --apply에서 감독이 복원 전이라 상태를 모를 때 포함), 64 사용법이고, 0의 뜻은 동작마다 다릅니다: status·stop status는 읽은 상태를 보고했다, stop verify는 Kubernetes에서 자물쇠와 파드 소멸까지 확인했다(정지됨, 노드 미확인).",
       examples: ["homelab olive status", "homelab olive stop verify"],
       actions: [
         { name: "status", about: "정지 여부·replicas·자물쇠·실행 파드 보기" },

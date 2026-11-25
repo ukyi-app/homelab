@@ -296,7 +296,9 @@ export type OliveWrite = {
 };
 
 // 올리브 감독 파드의 고정 관리 진입점(D-60). 동작 이름만 넘기고 ns·파드 라벨·컨테이너·진입점은 core 상수다.
-export type OliveAdminAction = "status";
+export type OliveAdminAction = "status" | "test-job";
+// 시험 작업 넣기의 값 여섯(OLIVE_TEST_JOB_FIELDS). 꼴은 OLIVE_TEST_JOB_VALUE이고 뜻은 감독이 본다.
+export type OliveTestJob = { owner: string; key: string; role: string; purpose: string; sourceRef: string; inputDigest: string };
 // ready만 실행 대상이다. absent는 파드가 없는 것(꺼 둔 정상 상태일 수 있다)이고, 목록이나 소유 객체를 읽지 못한 것은 이 값이 아니라 던진다.
 // not-owned는 셀렉터에 걸린 파드가 감독 Deployment의 것으로 확인되지 않은 것이다. 감독이 없다는 뜻이 아니다.
 // pods: absent·not-owned·not-ready는 목록의 파드 수, terminating·multiple은 끝나지 않은 파드 수다.
@@ -313,18 +315,34 @@ export type OliveSupervisorStatus = {
   stopGeneration: number;
   intakeOpen: boolean;
 };
+// 진입점이 stderr 한 줄에 적은 사유 낱말. refused는 감독이 거절, unreached는 감독에 닿지 못함, no-reply는 붙었지만 답을 받지 못함,
+// unknown은 감독이 답했지만 결과를 알려진 값으로 내지 못함이다. word는 그 갈래의 닫힌 목록 안의 값뿐이다.
+export type OliveAdminReason = { kind: "refused" | "unreached" | "no-reply" | "unknown"; word: string };
+// 진입점이 0이 아닌 코드로 끝났다. kubectl의 끝 줄이 원격 종료 코드를 확인한 때만 이 값이다(kubectl 자신의 실패는 아니다).
+// reason은 stderr가 정해진 꼴이고 낱말이 코드와 맞을 때만 있고, 아니면 null이다.
+export type OliveAdminExit = { state: "exit"; pod: string; code: number; reason: OliveAdminReason | null };
 // unknown: 시간 초과로 결과를 알 수 없다. 꺼짐이나 없음으로 읽지 않는다.
-export type OliveAdminOutcome = { state: "reported"; pod: string; status: OliveSupervisorStatus } | { state: "no-target"; target: OliveSupervisorMissing } | { state: "unknown" };
+export type OliveAdminOutcome = { state: "reported"; pod: string; status: OliveSupervisorStatus } | { state: "no-target"; target: OliveSupervisorMissing } | { state: "unknown" } | OliveAdminExit;
+// 시험 작업의 결과. unknown은 실행한 뒤 결과를 확인하지 못한 것이다(시간 초과, 원격 코드가 확인되지 않은 kubectl 실패, 꼴이 다른 출력).
+// 장부에 적혔을 수 있다. 실행 전의 실패(파드를 읽지 못함·시간 초과)는 던진다.
+export type OliveTestJobOutcome =
+  | { state: "accepted"; pod: string; outcome: "created" | "existing"; ref: string }
+  | { state: "no-target"; target: OliveSupervisorMissing }
+  | { state: "unknown"; pod: string }
+  | OliveAdminExit;
 
 export type OliveAdminRead = {
   // 대상 파드와 그 파드의 표시용 argv. exec하지 않는다. 읽지 못하면 던지고, 시간 초과는 ExecTimeout이다.
-  target(action: OliveAdminAction): OliveSupervisorTarget;
+  target(action: "status"): OliveSupervisorTarget;
+  target(action: "test-job", job: OliveTestJob): OliveSupervisorTarget;
 };
 
 // 쓰기 문맥만: kubectl exec는 바꾸는 것이 없어도 쓰기로 판정한다(설계 C.7).
 export type OliveAdminWrite = OliveAdminRead & {
   // 파드를 다시 찾아 고정 argv를 한 번 실행한다. 재시도하지 않는다. 출력이 정해진 꼴이 아니면 원문 없이 던진다.
-  run(action: OliveAdminAction): OliveAdminOutcome;
+  run(action: "status"): OliveAdminOutcome;
+  // 시험 작업 한 줄을 넣는다. 같은 규칙으로 파드를 다시 찾아 한 번 실행하고 재시도하지 않는다.
+  testJob(job: OliveTestJob): OliveTestJobOutcome;
 };
 
 // 이 프로세스가 클러스터 노드 위인지. /etc/machine-id와 Node의 status.nodeInfo.machineID가 하나만 맞아야 node다.

@@ -29,6 +29,7 @@ import botAccountAdd from "./commands/bot-account-add";
 import botAccountUse from "./commands/bot-account-use";
 import botAccountList from "./commands/bot-account-list";
 import olive from "./commands/olive";
+import oliveTestJob from "./commands/olive-test-job";
 
 export type Section = { title: string; commands: CommandSpec[] };
 
@@ -41,7 +42,7 @@ export const SECTIONS: Section[] = [
   { title: "시크릿·비밀번호", commands: [secretSet, secretSync, rotateDb, rotateCache] },
   { title: "복원", commands: [restoreDb, restoreCheck, restoreCache] },
   { title: "GitHub 설정", commands: [githubPlan, githubVerify, githubApply] },
-  { title: "봇", commands: [bot, botAccountAdd, botAccountUse, botAccountList, olive] },
+  { title: "봇", commands: [bot, botAccountAdd, botAccountUse, botAccountList, olive, oliveTestJob] },
 ];
 
 export const REGISTRY: CommandSpec[] = SECTIONS.flatMap((s) => s.commands);
