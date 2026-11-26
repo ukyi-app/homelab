@@ -404,7 +404,7 @@ export KUBECONFIG=~/.kube/homelab-vm.yaml && host/verify.sh --cluster vm --ident
 ## 5. 확인
 
 - VM 안(`vmssh`)에서 bootstrap.md 3절 블록을 `<이름>` = `vm`, `<KUBE_CONTEXT>` = `homelab-vm`으로 돌린다. `host/preflight.sh`가 VM 호스트를 보므로 호스트에서 돌리지 않는다.
-- 공개 경로·시험 터널(설계 E8 VM 격리 5번)과 복구 확인(restore.md 3절)은 호스트에서 `KUBECONFIG=~/.kube/homelab-vm.yaml`로 한다. port-forward도 호스트의 127.0.0.1에 열린다.
+- 공개 경로·시험 터널(설계 E8 VM 격리 5번)과 DB 복구를 시험할 때의 복구 확인(restore.md 3절)은 호스트에서 `KUBECONFIG=~/.kube/homelab-vm.yaml`로 한다. port-forward도 호스트의 127.0.0.1에 열린다.
 
 ## 6. 지우기 (호스트, sudo)
 
