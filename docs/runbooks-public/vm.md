@@ -62,14 +62,14 @@ test "$(cat /proc/sys/fs/inotify/max_user_instances)" -ge "$want" \
   || { echo "inotify 인스턴스 한도가 ${want}보다 낮다. sudo host/install.sh --cluster prod --host-config를 먼저 한다"; exit 1; }
 install -d -m 0700 "$state"
 sudo apt-get update
-# 버전은 2026-10-26 resolute 저장소의 후보로 고정한다. 저장소가 넘어가 이 버전이 없으면 설치가 실패한다.
+# 버전은 2026-11-26 resolute 저장소의 후보로 고정한다. 저장소가 넘어가 이 버전이 없으면 설치가 실패한다.
 # 그때는 apt-cache policy로 새 후보를 보고 이 목록을 PR로 고친다.
 # systemd-container는 지금 깔린 systemd와 같은 버전으로 묶는다. 후보를 그대로 받으면 systemd·udev·resolved까지
 # 새 버전으로 올라가 운영 노드의 systemd가 재실행되고 resolved가 다시 시작된다(2026-10-26 apt-get -s로 확인).
 sysd="$(dpkg-query -W -f='${Version}' systemd)"
 pkgs=(qemu-system-x86=1:10.2.1+ds-1ubuntu3.3 qemu-utils=1:10.2.1+ds-1ubuntu3.3
-  libvirt-daemon-system=12.0.0-1ubuntu5.6 libvirt-clients=12.0.0-1ubuntu5.6
-  virt-install=1:5.1.0-1 cloud-image-utils=0.33-1build1 "systemd-container=${sysd}")
+  libvirt-daemon-system=12.0.0-1ubuntu5.7 libvirt-clients=12.0.0-1ubuntu5.7
+  virt-install=1:5.1.0-1ubuntu0.1 cloud-image-utils=0.33-1build1 "systemd-container=${sysd}")
 # 먼저 흉내만 낸다. 이미 깔린 패키지를 하나라도 올리거나 지우면 운영 노드가 바뀌므로 멈춘다
 sim="$(LC_ALL=C apt-get -s install --no-install-recommends "${pkgs[@]}")"
 if ! grep -Eq '^0 upgraded, [0-9]+ newly installed, 0 to remove' <<<"$sim"; then
@@ -87,7 +87,7 @@ echo "새로 깐 패키지 $(wc -l <"$state/packages-new")개. 6절이 이 목�
 EOF
 ```
 
-2026-10-26 흉내 결과는 새 패키지 78개, 올림 0, 지움 0이었다.
+2026-11-26 흉내 결과는 새 패키지 78개, 올림 0, 지움 0이었다.
 
 ### 1.2 libvirt 네트워크
 
