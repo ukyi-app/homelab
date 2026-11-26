@@ -78,6 +78,9 @@ cluster:
   # test: 시험 클러스터 전용 감독 길 둘(platform/olive/values.yaml supervisor.test, D-98·D-101·D-109). jobs는 시험 작업 넣기,
   #   frontDoor는 시험 현관 대역이다. 운영은 늘 false다. 켤 수 있는 클러스터는 vm뿐이고, 운영에서 켜면 root 렌더
   #   (templates/cluster-check.yaml)와 CI(tools/ci/olive.ts olive-test-values)가 거절한다. 키는 jobs·frontDoor 둘이고 따옴표 없는 true·false만 받는다.
+  # roleImages·roleProfiles: 이 클러스터 작업자 실행기의 역할 이미지와 역할 프로필(platform/olive/values.yaml roleImages·roleProfiles,
+  #   키는 v1 역할 이름). 클러스터 값인 이유: 시험 클러스터는 모델 없는 고정 프로그램(D-118)이고 운영은 모델 CLI가 든 이미지라 함께 쓸 수 없다.
+  #   비면 root가 넘기지 않고 차트 렌더가 멈춘다. 운영은 역할 이미지 출처(D-103)와 프로필(O11·O12)이 정해진 뒤 켜는 PR이 넣는다.
   olive:
     enabled: false
     pki:
@@ -89,6 +92,8 @@ cluster:
     test:
       jobs: false
       frontDoor: false
+    roleImages: {}
+    roleProfiles: {}
 
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈추는 값(values-vm.yaml의 같은 블록에 쓰는 법).
   # 운영은 비워 둔다. 빈 값이면 root가 ApplicationSet에 넘기지 않아 렌더가 이 블록이 없을 때와 같다.

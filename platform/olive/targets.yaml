@@ -28,7 +28,8 @@ targets:
     declaredBy: platform/olive
     stop: true
     start: true
-  # 진단·읽기 실행기는 역할 프로필(O11·O12)이 채워지기 전에는 켜지 않는다. 지금 차트가 실행기 환경을 다 주지 않아 실행기는 감독에 붙기 전에 끝난다.
+  # 진단·읽기 실행기는 운영 역할 프로필(O11·O12)이 채워지기 전에는 운영에서 켜지 않는다. 역할 프로필은 클러스터 값이고 지금은 시험 클러스터의
+  # 모델 없는 고정 프로그램(D-118)만 있다(platform/root/values-vm.yaml cluster.olive.roleProfiles).
   - id: diagnosis
     kind: executor
     namespace: olive-diagnosis

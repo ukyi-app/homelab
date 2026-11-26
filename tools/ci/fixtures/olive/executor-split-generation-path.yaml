@@ -24,6 +24,7 @@ patch:
             - {name: tls, mountPath: /run/olive/tls, readOnly: true}
             - {name: trust, mountPath: /run/olive/trust, readOnly: true}
             - {name: effect-signing, mountPath: /run/olive/effect-signing, readOnly: true}
+            - {name: profile, mountPath: /run/olive/profile, readOnly: true}
             - {name: tmp, mountPath: /tmp}
             - {name: agent-link, mountPath: /run/olive/agent}
             - {name: store, mountPath: /var/lib/olive-executor}

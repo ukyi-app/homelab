@@ -51,6 +51,13 @@ cluster:
   # 공개 값 둘은 VM 발급 기관과 VM 감독 키에서 읽은 값만 넣는다. 운영 값을 옮겨 적지 않는다.
   # test(values-prod.yaml 주석): 시험 값을 켤 수 있는 유일한 클러스터다. 켜는 것은 VM 켜기 PR이다. frontDoor는 jobs와 함께만 켠다
   #   (jobs 없이 켜면 감독이 91로 끝나 root 렌더가 먼저 멈춘다). 함정: 대역을 켠 장부를 나중에 실제 현관과 쓰지 않는다.
+  # roleImages·roleProfiles(values-prod.yaml 주석): T1의 모델 없는 고정 프로그램(D-118). 공개 glibc 이미지 debian:trixie-slim(13.8-slim과
+  #   같은 digest, 2026-11-23 빌드)의 /bin/sh가 정해진 결과 JSON 한 줄을 찍고 끝난다. digest는 다중 아키텍처 목록의 것이고 linux/amd64를 담는다.
+  #   그 이미지 설정은 ENV가 PATH 하나(BUN_·LD_·NODE_CHANNEL_FD 없음), USER 없음이라 차트의 uid·gid 10002로 돈다(2026-11-26 레지스트리에서 읽음).
+  #   두 역할이 같은 이미지·같은 revision이다. 감독은 기대 revision을 하나만 쓴다(platform/olive/values.yaml roleProfiles 함정).
+  #   함정: VM 계정 Secret의 가짜 토큰은 아래 글(program·cwd·argv·env 값)과 결과 JSON에 들어 있지 않은 값으로 둔다. 들어 있으면 실행기가
+  #   띄우기를 거절하거나 결과를 실패로 바꾼다. 결과 role은 그 실행기의 역할이다.
+  #   함정: 시험 전용 값이다. 운영 값에 옮겨 적지 않는다(운영은 모델 CLI가 든 역할 이미지와 실제 프로필, O11·O12).
   olive:
     enabled: false
     pki:
@@ -62,6 +69,30 @@ cluster:
     test:
       jobs: false
       frontDoor: false
+    roleImages:
+      diagnosis:
+        repository: docker.io/library/debian
+        digest: sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0
+      isolated_reader:
+        repository: docker.io/library/debian
+        digest: sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0
+    roleProfiles:
+      diagnosis:
+        revision: t1-fixed-1
+        program: /bin/sh
+        argv: ["-c", "printf '%s\\n' \"$FIXED_RESULT\""]
+        cwd: /tmp
+        env:
+          FIXED_RESULT: '{"role":"diagnosis","outcome":"completed","summary":"T1 고정 시험 프로그램의 결과(모델 없음, D-118)","items":[],"refs":[]}'
+        credentialEnv: CLAUDE_CODE_OAUTH_TOKEN
+      isolated_reader:
+        revision: t1-fixed-1
+        program: /bin/sh
+        argv: ["-c", "printf '%s\\n' \"$FIXED_RESULT\""]
+        cwd: /tmp
+        env:
+          FIXED_RESULT: '{"role":"isolated_reader","outcome":"completed","summary":"T1 고정 시험 프로그램의 결과(모델 없음, D-118)","items":[],"refs":[]}'
+        credentialEnv: CLAUDE_CODE_OAUTH_TOKEN
 
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈춘다(restore.md 3절, 설계 C.6.4). 평소에는 빈 값이다.
   # apps/·data/의 values는 운영과 VM이 함께 읽어, VM 복구 PR이 거기에 suspended·running을 적으면 운영 앱도 멈춘다.

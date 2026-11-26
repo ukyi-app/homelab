@@ -16,9 +16,27 @@ roleImages:
 # 정책 판 번호도 가짜다(실제 값은 켜는 PR이 정한다).
 policy:
   revision: ci-policy
+# 역할 프로필도 가짜다(실제 값은 클러스터마다 root가 넘긴다). 진단 쪽에만 argv·env를 넣어 목록·맵이 JSON에 실리는 모양도 렌더에 보이게 한다.
+# 두 revision은 같아야 한다(감독은 기대 revision을 하나만 쓴다, tools/ci/olive.ts olive-role-profile).
+roleProfiles:
+  diagnosis:
+    revision: ci-profile
+    program: /ci/role-program
+    argv: ["--ci", "diagnosis"]
+    cwd: /tmp
+    env:
+      CI_ROLE: diagnosis
+    credentialEnv: CI_CREDENTIAL
+  isolated_reader:
+    revision: ci-profile
+    program: /ci/role-program
+    cwd: /tmp
+    credentialEnv: CI_CREDENTIAL
 supervisor:
   account:
     name: ci-account
+    # 계정 판(D-111)도 가짜다. 이 렌더는 env OLIVE_ACCOUNT_REVISION이 있는 모양, 켠 root 렌더(빈 값)는 없는 모양을 CI가 본다.
+    revision: ci-account-rev
   # 등록표 키 이름과 클러스터 이름도 가짜다.
   registry:
     key: CI_REGISTRY

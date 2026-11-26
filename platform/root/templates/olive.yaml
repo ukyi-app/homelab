@@ -7,6 +7,8 @@ olive: 올리브의 감독과 역할별 작업자 실행기(ns olive-control, ol
 켜짐, 내부 인증서의 켜짐·세대(pki), 발급 기관과 지시 서명 키가 클러스터마다 달라 함께 쓸 수 없는 공개 값 둘이 있다. 빈 값은 넘기지 않는다.
 pki.enabled는 true일 때만 넘긴다(bot-slot의 r08과 같다). 차트 기본값이 false라야 클러스터 값이 그대로 남는다(tools/ci/olive.ts가 본다).
 세대 값은 늘 넘긴다. 차트 기본값을 두 클러스터가 함께 읽으면 한 클러스터의 세대를 옮기는 PR이 다른 클러스터의 leaf도 다시 발급한다.
+역할 이미지·프로필(cluster.olive.roleImages·roleProfiles → roleImages·roleProfiles)도 클러스터마다 따로 넘긴다. 시험 클러스터는 모델 없는
+고정 프로그램(D-118)이고 운영은 모델 CLI가 든 이미지라 한 값을 함께 쓸 수 없다. 비지 않을 때만 넘기고, 비면 차트 렌더가 required로 멈춘다.
 시험 값 둘(cluster.olive.test.jobs·frontDoor → supervisor.test, D-98·D-101·D-109)도 true일 때만 넘긴다. 시험 클러스터(vm)만 켤 수 있고
 운영에서 켜면 templates/cluster-check.yaml이 렌더를 멈춘다. 차트 기본값이 false라 넘기지 않으면 꺼짐이다(tools/ci/olive.ts가 본다).
 
@@ -48,6 +50,14 @@ spec:
           {{- with $olive.trustBundlePem }}
           trustBundlePem: {{ . | quote }}
           {{- end }}
+        {{- with $olive.roleImages }}
+        roleImages:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with $olive.roleProfiles }}
+        roleProfiles:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         {{- if or $olive.supervisorSigningPublicKeyPem $test.jobs $test.frontDoor }}
         supervisor:
           {{- with $olive.supervisorSigningPublicKeyPem }}
