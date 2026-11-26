@@ -1108,7 +1108,7 @@ function checkKeySwitchWiring(keySwitch: Record<string, boolean>, offClusters: s
 // 클러스터 값이 false인 곳에서도 켜진다. 꺼 둔 클러스터의 렌더에는 그 차이가 나타나지 않아 렌더 대조만으로는 못 잡는다.
 export const OLIVE_CLUSTER_STATE: Record<string, { olive: boolean; pki: boolean }> = {
   prod: { olive: false, pki: false },
-  vm: { olive: false, pki: false },
+  vm: { olive: true, pki: true },
 };
 const OLIVE_CLUSTER_RULE = "olive-cluster-enable";
 const OLIVE_CLUSTER_TABLE = "tools/ci/olive.ts OLIVE_CLUSTER_STATE";
@@ -1163,7 +1163,9 @@ function clusterEnableTests(base: OliveInput): string[] {
   const real = base.deployed[REAL] ?? [];
   const off = { pki: { enabled: false } };
   // 값 파일 자리는 표와 같은 합성 값이다. 실제 값 파일의 어긋남은 olive targets 단계의 실제 검사가 한 번만 낸다.
-  const files: Record<string, unknown> = Object.fromEntries(clusters.map((c) => [c, { cluster: { olive: { enabled: OLIVE_CLUSTER_STATE[c]?.olive, pki: { enabled: OLIVE_CLUSTER_STATE[c]?.pki } } } }]));
+  const filesOf = (state: Record<string, { olive: boolean; pki: boolean }>): Record<string, unknown> =>
+    Object.fromEntries(clusters.map((c) => [c, { cluster: { olive: { enabled: state[c]?.olive, pki: { enabled: state[c]?.pki } } } }]));
+  const files = filesOf(OLIVE_CLUSTER_STATE);
   const expectHits = (name: string, got: Violation[], want: string[]) => {
     if (got.length !== want.length || want.some((w, i) => !got[i].message.includes(w))) bad.push(`${name}: 기대 ${JSON.stringify(want)}, 실제 ${JSON.stringify(got.map(fmt))}`);
   };
@@ -1178,14 +1180,25 @@ function clusterEnableTests(base: OliveInput): string[] {
     obj: { apiVersion: "cert-manager.io/v1", kind: "ClusterIssuer", metadata: { name: "ci-issuer", labels: { "app.kubernetes.io/part-of": "olive", "app.kubernetes.io/component": "pki" } } },
   };
   expectHits("운영에 올리브 발급 기관만 있는 렌더", checkClusterEnable([...real, issuer], targets, clusters, OLIVE_CLUSTER_STATE, off, files), ["인증서(pki)가 꺼짐인데"]);
+  // vm은 켬(올리브·인증서)이다. 지금 root 렌더에서 vm의 올리브 문서를 빼거나 표를 끔으로 바꿔 두 방향의 어긋남을 본다.
+  if (!OLIVE_CLUSTER_STATE.vm?.olive || !OLIVE_CLUSTER_STATE.vm?.pki) bad.push("아래 vm 사례는 표의 vm 줄이 켬(올리브·인증서)이라고 둔다. 줄을 바꾸는 PR은 사례도 고친다");
   const vmOn = { ...OLIVE_CLUSTER_STATE, vm: { olive: true, pki: true } };
-  const vmValuesOn = { ...files, vm: { cluster: { olive: { enabled: true, pki: { enabled: true } } } } };
-  expectHits("표와 값 파일만 vm 켬으로 바꾼 렌더", checkClusterEnable(real, targets, clusters, vmOn, off, vmValuesOn), ["올리브가 켬인데", "인증서(pki)가 켬인데"]);
-  expectHits("표만 vm 켬으로 바꾼 렌더", checkClusterEnable(real, targets, clusters, vmOn, off, files), ["cluster.olive.enabled(지금 false)가 표(true)와 다르다", "cluster.olive.pki.enabled(지금 false)가 표(true)와 다르다", "올리브가 켬인데", "인증서(pki)가 켬인데"]);
+  const vmOff = { ...OLIVE_CLUSTER_STATE, vm: { olive: false, pki: false } };
+  const vmPkiOff = { ...OLIVE_CLUSTER_STATE, vm: { olive: true, pki: false } };
+  const oliveNs = new Set(targets.filter((t) => t.declaredBy === OLIVE_CHART).map((t) => t.namespace));
+  const vmOlive = (d: Doc) =>
+    sourceOf(d.origin).cluster === "vm" &&
+    (sourceOf(d.origin).path === OLIVE_CHART || deployersOf(argoApps([d]), "vm", OLIVE_CHART).length > 0 || oliveNs.has(nsOf(d) ?? "") || (d.obj.kind === "Namespace" && oliveNs.has(d.obj.metadata?.name)) || isOlivePki(d));
+  const realNoVm = real.filter((d) => !vmOlive(d));
+  if (realNoVm.length === real.length) bad.push("지금 root 렌더에서 vm의 올리브 문서를 찾지 못했다");
+  expectHits("vm 올리브 문서를 뺀 렌더(표와 값 파일은 켬)", checkClusterEnable(realNoVm, targets, clusters, vmOn, off, filesOf(vmOn)), ["올리브가 켬인데", "인증서(pki)가 켬인데"]);
+  expectHits("표와 값 파일만 vm 끔으로 바꾼 렌더", checkClusterEnable(real, targets, clusters, vmOff, off, filesOf(vmOff)), ["올리브가 꺼짐인데 root 렌더에 있다: Application/argocd/olive", "인증서(pki)가 꺼짐인데"]);
+  expectHits("표만 vm 끔으로 바꾼 렌더", checkClusterEnable(real, targets, clusters, vmOff, off, filesOf(vmOn)), ["cluster.olive.enabled(지금 true)가 표(false)와 다르다", "cluster.olive.pki.enabled(지금 true)가 표(false)와 다르다", "올리브가 꺼짐인데 root 렌더에 있다", "인증서(pki)가 꺼짐인데"]);
+  expectHits("표와 값 파일만 vm 인증서 끔으로 바꾼 렌더", checkClusterEnable(real, targets, clusters, vmPkiOff, off, filesOf(vmPkiOff)), ["인증서(pki)가 꺼짐인데 root 렌더에 발급 리소스가 있다"]);
   const prodValueOn = { ...files, prod: { cluster: { olive: { enabled: true, pki: { enabled: false } } } } };
   expectHits("값 파일만 운영 켬(공용 스위치가 꺼져 렌더는 그대로)", checkClusterEnable(real, targets, clusters, OLIVE_CLUSTER_STATE, off, prodValueOn), ["cluster.olive.enabled(지금 true)가 표(false)와 다르다"]);
   expectHits("vm 줄이 없는 표", checkClusterEnable(real, targets, clusters, { prod: OLIVE_CLUSTER_STATE.prod }, off, files), ["클러스터 vm의 줄이 없다"]);
-  expectHits("pki만 켠 표", checkClusterEnable(real, targets, clusters, { ...OLIVE_CLUSTER_STATE, vm: { olive: false, pki: true } }, off, files), ["vm: pki만 켬이다", "cluster.olive.pki.enabled(지금 false)가 표(true)와 다르다", "인증서(pki)가 켬인데"]);
+  expectHits("pki만 켠 표", checkClusterEnable(real, targets, clusters, { ...OLIVE_CLUSTER_STATE, vm: { olive: false, pki: true } }, off, files), ["vm: pki만 켬이다", "cluster.olive.enabled(지금 true)가 표(false)와 다르다", "올리브가 꺼짐인데 root 렌더에 있다"]);
   expectHits("차트 기본값 pki.enabled가 true", checkClusterEnable(real, targets, clusters, OLIVE_CLUSTER_STATE, { pki: { enabled: true } }, files), ["pki.enabled 기본값은 false다"]);
   return bad;
 }
@@ -1226,8 +1239,9 @@ function clusterWiringTests(base: OliveInput): string[] {
       continue;
     }
     for (const c of clusters) {
+      // 켠 클러스터는 양쪽에서 올리브 문서를 뺀다. 지금 root에서 이미 켠 클러스터(표가 켬)는 지금 렌더에도 올리브 문서가 있다.
       const got = ofCluster(r.docs, c).filter((d) => c !== on || !isOlive(d, c)).map(key);
-      const want = ofCluster(real, c).map(key);
+      const want = ofCluster(real, c).filter((d) => c !== on || !isOlive(d, c)).map(key);
       if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(`${tag}: ${c} 렌더가 지금 root와 다르다${c === on ? "(올리브 문서를 뺀 나머지)" : ""}. ${firstDiff(got, want)}`);
     }
     const mine = ofCluster(r.docs, on);
@@ -1640,8 +1654,14 @@ function checkRoleProfile(targets: Target[], charts: Record<string, Doc[]>, depl
 //   3. 렌더(checkTestEnv): 시험 클러스터 밖의 배포 렌더(지금 root와 켠 root)에는 출처·컨테이너와 상관없이 OLIVE_TEST_로 시작하는 env가
 //      없어야 하고(이름 대소문자를 가리지 않는다), olive Application이 시험 값을 넘기지 않아야 한다. 시험 클러스터와 차트 ci 렌더에서는
 //      감독 env가 그 렌더의 값과 맞아야 한다(켬이면 "on" 하나, 끔이면 없음). 대역은 OLIVE_TEST_JOBS가 "on"일 때만이다(아니면 91).
-// 시험 클러스터를 OLIVE_ENVIRONMENT로 가르지 않는다(관리자 결정 대기). 이 목록을 바꾸는 PR은 cluster-check.yaml의 "vm"도 함께 고친다.
+//   4. 대역 이름(D-125): 감독은 OLIVE_ENVIRONMENT가 시험 클러스터 이름(OLIVE_TEST_FRONTDOOR_ENVIRONMENT)과 글자까지 같을 때만 대역을 받는다.
+//      checkTestEnv도 대역을 켠 렌더(값 supervisor.test.frontDoor나 env OLIVE_TEST_FRONTDOOR가 꺼짐이 아님)에서 감독 env OLIVE_ENVIRONMENT가
+//      정확히 그 이름 하나가 아니면 거절한다(감독·차트 CI 이중). 운영 렌더는 3이 시험 env부터 거절한다.
+// 이 목록을 바꾸는 PR은 cluster-check.yaml의 "vm"도 함께 고친다.
 export const OLIVE_TEST_CLUSTERS = ["vm"];
+// ukyi-app/olive src/supervisor/frontdoor/test-double.ts TEST_FRONT_DOOR_ENVIRONMENT와 같아야 한다. 바꾸는 PR은 두 저장소와
+// platform/root/values-vm.yaml cluster.olive.registryEnvironment를 함께 고친다. 어긋나면 감독이 91로 끝난다.
+export const OLIVE_TEST_FRONTDOOR_ENVIRONMENT = "vm";
 const OLIVE_TEST_RULE = "olive-test-values";
 const TEST_KEYS = ["jobs", "frontDoor"] as const;
 type TestKey = (typeof TEST_KEYS)[number];
@@ -1769,8 +1789,16 @@ function checkTestEnv(targets: Target[], charts: Record<string, Doc[]>, deployed
       if (v !== want) push(where, `env ${name}(${show(v)})가 이 렌더의 값 supervisor.test.${k}(${show(values.test[k])})와 맞지 않는다. 켬이면 "on" 하나, 끔이면 env가 없어야 한다(감독은 "on"만 켬으로 읽고 on·off 밖의 값은 91이다)`);
     }
     const fd = got.frontDoor;
-    if (fd !== undefined && fd.trim() !== "" && fd.trim().toLowerCase() !== "off" && got.jobs !== "on") {
+    const fdOn = fd !== undefined && fd.trim() !== "" && fd.trim().toLowerCase() !== "off";
+    if (fdOn && got.jobs !== "on") {
       push(where, `env ${TEST_ENV.frontDoor}(${show(fd)})가 꺼짐이 아닌데 ${TEST_ENV.jobs}가 "on"이 아니다(${show(got.jobs)}). 감독은 운영 값으로 보고 91로 끝난다(D-109)`);
+    }
+    // 대역 이름(D-125). 값과 env 가운데 하나라도 대역을 켜면 본다. env가 둘 이상이거나 valueFrom이면 이름을 확정할 수 없어 거절한다.
+    if (values.test.frontDoor === true || fdOn) {
+      const list = envOf(ctr, "OLIVE_ENVIRONMENT");
+      if (plainOne(list) !== OLIVE_TEST_FRONTDOOR_ENVIRONMENT) {
+        push(where, `시험 현관 대역을 켠 렌더의 env OLIVE_ENVIRONMENT(${envValues(list)})가 시험 클러스터 이름 ${JSON.stringify(OLIVE_TEST_FRONTDOOR_ENVIRONMENT)} 하나가 아니다. 감독은 이 이름과 글자까지 같을 때만 대역을 받는다(D-125, olive TEST_FRONT_DOOR_ENVIRONMENT). VM 값은 platform/root/values-vm.yaml cluster.olive.registryEnvironment다`);
+      }
     }
   }
   return out;
@@ -2788,7 +2816,8 @@ function listedSessionTest(base: OliveInput, fixtures: Fixture[]): string[] {
 
 // olive-test-values의 음성·양성 사례. 값 파일 검사는 합성 값으로 직접 부르고, 렌더 검사는 지금 입력의 문서를 고친 사본에 allChecks를 건다
 // (다른 규칙이 함께 걸리면 그것도 기대에 적는다). root 렌더(cluster-check.yaml)와 차트 렌더(fail·schema)의 멈춤은 helm으로 직접 본다.
-// 마지막으로 vm만 시험 값을 켠 실제 root 렌더에서 배선이 감독 env까지 닿고, 운영 렌더는 지금 켠 root와 문서 하나까지 같은지 본다.
+// 마지막으로 vm 값 파일이 켠 시험 값이 감독 env까지 닿는지, 그 값을 끈 root 렌더와의 차이가 olive Application과 감독 둘뿐이고
+// 운영 렌더는 문서 하나까지 같은지 본다. 렌더 사례의 vm은 값 파일대로 시험 값 둘과 대역 이름(vm)을 켠 상태에서 시작한다.
 function testValueTests(base: OliveInput): string[] {
   const bad: string[] = [];
   const clusters = clusterNames();
@@ -2843,6 +2872,30 @@ function testValueTests(base: OliveInput): string[] {
     s.helm.valuesObject ??= {};
     s.helm.valuesObject.supervisor = { ...(s.helm.valuesObject.supervisor ?? {}), test };
   };
+  const supCtrOf = (d: Doc | undefined) => {
+    const c = podSpec(d?.obj ?? {})?.containers?.[0];
+    if (!c) throw new Error("문서를 찾지 못했다");
+    return c;
+  };
+  const setEnv = (d: Doc | undefined, name: string, value: string) => {
+    const list = envOf(supCtrOf(d), name);
+    if (list.length !== 1) throw new Error(`env ${name}가 ${list.length}개다`);
+    list[0].value = value;
+  };
+  const dropEnv = (d: Doc | undefined, ...names: string[]) => {
+    const c = supCtrOf(d);
+    c.env = (c.env ?? []).filter((e: any) => !names.includes(e?.name));
+  };
+  // 값(olive Application의 supervisor.registry.environment)과 env를 함께 바꾼다. 감독 표(olive-supervisor-env)는 맞고 대역 이름만 다르다.
+  const setEnvironment = (i: OliveInput, value: string) => {
+    const a = appOf(i, "vm");
+    const s = a ? effectiveSources(a.obj.spec).find((x: any) => sameRepo(x?.repoURL) && x?.path === OLIVE_CHART) : undefined;
+    if (!s?.helm?.valuesObject?.supervisor) throw new Error("vm olive Application의 supervisor 값을 찾지 못했다");
+    const sup = s.helm.valuesObject.supervisor;
+    sup.registry = { ...(sup.registry ?? {}), environment: value };
+    setEnv(supOf(i, "vm"), "OLIVE_ENVIRONMENT", value);
+  };
+  const D = "시험 현관 대역을 켠 렌더의 env OLIVE_ENVIRONMENT";
   const otherProdWorkload = (i: OliveInput) => (i.deployed[REAL] ?? []).find((d) => d.obj.kind === "Deployment" && sourceOf(d.origin).cluster === "prod" && sourceOf(d.origin).path !== OLIVE_CHART && (podSpec(d.obj)?.containers ?? []).length > 0);
   const renderCases: [string, (i: OliveInput) => void, [string, string][]][] = [
     ["지금 렌더", () => {}, []],
@@ -2852,24 +2905,38 @@ function testValueTests(base: OliveInput): string[] {
     ["운영 감독에 valueFrom", (i) => addEnv(supOf(i, "prod"), { name: "OLIVE_TEST_JOBS", valueFrom: { configMapKeyRef: { name: "x", key: "y" } } }), [[T, "OLIVE_TEST_JOBS={\"configMapKeyRef\""]]],
     ["운영의 다른 워크로드", (i) => addEnv(otherProdWorkload(i), { name: "OLIVE_TEST_FRONTDOOR", value: "on" }), [[T, "가 prod 렌더에 있다"]]],
     ["운영 olive Application이 시험 값을 넘김", (i) => setTest(appOf(i, "prod"), { jobs: true }), [[T, "olive Application이 prod에 시험 값 supervisor.test.jobs=true"]]],
-    ["vm 값 끔인데 대역 env만", (i) => addEnv(supOf(i, "vm"), { name: "OLIVE_TEST_FRONTDOOR", value: "on" }), [[T, "OLIVE_TEST_FRONTDOOR(\"on\")가 이 렌더의 값"], [T, "91로 끝난다"]]],
-    ["vm 값 켬과 env 켬", (i) => {
-      setTest(appOf(i, "vm"), { jobs: true, frontDoor: true });
-      addEnv(supOf(i, "vm"), { name: "OLIVE_TEST_JOBS", value: "on" });
-      addEnv(supOf(i, "vm"), { name: "OLIVE_TEST_FRONTDOOR", value: "on" });
-    }, []],
-    ["vm 값 켬인데 env 없음", (i) => setTest(appOf(i, "vm"), { jobs: true }), [[T, "OLIVE_TEST_JOBS(없음)가 이 렌더의 값 supervisor.test.jobs(true)"]]],
-    ["vm 값 켬인데 env 값 true", (i) => {
-      setTest(appOf(i, "vm"), { jobs: true });
-      addEnv(supOf(i, "vm"), { name: "OLIVE_TEST_JOBS", value: "true" });
-    }, [[T, "OLIVE_TEST_JOBS(\"true\")가 이 렌더의 값"]]],
-    ["vm 대역 env 둘", (i) => {
-      setTest(appOf(i, "vm"), { jobs: true, frontDoor: true });
-      addEnv(supOf(i, "vm"), { name: "OLIVE_TEST_JOBS", value: "on" });
-      addEnv(supOf(i, "vm"), { name: "OLIVE_TEST_FRONTDOOR", value: "on" });
-      addEnv(supOf(i, "vm"), { name: "OLIVE_TEST_FRONTDOOR", value: "off" });
-    }, [[T, "env OLIVE_TEST_FRONTDOOR가 2번 있다"]]],
+    ["vm 값 끔인데 env 켬", (i) => setTest(appOf(i, "vm"), { jobs: false, frontDoor: false }), [[T, "OLIVE_TEST_JOBS(\"on\")가 이 렌더의 값"], [T, "OLIVE_TEST_FRONTDOOR(\"on\")가 이 렌더의 값"]]],
+    ["vm 대역 env만(jobs env 없음)", (i) => dropEnv(supOf(i, "vm"), "OLIVE_TEST_JOBS"), [[T, "OLIVE_TEST_JOBS(없음)가 이 렌더의 값 supervisor.test.jobs(true)"], [T, "91로 끝난다"]]],
+    ["vm 값 켬인데 env 없음", (i) => dropEnv(supOf(i, "vm"), "OLIVE_TEST_JOBS", "OLIVE_TEST_FRONTDOOR"), [[T, "OLIVE_TEST_JOBS(없음)가 이 렌더의 값 supervisor.test.jobs(true)"], [T, "OLIVE_TEST_FRONTDOOR(없음)가 이 렌더의 값 supervisor.test.frontDoor(true)"]]],
+    ["vm 값 켬인데 env 값 true", (i) => setEnv(supOf(i, "vm"), "OLIVE_TEST_JOBS", "true"), [[T, "OLIVE_TEST_JOBS(\"true\")가 이 렌더의 값"], [T, "91로 끝난다"]]],
+    ["vm 대역 env 둘", (i) => addEnv(supOf(i, "vm"), { name: "OLIVE_TEST_FRONTDOOR", value: "off" }), [[T, "env OLIVE_TEST_FRONTDOOR가 2번 있다"]]],
     ["차트 ci 렌더 감독에 OLIVE_TEST_JOBS=On", (i) => addEnv(supOf(i, undefined), { name: "OLIVE_TEST_JOBS", value: "On" }), [[T, "OLIVE_TEST_JOBS(\"On\")가 이 렌더의 값"]]],
+    // 대역 이름(D-125). 운영 이름과 그 변형, vm의 대소문자·공백·접미 변형, 차트 시험 이름을 값과 env에 함께 넣어 이 규칙 하나만 걸리게 한다.
+    ...["prod", "Prod", "PROD", "prod-vm", "VM", "Vm", " vm", "vm ", "vm-1", "vm.", "ci"].map(
+      (name): [string, (i: OliveInput) => void, [string, string][]] => [`vm 대역 켬인데 이름 ${JSON.stringify(name)}`, (i) => setEnvironment(i, name), [[T, `${D}([${JSON.stringify(name)}])`]]],
+    ),
+    ["vm 대역 켬인데 OLIVE_ENVIRONMENT env 없음", (i) => dropEnv(supOf(i, "vm"), "OLIVE_ENVIRONMENT"), [["olive-supervisor-env", '빠짐 ["OLIVE_ENVIRONMENT"]'], [T, `${D}([])`]]],
+    ["vm 대역 켬인데 OLIVE_ENVIRONMENT env 두 번", (i) => addEnv(supOf(i, "vm"), { name: "OLIVE_ENVIRONMENT", value: "vm" }), [["olive-supervisor-env", "env OLIVE_ENVIRONMENT가 2번 있다"], [T, `${D}(["vm","vm"])`]]],
+    ["vm 대역 켬인데 OLIVE_ENVIRONMENT valueFrom", (i) => {
+      dropEnv(supOf(i, "vm"), "OLIVE_ENVIRONMENT");
+      addEnv(supOf(i, "vm"), { name: "OLIVE_ENVIRONMENT", valueFrom: { configMapKeyRef: { name: "x", key: "y" } } });
+    }, [["olive-supervisor-env", "OLIVE_ENVIRONMENT"], [T, D]]],
+    // 값은 끔이어도 env가 대역을 켜면 이름을 본다.
+    ["vm 값 끔, env 대역 켬, 이름 prod", (i) => {
+      setTest(appOf(i, "vm"), { jobs: false, frontDoor: false });
+      setEnvironment(i, "prod");
+    }, [[T, "OLIVE_TEST_JOBS(\"on\")가 이 렌더의 값"], [T, "OLIVE_TEST_FRONTDOOR(\"on\")가 이 렌더의 값"], [T, `${D}(["prod"])`]]],
+    // 대역을 끄고 시험 작업만 켠 렌더는 이름을 보지 않는다(감독도 대역을 켤 때만 이름을 본다).
+    ["vm jobs만 켬이면 이름 prod도 지나감", (i) => {
+      setTest(appOf(i, "vm"), { jobs: true, frontDoor: false });
+      dropEnv(supOf(i, "vm"), "OLIVE_TEST_FRONTDOOR");
+      setEnvironment(i, "prod");
+    }, []],
+    // 차트 ci 렌더(이름 ci)에서 대역 env를 켜면 값과 다르다는 것과 함께 이름도 걸린다.
+    ["차트 ci 렌더 감독에 대역 env 둘(이름 ci)", (i) => {
+      addEnv(supOf(i, undefined), { name: "OLIVE_TEST_JOBS", value: "on" });
+      addEnv(supOf(i, undefined), { name: "OLIVE_TEST_FRONTDOOR", value: "on" });
+    }, [[T, "OLIVE_TEST_JOBS(\"on\")가 이 렌더의 값"], [T, "OLIVE_TEST_FRONTDOOR(\"on\")가 이 렌더의 값"], [T, `${D}(["ci"])`]]],
   ];
   for (const [name, mutate, want] of renderCases) {
     const input = structuredClone(flat);
@@ -2890,7 +2957,7 @@ function testValueTests(base: OliveInput): string[] {
     ["운영 jobs on(따옴표 없음)", "root-prod", "platform/root", ["platform/root/values-prod.yaml"], "cluster:\n  olive:\n    test:\n      jobs: on\n"],
     ["운영 jobs 문자열 ON", "root-prod", "platform/root", ["platform/root/values-prod.yaml"], 'cluster:\n  olive:\n    test:\n      jobs: "ON"\n'],
     ["vm jobs 문자열 on", "root-vm", "platform/root", ["platform/root/values-vm.yaml"], 'cluster:\n  olive:\n    test:\n      jobs: "on"\n'],
-    ["vm 대역만", "root-vm", "platform/root", ["platform/root/values-vm.yaml"], "cluster:\n  olive:\n    test:\n      frontDoor: true\n"],
+    ["vm 대역만", "root-vm", "platform/root", ["platform/root/values-vm.yaml"], "cluster:\n  olive:\n    test:\n      jobs: false\n      frontDoor: true\n"],
     ["vm 키 변형", "root-vm", "platform/root", ["platform/root/values-vm.yaml"], "cluster:\n  olive:\n    test:\n      FrontDoor: true\n"],
     ["차트 대역만", "olive", OLIVE_CHART, [`${OLIVE_CHART}/ci/enabled.yaml`], "supervisor:\n  test:\n    frontDoor: true\n"],
     ["차트 jobs 문자열 on", "olive", OLIVE_CHART, [`${OLIVE_CHART}/ci/enabled.yaml`], 'supervisor:\n  test:\n    jobs: "on"\n'],
@@ -2912,26 +2979,32 @@ function testValueTests(base: OliveInput): string[] {
     if (r.ok || !r.out.includes(helmWant[name])) bad.push(`helm: ${name}: 렌더가 ${helmWant[name]}로 멈추지 않았다: ${r.ok ? "렌더됨" : r.out.trim().slice(0, 300)}`);
   }
 
-  // vm만 시험 값을 켠 켠 root 렌더(배선 양성 사례).
+  // 배선 양성 사례. 지금 켠 root의 vm 감독은 값 파일대로 시험 env 둘이 "on"이고 대역 이름이 vm이다. vm만 시험 값을 끈 켠 root 렌더와의
+  // 차이는 olive Application과 감독 Deployment 둘뿐이고(시험 값이 그 둘에만 닿는다), 운영 렌더는 문서 하나까지 같다.
+  const forced = base.deployed[FORCED] ?? [];
+  const supNow = forced.find((d) => isSup(d) && sourceOf(d.origin).cluster === "vm");
+  const envNow = (podSpec(supNow?.obj ?? {})?.containers?.[0]?.env ?? []).filter((e: any) => [...TEST_ENV_NAMES, "OLIVE_ENVIRONMENT"].includes(e?.name));
+  const envWant = [{ name: "OLIVE_ENVIRONMENT", value: OLIVE_TEST_FRONTDOOR_ENVIRONMENT }, { name: "OLIVE_TEST_JOBS", value: "on" }, { name: "OLIVE_TEST_FRONTDOOR", value: "on" }];
+  const byName = (l: any[]) => [...l].sort((a, b) => String(a?.name).localeCompare(String(b?.name)));
+  if (!same(byName(envNow), byName(envWant))) bad.push(`지금 켠 root의 vm 감독 env가 시험 값 둘 "on"과 대역 이름 ${OLIVE_TEST_FRONTDOOR_ENVIRONMENT}가 아니다: ${show(envNow)}`);
   const opts = forcedOptions(declaringCharts(base.targets));
-  const r = renderAll({ ...opts, clusterOverlay: { vm: { cluster: { olive: { test: { jobs: true, frontDoor: true } } } } } });
+  const r = renderAll({ ...opts, clusterOverlay: { vm: { cluster: { olive: { test: { jobs: false, frontDoor: false } } } } } });
   if (r.violations.length > 0) {
-    bad.push(`vm 시험 값 렌더가 실패했다: ${r.violations.map(fmt).join("; ")}`);
+    bad.push(`vm 시험 값을 끈 렌더가 실패했다: ${r.violations.map(fmt).join("; ")}`);
     return bad;
   }
   const key = (d: Doc) => JSON.stringify(sortKeys({ origin: d.origin, ns: d.ns ?? null, obj: d.obj }));
   const ofCluster = (docs: Doc[], c: string) => docs.filter((d) => sourceOf(d.origin).cluster === c).map(key);
-  const forced = base.deployed[FORCED] ?? [];
-  if (JSON.stringify(ofCluster(r.docs, "prod")) !== JSON.stringify(ofCluster(forced, "prod"))) bad.push("vm 시험 값 렌더: 운영 렌더가 지금 켠 root와 다르다(vm 값이 운영에 번졌다)");
+  if (JSON.stringify(ofCluster(r.docs, "prod")) !== JSON.stringify(ofCluster(forced, "prod"))) bad.push("vm 시험 값을 끈 렌더: 운영 렌더가 지금 켠 root와 다르다(vm 값이 운영에 번졌다)");
   const vmGot = ofCluster(r.docs, "vm");
   const vmWant = new Set(ofCluster(forced, "vm"));
   const changed = r.docs.filter((d) => sourceOf(d.origin).cluster === "vm" && !vmWant.has(key(d))).map((d) => `${d.obj.kind}/${d.obj.metadata?.name}`).sort();
-  if (vmGot.length !== vmWant.size || !same(changed, ["Application/olive", "Deployment/supervisor"])) bad.push(`vm 시험 값 렌더: 바뀐 문서가 olive Application과 감독 Deployment 둘이 아니다: ${show(changed)}`);
+  if (vmGot.length !== vmWant.size || !same(changed, ["Application/olive", "Deployment/supervisor"])) bad.push(`vm 시험 값을 끈 렌더: 바뀐 문서가 olive Application과 감독 Deployment 둘이 아니다: ${show(changed)}`);
   const sup = r.docs.find((d) => isSup(d) && sourceOf(d.origin).cluster === "vm");
-  const env = (podSpec(sup?.obj ?? {})?.containers?.[0]?.env ?? []).filter((e: any) => TEST_ENV_NAMES.includes(e?.name));
-  if (!same(env, [{ name: "OLIVE_TEST_JOBS", value: "on" }, { name: "OLIVE_TEST_FRONTDOOR", value: "on" }])) bad.push(`vm 시험 값 렌더: 감독 env가 둘 다 "on"이 아니다: ${show(env)}`);
+  const env = (podSpec(sup?.obj ?? {})?.containers?.[0]?.env ?? []).filter((e: any) => TEST_ENV_LIKE.test(String(e?.name ?? "")));
+  if (env.length > 0) bad.push(`vm 시험 값을 끈 렌더: 감독에 시험 env가 남았다: ${show(env)}`);
   const hits = [...checkTestEnv(targets, {}, { [FORCED]: r.docs }, renderedKeySwitch(r.docs)), ...checkSupervisorEnv(targets, {}, { [FORCED]: r.docs }, renderedKeySwitch(r.docs))];
-  if (hits.length > 0) bad.push(`vm 시험 값 렌더가 검사에 걸렸다: ${hits.map(fmt).join("; ")}`);
+  if (hits.length > 0) bad.push(`vm 시험 값을 끈 렌더가 검사에 걸렸다: ${hits.map(fmt).join("; ")}`);
   return bad;
 }
 
@@ -2999,7 +3072,16 @@ function roleProfileTests(base: OliveInput): string[] {
     ["계정 별칭 env가 다른 이름", (i) => setEnv(supCtr(i), "OLIVE_ACCOUNT_NAME", "other-account"), [[E, 'env OLIVE_ACCOUNT_NAME("other-account")이 표의 값 "ci-account"과 다르다']]],
     ["계정 판 env 없음(값은 있음)", (i) => dropEnv(supCtr(i), "OLIVE_ACCOUNT_REVISION"), [[E, '빠짐 ["OLIVE_ACCOUNT_REVISION"], 표 밖 []']]],
     ["계정 판 env가 다른 값", (i) => setEnv(supCtr(i), "OLIVE_ACCOUNT_REVISION", "acct-other"), [[E, 'env OLIVE_ACCOUNT_REVISION("acct-other")이 표의 값 "ci-account-rev"과 다르다']]],
-    ["판 값이 빈 운영 켠 root 렌더에 판 env", (i) => { podSpec(forcedDoc(i, "prod", "olive-control", "supervisor")!.obj).containers[0].env.push({ name: "OLIVE_ACCOUNT_REVISION", value: "acct-1" }); }, [[E, '표 밖 ["OLIVE_ACCOUNT_REVISION"]']]],
+    // 운영 olive Application의 판 값을 빈 값으로 덮고 판 env를 하나만 둔다. values.yaml의 판 값이 비었는지와 상관없이 같은 모양이 된다.
+    ["판 값이 빈 운영 켠 root 렌더에 판 env", (i) => {
+      const app = argoApps(i.deployed[FORCED] ?? []).find((a) => sourceOf(a.origin).cluster === "prod" && effectiveSources(a.obj.spec).some((s: any) => sameRepo(s?.repoURL) && s?.path === OLIVE_CHART));
+      const src = app ? effectiveSources(app.obj.spec).find((s: any) => sameRepo(s?.repoURL) && s?.path === OLIVE_CHART) : undefined;
+      if (!src) throw new Error("운영 olive Application을 찾지 못했다");
+      setPath(src, "helm.valuesObject.supervisor.account.revision", "");
+      const c = podSpec(forcedDoc(i, "prod", "olive-control", "supervisor")!.obj).containers[0];
+      dropEnv(c, "OLIVE_ACCOUNT_REVISION");
+      c.env.push({ name: "OLIVE_ACCOUNT_REVISION", value: "acct-1" });
+    }, [[E, '표 밖 ["OLIVE_ACCOUNT_REVISION"]']]],
   ];
   for (const [name, mutate, want] of cases) {
     const input = structuredClone(flat);

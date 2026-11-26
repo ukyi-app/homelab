@@ -11,6 +11,8 @@ pki.enabled는 true일 때만 넘긴다(bot-slot의 r08과 같다). 차트 기�
 고정 프로그램(D-118)이고 운영은 모델 CLI가 든 이미지라 한 값을 함께 쓸 수 없다. 비지 않을 때만 넘기고, 비면 차트 렌더가 required로 멈춘다.
 시험 값 둘(cluster.olive.test.jobs·frontDoor → supervisor.test, D-98·D-101·D-109)도 true일 때만 넘긴다. 시험 클러스터(vm)만 켤 수 있고
 운영에서 켜면 templates/cluster-check.yaml이 렌더를 멈춘다. 차트 기본값이 false라 넘기지 않으면 꺼짐이다(tools/ci/olive.ts가 본다).
+등록표 environment(cluster.olive.registryEnvironment → supervisor.registry.environment, 감독 env OLIVE_ENVIRONMENT)도 클러스터 이름이라
+클러스터마다 넘긴다. 비면 넘기지 않고 차트 렌더가 required로 멈춘다. 시험 현관 대역의 이름 대조(D-125)는 tools/ci/olive.ts olive-test-values가 본다.
 
 wave 1(맨 뒤, 봇 자리·go와 같다): 올리브에 기대는 구성 요소가 없다. root sync는 마지막 wave의 health를 기다리지 않으므로
 올리브의 Degraded(Infisical 키 누락, 이미지 문제)가 플랫폼·앱 wave를 막지 않는다(설계 C.3.1). 앞에 두면 그 실패로 root가
@@ -58,8 +60,12 @@ spec:
         roleProfiles:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        {{- if or $olive.supervisorSigningPublicKeyPem $test.jobs $test.frontDoor }}
+        {{- if or $olive.supervisorSigningPublicKeyPem $olive.registryEnvironment $test.jobs $test.frontDoor }}
         supervisor:
+          {{- with $olive.registryEnvironment }}
+          registry:
+            environment: {{ . | quote }}
+          {{- end }}
           {{- with $olive.supervisorSigningPublicKeyPem }}
           signingKey:
             publicKeyPem: {{ . | quote }}
