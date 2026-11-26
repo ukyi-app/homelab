@@ -1,0 +1,11 @@
+# expect: fail
+# rule: olive-executor-split
+# match: OLIVE_POD_UID([{"fieldRef":{"fieldPath":"metadata.name"}}])가 표의 {"fieldRef":{"fieldPath":"metadata.uid"}} 하나가 아니다
+# 진단 실행기의 파드 UID를 파드 이름으로 바꿨다. UUID가 아니라 그 env를 읽는 olive digest는 81로 끝난다(D-155에서 고른 출처는 UID다).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-diagnosis, name: executor}
+    edit:
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_POD_UID}
+        set: {valueFrom.fieldRef.fieldPath: metadata.name}

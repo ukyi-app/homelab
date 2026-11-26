@@ -264,12 +264,14 @@ function checkExecutorStore(targets: Target[], charts: Record<string, Doc[]>, de
 //                                                                     effect-signing /run/olive/effect-signing, profile /run/olive/profile,
 //                                                                     olive-generation /opt/olive-generation 읽기 전용.
 //                                                                     tls(값 경로)·trust /run/olive/trust는 있으면 읽기 전용.
-//                                                                     env는 아래 여섯만 본다(나머지 이름은 olive-executor-store 등):
+//                                                                     env는 아래 일곱만 본다(나머지 이름은 olive-executor-store 등):
 //                                                                       OLIVE_ROLE = targets.yaml role, OLIVE_AGENT_SOCKET,
 //                                                                       OLIVE_INSTANCE = 대상 id(templates/_helpers.tpl olive.instance),
 //                                                                       OLIVE_POLICY_REVISION = 계약 v1 revision 꼴이고 같은 렌더의 감독 값과 같다(D-108),
 //                                                                       OLIVE_SIGNING_KEY_FILE = /run/olive/effect-signing/EFFECT_SIGNING_KEY,
-//                                                                       OLIVE_PROFILE_FILE = /run/olive/profile/profile.json(내용은 olive-role-profile)
+//                                                                       OLIVE_PROFILE_FILE = /run/olive/profile/profile.json(내용은 olive-role-profile),
+//                                                                       OLIVE_POD_UID = valueFrom.fieldRef.fieldPath metadata.uid 그대로(D-155.
+//                                                                       role·init에 넣으면 아래 "비밀"의 valueFrom 규칙이 거절한다)
 //       role        10002:10002  ["/opt/olive-agent/olive-agent"]     agent-bin /opt/olive-agent, agent-link /run/olive/agent 읽기 전용,
 //                                (대리가 PID 1, D-102)                 role-tmp /tmp 쓰기. env는 정확히 OLIVE_AGENT_SOCKET과 빈 BUN_OPTIONS·
 //                                                                     BUN_BE_BUN·LD_PRELOAD(대리 안의 Bun·로더가 이미지 ENV를 대리 코드보다
@@ -319,6 +321,8 @@ const PROFILE_CONFIGMAP = "olive-role-profile";
 const PROFILE_KEY = "profile.json";
 const PROFILE_FILE = `${PROFILE_DIR}/${PROFILE_KEY}`;
 const PROFILE_ANNOTATION = "checksum/role-profile";
+// 파드 UID env(D-155). 실행기는 정리 의도에 적은 UID와 지금 UID가 다르면 파드가 바뀌었다고 본다. 값 항목이나 다른 칸이면 교체를 가르지 못한다.
+const POD_UID_ENV = { name: "OLIVE_POD_UID", valueFrom: { fieldRef: { fieldPath: "metadata.uid" } } };
 // 계약 v1 revision 꼴(ukyi-app/olive src/executor/runtime.ts REVISION). 감독·실행기 진입점은 이 꼴이 아니면 81로 끝난다.
 const POLICY_REVISION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const INIT_CONTAINER = "olive-init";
@@ -661,6 +665,8 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: str
   if (plainOne(keyFile) !== EFFECT_KEY_FILE) push(cw(exec), `OLIVE_SIGNING_KEY_FILE(${envValues(keyFile)})이 표의 ${EFFECT_KEY_FILE}(effect-signing 마운트 ${EFFECT_KEY_DIR} 안의 키 파일) 하나가 아니다`);
   const profileFile = envOf(exec, "OLIVE_PROFILE_FILE");
   if (plainOne(profileFile) !== PROFILE_FILE) push(cw(exec), `OLIVE_PROFILE_FILE(${envValues(profileFile)})이 표의 ${PROFILE_FILE}(profile 마운트 ${PROFILE_DIR} 안의 역할 프로필) 하나가 아니다(없으면 실행기가 81, 그 파일이 없으면 82로 끝난다)`);
+  const podUid = envOf(exec, POD_UID_ENV.name);
+  if (!(podUid.length === 1 && same(podUid[0], POD_UID_ENV))) push(cw(exec), `OLIVE_POD_UID(${show(podUid.map((x: any) => x?.valueFrom ?? x?.value))})가 표의 ${show(POD_UID_ENV.valueFrom)} 하나가 아니다(실행기는 이 파드의 UID로 파드 교체를 가른다, D-155. 그 env를 읽는 olive digest는 없거나 소문자 UUID가 아니면 81로 끝난다)`);
   for (const k of ["livenessProbe", "readinessProbe", "startupProbe", "lifecycle", "ports"]) {
     if (role[k] !== undefined) push(cw(role), `역할 컨테이너에 ${k}를 두지 않는다(D-74: kubelet이 그 안에서 명령을 돌리지 않게)`);
   }
