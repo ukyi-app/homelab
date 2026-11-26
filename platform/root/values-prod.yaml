@@ -75,6 +75,9 @@ cluster:
   # 공개 값 둘(비면 넘기지 않는다): 발급 기관과 지시 서명 키가 클러스터마다 따로 만들어져 공용 값 파일에 두면 다른 클러스터의
   # 신뢰 기준까지 바뀐다. trustBundlePem: 이 클러스터 발급 기관의 인증서(PEM). supervisorSigningPublicKeyPem: 이 클러스터 감독의
   # 지시 서명 공개 키(PEM). 넣기 전에 볼 조건은 docs/runbooks-public/rotate.md 3i다.
+  # test: 시험 클러스터 전용 감독 길 둘(platform/olive/values.yaml supervisor.test, D-98·D-101·D-109). jobs는 시험 작업 넣기,
+  #   frontDoor는 시험 현관 대역이다. 운영은 늘 false다. 켤 수 있는 클러스터는 vm뿐이고, 운영에서 켜면 root 렌더
+  #   (templates/cluster-check.yaml)와 CI(tools/ci/olive.ts olive-test-values)가 거절한다. 키는 jobs·frontDoor 둘이고 따옴표 없는 true·false만 받는다.
   olive:
     enabled: false
     pki:
@@ -83,6 +86,9 @@ cluster:
       activeGeneration: 1
     trustBundlePem: ""
     supervisorSigningPublicKeyPem: ""
+    test:
+      jobs: false
+      frontDoor: false
 
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈추는 값(values-vm.yaml의 같은 블록에 쓰는 법).
   # 운영은 비워 둔다. 빈 값이면 root가 ApplicationSet에 넘기지 않아 렌더가 이 블록이 없을 때와 같다.

@@ -37,6 +37,30 @@
 {{- if not (kindIs "bool" $pkiOn) }}
 {{- fail (printf "cluster.olive.pki.enabled는 true 또는 false다(지금 %v, %s). 따옴표를 붙이면 문자열 \"false\"도 켬으로 읽힌다" $pkiOn (kindOf $pkiOn)) }}
 {{- end }}
+{{- /* 올리브 시험 값(D-98·D-101·D-109). templates/olive.yaml이 참·거짓으로만 읽어 문자열 "false"·"off"도 켬이 된다. 그래서 키 둘의 bool만 받는다.
+켜면 감독이 시험 작업을 받고 현관 대신 대역의 정지 아님 기록을 장부에 쓴다. 시험 클러스터(vm)에서만 켠다. 운영 장부에 그 기록이 남으면
+실제 현관으로 되돌릴 수 없다. 대역(frontDoor)은 jobs와 함께만 켠다(감독이 91로 끝난다). 같은 규칙을 tools/ci/olive.ts olive-test-values가
+값 파일에서 따로 본다. */}}
+{{- $oliveTest := dig "olive" "test" (dict) $cluster }}
+{{- if not (kindIs "map" $oliveTest) }}
+{{- fail (printf "cluster.olive.test는 jobs·frontDoor를 가진 맵이다(지금 %v, %s)" $oliveTest (kindOf $oliveTest)) }}
+{{- end }}
+{{- range $k, $v := $oliveTest }}
+{{- if not (has $k (list "jobs" "frontDoor")) }}
+{{- fail (printf "cluster.olive.test.%s는 없는 키다. 키는 jobs·frontDoor 둘뿐이다(대소문자 그대로)" $k) }}
+{{- end }}
+{{- if not (kindIs "bool" $v) }}
+{{- fail (printf "cluster.olive.test.%s는 true 또는 false다(지금 %v, %s). 따옴표를 붙이면 문자열 \"false\"도 켬으로 읽힌다" $k $v (kindOf $v)) }}
+{{- end }}
+{{- end }}
+{{- $testJobs := dig "olive" "test" "jobs" false $cluster }}
+{{- $testFrontDoor := dig "olive" "test" "frontDoor" false $cluster }}
+{{- if and (or $testJobs $testFrontDoor) (ne $name "vm") }}
+{{- fail (printf "cluster.olive.test(jobs %v, frontDoor %v)는 시험 클러스터 vm에서만 켠다(지금 %s). 운영 장부에 시험 작업과 대역의 기록을 남기지 않는다" $testJobs $testFrontDoor $name) }}
+{{- end }}
+{{- if and $testFrontDoor (not $testJobs) }}
+{{- fail "cluster.olive.test.frontDoor는 jobs와 함께만 켠다. 감독은 jobs가 on이 아닌데 대역이 on이면 운영 값으로 보고 91로 끝난다" }}
+{{- end }}
 {{- if ne $name "prod" }}
 {{- /* 사용자 승인(2026-11-06)이 운영뿐이다. 봇 env는 클러스터 공용이라 VM 경로를 열면 서명 환경 값도 운영(prod)과 같다. */}}
 {{- if $r08 }}

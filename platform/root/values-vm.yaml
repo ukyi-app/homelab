@@ -49,6 +49,8 @@ cluster:
   # 올리브(values-prod.yaml 주석, D-116). VM이 먼저 켜고 인증서를 처음 발급하는 클러스터다. 켜는 것은 이 파일의 뒤 PR이고
   # 그 PR이 tools/ci/olive.ts OLIVE_CLUSTER_STATE의 vm 줄도 함께 고친다. 세대 번호는 운영과 따로 센다.
   # 공개 값 둘은 VM 발급 기관과 VM 감독 키에서 읽은 값만 넣는다. 운영 값을 옮겨 적지 않는다.
+  # test(values-prod.yaml 주석): 시험 값을 켤 수 있는 유일한 클러스터다. 켜는 것은 VM 켜기 PR이다. frontDoor는 jobs와 함께만 켠다
+  #   (jobs 없이 켜면 감독이 91로 끝나 root 렌더가 먼저 멈춘다). 함정: 대역을 켠 장부를 나중에 실제 현관과 쓰지 않는다.
   olive:
     enabled: false
     pki:
@@ -57,6 +59,9 @@ cluster:
       activeGeneration: 1
     trustBundlePem: ""
     supervisorSigningPublicKeyPem: ""
+    test:
+      jobs: false
+      frontDoor: false
 
   # 복구 동안 이 클러스터에서만 앱과 영속 Valkey를 멈춘다(restore.md 3절, 설계 C.6.4). 평소에는 빈 값이다.
   # apps/·data/의 values는 운영과 VM이 함께 읽어, VM 복구 PR이 거기에 suspended·running을 적으면 운영 앱도 멈춘다.
