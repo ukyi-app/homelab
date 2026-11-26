@@ -2,6 +2,8 @@
 감독(D-37, supervisor.md §1.1·§8). 모델이 아닌 프로세스이고 hc·Kubernetes 자격이 없다. 장부(SQLite)를 혼자 쓴다.
 env 이름·꼴·파일 이름은 ukyi-app/olive의 감독 진입점(src/main/supervisor.ts, README "감독 진입점 › 환경")이 정한다. 진입점은 열한 개가
 모두 있고 비지 않아야 뜬다(없거나 틀리면 91). env·마운트·볼륨과 감독 ns의 ExternalSecret은 CI(tools/ci/olive.ts olive-supervisor-env)가 정확한 표와 대조한다.
+배정 값 셋(OLIVE_ACCOUNT_NAME·OLIVE_ACCOUNT_REVISION·OLIVE_PROFILE_REVISIONS)은 없어도 뜨지만 그때 배정이 보류되고, 꼴이 틀리면 91이다.
+기대 프로필 revision과 실행기 역할 프로필의 대조는 olive-role-profile이 본다.
 시험 값 둘(OLIVE_TEST_JOBS·OLIVE_TEST_FRONTDOOR)은 켤 때만 렌더하고 olive-test-values가 본다. 관리 소켓의 조건은 olive-supervisor-admin이 본다.
 */}}
 {{- $t := include "olive.supervisorTarget" . | fromYaml }}
@@ -90,6 +92,17 @@ spec:
             # 따로 붙인다: kubelet이 없으면 만들고, 마운트 자리라 링크가 아니며, 상위(/var/lib)는 이미지의 폴더다.
             - name: OLIVE_RESULT_DIR
               value: {{ $resultDir }}
+            # 고정 계정의 별칭(D-126). 아래 account 마운트와 같은 값이라 배정이 고른 계정의 자격 파일이 그 폴더에 있다.
+            - name: OLIVE_ACCOUNT_NAME
+              value: {{ $account | quote }}
+            {{- /* 계정 자격의 판(D-111). 비면 렌더하지 않는다. 감독은 없음과 빈 값을 같은 "판 모름"으로 읽는다(자격 참조를 만들지 않아 새 실행 0). */}}
+            {{- with .Values.supervisor.account.revision }}
+            - name: OLIVE_ACCOUNT_REVISION
+              value: {{ . | quote }}
+            {{- end }}
+            # 역할별 기대 프로필 revision(JSON 객체). 실행기 파드가 받는 역할 프로필과 같은 helper에서 만든다(templates/_helpers.tpl).
+            - name: OLIVE_PROFILE_REVISIONS
+              value: {{ include "olive.profileRevisionsJson" . | quote }}
             {{- /* 시험 값(values.yaml supervisor.test). 감독은 "on"만 켬으로 읽고 on·off 밖의 값은 91이라 값은 늘 "on"이다. */}}
             {{- if $test.jobs }}
             - name: OLIVE_TEST_JOBS

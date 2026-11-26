@@ -108,6 +108,35 @@ ImagePullBackOff로 Degraded가 되므로 렌더에서 막는다(모양은 value
 {{- end }}
 
 {{/*
+작업자 실행기의 역할 프로필 JSON(ukyi-app/olive src/executor/runtime.ts parseProfile). 받는 값: root, role(v1 역할 이름).
+칸은 정확히 일곱(argv·credentialEnv·cwd·env·program·revision·role)이고 role은 키에서 채운다. 실행기는 칸이 하나라도 빠지거나 더 있으면
+82로 끝난다. 비어서는 안 되는 칸이 비면 렌더를 멈춘다. toJson은 키를 정렬한다. ConfigMap 내용과 파드의 지문이 이 결과 하나에서 나온다.
+*/}}
+{{- define "olive.roleProfile" -}}
+{{- $p := index .root.Values.roleProfiles .role | default dict -}}
+{{- $out := dict "role" .role "argv" ($p.argv | default list) "env" ($p.env | default dict) -}}
+{{- range $k := list "revision" "program" "cwd" "credentialEnv" -}}
+{{- $_ := set $out $k (required (printf "roleProfiles.%s.%s is required (role profile for role %s; keep components.olive off until then)" $.role $k $.role) (get $p $k)) -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end }}
+
+{{/*
+감독 env OLIVE_PROFILE_REVISIONS(역할 → 기대 프로필 revision의 JSON 객체). 받는 값: root. 실행기 대상의 role마다 칸 하나이고 값은 그 실행기가
+받는 프로필(olive.roleProfile)의 revision이다. 같은 helper에서 읽어 두 쪽이 따로 정해지지 않는다. 같은 역할의 실행기가 둘이면 칸은 하나다.
+*/}}
+{{- define "olive.profileRevisionsJson" -}}
+{{- $out := dict -}}
+{{- range (include "olive.targets" . | fromYaml).items -}}
+{{- if eq .kind "executor" -}}
+{{- $p := include "olive.roleProfile" (dict "root" $ "role" .role) | fromJson -}}
+{{- $_ := set $out .role $p.revision -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end }}
+
+{{/*
 수량을 더하려고 같은 단위로 바꾼다. 받는 값: 수량 문자열. CPU는 밀리코어, 메모리는 MiB 정수.
 values.schema.json이 실행기 limits를 이 꼴(CPU 정수 또는 m, 메모리 Mi·Gi)로만 받는다. 다른 꼴은 sprig int가 0으로 바꿔 합이 조용히 틀린다.
 */}}
@@ -233,12 +262,12 @@ olive-tls
 실행기 TLS 마운트 경로 확인. 받는 값: id, path(executors.<id>.tls.mountPath), store(executors.<id>.store.mountPath),
 trust(olive.trustEnabled 결과).
 pki를 끄고 Secret을 직접 줄 때 스키마는 /run/ 아래 아무 경로나 받는다. 제어 컨테이너의 다른 마운트(/tmp, 소켓 폴더, 신뢰 묶음,
-저장소, 효과 서명 키)나 대리 폴더와 같으면 PodTemplate이 유효하지 않고, 한쪽이 다른 쪽 안이면 한쪽 파일이 가려지거나 읽기 전용 볼륨 안에
+저장소, 효과 서명 키, 역할 프로필)나 대리 폴더와 같으면 PodTemplate이 유효하지 않고, 한쪽이 다른 쪽 안이면 한쪽 파일이 가려지거나 읽기 전용 볼륨 안에
 마운트 지점을 만들지 못해 컨테이너가 뜨지 않는다.
 */}}
 {{- define "olive.executorTlsPath" -}}
 {{- $p := clean .path -}}
-{{- $mounts := list "/tmp" "/run/olive/agent" "/opt/olive-agent" (clean .store) (include "olive.effectKey.dir" .) -}}
+{{- $mounts := list "/tmp" "/run/olive/agent" "/opt/olive-agent" "/run/olive/profile" (clean .store) (include "olive.effectKey.dir" .) -}}
 {{- /* 신뢰 묶음 마운트는 trust가 켜졌을 때만 생긴다. 없는 마운트와 견주면 겹치지 않는 기존 값까지 막는다. */ -}}
 {{- if .trust -}}
 {{- $mounts = append $mounts "/run/olive/trust" -}}

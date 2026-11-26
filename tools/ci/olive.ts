@@ -4,6 +4,7 @@
 // 구성 요소를 root에서 꺼 둬도 돈다. 차트의 ci/*.yaml 렌더, 지금 root와 대상 차트를 켠 root의 실제 Application 값 렌더,
 // 호스트가 설치하는 매니페스트(host/k3s-manifests)를 함께 본다.
 // CLI의 올리브 명령은 아직 없다. 생기면 대상을 이 파일에서 읽어야 하고, 손으로 적은 목록을 두면 이 검사가 그 목록을 보지 못한다.
+import { createHash } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, posix, relative } from "node:path";
 import { type Doc, type Violation, ROOT, effectiveSources, fmt, gitFiles, parseAll, readText, sameRepo, tempDir } from "./lib";
@@ -260,14 +261,15 @@ function checkExecutorStore(targets: Target[], charts: Record<string, Doc[]>, de
 //       olive-init  65532:65532  ["bun", "src/main/agent-install.ts"]  agent-bin /opt/olive-agent, olive-generation /opt/olive-generation 쓰기.
 //                                                                     env 없음
 //       executor    65532:65532  ["bun", "src/main/executor.ts"]       tmp /tmp, agent-link /run/olive/agent, store(값 경로) 쓰기.
-//                                                                     effect-signing /run/olive/effect-signing,
+//                                                                     effect-signing /run/olive/effect-signing, profile /run/olive/profile,
 //                                                                     olive-generation /opt/olive-generation 읽기 전용.
 //                                                                     tls(값 경로)·trust /run/olive/trust는 있으면 읽기 전용.
-//                                                                     env는 아래 다섯만 본다(나머지 이름은 olive-executor-store 등):
+//                                                                     env는 아래 여섯만 본다(나머지 이름은 olive-executor-store 등):
 //                                                                       OLIVE_ROLE = targets.yaml role, OLIVE_AGENT_SOCKET,
 //                                                                       OLIVE_INSTANCE = 대상 id(templates/_helpers.tpl olive.instance),
 //                                                                       OLIVE_POLICY_REVISION = 계약 v1 revision 꼴이고 같은 렌더의 감독 값과 같다(D-108),
-//                                                                       OLIVE_SIGNING_KEY_FILE = /run/olive/effect-signing/EFFECT_SIGNING_KEY
+//                                                                       OLIVE_SIGNING_KEY_FILE = /run/olive/effect-signing/EFFECT_SIGNING_KEY,
+//                                                                       OLIVE_PROFILE_FILE = /run/olive/profile/profile.json(내용은 olive-role-profile)
 //       role        10002:10002  ["/opt/olive-agent/olive-agent"]     agent-bin /opt/olive-agent, agent-link /run/olive/agent 읽기 전용,
 //                                (대리가 PID 1, D-102)                 role-tmp /tmp 쓰기. env는 정확히 OLIVE_AGENT_SOCKET과 빈 BUN_OPTIONS·
 //                                                                     BUN_BE_BUN·LD_PRELOAD(대리 안의 Bun·로더가 이미지 ENV를 대리 코드보다
@@ -276,8 +278,8 @@ function checkExecutorStore(targets: Target[], charts: Record<string, Doc[]>, de
 //     소켓은 /run/olive/agent/agent.sock 하나다. 두 컨테이너가 같은 폴더 전체를 붙이고 그 바로 아래 같은 파일 이름이어야 같은 파일이다.
 //   볼륨(SPLIT_VOLUMES): agent-bin 디스크 256Mi, agent-link 메모리 1Mi, olive-generation 메모리 1Mi, role-tmp 디스크 512Mi, tmp 디스크 64Mi, store PVC
 //     (olive-executor-store가 본다), effect-signing Secret olive-effect-signing-key의 키 EFFECT_SIGNING_KEY 하나(복구 스위치와
-//     상관없이 늘 있다. 끄면 Secret을 손으로 만든다). tls Secret·trust ConfigMap(있으면)과 effect-signing은 파일마다 유효 모드 0444
-//     (fsGroup 없이 65532가 읽는다).
+//     상관없이 늘 있다. 끄면 Secret을 손으로 만든다), profile ConfigMap olive-role-profile의 키 profile.json 하나. tls Secret·trust
+//     ConfigMap(있으면)과 effect-signing·profile은 파일마다 유효 모드 0444(fsGroup 없이 65532가 읽는다).
 //   비밀: secret·PVC·projected 볼륨은 executor에만 붙는다. executor 밖 컨테이너에 envFrom·env valueFrom이 없다(볼륨 없이도 Secret이 들어간다).
 //   겹침: 한 컨테이너 안의 마운트 경로는 같거나 포개지지 않는다(값이 정하는 tls·store 경로 포함. 같으면 PodTemplate이 무효이고 포개면
 //     한쪽 파일이 가려진다).
@@ -289,8 +291,8 @@ function checkExecutorStore(targets: Target[], charts: Record<string, Doc[]>, de
 //     새 init의 표식이 옛 역할 컨테이너가 도는 동안 그 실행을 닫는다. replicas 0·1은 olive-replicas와 CLI가 지킨다).
 //     함정: 기능 게이트가 꺼진 API 서버는 두 칸을 말없이 지운다. 이 렌더 검사가 통과해도 적용은 켤 때 API에 남은 값으로 따로 본다.
 //   이미지: olive-init = executor = ghcr.io/ukyi-app/olive@sha256(대리와 실행기의 링크 계약이 같은 커밋이다). role은 대상 role의
-//     역할 이미지다. 시험 값(RENDER_FILL = ci/enabled.yaml)이 역할마다 다른 가짜 참조라 대상↔이미지 대응이 렌더에 보인다.
-//     함정: 켜는 PR이 실제 역할 이미지를 넣으면 켠 root 렌더가 그 값이 되어 이 대조(roleImageWanted)가 실패한다. 그 PR이 기대 값을 고친다.
+//     역할 이미지다. 기대 값은 그 렌더에 넣은 값에서 읽는다(차트 ci 렌더는 ci 파일, 켠 root 렌더는 클러스터 값 cluster.olive.roleImages,
+//     비면 RENDER_FILL). 시험 값(RENDER_FILL = ci/enabled.yaml)이 역할마다 다른 가짜 참조라 대상↔이미지 대응이 렌더에 보인다.
 //   한도: 같은 ns의 ResourceQuota olive-limits가 파드의 실효 limits(max(일반 컨테이너 합, 가장 큰 init))와 같다. 작으면 파드가
 //     거부되고, 크면 두 번째 파드가 들어갈 자리가 생긴다(templates/resourcequota.yaml). 상시 실행 init(restartPolicy Always)은 이 식에
 //     맞지 않아 위 컨테이너 표가 거절한다. 파드 단위 spec.resources도 두지 않는다. 있으면 쿠버네티스가 컨테이너 합 대신 그 값을
@@ -310,6 +312,13 @@ const EFFECT_KEY_DIR = "/run/olive/effect-signing";
 const EFFECT_KEY_FILE = `${EFFECT_KEY_DIR}/${EFFECT_KEY}`;
 const effectKeyStore = (t: Target) => `infisical-olive-executor-${t.id}`;
 const effectKeyPath = (t: Target) => `/olive/executors/${t.id}`;
+// 역할 프로필(templates/executor-deployments.yaml의 ConfigMap, olive src/executor/runtime.ts parseProfile). 템플릿 값을 바꾸면 여기도 함께 고친다.
+const PROFILE_VOLUME = "profile";
+const PROFILE_DIR = "/run/olive/profile";
+const PROFILE_CONFIGMAP = "olive-role-profile";
+const PROFILE_KEY = "profile.json";
+const PROFILE_FILE = `${PROFILE_DIR}/${PROFILE_KEY}`;
+const PROFILE_ANNOTATION = "checksum/role-profile";
 // 계약 v1 revision 꼴(ukyi-app/olive src/executor/runtime.ts REVISION). 감독·실행기 진입점은 이 꼴이 아니면 81로 끝난다.
 const POLICY_REVISION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const INIT_CONTAINER = "olive-init";
@@ -358,6 +367,7 @@ const SPLIT_CONTAINERS: Record<string, ContainerRule> = {
       "agent-link": { path: AGENT_LINK_DIR, readOnly: false },
       store: { readOnly: false },
       "effect-signing": { path: EFFECT_KEY_DIR, readOnly: true },
+      [PROFILE_VOLUME]: { path: PROFILE_DIR, readOnly: true, why: "실행기는 역할 프로필을 읽기만 한다. 없으면 OLIVE_PROFILE_FILE이 없는 파일이라 82로 끝난다" },
       [GENERATION_VOLUME]: { path: GENERATION_DIR, readOnly: true, why: "제어는 init이 쓴 세대 표식을 읽기만 한다. 없으면 표식이 늘 모름이라 회복이 실행을 닫지 못한다(D-104)" },
       tls: { readOnly: true, optional: true },
       trust: { path: "/run/olive/trust", readOnly: true, optional: true },
@@ -373,8 +383,8 @@ const SPLIT_CONTAINERS: Record<string, ContainerRule> = {
     env: { OLIVE_AGENT_SOCKET: AGENT_SOCKET, BUN_OPTIONS: "", BUN_BE_BUN: "", LD_PRELOAD: "" },
   },
 };
-// emptyDir는 칸까지 그대로 본다. secret은 defaultMode 밖의 칸(secretName·items)을 그대로 본다. mode는 파일마다 유효 모드 0444를 본다.
-type VolumeRule = { type: string; emptyDir?: Record<string, string>; secret?: Record<string, unknown>; what?: string; why?: string; optional?: boolean; mode?: boolean };
+// emptyDir는 칸까지 그대로 본다. source는 그 종류(secret·configMap)의 defaultMode 밖의 칸(이름·items)을 그대로 본다. mode는 파일마다 유효 모드 0444를 본다.
+type VolumeRule = { type: string; emptyDir?: Record<string, string>; source?: Record<string, unknown>; what?: string; why?: string; optional?: boolean; mode?: boolean };
 const SPLIT_VOLUMES: Record<string, VolumeRule> = {
   "agent-bin": { type: "emptyDir", emptyDir: { sizeLimit: "256Mi" }, what: "디스크 emptyDir(sizeLimit 256Mi)", why: "메모리 매체면 대리(약 104MiB)가 메모리 상한에 든다" },
   "agent-link": { type: "emptyDir", emptyDir: { medium: "Memory", sizeLimit: "1Mi" }, what: "메모리 emptyDir(sizeLimit 1Mi)", why: "소켓 파일 하나만 두는 자리다" },
@@ -384,9 +394,16 @@ const SPLIT_VOLUMES: Record<string, VolumeRule> = {
   store: { type: "persistentVolumeClaim" },
   "effect-signing": {
     type: "secret",
-    secret: { secretName: EFFECT_KEY_SECRET, items: [{ key: EFFECT_KEY, path: EFFECT_KEY }] },
+    source: { secretName: EFFECT_KEY_SECRET, items: [{ key: EFFECT_KEY, path: EFFECT_KEY }] },
     what: `Secret ${EFFECT_KEY_SECRET}의 키 ${EFFECT_KEY} 하나`,
     why: "OLIVE_SIGNING_KEY_FILE이 그 파일을 가리키고, 다른 Secret이면 실행기가 다른 키로 서명하거나 기동하지 못한다",
+    mode: true,
+  },
+  [PROFILE_VOLUME]: {
+    type: "configMap",
+    source: { name: PROFILE_CONFIGMAP, items: [{ key: PROFILE_KEY, path: PROFILE_KEY }] },
+    what: `ConfigMap ${PROFILE_CONFIGMAP}의 키 ${PROFILE_KEY} 하나`,
+    why: "OLIVE_PROFILE_FILE이 그 파일을 가리키고, 다른 ConfigMap이면 실행기가 다른 프로필로 뜨거나 82로 끝난다",
     mode: true,
   },
   tls: { type: "secret", optional: true, mode: true },
@@ -409,12 +426,11 @@ const normPath = (p: string) => {
   return n.length > 1 ? n.replace(/\/+$/, "") : n;
 };
 const under = (a: string, b: string) => a === b || a.startsWith(b === "/" ? "/" : `${b}/`);
-// 켠 root 렌더와 차트 시험 렌더가 쓰는 역할 이미지(RENDER_FILL). 위 표 "이미지"의 함정을 본다.
-const roleImageWanted = (role: unknown): string | undefined => {
-  const fill = RENDER_FILL[OLIVE_CHART];
-  const repo = fill[`roleImages.${String(role)}.repository`];
-  const digest = fill[`roleImages.${String(role)}.digest`];
-  return isString(role) && repo && digest ? `${repo}@${digest}` : undefined;
+// 이 렌더에 넣은 값의 역할 이미지(위 표 "이미지"). get은 renderValues의 것이다.
+const roleImageWanted = (get: (p: string) => unknown, role: unknown): string | undefined => {
+  const repo = get(`roleImages.${String(role)}.repository`);
+  const digest = get(`roleImages.${String(role)}.digest`);
+  return isString(role) && isString(repo) && repo !== "" && isString(digest) && digest !== "" ? `${repo}@${digest}` : undefined;
 };
 // 수량을 밀리코어·바이트로. 모르는 꼴은 NaN이라 비교가 실패로 드러난다.
 const cpuMilli = (q: unknown): number => {
@@ -437,6 +453,8 @@ function checkExecutorSplit(targets: Target[], charts: Record<string, Doc[]>, de
   const push = (where: string, message: string) => out.push({ rule: "olive-executor-split", where, message });
   const mine = targets.filter((t) => t.declaredBy === OLIVE_CHART && OLIVE_KINDS.has(t.kind));
   for (const [origin, group] of oliveChartGroups(charts, deployed)) {
+    // 역할 이미지의 기대 값을 읽을 이 렌더의 값. 켠 root 렌더에 소유 Application이 없으면 olive-owner가 낸다.
+    const get = renderValues(origin, deployed)?.get;
     // 실행기 값과 견줄 감독의 정책 판 번호. 감독 쪽이 틀리면 그 위반 하나만 내고 실행기는 꼴만 본다(원인 하나에 위반 하나).
     let supRevision: string | undefined;
     const supT = mine.find((t) => t.kind === "supervisor");
@@ -464,14 +482,15 @@ function checkExecutorSplit(targets: Target[], charts: Record<string, Doc[]>, de
         }
         const fsGroup = podSpec(deps[0].obj)?.securityContext?.fsGroup;
         if (fsGroup !== SUPERVISOR_FS_GROUP) push(id(deps[0]), `감독 파드의 fsGroup(${show(fsGroup)})이 ${SUPERVISOR_FS_GROUP}가 아니다. 감독은 0440 Secret(서명 키·계정·TLS)을 이 그룹으로 읽는다(실행기 파드에서만 뺐다, D-103)`);
-      } else out.push(...executorPodViolations(t, deps[0], quotas[0], supRevision));
+      } else out.push(...executorPodViolations(t, deps[0], quotas[0], supRevision, get));
     }
   }
   return out;
 }
 
 // 실행기 파드 하나를 위 경계 표와 대조한다. supRevision: 같은 렌더 감독의 정책 판 번호(감독 쪽이 틀리면 undefined).
-function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: string | undefined): Violation[] {
+// get: 이 렌더에 넣은 값(renderValues). 없으면 역할 이미지 대조를 건너뛴다.
+function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: string | undefined, get: ((p: string) => unknown) | undefined): Violation[] {
   const out: Violation[] = [];
   const push = (where: string, message: string) => out.push({ rule: "olive-executor-split", where, message });
   const where = id(dep);
@@ -526,9 +545,9 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: str
       if (types.length !== 1 || types[0] !== "emptyDir" || !same(v.emptyDir ?? {}, vr.emptyDir)) push(where, `볼륨 ${name}이 표의 ${vr.what}가 아니다(${JSON.stringify({ ...v, name: undefined })}). ${vr.why}`);
     } else if (types.length !== 1 || types[0] !== vr.type) push(where, `볼륨 ${name}이 표의 ${vr.type}가 아니다(${types.join(",")})`);
     else {
-      if (vr.secret) {
-        const { defaultMode: _mode, ...rest } = v.secret ?? {};
-        if (!same(rest, vr.secret)) push(where, `볼륨 ${name}이 표의 ${vr.what}가 아니다(${JSON.stringify(rest)}). ${vr.why}`);
+      if (vr.source) {
+        const { defaultMode: _mode, ...rest } = v[vr.type] ?? {};
+        if (!same(rest, vr.source)) push(where, `볼륨 ${name}이 표의 ${vr.what}가 아니다(${JSON.stringify(rest)}). ${vr.why}`);
       }
       if (vr.mode) {
         for (const [file, mode] of fileModes(v[vr.type])) {
@@ -640,6 +659,8 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: str
   }
   const keyFile = envOf(exec, "OLIVE_SIGNING_KEY_FILE");
   if (plainOne(keyFile) !== EFFECT_KEY_FILE) push(cw(exec), `OLIVE_SIGNING_KEY_FILE(${envValues(keyFile)})이 표의 ${EFFECT_KEY_FILE}(effect-signing 마운트 ${EFFECT_KEY_DIR} 안의 키 파일) 하나가 아니다`);
+  const profileFile = envOf(exec, "OLIVE_PROFILE_FILE");
+  if (plainOne(profileFile) !== PROFILE_FILE) push(cw(exec), `OLIVE_PROFILE_FILE(${envValues(profileFile)})이 표의 ${PROFILE_FILE}(profile 마운트 ${PROFILE_DIR} 안의 역할 프로필) 하나가 아니다(없으면 실행기가 81, 그 파일이 없으면 82로 끝난다)`);
   for (const k of ["livenessProbe", "readinessProbe", "startupProbe", "lifecycle", "ports"]) {
     if (role[k] !== undefined) push(cw(role), `역할 컨테이너에 ${k}를 두지 않는다(D-74: kubelet이 그 안에서 명령을 돌리지 않게)`);
   }
@@ -647,9 +668,9 @@ function executorPodViolations(t: Target, dep: Doc, quota: Doc, supRevision: str
   // 이미지.
   if (!isString(exec.image) || !OLIVE_IMAGE.test(exec.image)) push(cw(exec), `이미지(${show(exec.image)})가 ghcr.io/ukyi-app/olive@sha256:<64 hex>가 아니다`);
   if (init.image !== exec.image) push(cw(init), `${INIT_CONTAINER} 이미지(${init.image})가 ${EXECUTOR_CONTAINER} 이미지(${exec.image})와 다르다. 대리와 실행기는 같은 판이어야 한다(D-103)`);
-  const wantImage = roleImageWanted(t.role);
-  if (wantImage === undefined) push(cw(role), `대상 ${t.id}의 role(${show(t.role)})에 표의 역할 이미지가 없다(RENDER_FILL roleImages)`);
-  else if (role.image !== wantImage) push(cw(role), `역할 컨테이너 이미지(${show(role.image)})가 대상 ${t.id}의 역할 ${String(t.role)} 이미지(${wantImage})가 아니다`);
+  const wantImage = get === undefined ? null : roleImageWanted(get, t.role);
+  if (wantImage === undefined) push(cw(role), `대상 ${t.id}의 role(${show(t.role)})에 이 렌더의 역할 이미지 값이 없다(roleImages. 켠 root 렌더는 cluster.olive.roleImages 또는 RENDER_FILL)`);
+  else if (wantImage !== null && role.image !== wantImage) push(cw(role), `역할 컨테이너 이미지(${show(role.image)})가 대상 ${t.id}의 역할 ${String(t.role)} 이미지(${wantImage})가 아니다`);
 
   // 한도.
   for (const [k, parse] of [["limits.cpu", cpuMilli], ["limits.memory", memBytes]] as const) {
@@ -1236,8 +1257,10 @@ function clusterWiringTests(base: OliveInput): string[] {
 // 감독 파드 표(D-37). 감독 진입점(ukyi-app/olive src/main/supervisor.ts SUPERVISOR_ENV, README "감독 진입점 › 환경")이 읽는 env와
 // 그 env가 가리키는 파일을 내는 마운트·볼륨·생산자(ExternalSecret)를 렌더마다 정확한 표로 대조한다. 경로를 풀어 보거나 정규식으로 맞추지 않는다.
 //   파드: 일반 컨테이너 supervisor 하나, init·임시 컨테이너 없음(감독 전용 Secret을 받는 컨테이너는 감독 하나다). 어긋나면 나머지는 보지 않는다.
-//   env: 이름 집합이 열한 개 그대로(진입점은 모두 있고 비지 않아야 뜬다, 없으면 91. 표 밖 이름은 읽지 않아 오타가 조용히 남는다), 값은 표 그대로.
-//     OLIVE_POLICY_REVISION의 값은 olive-executor-split이 본다(감독·실행기 값 대조). OLIVE_TARGETS는 targets.yaml의 실행기 줄이고
+//   env: 이름 집합이 표 그대로, 값도 표 그대로(표 밖 이름은 진입점이 읽지 않아 오타가 조용히 남는다). 필수 열한 개(없으면 91)와 배정 값
+//     OLIVE_ACCOUNT_NAME(= 계정 별칭)·OLIVE_PROFILE_REVISIONS, 그리고 계정 판(supervisor.account.revision)이 있을 때만 OLIVE_ACCOUNT_REVISION
+//     (= 그 값)이다. 배정 값은 없어도 뜨지만 배정이 늘 보류되므로 표에 둔다. 판이 비면 env가 없어야 한다(감독은 없음과 빈 값을 같은 모름으로 읽는다).
+//     OLIVE_POLICY_REVISION의 값은 olive-executor-split이(감독·실행기 값 대조), OLIVE_PROFILE_REVISIONS의 값은 olive-role-profile이 본다. OLIVE_TARGETS는 targets.yaml의 실행기 줄이고
 //     차트 olive.supervisorTargetsJson의 키 차례다. 그 줄을 바꾸는 PR은 이 값을 함께 고친다(fixture는 targets만 고치고 렌더는 그대로라 계산하지 않는다).
 //   마운트: 목록 전체가 표와 같다. 항목의 칸은 name·mountPath·readOnly(생략은 false)뿐이고 subPath는 결과 마운트의 results만 받는다
 //     (subPathExpr 등은 폴더 자리를 파일 하나로 바꾸거나 필수 파일을 가린다).
@@ -1259,25 +1282,26 @@ const SUP_TARGETS_JSON = JSON.stringify([
   { namespace: "olive-reader", roles: ["isolated_reader"], target: "reader" },
 ]);
 const SUP_MOUNT_KEYS = ["name", "mountPath", "readOnly", "subPath"];
-type SupValues = { registryKey: unknown; environment: unknown; account: unknown; accountKey: unknown; signingKey: unknown; pki: boolean; trust: boolean; tlsSecret: unknown; externalSecrets: boolean; test: Record<TestKey, unknown> };
-// 렌더(출처)에 넣은 값. 켠 root 렌더에 소유 Application이 없으면 undefined다(olive-owner·olive-ignore-differences가 낸다).
-function supervisorValues(origin: string, deployed: Record<string, Doc[]>, keySwitch: Record<string, boolean>): SupValues | undefined {
+type SupValues = { registryKey: unknown; environment: unknown; account: unknown; accountKey: unknown; accountRevision: unknown; signingKey: unknown; pki: boolean; trust: boolean; tlsSecret: unknown; externalSecrets: boolean; test: Record<TestKey, unknown> };
+// 렌더(출처)에 넣은 값을 Helm처럼 겹쳐 읽는다. 차트 ci 렌더는 values.yaml + ci 파일, 켠 root 렌더는 values.yaml + Application의
+// valueFiles·valuesObject + RENDER_FILL(빈 칸만). 켠 root 렌더에 소유 Application이 없으면 undefined다(olive-owner·olive-ignore-differences가 낸다).
+// layers는 채우기 전의 층, cluster는 켠 root 렌더의 클러스터다.
+type RenderValues = { get: (p: string) => unknown; layers: unknown[]; cluster?: string };
+function renderValues(origin: string, deployed: Record<string, Doc[]>): RenderValues | undefined {
   const base = valueLayers(`${OLIVE_CHART}/values.yaml`);
   let layers: unknown[];
   let fill: Record<string, string> = {};
-  let switchValue: boolean | undefined;
+  let cluster: string | undefined;
   const m = origin.match(/^chart:olive\/(ci\/.+)$/);
   if (m) layers = [...base, ...valueLayers(`${OLIVE_CHART}/${m[1]}`)];
   else {
-    const cluster = sourceOf(origin).cluster;
+    cluster = sourceOf(origin).cluster;
     if (cluster === undefined) return undefined;
     const docs = expand(deployed[FORCED] ?? []).filter((d) => deployedDoc(d) && sourceOf(d.origin).cluster === cluster);
     const s = argoApps(docs).flatMap((a) => effectiveSources(a.obj.spec)).find((x) => sameRepo(x?.repoURL) && x?.path === OLIVE_CHART);
     if (!s) return undefined;
     layers = [...base, ...(s?.helm?.valueFiles ?? []).flatMap((f: unknown) => (isString(f) ? valueLayers(posix.join(OLIVE_CHART, f)) : [])), s?.helm?.valuesObject];
     fill = RENDER_FILL[OLIVE_CHART];
-    // 복구 스위치는 olive-executor-key와 같은 값(렌더 때 정한 keySwitch)을 쓴다.
-    switchValue = keySwitch[cluster];
   }
   // Helm처럼 뒤 층이 이긴다. 빈 값("", null)만 RENDER_FILL이 채운다(render.ts fillEmpty).
   const get = (p: string) => {
@@ -1288,6 +1312,15 @@ function supervisorValues(origin: string, deployed: Record<string, Doc[]>, keySw
     }
     return (v === undefined || v === null || v === "") && fill[p] !== undefined ? fill[p] : v;
   };
+  return { get, layers, cluster };
+}
+// 감독 표에 쓰는 이 렌더의 값.
+function supervisorValues(origin: string, deployed: Record<string, Doc[]>, keySwitch: Record<string, boolean>): SupValues | undefined {
+  const rv = renderValues(origin, deployed);
+  if (!rv) return undefined;
+  const { get, layers, cluster } = rv;
+  // 복구 스위치는 olive-executor-key와 같은 값(렌더 때 정한 keySwitch)을 쓴다. 차트 ci 렌더는 값 파일 그대로다.
+  const switchValue = cluster === undefined ? undefined : keySwitch[cluster];
   const on = (v: unknown) => !(v === undefined || v === null || v === false || v === 0 || v === "");
   const pki = on(get("pki.enabled"));
   return {
@@ -1295,6 +1328,7 @@ function supervisorValues(origin: string, deployed: Record<string, Doc[]>, keySw
     environment: get("supervisor.registry.environment"),
     account: get("supervisor.account.name"),
     accountKey: get("supervisor.account.key"),
+    accountRevision: get("supervisor.account.revision"),
     signingKey: get("supervisor.signingKey.key"),
     pki,
     trust: pki && on(get("pki.trustBundlePem")),
@@ -1316,6 +1350,10 @@ function supervisorTable(v: SupValues) {
     OLIVE_TARGETS: SUP_TARGETS_JSON,
     OLIVE_POLICY_REVISION: undefined,
     OLIVE_RESULT_DIR: SUP_RESULT_DIR,
+    OLIVE_ACCOUNT_NAME: String(v.account),
+    // 판이 비면 이름째 없어야 한다(templates/supervisor-deployment.yaml은 with로 감싼다).
+    ...(v.accountRevision === undefined || v.accountRevision === null || v.accountRevision === "" ? {} : { OLIVE_ACCOUNT_REVISION: String(v.accountRevision) }),
+    OLIVE_PROFILE_REVISIONS: undefined,
   };
   const mounts: Record<string, unknown>[] = [
     { name: "ledger", mountPath: SUP_LEDGER_DIR, readOnly: false },
@@ -1390,7 +1428,7 @@ function checkSupervisorEnv(targets: Target[], charts: Record<string, Doc[]>, de
     // 시험 값 둘은 켤 때만 있고 olive-test-values가 본다. 이름의 대소문자 변형은 여기서 표 밖으로 걸린다.
     const extraEnv = [...new Set(envNames.filter((n) => !wantNames.includes(n) && !TEST_ENV_NAMES.includes(n)))];
     if (missingEnv.length > 0 || extraEnv.length > 0) {
-      push(`env 이름이 감독 진입점의 표(olive SUPERVISOR_ENV 열한 개, 시험 값 둘 제외)와 다르다: 빠짐 ${JSON.stringify(missingEnv)}, 표 밖 ${JSON.stringify(extraEnv)}`);
+      push(`env 이름이 감독 표(진입점 필수 열한 개와 배정 값 OLIVE_ACCOUNT_NAME·OLIVE_PROFILE_REVISIONS, 계정 판이 있으면 OLIVE_ACCOUNT_REVISION. 시험 값 둘 제외)와 다르다: 빠짐 ${JSON.stringify(missingEnv)}, 표 밖 ${JSON.stringify(extraEnv)}`);
     }
     for (const [name, wantValue] of Object.entries(want.env)) {
       const list = envOf(c, name);
@@ -1443,6 +1481,149 @@ function checkSupervisorEnv(targets: Target[], charts: Record<string, Doc[]>, de
         const g = { store: s.secretStoreRef, target: s.target?.name, data: s.data, dataFrom: s.dataFrom };
         if (!same(g, w)) out.push({ rule: "olive-supervisor-env", where: id(got[0]), message: `ExternalSecret ${name}의 store·target·data(${show(g)})가 표의 ${show(w)}와 다르다(감독 볼륨이 읽는 Secret 이름·키와 생산자가 어긋나면 그 Secret이 없어 감독이 마운트 단계에서 멈춘다)` });
       }
+    }
+  }
+  return out;
+}
+
+// 역할 프로필과 감독의 기대 revision(ukyi-app/olive README "작업자 실행기 진입점"·"감독 진입점 › 환경", src/supervisor/runtime/assign-policy.md).
+// 실행기 제어는 OLIVE_PROFILE_FILE의 JSON을 기동 때 읽고(꼴이 틀리면 82) 그 revision으로 인사한다. 감독은 OLIVE_PROFILE_REVISIONS(역할 →
+// revision)와 견주어 다르면 그 실행기에 배정하지 않는다(꼴이 틀리면 91). 차트는 두 값을 한 helper에서 만들지만 렌더마다 두 문서를 그대로 대조한다:
+//   - 실행기 대상마다 그 ns의 ConfigMap olive-role-profile이 정확히 하나, data는 profile.json 하나(binaryData 없음).
+//   - profile.json은 olive parseProfile·fixProfile이 받는 꼴이다: 칸 일곱 그대로, role은 그 실행기의 OLIVE_ROLE, revision은 계약 v1 꼴, program·cwd는
+//     절대 경로, argv는 글 목록(256개 이하), env는 글 값 맵(128개 이하, 이름 [A-Z_][A-Z0-9_]{0,63}, credentialEnv와 다름), credentialEnv도 같은
+//     이름 꼴, 글에 NUL 없음. 대리 링크 틀 크기(65,536바이트)는 olive 인코더로만 잴 수 있어 보지 않는다(넘으면 실행기가 82로 끝난다).
+//   - 감독 OLIVE_PROFILE_REVISIONS는 olive profileRevisionsFromEnv가 받는 꼴(JSON 객체, v1 역할 이름 키, 계약 v1 revision 값, 거듭된 칸 없음)이고,
+//     칸은 실행기들의 OLIVE_ROLE 집합과 같고 값은 그 실행기 프로필의 revision이다.
+//   - 위가 모두 맞으면 값이 모두 같다: 감독은 기대 revision을 하나만 쓰고 칸마다 다르면 모든 배정을 보류한다(assign-policy.md "함정").
+//     역할마다 견주는 olive 판이 나오면 그 PR이 이 줄을 푼다.
+// env가 없거나 거듭되거나 valueFrom이면 olive-supervisor-env가, 마운트·볼륨·OLIVE_PROFILE_FILE은 olive-executor-split이 낸다(원인 하나에 진단 하나).
+// 프로필 쪽이 틀리면 감독 값과의 대조는 건너뛴다(같은 이유). 파드 템플릿의 checksum/role-profile은 렌더 시험(roleProfileRenderTest)이 본다.
+const ROLE_PROFILE_RULE = "olive-role-profile";
+const PROFILE_FIELDS = ["argv", "credentialEnv", "cwd", "env", "program", "revision", "role"];
+const PROFILE_ENV_NAME = /^[A-Z_][A-Z0-9_]{0,63}$/;
+const PROFILE_MAX_ARGV = 256;
+const PROFILE_MAX_ENV = 128;
+// profile.json 하나의 문제 목록과, 문제가 없으면 그 revision.
+function profileProblems(text: unknown, role: unknown): { revision?: string; problems: string[] } {
+  if (!isString(text)) return { problems: [`${PROFILE_KEY}가 없거나 글이 아니다`] };
+  let p: any;
+  try {
+    p = JSON.parse(text);
+  } catch {
+    return { problems: [`${PROFILE_KEY}가 JSON이 아니다(실행기는 82로 끝난다)`] };
+  }
+  if (!isMapValue(p)) return { problems: [`${PROFILE_KEY}가 JSON 객체가 아니다(실행기는 82로 끝난다)`] };
+  const problems: string[] = [];
+  const keys = Object.keys(p).sort();
+  if (!same(keys, PROFILE_FIELDS)) problems.push(`칸이 ${PROFILE_FIELDS.join("·")} 일곱 그대로가 아니다(${keys.join("·")}). 실행기는 칸이 빠지거나 더 있으면 82로 끝난다`);
+  if (p.role !== role) problems.push(`role(${show(p.role)})이 그 실행기의 OLIVE_ROLE(${show(role)})이 아니다. 실행기는 다르면 82로 끝난다`);
+  if (!isString(p.revision) || !POLICY_REVISION.test(p.revision)) problems.push(`revision(${show(p.revision)})이 계약 v1 revision 꼴이 아니다`);
+  for (const k of ["program", "cwd"]) if (!isString(p[k]) || !p[k].startsWith("/")) problems.push(`${k}(${show(p[k])})가 절대 경로가 아니다(실행기는 PATH로 찾지 않는다)`);
+  const argvOk = Array.isArray(p.argv) && p.argv.every(isString);
+  if (!argvOk) problems.push(`argv(${show(p.argv)})가 글 목록이 아니다`);
+  else if (p.argv.length > PROFILE_MAX_ARGV) problems.push(`argv가 ${p.argv.length}개다(대리 링크는 ${PROFILE_MAX_ARGV}개까지 싣는다)`);
+  const envOk = isMapValue(p.env) && Object.values(p.env).every(isString);
+  if (!envOk) problems.push(`env(${show(p.env)})가 글 값의 맵이 아니다`);
+  else {
+    const names = Object.keys(p.env);
+    if (names.length > PROFILE_MAX_ENV) problems.push(`env가 ${names.length}개다(대리 링크는 ${PROFILE_MAX_ENV}개까지 싣는다)`);
+    const bad = names.filter((n) => !PROFILE_ENV_NAME.test(n));
+    if (bad.length > 0) problems.push(`env 이름 ${bad.join("·")}가 ${PROFILE_ENV_NAME.source} 꼴이 아니다`);
+    if (isString(p.credentialEnv) && names.includes(p.credentialEnv)) problems.push(`env에 자격 이름 ${p.credentialEnv}가 있다(자격 값은 그 이름 하나에만 들어간다, olive fixProfile)`);
+  }
+  if (!isString(p.credentialEnv) || !PROFILE_ENV_NAME.test(p.credentialEnv)) problems.push(`credentialEnv(${show(p.credentialEnv)})가 ${PROFILE_ENV_NAME.source} 꼴의 이름이 아니다`);
+  const texts = [p.program, p.cwd, ...(argvOk ? p.argv : []), ...(envOk ? Object.values(p.env) : [])].filter(isString);
+  if (texts.some((s) => s.includes("\0"))) problems.push("program·cwd·argv·env 값에 NUL이 있다");
+  return problems.length === 0 ? { revision: p.revision, problems } : { problems };
+}
+// 감독 OLIVE_PROFILE_REVISIONS를 olive profileRevisionsFromEnv처럼 읽는다. 감독이 받지 않는 꼴이면 그 이유(감독은 91로 끝난다).
+function profileRevisionsOf(raw: string): Record<string, string> | string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "JSON이 아니다";
+  }
+  if (!isMapValue(parsed)) return "JSON 객체가 아니다";
+  const entries = Object.entries(parsed as object);
+  for (const [role, revision] of entries) {
+    if (!V1_ROLES.has(role)) return `${role}은 v1 역할 이름이 아니다`;
+    if (!isString(revision) || !POLICY_REVISION.test(revision)) return `역할 ${role}의 값(${show(revision)})이 계약 v1 revision 꼴이 아니다`;
+  }
+  // 함정: JSON.parse는 거듭된 칸의 앞 값을 조용히 버린다. olive처럼 원문의 문자열 토큰 수가 칸 수의 두 배인지 본다.
+  if ((raw.match(/"(?:[^"\\]|\\.)*"/g) ?? []).length !== entries.length * 2) return "거듭된 칸이 있다(JSON.parse가 앞 값을 버려 틀린 값이 지나간다)";
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+function checkRoleProfile(targets: Target[], charts: Record<string, Doc[]>, deployed: Record<string, Doc[]>): Violation[] {
+  const out: Violation[] = [];
+  const push = (where: string, message: string) => out.push({ rule: ROLE_PROFILE_RULE, where, message });
+  const mine = targets.filter((t) => t.declaredBy === OLIVE_CHART && OLIVE_KINDS.has(t.kind));
+  const sup = mine.find((t) => t.kind === "supervisor");
+  const executors = mine.filter((t) => t.kind === "executor");
+  for (const [origin, group] of oliveChartGroups(charts, deployed)) {
+    // 대상 → 꼴이 맞는 프로필의 revision. 하나라도 틀리면 감독 값과의 대조는 건너뛴다.
+    const revisions = new Map<Target, string>();
+    // 대상 → 그 실행기 제어가 받는 OLIVE_ROLE(렌더된 값). 실행기가 프로필과 견주는 것은 이 값이다. 그 값이 없거나 대상 표의 role과 다르면
+    // olive-executor-split(렌더)·olive-targets(표)가 내므로 그 대상은 건너뛴다(원인 하나에 진단 하나).
+    const roleOf = new Map<Target, string>();
+    let profilesOk = true;
+    for (const t of executors) {
+      const deps = group.filter((d) => d.obj.kind === "Deployment" && nsOf(d) === t.namespace && d.obj.metadata?.name === t.deployment);
+      const exec = deps.length === 1 ? (podSpec(deps[0].obj)?.containers ?? []).find((x: any) => x?.name === EXECUTOR_CONTAINER) : undefined;
+      const role = plainOne(envOf(exec, "OLIVE_ROLE"));
+      if (role === undefined || role !== t.role) {
+        profilesOk = false;
+        continue;
+      }
+      roleOf.set(t, role);
+      const cms = group.filter((d) => d.obj.kind === "ConfigMap" && nsOf(d) === t.namespace && d.obj.metadata?.name === PROFILE_CONFIGMAP);
+      if (cms.length !== 1) {
+        push(origin, `대상 ${t.id}의 ConfigMap ${t.namespace}/${PROFILE_CONFIGMAP}가 ${cms.length}개다(정확히 하나여야 한다. 없으면 실행기 볼륨이 붙지 않아 파드가 뜨지 않고, 둘이면 CI와 Argo CD가 다른 문서를 고른다)`);
+        profilesOk = false;
+        continue;
+      }
+      const where = id(cms[0]);
+      const data = cms[0].obj.data ?? {};
+      if (!same(Object.keys(data), [PROFILE_KEY]) || cms[0].obj.binaryData !== undefined) {
+        push(where, `data가 ${PROFILE_KEY} 하나가 아니다(data ${show(Object.keys(data))}, binaryData ${show(cms[0].obj.binaryData === undefined ? undefined : Object.keys(cms[0].obj.binaryData))}). 실행기 볼륨은 그 키 하나만 붙인다`);
+      }
+      const r = profileProblems(data[PROFILE_KEY], role);
+      for (const p of r.problems) push(where, `역할 프로필(대상 ${t.id}): ${p}`);
+      if (r.revision === undefined) profilesOk = false;
+      else revisions.set(t, r.revision);
+    }
+    if (!sup) continue;
+    const deps = group.filter((d) => d.obj.kind === "Deployment" && nsOf(d) === sup.namespace && d.obj.metadata?.name === sup.deployment);
+    if (deps.length !== 1) continue;
+    const c = (podSpec(deps[0].obj)?.containers ?? []).find((x: any) => x?.name === SUPERVISOR_CONTAINER);
+    const raw = plainOne(envOf(c, "OLIVE_PROFILE_REVISIONS"));
+    if (raw === undefined) continue;
+    const where = `${id(deps[0])} container ${SUPERVISOR_CONTAINER}`;
+    const parsed = profileRevisionsOf(raw);
+    if (typeof parsed === "string") {
+      push(where, `OLIVE_PROFILE_REVISIONS(${show(raw)})를 감독이 받지 않는다: ${parsed}(감독은 91로 끝난다)`);
+      continue;
+    }
+    if (!profilesOk) continue;
+    const roles = [...new Set(roleOf.values())].sort();
+    const keys = Object.keys(parsed).sort();
+    let matched = true;
+    if (!same(keys, roles)) {
+      push(where, `OLIVE_PROFILE_REVISIONS의 역할(${keys.join("·") || "없음"})이 실행기들의 OLIVE_ROLE(${roles.join("·")})과 다르다. 칸이 없는 역할의 실행기에는 배정하지 않고, 실행기가 없는 역할의 칸은 쓰이지 않는다`);
+      matched = false;
+    }
+    for (const [t, revision] of revisions) {
+      const role = roleOf.get(t) ?? "";
+      const want = parsed[role];
+      if (want !== undefined && want !== revision) {
+        push(where, `OLIVE_PROFILE_REVISIONS의 ${role}(${show(want)})이 실행기 ${t.id} 프로필의 revision(${show(revision)})과 다르다. 감독이 그 실행기의 인사를 기대값과 다르다고 보아 배정하지 않는다`);
+        matched = false;
+      }
+    }
+    if (!matched) continue;
+    if (new Set(Object.values(parsed)).size > 1) {
+      push(where, `역할 프로필 revision이 역할마다 다르다(${show(parsed)}). 감독은 기대 revision을 하나만 써서 칸마다 다르면 모든 배정을 보류한다(olive assign-policy.md "함정"). 실행기가 있는 역할의 revision을 하나로 맞춘다`);
     }
   }
   return out;
@@ -1643,6 +1824,7 @@ function oliveChecks(input: OliveInput): Violation[] {
     ...checkExecutorSplit(targets, input.charts, input.deployed),
     ...checkExecutorKey(targets, input.charts, input.deployed, input.keySwitch),
     ...checkSupervisorEnv(targets, input.charts, input.deployed, input.keySwitch),
+    ...checkRoleProfile(targets, input.charts, input.deployed),
     ...checkTestEnv(targets, input.charts, input.deployed, input.keySwitch),
     ...checkSupervisorAdmin(targets, input.charts, input.deployed),
     ...checkDeployed(targets, input.deployed),
@@ -1826,6 +2008,14 @@ const RENDER_FILL: Record<string, Record<string, string>> = {
     "roleImages.diagnosis.digest": `sha256:${"1".repeat(64)}`,
     "roleImages.isolated_reader.repository": "example.invalid/olive-role-isolated-reader",
     "roleImages.isolated_reader.digest": `sha256:${"1".repeat(64)}`,
+    "roleProfiles.diagnosis.revision": "ci-profile",
+    "roleProfiles.diagnosis.program": "/ci/role-program",
+    "roleProfiles.diagnosis.cwd": "/tmp",
+    "roleProfiles.diagnosis.credentialEnv": "CI_CREDENTIAL",
+    "roleProfiles.isolated_reader.revision": "ci-profile",
+    "roleProfiles.isolated_reader.program": "/ci/role-program",
+    "roleProfiles.isolated_reader.cwd": "/tmp",
+    "roleProfiles.isolated_reader.credentialEnv": "CI_CREDENTIAL",
   },
 };
 function renderFill(): Record<string, Record<string, unknown>> {
@@ -2101,7 +2291,7 @@ function renderSelfTests(): string[] {
   for (const [name, layers, vo, want] of cases) if (digest(layers, vo) !== want) bad.push(`fillEmpty(${name}): ${JSON.stringify(digest(layers, vo))}, 기대 ${JSON.stringify(want)}`);
   const c = collectChartRenders("platform/x", ["platform/x/ci/a.yaml", "platform/x/ci/empty.yaml"], (f) => ({ ok: true, out: f.endsWith("a.yaml") ? "kind: ConfigMap\n" : "" }));
   if (JSON.stringify(c.origins) !== JSON.stringify(["chart:x/ci/a.yaml", "chart:x/ci/empty.yaml"]) || c.docs.length !== 1) bad.push(`collectChartRenders가 문서 0개인 렌더의 출처를 남기지 않았다: ${JSON.stringify(c.origins)}`);
-  bad.push(...listedAppTests(), ...multiDocValuesTest(), ...hostScopeTest(), ...executorTlsPathTest(), ...policyRevisionRenderTest(), ...registryRenderTest(), ...ledgerResultPathTest());
+  bad.push(...listedAppTests(), ...multiDocValuesTest(), ...hostScopeTest(), ...executorTlsPathTest(), ...policyRevisionRenderTest(), ...registryRenderTest(), ...ledgerResultPathTest(), ...roleProfileRenderTest());
   return bad;
 }
 
@@ -2117,7 +2307,7 @@ function executorTlsPathTest(): string[] {
     return helmTemplate("olive", OLIVE_CHART, "app-olive", [`${OLIVE_CHART}/ci/enabled.yaml`, f]);
   };
   const bad: string[] = [];
-  for (const [path, overlaps] of [["/run/olive/agent", "/run/olive/agent"], ["/run/olive", "/run/olive/agent"], ["/run/olive/agent/tls", "/run/olive/agent"], ["/run/olive/effect-signing/tls", EFFECT_KEY_DIR]]) {
+  for (const [path, overlaps] of [["/run/olive/agent", "/run/olive/agent"], ["/run/olive", "/run/olive/agent"], ["/run/olive/agent/tls", "/run/olive/agent"], ["/run/olive/effect-signing/tls", EFFECT_KEY_DIR], ["/run/olive/profile", PROFILE_DIR]]) {
     const r = values(path);
     if (r.ok || !r.out.includes(`executors.reader.tls.mountPath ${path} overlaps the executor pod mount ${overlaps}`)) bad.push(`실행기 TLS 경로 ${path}가 ${overlaps}와 겹치는데 렌더가 그 이유로 멈추지 않았다: ${r.ok ? "렌더 성공" : r.out.trim()}`);
   }
@@ -2125,6 +2315,65 @@ function executorTlsPathTest(): string[] {
     const ok = values(path);
     if (!ok.ok) bad.push(`pki를 끈 실행기 TLS 경로 ${path}는 실제 마운트와 겹치지 않는데 렌더되지 않았다: ${ok.out.trim()}`);
   }
+  return bad;
+}
+
+// 역할 프로필(roleProfiles)과 계정 판(supervisor.account.revision)의 렌더. fixture는 렌더가 끝난 문서를 고치므로 값 → 렌더는 여기서만 본다.
+//   - 비어서는 안 되는 칸이 비면 렌더가 required로 멈추고, 꼴이 틀리면 스키마가 그 자리로 거절한다.
+//   - ci/enabled.yaml과 다른 값으로 렌더해 helper가 입력을 버리고 고정 값을 내는 것을 가려낸다: ConfigMap profile.json은 입력 그대로의 일곱 칸
+//     (키 정렬, 맵은 Helm처럼 ci 파일과 깊게 합쳐진다), 감독 OLIVE_PROFILE_REVISIONS는 실행기 role마다 그 revision, 실행기 파드의
+//     checksum/role-profile은 profile.json의 sha256이다(내용이 바뀌면 템플릿이 바뀌어 실행기가 다시 뜬다).
+//   - 계정 판은 비면 감독 env가 없고, 값이 있으면 그 값 하나다. OLIVE_ACCOUNT_NAME은 계정 별칭 그대로다.
+function roleProfileRenderTest(): string[] {
+  const dir = tempDir("olive-role-profile");
+  const render = (name: string, body: string) => {
+    const f = join(dir, `${name}.yaml`);
+    writeFileSync(f, body);
+    return helmTemplate("olive", OLIVE_CHART, "app-olive", [`${OLIVE_CHART}/ci/enabled.yaml`, f]);
+  };
+  const bad: string[] = [];
+  for (const [name, body, want] of [
+    ["revision-empty", 'roleProfiles:\n  diagnosis:\n    revision: ""\n', "roleProfiles.diagnosis.revision is required"],
+    ["program-empty", 'roleProfiles:\n  isolated_reader:\n    program: ""\n', "roleProfiles.isolated_reader.program is required"],
+    ["cwd-empty", 'roleProfiles:\n  diagnosis:\n    cwd: ""\n', "roleProfiles.diagnosis.cwd is required"],
+    ["credential-empty", 'roleProfiles:\n  isolated_reader:\n    credentialEnv: ""\n', "roleProfiles.isolated_reader.credentialEnv is required"],
+    ["revision-shape", 'roleProfiles:\n  diagnosis:\n    revision: "-lead"\n', "/roleProfiles/diagnosis/revision"],
+    ["program-relative", "roleProfiles:\n  diagnosis:\n    program: bin/sh\n", "/roleProfiles/diagnosis/program"],
+    ["env-name", "roleProfiles:\n  diagnosis:\n    env:\n      lower: x\n", "invalid propertyName 'lower'"],
+    ["account-revision-shape", 'supervisor:\n  account:\n    revision: "a b"\n', "/supervisor/account/revision"],
+  ]) {
+    const r = render(name, body);
+    if (r.ok || !r.out.includes(want)) bad.push(`${name}: 렌더가 "${want}"로 멈추지 않았다: ${r.ok ? "렌더 성공" : r.out.trim().slice(0, 300)}`);
+  }
+  const revision = "rt-2026.11_a";
+  const roles = ["diagnosis", "isolated_reader"];
+  const body = "roleProfiles:\n" + roles.map((r) => `  ${r}:\n    revision: ${revision}\n    program: /rt/bin\n    argv: ["-c", "x y"]\n    cwd: /rt\n    env:\n      RT_ENV: ${r}\n    credentialEnv: RT_CRED\n`).join("");
+  // ci/enabled.yaml의 진단 env(CI_ROLE)는 Helm 깊은 합치기로 남는다.
+  const envWant: Record<string, Record<string, string>> = { diagnosis: { CI_ROLE: "diagnosis", RT_ENV: "diagnosis" }, isolated_reader: { RT_ENV: "isolated_reader" } };
+  const ok = render("ok", body + "supervisor:\n  account:\n    revision: acct-2026.11_b\n");
+  if (!ok.ok) return [...bad, `꼴이 맞는 역할 프로필이 렌더되지 않았다: ${ok.out.trim().slice(0, 300)}`];
+  const docs = parseAll(ok.out);
+  for (const t of targetList(readOliveTargets()).filter((x) => x.declaredBy === OLIVE_CHART && x.kind === "executor")) {
+    const cms = docs.filter((d) => d?.kind === "ConfigMap" && d.metadata?.namespace === t.namespace && d.metadata?.name === PROFILE_CONFIGMAP);
+    const text = cms.length === 1 ? cms[0].data?.[PROFILE_KEY] : undefined;
+    const want = JSON.stringify(sortKeys({ role: t.role, revision, program: "/rt/bin", argv: ["-c", "x y"], cwd: "/rt", env: envWant[String(t.role)], credentialEnv: "RT_CRED" }));
+    if (text !== want) bad.push(`대상 ${t.id}의 ${PROFILE_KEY}가 입력 그대로가 아니다(ConfigMap ${cms.length}개): ${show(text)}, 기대 ${want}`);
+    const deps = docs.filter((d) => d?.kind === "Deployment" && d.metadata?.namespace === t.namespace && d.metadata?.name === t.deployment);
+    const ann = deps.length === 1 ? deps[0].spec?.template?.metadata?.annotations?.[PROFILE_ANNOTATION] : undefined;
+    const hash = isString(text) ? createHash("sha256").update(text).digest("hex") : undefined;
+    if (hash === undefined || ann !== hash) bad.push(`대상 ${t.id} 파드의 ${PROFILE_ANNOTATION}(${show(ann)})가 ${PROFILE_KEY}의 sha256(${show(hash)})이 아니다. 프로필이 바뀌어도 실행기가 다시 뜨지 않는다`);
+  }
+  const supEnv = (ds: any[], name: string) => {
+    const dep = ds.filter((d) => d?.kind === "Deployment" && d.metadata?.namespace === "olive-control" && d.metadata?.name === "supervisor");
+    return envOf(dep.length === 1 ? (podSpec(dep[0])?.containers ?? []).find((x: any) => x?.name === SUPERVISOR_CONTAINER) : undefined, name);
+  };
+  const revisionsWant = JSON.stringify({ diagnosis: revision, isolated_reader: revision });
+  if (plainOne(supEnv(docs, "OLIVE_PROFILE_REVISIONS")) !== revisionsWant) bad.push(`감독 OLIVE_PROFILE_REVISIONS가 실행기 프로필의 revision이 아니다(${envValues(supEnv(docs, "OLIVE_PROFILE_REVISIONS"))}, 기대 ${revisionsWant})`);
+  if (plainOne(supEnv(docs, "OLIVE_ACCOUNT_REVISION")) !== "acct-2026.11_b") bad.push(`supervisor.account.revision으로 렌더한 감독 OLIVE_ACCOUNT_REVISION이 입력 그대로가 아니다(${envValues(supEnv(docs, "OLIVE_ACCOUNT_REVISION"))})`);
+  if (plainOne(supEnv(docs, "OLIVE_ACCOUNT_NAME")) !== "ci-account") bad.push(`감독 OLIVE_ACCOUNT_NAME이 계정 별칭 ci-account가 아니다(${envValues(supEnv(docs, "OLIVE_ACCOUNT_NAME"))})`);
+  const empty = render("account-empty", 'supervisor:\n  account:\n    revision: ""\n');
+  if (!empty.ok) bad.push(`계정 판이 빈 값인데 렌더되지 않았다: ${empty.out.trim().slice(0, 300)}`);
+  else if (supEnv(parseAll(empty.out), "OLIVE_ACCOUNT_REVISION").length !== 0) bad.push("계정 판이 빈 값인데 감독 env OLIVE_ACCOUNT_REVISION이 있다(감독은 빈 값과 없음을 같게 읽지만 표는 없음이다)");
   return bad;
 }
 
@@ -2686,6 +2935,87 @@ function testValueTests(base: OliveInput): string[] {
   return bad;
 }
 
+// olive-role-profile의 음성 사례와, 역할 프로필·배정 값을 경계 표(olive-executor-split)와 감독 표(olive-supervisor-env)가 잡는지.
+// 지금 입력의 문서를 고친 사본에 allChecks를 걸어 기대한 위반만 나는지 본다(원인 하나에 진단 하나). 대부분 차트 ci 렌더(ci/enabled.yaml)의
+// 문서를 고치고, 판 값이 빈 모양과 클러스터 값의 역할 이미지는 켠 root 렌더(운영·vm)의 문서를 고친다.
+function roleProfileTests(base: OliveInput): string[] {
+  const bad: string[] = [];
+  const flat = flatInput(base);
+  const S = "olive-executor-split";
+  const E = "olive-supervisor-env";
+  const P = ROLE_PROFILE_RULE;
+  const chartDoc = (i: OliveInput, kind: string, ns: string, name: string) =>
+    Object.values(i.charts).flat().find((d) => d.obj.kind === kind && nsOf(d) === ns && d.obj.metadata?.name === name);
+  const forcedDoc = (i: OliveInput, cluster: string, ns: string, name: string) =>
+    (i.deployed[FORCED] ?? []).find((d) => sourceOf(d.origin).cluster === cluster && d.obj.kind === "Deployment" && nsOf(d) === ns && d.obj.metadata?.name === name);
+  const readerCm = (i: OliveInput) => chartDoc(i, "ConfigMap", "olive-reader", PROFILE_CONFIGMAP)!.obj;
+  const readerPod = (i: OliveInput) => podSpec(chartDoc(i, "Deployment", "olive-reader", "executor")!.obj);
+  const ctr = (pod: any, name: string) => pod.containers.find((c: any) => c.name === name);
+  const supCtr = (i: OliveInput) => podSpec(chartDoc(i, "Deployment", "olive-control", "supervisor")!.obj).containers[0];
+  const setEnv = (c: any, name: string, value: string) => (c.env.find((e: any) => e.name === name).value = value);
+  const dropEnv = (c: any, name: string) => (c.env = c.env.filter((e: any) => e.name !== name));
+  const profile = (i: OliveInput, change: (p: any) => void) => {
+    const cm = readerCm(i);
+    const p = JSON.parse(cm.data[PROFILE_KEY]);
+    change(p);
+    cm.data[PROFILE_KEY] = JSON.stringify(sortKeys(p));
+  };
+  const revisions = (i: OliveInput, value: string) => setEnv(supCtr(i), "OLIVE_PROFILE_REVISIONS", value);
+  const cases: [string, (i: OliveInput) => void, [string, string][]][] = [
+    ["지금", () => {}, []],
+    ["OLIVE_PROFILE_FILE이 다른 파일", (i) => setEnv(ctr(readerPod(i), "executor"), "OLIVE_PROFILE_FILE", "/run/olive/profile/other.json"), [[S, 'OLIVE_PROFILE_FILE(["/run/olive/profile/other.json"])이 표의 /run/olive/profile/profile.json']]],
+    ["OLIVE_PROFILE_FILE 없음", (i) => dropEnv(ctr(readerPod(i), "executor"), "OLIVE_PROFILE_FILE"), [[S, "OLIVE_PROFILE_FILE([])이 표의"]]],
+    ["프로필을 역할 컨테이너에도", (i) => ctr(readerPod(i), "role").volumeMounts.push({ name: PROFILE_VOLUME, mountPath: PROFILE_DIR, readOnly: true }), [[S, "profile을 role에 붙이지 않는다(표 밖의 볼륨이다"]]],
+    ["제어에 프로필 마운트 없음", (i) => { const c = ctr(readerPod(i), "executor"); c.volumeMounts = c.volumeMounts.filter((m: any) => m.name !== PROFILE_VOLUME); }, [[S, "profile을 executor에 붙이지 않았다"]]],
+    ["프로필 마운트 쓰기 가능", (i) => { ctr(readerPod(i), "executor").volumeMounts.find((m: any) => m.name === PROFILE_VOLUME).readOnly = false; }, [[S, "profile을 readOnly: true로 붙이지 않았다(executor)"]]],
+    ["프로필 볼륨이 다른 ConfigMap", (i) => { readerPod(i).volumes.find((v: any) => v.name === PROFILE_VOLUME).configMap.name = "olive-trust"; }, [[S, "볼륨 profile이 표의 ConfigMap olive-role-profile의 키 profile.json 하나가 아니다"]]],
+    ["프로필 볼륨 모드 0644", (i) => { readerPod(i).volumes.find((v: any) => v.name === PROFILE_VOLUME).configMap.defaultMode = 420; }, [[S, "볼륨 profile의 파일 profile.json 유효 모드 0644"]]],
+    ["vm 켠 root 렌더의 역할 이미지가 클러스터 값이 아님", (i) => { ctr(podSpec(forcedDoc(i, "vm", "olive-reader", "executor")!.obj), "role").image = `example.invalid/olive-role-isolated-reader@sha256:${"1".repeat(64)}`; }, [[S, "가 대상 reader의 역할 isolated_reader 이미지(docker.io/library/debian@sha256:"]]],
+    ["프로필 ConfigMap 없음", (i) => { for (const k of Object.keys(i.charts)) i.charts[k] = i.charts[k].filter((d) => !(d.obj.kind === "ConfigMap" && nsOf(d) === "olive-reader" && d.obj.metadata?.name === PROFILE_CONFIGMAP)); }, [[P, "대상 reader의 ConfigMap olive-reader/olive-role-profile가 0개다"]]],
+    ["프로필 data에 다른 키", (i) => { readerCm(i).data.extra = "x"; }, [[P, "data가 profile.json 하나가 아니다"]]],
+    ["프로필이 JSON 아님", (i) => { readerCm(i).data[PROFILE_KEY] = "not json"; }, [[P, "profile.json가 JSON이 아니다"]]],
+    ["프로필 칸 더함", (i) => profile(i, (p) => (p.image = "x")), [[P, "칸이 argv·credentialEnv·cwd·env·program·revision·role 일곱 그대로가 아니다"]]],
+    ["프로필 role이 다른 역할", (i) => profile(i, (p) => (p.role = "diagnosis")), [[P, 'role("diagnosis")이 그 실행기의 OLIVE_ROLE("isolated_reader")이 아니다']]],
+    ["프로필 revision 꼴", (i) => profile(i, (p) => (p.revision = "-lead")), [[P, 'revision("-lead")이 계약 v1 revision 꼴이 아니다']]],
+    ["프로필 program 상대 경로", (i) => profile(i, (p) => (p.program = "ci/role-program")), [[P, 'program("ci/role-program")가 절대 경로가 아니다']]],
+    ["프로필 argv가 글 목록 아님", (i) => profile(i, (p) => (p.argv = [1])), [[P, "argv([1])가 글 목록이 아니다"]]],
+    ["프로필 argv 257개", (i) => profile(i, (p) => (p.argv = Array(257).fill("a"))), [[P, "argv가 257개다"]]],
+    ["프로필 env 이름 꼴", (i) => profile(i, (p) => (p.env = { lower: "x" })), [[P, "env 이름 lower가"]]],
+    ["프로필 env에 자격 이름", (i) => profile(i, (p) => (p.env = { CI_CREDENTIAL: "x" })), [[P, "env에 자격 이름 CI_CREDENTIAL가 있다"]]],
+    ["프로필 credentialEnv 꼴", (i) => profile(i, (p) => (p.credentialEnv = "ci-cred")), [[P, 'credentialEnv("ci-cred")가']]],
+    ["프로필 argv에 NUL", (i) => profile(i, (p) => (p.argv = ["a\u0000b"])), [[P, "NUL이 있다"]]],
+    ["읽기 실행기 revision만 올림", (i) => profile(i, (p) => (p.revision = "ci-profile-2")), [[P, 'OLIVE_PROFILE_REVISIONS의 isolated_reader("ci-profile")이 실행기 reader 프로필의 revision("ci-profile-2")과 다르다']]],
+    ["역할마다 다른 revision(두 쪽은 맞음)", (i) => { profile(i, (p) => (p.revision = "ci-profile-2")); revisions(i, '{"diagnosis":"ci-profile","isolated_reader":"ci-profile-2"}'); }, [[P, "역할 프로필 revision이 역할마다 다르다"]]],
+    ["감독 기대값에 거듭된 칸", (i) => revisions(i, '{"diagnosis":"bad value","diagnosis":"ci-profile","isolated_reader":"ci-profile"}'), [[P, "거듭된 칸이 있다"]]],
+    ["감독 기대값 칸이 대상 id", (i) => revisions(i, '{"diagnosis":"ci-profile","reader":"ci-profile"}'), [[P, "reader은 v1 역할 이름이 아니다"]]],
+    ["감독 기대값이 JSON 아님", (i) => revisions(i, "diagnosis=ci-profile"), [[P, "를 감독이 받지 않는다: JSON이 아니다"]]],
+    ["감독 기대값이 배열", (i) => revisions(i, '["ci-profile"]'), [[P, "를 감독이 받지 않는다: JSON 객체가 아니다"]]],
+    ["감독 기대값 revision 꼴", (i) => revisions(i, '{"diagnosis":"a b","isolated_reader":"ci-profile"}'), [[P, '역할 diagnosis의 값("a b")이 계약 v1 revision 꼴이 아니다']]],
+    ["감독 기대값에 실행기 없는 역할", (i) => revisions(i, '{"code_author":"ci-profile","diagnosis":"ci-profile","isolated_reader":"ci-profile"}'), [[P, "OLIVE_PROFILE_REVISIONS의 역할(code_author·diagnosis·isolated_reader)이 실행기들의 OLIVE_ROLE(diagnosis·isolated_reader)과 다르다"]]],
+    ["감독 기대값에 역할 빠짐", (i) => revisions(i, '{"diagnosis":"ci-profile"}'), [[P, "OLIVE_PROFILE_REVISIONS의 역할(diagnosis)이 실행기들의 OLIVE_ROLE(diagnosis·isolated_reader)과 다르다"]]],
+    ["감독 기대값 env 없음", (i) => dropEnv(supCtr(i), "OLIVE_PROFILE_REVISIONS"), [[E, '빠짐 ["OLIVE_PROFILE_REVISIONS"], 표 밖 []']]],
+    ["감독 기대값 env 두 번", (i) => supCtr(i).env.push({ name: "OLIVE_PROFILE_REVISIONS", value: "{}" }), [[E, "env OLIVE_PROFILE_REVISIONS가 2번 있다"]]],
+    ["계정 별칭 env 없음", (i) => dropEnv(supCtr(i), "OLIVE_ACCOUNT_NAME"), [[E, '빠짐 ["OLIVE_ACCOUNT_NAME"], 표 밖 []']]],
+    ["계정 별칭 env가 다른 이름", (i) => setEnv(supCtr(i), "OLIVE_ACCOUNT_NAME", "other-account"), [[E, 'env OLIVE_ACCOUNT_NAME("other-account")이 표의 값 "ci-account"과 다르다']]],
+    ["계정 판 env 없음(값은 있음)", (i) => dropEnv(supCtr(i), "OLIVE_ACCOUNT_REVISION"), [[E, '빠짐 ["OLIVE_ACCOUNT_REVISION"], 표 밖 []']]],
+    ["계정 판 env가 다른 값", (i) => setEnv(supCtr(i), "OLIVE_ACCOUNT_REVISION", "acct-other"), [[E, 'env OLIVE_ACCOUNT_REVISION("acct-other")이 표의 값 "ci-account-rev"과 다르다']]],
+    ["판 값이 빈 운영 켠 root 렌더에 판 env", (i) => { podSpec(forcedDoc(i, "prod", "olive-control", "supervisor")!.obj).containers[0].env.push({ name: "OLIVE_ACCOUNT_REVISION", value: "acct-1" }); }, [[E, '표 밖 ["OLIVE_ACCOUNT_REVISION"]']]],
+  ];
+  for (const [name, mutate, want] of cases) {
+    const input = structuredClone(flat);
+    try {
+      mutate(input);
+    } catch (error) {
+      bad.push(`${name}: 고칠 문서를 찾지 못했다(${String(error)})`);
+      continue;
+    }
+    const got = allChecks(input);
+    const ok = got.length === want.length && want.every(([r, m], k) => got[k].rule === r && got[k].message.includes(m));
+    if (!ok) bad.push(`${name}: 기대 ${JSON.stringify(want)}, 실제 ${JSON.stringify(got.map(fmt))}`);
+  }
+  return bad;
+}
+
 // olive-supervisor-admin의 음성 사례와, 관리 소켓의 /tmp 조건을 olive-supervisor-env의 표가 잡는지. 차트 ci 렌더의 감독 하나만 고친다.
 function supervisorAdminTests(base: OliveInput): string[] {
   const bad: string[] = [];
@@ -2727,6 +3057,7 @@ export function checkOliveFixtures(base: OliveInput): Violation[] {
   for (const m of clusterWiringTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts clusterWiringTests", message: m });
   for (const m of testValueTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts testValueTests", message: m });
   for (const m of supervisorAdminTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts supervisorAdminTests", message: m });
+  for (const m of roleProfileTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts roleProfileTests", message: m });
   const files = gitFiles(`${FIXTURE_DIR}/*.yaml`);
   const fixtures: Fixture[] = [];
   for (const f of files) {

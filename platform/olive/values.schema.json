@@ -59,12 +59,30 @@
         "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" }
       }
     },
+    "roleProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "program", "argv", "cwd", "env", "credentialEnv"],
+      "properties": {
+        "revision": { "type": "string", "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]{0,63})?$" },
+        "program": { "type": "string", "pattern": "^(/.*)?$" },
+        "argv": { "type": "array", "maxItems": 256, "items": { "type": "string" } },
+        "cwd": { "type": "string", "pattern": "^(/.*)?$" },
+        "env": {
+          "type": "object",
+          "maxProperties": 128,
+          "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]{0,63}$" },
+          "additionalProperties": { "type": "string" }
+        },
+        "credentialEnv": { "type": "string", "pattern": "^([A-Z_][A-Z0-9_]{0,63})?$" }
+      }
+    },
     "namespace": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" },
     "hours": { "type": "integer", "minimum": 1 }
   },
   "type": "object",
   "additionalProperties": false,
-  "required": ["infisical", "image", "roleImages", "policy", "supervisor", "pki", "executors", "externalSecrets"],
+  "required": ["infisical", "image", "roleImages", "roleProfiles", "policy", "supervisor", "pki", "executors", "externalSecrets"],
   "if": {
     "required": ["pki"],
     "properties": { "pki": { "required": ["enabled"], "properties": { "enabled": { "const": true } } } }
@@ -115,6 +133,11 @@
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][a-z_]*$" },
       "additionalProperties": { "$ref": "#/definitions/roleImage" }
+    },
+    "roleProfiles": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z_]*$" },
+      "additionalProperties": { "$ref": "#/definitions/roleProfile" }
     },
     "policy": {
       "type": "object",
@@ -171,10 +194,11 @@
         "account": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "key"],
+          "required": ["name", "key", "revision"],
           "properties": {
             "name": { "type": "string", "pattern": "^([a-z0-9]([-a-z0-9]{0,30}[a-z0-9])?)?$" },
-            "key": { "const": "CLAUDE_CODE_OAUTH_TOKEN" }
+            "key": { "const": "CLAUDE_CODE_OAUTH_TOKEN" },
+            "revision": { "type": "string", "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]{0,63})?$" }
           }
         },
         "extraClientNamespaces": { "type": "array", "items": { "$ref": "#/definitions/namespace" } },
