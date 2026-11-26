@@ -67,8 +67,22 @@ cluster:
       enabled: true
       generations: [1]
       activeGeneration: 1
-    trustBundlePem: ""
-    supervisorSigningPublicKeyPem: ""
+    trustBundlePem: |
+      -----BEGIN CERTIFICATE-----
+      MIIBgjCCASigAwIBAgIUZJ1ioENhysDOIpmF4yKuozfgeBswCgYIKoZIzj0EAwIw
+      HzEdMBsGA1UEAxMUb2xpdmUtaW50ZXJuYWwtY2EtZzEwHhcNMjYxMTI2MDc1NjMy
+      WhcNMzYxMTIzMDc1NjMyWjAfMR0wGwYDVQQDExRvbGl2ZS1pbnRlcm5hbC1jYS1n
+      MTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABCITD4NSjr699bmjYQlh8O4CoBZ0
+      3Vt61IgWosAeNs5SNcPBXCJw3NHBm3SRRnP738RFwRBd5Jiuh8TzBp6VXJGjQjBA
+      MA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRa4ErB
+      MKnuWmLvoXlph8B44BBPMjAKBggqhkjOPQQDAgNIADBFAiAmzeMiN/+GW6XNDACT
+      KIZh2hZqmtHoGi11sB04vwY55gIhAKsE/R1cnoPSrdFXAclU7Cd6m3mZBtcFxAUs
+      fmEVKhrc
+      -----END CERTIFICATE-----
+    supervisorSigningPublicKeyPem: |
+      -----BEGIN PUBLIC KEY-----
+      MCowBQYDK2VwAyEABoVC9JDkYQIcd7gDjE4C4FZJkuGsGP+hkC3XPwmLPPI=
+      -----END PUBLIC KEY-----
     registryEnvironment: vm
     test:
       jobs: true
