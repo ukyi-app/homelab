@@ -14,7 +14,7 @@
 아래 `<이름>`은 이 이름 하나다. 스크립트와 매니페스트에는 클러스터 이름 분기가 없고, 값 파일만 바뀐다.
 
 - VM은 호스트 안의 임시 KVM VM이다(사용자 2026-10-26). 만들기·지우기와 `vm.env` 값의 근거는 [vm.md](vm.md)다. env 파일에 `CHANGE_ME`가 남아 있으면 host 스크립트가 멈춘다.
-- `values-vm.yaml`은 ci가 VM 프로필로 단언한다(`platform/root/templates/cluster-check.yaml`): 접두 `vm-`, Infisical `homelab-dev`/`dev`, 버킷과 serverName이 운영과 다름. 하나라도 어긋나면 root-vm 렌더가 실패해 ci와 Argo CD sync가 멈춘다. 복구 원본(`recoverySource`)은 [restore.md](restore.md) 3절의 VM 복구 PR이 넣는다. 그 PR이 main에 병합되기 전에는 `root-vm.yaml`을 apply하지 않는다.
+- `values-vm.yaml`은 ci가 VM 프로필로 단언한다(`platform/root/templates/cluster-check.yaml`): 접두 `vm-`, Infisical `homelab-dev`/`dev`, 버킷과 serverName이 운영과 다름. 하나라도 어긋나면 root-vm 렌더가 실패해 ci와 Argo CD sync가 멈춘다. 복구 원본(`recoverySource`)은 [restore.md](restore.md) 3절의 VM 복구 PR이 넣는다. DB 복구를 시험할 때는 그 PR이 main에 병합되기 전에 `root-vm.yaml`을 apply하지 않는다. 복구 없이 `initdb`로 먼저 뜬 `pg`는 나중에 Git을 고쳐도 복구로 바뀌지 않기 때문이다(restore.md 3절). DB 복구가 없는 VM 시험(예: 올리브 T1, D-133)은 그 PR 없이 2.2 vm 분기 3단계를 건너뛰고 root를 적용한다.
 - VM 호스트는 tailnet에 넣지 않는다(`TAILNET_JOIN=false`). VM은 libvirt NAT 뒤라 호스트에서만 닿는다. 접근은 호스트에서 `vm.env`의 노드 IP(SSH)나 `virsh console`로 한다.
 
 ### 0.0 작업 사본과 필요한 패키지
@@ -390,7 +390,7 @@ EOF
 
 다시 실행해도 같은 Secret을 덮어쓸 뿐 멈추지 않는다. 값은 `kubectl`의 명령행 인자에 들어가지 않고(`--from-literal`은 `ps`·`/proc`로 보인다), `--server-side`로 적용해 client-side apply가 남기는 `last-applied-configuration` 주석에 값이 한 벌 더 복사되지도 않는다. T09가 2026-10-20에 이 방식을 확정했다(시나리오 7의 장애 주입과 복구가 같은 방식이었다. ESO를 재시작하지 않아도 Secret 교체 약 1분 20초 뒤 Store가 Ready였다). 자격을 바꾸는 순서는 [rotate.md](rotate.md) 1절이다.
 
-**vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). 위의 일반 ESO 블록 대신 아래 2단계 블록을 쓰고, 2.3 대신 4단계 블록을 쓴다.
+**vm 분기(시나리오 13)는 이 절에서 아래를 이 순서로 더 한다**(설계 C.3.3 "vm 분기의 추가 단계"). 위의 일반 ESO 블록 대신 아래 2단계 블록을 쓰고, 2.3 대신 4단계 블록을 쓴다. 3단계는 DB 복구를 시험할 때만 한다(DB 복구가 없는 VM 시험은 건너뛴다, D-133).
 
 호스트의 작업 사본에서 한다. Infisical CLI와 yq는 호스트의 mise에만 있고 VM에는 없다. 호스트에는 운영 kubeconfig도 있으므로 VM에 쓰는 블록은 모두 첫 두 줄에서 `KUBECONFIG`를 VM 파일로 고정하고 정체성(context `homelab-vm`, `vm.env`의 노드 이름 하나)을 본다. VM kubeconfig를 호스트에 두는 방법은 [vm.md](vm.md) 3절이다. **운영 kubeconfig로 2단계를 돌리면 운영 ESO 자격이 dev identity로 바뀌어 운영의 모든 ExternalSecret 갱신이 멈춘다.**
 
@@ -462,7 +462,7 @@ EOF
    EOF
    ```
 
-3. **root apply 전에 복구 원본 R2 읽기 전용 Secret을 넣는다.** **토큰은 운영 버킷 `homelab-backups`에 묶인 읽기 전용 토큰이다. VM 버킷(`homelab-backups-vm`) 토큰을 넣지 않는다**(같은 계정·같은 endpoint라 헷갈리기 쉽다. 2026-10-28 시험에서 두 번 잘못 넣었고 restore.md 3절의 쓰기 거부 시험이 읽기 403으로 막았다. 그때는 맞는 토큰으로 이 블록을 다시 돌린다). 복구 자산의 그 토큰을 2단계처럼 `R2_RO_ACCESS_KEY_ID`·`R2_RO_SECRET_ACCESS_KEY`·`R2_RO_ENDPOINT`(S3 API endpoint URL)로 export한다. Infisical에 두지 않는 Secret 하나다(설계 E8 VM 격리 3번). 이름과 키는 values-vm의 `recoverySource.credentialsSecret`, CNPG 차트가 읽는 키(`platform/cnpg/cluster/templates/_helpers.tpl`)와 같다. 그래서 main의 values-vm에 복구 PR이 없으면 넣지 않고 멈춘다. `database` ns는 root의 namespaces(wave -9)가 만들기 전이라 여기서 만들고, 나중에 root가 라벨을 붙여 인수한다. 같은 블록이 [restore.md](restore.md) 3절에도 있다. 고치면 둘을 함께 고친다.
+3. **root apply 전에 복구 원본 R2 읽기 전용 Secret을 넣는다.** **DB 복구를 시험할 때만 한다.** DB 복구가 없는 VM 시험(예: 올리브 T1, D-133)은 이 단계(아래 쓰기 거부 시험 포함)를 건너뛰고 4단계로 간다. **토큰은 운영 버킷 `homelab-backups`에 묶인 읽기 전용 토큰이다. VM 버킷(`homelab-backups-vm`) 토큰을 넣지 않는다**(같은 계정·같은 endpoint라 헷갈리기 쉽다. 2026-10-28 시험에서 두 번 잘못 넣었고 restore.md 3절의 쓰기 거부 시험이 읽기 403으로 막았다. 그때는 맞는 토큰으로 이 블록을 다시 돌린다). 복구 자산의 그 토큰을 2단계처럼 `R2_RO_ACCESS_KEY_ID`·`R2_RO_SECRET_ACCESS_KEY`·`R2_RO_ENDPOINT`(S3 API endpoint URL)로 export한다. Infisical에 두지 않는 Secret 하나다(설계 E8 VM 격리 3번). 이름과 키는 values-vm의 `recoverySource.credentialsSecret`, CNPG 차트가 읽는 키(`platform/cnpg/cluster/templates/_helpers.tpl`)와 같다. 그래서 main의 values-vm에 복구 PR이 없으면 넣지 않고 멈춘다. `database` ns는 root의 namespaces(wave -9)가 만들기 전이라 여기서 만들고, 나중에 root가 라벨을 붙여 인수한다. 같은 블록이 [restore.md](restore.md) 3절에도 있다. 고치면 둘을 함께 고친다.
 
    ```bash
    bash -euo pipefail <<'EOF'

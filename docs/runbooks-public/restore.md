@@ -1230,7 +1230,7 @@ podman rm -f pgm
 
 클러스터를 잃었을 때의 전체 순서는 설계 C.6.4 "복구 순서" 표다. 여기는 데이터에 해당하는 두 PR과 확인만 적는다.
 
-VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점은 단계마다 "VM 시험" 줄에 있다: 값 파일은 `values-vm.yaml`만 고치고, 운영 아카이브는 손으로 넣는 읽기 전용 자격(`r2-source-readonly`)으로만 읽는다. VM 블록은 호스트에서 VM kubeconfig(`~/.kube/homelab-vm.yaml`)로 돌고, 운영 kubeconfig로 새지 않게 블록마다 처음에 `KUBECONFIG`를 고정하고 `host/verify.sh --cluster vm --identity`로 대상을 확인한다.
+VM 시험(시나리오 13, 설계 E8 VM 격리)도 같은 순서다. 다른 점은 단계마다 "VM 시험" 줄에 있다: 값 파일은 `values-vm.yaml`만 고치고, 운영 아카이브는 손으로 넣는 읽기 전용 자격(`r2-source-readonly`)으로만 읽는다. VM 블록은 호스트에서 VM kubeconfig(`~/.kube/homelab-vm.yaml`)로 돌고, 운영 kubeconfig로 새지 않게 블록마다 처음에 `KUBECONFIG`를 고정하고 `host/verify.sh --cluster vm --identity`로 대상을 확인한다. DB 복구가 없는 VM 시험(예: 올리브 T1, D-133)은 이 절을 건너뛰고 복구 PR 없이 root를 적용한다([bootstrap.md](bootstrap.md) 2.2 vm 분기).
 
 **복구 PR을 root apply보다 먼저 병합한다.** Git이 평상시 값(`initdb`)인 채 root를 apply하면 Argo CD가 빈 Cluster `pg`를 먼저 만들고, bootstrap은 초기화 때만 읽혀 나중에 Git을 고쳐도 떠 있는 클러스터는 바뀌지 않는다. Cluster에는 보호 주석이 있어 Argo CD가 지우지도 않는다.
 
