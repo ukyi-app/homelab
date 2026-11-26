@@ -411,15 +411,15 @@ export KUBECONFIG=~/.kube/homelab-vm.yaml && host/verify.sh --cluster vm --ident
 VM 밖 자원은 설계 E8 "되돌리는 방법"을 따른다. 이 절은 호스트에 남는 것을 0으로 만든다. VM 밖 정리는 이 순서로 한다(2026-10-29 U40):
 
 1. Tailscale: VM operator OAuth client는 콘솔에 삭제가 없고 **Revoke**만 있다. Revoke해도 기기는 남으므로 `vm-*` 기기(VM operator·프록시)를 따로 **Remove**한다. VM을 먼저 지우면 VM operator가 기기를 정리하지 못하므로 콘솔에서 지운다.
-2. R2: VM 전용 버킷을 비우고 지운 뒤, 그 버킷 토큰과 운영 버킷 읽기 전용 토큰을 폐기한다.
+2. R2: VM 전용 버킷을 비우고 지운 뒤, 그 버킷 토큰을 폐기한다. DB 복구를 시험했으면 운영 버킷 읽기 전용 토큰도 폐기한다.
 3. Cloudflare: 시험 터널을 지운다.
 4. Infisical: `eso-homelab-dev` client secret을 폐기하고, `homelab-dev`/`dev`의 외부 자격 키(VM 버킷·터널·operator OAuth·알림 수신자)를 지운다. 생성 시험 값(bcrypt 해시, 시험 키 등)은 남겨도 된다.
 5. U40 시험이면 암호화 내보내기 파일과 암호문구를 지운다([restore.md](restore.md) 3.1).
-6. values-vm 복구 원본은 정리 PR로 지운다(restore.md 3절 7단계).
+6. DB 복구를 시험했으면 values-vm 복구 원본은 정리 PR로 지운다(restore.md 3절 7단계). DB 복구가 없는 시험(예: 올리브 T1, D-133)에는 지울 복구 원본이 없다.
 
 VM 준비 자산 중 Infisical 밖 값(ESO client secret, 운영 버킷 읽기 전용 토큰, VM 콘솔 비밀번호, 내보내기 암호문구)은 비밀번호 관리자에 둔다. 암호화된 메모도 되고, 시험 뒤 지운다.
 
-VM은 운영 DB 사본을 담고 있다. 지운 뒤에는 되돌릴 수 없다. 남길 증거(결과표, 로그)를 먼저 옮긴다.
+DB 복구를 시험한 VM은 운영 DB 사본을 담고 있다. 지운 뒤에는 되돌릴 수 없다. 남길 증거(결과표, 로그)를 먼저 옮긴다.
 
 VM 안의 파드 egress 표(2절)는 VM과 함께 사라진다. 호스트에서 `--egress-off`를 돌리지 않는다(운영 표가 지워진다, 2절).
 
