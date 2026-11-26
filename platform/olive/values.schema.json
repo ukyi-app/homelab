@@ -127,7 +127,7 @@
     "supervisor": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["port", "clusterIP", "resources", "ledger", "signingKey", "account", "registry", "extraClientNamespaces", "tls"],
+      "required": ["port", "clusterIP", "resources", "ledger", "signingKey", "account", "registry", "extraClientNamespaces", "tls", "test"],
       "properties": {
         "port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
         "clusterIP": {
@@ -178,7 +178,16 @@
           }
         },
         "extraClientNamespaces": { "type": "array", "items": { "$ref": "#/definitions/namespace" } },
-        "tls": { "$ref": "#/definitions/tls" }
+        "tls": { "$ref": "#/definitions/tls" },
+        "test": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["jobs", "frontDoor"],
+          "properties": {
+            "jobs": { "type": "boolean" },
+            "frontDoor": { "type": "boolean" }
+          }
+        }
       }
     },
     "pki": {

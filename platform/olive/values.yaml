@@ -103,6 +103,18 @@ supervisor:
   tls:
     secretName: ""
     mountPath: /run/olive/tls
+  # 시험 클러스터 전용 감독 길 둘(D-98·D-101·D-109, olive README "시험 현관 대역"·"감독 관리 통로"). true면 감독 env를 "on"으로
+  # 렌더하고, false면 env를 렌더하지 않는다(감독은 없음을 꺼짐으로 읽는다).
+  # jobs(OLIVE_TEST_JOBS): 관리 통로의 시험 작업 넣기(test-job)를 받는다.
+  # frontDoor(OLIVE_TEST_FRONTDOOR): 현관(O08) 대신 시험 현관 대역을 쓴다. 감독이 정지 아님 기록·이웃 행·시험 소유자 입력을 스스로 만든다.
+  # 함정: 운영에서 켜지 않는다. 기본값은 false이고 root는 클러스터 값(values-<클러스터>.yaml cluster.olive.test)이 true일 때만 넘긴다.
+  #   운영 값에서 켜면 root 렌더(templates/cluster-check.yaml)와 CI(tools/ci/olive.ts olive-test-values)가 거절한다. 여기를 true로 바꾸면
+  #   모든 클러스터가 켜지므로 CI가 기본값 false도 본다.
+  # 함정: frontDoor는 jobs와 함께만 켠다. 감독은 jobs가 on이 아닌데 frontDoor가 on이면 운영 값으로 보고 91로 끝나므로 렌더가 먼저 멈춘다.
+  # 함정: 대역이 만든 정지 아님 기록과 입력은 장부에 남는다. 대역을 쓴 장부를 나중에 실제 현관과 쓰지 않는다(새 장부로 시작한다).
+  test:
+    jobs: false
+    frontDoor: false
 
 # 올리브 내부 인증서(D-58, templates/pki-ca.yaml·pki-leaf.yaml·pki-trust.yaml). 아래 수명·보관 자리·신원 규칙은 관리자가 배포 PR에서 고르는 안이다.
 # 켜짐과 세대 값은 클러스터마다 root가 넘긴다(platform/root/values-<클러스터>.yaml cluster.olive.pki, D-116). 아래 값은 차트만 렌더할 때(ci/*.yaml)의 기본값이다.
