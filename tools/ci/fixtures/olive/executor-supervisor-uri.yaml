@@ -2,19 +2,11 @@
 # rule: olive-executor-store
 # match: 가 감독 인증서의 URI SAN spiffe://olive.internal/ns/olive-control/supervisor와 다르다
 # 읽기 실행기가 기대하는 감독 URI SAN을 다른 값으로 바꿨다. 실행기는 진짜 감독을 거부하거나, 다른 신원의 상대를 감독으로 믿는다.
+# 그 env 하나만 바꾼다. 다른 env는 렌더 그대로라 정책 판 등 실제 값이 들어가도 이 규칙 하나만 걸린다.
 patch:
   - in: all
     select: {kind: Deployment, namespace: olive-reader, name: executor}
     edit:
-      spec.template.spec.containers:
-        match: {name: executor}
-        set:
-          env:
-            - {name: OLIVE_ROLE, value: isolated_reader}
-            - {name: OLIVE_INSTANCE, value: reader}
-            - {name: OLIVE_POLICY_REVISION, value: ci-policy}
-            - {name: OLIVE_SIGNING_KEY_FILE, value: /run/olive/effect-signing/EFFECT_SIGNING_KEY}
-            - {name: OLIVE_PROFILE_FILE, value: /run/olive/profile/profile.json}
-            - {name: OLIVE_SUPERVISOR_URI, value: "spiffe://olive.internal/ns/olive-control/not-supervisor"}
-            - {name: OLIVE_STORE_DIR, value: /var/lib/olive-executor/store}
-            - {name: OLIVE_AGENT_SOCKET, value: /run/olive/agent/agent.sock}
+      spec.template.spec.containers.0.env:
+        match: {name: OLIVE_SUPERVISOR_URI}
+        set: {value: "spiffe://olive.internal/ns/olive-control/not-supervisor"}

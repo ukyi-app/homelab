@@ -75,6 +75,9 @@ cluster:
   # 공개 값 둘(비면 넘기지 않는다): 발급 기관과 지시 서명 키가 클러스터마다 따로 만들어져 공용 값 파일에 두면 다른 클러스터의
   # 신뢰 기준까지 바뀐다. trustBundlePem: 이 클러스터 발급 기관의 인증서(PEM). supervisorSigningPublicKeyPem: 이 클러스터 감독의
   # 지시 서명 공개 키(PEM). 넣기 전에 볼 조건은 docs/runbooks-public/rotate.md 3i다.
+  # registryEnvironment: 이 클러스터 감독의 env OLIVE_ENVIRONMENT이자 Infisical 등록표 문서의 environment(platform/olive/values.yaml
+  #   supervisor.registry). 클러스터 이름이라 공용 값에 두지 않는다. 비면 넘기지 않고, 켠 렌더는 차트 required로 멈춘다.
+  #   운영 이름은 운영 켜기 PR이 정한다. 함정: vm으로 두지 않는다(감독이 시험 현관 대역을 받는 이름이다, D-125).
   # test: 시험 클러스터 전용 감독 길 둘(platform/olive/values.yaml supervisor.test, D-98·D-101·D-109). jobs는 시험 작업 넣기,
   #   frontDoor는 시험 현관 대역이다. 운영은 늘 false다. 켤 수 있는 클러스터는 vm뿐이고, 운영에서 켜면 root 렌더
   #   (templates/cluster-check.yaml)와 CI(tools/ci/olive.ts olive-test-values)가 거절한다. 키는 jobs·frontDoor 둘이고 따옴표 없는 true·false만 받는다.
@@ -89,6 +92,7 @@ cluster:
       activeGeneration: 1
     trustBundlePem: ""
     supervisorSigningPublicKeyPem: ""
+    registryEnvironment: ""
     test:
       jobs: false
       frontDoor: false

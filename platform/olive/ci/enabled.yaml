@@ -1,5 +1,5 @@
-# 켠 모양의 렌더. root는 components.olive.enabled가 false라 이 차트를 렌더하지 않으므로, 이 파일이 정책·kubeconform·복구 스위치
-# 검사를 대신 받는다. digest와 계정 별칭은 가짜다(실제 값은 켜는 PR이 values.yaml에 넣는다).
+# 켠 모양의 렌더. root는 올리브를 켠 클러스터(values-<클러스터>.yaml cluster.olive.enabled)의 실제 값만 렌더하고 그 값은 공개 값 둘 등이
+# 빈 모양이라, 이 파일이 그 칸까지 찬 모양의 정책·kubeconform·복구 스위치 검사를 받는다. digest와 계정 별칭은 가짜다(실제 값은 values.yaml).
 infisical:
   projectSlug: ci-project
   environmentSlug: ci
@@ -13,7 +13,7 @@ roleImages:
   isolated_reader:
     repository: example.invalid/olive-role-isolated-reader
     digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
-# 정책 판 번호도 가짜다(실제 값은 켜는 PR이 정한다).
+# 정책 판 번호도 가짜다(실제 값은 values.yaml policy.revision).
 policy:
   revision: ci-policy
 # 역할 프로필도 가짜다(실제 값은 클러스터마다 root가 넘긴다). 진단 쪽에만 argv·env를 넣어 목록·맵이 JSON에 실리는 모양도 렌더에 보이게 한다.
@@ -35,7 +35,7 @@ roleProfiles:
 supervisor:
   account:
     name: ci-account
-    # 계정 판(D-111)도 가짜다. 이 렌더는 env OLIVE_ACCOUNT_REVISION이 있는 모양, 켠 root 렌더(빈 값)는 없는 모양을 CI가 본다.
+    # 계정 판(D-111)도 가짜다. 판이 빈 모양(env 없음)은 tools/ci/olive.ts roleProfileTests가 운영 olive Application의 판 값을 비워 본다.
     revision: ci-account-rev
   # 등록표 키 이름과 클러스터 이름도 가짜다.
   registry:
