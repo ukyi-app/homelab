@@ -399,7 +399,7 @@ EOF
 export KUBECONFIG=~/.kube/homelab-vm.yaml && host/verify.sh --cluster vm --identity
 ```
 
-그 셸에서 [bootstrap.md](bootstrap.md) 2.1 → 2.2(vm 분기 1~4단계)를 한다. vm 분기의 블록은 스스로 대상을 다시 고정한다. 2.2 vm 분기 3단계 전에 [restore.md](restore.md) 3절의 VM 복구 PR이 main에 병합돼 있어야 한다.
+그 셸에서 [bootstrap.md](bootstrap.md) 2.1 → 2.2(vm 분기 1~4단계)를 한다. vm 분기의 블록은 스스로 대상을 다시 고정한다. DB 복구를 시험할 때는 2.2 vm 분기 3단계 전에 [restore.md](restore.md) 3절의 VM 복구 PR이 main에 병합돼 있어야 한다. 복구 없이 `initdb`로 먼저 뜬 `pg`는 나중에 복구로 바뀌지 않기 때문이다. DB 복구가 없는 시험(예: 올리브 T1, D-133)은 그 PR 없이 3단계를 건너뛰고 4단계로 root를 적용한다.
 
 ## 5. 확인
 
