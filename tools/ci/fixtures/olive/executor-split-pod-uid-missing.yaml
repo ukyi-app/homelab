@@ -1,0 +1,9 @@
+# expect: fail
+# rule: olive-executor-split
+# match: OLIVE_POD_UID([])가 표의 {"fieldRef":{"fieldPath":"metadata.uid"}} 하나가 아니다
+# 읽기 실행기 제어 컨테이너에서 파드 UID env를 뺐다. 그 env를 읽는 olive digest는 감독에 붙기 전에 81로 끝난다(D-155).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    remove:
+      spec.template.spec.containers.0.env: {name: OLIVE_POD_UID}

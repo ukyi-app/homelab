@@ -18,3 +18,4 @@ patch:
             - {name: OLIVE_SUPERVISOR_URI, value: "spiffe://olive.internal/ns/olive-control/supervisor"}
             - {name: OLIVE_STORE_DIR, value: /var/lib/olive-executor/store}
             - {name: OLIVE_AGENT_SOCKET, value: /run/olive/agent/agent.sock}
+            - {name: OLIVE_POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}

@@ -8,7 +8,7 @@
 경계는 마운트와 PID 공간이다. 비밀·PVC 볼륨은 executor에만 붙이고 shareProcessNamespace를 두지 않는다. 한 파드라 네트워크 공간은
 같다: 역할 쪽에서도 감독 주소에 닿지만 mTLS 키가 executor에만 있어 감독이 받지 않는다. CI(tools/ci/olive.ts olive-executor-split)가 렌더를
 그 파일의 경계 표(SPLIT_*: 컨테이너별 명령·uid·보안 문맥·마운트·env, 볼륨 매체·상한, Secret 모드)와 그대로 대조한다. 여기 값을 바꾸면 표도 함께 고친다.
-env 이름은 ukyi-app/olive README "작업자 실행기 진입점"의 환경 표(열두 개)와 같다. 역할 프로필(OLIVE_PROFILE_FILE)은 values.yaml
+env 이름은 ukyi-app/olive README "작업자 실행기 진입점"의 환경 표와 같다(OLIVE_POD_UID를 읽는 판부터 열세 개). 역할 프로필(OLIVE_PROFILE_FILE)은 values.yaml
 roleProfiles에서 만든 ConfigMap olive-role-profile이고(아래 Deployment 앞) 제어만 붙인다.
 
 회복(D-104, olive README "회복의 차트"): 실행 중 대리 링크가 끊기면 제어가 94로 끝난다. 그 코드에만 파드의 모든 컨테이너를 다시 띄우고
@@ -151,6 +151,13 @@ spec:
             # 대리가 붙는 소켓. 실행기가 이 경로에서 듣고 역할 컨테이너가 같은 경로로 붙는다(두 컨테이너의 agent-link 마운트 아래).
             - name: OLIVE_AGENT_SOCKET
               value: /run/olive/agent/agent.sock
+            # 이 파드의 UID(D-155). 실행기가 정리 의도에 적어 두고, 다른 UID로 뜨면 그 실행의 작업 공간(role-tmp)이 옛 파드와 함께 사라졌다고 본다.
+            # 같은 파드의 재시작(94 포함)에는 그대로다. 제어에만 둔다(역할 컨테이너가 판정 값에 닿지 않게, CI olive-executor-split).
+            # 함정: 이 env를 읽는 olive digest는 없으면 81로 끝난다. 그보다 앞 digest는 남는 env를 읽지 않는다.
+            - name: OLIVE_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
           # 프로브는 두지 않는다. 실행기는 듣는 포트가 없고(D-55) 건강 확인 방식은 아직 정하지 않았다(spec.md §5.3).
           {{- include "olive.containerSecurity" . | nindent 10 }}
           resources:

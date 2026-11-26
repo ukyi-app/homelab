@@ -1,0 +1,17 @@
+# expect: fail
+# rule: olive-executor-split
+# match: env OLIVE_POD_UID에 valueFrom을 두지 않는다
+# 역할 컨테이너에도 파드 UID를 넣었다. 파드 교체 판정 값은 제어에만 둔다(D-155).
+patch:
+  - in: chart
+    select: {kind: Deployment, namespace: olive-reader, name: executor}
+    edit:
+      spec.template.spec.containers:
+        match: {name: role}
+        set:
+          env:
+            - {name: OLIVE_AGENT_SOCKET, value: /run/olive/agent/agent.sock}
+            - {name: BUN_OPTIONS, value: ""}
+            - {name: BUN_BE_BUN, value: ""}
+            - {name: LD_PRELOAD, value: ""}
+            - {name: OLIVE_POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}
