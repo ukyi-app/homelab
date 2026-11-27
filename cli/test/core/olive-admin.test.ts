@@ -84,7 +84,7 @@ describe("감독 관리 진입점 argv", () => {
   test("argv: ns·컨테이너·진입점이 고정이고 동작은 타입으로 좁힌 값만 들어간다", () => {
     const { ctx, calls } = testCtx("plan", owned(list(pod())));
     for (const bad of ["queue", "runs", "watch", "account", "diagnosis", "status --all", "--help", "-h", "status\n", "status\nqueue", "", " status", "toString", "__proto__", "constructor", null, undefined, 1, ["status"], { name: "status" }]) {
-      expect(() => ctx.oliveAdmin.target(bad as any)).toThrow("감독 관리 동작은 status, test-job만");
+      expect(() => ctx.oliveAdmin.target(bad as any)).toThrow("감독 관리 동작은 status, test-job, holds만");
     }
     expect(calls().calls).toEqual([]);
     expect(ctx.oliveAdmin.target("status")).toEqual({ state: "ready", pod: POD, argv: ["kubectl", "-n", "olive-control", "exec", POD, "-c", "supervisor", "--request-timeout=20s", "--", "bun", "src/main/admin.ts", "status"] });
@@ -104,8 +104,9 @@ describe("감독 관리 진입점 argv", () => {
     expect(others.length).toBeGreaterThan(0);
     for (const t of others) expect([t.kind, t.namespace === OLIVE_ADMIN_NS]).toEqual([t.kind, false]);
     // 파드 이름을 받는 공개 함수가 없고, 호출자가 대상을 더 넘겨도 ns·파드·컨테이너는 그대로다.
+    // workerPod는 대상 목록의 id만 받고 get만 한다(olive-admin-release.test.ts).
     const { ctx } = testCtx("plan", owned(list(pod())));
-    expect(Object.keys(ctx.oliveAdmin)).toEqual(["target"]);
+    expect(Object.keys(ctx.oliveAdmin)).toEqual(["target", "workerPod"]);
     const found = (ctx.oliveAdmin.target as any)("status", "session-0", { ns: "olive-session", container: "hc", argv: ["sh"] });
     expect(found).toEqual(READY);
     // 상수가 차트의 감독 Deployment와 같다.
@@ -535,7 +536,7 @@ describe("쓰기 문맥의 실행", () => {
 
   test("exec: 모르는 동작은 어떤 호출도 하기 전에 거부한다", async () => {
     const { ctx, calls } = testCtx("apply", owned(list(pod())));
-    await expect(applyWith(ctx, (w) => w.oliveAdmin.run("queue" as any))).rejects.toThrow("감독 관리 동작은 status, test-job만");
+    await expect(applyWith(ctx, (w) => w.oliveAdmin.run("queue" as any))).rejects.toThrow("감독 관리 동작은 status, test-job, holds만");
     await expect(applyWith(ctx, (w) => w.oliveAdmin.run("test-job" as any))).rejects.toThrow("감독 관리 동작 run은 status만");
     expect(calls().calls).toEqual([]);
   });

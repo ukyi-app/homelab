@@ -296,7 +296,8 @@ export type OliveWrite = {
 };
 
 // 올리브 감독 파드의 고정 관리 진입점(D-60). 동작 이름만 넘기고 ns·파드 라벨·컨테이너·진입점은 core 상수다.
-export type OliveAdminAction = "status" | "test-job";
+// holds는 자리 풀기(D-149 ④)의 읽기다. 자리 풀기 쓰기 넷은 동작 이름이 아니라 OliveReleaseCall로만 간다(값의 꼴을 어댑터가 본다).
+export type OliveAdminAction = "status" | "test-job" | "holds";
 // 시험 작업 넣기의 값 여섯(OLIVE_TEST_JOB_FIELDS). 꼴은 OLIVE_TEST_JOB_VALUE이고 뜻은 감독이 본다.
 export type OliveTestJob = { owner: string; key: string; role: string; purpose: string; sourceRef: string; inputDigest: string };
 // ready만 실행 대상이다. absent는 파드가 없는 것(꺼 둔 정상 상태일 수 있다)이고, 목록이나 소유 객체를 읽지 못한 것은 이 값이 아니라 던진다.
@@ -317,7 +318,8 @@ export type OliveSupervisorStatus = {
 };
 // 진입점이 stderr 한 줄에 적은 사유 낱말. refused는 감독이 거절, unreached는 감독에 닿지 못함, no-reply는 붙었지만 답을 받지 못함,
 // unknown은 감독이 답했지만 결과를 알려진 값으로 내지 못함이다. word는 그 갈래의 닫힌 목록 안의 값뿐이다.
-export type OliveAdminReason = { kind: "refused" | "unreached" | "no-reply" | "unknown"; word: string };
+// detail은 자리 풀기에서만 있다: ledger_refused의 장부 거절 이름, write_unknown의 까닭(둘 다 닫힌 목록).
+export type OliveAdminReason = { kind: "refused" | "unreached" | "no-reply" | "unknown"; word: string; detail?: string };
 // 진입점이 0이 아닌 코드로 끝났다. kubectl의 끝 줄이 원격 종료 코드를 확인한 때만 이 값이다(kubectl 자신의 실패는 아니다).
 // reason은 stderr가 정해진 꼴이고 낱말이 코드와 맞을 때만 있고, 아니면 null이다.
 export type OliveAdminExit = { state: "exit"; pod: string; code: number; reason: OliveAdminReason | null };
@@ -331,10 +333,51 @@ export type OliveTestJobOutcome =
   | { state: "unknown"; pod: string }
   | OliveAdminExit;
 
+// 자리 풀기(D-149 ④). 감독 관리 통로의 olive-holds/v1·olive-release/v1 꼴(olive src/supervisor/admin/protocol.ts)과 같은 칸이다.
+export type OliveRunState = "queued" | "preparing" | "running" | "stopping" | "checking" | "ready_result" | "finalized" | "not_started" | "failed_stopped" | "unknown_running" | "cleanup_pending";
+// 감독이 앞 상태로 정한 다음 행동. 뜻은 olive README "감독 관리 통로"의 holds 표다.
+export type OliveHoldAction = "close_unconfirmed" | "abandon_result" | "wait_cleanup" | "close_store_reset" | "release_hold" | "none";
+// closableAt: 관리자 닫기가 닫을 수 있게 되는 시각(감독 시계 epoch ms). null이면 기다려도 닫히지 않는다.
+// stopReceiptId: checking 줄에만 있다(결과 포기에 그대로 넘긴다).
+export type OliveHoldRun = {
+  runId: string;
+  kind: "worker" | "session";
+  state: OliveRunState;
+  executorId: string;
+  runGeneration: number;
+  accepted: boolean;
+  finalizeSent: boolean;
+  closableAt: number | null;
+  stopReceiptId: string | null;
+  next: OliveHoldAction;
+};
+// heldAt: 관측을 적은 감독 시각(epoch ms). 바꾼 파드는 그 뒤에 떠야 한다.
+export type OliveHoldObservation = { observation: number; executorId: string; runId: string; kind: "worker" | "session"; runGeneration: number; why: string; heldAt: number };
+// slotFree: 새 작업자 실행이 자리를 받을 수 있는가(감독 장부만 본다. 실행기 저장소 쪽은 모른다). truncated: 뒤의 줄이 빠졌다.
+export type OliveHolds = { slotFree: boolean; runs: OliveHoldRun[]; slotHolds: OliveHoldObservation[]; truncated: boolean };
+export type OliveAbandonReason = "no_answer" | "not_known" | "unstorable";
+// 자리 풀기 쓰기 하나. 칸 이름은 감독 통로(RELEASE_FIELDS)와 같다. 확인 방법과 시각은 감독이 정하므로 칸이 아니다.
+// podStartedAt은 쿠버네티스에서 읽은 새 파드의 creationTimestamp(초 단위 내림, epoch ms)다. 지어낸 값을 넣지 않는다(D-97).
+export type OliveReleaseCall =
+  | { command: "close-unconfirmed" | "close-store-reset"; runId: string; fromState: OliveRunState; podName: string; podStartedAt: number }
+  | { command: "abandon-result"; runId: string; reason: OliveAbandonReason; stopReceiptId: string }
+  | { command: "release-hold"; executorId: string; runId: string; runGeneration: number; observation: number; podName: string; podStartedAt: number };
+// released: 이 쓰기의 대상이 작업자 자리를 놓았다. slotFree: 쓰기 뒤에 따로 읽은 "작업자 자리를 쓸 수 있다"(null은 모름).
+export type OliveReleaseAnswer = { outcome: "closed" | "abandoned" | "hold_released"; runId: string; released: boolean; slotFree: boolean | null };
+// unknown: holds는 결과를 읽지 못함, 쓰기는 적혔는지 모름이다. 실행 전 실패(파드를 읽지 못함)는 던진다.
+export type OliveHoldsOutcome = { state: "reported"; pod: string; holds: OliveHolds } | { state: "no-target"; target: OliveSupervisorMissing } | { state: "unknown"; pod: string | null } | OliveAdminExit;
+export type OliveReleaseOutcome = { state: "released"; pod: string; answer: OliveReleaseAnswer } | { state: "no-target"; target: OliveSupervisorMissing } | { state: "unknown"; pod: string | null } | OliveAdminExit;
+// 작업자 실행기 Deployment가 소유 사슬(파드 → ReplicaSet → Deployment, UID 대조)로 가진 파드 하나. createdAt은 metadata.creationTimestamp를
+// 초 단위로 내린 epoch ms다(실행기가 뜬 시각보다 늦지 않은 값이고 내림은 장부의 거절 쪽이다).
+export type OliveWorkerPod = { state: "ready"; name: string; uid: string; createdAt: number } | { state: "absent" | "not-owned" | "not-ready" | "terminating" | "multiple"; pods: number };
+
 export type OliveAdminRead = {
   // 대상 파드와 그 파드의 표시용 argv. exec하지 않는다. 읽지 못하면 던지고, 시간 초과는 ExecTimeout이다.
   target(action: "status"): OliveSupervisorTarget;
   target(action: "test-job", job: OliveTestJob): OliveSupervisorTarget;
+  target(action: "holds"): OliveSupervisorTarget;
+  // 대상 목록(targets.yaml)의 kind executor 줄 id로 그 실행기의 파드를 읽는다. get만 하고 exec하지 않는다. 읽지 못하면 던진다.
+  workerPod(targetId: string): OliveWorkerPod;
 };
 
 // 쓰기 문맥만: kubectl exec는 바꾸는 것이 없어도 쓰기로 판정한다(설계 C.7).
@@ -343,6 +386,10 @@ export type OliveAdminWrite = OliveAdminRead & {
   run(action: "status"): OliveAdminOutcome;
   // 시험 작업 한 줄을 넣는다. 같은 규칙으로 파드를 다시 찾아 한 번 실행하고 재시도하지 않는다.
   testJob(job: OliveTestJob): OliveTestJobOutcome;
+  // 자리 목록(holds)을 읽는다. 감독 쪽은 읽기지만 exec라 쓰기 문맥에만 있다.
+  holds(): OliveHoldsOutcome;
+  // 자리 풀기 쓰기 하나. 같은 규칙으로 파드를 다시 찾아 한 번 실행하고 재시도하지 않는다.
+  release(call: OliveReleaseCall): OliveReleaseOutcome;
 };
 
 // 이 프로세스가 클러스터 노드 위인지. /etc/machine-id와 Node의 status.nodeInfo.machineID가 하나만 맞아야 node다.
