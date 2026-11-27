@@ -96,17 +96,17 @@ cluster:
         digest: sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0
     roleProfiles:
       diagnosis:
-        revision: t1-fixed-1
+        revision: t1-hold-1
         program: /bin/sh
-        argv: ["-c", "printf '%s\\n' \"$FIXED_RESULT\""]
+        argv: ["-c", "sleep 240; printf '%s\\n' \"$FIXED_RESULT\""]
         cwd: /tmp
         env:
           FIXED_RESULT: '{"role":"diagnosis","outcome":"completed","summary":"T1 고정 시험 프로그램의 결과(모델 없음, D-118)","items":[],"refs":[]}'
         credentialEnv: CLAUDE_CODE_OAUTH_TOKEN
       isolated_reader:
-        revision: t1-fixed-1
+        revision: t1-hold-1
         program: /bin/sh
-        argv: ["-c", "printf '%s\\n' \"$FIXED_RESULT\""]
+        argv: ["-c", "sleep 240; printf '%s\\n' \"$FIXED_RESULT\""]
         cwd: /tmp
         env:
           FIXED_RESULT: '{"role":"isolated_reader","outcome":"completed","summary":"T1 고정 시험 프로그램의 결과(모델 없음, D-118)","items":[],"refs":[]}'
