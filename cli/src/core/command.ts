@@ -400,11 +400,12 @@ export type OliveAdminWrite = OliveAdminRead & {
 export type OliveLedgerCheckId = "deployment" | "replicas" | "rollout" | "supervisor-pods" | "shape" | "ledger-users" | "pvc" | "stop-lock" | "leftover" | "quota";
 export type OliveLedgerCheck = { id: OliveLedgerCheckId; ok: true } | { id: OliveLedgerCheckId; ok: false; detail: string };
 export type OliveLedgerJob = { namespace: string; name: string; image: string; ledgerDir: string; pvc: string; limits: { cpu: string; memory: string }; deadlineSec: number; ttlSec: number };
-// job은 감독 Deployment의 꼴을 읽어 Job을 만들 수 있을 때만 있다.
+// job은 감독 Deployment의 꼴을 읽어 Job을 만들 수 있을 때만 있다. context가 null이면 kubectl 문맥을 정하지 못해 아무것도 읽지 않았다
+// (checks가 비어 있다). 문맥이 있으면 그 실행의 모든 kubectl 호출이 그 문맥으로 갔다.
 export type OliveLedgerInspection = { context: string | null; namespace: string; deployment: string; checks: OliveLedgerCheck[]; job: OliveLedgerJob | null };
 // deleted: 판정 뒤 지웠다. kept: 끝나지 않았거나 만들었는지 몰라 지우지 않았다. failed: 지우기를 확인하지 못했다.
 export type OliveLedgerCleanup = { state: "deleted" } | { state: "kept" | "failed"; why: string };
-// blocked: 확인이 어긋나 Job을 만들지 않았다. not-created: 만들기를 API가 거절했다(파드 없음).
+// blocked: 확인이 어긋나 Job을 만들지 않았다. not-created: 만들기를 API가 거절했거나 kubectl을 띄우지 못했다(파드 없음).
 // created(종료 0)·exists(90)는 성공, failed는 그 밖의 종료 코드, unknown은 종료 코드를 확인하지 못했다(장부가 만들어졌을 수 있다).
 export type OliveLedgerOutcome =
   | { state: "blocked"; inspection: OliveLedgerInspection }

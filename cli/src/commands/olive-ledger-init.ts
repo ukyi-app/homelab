@@ -21,13 +21,15 @@ const OK_WORD: Record<OliveLedgerCheck["id"], string> = {
   pvc: "장부 PVC 있음",
   "stop-lock": "정지 자물쇠 없음",
   leftover: "지난 초기화 Job·파드 없음",
-  quota: "olive-limits 사용량 0, 한도 = 감독 limits",
+  quota: "olive-limits 사용량 0, 집행 중인 한도 = 감독 limits, 적용 범위 없음",
 };
 
 // 정지 자물쇠(파드 0개 쿼터)가 걸려 있으면 거절한다. 만들어도 쿼터가 파드를 막아 기한까지 기다린 뒤 결과 모름이 되고,
 // 비상 정지를 풀지는 그 절차(정지 원인 확인, 실행 파드 0개)로 사람이 정할 일이라 이 명령이 풀거나 비켜 가지 않는다.
 const LOCK_NEXT = `정지를 건 까닭이 풀렸는지 확인하고 정지 절차대로 자물쇠를 푼 뒤 다시: ${AGAIN}`;
 const LEFTOVER_NEXT = `지난 초기화의 결과를 확인하고 Job을 지운 뒤 다시: ${AGAIN}(끝난 Job은 끝난 뒤 600초면 스스로 지워진다)`;
+// Job 없이 남은 초기화 파드(손으로 띄운 본보기 등)에는 ttl이 없어 기다려도 풀리지 않는다.
+const POD_LEFTOVER_NEXT = `지난 초기화 파드의 결과(종료 코드)를 확인하고 그 파드를 지운 뒤 다시: ${AGAIN}(Job 없이 남은 파드는 스스로 지워지지 않는다)`;
 const LATER = `잠시 뒤 다시: ${AGAIN}`;
 const SHAPE_NEXT = "CLI와 차트의 판을 맞춘다(CLI를 다시 설치하거나 감독 Deployment를 확인한다)";
 
@@ -53,10 +55,13 @@ function failWord(c: OliveLedgerCheck & { ok: false }): Word {
       if (d === "different") return { line: "정지 자물쇠 자리(olive-stop)에 다른 모양의 쿼터가 있다", next: "그 쿼터가 무엇인지 확인한다(이 명령은 지우지 않는다)" };
       return { line: "정지 자물쇠(olive-stop)가 걸려 있어 초기화 파드도 뜰 수 없다", next: LOCK_NEXT };
     case "leftover":
-      return { line: d === "job" ? "지난 초기화 Job(olive-ledger-init)이 남아 있다" : `지난 초기화 파드가 남아 있다(${d.replace("pods ", "")}개)`, next: LEFTOVER_NEXT };
+      return d === "job" ? { line: "지난 초기화 Job(olive-ledger-init)이 남아 있다", next: LEFTOVER_NEXT } : { line: `지난 초기화 파드가 남아 있다(${d.replace("pods ", "")}개)`, next: POD_LEFTOVER_NEXT };
     case "quota":
       if (d === "absent") return { line: "olive-limits 쿼터가 없다(감독과 함께 뜨는 것을 막지 못한다)", next: "올리브 차트의 olive-limits를 확인한다" };
       if (d === "mismatch") return { line: "olive-limits 한도가 감독 limits와 다르다(감독과 함께 뜨는 것을 막지 못한다)", next: "올리브 차트의 olive-limits와 감독 resources를 확인한다" };
+      if (d === "deleting") return { line: "olive-limits 쿼터가 지워지는 중이다(감독과 함께 뜨는 것을 막지 못한다)", next: "올리브 차트의 olive-limits를 확인한다" };
+      if (d === "scoped") return { line: "olive-limits에 적용 범위(scopes·scopeSelector)가 있다(차트와 다르다)", next: "올리브 차트의 olive-limits를 확인한다(이 명령은 고치지 않는다)" };
+      if (d === "enforcing") return { line: "olive-limits가 집행 중인 한도(status.hard)가 아직 감독 limits와 같지 않다", waiting: true, next: LATER };
       return { line: d === "unread" ? "olive-limits 사용량을 아직 계산하지 않았다" : "olive-limits 사용량이 0이 아니다", waiting: true, next: LATER };
   }
 }
@@ -68,6 +73,9 @@ const checkLines = (i: OliveLedgerInspection) => i.checks.map((c) => (c.ok ? `�
 
 // 어긋난 확인이 하나라도 있으면 만들지 않는다. 모두 잠시 뒤 풀리는 것(감독이 내려가는 중 등)이면 대기(3), 아니면 실패(1)다.
 function blocked(i: OliveLedgerInspection, verbose: boolean, planned: boolean): Outcome | null {
+  if (i.context === null) {
+    return { status: "failed", label: "확인 어긋남", headline: `장부 초기화: ${planned ? "만들 수 없다" : "Job을 만들지 않았다"}. kubectl 문맥을 정하지 못했다`, lines: [], next: `kubectl config current-context가 대상 클러스터의 문맥을 내는지 확인한 뒤 다시: ${AGAIN}` };
+  }
   const bad = i.checks.filter((c): c is OliveLedgerCheck & { ok: false } => !c.ok).map(failWord);
   if (bad.length === 0 && i.job !== null) return null;
   const first = bad[0] ?? { line: "Job 모양을 만들지 못했다", next: SHAPE_NEXT };
@@ -94,6 +102,8 @@ function planned(c: ReadCtx, verbose: boolean): Outcome {
 const UNKNOWN_WHY: Record<string, string> = {
   "create-timeout": "Job을 만들었는지 모른다(시간 초과)",
   "create-unread": "만든 Job의 응답을 읽지 못했다",
+  "create-lost": "Job을 만들었는지 모른다(만들기 응답을 받지 못했다)",
+  "not-owned": "종료 코드를 낸 파드가 만든 Job의 것인지 확인하지 못했다",
   deadline: "초기화 파드가 기한 안에 끝나지 않았다",
   wait: "기다림 상한 안에 Job이 끝나지 않았다",
   gone: "기다리는 도중 Job이 사라졌다",
@@ -112,11 +122,19 @@ function cleanupLine(c: OliveLedgerCleanup, j: OliveLedgerJob): string | null {
 }
 
 // 진입점 종료 코드(olive ledger-init: 0 만듦, 64 사용법, 90 이미 있음, 91 환경, 94 그 밖)를 CLI 공통 규칙(D-61)으로 옮긴다.
-// 64·91은 장부를 열기 전에 멈춘 것이다. 94는 장부를 만들지 못했지만 닫기 실패(close:)면 장부가 이미 있다. 모르는 코드는 만들어졌을 수 있다.
+// 64·91은 장부를 열기 전에 멈춘 것이다. 모르는 코드는 만들어졌을 수 있다. 94는 사유마다 장부가 생겼는지가 다르다:
+// close:threw는 장부를 만든 뒤 닫기만 실패한 것이다(진입점의 명시 계약). 아래 열기 실패는 첫 설치 기록을 커밋한 뒤의 WAL 전환에서도
+// 날 수 있어 쓰기 시점을 가릴 수 없다(olive src/ledger/ledger.ts openLedger). 그 밖의 사유는 파일에 쓰기 전의 판정이다.
+// 어느 쪽이든 CLI는 1이고 자동으로 다시 돌리지 않는다.
+const MAYBE_WRITTEN = new Set(["open:io", "open:db_error", "open:full", "open:closed", "open:threw", "open:unreadable"]);
+const FIX_THEN = "자동으로 다시 돌리지 않았다. 사유를 보고 장부 자리를 바로잡은 뒤";
+
 function failedLine(code: number, reason: string | null, kubelet: string | null): { line: string; maybe: boolean; next: string } {
   if (code === 64) return { line: "초기화 진입점이 실행을 받지 않았다(종료 64, CLI와 감독 이미지의 판이 다를 수 있다)", maybe: false, next: SHAPE_NEXT };
   if (code === 91) return { line: `초기화 진입점이 장부 경로 환경을 받지 못했다(종료 91${reason ? `, ${reason}` : ""})`, maybe: false, next: "감독 Deployment의 OLIVE_LEDGER_DIR을 확인한다" };
-  if (code === 94) return { line: `장부를 만들지 못했다(종료 94, ${reason ?? "사유를 읽지 못함"})`, maybe: reason === null || reason.startsWith("close:"), next: `자동으로 다시 돌리지 않았다. 사유를 보고 장부 자리를 바로잡은 뒤 다시: ${AGAIN}(0바이트 장부 파일만 남았으면 olive README의 장부 초기화 절을 본다)` };
+  if (code === 94 && reason === "close:threw") return { line: "장부는 만들었고 닫기가 실패했다(종료 94, close:threw)", maybe: false, next: `자동으로 다시 돌리지 않았다. ${CHECK_AGAIN}` };
+  if (code === 94 && reason !== null && MAYBE_WRITTEN.has(reason)) return { line: `장부 열기가 실패했다(종료 94, ${reason})`, maybe: true, next: `${FIX_THEN} ${CHECK_AGAIN}` };
+  if (code === 94) return { line: `장부를 만들지 못했다(종료 94, ${reason ?? "사유를 읽지 못함"})`, maybe: reason === null, next: `${FIX_THEN} 다시: ${AGAIN}(0바이트 장부 파일만 남았으면 olive README의 장부 초기화 절을 본다)` };
   return { line: `초기화 파드가 종료 ${code}로 끝났다(${kubelet ?? "사유를 읽지 못함"})`, maybe: true, next: CHECK_AGAIN };
 }
 
@@ -130,7 +148,7 @@ function applied(w: WriteCtx, verbose: boolean): Outcome {
   if (r.state === "blocked") return blocked(r.inspection, verbose, false) ?? { status: "failed", label: "확인 어긋남", headline: "장부 초기화: Job을 만들지 않았다", lines: [], next: SHAPE_NEXT };
   const j = r.job;
   if (r.state === "not-created") {
-    const why = r.why === "exists" ? "같은 이름의 Job이 먼저 생겼다" : r.why === "forbidden" ? "API 서버가 거절했다" : `kubectl ${r.why}`;
+    const why = r.why === "exists" ? "같은 이름의 Job이 먼저 생겼다" : r.why === "forbidden" || r.why === "refused" ? "API 서버가 거절했다" : r.why === "not-run" ? "kubectl을 띄우지 못했다" : `kubectl ${r.why}`;
     return { status: "failed", label: "만들지 못함", headline: `장부 초기화: Job을 만들지 못했다(${why}). 아무것도 돌지 않았다`, lines: verbose ? [jobLine(j)] : [], next: r.why === "exists" ? LEFTOVER_NEXT : `원인을 고친 뒤 다시: ${AGAIN}` };
   }
   const tail = [cleanupLine(r.cleanup, j)].filter((l): l is string => l !== null);
@@ -183,7 +201,7 @@ export function makeOliveLedgerInit() {
     summary: "올리브 감독 장부 처음 만들기",
     help: {
       about:
-        "감독을 처음 켜기 전에 빈 장부를 한 번 만듭니다. 계획은 클러스터를 읽기만 해서 대상, 확인 결과, 띄울 Job(이미지, 장부 경로, PVC, 자원 한도)을 보입니다. --apply는 확인을 다시 읽어 감독 replicas와 파드가 0이고 정지 자물쇠가 없으며 지난 초기화가 남지 않았을 때만 감독과 같은 이미지·보안 설정의 일회성 Job을 띄우고, 끝날 때까지(기한 5분) 기다려 판정한 뒤 Job을 지웁니다. 정지 자물쇠가 걸려 있으면 풀지 않고 거절합니다. 종료 코드는 0 장부를 만듦·이미 있음(바꾸지 않음), 1 확인 어긋남·실패·결과 모름, 3 대기(감독이 내려가는 중 등), 64 사용법입니다. 결과 모름이면 장부가 만들어졌을 수 있으니 다시 불러 확인합니다(있으면 바꾸지 않고 끝납니다).",
+        "감독을 처음 켜기 전에 빈 장부를 한 번 만듭니다. 계획은 클러스터를 읽기만 해서 대상, 확인 결과, 띄울 Job(이미지, 장부 경로, PVC, 자원 한도)을 보입니다. 계획과 --apply 모두 시작에 kubectl 문맥을 한 번 정해 모든 호출에 같은 문맥을 씁니다. --apply는 확인을 다시 읽어 감독 replicas와 파드가 0이고 정지 자물쇠가 없으며 지난 초기화가 남지 않았을 때만 감독과 같은 이미지·보안 설정의 일회성 Job을 띄우고, 끝날 때까지(기한 5분) 기다려 판정한 뒤 Job을 지웁니다. 정지 자물쇠가 걸려 있으면 풀지 않고 거절합니다. 종료 코드는 0 장부를 만듦·이미 있음(바꾸지 않음), 1 확인 어긋남·실패·결과 모름, 3 대기(감독이 내려가는 중 등), 64 사용법입니다. 결과 모름이면 장부가 만들어졌을 수 있으니 다시 불러 확인합니다(있으면 바꾸지 않고 끝납니다).",
       examples: ["homelab olive ledger-init", "homelab olive ledger-init --verbose"],
       related: ["olive"],
     },

@@ -4,7 +4,11 @@
 // 함정: 이 Job은 차트 밖이라 렌더 CI가 보지 않는다. 모양은 CLI 시험(cli/test/commands/olive-ledger-init.test.ts)이 고정한다.
 // 잠금은 둘이다. 쓰기 전 확인(감독 replicas 0·파드 0·정지 자물쇠 없음·olive-limits 사용량 0)과, limits를 감독과 같게 둬서
 // olive-limits 쿼터(한도 = 감독 limits)가 감독 파드와 이 파드를 함께 띄우지 못하게 하는 것. 두 초기화 파드의 동시 실행도 같은 쿼터가 막는다.
+// 함정: API 서버가 파드 생성을 심사하는 한도는 spec.hard가 아니라 쿼터 컨트롤러가 옮겨 적은 status.hard이고, 적용 범위(scopes·
+// scopeSelector)가 붙은 쿼터는 맞는 파드만 센다. 그래서 두 번째 잠금은 status.hard = 감독 limits이고 범위가 없을 때만 믿는다.
 // 감독 ns로 가는 다른 길(관리 진입점)은 olive-admin.ts에 있고, ns·Deployment·컨테이너 이름은 그 파일의 상수를 쓴다.
+// 한 실행의 kubectl 호출은 시작에 한 번 읽은 문맥을 --context로 모두 받는다. 기본 문맥을 쓰면 확인한 클러스터와 Job을 만드는
+// 클러스터가 그사이 바뀐 기본 문맥 때문에 달라질 수 있고, 같은 이름의 PVC가 있으면 확인하지 않은 장부를 초기화한다.
 import type { OliveLedgerCheck, OliveLedgerCleanup, OliveLedgerInspection, OliveLedgerJob, OliveLedgerOutcome, OliveLedgerRead, OliveLedgerWrite } from "./command";
 import { ExecTimeout, why, type Exec, type ExecResult } from "./exec";
 import { entries, isArray, jsonParse, jsonStringify } from "./intrinsics";
@@ -32,20 +36,28 @@ const DELETE_WAIT_MS = 60_000;
 const POLL_MS = 2_000;
 const LEDGER_ENV = "OLIVE_LEDGER_DIR";
 const QUOTA = "olive-limits";
+// 만들기 요청을 API 서버가 받지 않았다는 응답(kubectl의 "Error from server (이유)" 줄). 이 밖의 실패는 만들었는지 모른다.
+const REFUSED = /^Error from server \((AlreadyExists|Forbidden|Invalid|BadRequest|Unauthorized|NotFound)\)/m;
 
 const NAME = /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/;
 const DIGEST_IMAGE = /^[a-z0-9][a-z0-9._\/:-]{0,200}@sha256:[0-9a-f]{64}$/;
 // 절대 경로이고 . · .. 조각이 없다(감독의 settingsFromEnv는 상대 경로를 틀림으로 본다).
 const ABS_PATH = /^(\/[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}){1,8}$/;
 const QUANTITY = /^[0-9]+(\.[0-9]+)?(m|Ki|Mi|Gi|Ti|k|M|G|T)?$/;
-const SHORT_WORD = /^[A-Za-z]{1,40}$/;
 const POD_SC_KEYS = new Set(["runAsNonRoot", "runAsUser", "runAsGroup", "fsGroup", "seccompProfile"]);
 const CONTAINER_SC_KEYS = new Set(["allowPrivilegeEscalation", "readOnlyRootFilesystem", "capabilities"]);
 // 진입점이 0이 아닐 때 stderr에 쓰는 한 줄(olive src/main/ledger-init.ts의 say). 파드 상태의 message(FallbackToLogsOnError)에서 읽는다.
 // 문구가 바뀌면 사유는 null이 되고 종료 코드만으로 말한다. 원문은 내지 않는다.
 const INIT_LINE = /^olive ledger-init [0-9A-Za-z.+-]{1,40}: (.*)$/;
-const INIT_REASONS: [RegExp, (m: RegExpExecArray) => string][] = [
-  [/^장부를 만들지 못했다\(((?:open|close|deps):[a-z_]{1,40})\)$/, (m) => m[1] as string],
+// 94의 사유는 진입점이 실제로 내는 것만 받는다(olive src/main/ledger-init.ts의 failed 호출과 src/ledger/errors.ts의 UNAVAILABLE_REASONS).
+// already_initialized는 90이라 없다. 목록 밖 낱말은 null(사유를 읽지 못함)이다: 출력에 실을 낱말을 진입점 문구가 정하지 않게 한다.
+const OPEN_REASONS = ["locked", "corrupt", "full", "io", "too_new", "migration_mismatch", "migration_failed", "not_initialized", "foreign_data", "interrupted_install", "closed", "db_error", "threw", "unreadable"];
+const INIT_FAILURES = new Set([...OPEN_REASONS.map((r) => `open:${r}`), "close:threw", "deps:threw"]);
+// 표시할 kubelet 사유(컨테이너 상태의 terminated.reason·waiting.reason). 목록 밖은 null이다.
+const TERMINATED_REASONS = new Set(["Completed", "Error", "OOMKilled", "ContainerCannotRun", "DeadlineExceeded", "StartError"]);
+const WAITING_REASONS = new Set(["ContainerCreating", "PodInitializing", "ErrImagePull", "ImagePullBackOff", "ErrImageNeverPull", "InvalidImageName", "ImageInspectError", "RegistryUnavailable", "SignatureValidationFailed", "CreateContainerConfigError", "CreateContainerError", "PreStartHookError", "PostStartHookError", "RunContainerError", "CrashLoopBackOff"]);
+const INIT_REASONS: [RegExp, (m: RegExpExecArray) => string | null][] = [
+  [/^장부를 만들지 못했다\(((?:open|close|deps):[a-z_]{1,40})\)$/, (m) => (INIT_FAILURES.has(m[1] as string) ? (m[1] as string) : null)],
   [/^환경 OLIVE_LEDGER_DIR이\(가\) 없다$/, () => "env:missing"],
   [/^환경 OLIVE_LEDGER_DIR이\(가\) 틀렸다$/, () => "env:invalid"],
   [/^사용법: /, () => "usage"],
@@ -56,10 +68,20 @@ const isObj = (v: unknown): v is Record<string, any> => typeof v === "object" &&
 const isName = (v: unknown): v is string => typeof v === "string" && v.length <= 253 && NAME.test(v);
 const posInt = (v: unknown, min: number) => Number.isSafeInteger(v) && (v as number) >= min;
 const run = (exec: Exec, args: string[], opts: Parameters<Exec>[1] = {}) => exec(kubectlArgv(args), opts);
+// 문맥 이름은 kubeconfig 안의 이름이라 꼴이 자유롭다. 공백·제어 문자만 받지 않고, 한 인자(--context=이름)로 넘겨 플래그로 읽히지 않게 한다.
+const CONTEXT = /^[\x21-\x7e]{1,253}$/;
+
+// 받은 exec의 kubectl 호출마다 같은 문맥을 붙인다. olive.ts의 자물쇠 조회도 이 exec를 받아 같은 문맥으로 간다.
+function pinned(exec: Exec, context: string): Exec {
+  return (argv, opts) => {
+    if (argv[0] !== "kubectl") throw new Error("장부 초기화는 kubectl만 부른다");
+    return exec(["kubectl", `--context=${context}`, ...argv.slice(1)], opts);
+  };
+}
 
 // 한 객체 읽기. 없으면 null, 시간 초과는 ExecTimeout, 그 밖의 실패와 다른 객체는 던진다.
-function getDoc(exec: Exec, resource: string, name: string, kind: string): any | null {
-  const r = run(exec, ["-n", OLIVE_ADMIN_NS, "get", resource, name, "-o", "json"]);
+function getDoc(exec: Exec, resource: string, name: string, kind: string, opts: Parameters<Exec>[1] = {}): any | null {
+  const r = run(exec, ["-n", OLIVE_ADMIN_NS, "get", resource, name, "-o", "json"], opts);
   if (r.errKind === "timeout") throw new ExecTimeout(`${kind} ${name}: 시간 초과(결과 미상)`);
   if (r.code !== 0 && r.notFound) return null;
   if (r.code !== 0) throw new Error(`${kind} ${name}을 읽지 못했다(${why(r)})`);
@@ -74,8 +96,8 @@ function getDoc(exec: Exec, resource: string, name: string, kind: string): any |
 }
 
 // 파드 목록. 다른 종류의 빈 목록이나 남은 페이지가 있는 부분 목록을 "파드 0개"로 읽지 않는다.
-function listPods(exec: Exec, selector?: string): any[] {
-  const r = run(exec, ["-n", OLIVE_ADMIN_NS, "get", "pods", ...(selector ? ["-l", selector] : []), "-o", "json"]);
+function listPods(exec: Exec, selector?: string, opts: Parameters<Exec>[1] = {}): any[] {
+  const r = run(exec, ["-n", OLIVE_ADMIN_NS, "get", "pods", ...(selector ? ["-l", selector] : []), "-o", "json"], opts);
   if (r.errKind === "timeout") throw new ExecTimeout("파드 목록: 시간 초과(결과 미상)");
   if (r.code !== 0) throw new Error(`파드 목록을 읽지 못했다(${why(r)})`);
   let doc: any;
@@ -209,10 +231,13 @@ function shapeFrom(d: any): Shape {
 
 type Inspected = OliveLedgerInspection & { manifest: Record<string, unknown> | null };
 
-function inspect(exec: Exec): Inspected {
+// 문맥을 정하지 못하면 다른 것을 읽지 않는다(context null, 확인 없음, job 없음). 명령은 이것을 만들지 않음으로 말한다.
+function inspect(readExec: Exec): Inspected {
   const checks: OliveLedgerCheck[] = [];
   const add = (id: OliveLedgerCheck["id"], fail: string | null) => checks.push(fail === null ? { id, ok: true } : { id, ok: false, detail: fail });
-  const context = kubeRead(exec).currentContext();
+  const context = kubeRead(readExec).currentContext();
+  if (context === null || !CONTEXT.test(context)) return { context: null, namespace: OLIVE_ADMIN_NS, deployment: OLIVE_ADMIN_DEPLOYMENT, checks, job: null, manifest: null };
+  const exec = pinned(readExec, context);
   const d = getDoc(exec, "deployments.apps", OLIVE_ADMIN_DEPLOYMENT, "Deployment");
   const pods = listPods(exec);
   const lock = oliveRead(exec).stopLock(OLIVE_ADMIN_NS);
@@ -253,11 +278,18 @@ function inspect(exec: Exec): Inspected {
   if (quota === null) add("quota", "absent");
   else {
     const hard = quota?.spec?.hard;
+    const enforced = quota?.status?.hard;
     const used = quota?.status?.used;
-    const cpu = hard?.["limits.cpu"];
-    const memory = hard?.["limits.memory"];
-    // API 서버는 수량을 정규형으로 저장해 같은 값은 같은 글자다(500m·0.5 → 500m).
-    if (job !== null && (cpu !== job.limits.cpu || memory !== job.limits.memory)) add("quota", "mismatch");
+    const scopes = quota?.spec?.scopes;
+    // 차트의 olive-limits에는 범위가 없다. 범위가 붙으면 감독·초기화 파드를 세지 않을 수 있다(olive.ts lockState와 같은 판정).
+    const scoped = !(scopes === undefined || (isArray(scopes) && scopes.length === 0)) || present(quota?.spec?.scopeSelector);
+    const same = (h: any) => job !== null && isObj(h) && h["limits.cpu"] === job.limits.cpu && h["limits.memory"] === job.limits.memory;
+    // 지워지는 쿼터는 곧 사라지고 되살릴 수 없다. API 서버는 수량을 정규형으로 저장해 같은 값은 같은 글자다(500m·0.5 → 500m).
+    if (present(quota?.metadata?.deletionTimestamp)) add("quota", "deleting");
+    else if (scoped) add("quota", "scoped");
+    else if (job !== null && !same(hard)) add("quota", "mismatch");
+    // status.hard는 컨트롤러가 spec을 반영한 뒤에 바뀐다. 반영 전에는 옛 한도로 심사하므로 기다린다.
+    else if (job !== null && !same(enforced)) add("quota", "enforcing");
     else if (!isObj(used) || !present(used["limits.cpu"]) || !present(used["limits.memory"])) add("quota", "unread");
     else add("quota", used["limits.cpu"] === "0" && used["limits.memory"] === "0" ? null : "used");
   }
@@ -271,8 +303,16 @@ function condition(job: any, type: string): any | null {
   return isArray(list) ? (list.find((c: any) => c?.type === type && c?.status === "True") ?? null) : null;
 }
 
-// 컨테이너 상태의 사유 낱말(kubelet이 정한 짧은 이름만, 예 ImagePullBackOff·OOMKilled). 모르는 꼴은 null.
-const word = (v: unknown): string | null => (typeof v === "string" && SHORT_WORD.test(v) ? v : null);
+const word = (v: unknown, known: Set<string>): string | null => (typeof v === "string" && known.has(v) ? v : null);
+
+// 종료 코드를 읽을 파드는 만든 그 Job이 제어하는 파드뿐이다. 컨트롤러 uid 라벨은 누구나 붙일 수 있어 제어 참조로 대조한다(olive-admin.ts와 같은 방식).
+function ownedBy(p: any, uid: string): boolean {
+  const refs = p?.metadata?.ownerReferences;
+  const ctl = isArray(refs) ? refs.filter((r: any) => r?.controller === true) : [];
+  if (ctl.length !== 1) return false;
+  const r = ctl[0];
+  return r?.apiVersion === "batch/v1" && r?.kind === "Job" && r?.name === LEDGER_INIT_JOB && r?.uid === uid;
+}
 
 function initReason(message: unknown): string | null {
   if (typeof message !== "string" || message.length > 4_096) return null;
@@ -288,26 +328,29 @@ function initReason(message: unknown): string | null {
 
 type Watch = { terminal: "complete" | "failed" | null; deadline: boolean; gone: boolean; pods: any[]; waiting: string | null };
 
-function watchOnce(exec: Exec, uid: string): Watch {
-  const j = getDoc(exec, "jobs.batch", LEDGER_INIT_JOB, "Job");
+// left는 조회마다의 남은 시간(ms)이다. 조회 자체도 기다림 상한 안에 끝나게 실행 제한으로 넘긴다.
+function watchOnce(exec: Exec, uid: string, left: () => number): Watch {
+  const j = getDoc(exec, "jobs.batch", LEDGER_INIT_JOB, "Job", { timeoutMs: Math.max(1, left()) });
   if (j === null || j?.metadata?.uid !== uid) return { terminal: null, deadline: false, gone: true, pods: [], waiting: null };
   const failed = condition(j, "Failed");
   const terminal = condition(j, "Complete") ? "complete" : failed ? "failed" : null;
-  const pods = listPods(exec, `batch.kubernetes.io/controller-uid=${uid}`);
+  const pods = listPods(exec, `batch.kubernetes.io/controller-uid=${uid}`, { timeoutMs: Math.max(1, left()) });
   let waiting: string | null = null;
   for (const p of pods) {
+    if (!ownedBy(p, uid)) continue;
     const cs = isArray(p?.status?.containerStatuses) ? p.status.containerStatuses.find((s: any) => s?.name === LEDGER_INIT_CONTAINER) : undefined;
-    waiting = word(cs?.state?.waiting?.reason) ?? waiting;
+    waiting = word(cs?.state?.waiting?.reason, WAITING_REASONS) ?? waiting;
   }
   return { terminal, deadline: failed?.reason === "DeadlineExceeded", gone: false, pods, waiting };
 }
 
 type Verdict = { state: "unknown"; why: string } | { state: "created" | "exists" } | { state: "failed"; code: number; reason: string | null; kubelet: string | null };
 
-function judge(w: Watch): Verdict {
+function judge(w: Watch, uid: string): Verdict {
   if (w.deadline) return { state: "unknown", why: "deadline" };
   if (w.pods.length !== 1) return { state: "unknown", why: "pods" };
   const p = w.pods[0];
+  if (!ownedBy(p, uid)) return { state: "unknown", why: "not-owned" };
   const cs = isArray(p?.status?.containerStatuses) ? p.status.containerStatuses.filter((s: any) => s?.name === LEDGER_INIT_CONTAINER) : [];
   const t = cs.length === 1 ? cs[0]?.state?.terminated : undefined;
   const code = t?.exitCode;
@@ -316,7 +359,7 @@ function judge(w: Watch): Verdict {
   if ((code === 0) !== (w.terminal === "complete")) return { state: "unknown", why: "mismatch" };
   if (code === 0) return { state: "created" };
   if (code === 90) return { state: "exists" };
-  return { state: "failed", code, reason: initReason(t?.message), kubelet: word(t?.reason) };
+  return { state: "failed", code, reason: initReason(t?.message), kubelet: word(t?.reason, TERMINATED_REASONS) };
 }
 
 export type OliveLedgerOpts = { pollMs?: number; capMs?: number };
@@ -325,13 +368,13 @@ export function oliveLedgerRead(readExec: Exec): OliveLedgerRead {
   return { inspect: () => publicView(inspect(readExec)) };
 }
 
-export function oliveLedgerWrite(exec: Exec, readExec: Exec, opts: OliveLedgerOpts = {}): OliveLedgerWrite {
+export function oliveLedgerWrite(writeExec: Exec, baseReadExec: Exec, opts: OliveLedgerOpts = {}): OliveLedgerWrite {
   const pollMs = opts.pollMs ?? POLL_MS;
   const cap = (ms: number) => (opts.capMs !== undefined && opts.capMs > 0 ? Math.min(ms, opts.capMs) : ms);
 
   // 판정 뒤 Job을 지운다. 확인한 그 Job(uid)만, 파드까지 지우는 Foreground로 지우고 사라질 때까지 기다린다.
   // kubectl delete는 precondition을 넣지 않아 DeleteOptions를 --raw 본문으로 보낸다(kubectl.ts deleteRestoreObject와 같은 방식).
-  const remove = (uid: string): OliveLedgerCleanup => {
+  const remove = (exec: Exec, readExec: Exec, uid: string): OliveLedgerCleanup => {
     const body = jsonStringify({ kind: "DeleteOptions", apiVersion: "v1", propagationPolicy: "Foreground", preconditions: { uid } });
     const x = run(exec, ["delete", "--raw", `/apis/batch/v1/namespaces/${OLIVE_ADMIN_NS}/jobs/${LEDGER_INIT_JOB}`, "-f", "-"], { input: body, secretStdout: true, signals: { conflict: /Precondition failed|\(Conflict\)/ } });
     if (x.errKind === "timeout") return { state: "failed", why: "timeout" };
@@ -352,14 +395,25 @@ export function oliveLedgerWrite(exec: Exec, readExec: Exec, opts: OliveLedgerOp
   };
 
   return {
-    ...oliveLedgerRead(readExec),
+    ...oliveLedgerRead(baseReadExec),
     run(): OliveLedgerOutcome {
-      const seen = inspect(readExec);
-      if (seen.checks.some((c) => !c.ok) || seen.job === null || seen.manifest === null) return { state: "blocked", inspection: publicView(seen) };
+      const seen = inspect(baseReadExec);
+      if (seen.context === null || seen.checks.some((c) => !c.ok) || seen.job === null || seen.manifest === null) return { state: "blocked", inspection: publicView(seen) };
       const job = seen.job;
+      // 확인에 쓴 그 문맥으로만 만들고, 기다리고, 지운다.
+      const exec = pinned(writeExec, seen.context);
+      const readExec = pinned(baseReadExec, seen.context);
       const x: ExecResult = run(exec, ["-n", OLIVE_ADMIN_NS, "create", "-f", "-", "-o", "json"], { input: jsonStringify(seen.manifest) });
       if (x.errKind === "timeout") return { state: "unknown", job, why: "create-timeout", waiting: null, cleanup: { state: "kept", why: "unknown" } };
-      if (x.code !== 0) return { state: "not-created", job, why: /AlreadyExists/.test(x.stderr) ? "exists" : /Forbidden/.test(x.stderr) ? "forbidden" : `exit ${x.code}` };
+      // kubectl을 띄우지 못했으면 요청이 나가지 않았다.
+      if (x.errKind === "not-found" || x.errKind === "spawn") return { state: "not-created", job, why: "not-run" };
+      if (x.code !== 0) {
+        // 만들지 않았다고 말할 수 있는 것은 API 서버가 요청을 거절했다는 응답뿐이다. 응답 기한·EOF·연결 끊김·서버 오류는
+        // 서버가 Job을 저장한 뒤 응답만 잃었을 수 있어 결과 모름이고, uid가 없으니 지우거나 다시 만들지 않는다.
+        const refused = REFUSED.exec(x.stderr)?.[1];
+        if (refused === undefined) return { state: "unknown", job, why: "create-lost", waiting: null, cleanup: { state: "kept", why: "unknown" } };
+        return { state: "not-created", job, why: refused === "AlreadyExists" ? "exists" : refused === "Forbidden" ? "forbidden" : "refused" };
+      }
       let created: any;
       try {
         created = jsonParse(x.stdout);
@@ -370,14 +424,16 @@ export function oliveLedgerWrite(exec: Exec, readExec: Exec, opts: OliveLedgerOp
       if (created?.kind !== "Job" || created?.metadata?.name !== LEDGER_INIT_JOB || typeof uid !== "string" || !POD_UID.test(uid)) return { state: "unknown", job, why: "create-unread", waiting: null, cleanup: { state: "kept", why: "unknown" } };
 
       const until = Date.now() + cap(WAIT_MS);
+      const left = () => until - Date.now();
       let w: Watch = { terminal: null, deadline: false, gone: false, pods: [], waiting: null };
       let unread = false;
       for (;;) {
         try {
-          w = watchOnce(readExec, uid);
+          w = watchOnce(readExec, uid, left);
           unread = false;
-        } catch {
-          unread = true;
+        } catch (e) {
+          // 남은 시간을 다 써서 끊긴 조회는 새 관측이 아니다. 그 앞 조회의 결과(읽음·읽지 못함)를 그대로 둔다.
+          if (!(e instanceof ExecTimeout && left() <= 0)) unread = true;
         }
         if (w.gone) return { state: "unknown", job, why: "gone", waiting: w.waiting, cleanup: { state: "deleted" } };
         if (!unread && w.terminal !== null) break;
@@ -387,8 +443,9 @@ export function oliveLedgerWrite(exec: Exec, readExec: Exec, opts: OliveLedgerOp
         }
         Bun.sleepSync(pollMs);
       }
-      const verdict = judge(w);
-      const cleanup = remove(uid);
+      // 상한 뒤에 끝난 관측은 판정에 쓰지 않는다(상한은 조회 시간까지 센다). 끝난 Job이라 지우기는 하고, 그 기다림은 따로 센다.
+      const verdict: Verdict = left() < 0 ? { state: "unknown", why: "wait" } : judge(w, uid);
+      const cleanup = remove(exec, readExec, uid);
       if (verdict.state === "unknown") return { state: "unknown", job, why: verdict.why, waiting: w.waiting, cleanup };
       if (verdict.state === "failed") return { state: "failed", job, code: verdict.code, reason: verdict.reason, kubelet: verdict.kubelet, cleanup };
       return verdict.state === "created" ? { state: "created", job, cleanup } : { state: "exists", job, cleanup };
