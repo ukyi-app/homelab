@@ -54,7 +54,10 @@ spec:
       initContainers:
         # 결과 폴더를 감독 uid 소유·0700으로 맞춘다(D-177, olive src/main/result-dir-init.ts). kubelet은 subPath 폴더가 없을 때만
         # root 소유·볼륨 뿌리의 모드(local-path는 0777)로 만들고 있으면 그대로 쓴다. 그래서 감독 컨테이너가 뜨기 전에 이 컨테이너가 만들어 둔다.
-        # 함정: 폴더가 이미 root 소유(kubelet이 만든 것)면 이 uid로 고칠 수 없어 98로 끝나고 파드가 Init:Error에 멈춘다. 관리자가 일회성 파드로 바로잡는다.
+        # 함정: 폴더가 이미 root 소유(kubelet이 만든 것)면 이 uid로 고칠 수 없어 98로 끝나고 파드가 Init:Error·Init:CrashLoopBackOff에 머문다.
+        # 그 파드도 olive-limits(감독 limits) 전체를 쥐어 같은 ns의 일회성 복구 파드를 쿼터가 거절한다. 관리자는 replicas를 0으로 내리고 파드 0개와
+        # 쿼터 반환을 확인한 뒤(정지 자물쇠 olive-stop이 걸려 있으면 복구 파드도 막히므로 그 상태도 전제다) 일회성 파드로 바로잡고 다시 띄운다.
+        # 98은 디스크가 그대로라는 뜻이 아니다. 만들거나 고친 뒤 확인이 실패한 98은 그 변경이 남을 수 있어 다시 돌리기 전에 폴더를 본다.
         # Secret·토큰·/tmp를 붙이지 않는다. 감독 전용 Secret을 받는 컨테이너는 감독 하나이고, 감독 /tmp(관리 소켓 자리)는 다른 컨테이너와 나누지 않는다.
         # 이 진입점은 /tmp에 쓰지 않는다. 이 컨테이너의 모양은 CI olive-supervisor-env의 init 표가 고정한다.
         - name: result-dir

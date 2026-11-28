@@ -1293,9 +1293,10 @@ function clusterWiringTests(base: OliveInput): string[] {
 //   볼륨: 이름마다 하나이고 내용이 표와 같다. Secret 모드는 십진 288(0440, fsGroup 65532로 읽는다), 신뢰 ConfigMap은 292(0444).
 //   생산자: 복구 스위치가 켠 렌더에서 감독 ns의 ExternalSecret이 표의 셋과 같다(store infisical-olive, target 이름 = 볼륨의 secretName,
 //     data의 Secret 키 = 볼륨 items의 key). 끈 렌더의 0개는 olive-executor-key가 본다(같은 이름 Secret은 사람이 만든다).
-// 렌더마다 다른 칸(등록표 키, 클러스터 이름, 계정 별칭, pki 켬, 신뢰 묶음, 직접 준 TLS Secret)은 그 렌더에 넣은 값에서 얻는다:
+// 렌더마다 다른 칸(등록표 키, 클러스터 이름, 계정 별칭, 장부 경로, pki 켬, 신뢰 묶음, 직접 준 TLS Secret)은 그 렌더에 넣은 값에서 얻는다:
 // 차트 ci 렌더는 values.yaml + ci 파일, 켠 root 렌더는 values.yaml + Application의 valueFiles·valuesObject + RENDER_FILL(빈 칸만).
 // TLS 볼륨·마운트는 값이 TLS Secret을 정할 때(pki 켬이면 olive-tls, 끄면 supervisor.tls.secretName), 신뢰는 pki 켬과 묶음이 있을 때 있어야 한다.
+// 장부 경로의 values.yaml 기본값. 표는 렌더에 넣은 값(supervisor.ledger.mountPath)을 쓰고, 이 값은 차트 ci 렌더를 고치는 시험만 쓴다.
 const SUP_LEDGER_DIR = "/var/lib/olive";
 const SUP_RESULT_DIR = "/var/lib/olive-results";
 const SUP_RESULT_SUBPATH = "results";
@@ -1314,7 +1315,7 @@ const SUP_TARGETS_JSON = JSON.stringify([
 const SUP_MOUNT_KEYS = ["name", "mountPath", "readOnly", "subPath"];
 const SUP_INIT_KEYS = ["name", "image", "command", "env", "securityContext", "resources", "volumeMounts"];
 const SUP_INIT_SECURITY = { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } };
-type SupValues = { registryKey: unknown; environment: unknown; account: unknown; accountKey: unknown; accountRevision: unknown; signingKey: unknown; pki: boolean; trust: boolean; tlsSecret: unknown; externalSecrets: boolean; test: Record<TestKey, unknown> };
+type SupValues = { registryKey: unknown; environment: unknown; ledgerDir: unknown; account: unknown; accountKey: unknown; accountRevision: unknown; signingKey: unknown; pki: boolean; trust: boolean; tlsSecret: unknown; externalSecrets: boolean; test: Record<TestKey, unknown> };
 // 렌더(출처)에 넣은 값을 Helm처럼 겹쳐 읽는다. 차트 ci 렌더는 values.yaml + ci 파일, 켠 root 렌더는 values.yaml + Application의
 // valueFiles·valuesObject + RENDER_FILL(빈 칸만). 켠 root 렌더에 소유 Application이 없으면 undefined다(olive-owner·olive-ignore-differences가 낸다).
 // layers는 채우기 전의 층, cluster는 켠 root 렌더의 클러스터다.
@@ -1358,6 +1359,7 @@ function supervisorValues(origin: string, deployed: Record<string, Doc[]>, keySw
   return {
     registryKey: get("supervisor.registry.key"),
     environment: get("supervisor.registry.environment"),
+    ledgerDir: get("supervisor.ledger.mountPath"),
     account: get("supervisor.account.name"),
     accountKey: get("supervisor.account.key"),
     accountRevision: get("supervisor.account.revision"),
@@ -1370,9 +1372,11 @@ function supervisorValues(origin: string, deployed: Record<string, Doc[]>, keySw
   };
 }
 function supervisorTable(v: SupValues) {
+  // 감독 env·마운트와 init 마운트는 값 그대로, init env는 차트처럼 clean한 경로 + "/" + subPath다(진입점은 정규화된 절대 경로만 받는다).
+  const ledgerDir = String(v.ledgerDir);
   const env: Record<string, string | undefined> = {
     OLIVE_SUPERVISOR_PORT: "8443",
-    OLIVE_LEDGER_DIR: SUP_LEDGER_DIR,
+    OLIVE_LEDGER_DIR: ledgerDir,
     OLIVE_SIGNING_KEY_DIR: "/run/olive/signing",
     OLIVE_ACCOUNTS_DIR: "/run/olive/accounts",
     OLIVE_TLS_DIR: SUP_TLS_DIR,
@@ -1388,7 +1392,7 @@ function supervisorTable(v: SupValues) {
     OLIVE_PROFILE_REVISIONS: undefined,
   };
   const mounts: Record<string, unknown>[] = [
-    { name: "ledger", mountPath: SUP_LEDGER_DIR, readOnly: false },
+    { name: "ledger", mountPath: ledgerDir, readOnly: false },
     { name: "ledger", mountPath: SUP_RESULT_DIR, readOnly: false, subPath: SUP_RESULT_SUBPATH },
     { name: "registry", mountPath: "/run/olive/registry", readOnly: true },
     { name: "signing", mountPath: "/run/olive/signing", readOnly: true },
@@ -1415,8 +1419,8 @@ function supervisorTable(v: SupValues) {
     [`olive-account-${v.account}`]: { store: SUP_STORE_REF, target: `olive-account-${v.account}`, data: data(v.accountKey, `/bot-accounts/${v.account}/${v.accountKey}`) },
   };
   const init = {
-    env: [{ name: "OLIVE_RESULT_DIR", value: `${SUP_LEDGER_DIR}/${SUP_RESULT_SUBPATH}` }],
-    mounts: [{ name: "ledger", mountPath: SUP_LEDGER_DIR, readOnly: false }],
+    env: [{ name: "OLIVE_RESULT_DIR", value: `${normPath(ledgerDir)}/${SUP_RESULT_SUBPATH}` }],
+    mounts: [{ name: "ledger", mountPath: ledgerDir, readOnly: false }],
   };
   return { env, mounts, volumes, externalSecrets, init };
 }
@@ -2355,7 +2359,7 @@ function readFixture(f: string): Fixture | string {
 
 // 렌더 경로의 작은 시험. fixture는 렌더가 끝난 입력에 patch를 얹으므로 렌더 쪽 판단(목록 안 Application, 보충값 우선순위, 0문서 출처)을
 // 보지 못한다. 그 함수를 직접 부른다.
-function renderSelfTests(): string[] {
+function renderSelfTests(base: OliveInput): string[] {
   const bad: string[] = [];
   const list = Bun.YAML.parse("apiVersion: v1\nkind: List\nitems:\n  - {apiVersion: argoproj.io/v1alpha1, kind: Application, metadata: {name: child}}\n  - {kind: ConfigMapList, items: [{kind: ApplicationSet, metadata: {name: nested}}]}\n");
   if (JSON.stringify(listedArgoApps(list)) !== JSON.stringify(["Application/child", "ApplicationSet/nested"])) bad.push(`listedArgoApps가 목록 안 Application을 찾지 못했다: ${JSON.stringify(listedArgoApps(list))}`);
@@ -2371,7 +2375,7 @@ function renderSelfTests(): string[] {
   for (const [name, layers, vo, want] of cases) if (digest(layers, vo) !== want) bad.push(`fillEmpty(${name}): ${JSON.stringify(digest(layers, vo))}, 기대 ${JSON.stringify(want)}`);
   const c = collectChartRenders("platform/x", ["platform/x/ci/a.yaml", "platform/x/ci/empty.yaml"], (f) => ({ ok: true, out: f.endsWith("a.yaml") ? "kind: ConfigMap\n" : "" }));
   if (JSON.stringify(c.origins) !== JSON.stringify(["chart:x/ci/a.yaml", "chart:x/ci/empty.yaml"]) || c.docs.length !== 1) bad.push(`collectChartRenders가 문서 0개인 렌더의 출처를 남기지 않았다: ${JSON.stringify(c.origins)}`);
-  bad.push(...listedAppTests(), ...multiDocValuesTest(), ...hostScopeTest(), ...executorTlsPathTest(), ...policyRevisionRenderTest(), ...registryRenderTest(), ...ledgerResultPathTest(), ...roleProfileRenderTest());
+  bad.push(...listedAppTests(), ...multiDocValuesTest(), ...hostScopeTest(), ...executorTlsPathTest(), ...policyRevisionRenderTest(), ...registryRenderTest(), ...ledgerResultPathTest(base), ...roleProfileRenderTest());
   return bad;
 }
 
@@ -2504,20 +2508,79 @@ function registryRenderTest(): string[] {
 }
 
 // 결과 폴더 자리(/var/lib/olive-results)는 예약이다. 장부를 그 자리나 아래에 두면 렌더가 멈추고, 다른 /var/lib/ 경로는 렌더된다.
-function ledgerResultPathTest(): string[] {
+// 렌더되는 경로는 init과 감독이 같은 PVC 폴더를 보는지까지 본다. 렌더 성공만 보면 템플릿이 init env를 기본 경로로 고정해도 통과한다.
+//   렌더: init env = 정규화한 장부 경로 + "/results", init 마운트 = 장부 경로에 PVC 뿌리 하나(subPath 없음),
+//     감독 = OLIVE_LEDGER_DIR과 장부 뿌리 마운트는 값 그대로, 결과 마운트는 /var/lib/olive-results에 subPath results.
+//   검사: 그 렌더의 장부 칸을 켠 vm root 렌더의 감독에 옮기고 olive Application 값도 같은 경로로 바꾸면 위반이 없어야 하고,
+//     거기서 init env만 기본 경로(/var/lib/olive/results)로 두면 olive-supervisor-env의 init env 위반 하나여야 한다(기대값이 값에서 나온다).
+function ledgerResultPathTest(base: OliveInput): string[] {
   const dir = tempDir("olive-ledger-path");
   const bad: string[] = [];
-  for (const [name, path, fails] of [
-    ["same", "/var/lib/olive-results", true],
-    ["slash", "/var/lib/olive-results/", true],
-    ["under", "/var/lib/olive-results/ledger", true],
-    ["sibling", "/var/lib/olive-ledger", false],
+  for (const [name, path, fails, initDir] of [
+    ["same", "/var/lib/olive-results", true, ""],
+    ["slash", "/var/lib/olive-results/", true, ""],
+    ["under", "/var/lib/olive-results/ledger", true, ""],
+    ["sibling", "/var/lib/olive-ledger", false, "/var/lib/olive-ledger/results"],
+    ["unclean", "/var/lib//olive-ledger/", false, "/var/lib/olive-ledger/results"],
   ] as const) {
     const f = join(dir, `${name}.yaml`);
     writeFileSync(f, `supervisor:\n  ledger:\n    mountPath: ${JSON.stringify(path)}\n`);
     const r = helmTemplate("olive", OLIVE_CHART, "app-olive", [`${OLIVE_CHART}/ci/enabled.yaml`, f]);
     if (fails && (r.ok || !r.out.includes("collides with the reserved result directory"))) bad.push(`supervisor.ledger.mountPath ${path}의 렌더가 결과 폴더 예약으로 멈추지 않았다: ${r.ok ? "렌더 성공" : r.out.trim()}`);
     if (!fails && !r.ok) bad.push(`supervisor.ledger.mountPath ${path}가 렌더되지 않았다: ${r.out.trim()}`);
+    if (!fails && r.ok) bad.push(...ledgerPathCases(base, path, initDir, r.out));
+  }
+  return bad;
+}
+function ledgerPathCases(base: OliveInput, path: string, initDir: string, rendered: string): string[] {
+  const at = `supervisor.ledger.mountPath ${path}`;
+  const isSup = (d: Doc) => d.obj.kind === "Deployment" && nsOf(d) === "olive-control" && d.obj.metadata?.name === "supervisor";
+  const parts = (d: Doc | undefined) => {
+    const pod = podSpec(d?.obj ?? {});
+    return { init: pod?.initContainers?.find((c: any) => c?.name === SUP_INIT_CONTAINER), ctr: pod?.containers?.find((c: any) => c?.name === SUPERVISOR_CONTAINER) };
+  };
+  const { init, ctr } = parts(parseRendered("chart:olive/ledger-path", rendered).docs.find(isSup));
+  if (!init || !ctr) return [`${at}: 렌더에 감독의 init ${SUP_INIT_CONTAINER}·컨테이너 ${SUPERVISOR_CONTAINER}가 없다`];
+  const got = {
+    initEnv: init.env,
+    initMounts: init.volumeMounts,
+    ledgerEnv: envOf(ctr, "OLIVE_LEDGER_DIR"),
+    ledgerMounts: (ctr.volumeMounts ?? []).filter((m: any) => m?.name === "ledger"),
+  };
+  const want = {
+    initEnv: [{ name: "OLIVE_RESULT_DIR", value: initDir }],
+    initMounts: [{ name: "ledger", mountPath: path }],
+    ledgerEnv: [{ name: "OLIVE_LEDGER_DIR", value: path }],
+    ledgerMounts: [{ name: "ledger", mountPath: path }, { name: "ledger", mountPath: "/var/lib/olive-results", subPath: "results" }],
+  };
+  if (!same(got, want)) return [`${at}: 렌더의 init env·마운트와 감독 장부 칸(${show(got)})이 ${show(want)}와 다르다(init과 감독이 같은 PVC 폴더 results를 봐야 한다)`];
+  const transplant = (initValue: string) => {
+    const input = flatInput(base);
+    const vm = (input.deployed[FORCED] ?? []).find((d) => isSup(d) && sourceOf(d.origin).cluster === "vm");
+    const app = argoApps(input.deployed[FORCED] ?? []).find((a) => sourceOf(a.origin).cluster === "vm" && effectiveSources(a.obj.spec).some((s: any) => sameRepo(s?.repoURL) && s?.path === OLIVE_CHART));
+    const s = app ? effectiveSources(app.obj.spec).find((x: any) => sameRepo(x?.repoURL) && x?.path === OLIVE_CHART) : undefined;
+    const p = parts(vm);
+    if (!p.init || !p.ctr || !s?.helm?.valuesObject?.supervisor) throw new Error("켠 vm root 렌더의 감독·olive Application 값을 찾지 못했다");
+    const sup = s.helm.valuesObject.supervisor;
+    sup.ledger = { ...(sup.ledger ?? {}), mountPath: path };
+    p.init.env = [{ name: "OLIVE_RESULT_DIR", value: initValue }];
+    p.init.volumeMounts = structuredClone(init.volumeMounts);
+    const ledgerEnv = envOf(p.ctr, "OLIVE_LEDGER_DIR");
+    if (ledgerEnv.length !== 1) throw new Error(`vm 감독의 env OLIVE_LEDGER_DIR가 ${ledgerEnv.length}개다`);
+    ledgerEnv[0].value = path;
+    p.ctr.volumeMounts = [...structuredClone(got.ledgerMounts), ...(p.ctr.volumeMounts ?? []).filter((m: any) => m?.name !== "ledger")];
+    return allChecks(input);
+  };
+  const bad: string[] = [];
+  try {
+    const ok = transplant(initDir);
+    if (ok.length > 0) bad.push(`${at}: 렌더 그대로 옮긴 vm 감독이 걸렸다: ${ok.map(fmt).join("; ")}`);
+    const pinned = transplant("/var/lib/olive/results");
+    if (pinned.length !== 1 || pinned[0].rule !== "olive-supervisor-env" || !pinned[0].message.includes("init env OLIVE_RESULT_DIR")) {
+      bad.push(`${at}: init env만 기본 경로로 둔 vm 감독이 init env 위반 하나로 걸리지 않았다: ${JSON.stringify(pinned.map(fmt))}`);
+    }
+  } catch (e) {
+    bad.push(`${at}: ${(e as Error).message}`);
   }
   return bad;
 }
@@ -3233,7 +3296,7 @@ function supervisorInitTests(base: OliveInput): string[] {
 
 export function checkOliveFixtures(base: OliveInput): Violation[] {
   const out: Violation[] = [];
-  for (const m of renderSelfTests()) out.push({ rule: "fixture", where: "tools/ci/olive.ts renderSelfTests", message: m });
+  for (const m of renderSelfTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts renderSelfTests", message: m });
   for (const m of listShapeTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts listShapeTests", message: m });
   for (const m of namespaceRegexTests()) out.push({ rule: "fixture", where: "tools/ci/olive.ts namespaceRegexTests", message: m });
   for (const m of executorKeyTests(base)) out.push({ rule: "fixture", where: "tools/ci/olive.ts executorKeyTests", message: m });
