@@ -45,6 +45,7 @@ function failWord(c: OliveLedgerCheck & { ok: false }): Word {
     case "supervisor-pods":
       return d === "selector" ? { line: "감독 Deployment의 파드 선택자를 읽지 못했다", next: SHAPE_NEXT } : { line: `감독 파드가 ${d}개 남아 있다(내려가는 중 포함)`, waiting: true, next: `감독 파드가 사라진 뒤 다시: ${AGAIN}` };
     case "shape":
+      if (d === "zero-limits") return { line: "감독 limits에 0인 자원이 있다(olive-limits가 감독과 함께 뜨는 것을 막지 못한다)", next: "올리브 차트의 감독 resources.limits를 확인한다(cpu·memory 모두 0보다 커야 한다)" };
       return { line: `감독 Deployment의 꼴이 예상과 다르다(${d})`, next: SHAPE_NEXT };
     case "ledger-users":
       return { line: `장부 PVC를 붙인 다른 파드가 ${d}개 있다`, next: `그 파드가 끝난 뒤 다시: ${AGAIN}` };
@@ -66,7 +67,17 @@ function failWord(c: OliveLedgerCheck & { ok: false }): Word {
   }
 }
 
-const target = (i: OliveLedgerInspection) => `대상: 문맥 ${i.context ?? "모름"}, ${i.namespace}/${i.deployment}`;
+// 문맥 이름은 kubectl에 넘긴 그대로가 아니라 화면용으로 보인다. 공백이나 보이지 않는 글자가 있으면 따옴표로 감싸고
+// 보이지 않는 글자는 \u{…}로 적어, 앞뒤 공백이 있는 이름과 없는 이름이 같아 보이지 않게 한다.
+const PLAIN_CONTEXT = /^[\p{L}\p{M}\p{N}\p{P}\p{S}]+$/u;
+const VISIBLE = /[\p{L}\p{M}\p{N}\p{P}\p{S} ]/u;
+function shownContext(name: string): string {
+  if (PLAIN_CONTEXT.test(name)) return name;
+  const body = [...name].map((ch) => (ch === '"' || ch === "\\" ? `\\${ch}` : VISIBLE.test(ch) ? ch : `\\u{${(ch.codePointAt(0) as number).toString(16)}}`)).join("");
+  return `"${body}"`;
+}
+
+const target = (i: OliveLedgerInspection) => `대상: 문맥 ${i.context === null ? "모름" : shownContext(i.context)}, ${i.namespace}/${i.deployment}`;
 const jobLine = (j: OliveLedgerJob) => `Job: 이미지 ${j.image}, 장부 ${j.ledgerDir}(PVC ${j.pvc}), limits ${j.limits.cpu}·${j.limits.memory}`;
 const jobDetail = (j: OliveLedgerJob) => `Job ${j.namespace}/${j.name}, 기한 ${j.deadlineSec}초, 끝난 뒤 ${j.ttlSec}초면 스스로 지워짐`;
 const checkLines = (i: OliveLedgerInspection) => i.checks.map((c) => (c.ok ? `확인: ${OK_WORD[c.id]}` : `어긋남: ${failWord(c).line}`));
@@ -123,18 +134,20 @@ function cleanupLine(c: OliveLedgerCleanup, j: OliveLedgerJob): string | null {
 
 // 진입점 종료 코드(olive ledger-init: 0 만듦, 64 사용법, 90 이미 있음, 91 환경, 94 그 밖)를 CLI 공통 규칙(D-61)으로 옮긴다.
 // 64·91은 장부를 열기 전에 멈춘 것이다. 모르는 코드는 만들어졌을 수 있다. 94는 사유마다 장부가 생겼는지가 다르다:
-// close:threw는 장부를 만든 뒤 닫기만 실패한 것이다(진입점의 명시 계약). 아래 열기 실패는 첫 설치 기록을 커밋한 뒤의 WAL 전환에서도
-// 날 수 있어 쓰기 시점을 가릴 수 없다(olive src/ledger/ledger.ts openLedger). 그 밖의 사유는 파일에 쓰기 전의 판정이다.
+// close:threw는 장부를 만든 뒤 닫기만 실패한 것이다(진입점의 명시 계약). "만들지 못했다"는 첫 설치 기록을 커밋하기 전에만 나는
+// 판정 사유(BEFORE_WRITE)에만 쓴다. 나머지 열기 사유는 커밋 뒤의 WAL 전환·장부 객체 생성에서 난 SQLite 오류도 같은 이름으로
+// 분류되어(olive src/ledger/ledger.ts openLedger, src/ledger/errors.ts classify) 시점을 가릴 수 없고, 사유를 읽지 못한 94도 그렇다.
 // 어느 쪽이든 CLI는 1이고 자동으로 다시 돌리지 않는다.
-const MAYBE_WRITTEN = new Set(["open:io", "open:db_error", "open:full", "open:closed", "open:threw", "open:unreadable"]);
+const BEFORE_WRITE = new Set(["deps:threw", "open:too_new", "open:migration_mismatch", "open:migration_failed", "open:not_initialized", "open:foreign_data", "open:interrupted_install"]);
 const FIX_THEN = "자동으로 다시 돌리지 않았다. 사유를 보고 장부 자리를 바로잡은 뒤";
 
 function failedLine(code: number, reason: string | null, kubelet: string | null): { line: string; maybe: boolean; next: string } {
   if (code === 64) return { line: "초기화 진입점이 실행을 받지 않았다(종료 64, CLI와 감독 이미지의 판이 다를 수 있다)", maybe: false, next: SHAPE_NEXT };
   if (code === 91) return { line: `초기화 진입점이 장부 경로 환경을 받지 못했다(종료 91${reason ? `, ${reason}` : ""})`, maybe: false, next: "감독 Deployment의 OLIVE_LEDGER_DIR을 확인한다" };
   if (code === 94 && reason === "close:threw") return { line: "장부는 만들었고 닫기가 실패했다(종료 94, close:threw)", maybe: false, next: `자동으로 다시 돌리지 않았다. ${CHECK_AGAIN}` };
-  if (code === 94 && reason !== null && MAYBE_WRITTEN.has(reason)) return { line: `장부 열기가 실패했다(종료 94, ${reason})`, maybe: true, next: `${FIX_THEN} ${CHECK_AGAIN}` };
-  if (code === 94) return { line: `장부를 만들지 못했다(종료 94, ${reason ?? "사유를 읽지 못함"})`, maybe: reason === null, next: `${FIX_THEN} 다시: ${AGAIN}(0바이트 장부 파일만 남았으면 olive README의 장부 초기화 절을 본다)` };
+  if (code === 94 && reason !== null && BEFORE_WRITE.has(reason)) return { line: `장부를 만들지 못했다(종료 94, ${reason})`, maybe: false, next: `${FIX_THEN} 다시: ${AGAIN}(0바이트 장부 파일만 남았으면 olive README의 장부 초기화 절을 본다)` };
+  if (code === 94 && reason !== null && reason.startsWith("open:")) return { line: `장부 열기가 실패했다(종료 94, ${reason})`, maybe: true, next: `${FIX_THEN} ${CHECK_AGAIN}` };
+  if (code === 94) return { line: `초기화 진입점이 종료 94로 끝났다(${reason ?? "사유를 읽지 못함"})`, maybe: true, next: `${FIX_THEN} ${CHECK_AGAIN}` };
   return { line: `초기화 파드가 종료 ${code}로 끝났다(${kubelet ?? "사유를 읽지 못함"})`, maybe: true, next: CHECK_AGAIN };
 }
 

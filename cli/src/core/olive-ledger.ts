@@ -12,7 +12,7 @@
 import type { OliveLedgerCheck, OliveLedgerCleanup, OliveLedgerInspection, OliveLedgerJob, OliveLedgerOutcome, OliveLedgerRead, OliveLedgerWrite } from "./command";
 import { ExecTimeout, why, type Exec, type ExecResult } from "./exec";
 import { entries, isArray, jsonParse, jsonStringify } from "./intrinsics";
-import { kubeRead, kubectlArgv } from "./kubectl";
+import { kubectlArgv } from "./kubectl";
 import { OLIVE_ADMIN_CONTAINER, OLIVE_ADMIN_DEPLOYMENT, OLIVE_ADMIN_NS } from "./olive-admin";
 import { oliveRead, POD_UID } from "./olive";
 
@@ -36,8 +36,17 @@ const DELETE_WAIT_MS = 60_000;
 const POLL_MS = 2_000;
 const LEDGER_ENV = "OLIVE_LEDGER_DIR";
 const QUOTA = "olive-limits";
-// 만들기 요청을 API 서버가 받지 않았다는 응답(kubectl의 "Error from server (이유)" 줄). 이 밖의 실패는 만들었는지 모른다.
-const REFUSED = /^Error from server \((AlreadyExists|Forbidden|Invalid|BadRequest|Unauthorized|NotFound)\)/m;
+// 만들기 요청을 API 서버가 받지 않았다는 응답. 꼴은 kubectl 1.36.6의 cmd/util/helpers.go(checkErr·StandardErrorMessage)가 정한다:
+// Invalid는 "The Job "이름" is invalid"(세부가 없으면 "The request is invalid"), Unauthorized는 "error: You must be logged in
+// to the server (…)"로 나오고 "Error from server (이유)"로는 나오지 않는다. 이 밖의 실패는 만들었는지 모른다.
+const REFUSED: [RegExp, "exists" | "forbidden" | "refused"][] = [
+  [/^Error from server \(AlreadyExists\)/m, "exists"],
+  [/^Error from server \(Forbidden\)/m, "forbidden"],
+  [/^Error from server \((BadRequest|NotFound)\)/m, "refused"],
+  [new RegExp(`^The Job "${LEDGER_INIT_JOB}" is invalid(:|$)`, "m"), "refused"],
+  [/^The request is invalid(:|$)/m, "refused"],
+  [/^error: You must be logged in to the server \(/m, "refused"],
+];
 
 const NAME = /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/;
 const DIGEST_IMAGE = /^[a-z0-9][a-z0-9._\/:-]{0,200}@sha256:[0-9a-f]{64}$/;
@@ -68,8 +77,18 @@ const isObj = (v: unknown): v is Record<string, any> => typeof v === "object" &&
 const isName = (v: unknown): v is string => typeof v === "string" && v.length <= 253 && NAME.test(v);
 const posInt = (v: unknown, min: number) => Number.isSafeInteger(v) && (v as number) >= min;
 const run = (exec: Exec, args: string[], opts: Parameters<Exec>[1] = {}) => exec(kubectlArgv(args), opts);
-// 문맥 이름은 kubeconfig 안의 이름이라 꼴이 자유롭다. 공백·제어 문자만 받지 않고, 한 인자(--context=이름)로 넘겨 플래그로 읽히지 않게 한다.
-const CONTEXT = /^[\x21-\x7e]{1,253}$/;
+// 문맥 이름은 kubeconfig 맵의 키라 한글·공백도 그대로 이름이다. 다듬으면(trim 등) 다른 문맥을 고를 수 있다.
+// 제어 문자(줄바꿈 포함)와 U+FFFD(UTF-8로 읽지 못한 바이트)가 있으면 그 이름을 그대로 옮겼다고 볼 수 없어 받지 않는다.
+const BAD_CONTEXT = /[\p{Cc}\uFFFD]/u;
+
+// kubectl config current-context는 이름 뒤에 줄바꿈 하나를 붙여 낸다. 그 하나만 떼고, 줄바꿈이 없으면 잘린 출력일 수 있어 받지 않는다.
+function currentContext(exec: Exec): string | null {
+  const r = exec(["kubectl", "config", "current-context"]);
+  if (r.errKind === "not-found") throw new Error("kubectl이 없다");
+  if (r.code !== 0 || !r.stdout.endsWith("\n")) return null;
+  const name = r.stdout.slice(0, -1);
+  return name !== "" && !BAD_CONTEXT.test(name) ? name : null;
+}
 
 // 받은 exec의 kubectl 호출마다 같은 문맥을 붙인다. olive.ts의 자물쇠 조회도 이 exec를 받아 같은 문맥으로 간다.
 function pinned(exec: Exec, context: string): Exec {
@@ -167,9 +186,12 @@ function shapeFrom(d: any): Shape {
     caps.drop[0] === "ALL";
   if (!containerOk) return { problem: "컨테이너 securityContext" };
   const res = c.resources;
+  const zero = (q: unknown) => typeof q === "string" && /^0+(\.0+)?[A-Za-z]*$/.test(q);
   const quantities = (v: unknown, need: boolean) =>
     v === undefined ? !need : isObj(v) && Object.keys(v).every((k) => k === "cpu" || k === "memory") && (!need || (typeof v.cpu === "string" && typeof v.memory === "string")) && Object.values(v).every((q) => typeof q === "string" && QUANTITY.test(q));
   if (!isObj(res) || Object.keys(res).some((k) => k !== "limits" && k !== "requests") || !quantities(res.limits, true) || !quantities(res.requests, false)) return { problem: "resources" };
+  // 쿼터는 수량 0을 사용량에 더하지 않고 이 차트의 olive-limits는 파드 수를 세지 않는다. 한도가 0이면 감독과 초기화 파드가 함께 떠도 막지 못한다.
+  if (zero(res.limits.cpu) || zero(res.limits.memory)) return { problem: "zero-limits" };
   const sa = spec.serviceAccountName;
   if (sa !== undefined && !isName(sa)) return { problem: "serviceAccountName" };
   const job: OliveLedgerJob = {
@@ -235,8 +257,8 @@ type Inspected = OliveLedgerInspection & { manifest: Record<string, unknown> | n
 function inspect(readExec: Exec): Inspected {
   const checks: OliveLedgerCheck[] = [];
   const add = (id: OliveLedgerCheck["id"], fail: string | null) => checks.push(fail === null ? { id, ok: true } : { id, ok: false, detail: fail });
-  const context = kubeRead(readExec).currentContext();
-  if (context === null || !CONTEXT.test(context)) return { context: null, namespace: OLIVE_ADMIN_NS, deployment: OLIVE_ADMIN_DEPLOYMENT, checks, job: null, manifest: null };
+  const context = currentContext(readExec);
+  if (context === null) return { context: null, namespace: OLIVE_ADMIN_NS, deployment: OLIVE_ADMIN_DEPLOYMENT, checks, job: null, manifest: null };
   const exec = pinned(readExec, context);
   const d = getDoc(exec, "deployments.apps", OLIVE_ADMIN_DEPLOYMENT, "Deployment");
   const pods = listPods(exec);
@@ -410,9 +432,9 @@ export function oliveLedgerWrite(writeExec: Exec, baseReadExec: Exec, opts: Oliv
       if (x.code !== 0) {
         // 만들지 않았다고 말할 수 있는 것은 API 서버가 요청을 거절했다는 응답뿐이다. 응답 기한·EOF·연결 끊김·서버 오류는
         // 서버가 Job을 저장한 뒤 응답만 잃었을 수 있어 결과 모름이고, uid가 없으니 지우거나 다시 만들지 않는다.
-        const refused = REFUSED.exec(x.stderr)?.[1];
+        const refused = REFUSED.find(([re]) => re.test(x.stderr))?.[1];
         if (refused === undefined) return { state: "unknown", job, why: "create-lost", waiting: null, cleanup: { state: "kept", why: "unknown" } };
-        return { state: "not-created", job, why: refused === "AlreadyExists" ? "exists" : refused === "Forbidden" ? "forbidden" : "refused" };
+        return { state: "not-created", job, why: refused };
       }
       let created: any;
       try {
@@ -426,13 +448,14 @@ export function oliveLedgerWrite(writeExec: Exec, baseReadExec: Exec, opts: Oliv
       const until = Date.now() + cap(WAIT_MS);
       const left = () => until - Date.now();
       let w: Watch = { terminal: null, deadline: false, gone: false, pods: [], waiting: null };
-      let unread = false;
+      // 아직 한 번도 끝까지 읽지 못한 처음 상태다. 첫 조회가 상한에 끊겨도 "끝나지 않았다"로 읽지 않게 읽지 못함에서 시작한다.
+      let unread = true;
       for (;;) {
         try {
           w = watchOnce(readExec, uid, left);
           unread = false;
         } catch (e) {
-          // 남은 시간을 다 써서 끊긴 조회는 새 관측이 아니다. 그 앞 조회의 결과(읽음·읽지 못함)를 그대로 둔다.
+          // 남은 시간을 다 써서 끊긴 조회는 새 관측이 아니다. 그 앞 조회의 결과(읽음·읽지 못함·아직 못 읽음)를 그대로 둔다.
           if (!(e instanceof ExecTimeout && left() <= 0)) unread = true;
         }
         if (w.gone) return { state: "unknown", job, why: "gone", waiting: w.waiting, cleanup: { state: "deleted" } };

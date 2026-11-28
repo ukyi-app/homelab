@@ -1,5 +1,6 @@
 // homelab olive ledger-init(장부 초기화 일회성 Job). 실제 클러스터에 닿지 않는다: kubectl은 PATH 스텁이다.
 import { describe, expect, test } from "bun:test";
+import type { Exec } from "../../src/core/exec";
 import { kubectlArgv } from "../../src/core/kubectl";
 import { oliveLedgerWrite } from "../../src/core/olive-ledger";
 import { expectNoSecrets, expectPlanReadOnly, kubectlRule, rule, runCli, type Call, type Resp, type Rule } from "../harness";
@@ -91,9 +92,11 @@ const exited = (exitCode: number, message?: string, reason = exitCode === 0 ? "C
 
 // 실행 시작에 정한 문맥을 모든 kubectl 호출에 붙인다(current-context 한 번만 예외).
 const PIN = `--context=${CTX}`;
-const kube = (args: string[], resp: Resp | Resp[]) => kubectlRule([PIN, ...args], resp);
-const CREATE = kubectlArgv([PIN, "-n", NS, "create", "-f", "-", "-o", "json"]);
-const DELETE = kubectlArgv([PIN, "delete", "--raw", `/apis/batch/v1/namespaces/${NS}/jobs/${JOB}`, "-f", "-"]);
+const kube = (args: string[], resp: Resp | Resp[], ctx = CTX) => kubectlRule([`--context=${ctx}`, ...args], resp);
+const createArgv = (ctx = CTX) => kubectlArgv([`--context=${ctx}`, "-n", NS, "create", "-f", "-", "-o", "json"]);
+const deleteArgv = (ctx = CTX) => kubectlArgv([`--context=${ctx}`, "delete", "--raw", `/apis/batch/v1/namespaces/${NS}/jobs/${JOB}`, "-f", "-"]);
+const CREATE = createArgv();
+const DELETE = deleteArgv();
 const CURRENT = ["kubectl", "config", "current-context"];
 
 type World = {
@@ -108,21 +111,24 @@ type World = {
   create?: Resp;
   remove?: Resp;
   context?: Resp;
+  // 현재 문맥 이름. current-context가 이 이름과 줄바꿈 하나를 내고, 뒤의 호출은 이 이름의 --context를 받아야 맞는다.
+  ctx?: string;
 };
 
 function world(w: World = {}): Rule[] {
+  const ctx = w.ctx ?? CTX;
   return [
-    rule(CURRENT, w.context ?? { stdout: `${CTX}\n` }),
-    kube(["-n", NS, "get", "deployments.apps", "supervisor", "-o", "json"], w.deploy ?? json(deployment())),
-    kube(["-n", NS, "get", "pods", "-o", "json"], w.pods ?? list()),
-    kube(["-n", NS, "get", "resourcequotas", "olive-stop", "-o", "json"], w.stopLock ?? notFound('resourcequotas "olive-stop"')),
-    kube(["-n", NS, "get", "jobs.batch", JOB, "-o", "json"], w.jobs ?? [notFound(`jobs.batch "${JOB}"`), jobDoc(COMPLETE), notFound(`jobs.batch "${JOB}"`)]),
-    kube(["-n", NS, "get", "resourcequotas", "olive-limits", "-o", "json"], w.quota ?? quota()),
-    kube(["-n", NS, "get", "persistentvolumeclaims", "ledger", "-o", "json"], w.pvc ?? pvc()),
-    kube(["-n", NS, "get", "persistentvolumeclaims", "ledger-2", "-o", "json"], pvc("ledger-2")),
-    kube(["-n", NS, "get", "pods", "-l", `batch.kubernetes.io/controller-uid=${JOB_UID}`, "-o", "json"], w.initPods ?? exited(0)),
-    rule(CREATE, w.create ?? json({ apiVersion: "batch/v1", kind: "Job", metadata: { name: JOB, namespace: NS, uid: JOB_UID } }), { captureStdin: true }),
-    rule(DELETE, w.remove ?? json({ kind: "Status", status: "Success" }), { captureStdin: true }),
+    rule(CURRENT, w.context ?? { stdout: `${ctx}\n` }),
+    kube(["-n", NS, "get", "deployments.apps", "supervisor", "-o", "json"], w.deploy ?? json(deployment()), ctx),
+    kube(["-n", NS, "get", "pods", "-o", "json"], w.pods ?? list(), ctx),
+    kube(["-n", NS, "get", "resourcequotas", "olive-stop", "-o", "json"], w.stopLock ?? notFound('resourcequotas "olive-stop"'), ctx),
+    kube(["-n", NS, "get", "jobs.batch", JOB, "-o", "json"], w.jobs ?? [notFound(`jobs.batch "${JOB}"`), jobDoc(COMPLETE), notFound(`jobs.batch "${JOB}"`)], ctx),
+    kube(["-n", NS, "get", "resourcequotas", "olive-limits", "-o", "json"], w.quota ?? quota(), ctx),
+    kube(["-n", NS, "get", "persistentvolumeclaims", "ledger", "-o", "json"], w.pvc ?? pvc(), ctx),
+    kube(["-n", NS, "get", "persistentvolumeclaims", "ledger-2", "-o", "json"], pvc("ledger-2"), ctx),
+    kube(["-n", NS, "get", "pods", "-l", `batch.kubernetes.io/controller-uid=${JOB_UID}`, "-o", "json"], w.initPods ?? exited(0), ctx),
+    rule(createArgv(ctx), w.create ?? json({ apiVersion: "batch/v1", kind: "Job", metadata: { name: JOB, namespace: NS, uid: JOB_UID } }), { captureStdin: true }),
+    rule(deleteArgv(ctx), w.remove ?? json({ kind: "Status", status: "Success" }), { captureStdin: true }),
   ];
 }
 
@@ -290,9 +296,9 @@ describe("--apply 판정", () => {
   const rows: [string, unknown[], Resp, number, string, string | null][] = [
     ["0 만듦", COMPLETE, exited(0), 0, "장부 초기화: 장부를 만들었다", null],
     ["90 이미 있음", FAILED, exited(90, "olive ledger-init 0.1.0: 장부가 이미 있다. 아무것도 바꾸지 않았다\n"), 0, "장부 초기화: 장부가 이미 있다(바꾸지 않았다)", null],
-    ["94 잠김", FAILED, exited(94, "olive ledger-init 0.1.0: 장부를 만들지 못했다(open:locked)\n"), 1, "장부 초기화 실패: 장부를 만들지 못했다(종료 94, open:locked)", "자동으로 다시 돌리지 않았다"],
+    ["94 잠김", FAILED, exited(94, "olive ledger-init 0.1.0: 장부를 만들지 못했다(open:locked)\n"), 1, "장부 초기화 실패: 장부 열기가 실패했다(종료 94, open:locked). 장부가 만들어졌을 수 있다", "자동으로 다시 돌리지 않았다"],
     ["94 닫기 실패", FAILED, exited(94, "olive ledger-init 0.1.0: 장부를 만들지 못했다(close:threw)\n"), 1, "장부 초기화 실패: 장부는 만들었고 닫기가 실패했다(종료 94, close:threw)", "자동으로 다시 돌리지 않았다"],
-    ["94 사유 꼴이 다름", FAILED, exited(94, `olive ledger-init 0.1.0: ${CANARY}\n`), 1, "장부 초기화 실패: 장부를 만들지 못했다(종료 94, 사유를 읽지 못함). 장부가 만들어졌을 수 있다", "자동으로 다시 돌리지 않았다"],
+    ["94 사유 꼴이 다름", FAILED, exited(94, `olive ledger-init 0.1.0: ${CANARY}\n`), 1, "장부 초기화 실패: 초기화 진입점이 종료 94로 끝났다(사유를 읽지 못함). 장부가 만들어졌을 수 있다", "자동으로 다시 돌리지 않았다"],
     ["91 환경", FAILED, exited(91, "olive ledger-init 0.1.0: 환경 OLIVE_LEDGER_DIR이(가) 없다\n"), 1, "장부 초기화 실패: 초기화 진입점이 장부 경로 환경을 받지 못했다(종료 91, env:missing)", "OLIVE_LEDGER_DIR을 확인"],
     ["64 사용법", FAILED, exited(64, "olive ledger-init 0.1.0: 사용법: bun src/main/ledger-init.ts (인자 없음)\n"), 1, "장부 초기화 실패: 초기화 진입점이 실행을 받지 않았다(종료 64, CLI와 감독 이미지의 판이 다를 수 있다)", "CLI와 차트의 판"],
     ["137 메모리 초과", FAILED, exited(137, undefined, "OOMKilled"), 1, "장부 초기화 실패: 초기화 파드가 종료 137로 끝났다(OOMKilled). 장부가 만들어졌을 수 있다", "다시 불러 확인한다"],
@@ -413,8 +419,7 @@ describe("사용법", () => {
   }, 60_000);
 });
 
-// 리뷰 발견(F1~F8)마다 그 관측을 재현한다.
-describe("문맥 고정(F1)", () => {
+describe("문맥 고정", () => {
   test("문맥을 한 번 정하고, 그 뒤의 kubectl 호출은 모두 같은 --context를 받는다(plan·--apply)", async () => {
     for (const r of [await plan(), await apply()]) {
       expect(r.unmatched.map((c) => c.argv)).toEqual([]);
@@ -439,7 +444,7 @@ describe("문맥 고정(F1)", () => {
   });
 });
 
-describe("집행 중인 쿼터(F2)", () => {
+describe("집행 중인 쿼터", () => {
   const rows: [string, Resp, number, string][] = [
     ["status.hard가 감독 limits보다 큼", quota(undefined, undefined, { enforced: { cpu: "1", memory: "1536Mi" } }), 3, "olive-limits가 집행 중인 한도(status.hard)가 아직 감독 limits와 같지 않다"],
     ["status.hard 없음", quota(undefined, undefined, { enforced: null }), 3, "olive-limits가 집행 중인 한도(status.hard)가 아직 감독 limits와 같지 않다"],
@@ -460,11 +465,13 @@ describe("집행 중인 쿼터(F2)", () => {
   }, 60_000);
 });
 
-describe("만들기 응답을 잃음(F3)", () => {
+describe("만들기 응답을 잃음", () => {
   const lost: [string, Resp][] = [
     ["응답 기한", { code: 1, stderr: "error: Post \"https://example.invalid/apis/batch/v1/namespaces/olive-control/jobs\": context deadline exceeded\n" }],
     ["연결 끊김", { code: 1, stderr: "error: Post \"https://example.invalid/apis/batch/v1/namespaces/olive-control/jobs\": read tcp: connection reset by peer\n" }],
     ["EOF", { code: 1, stderr: "error: Post \"https://example.invalid/apis/batch/v1/namespaces/olive-control/jobs\": unexpected EOF\n" }],
+    ["다른 Job의 Invalid 꼴", { code: 1, stderr: "The Job \"other-job\" is invalid: spec.template: Invalid value\n" }],
+    ["줄 가운데의 거절 꼴", { code: 1, stderr: "error: Post: EOF (The request is invalid: x)\n" }],
     ["서버 응답 기한", { code: 1, stderr: "Error from server (Timeout): the server was unable to return a response in the time allotted\n" }],
     ["서버 내부 오류", { code: 1, stderr: "Error from server (InternalError): Internal error occurred\n" }],
   ];
@@ -478,18 +485,32 @@ describe("만들기 응답을 잃음(F3)", () => {
     }
   }, 60_000);
 
+  // kubectl 1.36.6이 거절을 내는 꼴(cmd/util/helpers.go의 checkErr·StandardErrorMessage). Invalid와 Unauthorized는
+  // "Error from server (이유)" 꼴로 나오지 않는다.
+  const refusals: [string, string][] = [
+    ["BadRequest", `Error from server (BadRequest): ${CANARY}\n`],
+    ["NotFound", `Error from server (NotFound): ${CANARY}\n`],
+    ["Forbidden", `Error from server (Forbidden): error when creating "STDIN": jobs.batch is forbidden: ${CANARY}\n`],
+    ["Invalid 원인 하나", `The Job "${JOB}" is invalid: spec.template.spec.containers[0].image: Required value: ${CANARY}\n`],
+    ["Invalid 원인 여럿", `The Job "${JOB}" is invalid: \n* spec.template: Invalid value: ${CANARY}\n* spec.completions: Invalid value: 2\n`],
+    ["Invalid 원인 없음", "The Job \"olive-ledger-init\" is invalid\n"],
+    ["Invalid 세부 없음", `The request is invalid: ${CANARY}\n`],
+    ["Unauthorized", `error: You must be logged in to the server (error when creating "STDIN": Unauthorized)\n`],
+    ["Unauthorized 자격 요구", "error: You must be logged in to the server (the server has asked for the client to provide credentials)\n"],
+  ];
   test("API의 명확한 거절은 만들지 않음이다", async () => {
-    for (const word of ["Invalid", "BadRequest", "Unauthorized", "NotFound"]) {
-      const r = await apply({ create: { code: 1, stderr: `Error from server (${word}): ${CANARY}\n` } });
+    for (const [word, stderr] of refusals) {
+      const r = await apply({ create: { code: 1, stderr } });
       expect([word, r.code, r.json.body]).toEqual([word, 1, "장부 초기화: Job을 만들지 못했다(API 서버가 거절했다). 아무것도 돌지 않았다"]);
       expect([word, argvs(r, DELETE).length]).toEqual([word, 0]);
+      expect([word, `${r.stdout}${r.stderr}`.includes(CANARY)]).toEqual([word, false]);
     }
     const exists = await apply({ create: { code: 1, stderr: `Error from server (AlreadyExists): ${CANARY}\n` } });
     expect(exists.json.body).toBe("장부 초기화: Job을 만들지 못했다(같은 이름의 Job이 먼저 생겼다). 아무것도 돌지 않았다");
   }, 60_000);
 });
 
-describe("종료 코드를 낸 파드의 신원(F4)", () => {
+describe("종료 코드를 낸 파드의 신원", () => {
   const other = [{ apiVersion: "batch/v1", kind: "Job", name: "other-job", uid: OTHER_JOB_UID, controller: true }];
   const rows: [string, unknown[] | null][] = [
     ["다른 Job의 파드", other],
@@ -509,11 +530,11 @@ describe("종료 코드를 낸 파드의 신원(F4)", () => {
   }, 60_000);
 });
 
-describe("사유는 알려진 값만(F5)", () => {
+describe("사유는 알려진 값만", () => {
   test("진입점 목록 밖의 낱말은 내지 않는다", async () => {
     const r = await apply({ jobs: [notFound(`jobs.batch "${JOB}"`), jobDoc(FAILED), notFound(`jobs.batch "${JOB}"`)], initPods: exited(94, "olive ledger-init 0.1.0: 장부를 만들지 못했다(open:review_marker)\n") });
     expect(r.code).toBe(1);
-    expect(r.json.body.split("\n")[0]).toBe("장부 초기화 실패: 장부를 만들지 못했다(종료 94, 사유를 읽지 못함). 장부가 만들어졌을 수 있다");
+    expect(r.json.body.split("\n")[0]).toBe("장부 초기화 실패: 초기화 진입점이 종료 94로 끝났다(사유를 읽지 못함). 장부가 만들어졌을 수 있다");
     expect(`${r.stdout}${r.stderr}`.includes("review_marker")).toBe(false);
   });
 
@@ -529,28 +550,120 @@ describe("사유는 알려진 값만(F5)", () => {
   }, 30_000);
 });
 
-describe("종료 94의 안내(F6)", () => {
-  const rows: [string, string, string][] = [
-    ["open:io", "장부 초기화 실패: 장부 열기가 실패했다(종료 94, open:io). 장부가 만들어졌을 수 있다", "다시 불러 확인한다"],
-    ["open:db_error", "장부 초기화 실패: 장부 열기가 실패했다(종료 94, open:db_error). 장부가 만들어졌을 수 있다", "다시 불러 확인한다"],
-    ["open:full", "장부 초기화 실패: 장부 열기가 실패했다(종료 94, open:full). 장부가 만들어졌을 수 있다", "다시 불러 확인한다"],
-    ["open:foreign_data", "장부 초기화 실패: 장부를 만들지 못했다(종료 94, open:foreign_data)", "장부 자리를 바로잡은 뒤"],
-    ["deps:threw", "장부 초기화 실패: 장부를 만들지 못했다(종료 94, deps:threw)", "장부 자리를 바로잡은 뒤"],
+describe("종료 94의 안내", () => {
+  // 진입점이 내는 94 사유 16개(olive src/main/ledger-init.ts의 failed 호출과 src/ledger/errors.ts의 UNAVAILABLE_REASONS에서
+  // already_initialized를 뺀 것). before: 첫 설치 기록을 커밋하기 전에만 나는 판정, maybe: 커밋 뒤(WAL 전환·장부 객체 생성)에도
+  // SQLite 오류의 분류로 날 수 있는 사유, made: 만든 뒤의 닫기 실패.
+  const kinds: [string, "before" | "maybe" | "made"][] = [
+    ["deps:threw", "before"],
+    ["open:too_new", "before"],
+    ["open:migration_mismatch", "before"],
+    ["open:migration_failed", "before"],
+    ["open:not_initialized", "before"],
+    ["open:foreign_data", "before"],
+    ["open:interrupted_install", "before"],
+    ["open:locked", "maybe"],
+    ["open:corrupt", "maybe"],
+    ["open:full", "maybe"],
+    ["open:io", "maybe"],
+    ["open:closed", "maybe"],
+    ["open:db_error", "maybe"],
+    ["open:threw", "maybe"],
+    ["open:unreadable", "maybe"],
+    ["close:threw", "made"],
   ];
-  test("사유마다 장부가 생겼는지를 다르게 말하고, 1이며 다시 돌리지 않는다", async () => {
-    for (const [reason, headline, next] of rows) {
-      const r = await apply({ jobs: [notFound(`jobs.batch "${JOB}"`), jobDoc(FAILED), notFound(`jobs.batch "${JOB}"`)], initPods: exited(94, `olive ledger-init 0.1.0: 장부를 만들지 못했다(${reason})\n`) });
-      expect([reason, r.code, r.json.body.split("\n")[0]]).toEqual([reason, 1, headline]);
-      expect([reason, String(r.json.next).includes("자동으로 다시 돌리지 않았다"), String(r.json.next).includes(next)]).toEqual([reason, true, true]);
+  const failedWorld = (message?: string): World => ({ jobs: [notFound(`jobs.batch "${JOB}"`), jobDoc(FAILED), notFound(`jobs.batch "${JOB}"`)], initPods: exited(94, message) });
+  const both = (text: string) => text.includes("만들지 못했다") && text.includes("만들어졌을 수 있다");
+
+  test("사유 16개마다 장부가 생겼는지를 한 가지로 말하고, 1이며 다시 돌리지 않는다", async () => {
+    expect(kinds).toHaveLength(16);
+    for (const [reason, kind] of kinds) {
+      const r = await apply(failedWorld(`olive ledger-init 0.1.0: 장부를 만들지 못했다(${reason})\n`));
+      const headline =
+        kind === "before" ? `장부 초기화 실패: 장부를 만들지 못했다(종료 94, ${reason})` : kind === "maybe" ? `장부 초기화 실패: 장부 열기가 실패했다(종료 94, ${reason}). 장부가 만들어졌을 수 있다` : "장부 초기화 실패: 장부는 만들었고 닫기가 실패했다(종료 94, close:threw)";
+      expect([reason, r.code, r.json.body.split("\n")[0], r.json.error.message]).toEqual([reason, 1, headline, headline]);
+      const next = String(r.json.next);
+      expect([reason, next.includes("자동으로 다시 돌리지 않았다")]).toEqual([reason, true]);
+      expect([reason, next.includes(kind === "before" ? "장부 자리를 바로잡은 뒤 다시: homelab olive ledger-init(" : "다시 불러 확인한다: homelab olive ledger-init --apply")]).toEqual([reason, true]);
+      expect([reason, both(r.json.body), both(r.json.error.message)]).toEqual([reason, false, false]);
       expect([reason, argvs(r, CREATE).length]).toEqual([reason, 1]);
     }
-    const closed = await apply({ jobs: [notFound(`jobs.batch "${JOB}"`), jobDoc(FAILED), notFound(`jobs.batch "${JOB}"`)], initPods: exited(94, "olive ledger-init 0.1.0: 장부를 만들지 못했다(close:threw)\n") });
-    expect(closed.json.body).not.toContain("만들지 못했다");
-    expect(closed.json.body).not.toContain("만들어졌을 수 있다");
+  }, 120_000);
+
+  test("사유를 읽지 못한 94와 시점을 가릴 수 없는 사유는 사람용·JSON 모두 만들어졌을 수 있다고만 말한다", async () => {
+    for (const message of [undefined, "olive ledger-init 0.1.0: 장부를 만들지 못했다(open:corrupt)\n"]) {
+      const machine = await apply(failedWorld(message));
+      expect([message, machine.code, both(machine.json.body), both(machine.json.error.message), machine.json.body.includes("만들어졌을 수 있다")]).toEqual([message, 1, false, false, true]);
+      const human = await runCli(["olive", "ledger-init", "--apply"], world(failedWorld(message)));
+      expect([message, human.code, both(`${human.stdout}${human.stderr}`), `${human.stdout}${human.stderr}`.includes("만들어졌을 수 있다")]).toEqual([message, 1, false, true]);
+    }
   }, 60_000);
 });
 
-describe("기다림 상한(F7)", () => {
+describe("문맥 이름", () => {
+  const shown: [string, string][] = [
+    [" test-cluster ", '" test-cluster "'],
+    ["홈랩", "홈랩"],
+    ["test cluster", '"test cluster"'],
+    ["it's $(touch x) `id`", "\"it's $(touch x) `id`\""],
+  ];
+  test("이름을 줄바꿈 하나만 떼고 그대로 쓴다: 한글·공백·셸 문자도 plan·--apply가 그 이름의 --context로만 간다", async () => {
+    for (const [ctx, label] of shown) {
+      const pin = `--context=${ctx}`;
+      const p = await plan({ ctx });
+      expect([ctx, p.code, p.json.status, p.unmatched.map((c) => c.argv)]).toEqual([ctx, 0, "pending", []]);
+      expect([ctx, p.json.body.split("\n")[1]]).toEqual([ctx, `대상: 문맥 ${label}, ${NS}/supervisor`]);
+      expectPlanReadOnly(p);
+      const a = await apply({ ctx });
+      expect([ctx, a.code, a.json.body, a.unmatched.map((c) => c.argv)]).toEqual([ctx, 0, "장부 초기화: 장부를 만들었다", []]);
+      expect([ctx, argvs(a, createArgv(ctx)).length, argvs(a, deleteArgv(ctx)).length]).toEqual([ctx, 1, 1]);
+      for (const r of [p, a]) {
+        const kubectl = r.calls.filter((c) => c.argv[0] === "kubectl");
+        expect([ctx, kubectl[0]!.argv]).toEqual([ctx, CURRENT]);
+        expect([ctx, kubectl.slice(1).every((c) => c.argv[1] === pin && c.argv.filter((x) => x.startsWith("--context")).length === 1)]).toEqual([ctx, true]);
+        expect([ctx, r.calls.some((c) => c.argv.includes(PIN))]).toEqual([ctx, ctx === CTX]);
+      }
+    }
+  }, 120_000);
+
+  test("제어 문자·빈 이름·끝 줄바꿈이 없는 출력이면 다른 것을 읽거나 만들지 않고 1이다", async () => {
+    for (const stdout of ["a\tb\n", "a\u001b[2Jb\n", `${CTX}\r\n`, `${CTX}\n\n`, CTX, "a\u0085b\n", "a\ufffdb\n", "\n", ""]) {
+      for (const mode of [[], ["--apply"]]) {
+        const r = await runCli(["olive", "ledger-init", ...mode, "--json"], world({ context: { stdout } }));
+        expect([stdout, mode, r.code]).toEqual([stdout, mode, 1]);
+        expect([stdout, mode, r.json.body.split("\n")[0]]).toEqual([stdout, mode, `장부 초기화: ${mode.length ? "Job을 만들지 않았다" : "만들 수 없다"}. kubectl 문맥을 정하지 못했다`]);
+        expect([stdout, mode, r.calls.map((c) => c.argv), r.writes]).toEqual([stdout, mode, [CURRENT], []]);
+      }
+    }
+  }, 120_000);
+});
+
+describe("한도 0", () => {
+  const rows: { cpu: string; memory: string }[] = [
+    { cpu: "0", memory: "768Mi" },
+    { cpu: "500m", memory: "0" },
+    { cpu: "0m", memory: "0Mi" },
+    { cpu: "0.000", memory: "0Gi" },
+  ];
+  test("감독 limits의 CPU나 메모리가 0이면 쿼터가 같아도 plan·--apply 모두 실패(1)이고 만들지 않는다", async () => {
+    for (const limits of rows) {
+      for (const mode of [[], ["--apply"]]) {
+        const r = await runCli(["olive", "ledger-init", ...mode, "--json"], world({ deploy: json(deployment({ limits })), quota: quota(limits) }));
+        expect([limits, mode, r.code]).toEqual([limits, mode, 1]);
+        expect([limits, mode, r.json.body.split("\n")[0]]).toEqual([limits, mode, `장부 초기화: ${mode.length ? "Job을 만들지 않았다" : "만들 수 없다"}. 감독 limits에 0인 자원이 있다(olive-limits가 감독과 함께 뜨는 것을 막지 못한다)`]);
+        expect([limits, mode, argvs(r, CREATE).length, r.writes.length]).toEqual([limits, mode, 0, 0]);
+      }
+    }
+  }, 60_000);
+
+  test("0이 아닌 작은 한도는 지금처럼 계획한다", async () => {
+    const limits = { cpu: "1m", memory: "1Ki" };
+    const r = await plan({ deploy: json(deployment({ limits })), quota: quota(limits) });
+    expect([r.code, r.json.status]).toEqual([0, "pending"]);
+  });
+});
+
+describe("기다림 상한", () => {
   // 스텁 대신 가짜 exec로 조회마다 지연을 넣고, 각 조회가 받은 실행 제한을 적는다.
   function fake(delayMs: number) {
     const rules = world();
@@ -585,9 +698,20 @@ describe("기다림 상한(F7)", () => {
     const { exec } = fake(0);
     expect(oliveLedgerWrite(exec, exec, { capMs: 5_000, pollMs: 2 }).run().state).toBe("created");
   });
+
+  test("끝난 Job의 첫 파드 조회가 상한에 끊기면 아직 끝나지 않았다가 아니라 읽지 못함(결과 모름)이다", () => {
+    const { exec } = fake(0);
+    const slow: Exec = (argv, opts) => {
+      if (!argv.includes("-l")) return exec(argv, opts);
+      Bun.sleepSync(80);
+      return { code: null, stdout: "", stderr: "", notFound: false, errKind: "timeout" };
+    };
+    const out = oliveLedgerWrite(slow, slow, { capMs: 50, pollMs: 2 }).run();
+    expect(out).toMatchObject({ state: "unknown", why: "unread", cleanup: { state: "kept", why: "unread" } });
+  });
 });
 
-describe("Job 없이 남은 파드(F8)", () => {
+describe("Job 없이 남은 파드", () => {
   test("남은 Job과 남은 파드의 안내가 다르다", async () => {
     const orphan = await plan({ pods: list(pod(JOB, INIT_LABELS, { status: { phase: "Succeeded" } })) });
     expect(orphan.code).toBe(1);
