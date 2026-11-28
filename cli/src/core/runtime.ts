@@ -17,6 +17,7 @@ import { kubeRead, kubeWrite } from "./kubectl";
 import { nodeRead } from "./node";
 import { oliveRead, oliveWrite } from "./olive";
 import { oliveAdminRead, oliveAdminWrite } from "./olive-admin";
+import { oliveLedgerRead, oliveLedgerWrite } from "./olive-ledger";
 import { writeStderr } from "./output";
 import { repoRead } from "./pr";
 import type { Mode } from "./result";
@@ -50,6 +51,9 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
   // 기다림 간격. 시험 전용 HOMELAB_TEST_POLL_MS가 줄인다(HOMELAB_TEST_TIMEOUT_MS와 같은 방식).
   const poll = Number(o.env.HOMELAB_TEST_POLL_MS);
   const kube = Number.isFinite(poll) && poll > 0 ? { pollMs: poll } : {};
+  // 장부 초기화의 긴 기다림(수 분)도 시험 전용 HOMELAB_TEST_TIMEOUT_MS가 줄인다(exec.ts와 같은 상한).
+  const testCap = Number(o.env.HOMELAB_TEST_TIMEOUT_MS);
+  const ledgerOpts = { ...kube, ...(Number.isFinite(testCap) && testCap > 0 ? { capMs: testCap } : {}) };
   const cwd = o.cwd ?? process.cwd();
   // github 래퍼를 부르는 명령(delegate, wrapper)만: 직접 stdio를 쓸 수 있는 읽기 exec.
   const delegateRead = o.delegate || o.wrapper ? makeExec("read", { env: o.env, delegate: true }) : null;
@@ -85,6 +89,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
       bot: botWrite(exec, k8sRead, kube.pollMs ?? 2_000),
       olive: { ...oliveRead(readExec), ...oliveWrite(exec, readExec, kube) },
       oliveAdmin: oliveAdminWrite(exec, readExec, alive),
+      oliveLedger: oliveLedgerWrite(exec, readExec, ledgerOpts),
       node: nodeRead(readExec),
       progress: o.progress,
     };
@@ -111,6 +116,7 @@ export function makeRuntime(o: RuntimeOpts): ReadCtx {
     bot: botRead(kubeRead(readExec, kube)),
     olive: oliveRead(readExec),
     oliveAdmin: oliveAdminRead(readExec),
+    oliveLedger: oliveLedgerRead(readExec),
     node: nodeRead(readExec),
     tools: toolsRead(readExec, o.env),
     progress: o.progress,

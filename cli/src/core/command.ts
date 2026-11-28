@@ -394,6 +394,33 @@ export type OliveAdminWrite = OliveAdminRead & {
   release(call: OliveReleaseCall): OliveReleaseOutcome;
 };
 
+// 올리브 장부 초기화(D-110·D-176). 감독이 꺼진 것을 확인한 뒤 Argo CD 밖의 일회성 Job으로 초기화 진입점을 한 번 돌린다.
+// Job 모양은 core 고정이고 이미지·장부 경로·PVC·보안 칸·자원은 라이브 감독 Deployment에서 읽는다. 명령이 넘기는 값은 없다.
+// 확인 하나의 결과. detail은 어긋남의 짧은 낱말·수다(명령이 쉬운 말로 옮긴다). 앞 확인이 어긋나 볼 수 없는 확인은 목록에 없다.
+export type OliveLedgerCheckId = "deployment" | "replicas" | "rollout" | "supervisor-pods" | "shape" | "ledger-users" | "pvc" | "stop-lock" | "leftover" | "quota";
+export type OliveLedgerCheck = { id: OliveLedgerCheckId; ok: true } | { id: OliveLedgerCheckId; ok: false; detail: string };
+export type OliveLedgerJob = { namespace: string; name: string; image: string; ledgerDir: string; pvc: string; limits: { cpu: string; memory: string }; deadlineSec: number; ttlSec: number };
+// job은 감독 Deployment의 꼴을 읽어 Job을 만들 수 있을 때만 있다. context가 null이면 kubectl 문맥을 정하지 못해 아무것도 읽지 않았다
+// (checks가 비어 있다). 문맥이 있으면 그 실행의 모든 kubectl 호출이 그 문맥으로 갔다.
+export type OliveLedgerInspection = { context: string | null; namespace: string; deployment: string; checks: OliveLedgerCheck[]; job: OliveLedgerJob | null };
+// deleted: 판정 뒤 지웠다. kept: 끝나지 않았거나 만들었는지 몰라 지우지 않았다. failed: 지우기를 확인하지 못했다.
+export type OliveLedgerCleanup = { state: "deleted" } | { state: "kept" | "failed"; why: string };
+// blocked: 확인이 어긋나 Job을 만들지 않았다. not-created: 만들기를 API가 거절했거나 kubectl을 띄우지 못했다(파드 없음).
+// created(종료 0)·exists(90)는 성공, failed는 그 밖의 종료 코드, unknown은 종료 코드를 확인하지 못했다(장부가 만들어졌을 수 있다).
+export type OliveLedgerOutcome =
+  | { state: "blocked"; inspection: OliveLedgerInspection }
+  | { state: "not-created"; job: OliveLedgerJob; why: string }
+  | { state: "created"; job: OliveLedgerJob; cleanup: OliveLedgerCleanup }
+  | { state: "exists"; job: OliveLedgerJob; cleanup: OliveLedgerCleanup }
+  | { state: "failed"; job: OliveLedgerJob; code: number; reason: string | null; kubelet: string | null; cleanup: OliveLedgerCleanup }
+  | { state: "unknown"; job: OliveLedgerJob; why: string; waiting: string | null; cleanup: OliveLedgerCleanup };
+export type OliveLedgerRead = {
+  // 읽기만 한다. 읽지 못하면 던지고, 시간 초과는 ExecTimeout이다.
+  inspect(): OliveLedgerInspection;
+};
+// 쓰기 문맥만: 확인을 다시 읽어 모두 맞을 때만 Job을 만들고, 끝날 때까지 기다려 판정한 뒤 지운다. 재시도하지 않는다.
+export type OliveLedgerWrite = OliveLedgerRead & { run(): OliveLedgerOutcome };
+
 // 이 프로세스가 클러스터 노드 위인지. /etc/machine-id와 Node의 status.nodeInfo.machineID가 하나만 맞아야 node다.
 export type NodeHost = { state: "node"; node: string } | { state: "not-node" } | { state: "unknown"; reason: string };
 // 파드 UID의 cgroup(kubepods.slice 아래 고정 꼴)의 cgroup.events. absent는 그 경로가 없음, empty는 populated 0.
@@ -495,6 +522,7 @@ export type ReadCtx = {
   bot: BotRead;
   olive: OliveRead;
   oliveAdmin: OliveAdminRead;
+  oliveLedger: OliveLedgerRead;
   node: NodeRead;
   // kind delegate 명령과 wrapper 표시 명령(app new)에만 있다.
   github?: GithubDelegate;
@@ -531,6 +559,7 @@ export type WriteCtx = {
   bot: BotWrite;
   olive: OliveRead & OliveWrite;
   oliveAdmin: OliveAdminWrite;
+  oliveLedger: OliveLedgerWrite;
   node: NodeRead;
   // wrapper 표시 명령(app new)에만 있다.
   github?: { apply(): number };
