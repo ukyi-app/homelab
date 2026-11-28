@@ -270,10 +270,14 @@ describe("소스 규칙", () => {
     expect(commandProblems("olive.ts", 'import { oliveAdminWrite } from "../core/olive-admin";')).toEqual(["import ../core/olive-admin"]);
     expect(commandProblems("olive.ts", 'import { makeExec } from "../core/exec";')).toEqual(["import ../core/exec"]);
     expect(offenders(/\boliveAdmin(Read|Write)\b/, ["core/olive-admin.ts", "core/runtime.ts"])).toEqual([]);
+    expect(src.map(rel)).toContain("core/olive-ledger.ts");
+    expect(offenders(/\boliveLedger(Read|Write)\b/, ["core/olive-ledger.ts", "core/runtime.ts"])).toEqual([]);
     // 어댑터가 프로세스를 직접 띄우지 않고 받은 exec만 부른다.
     expect(body(join(SRC, "core", "olive-admin.ts"))).not.toMatch(/\bBun\.|\bprocess\.|node:/);
-    // 감독 ns로 가는 길은 이 파일 하나고, 비상 정지 어댑터에는 exec가 없다.
+    expect(body(join(SRC, "core", "olive-ledger.ts"))).not.toMatch(/\bprocess\.|node:/);
+    // 감독 ns로 가는 길은 관리 진입점(olive-admin.ts)과 장부 초기화 Job(olive-ledger.ts, ns 상수는 olive-admin.ts의 것)뿐이고, 비상 정지 어댑터에는 exec가 없다.
     expect(offenders(/olive-control/, ["core/olive-admin.ts"])).toEqual([]);
+    expect(offenders(/\bOLIVE_ADMIN_NS\b/, ["core/olive-admin.ts", "core/olive-ledger.ts"])).toEqual([]);
     for (const f of ["olive.ts", "node.ts"]) expect([f, /["'`]exec["'`]/.test(body(join(SRC, "core", f)))]).toEqual([f, false]);
   });
 
