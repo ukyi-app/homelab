@@ -8,7 +8,9 @@
 #   Immediate면 노드를 몰라 바인딩에 실패한다.
 # - StorageClass 필드는 바꿀 수 없다. reclaimPolicy를 고쳐도 적용이 실패하고, 이미 만든 PV의
 #   reclaim은 SC를 바꿔도 그대로다. 처음부터 Retain으로 둔다.
-# - hostPath PV에는 fsGroup이 적용되지 않는다. 쓰는 컨테이너의 uid를 맞춘다.
+# - hostPath PV에는 fsGroup이 적용되지 않는다. 쓰는 컨테이너의 uid를 맞춘다. PV 뿌리는 root 0777로 만들어지고,
+#   subPath 하위 폴더도 없으면 kubelet이 root 소유로 만든다. 비root가 소유해야 하는 하위 폴더는 같은 uid의 init 컨테이너가
+#   먼저 만든다(platform/olive 감독 파드의 result-dir). 이미 root 소유로 생긴 폴더는 그 uid로 고칠 수 없다.
 # - kubelet_volume_stats가 없고 용량 제한도 강제되지 않는다. 디스크는 node-exporter
 #   파일시스템 지표와 경보로 본다.
 # - PV는 /var/lib/rancher/k3s/storage 아래라 k3s-uninstall.sh가 함께 지운다. 보존은 R2 백업이 맡는다.
