@@ -39,14 +39,18 @@ const QUOTA = "olive-limits";
 // 만들기 요청을 API 서버가 받지 않았다는 응답. 꼴은 kubectl 1.36.6의 cmd/util/helpers.go(checkErr·StandardErrorMessage)가 정한다:
 // Invalid는 "The Job "이름" is invalid"(세부가 없으면 "The request is invalid"), Unauthorized는 "error: You must be logged in
 // to the server (…)"로 나오고 "Error from server (이유)"로는 나오지 않는다. 이 밖의 실패는 만들었는지 모른다.
+// 함정: 이 꼴은 stderr 첫 줄(kubectl이 고른 최상위 오류)에만 맞춘다. 뒤 줄은 서버가 붙인 세부라, InternalError·Timeout·
+// 전송 오류 뒤에 Invalid 꼴이 와도 거절이 아니다(서버가 Job을 저장한 뒤 응답만 잃었을 수 있다). 첫 줄이 경고(Warning: …)여도
+// 거절로 읽지 않아 결과 모름 쪽으로 기운다.
 const REFUSED: [RegExp, "exists" | "forbidden" | "refused"][] = [
-  [/^Error from server \(AlreadyExists\)/m, "exists"],
-  [/^Error from server \(Forbidden\)/m, "forbidden"],
-  [/^Error from server \((BadRequest|NotFound)\)/m, "refused"],
-  [new RegExp(`^The Job "${LEDGER_INIT_JOB}" is invalid(:|$)`, "m"), "refused"],
-  [/^The request is invalid(:|$)/m, "refused"],
-  [/^error: You must be logged in to the server \(/m, "refused"],
+  [/^Error from server \(AlreadyExists\)/, "exists"],
+  [/^Error from server \(Forbidden\)/, "forbidden"],
+  [/^Error from server \((BadRequest|NotFound)\)/, "refused"],
+  [new RegExp(`^The Job "${LEDGER_INIT_JOB}" is invalid(:|$)`), "refused"],
+  [/^The request is invalid(:|$)/, "refused"],
+  [/^error: You must be logged in to the server \(/, "refused"],
 ];
+const topError = (stderr: string) => stderr.split("\n").find((l) => l.trim() !== "") ?? "";
 
 const NAME = /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/;
 const DIGEST_IMAGE = /^[a-z0-9][a-z0-9._\/:-]{0,200}@sha256:[0-9a-f]{64}$/;
@@ -190,7 +194,9 @@ function shapeFrom(d: any): Shape {
   const quantities = (v: unknown, need: boolean) =>
     v === undefined ? !need : isObj(v) && Object.keys(v).every((k) => k === "cpu" || k === "memory") && (!need || (typeof v.cpu === "string" && typeof v.memory === "string")) && Object.values(v).every((q) => typeof q === "string" && QUANTITY.test(q));
   if (!isObj(res) || Object.keys(res).some((k) => k !== "limits" && k !== "requests") || !quantities(res.limits, true) || !quantities(res.requests, false)) return { problem: "resources" };
-  // 쿼터는 수량 0을 사용량에 더하지 않고 이 차트의 olive-limits는 파드 수를 세지 않는다. 한도가 0이면 감독과 초기화 파드가 함께 떠도 막지 못한다.
+  // 초기화는 CPU와 메모리 둘 다 양수 한도를 요구한다. 쿼터는 증가분에서 수량 0인 자원을 빼고 남은 자원만 한도와 비교하고,
+  // 이 차트의 olive-limits는 파드 수를 세지 않는다. 둘 다 0이면 아무것도 세지 않아 감독과 초기화 파드가 함께 떠도 막지 못한다.
+  // 하나만 0이면 남은 자원으로는 막지만, 두 번째 잠금이 가정하는 한도(두 자원 모두 감독 limits)와 다르다.
   if (zero(res.limits.cpu) || zero(res.limits.memory)) return { problem: "zero-limits" };
   const sa = spec.serviceAccountName;
   if (sa !== undefined && !isName(sa)) return { problem: "serviceAccountName" };
@@ -253,6 +259,13 @@ function shapeFrom(d: any): Shape {
 
 type Inspected = OliveLedgerInspection & { manifest: Record<string, unknown> | null };
 
+// 쿼터 비교에 쓰는 감독 limits. Job 모양과 따로 읽어, 모양을 거절한 경우(한도 0 등)에도 쿼터 한도를 비교한다.
+function supervisorLimits(d: any): { cpu: string; memory: string } | null {
+  const c = isArray(d?.spec?.template?.spec?.containers) ? d.spec.template.spec.containers.find((x: any) => x?.name === OLIVE_ADMIN_CONTAINER) : undefined;
+  const l = c?.resources?.limits;
+  return isObj(l) && typeof l.cpu === "string" && typeof l.memory === "string" && QUANTITY.test(l.cpu) && QUANTITY.test(l.memory) ? { cpu: l.cpu, memory: l.memory } : null;
+}
+
 // 문맥을 정하지 못하면 다른 것을 읽지 않는다(context null, 확인 없음, job 없음). 명령은 이것을 만들지 않음으로 말한다.
 function inspect(readExec: Exec): Inspected {
   const checks: OliveLedgerCheck[] = [];
@@ -305,13 +318,16 @@ function inspect(readExec: Exec): Inspected {
     const scopes = quota?.spec?.scopes;
     // 차트의 olive-limits에는 범위가 없다. 범위가 붙으면 감독·초기화 파드를 세지 않을 수 있다(olive.ts lockState와 같은 판정).
     const scoped = !(scopes === undefined || (isArray(scopes) && scopes.length === 0)) || present(quota?.spec?.scopeSelector);
-    const same = (h: any) => job !== null && isObj(h) && h["limits.cpu"] === job.limits.cpu && h["limits.memory"] === job.limits.memory;
+    const limits = d === null ? null : supervisorLimits(d);
+    const same = (h: any) => limits !== null && isObj(h) && h["limits.cpu"] === limits.cpu && h["limits.memory"] === limits.memory;
     // 지워지는 쿼터는 곧 사라지고 되살릴 수 없다. API 서버는 수량을 정규형으로 저장해 같은 값은 같은 글자다(500m·0.5 → 500m).
     if (present(quota?.metadata?.deletionTimestamp)) add("quota", "deleting");
     else if (scoped) add("quota", "scoped");
-    else if (job !== null && !same(hard)) add("quota", "mismatch");
+    // 감독 limits를 읽지 못하면 비교하지 못한 것이다. 맞음으로 세지 않는다.
+    else if (limits === null) add("quota", "unchecked");
+    else if (!same(hard)) add("quota", "mismatch");
     // status.hard는 컨트롤러가 spec을 반영한 뒤에 바뀐다. 반영 전에는 옛 한도로 심사하므로 기다린다.
-    else if (job !== null && !same(enforced)) add("quota", "enforcing");
+    else if (!same(enforced)) add("quota", "enforcing");
     else if (!isObj(used) || !present(used["limits.cpu"]) || !present(used["limits.memory"])) add("quota", "unread");
     else add("quota", used["limits.cpu"] === "0" && used["limits.memory"] === "0" ? null : "used");
   }
@@ -351,11 +367,13 @@ function initReason(message: unknown): string | null {
 type Watch = { terminal: "complete" | "failed" | null; deadline: boolean; gone: boolean; pods: any[]; waiting: string | null };
 
 // left는 조회마다의 남은 시간(ms)이다. 조회 자체도 기다림 상한 안에 끝나게 실행 제한으로 넘긴다.
-function watchOnce(exec: Exec, uid: string, left: () => number): Watch {
+// ended는 같은 UID의 Job이 끝났다고 읽은 관측을 받는다. 뒤의 파드 조회가 끊겨 이 조회의 Watch가 돌아오지 않아도 그 사실은 남긴다.
+function watchOnce(exec: Exec, uid: string, left: () => number, ended: { terminal: "complete" | "failed" | null }): Watch {
   const j = getDoc(exec, "jobs.batch", LEDGER_INIT_JOB, "Job", { timeoutMs: Math.max(1, left()) });
   if (j === null || j?.metadata?.uid !== uid) return { terminal: null, deadline: false, gone: true, pods: [], waiting: null };
   const failed = condition(j, "Failed");
   const terminal = condition(j, "Complete") ? "complete" : failed ? "failed" : null;
+  if (terminal !== null) ended.terminal = terminal;
   const pods = listPods(exec, `batch.kubernetes.io/controller-uid=${uid}`, { timeoutMs: Math.max(1, left()) });
   let waiting: string | null = null;
   for (const p of pods) {
@@ -432,7 +450,8 @@ export function oliveLedgerWrite(writeExec: Exec, baseReadExec: Exec, opts: Oliv
       if (x.code !== 0) {
         // 만들지 않았다고 말할 수 있는 것은 API 서버가 요청을 거절했다는 응답뿐이다. 응답 기한·EOF·연결 끊김·서버 오류는
         // 서버가 Job을 저장한 뒤 응답만 잃었을 수 있어 결과 모름이고, uid가 없으니 지우거나 다시 만들지 않는다.
-        const refused = REFUSED.find(([re]) => re.test(x.stderr))?.[1];
+        const top = topError(x.stderr);
+        const refused = REFUSED.find(([re]) => re.test(top))?.[1];
         if (refused === undefined) return { state: "unknown", job, why: "create-lost", waiting: null, cleanup: { state: "kept", why: "unknown" } };
         return { state: "not-created", job, why: refused };
       }
@@ -450,9 +469,10 @@ export function oliveLedgerWrite(writeExec: Exec, baseReadExec: Exec, opts: Oliv
       let w: Watch = { terminal: null, deadline: false, gone: false, pods: [], waiting: null };
       // 아직 한 번도 끝까지 읽지 못한 처음 상태다. 첫 조회가 상한에 끊겨도 "끝나지 않았다"로 읽지 않게 읽지 못함에서 시작한다.
       let unread = true;
+      const ended: { terminal: "complete" | "failed" | null } = { terminal: null };
       for (;;) {
         try {
-          w = watchOnce(readExec, uid, left);
+          w = watchOnce(readExec, uid, left, ended);
           unread = false;
         } catch (e) {
           // 남은 시간을 다 써서 끊긴 조회는 새 관측이 아니다. 그 앞 조회의 결과(읽음·읽지 못함·아직 못 읽음)를 그대로 둔다.
@@ -461,6 +481,9 @@ export function oliveLedgerWrite(writeExec: Exec, baseReadExec: Exec, opts: Oliv
         if (w.gone) return { state: "unknown", job, why: "gone", waiting: w.waiting, cleanup: { state: "deleted" } };
         if (!unread && w.terminal !== null) break;
         if (Date.now() + pollMs > until) {
+          // Job이 끝난 것은 읽었는데 파드 종료 코드를 끝내 읽지 못했다. "아직 끝나지 않았다"가 아니다. 지우면 파드까지 사라져
+          // 사람이 종료 코드를 확인할 수 없어 남긴다(ttl이 치운다).
+          if (ended.terminal !== null) return { state: "unknown", job, why: `${ended.terminal}-unread`, waiting: w.waiting, cleanup: { state: "kept", why: "exit-unread" } };
           // 끝나지 않은 Job은 지우지 않는다(아직 쓰는 중일 수 있다). 기한이 끝내고 ttl이 치운다.
           return { state: "unknown", job, why: unread ? "unread" : "wait", waiting: w.waiting, cleanup: { state: "kept", why: unread ? "unread" : "running" } };
         }

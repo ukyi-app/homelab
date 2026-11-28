@@ -303,7 +303,7 @@ describe("--apply 판정", () => {
     ["64 사용법", FAILED, exited(64, "olive ledger-init 0.1.0: 사용법: bun src/main/ledger-init.ts (인자 없음)\n"), 1, "장부 초기화 실패: 초기화 진입점이 실행을 받지 않았다(종료 64, CLI와 감독 이미지의 판이 다를 수 있다)", "CLI와 차트의 판"],
     ["137 메모리 초과", FAILED, exited(137, undefined, "OOMKilled"), 1, "장부 초기화 실패: 초기화 파드가 종료 137로 끝났다(OOMKilled). 장부가 만들어졌을 수 있다", "다시 불러 확인한다"],
     ["기한 넘김", DEADLINE, list(), 1, "장부 초기화: 결과 모름. 초기화 파드가 기한 안에 끝나지 않았다. 장부가 만들어졌을 수 있다", "다시 불러 확인한다"],
-    ["파드를 읽지 못함", FAILED, { code: 1, stderr: `Error from server (Forbidden): ${CANARY}\n` }, 1, "장부 초기화: 결과 모름. Job 상태를 읽지 못했다. 장부가 만들어졌을 수 있다", "Job이 끝나고 지워진 뒤"],
+    ["파드를 읽지 못함", FAILED, { code: 1, stderr: `Error from server (Forbidden): ${CANARY}\n` }, 1, "장부 초기화: 결과 모름. Job 실패는 확인했으나 초기화 파드의 종료 코드를 읽지 못했다. 장부가 만들어졌을 수 있다", "Job이 끝나고 지워진 뒤"],
     ["종료 코드 없음", FAILED, initPod({ waiting: { reason: "ContainerCreating" } }), 1, "장부 초기화: 결과 모름. 초기화 파드의 종료 코드를 읽지 못했다. 장부가 만들어졌을 수 있다", "다시 불러 확인한다"],
     ["상태와 코드가 어긋남", COMPLETE, exited(94, "olive ledger-init 0.1.0: 장부를 만들지 못했다(open:locked)\n"), 1, "장부 초기화: 결과 모름. Job 상태와 종료 코드가 맞지 않는다. 장부가 만들어졌을 수 있다", "다시 불러 확인한다"],
   ];
@@ -474,6 +474,11 @@ describe("만들기 응답을 잃음", () => {
     ["줄 가운데의 거절 꼴", { code: 1, stderr: "error: Post: EOF (The request is invalid: x)\n" }],
     ["서버 응답 기한", { code: 1, stderr: "Error from server (Timeout): the server was unable to return a response in the time allotted\n" }],
     ["서버 내부 오류", { code: 1, stderr: "Error from server (InternalError): Internal error occurred\n" }],
+    // 최상위 오류가 거절이 아니면 뒤 줄(서버가 붙인 세부)에 거절 꼴이 있어도 결과 모름이다.
+    ["서버 내부 오류 뒤 줄의 Invalid 꼴", { code: 1, stderr: 'Error from server (InternalError): error when creating "STDIN": Internal error occurred:\nThe request is invalid: validation service unavailable\n' }],
+    ["서버 응답 기한 뒤 줄의 Invalid 꼴", { code: 1, stderr: `Error from server (Timeout): request did not complete within requested timeout\nThe Job "${JOB}" is invalid: cached validation detail\n` }],
+    ["연결 오류 뒤 줄의 Unauthorized 꼴", { code: 1, stderr: 'error: Post "https://example.invalid/apis/batch/v1/namespaces/olive-control/jobs": unexpected EOF\nerror: You must be logged in to the server (Unauthorized)\n' }],
+    ["서버 내부 오류 뒤 줄의 Forbidden 꼴", { code: 1, stderr: "Error from server (InternalError): Internal error occurred\nError from server (Forbidden): jobs.batch is forbidden\n" }],
   ];
   test("명확한 거절이 아닌 실패는 결과 모름(1)이고 기다리거나 지우지 않는다", async () => {
     for (const [name, create] of lost) {
@@ -586,6 +591,12 @@ describe("종료 94의 안내", () => {
       expect([reason, next.includes("자동으로 다시 돌리지 않았다")]).toEqual([reason, true]);
       expect([reason, next.includes(kind === "before" ? "장부 자리를 바로잡은 뒤 다시: homelab olive ledger-init(" : "다시 불러 확인한다: homelab olive ledger-init --apply")]).toEqual([reason, true]);
       expect([reason, both(r.json.body), both(r.json.error.message)]).toEqual([reason, false, false]);
+      // 만든 뒤의 닫기 실패는 본문 어디에도 만들지 못했다·만들어졌을 수 있다를 싣지 않는다(한 줄만 덧붙어도 모순이다).
+      if (kind === "made") {
+        for (const text of [r.json.body, r.json.error.message]) {
+          expect([reason, text.includes("만들지 못했다"), text.includes("만들어졌을 수 있다")]).toEqual([reason, false, false]);
+        }
+      }
       expect([reason, argvs(r, CREATE).length]).toEqual([reason, 1]);
     }
   }, 120_000);
@@ -626,6 +637,27 @@ describe("문맥 이름", () => {
     }
   }, 120_000);
 
+  test("따옴표·역슬래시·보이지 않는 글자가 든 이름은 인용·이스케이프해 서로 다른 이름이 같은 대상 줄로 보이지 않는다", async () => {
+    const names: [string, string][] = [
+      ["ctx", "ctx"],
+      ["ctx\u200b", '"ctx\\u{200b}"'],
+      ['"ctx\\u{200b}"', '"\\"ctx\\\\u{200b}\\""'],
+      ["ctx\u034f", '"ctx\\u{34f}"'],
+      ['a"b', '"a\\"b"'],
+      ["a\\b", '"a\\\\b"'],
+      ["a\u00a0b", '"a\\u{a0}b"'],
+    ];
+    const targets: string[] = [];
+    for (const [ctx, label] of names) {
+      const p = await plan({ ctx });
+      expect([ctx, p.code, p.unmatched.map((c) => c.argv)]).toEqual([ctx, 0, []]);
+      const line = p.json.body.split("\n")[1];
+      expect([ctx, line]).toEqual([ctx, `대상: 문맥 ${label}, ${NS}/supervisor`]);
+      targets.push(line);
+    }
+    expect(new Set(targets).size).toBe(names.length);
+  }, 60_000);
+
   test("제어 문자·빈 이름·끝 줄바꿈이 없는 출력이면 다른 것을 읽거나 만들지 않고 1이다", async () => {
     for (const stdout of ["a\tb\n", "a\u001b[2Jb\n", `${CTX}\r\n`, `${CTX}\n\n`, CTX, "a\u0085b\n", "a\ufffdb\n", "\n", ""]) {
       for (const mode of [[], ["--apply"]]) {
@@ -650,8 +682,27 @@ describe("한도 0", () => {
       for (const mode of [[], ["--apply"]]) {
         const r = await runCli(["olive", "ledger-init", ...mode, "--json"], world({ deploy: json(deployment({ limits })), quota: quota(limits) }));
         expect([limits, mode, r.code]).toEqual([limits, mode, 1]);
-        expect([limits, mode, r.json.body.split("\n")[0]]).toEqual([limits, mode, `장부 초기화: ${mode.length ? "Job을 만들지 않았다" : "만들 수 없다"}. 감독 limits에 0인 자원이 있다(olive-limits가 감독과 함께 뜨는 것을 막지 못한다)`]);
+        expect([limits, mode, r.json.body.split("\n")[0]]).toEqual([limits, mode, `장부 초기화: ${mode.length ? "Job을 만들지 않았다" : "만들 수 없다"}. 감독 limits에 0인 자원이 있다(초기화는 CPU와 메모리 둘 다 양수 한도를 요구한다)`]);
         expect([limits, mode, argvs(r, CREATE).length, r.writes.length]).toEqual([limits, mode, 0, 0]);
+      }
+    }
+  }, 60_000);
+
+  test("Job 모양을 거절해도 쿼터 한도는 감독 limits와 비교하고, 비교하지 못하면 확인으로 보이지 않는다", async () => {
+    const ok = "확인: olive-limits 사용량 0, 집행 중인 한도 = 감독 limits, 적용 범위 없음";
+    const rows: [string, World, string | null][] = [
+      ["한도 0, 쿼터가 다름", { deploy: json(deployment({ limits: { cpu: "0", memory: "768Mi" } })), quota: quota({ cpu: "500m", memory: "768Mi" }) }, "어긋남: olive-limits 한도가 감독 limits와 다르다(감독과 함께 뜨는 것을 막지 못한다)"],
+      ["한도 0, 쿼터가 같음", { deploy: json(deployment({ limits: { cpu: "0", memory: "768Mi" } })), quota: quota({ cpu: "0", memory: "768Mi" }) }, null],
+      ["limits를 읽지 못함", { deploy: json(deployment({ limits: { cpu: "500m" } as { cpu: string; memory: string } })) }, "어긋남: olive-limits 한도를 감독 limits와 비교하지 못했다(감독 limits를 읽지 못했다)"],
+      ["감독 Deployment 없음", { deploy: notFound('deployments.apps "supervisor"') }, "어긋남: olive-limits 한도를 감독 limits와 비교하지 못했다(감독 limits를 읽지 못했다)"],
+    ];
+    for (const [name, w, line] of rows) {
+      for (const mode of [[], ["--apply"]]) {
+        const r = await runCli(["olive", "ledger-init", ...mode, "--json", "--verbose"], world(w));
+        const lines: string[] = r.json.body.split("\n");
+        expect([name, mode, r.code, argvs(r, CREATE).length, r.writes.length]).toEqual([name, mode, 1, 0, 0]);
+        expect([name, mode, lines.includes(ok)]).toEqual([name, mode, line === null]);
+        if (line !== null) expect([name, mode, lines.includes(line)]).toEqual([name, mode, true]);
       }
     }
   }, 60_000);
@@ -665,8 +716,8 @@ describe("한도 0", () => {
 
 describe("기다림 상한", () => {
   // 스텁 대신 가짜 exec로 조회마다 지연을 넣고, 각 조회가 받은 실행 제한을 적는다.
-  function fake(delayMs: number) {
-    const rules = world();
+  function fake(delayMs: number, w: World = {}) {
+    const rules = world(w);
     const asked: { argv: string[]; timeoutMs: number | undefined }[] = [];
     let created = false;
     const exec = (argv: string[], opts: { timeoutMs?: number } = {}) => {
@@ -707,7 +758,31 @@ describe("기다림 상한", () => {
       return { code: null, stdout: "", stderr: "", notFound: false, errKind: "timeout" };
     };
     const out = oliveLedgerWrite(slow, slow, { capMs: 50, pollMs: 2 }).run();
-    expect(out).toMatchObject({ state: "unknown", why: "unread", cleanup: { state: "kept", why: "unread" } });
+    expect(out).toMatchObject({ state: "unknown", why: "complete-unread", cleanup: { state: "kept", why: "exit-unread" } });
+  });
+
+  test("실행 중을 읽은 뒤 같은 UID의 완료를 읽고 파드 조회가 상한에 끊기면 아직 끝나지 않았다가 아니라 완료·종료 코드 못 읽음이다", () => {
+    const { exec } = fake(0, { jobs: [notFound(`jobs.batch "${JOB}"`), jobDoc([]), jobDoc(COMPLETE)], initPods: initPod({ running: {} }) });
+    let lists = 0;
+    const slow: Exec = (argv, opts) => {
+      if (!argv.includes("-l") || ++lists === 1) return exec(argv, opts);
+      Bun.sleepSync(80);
+      return { code: null, stdout: "", stderr: "", notFound: false, errKind: "timeout" };
+    };
+    const out = oliveLedgerWrite(slow, slow, { capMs: 50, pollMs: 2 }).run();
+    expect(lists).toBe(2);
+    expect(out).toMatchObject({ state: "unknown", why: "complete-unread", cleanup: { state: "kept", why: "exit-unread" } });
+  });
+
+  test("실패를 읽은 뒤 파드 조회가 끊기면 실패는 확인했으나 종료 코드를 읽지 못함이다", () => {
+    const { exec } = fake(0, { jobs: [notFound(`jobs.batch "${JOB}"`), jobDoc(FAILED)] });
+    const slow: Exec = (argv, opts) => {
+      if (!argv.includes("-l")) return exec(argv, opts);
+      Bun.sleepSync(80);
+      return { code: null, stdout: "", stderr: "", notFound: false, errKind: "timeout" };
+    };
+    const out = oliveLedgerWrite(slow, slow, { capMs: 50, pollMs: 2 }).run();
+    expect(out).toMatchObject({ state: "unknown", why: "failed-unread", cleanup: { state: "kept", why: "exit-unread" } });
   });
 });
 

@@ -45,7 +45,7 @@ function failWord(c: OliveLedgerCheck & { ok: false }): Word {
     case "supervisor-pods":
       return d === "selector" ? { line: "감독 Deployment의 파드 선택자를 읽지 못했다", next: SHAPE_NEXT } : { line: `감독 파드가 ${d}개 남아 있다(내려가는 중 포함)`, waiting: true, next: `감독 파드가 사라진 뒤 다시: ${AGAIN}` };
     case "shape":
-      if (d === "zero-limits") return { line: "감독 limits에 0인 자원이 있다(olive-limits가 감독과 함께 뜨는 것을 막지 못한다)", next: "올리브 차트의 감독 resources.limits를 확인한다(cpu·memory 모두 0보다 커야 한다)" };
+      if (d === "zero-limits") return { line: "감독 limits에 0인 자원이 있다(초기화는 CPU와 메모리 둘 다 양수 한도를 요구한다)", next: "올리브 차트의 감독 resources.limits를 확인한다(cpu·memory 모두 0보다 커야 한다)" };
       return { line: `감독 Deployment의 꼴이 예상과 다르다(${d})`, next: SHAPE_NEXT };
     case "ledger-users":
       return { line: `장부 PVC를 붙인 다른 파드가 ${d}개 있다`, next: `그 파드가 끝난 뒤 다시: ${AGAIN}` };
@@ -59,6 +59,7 @@ function failWord(c: OliveLedgerCheck & { ok: false }): Word {
       return d === "job" ? { line: "지난 초기화 Job(olive-ledger-init)이 남아 있다", next: LEFTOVER_NEXT } : { line: `지난 초기화 파드가 남아 있다(${d.replace("pods ", "")}개)`, next: POD_LEFTOVER_NEXT };
     case "quota":
       if (d === "absent") return { line: "olive-limits 쿼터가 없다(감독과 함께 뜨는 것을 막지 못한다)", next: "올리브 차트의 olive-limits를 확인한다" };
+      if (d === "unchecked") return { line: "olive-limits 한도를 감독 limits와 비교하지 못했다(감독 limits를 읽지 못했다)", next: SHAPE_NEXT };
       if (d === "mismatch") return { line: "olive-limits 한도가 감독 limits와 다르다(감독과 함께 뜨는 것을 막지 못한다)", next: "올리브 차트의 olive-limits와 감독 resources를 확인한다" };
       if (d === "deleting") return { line: "olive-limits 쿼터가 지워지는 중이다(감독과 함께 뜨는 것을 막지 못한다)", next: "올리브 차트의 olive-limits를 확인한다" };
       if (d === "scoped") return { line: "olive-limits에 적용 범위(scopes·scopeSelector)가 있다(차트와 다르다)", next: "올리브 차트의 olive-limits를 확인한다(이 명령은 고치지 않는다)" };
@@ -67,13 +68,15 @@ function failWord(c: OliveLedgerCheck & { ok: false }): Word {
   }
 }
 
-// 문맥 이름은 kubectl에 넘긴 그대로가 아니라 화면용으로 보인다. 공백이나 보이지 않는 글자가 있으면 따옴표로 감싸고
-// 보이지 않는 글자는 \u{…}로 적어, 앞뒤 공백이 있는 이름과 없는 이름이 같아 보이지 않게 한다.
-const PLAIN_CONTEXT = /^[\p{L}\p{M}\p{N}\p{P}\p{S}]+$/u;
-const VISIBLE = /[\p{L}\p{M}\p{N}\p{P}\p{S} ]/u;
+// 문맥 이름은 kubectl에 넘긴 그대로가 아니라 화면용으로 보인다. 규칙 하나로 서로 다른 이름이 같은 줄로 보이지 않게 한다:
+// 따옴표·역슬래시·공백·보이지 않는 글자가 하나라도 있으면 따옴표로 감싸고, 그 안의 따옴표·역슬래시는 역슬래시를 붙이고
+// 보이지 않는 글자(글자·숫자·기호·문장 부호가 아닌 것과 U+034F·U+200B 같은 무시 가능 글자)는 \u{…}로 적는다. 감싸지 않은 이름에는
+// 따옴표가 없어 감싼 이름과 겹치지 않는다.
+const ESCAPED = /[^\p{L}\p{M}\p{N}\p{P}\p{S} ]|\p{Default_Ignorable_Code_Point}/u;
 function shownContext(name: string): string {
-  if (PLAIN_CONTEXT.test(name)) return name;
-  const body = [...name].map((ch) => (ch === '"' || ch === "\\" ? `\\${ch}` : VISIBLE.test(ch) ? ch : `\\u{${(ch.codePointAt(0) as number).toString(16)}}`)).join("");
+  const chars = [...name];
+  if (chars.every((ch) => ch !== '"' && ch !== "\\" && ch !== " " && !ESCAPED.test(ch))) return name;
+  const body = chars.map((ch) => (ch === '"' || ch === "\\" ? `\\${ch}` : ESCAPED.test(ch) ? `\\u{${(ch.codePointAt(0) as number).toString(16)}}` : ch)).join("");
   return `"${body}"`;
 }
 
@@ -122,11 +125,14 @@ const UNKNOWN_WHY: Record<string, string> = {
   "no-exit": "초기화 파드의 종료 코드를 읽지 못했다",
   mismatch: "Job 상태와 종료 코드가 맞지 않는다",
   unread: "Job 상태를 읽지 못했다",
+  "complete-unread": "Job 완료는 확인했으나 초기화 파드의 종료 코드를 읽지 못했다",
+  "failed-unread": "Job 실패는 확인했으나 초기화 파드의 종료 코드를 읽지 못했다",
 };
 
 // 지우지 못한 Job은 다음 실행을 막으므로(지난 초기화 Job이 남아 있음) 기본 출력에도 한 줄 남긴다.
 function cleanupLine(c: OliveLedgerCleanup, j: OliveLedgerJob): string | null {
   if (c.state === "deleted") return null;
+  if (c.state === "kept" && c.why === "exit-unread") return `Job ${j.name}을 지우지 않았다(끝났으나 종료 코드를 읽지 못했다. 파드의 종료 코드를 확인할 수 있게 남겼다). 끝난 뒤 ${j.ttlSec}초면 스스로 지워진다`;
   if (c.state === "kept" && c.why === "unread") return `Job ${j.name}을 지우지 않았다(상태를 읽지 못했다). 끝난 뒤 ${j.ttlSec}초면 스스로 지워진다`;
   if (c.state === "kept") return c.why === "running" ? `Job ${j.name}을 지우지 않았다(아직 끝나지 않았다). 기한 ${j.deadlineSec}초에 끝나고, 끝난 뒤 ${j.ttlSec}초면 스스로 지워진다` : `Job ${j.name}을 지우지 않았다(만들었는지 모른다). 있으면 끝난 뒤 ${j.ttlSec}초면 스스로 지워진다`;
   return `Job ${j.name}을 지우지 못했다(${c.why}). 끝난 뒤 ${j.ttlSec}초면 스스로 지워진다`;
