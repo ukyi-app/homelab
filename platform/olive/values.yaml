@@ -13,7 +13,7 @@ infisical:
 # 작업자 실행기의 init(olive-init)도 이 이미지다. 이 이미지에 든 대리(/opt/olive/olive-agent)를 역할 컨테이너에 놓는다(D-103).
 image:
   repository: ghcr.io/ukyi-app/olive
-  digest: sha256:46e0e3b2ddb9c3fe4193b0ec8631356bdbff6ac7e2e9d593781d8b8baff6c058
+  digest: sha256:0e2b3e134f2415a367c70c3a7a8b8ec21c66a449278d54a7bc63819fb21405ec
 
 # 작업자 실행기 역할 컨테이너의 이미지(D-103 역할별 이미지). 키는 v1 역할 이름(targets.yaml role)이다. 대상 id가 아니다.
 # 출처(누가 빌드하고 서명을 어떻게 확인하는지)는 정하지 않았다. 빈 값이면 렌더가 실패한다(templates/_helpers.tpl olive.roleImage).
