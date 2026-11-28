@@ -23,13 +23,29 @@ const NOT_ACCEPTED = "주의: 실행기가 이 실행을 받았다고 알린 적
 const ABANDON_WARNING = [
   "경고: 이 실행의 결과를 버린다. 뒤에 결과 보고가 와도 쓰지 않고, 확정은 실패(요청한 취소였으면 취소)다",
   "경고: 장부는 사유를 확인하지 못한다. 곧 실행기의 답으로 풀릴 실행이나, 결과가 있는데 보관만 못 한 실행에 쓰면 그 결과를 잃는다",
-  "머문 시간: 자리 목록에는 결과를 기다린 시간이 없다. 감독 로그의 result_check_alert(result_wait_overdue) 줄의 waitedMs로 본다",
 ];
+// 옛 판(olive-holds/v1) 감독은 결과를 기다리기 시작한 시각을 싣지 않는다.
+const NO_WAITED = "머문 시간: 자리 목록에는 결과를 기다린 시간이 없다. 감독 로그의 result_check_alert(result_wait_overdue) 줄의 waitedMs로 본다";
+const WAITED = "결과를 기다린 시간:";
+// 시작 시각은 감독 시계(장부 값), 지금은 이 컴퓨터 시계다. 출력마다 한 번 붙인다(runRelease).
+const CLOCK_NOTE = "시계: 결과를 기다린 시간은 감독 시계의 시작 시각부터 이 컴퓨터 시계의 지금까지다. 두 시계가 다르면 그만큼 어긋난다";
 // D-158·D-170. 장부는 저장소를 비웠는지 확인하지 못한다.
 const STORE_RESET_WARNING = [
   "경고: 그 실행기 저장소를 비우고 작업자 파드를 새로 띄운 뒤에만 쓴다. 장부는 저장소를 비웠는지 확인하지 못하고, 비우지 않으면 실행기에 그 실행의 기록이 남는다",
   "경고: 저장소를 비우면 그 실행기의 다른 기록도 모두 잃는다. 결과를 보관했던 실행도 실패로 보인다. 실행기 저장소는 사본·스냅샷에서 되살리지 않는다",
 ];
+// 결과를 기다린 시간 한 줄. 시작 시각이 지금보다 늦으면(시계 어긋남) 시간을 지어내지 않는다.
+export function waitedLine(since: number, now: number): string {
+  const ms = now - since;
+  if (ms < 0) return `${WAITED} 모름(시작 시각 ${at(since)}이 이 컴퓨터 시계의 지금보다 늦다)`;
+  const min = Math.floor(ms / 60_000);
+  const [d, h, m] = [Math.floor(min / 1440), Math.floor(min / 60) % 24, min % 60];
+  const span = min < 1 ? "1분 미만" : min < 60 ? `${m}분` : min < 1440 ? `${h}시간 ${m}분` : `${d}일 ${h}시간`;
+  return `${WAITED} ${span}(${at(since)}부터)`;
+}
+
+const abandonWarning = (run: OliveHoldRun): string[] => [...ABANDON_WARNING, run.checkingSince === null ? NO_WAITED : waitedLine(run.checkingSince, Date.now())];
+
 const REASON_WORD: Record<string, string> = { no_answer: "실행기가 답하지 않는다", not_known: "실행기가 그 실행을 모른다고 답했다", unstorable: "결과가 왔지만 감독이 보관하지 못한다" };
 
 const STATE_WORD: Record<string, string> = {
@@ -114,7 +130,7 @@ function runGuide(run: OliveHoldRun, verbose: boolean): string[] {
   const head = `실행 ${run.runId}(${workerName(run.executorId)} 실행기): ${STATE_WORD[run.state] ?? run.state}(${run.state})`;
   const cmd = (flag: string) => `명령: homelab olive release ${run.runId} --apply ${flag}`;
   const lines = [head];
-  if (verbose) lines.push(`  실행기 ${run.executorId}, 세대 ${run.runGeneration}, 접수 영수증 ${run.accepted ? "있음" : "없음"}, 확정 지시 ${run.finalizeSent ? "있음" : "없음"}, 닫을 수 있는 시각 ${run.closableAt === null ? "없음" : `${at(run.closableAt)}(${run.closableAt})`}, 다음 ${run.next}`);
+  if (verbose) lines.push(`  실행기 ${run.executorId}, 세대 ${run.runGeneration}, 접수 영수증 ${run.accepted ? "있음" : "없음"}, 확정 지시 ${run.finalizeSent ? "있음" : "없음"}, 닫을 수 있는 시각 ${run.closableAt === null ? "없음" : `${at(run.closableAt)}(${run.closableAt})`}${run.checkingSince === null ? "" : `, 결과 기다림 시작 ${at(run.checkingSince)}(${run.checkingSince})`}, 다음 ${run.next}`);
   const add = (...more: string[]) => lines.push(...more.map((l) => `  ${l}`));
   if (run.kind !== "worker") {
     add("다음: 없음. 세션 실행은 이 명령으로 풀지 않는다");
@@ -130,7 +146,7 @@ function runGuide(run: OliveHoldRun, verbose: boolean): string[] {
     return lines;
   }
   if (run.next === "abandon_result") {
-    add("다음: 결과를 기다리거나 결과를 버린다", cmd("--abandon-result <no_answer|not_known|unstorable>"), ...ABANDON_WARNING);
+    add("다음: 결과를 기다리거나 결과를 버린다", cmd("--abandon-result <no_answer|not_known|unstorable>"), ...abandonWarning(run));
     add("실행기가 영영 돌아오지 않으면: 그 실행기 저장소를 비우고 작업자 파드를 새로 띄운 뒤 --store-reset으로 닫는다");
     return lines;
   }
@@ -317,7 +333,7 @@ function applied(w: WriteCtx, req: Request, verbose: boolean): Outcome {
   let call: OliveReleaseCall;
   if (plan.kind === "abandon-result") {
     call = { command: "abandon-result", runId: plan.run.runId, reason: plan.reason, stopReceiptId: plan.run.stopReceiptId as string };
-    lines.push(`사유: ${REASON_WORD[plan.reason]}(${plan.reason})`, ...ABANDON_WARNING);
+    lines.push(`사유: ${REASON_WORD[plan.reason]}(${plan.reason})`, ...abandonWarning(plan.run));
   } else if (plan.kind === "release-hold") {
     const ev = podEvidence(w, plan.hold.executorId, plan.hold.heldAt, "hold", lines, verbose);
     if ("outcome" in ev) return ev.outcome;
@@ -366,7 +382,8 @@ async function runRelease(ctx: ReadCtx, req: Request, verbose: boolean): Promise
   const failing = o.status === "failed" || o.status === "usage";
   const steps = r.steps.map((s) => ({ ...s, detail: o.label, result: failing ? ("failed" as const) : o.status === "waiting" ? ("waiting" as const) : s.result }));
   const next = o.next === undefined ? r.next : o.next;
-  const result: Result = { ...r, status: o.status, steps, body: [o.headline, ...o.lines].join("\n"), next };
+  const tail = o.lines.some((l) => l.trimStart().startsWith(WAITED)) ? [CLOCK_NOTE] : [];
+  const result: Result = { ...r, status: o.status, steps, body: [o.headline, ...o.lines, ...tail].join("\n"), next };
   if (failing) result.error = { message: o.headline, next: next ?? "원인을 고친 뒤 같은 명령을 다시 실행한다" };
   return result;
 }

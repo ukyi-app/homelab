@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { OliveReleaseCall } from "../../src/core/command";
 import { kubectlArgv } from "../../src/core/kubectl";
-import { OLIVE_ADMIN_HOLDS_SCHEMA, OLIVE_ADMIN_RELEASE_SCHEMA, OLIVE_LEDGER_REFUSALS, OLIVE_WORKER_CONTAINER, parseHolds, parseRelease } from "../../src/core/olive-admin";
+import { OLIVE_ADMIN_HOLDS_SCHEMA, OLIVE_ADMIN_HOLDS_SCHEMA_V1, OLIVE_ADMIN_RELEASE_SCHEMA, OLIVE_LEDGER_REFUSALS, OLIVE_WORKER_CONTAINER, parseHolds, parseRelease } from "../../src/core/olive-admin";
 import { applyWith, rule, testCtx, type Resp } from "../harness";
 
 const REPO = join(import.meta.dir, "..", "..", "..");
@@ -59,23 +59,51 @@ const wDeploy = (uid = W_DEPLOY_UID) => json({ apiVersion: "apps/v1", kind: "Dep
 const wRs = (parent = W_DEPLOY_UID) => json({ apiVersion: "apps/v1", kind: "ReplicaSet", metadata: { name: W_RS, namespace: diag.namespace, uid: W_RS_UID, ownerReferences: [{ apiVersion: "apps/v1", kind: "Deployment", name: diag.deployment, uid: parent, controller: true }] } });
 const workerRules = (pods: Resp = list(workerPod()), deploy: Resp = wDeploy(), rs: Resp = wRs()) => [rule(wPodsArgv, pods), rule(wDeployArgv, deploy), rule(wRsArgv, rs)];
 
-const RUN_LINE = { runId: RUN, kind: "worker", state: "checking", executorId: EXECUTOR, runGeneration: 3, accepted: true, finalizeSent: false, closableAt: 1764227400000, stopReceiptId: STOP, next: "abandon_result" };
+const RUN_LINE = { runId: RUN, kind: "worker", state: "checking", executorId: EXECUTOR, runGeneration: 3, accepted: true, finalizeSent: false, closableAt: 1764227400000, checkingSince: 1764227300000, stopReceiptId: STOP, next: "abandon_result" };
+const { checkingSince: _v2only, ...RUN_LINE_V1 } = RUN_LINE;
 const HOLD_LINE = { observation: 4, executorId: EXECUTOR, runId: RUN, kind: "worker", runGeneration: 2, why: "outside_ledger", heldAt: 1764227400000, next: "release_hold" };
 const holdsDoc = (o: Record<string, unknown> = {}) => ({ schema: OLIVE_ADMIN_HOLDS_SCHEMA, slotFree: false, runs: [RUN_LINE], slotHolds: [HOLD_LINE], truncated: false, ...o });
 const line = (x: unknown) => `${JSON.stringify(x)}\n`;
 const FIXED = "감독 관리 진입점 출력이 정해진 꼴이 아니다";
 
-describe("holds 답 파서(olive-holds/v1)", () => {
+describe("holds 답 파서(olive-holds/v2, 옛 판 v1)", () => {
   test("정해진 칸만 옮기고 점유 관측의 next(늘 release_hold)는 싣지 않는다", () => {
     const { next: _drop, ...hold } = HOLD_LINE;
     expect(parseHolds(line(holdsDoc()))).toEqual({ slotFree: false, runs: [RUN_LINE as any], slotHolds: [hold as any], truncated: false });
     expect(parseHolds(line(holdsDoc({ runs: [], slotHolds: [], slotFree: true })))).toEqual({ slotFree: true, runs: [], slotHolds: [], truncated: false });
     expect(parseHolds(line(holdsDoc({ runs: [{ ...RUN_LINE, closableAt: null, stopReceiptId: null, state: "unknown_running", next: "close_unconfirmed" }] }))).runs[0]!.closableAt).toBeNull();
+    expect(parseHolds(line(holdsDoc({ runs: [{ ...RUN_LINE, checkingSince: null, stopReceiptId: null, state: "unknown_running", next: "close_unconfirmed" }] }))).runs[0]!.checkingSince).toBeNull();
+  });
+
+  test("옛 판 v1은 칸 열 개를 받고 checkingSince를 null로 옮긴다", () => {
+    expect(parseHolds(line(holdsDoc({ schema: OLIVE_ADMIN_HOLDS_SCHEMA_V1, runs: [RUN_LINE_V1] }))).runs).toEqual([{ ...RUN_LINE_V1, checkingSince: null } as any]);
+  });
+
+  test("판마다 실행 줄의 칸을 정확히 대조하고 checkingSince는 null이거나 양의 안전 정수다", () => {
+    const bad: [string, unknown][] = [
+      ["v2에 checkingSince 빠짐", holdsDoc({ runs: [RUN_LINE_V1] })],
+      ["v1에 checkingSince 있음", holdsDoc({ schema: OLIVE_ADMIN_HOLDS_SCHEMA_V1, runs: [RUN_LINE] })],
+      ["v1에 checkingSince null", holdsDoc({ schema: OLIVE_ADMIN_HOLDS_SCHEMA_V1, runs: [{ ...RUN_LINE, checkingSince: null }] })],
+      ["문자열", holdsDoc({ runs: [{ ...RUN_LINE, checkingSince: "1764227300000" }] })],
+      ["0", holdsDoc({ runs: [{ ...RUN_LINE, checkingSince: 0 }] })],
+      ["음수", holdsDoc({ runs: [{ ...RUN_LINE, checkingSince: -1 }] })],
+      ["소수", holdsDoc({ runs: [{ ...RUN_LINE, checkingSince: 1764227300000.5 }] })],
+      ["true", holdsDoc({ runs: [{ ...RUN_LINE, checkingSince: true }] })],
+    ];
+    for (const [name, doc] of bad) {
+      let message = "";
+      try {
+        parseHolds(line(doc));
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect([name, message]).toEqual([name, FIXED]);
+    }
   });
 
   test("모르는 판·칸·꼴은 원문 없이 던진다", () => {
     const bad: [string, string][] = [
-      ["판 v2", line(holdsDoc({ schema: "olive-holds/v2" }))],
+      ["판 v3", line(holdsDoc({ schema: "olive-holds/v3" }))],
       ["모르는 칸", line(holdsDoc({ extra: 1 }))],
       ["빠진 칸", line(Object.fromEntries(Object.entries(holdsDoc()).filter(([k]) => k !== "truncated")))],
       ["같은 키 둘", `{"schema":"olive-holds/v1","slotFree":true,"slotFree":false,"runs":[],"slotHolds":[],"truncated":false}\n`],
@@ -223,7 +251,7 @@ describe("holds 읽기", () => {
     const { value } = await applyWith(ok.ctx, (w) => w.oliveAdmin.holds());
     expect((value as any).state).toBe("reported");
     expect(ok.calls().calls.filter((c) => c.argv.includes("exec")).map((c) => c.argv)).toEqual([HOLDS]);
-    const bad = testCtx("apply", [...supervisor(), rule(HOLDS, { stdout: line(holdsDoc({ schema: "olive-holds/v2" })) })]);
+    const bad = testCtx("apply", [...supervisor(), rule(HOLDS, { stdout: line(holdsDoc({ schema: "olive-holds/v3" })) })]);
     expect((await applyWith(bad.ctx, (w) => w.oliveAdmin.holds())).value).toEqual({ state: "unknown", pod: POD });
     const slow = testCtx("apply", [...supervisor(), rule(HOLDS, { sleepMs: 3_500 })]);
     expect((await applyWith(slow.ctx, (w) => w.oliveAdmin.holds())).value).toEqual({ state: "unknown", pod: POD });

@@ -1,5 +1,6 @@
 // homelab olive release(관리자 자리 풀기). 실제 클러스터·감독에 닿지 않는다: kubectl은 PATH 스텁이고 감독 진입점의 답은 가짜다.
 import { describe, expect, test } from "bun:test";
+import { waitedLine } from "../../src/commands/olive-release";
 import { expectNoSecrets, expectPlanReadOnly, kubectlRule, rule, runCli, type Call, type Resp, type Rule } from "../harness";
 
 const POD = "supervisor-7c9d8f6b5-x2k4q";
@@ -69,6 +70,13 @@ type Run = { runId?: string; kind?: string; state: string; executorId?: string; 
 const run = (o: Run) => ({ runId: o.runId ?? RUN, kind: o.kind ?? "worker", state: o.state, executorId: o.executorId ?? EXECUTOR, runGeneration: o.runGeneration ?? 1, accepted: o.accepted ?? true, finalizeSent: o.finalizeSent ?? false, closableAt: o.closableAt === undefined ? CLOSABLE : o.closableAt, stopReceiptId: o.stopReceiptId ?? null, next: o.next });
 const hold = (o: { observation?: number; runId?: string; heldAt?: number } = {}) => ({ observation: o.observation ?? 4, executorId: EXECUTOR, runId: o.runId ?? RUN, kind: "worker", runGeneration: 2, why: "outside_ledger", heldAt: o.heldAt ?? CLOSABLE, next: "release_hold" });
 const holdsLine = (runs: unknown[], slotHolds: unknown[] = [], slotFree = false, truncated = false): Resp => ({ stdout: `${JSON.stringify({ schema: "olive-holds/v1", slotFree, runs, slotHolds, truncated })}\n` });
+// 감독 판 v2: 실행 줄에 checkingSince가 더 있다(checking에만 값).
+const v2run = (o: Run, checkingSince: unknown = null) => ({ ...run(o), checkingSince });
+const holdsLineV2 = (runs: unknown[], slotHolds: unknown[] = [], slotFree = false): Resp => ({ stdout: `${JSON.stringify({ schema: "olive-holds/v2", slotFree, runs, slotHolds, truncated: false })}\n` });
+const CLOCK_NOTE = "시계: 결과를 기다린 시간은 감독 시계의 시작 시각부터 이 컴퓨터 시계의 지금까지다. 두 시계가 다르면 그만큼 어긋난다";
+// 하위 프로세스의 시계는 고정할 수 없어 지금에서 2시간 30분 10초 앞으로 둔다(실행이 50초 안에 끝나면 문구가 같다).
+const sinceAgo = () => Date.now() - (2 * 3_600_000 + 30 * 60_000 + 10_000);
+const kst = (ms: number) => `${new Date(ms + 9 * 3_600_000).toISOString().slice(0, 19).replace("T", " ")} KST`;
 const releaseLine = (outcome: string, released: boolean, slotFree: boolean | null, runId = RUN): Resp => ({ stdout: `${JSON.stringify({ schema: "olive-release/v1", outcome, runId, released, slotFree })}\n` });
 const entryExit = (code: number, line: string): Resp => ({ code, stderr: `${line}\ncommand terminated with exit code ${code}\n` });
 const execCalls = (r: { calls: Call[] }) => r.calls.filter((c) => c.argv.includes("exec")).map((c) => c.argv);
@@ -170,9 +178,9 @@ describe("--apply 목록: 읽기만 한다", () => {
   });
 
   test("모르는 판·꼴이 다른 답은 해석하지 않고 1, 복원 전은 3, 진입점 64는 1(판 어긋남)", async () => {
-    const v2 = { stdout: `${JSON.stringify({ schema: "olive-holds/v2", slotFree: true, runs: [], slotHolds: [], truncated: false })}\n` };
+    const v3 = { stdout: `${JSON.stringify({ schema: "olive-holds/v3", slotFree: true, runs: [], slotHolds: [], truncated: false })}\n` };
     const rows: [Resp, number, string][] = [
-      [v2, 1, "판이 다를 수 있다"],
+      [v3, 1, "판이 다를 수 있다"],
       [{ stdout: `{"schema":"olive-holds/v1","slotFree":true,"slotFree":false,"runs":[],"slotHolds":[],"truncated":false}\n` }, 1, "판이 다를 수 있다"],
       [entryExit(3, "olive admin: 자리 목록 모름: 감독이 복원을 마치지 않았다(restore_not_done)"), 3, "감독이 복원을 마치지 않았다(restore_not_done)"],
       [entryExit(64, "olive admin: 사용법: bun src/main/admin.ts status"), 1, "종료 코드 64"],
@@ -184,6 +192,87 @@ describe("--apply 목록: 읽기만 한다", () => {
       expect([text, r.code]).toEqual([text, code]);
       expect(r.json.body).toContain(text);
       expect(r.stdout + r.stderr).not.toContain(CANARY);
+    }
+  });
+});
+
+describe("결과를 기다린 시간(olive-holds/v2의 checkingSince)", () => {
+  test("고정 시계: 분·시간·일, 1분 미만, 시작 시각이 지금보다 늦으면 모름", () => {
+    const since = Date.parse("2026-11-27T07:10:00Z");
+    const rows: [number, string][] = [
+      [0, "1분 미만"],
+      [59_999, "1분 미만"],
+      [60_000, "1분"],
+      [3_599_999, "59분"],
+      [3_600_000, "1시간 0분"],
+      [2 * 3_600_000 + 30 * 60_000 + 10_000, "2시간 30분"],
+      [27 * 3_600_000 + 59 * 60_000, "1일 3시간"],
+    ];
+    for (const [ms, span] of rows) expect([ms, waitedLine(since, since + ms)]).toEqual([ms, `결과를 기다린 시간: ${span}(2026-11-27 16:10:00 KST부터)`]);
+    expect(waitedLine(since, since - 1)).toBe("결과를 기다린 시간: 모름(시작 시각 2026-11-27 16:10:00 KST이 이 컴퓨터 시계의 지금보다 늦다)");
+  });
+
+  test("v2 목록: checking 실행에 기다린 시간과 시작 시각(KST), 시계 꼬리말은 한 번, 옛 문구 없음", async () => {
+    const R = (n: number) => `3f2a9c41-5b6d-4e7f-8a9b-0c1d2e3f4a5${n}`;
+    const since = sinceAgo();
+    const runs = [
+      v2run({ runId: R(1), state: "checking", next: "abandon_result", stopReceiptId: STOP }, since),
+      v2run({ runId: R(2), state: "checking", next: "abandon_result", stopReceiptId: STOP }, since),
+      v2run({ runId: R(3), state: "unknown_running", next: "close_unconfirmed" }),
+    ];
+    const r = await cli(["--apply"], [...supervisor(), rule(HOLDS_EXEC, holdsLineV2(runs))]);
+    expect(r.code).toBe(0);
+    const body: string = r.json.body;
+    expect(body).toContain(`  결과를 기다린 시간: 2시간 30분(${kst(since)}부터)`);
+    expect(body.split("\n").filter((l) => l.includes("결과를 기다린 시간:"))).toHaveLength(2);
+    expect(body.split("\n").filter((l) => l === CLOCK_NOTE)).toHaveLength(1);
+    expect(body.split("\n").at(-1)).toBe(CLOCK_NOTE);
+    expect(body).not.toContain("result_check_alert");
+    expect(body).not.toContain(String(since));
+    const v = await cli(["--apply", "--verbose"], [...supervisor(), rule(HOLDS_EXEC, holdsLineV2(runs))]);
+    expect(v.json.body).toContain(`, 결과 기다림 시작 ${kst(since)}(${since}), 다음 abandon_result`);
+    expect(v.json.body).not.toMatch(/닫을 수 있는 시각 [^\n]*결과 기다림 시작[^\n]*다음 close_unconfirmed/);
+  });
+
+  test("v2라도 checkingSince가 null이면 옛 문구, 시계 꼬리말 없음", async () => {
+    const r = await cli(["--apply"], [...supervisor(), rule(HOLDS_EXEC, holdsLineV2([v2run({ state: "checking", next: "abandon_result", stopReceiptId: STOP })]))]);
+    expect(r.code).toBe(0);
+    expect(r.json.body).toContain("result_check_alert(result_wait_overdue)");
+    expect(r.json.body).not.toContain("결과를 기다린 시간:");
+    expect(r.json.body).not.toContain("시계:");
+  });
+
+  test("v1 감독이면 옛 문구 그대로, 시계 꼬리말 없음", async () => {
+    const r = await cli(["--apply", "--verbose"], [...supervisor(), rule(HOLDS_EXEC, holdsLine([run({ state: "checking", next: "abandon_result", stopReceiptId: STOP })]))]);
+    expect(r.code).toBe(0);
+    expect(r.json.body).toContain("머문 시간: 자리 목록에는 결과를 기다린 시간이 없다. 감독 로그의 result_check_alert(result_wait_overdue) 줄의 waitedMs로 본다");
+    expect(r.json.body).not.toContain("결과 기다림 시작");
+    expect(r.json.body).not.toContain("시계:");
+  });
+
+  test("결과 포기 쓰기도 v2의 기다린 시간을 보이고 넘기는 값은 같다", async () => {
+    const since = sinceAgo();
+    const runs = [v2run({ state: "checking", next: "abandon_result", stopReceiptId: STOP }, since)];
+    const r = await cli([RUN, "--apply", "--abandon-result", "no_answer"], [...supervisor(), rule(HOLDS_EXEC, holdsLineV2(runs)), rule(ABANDON_EXEC("no_answer"), releaseLine("abandoned", false, false))]);
+    expect(r.code).toBe(0);
+    expect(execCalls(r)).toEqual([HOLDS_EXEC, ABANDON_EXEC("no_answer")]);
+    expect(r.json.body).toContain(`결과를 기다린 시간: 2시간 30분(${kst(since)}부터)`);
+    expect(r.json.body.split("\n").at(-1)).toBe(CLOCK_NOTE);
+  });
+
+  test("v2의 checkingSince 빠짐·문자열·0·음수, v1 줄에 checkingSince는 해석하지 않고 1(판 어긋남)", async () => {
+    const base = { state: "checking", next: "abandon_result", stopReceiptId: STOP } as const;
+    const rows: [string, Resp][] = [
+      ["빠짐", holdsLineV2([run(base)])],
+      ["문자열", holdsLineV2([v2run(base, "1764227300000")])],
+      ["0", holdsLineV2([v2run(base, 0)])],
+      ["음수", holdsLineV2([v2run(base, -1)])],
+      ["v1 줄에 있음", holdsLine([v2run(base, 1764227300000)])],
+    ];
+    for (const [name, resp] of rows) {
+      const r = await cli(["--apply"], [...supervisor(), rule(HOLDS_EXEC, resp)]);
+      expect([name, r.code]).toEqual([name, 1]);
+      expect(r.json.body).toContain("판이 다를 수 있다");
     }
   });
 });
@@ -344,16 +433,14 @@ describe("쓰기 진입점의 종료 코드 옮기기", () => {
     ["모르는 판의 답", { stdout: `${JSON.stringify({ schema: "olive-release/v2", outcome: "closed", runId: RUN, released: true, slotFree: true })}\n` }, 1, "자리 풀기: 결과 모름. 실행했지만 감독의 답을 확인하지 못했다. 장부에 적혔을 수 있다", REREAD],
     ["kubectl 실패(원격 코드 없음)", { code: 1, stderr: `Error from server (Forbidden): ${CANARY}\n` }, 1, "자리 풀기: 결과 모름. 실행했지만 감독의 답을 확인하지 못했다. 장부에 적혔을 수 있다", REREAD],
   ];
-  test("표의 각 줄: 종료 코드·머리 줄·다음 행동, 쓰기 exec는 한 번, 원문 없음", async () => {
-    for (const [name, resp, code, head, next] of rows) {
-      const r = await cli([RUN, "--apply", "--pod-replaced"], [...supervisor(), ...worker(), rule(HOLDS_EXEC, holdsLine([run({ state: "unknown_running", next: "close_unconfirmed" })])), rule(CLOSE_EXEC(), resp)]);
-      expect([name, r.code]).toEqual([name, code]);
-      expect([name, r.json.body.split("\n")[0]]).toEqual([name, head]);
-      expect([name, r.json.next]).toEqual([name, next]);
-      expect(writeExec(r)).toEqual([CLOSE_EXEC()]);
-      expect(r.stdout + r.stderr).not.toContain(CANARY);
-    }
-  });
+  // 줄마다 CLI 하위 프로세스 하나와 가짜 kubectl 여러 번이라, 한 시험에 모으면 느린 러너에서 기본 한도(5초)를 넘는다. 줄마다 나눈다.
+  test.each(rows)("표의 줄 %s: 종료 코드·머리 줄·다음 행동, 쓰기 exec는 한 번, 원문 없음", async (name, resp, code, head, next) => {
+    const r = await cli([RUN, "--apply", "--pod-replaced"], [...supervisor(), ...worker(), rule(HOLDS_EXEC, holdsLine([run({ state: "unknown_running", next: "close_unconfirmed" })])), rule(CLOSE_EXEC(), resp)]);
+    expect([name, r.code]).toEqual([name, code]);
+    expect([name, r.json.body.split("\n")[0]]).toEqual([name, head]);
+    expect([name, r.json.next]).toEqual([name, next]);
+    expect(writeExec(r)).toEqual([CLOSE_EXEC()]);
+    expect(r.stdout + r.stderr).not.toContain(CANARY);  });
 
   test("결과 포기의 outcome_unknown·report_pending은 기다림과 저장소 비움 닫기를 안내한다", async () => {
     const runs = [run({ state: "checking", next: "abandon_result", stopReceiptId: STOP })];

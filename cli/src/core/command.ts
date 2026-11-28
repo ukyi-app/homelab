@@ -333,11 +333,12 @@ export type OliveTestJobOutcome =
   | { state: "unknown"; pod: string }
   | OliveAdminExit;
 
-// 자리 풀기(D-149 ④). 감독 관리 통로의 olive-holds/v1·olive-release/v1 꼴(olive src/supervisor/admin/protocol.ts)과 같은 칸이다.
+// 자리 풀기(D-149 ④). 감독 관리 통로의 olive-holds/v2(옛 판 v1)·olive-release/v1 꼴(olive src/supervisor/admin/protocol.ts)과 같은 칸이다.
 export type OliveRunState = "queued" | "preparing" | "running" | "stopping" | "checking" | "ready_result" | "finalized" | "not_started" | "failed_stopped" | "unknown_running" | "cleanup_pending";
 // 감독이 앞 상태로 정한 다음 행동. 뜻은 olive README "감독 관리 통로"의 holds 표다.
 export type OliveHoldAction = "close_unconfirmed" | "abandon_result" | "wait_cleanup" | "close_store_reset" | "release_hold" | "none";
 // closableAt: 관리자 닫기가 닫을 수 있게 되는 시각(감독 시계 epoch ms). null이면 기다려도 닫히지 않는다.
+// checkingSince: checking 줄에만, 결과를 기다리기 시작한 장부 시각(감독 시계 epoch ms). 옛 판 v1 감독은 싣지 않아 늘 null이다.
 // stopReceiptId: checking 줄에만 있다(결과 포기에 그대로 넘긴다).
 export type OliveHoldRun = {
   runId: string;
@@ -348,6 +349,7 @@ export type OliveHoldRun = {
   accepted: boolean;
   finalizeSent: boolean;
   closableAt: number | null;
+  checkingSince: number | null;
   stopReceiptId: string | null;
   next: OliveHoldAction;
 };
