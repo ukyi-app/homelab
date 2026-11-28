@@ -50,7 +50,9 @@ export const OLIVE_ADMIN_ENTRY = ["bun", "src/main/admin.ts"];
 // 칸을 바꾸면 판을 올린다. 감독 이미지와 CLI는 따로 배포되므로 모르는 판은 해석하지 않고 거부한다.
 export const OLIVE_ADMIN_STATUS_SCHEMA = "olive-supervisor-status/v1";
 export const OLIVE_ADMIN_TEST_JOB_SCHEMA = "olive-test-job/v1";
-export const OLIVE_ADMIN_HOLDS_SCHEMA = "olive-holds/v1";
+export const OLIVE_ADMIN_HOLDS_SCHEMA = "olive-holds/v2";
+// 감독 이미지가 v2로 바뀌기 전의 판. 칸 checkingSince가 없다(읽으면 null). 감독 이미지가 모두 v2가 된 뒤에 뺀다.
+export const OLIVE_ADMIN_HOLDS_SCHEMA_V1 = "olive-holds/v1";
 export const OLIVE_ADMIN_RELEASE_SCHEMA = "olive-release/v1";
 // 작업자 실행기 파드의 제어 컨테이너 이름(platform/olive/templates/executor-deployments.yaml). 파드 모양 대조에만 쓴다.
 export const OLIVE_WORKER_CONTAINER = "executor";
@@ -459,19 +461,25 @@ const isInt = (v: unknown, min: number): v is number => Number.isSafeInteger(v) 
 const oneOf = <T extends string>(v: unknown, list: readonly T[]): v is T => typeof v === "string" && (list as readonly string[]).includes(v);
 const isRunKind = (v: unknown): v is "worker" | "session" => v === "worker" || v === "session";
 
-// 자리 목록 한 줄(olive-holds/v1). 칸·꼴은 olive protocol.ts holdsOf와 같다. 정해진 칸만 타입 있는 값으로 옮긴다.
+const HOLD_RUN_KEYS_V1 = ["runId", "kind", "state", "executorId", "runGeneration", "accepted", "finalizeSent", "closableAt", "stopReceiptId", "next"] as const;
+const HOLD_RUN_KEYS_V2 = ["runId", "kind", "state", "executorId", "runGeneration", "accepted", "finalizeSent", "closableAt", "checkingSince", "stopReceiptId", "next"] as const;
+
+// 자리 목록 한 줄(olive-holds/v2, 옛 판 v1도). 칸·꼴은 olive protocol.ts holdsOf와 같다. 정해진 칸만 타입 있는 값으로 옮긴다.
+// 판마다 실행 줄의 칸을 정확히 대조한다: v1 줄에 checkingSince가 있거나 v2 줄에 없으면 꼴 틀림이다.
 export function parseHolds(stdout: string): OliveHolds {
   const fail = () => new Error("감독 관리 진입점 출력이 정해진 꼴이 아니다");
   const doc = strictLine(stdout);
-  if (!exactKeys(doc, ["schema", "slotFree", "runs", "slotHolds", "truncated"]) || doc.schema !== OLIVE_ADMIN_HOLDS_SCHEMA) throw fail();
+  if (!exactKeys(doc, ["schema", "slotFree", "runs", "slotHolds", "truncated"]) || !(doc.schema === OLIVE_ADMIN_HOLDS_SCHEMA || doc.schema === OLIVE_ADMIN_HOLDS_SCHEMA_V1)) throw fail();
+  const v2 = doc.schema === OLIVE_ADMIN_HOLDS_SCHEMA;
   if (typeof doc.slotFree !== "boolean" || typeof doc.truncated !== "boolean" || !isArray(doc.runs) || !isArray(doc.slotHolds)) throw fail();
   const runs: OliveHoldRun[] = doc.runs.map((run: any) => {
-    if (!exactKeys(run, ["runId", "kind", "state", "executorId", "runGeneration", "accepted", "finalizeSent", "closableAt", "stopReceiptId", "next"])) throw fail();
+    if (!exactKeys(run, v2 ? HOLD_RUN_KEYS_V2 : HOLD_RUN_KEYS_V1)) throw fail();
+    if (v2 && !(run.checkingSince === null || isInt(run.checkingSince, 1))) throw fail();
     if (typeof run.runId !== "string" || !REF.test(run.runId) || !isRunKind(run.kind) || !oneOf(run.state, RUN_STATES)) throw fail();
     if (typeof run.executorId !== "string" || !EXECUTOR_REF.test(run.executorId) || !isInt(run.runGeneration, 0)) throw fail();
     if (typeof run.accepted !== "boolean" || typeof run.finalizeSent !== "boolean" || !(run.closableAt === null || isInt(run.closableAt, 1))) throw fail();
     if (!(run.stopReceiptId === null || (typeof run.stopReceiptId === "string" && REF.test(run.stopReceiptId))) || !oneOf(run.next, HOLD_ACTIONS)) throw fail();
-    return { runId: run.runId, kind: run.kind, state: run.state, executorId: run.executorId, runGeneration: run.runGeneration, accepted: run.accepted, finalizeSent: run.finalizeSent, closableAt: run.closableAt, stopReceiptId: run.stopReceiptId, next: run.next };
+    return { runId: run.runId, kind: run.kind, state: run.state, executorId: run.executorId, runGeneration: run.runGeneration, accepted: run.accepted, finalizeSent: run.finalizeSent, closableAt: run.closableAt, checkingSince: v2 ? run.checkingSince : null, stopReceiptId: run.stopReceiptId, next: run.next };
   });
   const slotHolds: OliveHoldObservation[] = doc.slotHolds.map((hold: any) => {
     if (!exactKeys(hold, ["observation", "executorId", "runId", "kind", "runGeneration", "why", "heldAt", "next"])) throw fail();
