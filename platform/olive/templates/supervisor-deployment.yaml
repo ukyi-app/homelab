@@ -14,6 +14,8 @@ env 이름·꼴·파일 이름은 ukyi-app/olive의 감독 진입점(src/main/su
 {{- /* 결과 폴더(OLIVE_RESULT_DIR) 자리는 예약이다. 장부를 그 자리나 그 아래에 두면 같은 컨테이너에 같은 mountPath가 둘이라 쿠버네티스가 파드를 거부하거나 한쪽이 가려진다. */}}
 {{- $resultDir := "/var/lib/olive-results" }}
 {{- $ledgerDir := .Values.supervisor.ledger.mountPath }}
+{{- /* 결과 폴더는 장부 PVC의 이 하위 폴더다. 감독의 결과 마운트(subPath)와 init의 OLIVE_RESULT_DIR이 이 값 하나에서 나와야 같은 폴더를 본다. */}}
+{{- $resultSubPath := "results" }}
 {{- $test := .Values.supervisor.test }}
 {{- /* 감독은 OLIVE_TEST_JOBS가 on이 아닌데 대역이 on이면 운영 값으로 보고 91로 끝난다(D-109). 파드를 띄우기 전에 렌더에서 멈춘다. */}}
 {{- if and $test.frontDoor (not $test.jobs) }}
@@ -49,6 +51,31 @@ spec:
         {{- include "olive.labels" $t | nindent 8 }}
     spec:
       {{- include "olive.podSecurity" $t | nindent 6 }}
+      initContainers:
+        # 결과 폴더를 감독 uid 소유·0700으로 맞춘다(D-177, olive src/main/result-dir-init.ts). kubelet은 subPath 폴더가 없을 때만
+        # root 소유·볼륨 뿌리의 모드(local-path는 0777)로 만들고 있으면 그대로 쓴다. 그래서 감독 컨테이너가 뜨기 전에 이 컨테이너가 만들어 둔다.
+        # 함정: 폴더가 이미 root 소유(kubelet이 만든 것)면 이 uid로 고칠 수 없어 98로 끝나고 파드가 Init:Error·Init:CrashLoopBackOff에 머문다.
+        # 그 파드도 olive-limits(감독 limits) 전체를 쥐어 같은 ns의 일회성 복구 파드를 쿼터가 거절한다. 관리자는 replicas를 0으로 내리고 파드 0개와
+        # 쿼터 반환을 확인한 뒤(정지 자물쇠 olive-stop이 걸려 있으면 복구 파드도 막히므로 그 상태도 전제다) 일회성 파드로 바로잡고 다시 띄운다.
+        # 98은 디스크가 그대로라는 뜻이 아니다. 만들거나 고친 뒤 확인이 실패한 98은 그 변경이 남을 수 있어 다시 돌리기 전에 폴더를 본다.
+        # Secret·토큰·/tmp를 붙이지 않는다. 감독 전용 Secret을 받는 컨테이너는 감독 하나이고, 감독 /tmp(관리 소켓 자리)는 다른 컨테이너와 나누지 않는다.
+        # 이 진입점은 /tmp에 쓰지 않는다. 이 컨테이너의 모양은 CI olive-supervisor-env의 init 표가 고정한다.
+        - name: result-dir
+          image: {{ include "olive.image" . }}
+          command: ["bun", "src/main/result-dir-init.ts"]
+          env:
+            # 이 컨테이너에서 보이는 결과 폴더 경로다. 감독의 OLIVE_RESULT_DIR과 같은 폴더이고 마운트 자리가 달라 값만 다르다.
+            # 진입점은 정규화된 절대 경로만 받으므로(아니면 91) 장부 경로를 clean으로 맞춘다.
+            - name: OLIVE_RESULT_DIR
+              value: {{ printf "%s/%s" (clean $ledgerDir) $resultSubPath | quote }}
+          {{- include "olive.containerSecurity" . | nindent 10 }}
+          # 감독과 같은 값이다. 파드의 실효 limits는 max(일반 컨테이너 합, 가장 큰 init)라 olive-limits(감독 limits)가 그대로 맞는다.
+          resources:
+            {{- include "olive.resources" (dict "root" . "target" $t) | nindent 12 }}
+          volumeMounts:
+            # PVC 뿌리를 쓰기로(subPath 없이) 붙인다. 뿌리에 써야 results를 만들 수 있다. 장부 파일에도 닿지만 감독과 같은 이미지·uid의 고정 명령이다.
+            - name: ledger
+              mountPath: {{ $ledgerDir }}
       containers:
         - name: supervisor
           image: {{ include "olive.image" . }}
@@ -89,7 +116,7 @@ spec:
             - name: OLIVE_TARGETS
               value: {{ include "olive.supervisorTargetsJson" . | quote }}
             # 결과 보관 폴더. 진입점은 마지막 경로 요소만 lstat으로 보고 만들지 않는다. 그래서 장부 PVC의 하위 폴더를 subPath로
-            # 따로 붙인다: kubelet이 없으면 만들고, 마운트 자리라 링크가 아니며, 상위(/var/lib)는 이미지의 폴더다.
+            # 따로 붙인다: 폴더는 위 init(result-dir)이 감독 uid·0700으로 먼저 만들고, 마운트 자리라 링크가 아니며, 상위(/var/lib)는 이미지의 폴더다.
             - name: OLIVE_RESULT_DIR
               value: {{ $resultDir }}
             # 고정 계정의 별칭(D-126). 아래 account 마운트와 같은 값이라 배정이 고른 계정의 자격 파일이 그 폴더에 있다.
@@ -125,7 +152,7 @@ spec:
             # 함정: 장부 PVC를 잃으면 결과 본문도 함께 잃는다(같은 볼륨). 볼륨을 나눌지는 정하지 않았다(D-78이 보관소의 자리를 정하지 않음).
             - name: ledger
               mountPath: {{ $resultDir }}
-              subPath: results
+              subPath: {{ $resultSubPath }}
             - name: registry
               mountPath: /run/olive/registry
               readOnly: true

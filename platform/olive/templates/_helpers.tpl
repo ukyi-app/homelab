@@ -229,7 +229,8 @@ securityContext:
   runAsUser: 65532
   runAsGroup: 65532
   {{- if eq .kind "supervisor" }}
-  # Secret 볼륨(0440)을 그룹으로 읽게 한다. local-path PVC에는 적용되지 않는다(폴더가 0777로 만들어진다).
+  # Secret 볼륨(0440)을 그룹으로 읽게 한다. local-path PVC에는 적용되지 않는다(뿌리가 root 0777로 만들어진다). 그래서 결과 폴더의
+  # 소유·모드는 감독 파드의 init(result-dir)이 감독 uid로 맞춘다(templates/supervisor-deployment.yaml).
   # 감독 파드에만 둔다. fsGroup은 파드의 모든 컨테이너에 보조 그룹으로 붙어, 실행기 파드에 두면 역할 컨테이너(uid·gid 10002)도
   # 제어(65532)의 그룹이 된다(D-103). 실행기 파드는 대신 Secret을 0444로 붙인다(templates/executor-deployments.yaml).
   fsGroup: 65532

@@ -9,11 +9,12 @@ infisical:
 # 빈 값이면 렌더가 실패한다(templates/_helpers.tpl olive.image). 켠 클러스터가 모두 이 값 하나를 쓴다(클러스터별 값이 아니다).
 # 이미지 계약(ukyi-app/olive README "이미지 계약"): 비root uid·gid 65532, 루트 파일시스템 읽기 전용 전제, 듣는 포트를 이미지에
 # 적지 않음, 역할을 고르지 않으면 64·아직 구현되지 않은 역할은 69로 끝남. 루트가 읽기 전용이라 쓰기는 컨테이너마다 붙인 볼륨에만
-# 한다: 감독은 /tmp와 장부 PVC, 실행기 제어는 /tmp·소켓 폴더(agent-link)·저장소 PVC, init은 /opt/olive-agent(대리 설치).
+# 한다: 감독은 /tmp와 장부 PVC, 감독 init(result-dir)은 장부 PVC 뿌리(결과 폴더 준비), 실행기 제어는 /tmp·소켓 폴더(agent-link)·저장소 PVC,
+# 실행기 init은 /opt/olive-agent(대리 설치).
 # 작업자 실행기의 init(olive-init)도 이 이미지다. 이 이미지에 든 대리(/opt/olive/olive-agent)를 역할 컨테이너에 놓는다(D-103).
 image:
   repository: ghcr.io/ukyi-app/olive
-  digest: sha256:0e2b3e134f2415a367c70c3a7a8b8ec21c66a449278d54a7bc63819fb21405ec
+  digest: sha256:78b2518ab6020df88503795811409008d7655d299f9e6c0b7d68e500291cc999
 
 # 작업자 실행기 역할 컨테이너의 이미지(D-103 역할별 이미지). 키는 v1 역할 이름(targets.yaml role)이다. 대상 id가 아니다.
 # 출처(누가 빌드하고 서명을 어떻게 확인하는지)는 정하지 않았다. 빈 값이면 렌더가 실패한다(templates/_helpers.tpl olive.roleImage).
@@ -82,6 +83,7 @@ supervisor:
   # 바꾸면 실행기 env(OLIVE_SUPERVISOR_ADDR)가 함께 바뀐다. 이미 뜬 실행기는 다시 떠야 새 주소를 읽는다.
   clusterIP: 10.43.0.29
   # S-09 출발점(감독 0.5 CPU·0.75GB, supervisor.md §11). 같은 값이 olive-control의 ResourceQuota(limits 합)가 된다.
+  # 감독 파드의 init(result-dir)도 이 값을 쓴다. init limits가 감독 limits를 넘으면 파드 실효 limits가 쿼터를 넘어 파드가 생기지 않는다.
   # cpu limit을 두는 이유: 그 ResourceQuota가 limits.cpu를 세면 cpu limit 없는 파드는 거부된다.
   # requests는 대기 중 Bun 프로세스 하나와 SQLite 기준의 [가정]이다. 실측이 쌓이면 맞춘다.
   resources:
